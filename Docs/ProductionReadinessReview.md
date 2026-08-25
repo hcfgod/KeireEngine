@@ -2,10 +2,10 @@
 
 Review date: 2026-08-24
 
-Revision: Kéire 0.4.0 exact-release evidence with retained Kéire 0.3.2 historical evidence
+Revision: Kéire 0.4.1 exact-release evidence with retained Kéire 0.3.2 historical evidence
 
-Review scope: the clean Windows and Rocky Linux 9 compatibility-baseline 0.4.0 Dist packages, signed distribution
-snapshot `release-0.4.0-sequence-15-9de86e6`, the canonical documentation library, and the feature-gated online
+Review scope: the clean Windows and Rocky Linux 9 compatibility-baseline 0.4.1 Dist packages, signed distribution
+snapshot `release-0.4.1-sequence-16-0c21d51`, the canonical documentation library, and the feature-gated online
 platform. Source behavior, package validation,
 native installation, and public-catalog evidence remain distinct; success in one lane is not silently promoted into
 another.
@@ -13,9 +13,9 @@ another.
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
 
-## 0.4.0 Release Update
+## 0.4.1 Release Update
 
-Version 0.4.0 is active through signed catalog sequence 15. The immutable package set contains Windows and Linux
+Version 0.4.1 is active through signed catalog sequence 16. The immutable package set contains Windows and Linux
 x86-64 Editors, the Windows Hub installer, and separate DEB and RPM Hub installers. The exact DEB passed installation
 and version checks on Ubuntu 22.04 and Debian 13; the exact RPM passed on Rocky Linux 9, Fedora 44, and openSUSE
 Tumbleweed. The website and Hub catalog expose only those verified records.
@@ -34,7 +34,7 @@ outstanding. These gaps prevent a 1.0 or AAA-production-readiness claim, not the
 
 ## What Changed In This Refresh
 
-- Kéire 0.4.0 is the active Windows and Linux x86-64 public preview. Immutable sequence 15 publishes Windows
+- Kéire 0.4.1 is the active Windows and Linux x86-64 public preview. Immutable sequence 16 publishes Windows
   Editor/Hub packages and Linux Editor, DEB Hub, and RPM Hub packages.
 - ARM64 Linux acceptance is currently limited to emulated Ubuntu 24.04 toolchain coverage: a QEMU-driven ARM64 shader and
   dependency pipeline is running again from the prior attempt and has now passed the vkd3d install phase, but no native
@@ -72,10 +72,10 @@ outstanding. These gaps prevent a 1.0 or AAA-production-readiness claim, not the
 
 Kéire is a serious production-oriented pre-1.0 engine with explicit ownership, deterministic serialization,
 transactional assets/projects, strong failure isolation, broad native tests, and real Windows/Linux distribution.
-Version 0.4.0 is a usable cross-platform technology preview and development platform. It is not yet justified as a
+Version 0.4.1 is a usable cross-platform technology preview and development platform. It is not yet justified as a
 finished AAA production engine or a generally available cross-platform marketplace.
 
-The historical immutable 0.3.2 release grade remains **B+ (89/100)**. The 0.4.0 current-source grade is also
+The historical immutable 0.3.2 release grade remains **B+ (89/100)**. The 0.4.1 current-source grade is also
 **B+ (89/100)**. New multi-scene, managed-residency, material, authoring, and Marketplace capabilities improve several
 domains, but the fresh rendered-output compile failure prevents a higher current-source grade. Native release signing,
 macOS/Metal, reference-hardware GPU evidence, Marketplace launch acceptance, accessibility/localization, and
@@ -282,7 +282,7 @@ Production performance acceptance still requires:
 - Complete every ordered gate in [Marketplace Launch](MarketplaceLaunch.md), including SMTP and leaked-password
   protection, policy review, official signed packages, moderation, validator recovery, backup/restore rehearsal, abuse
   controls, accessibility/performance audits, and Windows/Linux end-to-end recovery scenarios.
-- Keep `paid_checkout_enabled=false` for 0.4.0. Native plugins remain unsupported.
+- Keep `paid_checkout_enabled=false` for 0.4.1. Native plugins remain unsupported.
 
 ### Before an AAA production-readiness claim
 
@@ -294,7 +294,7 @@ Production performance acceptance still requires:
 
 ## Recommended Closure Order
 
-1. Acquire Windows Authenticode and RPM GPG signing identities and exercise native update/rollback from the live 0.4.0
+1. Acquire Windows Authenticode and RPM GPG signing identities and exercise native update/rollback from the live 0.4.1
    catalog.
 2. Repeat Linux graphical and package-manager acceptance on real distro hosts, then publish exact-version Build Support.
 3. Complete Marketplace official products, automatic signing/publication, claim/download, validator recovery,
@@ -304,6 +304,6 @@ Production performance acceptance still requires:
 5. Prioritize the 39 Planned and 8 Partial material rows plus the 30 disabled VFX rows by production scenario.
 6. Establish native macOS/Metal validation before presenting macOS as supported.
 
-The correct public description is **production-oriented Kéire 0.4.0 technology preview with catalog-verified Windows
+The correct public description is **production-oriented Kéire 0.4.1 technology preview with catalog-verified Windows
 and Linux x86-64 downloads**. “AAA production ready,” “complete Unreal/Unity parity,” and “cross-platform release complete”
 remain future acceptance outcomes, not current product facts.

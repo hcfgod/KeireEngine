@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "releaseStatus": {
     "state": "active",
-    "version": "0.4.0",
-    "activeCatalogVersion": "0.4.0",
-    "message": "Kéire 0.4.0 signed downloads are active for Windows and Linux x86-64; macOS downloads remain gated."
+    "version": "0.4.1",
+    "activeCatalogVersion": "0.4.1",
+    "message": "Kéire 0.4.1 signed downloads are active for Windows and Linux x86-64; macOS downloads remain gated."
   },
   "packages": []
 }

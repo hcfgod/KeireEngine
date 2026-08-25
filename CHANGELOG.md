@@ -8,6 +8,13 @@ versions.
 
 ## Unreleased
 
+### Added
+
+- Added production same-frame GPU occlusion culling for explicitly safe opaque Shader Graph geometry, with per-surface
+  depth pyramids, conservative compute classification, compacted indexed indirect draws, deterministic direct-draw
+  fallback, asynchronous source-frame-qualified diagnostics, project mode controls, editor bounds/HZB status overlays,
+  profiler and Render Graph reporting, and focused presenter, lifecycle, fallback, and rendered-output verification.
+
 ## 0.4.1 - 2026-08-24
 
 - Fixed Linux standalone Hub installer packaging after payload permission normalization by deriving the Hub worker
@@ -46,6 +53,9 @@ versions.
 - Cached mutable-scene hierarchy order and child adjacency between structural edits, propagated transform dirtiness by
   subtree instead of repeated ancestor walks, moved queued render requests without deep-copying them, and ignored exact
   no-op local transform assignments.
+- Reprofiled the Distribution Showcase on the same Direct3D 12 workload: average frame time fell from 30.83 ms to
+  4.99 ms (32.4 to 200.3 FPS), P95 fell from 39.77 ms to 8.14 ms, and draw calls fell from 1,390 to 61 with zero
+  steady-state dynamic-buffer reallocations.
 - Fixed Apple Clang/libc++ portability for filesystem clock values and Portable Custom HLSL numeric parsing, and made
   generated macOS links use native archive paths, complete SDL framework dependencies, and an app-local nethost RPATH.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and

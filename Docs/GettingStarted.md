@@ -25,13 +25,13 @@ pointers or stage Git changes.
 
 | Platform | Current evidence | Public preview |
 | --- | --- | --- |
-| Windows x86-64 | Clean 0.4.0 Dist Editor and Hub packages; 726 Core, 199 Editor, and 372 Hub tests plus SDK/package consumers, package smoke, and inventory validation | Signed sequence-15 catalog; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
-| Linux x86-64 (glibc) | Clean 0.4.0 compatibility-baseline builds on Rocky Linux 9; 726 Core, 199 Editor, and 370 Hub tests; DEB acceptance on Ubuntu 22.04 and Debian 13; RPM acceptance on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed; packaged Vulkan/WSLg smoke | Signed sequence-15 catalog with Editor archive plus native DEB and RPM Hub packages; the RPM is catalog/hash verified but not GPG-signed |
+| Windows x86-64 | Clean 0.4.1 Dist Editor and Hub packages; 736 Core, 199 Editor, and 372 Hub tests plus SDK/package consumers, package smoke, and inventory validation | Signed sequence-16 catalog; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
+| Linux x86-64 (glibc) | Clean 0.4.1 compatibility-baseline builds on Rocky Linux 9; Core, Editor, and Hub suites plus DEB acceptance on Ubuntu 22.04 and Debian 13; RPM acceptance on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed; packaged Vulkan/WSLg smoke | Signed sequence-16 catalog with Editor archive plus native DEB and RPM Hub packages; the RPM is catalog/hash verified but not GPG-signed |
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64/ARM64 | Build and packaging contracts retained; native macOS and Metal evidence remains outstanding | Not published |
 
-Version 0.4.0 is the active public preview through immutable snapshot
-`release-0.4.0-sequence-15-9de86e6`. Building current source does not relabel those packages or advance the catalog.
+Version 0.4.1 is the active public preview through immutable snapshot
+`release-0.4.1-sequence-16-0c21d51`. Building current source does not relabel those packages or advance the catalog.
 
 The [Downloads page](https://keireengine.duckdns.org/downloads/) shows the current Hub release. The
 [release archive](https://keireengine.duckdns.org/downloads/archive/) preserves historical metadata without crowding

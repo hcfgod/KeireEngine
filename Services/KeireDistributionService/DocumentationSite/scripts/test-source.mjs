@@ -554,7 +554,7 @@ assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('h
     "Roadmap, changelog, Community, and policies must remain reachable from the global footer.");
 assert(platformFooter.includes(`Kéire ${projectVersion}`) &&
     platformFooter.includes("current pre-1.0 release") &&
-    platformFooter.includes("signed sequence-15 packages are active"),
+    platformFooter.includes("signed sequence-16 packages are active"),
     "The global footer must identify the current release and catalog-controlled availability.");
 const platformHome = await readFile(path.join(siteRoot, "Source", "pages", "index.astro"), "utf8");
 assert(platformHome.includes(`softwareVersion: "${projectVersion}"`) &&
