@@ -138,6 +138,7 @@ TEST_CASE("asset-package archives are deterministic, inspectable, and extracted 
                                                               .ExpectedArchiveSha256 = first.ArchiveSha256}});
 
     CHECK(extracted.Metadata.Manifest == manifest);
+    CHECK(extracted.StagingRoot == std::filesystem::canonical(staging));
     CHECK(KeireTests::ReadFile(staging / "Assets" / "Material.keirematerial") == "material-bytes\n");
     CHECK(KeireTests::ReadFile(staging / "Assets" / "Material.keiremeta") == "{\"schemaVersion\":1}\n");
     CHECK_THROWS_AS(
@@ -148,6 +149,26 @@ TEST_CASE("asset-package archives are deterministic, inspectable, and extracted 
                         {.Manifest = manifest, .PayloadRoot = fixture.Payload, .Output = firstPath})),
                     std::invalid_argument);
 }
+
+#if !defined(_WIN32)
+TEST_CASE("asset-package extraction resolves an authorized parent path alias before creating staging")
+{
+    AssetPackageFixture fixture;
+    const auto archive = fixture.Root / "alias.keireassetpackage";
+    static_cast<void>(Keire::WriteAssetPackageArchive(
+        {.Manifest = fixture.Manifest(), .PayloadRoot = fixture.Payload, .Output = archive}));
+    const auto stagingParent = fixture.Root / "CanonicalStaging";
+    const auto stagingAlias = fixture.Root / "StagingAlias";
+    std::filesystem::create_directory(stagingParent);
+    std::filesystem::create_directory_symlink(stagingParent, stagingAlias);
+
+    const auto extracted = Keire::ExtractAssetPackageToStaging(
+        {.Archive = archive, .AllowedStagingParent = stagingAlias, .StagingRoot = stagingAlias / "Operation"});
+
+    CHECK(extracted.StagingRoot == std::filesystem::canonical(stagingParent) / "Operation");
+    CHECK(KeireTests::ReadFile(extracted.StagingRoot / "Assets" / "Material.keirematerial") == "material-bytes\n");
+}
+#endif
 
 TEST_CASE("asset-package signatures are independently verified against exact manifest bytes")
 {

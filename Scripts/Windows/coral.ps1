@@ -63,10 +63,10 @@ if ($LASTEXITCODE -ne 0 -or $ActualCommit -ne $Lock.CORAL_COMMIT) {
 }
 
 $BuildRoot = Join-Path $env:LOCALAPPDATA "KeireDependencyBuilds"
-$CacheKey = "$($Lock.CORAL_COMMIT.Substring(0, 12))-$($PatchDigest.Substring(0, 16))"
+$CacheKey = "$($Lock.CORAL_COMMIT.Substring(0, 12))-$($PatchDigest.Substring(0, 16))-dotnet-$($Lock.DOTNET_SDK_VERSION)"
 $Patched = Join-Path $BuildRoot "coral-$CacheKey"
 $Stamp = Join-Path $Patched "keire-coral-patch.stamp"
-$ExpectedStamp = "$($Lock.CORAL_COMMIT)|$PatchDigest"
+$ExpectedStamp = "$($Lock.CORAL_COMMIT)|$PatchDigest|dotnet-$($Lock.DOTNET_SDK_VERSION)"
 $Prepared = (Test-Path -LiteralPath $Stamp) -and
     ((Get-Content -LiteralPath $Stamp -Raw).Trim() -eq $ExpectedStamp)
 $NetHostLibrary = ""

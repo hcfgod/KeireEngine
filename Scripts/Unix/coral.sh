@@ -49,10 +49,10 @@ fi
 }
 
 build_root="${XDG_CACHE_HOME:-$HOME/.cache}/keire/dependency-builds"
-cache_key="${coral_commit:0:12}-${patch_digest:0:16}"
+cache_key="${coral_commit:0:12}-${patch_digest:0:16}-dotnet-$dotnet_sdk_version"
 patched="$build_root/coral-$cache_key"
 stamp="$patched/keire-coral-patch.stamp"
-expected_stamp="$coral_commit|$patch_digest"
+expected_stamp="$coral_commit|$patch_digest|dotnet-$dotnet_sdk_version"
 if [[ ! -f "$stamp" || "$(tr -d '\r\n' < "$stamp")" != "$expected_stamp" ]]; then
   mkdir -p "$build_root"
   temporary_patched="$build_root/coral-$cache_key.tmp-$$"

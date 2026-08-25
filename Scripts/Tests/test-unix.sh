@@ -675,6 +675,7 @@ assert_true grep -F -q 'stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION"
 assert_true grep -F -q 'pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"' \
   "$ROOT/Scripts/Unix/coral.sh"
 assert_true grep -F -q '"-DDOTNET_EXE=$dotnet_executable"' "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'dotnet-$dotnet_sdk_version' "$ROOT/Scripts/Unix/coral.sh"
 assert_equal "$(grep -F -c 'DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"' \
   "$ROOT/Scripts/Unix/coral.sh")" 2 'Coral pinned .NET configure and build environment'
 assert_true grep -F -q 'ubuntu-22.04 ubuntu-24.04 ubuntu-26.04 debian-12 fedora arch tumbleweed rocky-9' \
@@ -1308,6 +1309,7 @@ bash "$identity_fixture/Scripts/Unix/build-info.sh"
 identity_header="$identity_fixture/Build/Generated/IdentityFixture/BuildInfo.generated.h"
 assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_VERSION "1.2.3-alpha.1+build.5"' "$identity_header"
 assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_NAME "Quoted \"Kéire\" \\\\ Client"' "$identity_header"
+assert_false grep -Fq '\1777777777777777777' "$identity_header"
 assert_true grep -Fq "#define KEIRE_BUILD_GIT_COMMIT \"$first_commit\"" "$identity_header"
 assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
 touch "$identity_fixture/.ninja_lock"

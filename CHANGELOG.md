@@ -61,8 +61,10 @@ versions.
   and a macOS 12-compatible Hub activation channel. Managed-client failure reporting no longer restarts logging after
   application shutdown, avoiding a late async-logger abort when a graphics backend is unavailable. macOS now links
   the app-local nethost dylib instead of its static archive so bundled weak RTTI cannot preempt libc++ exception types.
-  The distribution publisher now pins its .NET runtime patch so locked restores remain reproducible across installed
-  SDK patch levels.
+  Coral dependency caches now include the pinned .NET SDK version so stale managed host outputs cannot request a
+  different runtime patch. The distribution publisher now pins its .NET runtime patch so locked restores remain
+  reproducible across installed SDK patch levels. Asset-package extraction accepts canonical macOS temporary-directory
+  aliases without weakening staging confinement, and Unix BuildInfo generation preserves UTF-8 under macOS Bash 3.2.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and
   component-only, preventing record-generated `ToString()` from recursively formatting self-typed computed properties
   and overflowing the stack in logs.

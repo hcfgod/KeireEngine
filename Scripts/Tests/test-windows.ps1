@@ -516,6 +516,7 @@ $unixCoralScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\cor
 $unixCommonScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\common.sh") -Raw
 Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"') -and
              $unixCoralScript.Contains('"-DDOTNET_EXE=$dotnet_executable"') -and
+             $unixCoralScript.Contains('dotnet-$dotnet_sdk_version') -and
              ([regex]::Matches(
                  $unixCoralScript,
                  [regex]::Escape('DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"')).Count -eq 2) -and
@@ -524,8 +525,9 @@ Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$
 Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
     "Coral source cache uses deterministic LF checkouts"
 Assert-True ($coralScript.Contains('Get-Command dotnet -CommandType Application') -and
-             $coralScript.Contains('$env:DOTNET_ROOT = Split-Path -Parent $DotnetExecutable')) `
-    "Coral resolves DOTNET_ROOT when the hosted SDK is available only through PATH"
+             $coralScript.Contains('$env:DOTNET_ROOT = Split-Path -Parent $DotnetExecutable') -and
+             $coralScript.Contains('dotnet-$($Lock.DOTNET_SDK_VERSION)')) `
+    "Coral resolves DOTNET_ROOT and keys managed build caches by the pinned SDK"
 Assert-True ($coralScript.Contains('Microsoft.NETCore.App.Host.win-$DotnetHostArchitecture') -and
              $coralScript.Contains("Where-Object { `$_.Name -match '^10\.' }")) `
     "Coral selects the native architecture's .NET 10 nethost pack"
