@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -142,6 +143,30 @@ namespace KeireHub
             (void)close(descriptor);
             errno = error;
             return -1;
+        }
+
+        [[nodiscard]] int CreateFifoAt(const int directory, const std::string& name, const mode_t mode)
+        {
+#if defined(__APPLE__)
+            std::array<char, PATH_MAX> directoryPath{};
+            int pathResult = -1;
+            do
+            {
+                pathResult = fcntl(directory, F_GETPATH, directoryPath.data());
+            } while (pathResult < 0 && errno == EINTR);
+            if (pathResult < 0)
+                return -1;
+
+            const auto fifoPath = std::filesystem::path(directoryPath.data()) / name;
+            int result = -1;
+            do
+            {
+                result = mkfifo(fifoPath.c_str(), mode);
+            } while (result < 0 && errno == EINTR);
+            return result;
+#else
+            return mkfifoat(directory, name.c_str(), mode);
+#endif
         }
 
         [[nodiscard]] bool IsPrivateOwner(const struct stat& status) noexcept
@@ -669,7 +694,7 @@ namespace KeireHub
             if (m_Primary)
             {
                 RemoveStaleUnixFifo(m_RuntimeDirectory, m_FifoName);
-                if (mkfifoat(m_RuntimeDirectory, m_FifoName.c_str(), 0600) != 0)
+                if (CreateFifoAt(m_RuntimeDirectory, m_FifoName, 0600) != 0)
                     throw std::runtime_error("Could not create the Hub activation channel.");
 
                 struct stat createdStatus{};

@@ -57,7 +57,8 @@ versions.
   4.99 ms (32.4 to 200.3 FPS), P95 fell from 39.77 ms to 8.14 ms, and draw calls fell from 1,390 to 61 with zero
   steady-state dynamic-buffer reallocations.
 - Fixed Apple Clang/libc++ portability for filesystem clock values and Portable Custom HLSL numeric parsing, and made
-  generated macOS links use native archive paths, complete SDL framework dependencies, and an app-local nethost RPATH.
+  generated macOS links use native archive paths, complete SDL framework dependencies, an app-local nethost RPATH,
+  and a macOS 12-compatible Hub activation channel.
   The distribution publisher now pins its .NET runtime patch so locked restores remain reproducible across installed
   SDK patch levels.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and
