@@ -47,21 +47,56 @@ $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $CompilerCache = Resolve-CompilerCache $Generator $CompilerCache
 $Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
-$expectedStamp = "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$(Get-ProjectGenerationFingerprint $Root)"
-$stamp = Join-Path $Root "Build\Generated\$Generator.stamp"
+$stampDirectory = Join-Path $Root "Build\Generated"
+$stamp = Join-Path $stampDirectory "$Generator.stamp"
+$outputIdentityStamp = Join-Path $stampDirectory `
+    "windows-$(Get-ArchitectureOutputName $Architecture)-output.stamp"
 
 Assert-SupportedBuildCombination $Generator $Configuration $Architecture $Toolset
 if ($Configuration -eq "Profile") {
     & (Join-Path $PSScriptRoot "vendor.ps1") -IncludeProfileDependencies
 }
 
-function Invoke-GenerationIfNeeded {
+function Initialize-KeireGeneratedBuild {
     param([string]$ExpectedFile)
-    $stampMatches = (Test-Path $stamp) -and ((Get-Content $stamp -Raw).Trim() -eq $expectedStamp)
-    if ($Generate -or $Update -or -not (Test-Path (Join-Path $Root $ExpectedFile)) -or -not $stampMatches) {
+
+    $toolchainIdentity = $null
+    $expectedStamp = $null
+    $requiresGeneration = $Generate -or $Update -or -not (Test-Path (Join-Path $Root $ExpectedFile)) -or
+        -not (Test-Path -LiteralPath $stamp -PathType Leaf)
+    if (-not $requiresGeneration) {
+        try {
+            $toolchainIdentity = Get-WindowsToolchainIdentity -Generator $Generator -Toolset $Toolset `
+                -Architecture $Architecture
+        }
+        catch {
+            # Generation owns bootstrap. Let it repair a missing or incomplete toolchain before provenance is read.
+            Write-Host "==> Toolchain identity is unavailable; refreshing bootstrap and generated build files"
+            $requiresGeneration = $true
+        }
+        if (-not $requiresGeneration) {
+            $expectedStamp = "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$toolchainIdentity|$(Get-ProjectGenerationFingerprint $Root)"
+            $requiresGeneration = (Get-Content -LiteralPath $stamp -Raw).Trim() -ne $expectedStamp
+        }
+    }
+
+    if ($requiresGeneration) {
         & (Join-Path $PSScriptRoot "generate.ps1") -Generator $Generator -Architecture $Architecture `
             -Toolset $Toolset -CompilerCache $CompilerCache -CI:$CI -Update:$Update
+        $toolchainIdentity = Get-WindowsToolchainIdentity -Generator $Generator -Toolset $Toolset `
+            -Architecture $Architecture
+        $expectedStamp = "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$toolchainIdentity|$(Get-ProjectGenerationFingerprint $Root)"
     }
+
+    if (-not (Test-Path -LiteralPath $stamp -PathType Leaf) -or
+        (Get-Content -LiteralPath $stamp -Raw).Trim() -ne $expectedStamp) {
+        throw "Generated $Generator build files do not match the active Windows toolchain."
+    }
+
+    New-Item -ItemType Directory -Force -Path $stampDirectory | Out-Null
+    Remove-IncompatibleBuildBinaries -Root $Root -Architecture $Architecture -Toolset $Toolset `
+        -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedStamp -IdentityStamp $outputIdentityStamp
+    Set-Content -Path $outputIdentityStamp -Value $expectedStamp -Encoding ASCII
 }
 
 function Get-NinjaExecutable {
@@ -76,7 +111,7 @@ switch ($Generator) {
     { $_ -like "vs*" } {
         $majorVersion = Get-VisualStudioMajorVersion $Generator
         $solutionName = if ($Generator -eq "vs2026") { "$WorkspaceName.slnx" } else { "$WorkspaceName.sln" }
-        Invoke-GenerationIfNeeded $solutionName
+        Initialize-KeireGeneratedBuild $solutionName
         $environment = Get-VSBuildEnvironment $majorVersion
         $platform = Get-MSBuildPlatform $Architecture
         Write-Host "==> Building $Target $Configuration for $Architecture with $Generator"
@@ -103,7 +138,7 @@ switch ($Generator) {
         break
     }
     "ninja" {
-        Invoke-GenerationIfNeeded "build.ninja"
+        Initialize-KeireGeneratedBuild "build.ninja"
         Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         Write-Host "==> Building $Target $Configuration for $Architecture with Ninja"
         $ninjaArguments = @("-C", $Root, "-f", "build.ninja")
@@ -114,7 +149,7 @@ switch ($Generator) {
         break
     }
     "gmake" {
-        Invoke-GenerationIfNeeded "Makefile"
+        Initialize-KeireGeneratedBuild "Makefile"
         Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
         $make = Get-Command mingw32-make, make -ErrorAction SilentlyContinue | Select-Object -First 1
         if (-not $make) {

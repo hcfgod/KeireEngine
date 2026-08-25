@@ -969,7 +969,7 @@ namespace Keire
                                                 ? attribute("SheenRoughness")
                                                 : optionalInput("SheenRoughness", ShaderGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes ? attribute("Normal")
+                                    : hasMaterialAttributes                                        ? attribute("Normal")
                                                             : input("Normal", ShaderGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", ShaderGraphValueType::Vector3)
@@ -3163,24 +3163,6 @@ float4 PSMain(VertexOutput input) : SV_Target0
         return CreateRef<ShaderGraphAsset>(CreateDefaultShaderGraph(ShaderGraphOutput::Unlit));
     }
 
-    ShaderGraphInstanceAsset::ShaderGraphInstanceAsset(ShaderGraphInstanceDefinition definition)
-        : m_Definition(std::move(definition))
-    {
-    }
-
-    std::size_t ShaderGraphInstanceAsset::ResidentBytes() const noexcept
-    {
-        std::size_t result = sizeof(*this);
-        for (const auto& [name, value] : m_Definition.Properties)
-        {
-            (void)value;
-            result += name.size() + sizeof(MaterialPropertyValue);
-        }
-        for (const auto& [name, value] : m_Definition.KeywordOverrides)
-            result += name.size() + value.size();
-        return result;
-    }
-
     Ref<ShaderGraphInstanceAsset> ShaderGraphInstanceAsset::Decode(const std::span<const std::byte> bytes)
     {
         try
@@ -3217,17 +3199,6 @@ float4 PSMain(VertexOutput input) : SV_Target0
     }
 
     Ref<ShaderGraphInstanceAsset> ShaderGraphInstanceAsset::Error() { return CreateRef<ShaderGraphInstanceAsset>(); }
-
-    std::vector<AssetId> ShaderGraphReferencedAssets(const ShaderGraphDefinition& definition)
-    {
-        std::vector<AssetId> result;
-        for (const auto& node : definition.Nodes)
-            if (node.ReferencedAsset)
-                result.push_back(node.ReferencedAsset);
-        std::ranges::sort(result);
-        result.erase(std::unique(result.begin(), result.end()), result.end());
-        return result;
-    }
 
     ShaderGraphDefinition
     ExpandShaderGraphFunctions(const ShaderGraphDefinition& definition,

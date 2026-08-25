@@ -19,43 +19,60 @@ $Ninja = Get-NinjaExecutable
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
 $Bridge = Join-Path $Root "Scripts\Dependencies\CMakeLists.txt"
 $bridgeHash = (Get-FileHash -Algorithm SHA256 $Bridge).Hash.ToLowerInvariant()
+$WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "dependencies"
+try {
 
 function Get-LockedDependencySource {
     param([string]$Name, [string]$Url, [string]$Commit)
 
     $sourceBase = Join-Path $env:LOCALAPPDATA "KeireDependencySources"
+    $sourceContainerRoot = Split-Path $sourceBase -Parent
     $source = Join-Path $sourceBase "$Name-$Commit"
     if (Test-Path -LiteralPath $source) {
-        $actual = ([string](& git -C $source rev-parse HEAD 2>$null)).Trim()
-        if ($LASTEXITCODE -ne 0 -or $actual -ne $Commit) {
-            throw "Locked $Name source cache is not the expected commit: $source"
-        }
+        Assert-KeireLockedGitSource -Path $source -ExpectedCommit $Commit -Name $Name
         return $source
     }
 
     New-Item -ItemType Directory -Force $sourceBase | Out-Null
+    $cacheLock = Enter-KeireWorkspaceLock -RepositoryRoot $sourceBase `
+        -CommandName "dependency-source-$Name-$Commit" -LockRelativePath ".locks\$Name-$Commit.lock"
     $temporary = Join-Path $sourceBase "$Name-$Commit.tmp-$PID"
-    if (Test-Path -LiteralPath $temporary) {
-        $resolvedTemporary = [IO.Path]::GetFullPath($temporary)
-        $resolvedBase = [IO.Path]::GetFullPath($sourceBase) + [IO.Path]::DirectorySeparatorChar
-        if (-not $resolvedTemporary.StartsWith($resolvedBase, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Refusing to replace a dependency source outside $sourceBase."
-        }
-        Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force
-    }
     try {
+        # A different worktree can publish the immutable checkout while this process waits for the shared cache lock.
+        if (Test-Path -LiteralPath $source) {
+            Assert-KeireLockedGitSource -Path $source -ExpectedCommit $Commit -Name $Name
+            return $source
+        }
+        if (Get-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue) {
+            Remove-KeireGeneratedDirectory -RepositoryRoot $sourceContainerRoot -AllowedRoot $sourceBase `
+                -Path $temporary -Description "temporary dependency source"
+        }
         & git clone --quiet --filter=blob:none --no-checkout $Url $temporary
         if ($LASTEXITCODE -ne 0) { throw "Could not clone $Name." }
         & git -C $temporary fetch --quiet --depth 1 origin $Commit
         if ($LASTEXITCODE -ne 0) { throw "Could not fetch locked $Name commit $Commit." }
         & git -C $temporary checkout --quiet --detach $Commit
         if ($LASTEXITCODE -ne 0) { throw "Could not check out locked $Name commit $Commit." }
+        Assert-KeireLockedGitSource -Path $temporary -ExpectedCommit $Commit -Name $Name
         Move-Item -LiteralPath $temporary -Destination $source
     }
     catch {
-        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
-        throw
+        $failure = $_
+        if (Get-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue) {
+            try {
+                Remove-KeireGeneratedDirectory -RepositoryRoot $sourceContainerRoot -AllowedRoot $sourceBase `
+                    -Path $temporary -Description "temporary dependency source"
+            }
+            catch {
+                Write-Warning "Could not safely clean temporary dependency source '$temporary': $($_.Exception.Message)"
+            }
+        }
+        throw $failure
     }
+    finally {
+        Exit-KeireWorkspaceLock -Lock $cacheLock
+    }
+    Assert-KeireLockedGitSource -Path $source -ExpectedCommit $Commit -Name $Name
     return $source
 }
 
@@ -64,23 +81,16 @@ $recastSource = Get-LockedDependencySource "recast" $Lock.RECAST_URL $Lock.RECAS
 $miniaudioSource = Get-LockedDependencySource "miniaudio" $Lock.MINIAUDIO_URL $Lock.MINIAUDIO_COMMIT
 $sodiumSource = Get-LockedDependencySource "libsodium" $Lock.LIBSODIUM_URL $Lock.LIBSODIUM_COMMIT
 $assimpSource = Join-Path $Root "Vendor\assimp"
-$assimpSourceLink = Join-Path $env:LOCALAPPDATA "KeireDependencySources\assimp-$($Lock.ASSIMP_COMMIT)"
-if (Test-Path -LiteralPath $assimpSourceLink) {
-    $link = Get-Item -LiteralPath $assimpSourceLink -Force
-    $linkTarget = [string]($link.Target | Select-Object -First 1)
-    if (-not ($link.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
-        [IO.Path]::GetFullPath($linkTarget) -ne [IO.Path]::GetFullPath($assimpSource)) {
-        throw "Assimp dependency source cache points somewhere unexpected: $assimpSourceLink"
-    }
-}
-else {
-    New-Item -ItemType Directory -Force (Split-Path $assimpSourceLink) | Out-Null
-    New-Item -ItemType Junction -Path $assimpSourceLink -Target $assimpSource | Out-Null
-}
+# Locked Git checkouts above are immutable and safe to share. Assimp is a submodule inside this checkout, so its ASCII
+# junction must also include the workspace identity or a linked worktree can collide with the primary checkout.
+$assimpSourceLink = Get-KeireWorkspaceJunctionPath -BasePath (Join-Path $env:LOCALAPPDATA "KeireDependencySources") `
+    -Prefix "assimp-$($Lock.ASSIMP_COMMIT)" -RepositoryRoot $Root
+Initialize-KeireWorkspaceJunction -Path $assimpSourceLink -Target $assimpSource | Out-Null
 
 $compiler = if ($Toolset -eq "clang") { (& clang++ --version | Select-Object -First 1) }
 elseif ($Toolset -eq "gcc") { (& g++ --version | Select-Object -First 1) }
 else { "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion" }
+$sourceLayoutIdentity = "workspace-assimp-v2:$assimpSourceLink"
 $options = @(
     "-DSDL_SHARED=OFF", "-DSDL_STATIC=ON", "-DSDL_TEST_LIBRARY=OFF", "-DSDL_TESTS=OFF",
     "-DSDL_EXAMPLES=OFF", "-DSDL_AUDIO=OFF", "-DSDL_CAMERA=OFF", "-DSDL_JOYSTICK=ON",
@@ -133,7 +143,7 @@ function Assert-SdlInputBackends {
 }
 
 $key = @($Lock.SDL_COMMIT, $Lock.ASSIMP_COMMIT, $Lock.JOLT_COMMIT, $Lock.RECAST_COMMIT,
-    $Lock.MINIAUDIO_COMMIT, $Lock.LIBSODIUM_COMMIT, $Architecture, $Toolset, $compiler, $bridgeHash,
+    $Lock.MINIAUDIO_COMMIT, $Lock.LIBSODIUM_COMMIT, $sourceLayoutIdentity, $Architecture, $Toolset, $compiler, $bridgeHash,
     ($options -join ";")) -join "|"
 $base = Join-Path $Root "Build\Dependencies\windows-$OutputArchitecture-$Toolset"
 $zlibDebugName = if ($Toolset -eq "msc") { "zlibstaticd.lib" } else { "zlibstatic.lib" }
@@ -260,8 +270,15 @@ foreach ($configuration in @("Debug", "Release")) {
 
 & (Join-Path $PSScriptRoot "shader-compiler.ps1") -Generator $Generator -Architecture $Architecture -Toolset $Toolset -Force:$Force
 
-$coralDebug = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Debug -Build -Force:$Force
-& (Join-Path $PSScriptRoot "coral.ps1") -Configuration Release -Build -Force:$Force | Out-Null
+$coralDebug = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Debug -Architecture $Architecture `
+    -Build -Force:$Force
+$coralRelease = & (Join-Path $PSScriptRoot "coral.ps1") -Configuration Release -Architecture $Architecture `
+    -Build -Force:$Force
+if ($coralDebug.Source -ne $coralRelease.Source -or $coralDebug.BuildVariant -ne $coralRelease.BuildVariant -or
+    $coralDebug.NetHostLibrary -ne $coralRelease.NetHostLibrary -or
+    $coralDebug.NetHostRuntime -ne $coralRelease.NetHostRuntime -or $coralDebug.DotnetRoot -ne $coralRelease.DotnetRoot) {
+    throw "Coral Debug and Release metadata must resolve to one checkout-isolated build variant."
+}
 
 function Set-DependencyJunction {
     param([string]$Path, [string]$Target)
@@ -363,3 +380,7 @@ DependencyManifest = {
 "@
 [IO.File]::WriteAllText((Join-Path $generated "Dependencies.lua"), $manifest, [Text.UTF8Encoding]::new($false))
 Write-Host "==> Dependency manifest generated"
+}
+finally {
+    Exit-KeireWorkspaceLock -Lock $WorkspaceLock
+}

@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
+#include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 
 #include "Keire/Log.h"
@@ -23,20 +24,12 @@
 
 namespace
 {
-    constexpr std::uint32_t AutomaticMinimumCandidates = 128;
-    constexpr std::uint64_t AutomaticMinimumCandidateTriangles = 100'000;
-    constexpr float AutomaticMinimumOccluderCoverage = 0.05F;
-    constexpr float AutomaticMaximumDepthCostRatio = 0.5F;
-    constexpr float AutomaticMinimumOccluderPixels = 4096.0F;
-    constexpr float ForcedMinimumOccluderPixels = 256.0F;
-    constexpr std::uint32_t AutomaticQualifyingFrames = 2;
-    constexpr std::uint32_t AutomaticMinimumActiveFrames = 30;
+    namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;
+
     constexpr float OcclusionDepthBias = 0.0001F;
     constexpr std::uint32_t ForceVisibleFlag = 1U;
     constexpr std::uint32_t MaximumGpuOcclusionCandidates = 262'144U;
     constexpr std::uint32_t MaximumGpuOcclusionSurfaceDimension = 16'384U;
-    constexpr std::uint32_t AutomaticCoverageColumns = 16U;
-    constexpr std::uint32_t AutomaticCoverageRows = 9U;
 
     struct ProjectedRectangle final
     {
@@ -148,30 +141,7 @@ namespace
                                        const Keire::GpuOcclusionMode requested,
                                        const Keire::GpuOcclusionFallbackReason reason)
     {
-        auto& diagnostics = surface.GpuOcclusionDiagnostics;
-        const bool transitioned = diagnostics.RequestedMode != requested ||
-                                  diagnostics.EffectiveMode != Keire::GpuOcclusionMode::Disabled ||
-                                  diagnostics.FallbackReason != reason;
-        diagnostics.RequestedMode = requested;
-        diagnostics.EffectiveMode = Keire::GpuOcclusionMode::Disabled;
-        diagnostics.State = reason == Keire::GpuOcclusionFallbackReason::DisabledBySetting
-                                ? Keire::GpuOcclusionSurfaceState::Disabled
-                            : reason == Keire::GpuOcclusionFallbackReason::UnsupportedBackend
-                                ? Keire::GpuOcclusionSurfaceState::Unsupported
-                                : Keire::GpuOcclusionSurfaceState::Fallback;
-        diagnostics.FallbackReason = reason;
-        diagnostics.SourceFrame = 0;
-        diagnostics.ReadbackAge = std::numeric_limits<std::uint32_t>::max();
-        diagnostics.Candidates = 0;
-        diagnostics.Visible = 0;
-        diagnostics.Culled = 0;
-        diagnostics.SafeOccluders = 0;
-        diagnostics.PyramidMipCount = 0;
-        diagnostics.PyramidValid = false;
-        diagnostics.ReadbackValid = false;
-        surface.GpuOcclusionLatestCandidateTriangles = 0;
-        surface.GpuOcclusionLatestVisibleTriangles = 0;
-        return transitioned;
+        return Keire::RenderBackend::PublishGpuOcclusionFallback(surface, requested, reason);
     }
 } // namespace
 
@@ -194,6 +164,7 @@ namespace Keire::RenderBackend
             surface.GpuOcclusionAutomaticMinimumFrames = 0;
             surface.GpuOcclusionAutomaticCooldownFrames = 0;
             surface.GpuOcclusionValidationCooldown = false;
+            surface.GpuOcclusionValidationFallbackEventPending = false;
             return prepared;
         }
         if (surface.GpuOcclusionValidationCooldown && surface.GpuOcclusionAutomaticCooldownFrames > 0U)
@@ -201,8 +172,10 @@ namespace Keire::RenderBackend
             --surface.GpuOcclusionAutomaticCooldownFrames;
             if (surface.GpuOcclusionAutomaticCooldownFrames == 0U)
                 surface.GpuOcclusionValidationCooldown = false;
+            const bool transitioned =
+                PublishFallback(surface, requested, GpuOcclusionFallbackReason::ReadbackValidationFailed);
             Statistics.GpuOcclusionFallbacks +=
-                PublishFallback(surface, requested, GpuOcclusionFallbackReason::ReadbackValidationFailed) ? 1U : 0U;
+                ConsumeGpuOcclusionValidationFallbackEvent(surface, transitioned) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
             return prepared;
         }
@@ -243,7 +216,7 @@ namespace Keire::RenderBackend
         std::vector<GpuOcclusionBatch> batches;
         std::vector<SDL_GPUIndexedIndirectDrawCommand> indirect;
         std::vector<PreparedSceneBatch*> preparedBatches;
-        std::array<bool, AutomaticCoverageColumns * AutomaticCoverageRows> occluderCoverage{};
+        std::array<bool, Policy::AutomaticCoverageColumns * Policy::AutomaticCoverageRows> occluderCoverage{};
         std::uint64_t depthTriangles = 0;
         bool oversizedBatch = false;
         bool legacyShaderAbi = false;
@@ -335,8 +308,8 @@ namespace Keire::RenderBackend
                     ProjectedBoundsPixels(clipFromLocal, instanceDraw.Submesh.Bounds, surface.Width, surface.Height);
                 const float area = rectangle.Area();
                 const float minimumOccluderPixels = requested == GpuOcclusionMode::Automatic
-                                                        ? AutomaticMinimumOccluderPixels
-                                                        : ForcedMinimumOccluderPixels;
+                                                        ? Policy::AutomaticMinimumOccluderPixels
+                                                        : Policy::ForcedMinimumOccluderPixels;
                 if (area < minimumOccluderPixels)
                 {
                     flushRange();
@@ -348,22 +321,22 @@ namespace Keire::RenderBackend
                     rangeFirst = gpuInstance;
                 ++rangeCount;
                 depthTriangles += triangleCount;
-                for (std::uint32_t row = 0; row < AutomaticCoverageRows; ++row)
+                for (std::uint32_t row = 0; row < Policy::AutomaticCoverageRows; ++row)
                 {
                     const float cellMinimumY = static_cast<float>(row) * static_cast<float>(surface.Height) /
-                                               static_cast<float>(AutomaticCoverageRows);
+                                               static_cast<float>(Policy::AutomaticCoverageRows);
                     const float cellMaximumY = static_cast<float>(row + 1U) * static_cast<float>(surface.Height) /
-                                               static_cast<float>(AutomaticCoverageRows);
-                    for (std::uint32_t column = 0; column < AutomaticCoverageColumns; ++column)
+                                               static_cast<float>(Policy::AutomaticCoverageRows);
+                    for (std::uint32_t column = 0; column < Policy::AutomaticCoverageColumns; ++column)
                     {
                         const float cellMinimumX = static_cast<float>(column) * static_cast<float>(surface.Width) /
-                                                   static_cast<float>(AutomaticCoverageColumns);
+                                                   static_cast<float>(Policy::AutomaticCoverageColumns);
                         const float cellMaximumX = static_cast<float>(column + 1U) * static_cast<float>(surface.Width) /
-                                                   static_cast<float>(AutomaticCoverageColumns);
+                                                   static_cast<float>(Policy::AutomaticCoverageColumns);
                         if (rectangle.MinimumX <= cellMinimumX && rectangle.MaximumX >= cellMaximumX &&
                             rectangle.MinimumY <= cellMinimumY && rectangle.MaximumY >= cellMaximumY)
                         {
-                            occluderCoverage[row * AutomaticCoverageColumns + column] = true;
+                            occluderCoverage[row * Policy::AutomaticCoverageColumns + column] = true;
                         }
                     }
                 }
@@ -460,13 +433,14 @@ namespace Keire::RenderBackend
             }
             const auto coveredCells = static_cast<std::uint32_t>(std::ranges::count(occluderCoverage, true));
             const float occluderCoverageRatio =
-                static_cast<float>(coveredCells) / static_cast<float>(AutomaticCoverageColumns * AutomaticCoverageRows);
+                static_cast<float>(coveredCells) /
+                static_cast<float>(Policy::AutomaticCoverageColumns * Policy::AutomaticCoverageRows);
             const bool qualifies =
-                prepared.CandidateCount >= AutomaticMinimumCandidates &&
-                prepared.CandidateTriangles >= AutomaticMinimumCandidateTriangles &&
-                occluderCoverageRatio >= AutomaticMinimumOccluderCoverage &&
+                prepared.CandidateCount >= Policy::AutomaticMinimumCandidates &&
+                prepared.CandidateTriangles >= Policy::AutomaticMinimumCandidateTriangles &&
+                occluderCoverageRatio >= Policy::AutomaticMinimumOccluderCoverage &&
                 static_cast<double>(depthTriangles) <=
-                    static_cast<double>(prepared.CandidateTriangles) * AutomaticMaximumDepthCostRatio;
+                    static_cast<double>(prepared.CandidateTriangles) * Policy::AutomaticMaximumDepthCostRatio;
             if (surface.GpuOcclusionAutomaticActive)
             {
                 if (surface.GpuOcclusionAutomaticMinimumFrames > 0)
@@ -480,11 +454,11 @@ namespace Keire::RenderBackend
             else if (qualifies)
             {
                 ++surface.GpuOcclusionAutomaticQualifyingFrames;
-                if (surface.GpuOcclusionAutomaticQualifyingFrames >= AutomaticQualifyingFrames)
+                if (surface.GpuOcclusionAutomaticQualifyingFrames >= Policy::AutomaticQualifyingFrames)
                 {
                     surface.GpuOcclusionAutomaticActive = true;
                     surface.GpuOcclusionAutomaticQualifyingFrames = 0;
-                    surface.GpuOcclusionAutomaticMinimumFrames = AutomaticMinimumActiveFrames;
+                    surface.GpuOcclusionAutomaticMinimumFrames = Policy::AutomaticMinimumActiveFrames;
                 }
             }
             else

@@ -28,6 +28,8 @@ Assert-SupportedBuildCombination $Generator "Debug" $Architecture $Toolset
 # rebuilding those is an explicit bootstrap operation so a project refresh cannot start an hour-long codec build.
 & (Join-Path $PSScriptRoot "dependencies.ps1") -Generator $Generator -Architecture $Architecture `
     -Toolset $Toolset
+$toolchainIdentity = Get-WindowsToolchainIdentity -Generator $Generator -Toolset $Toolset `
+    -Architecture $Architecture
 
 $premakeArchitecture = Get-PremakeArchitecture $Architecture
 # Premake beta8 cannot reliably parse a Unicode absolute --file path on
@@ -37,6 +39,8 @@ if ($CI) { $arguments += "--ci" }
 $stampDirectory = Join-Path $Root "Build\Generated"
 $identityGenerator = if ($Generator -eq "compilecommands") { "ninja" } else { $Generator }
 $identityStamp = Join-Path $stampDirectory "$identityGenerator.stamp"
+$outputIdentityStamp = Join-Path $stampDirectory `
+    "windows-$(Get-ArchitectureOutputName $Architecture)-output.stamp"
 Write-Host "==> Generating $Generator files for $Architecture with toolset $Toolset"
 $premakeRoot = $Root.Path
 $premakeJunction = $null
@@ -90,14 +94,20 @@ if ($Generator -eq "compilecommands") {
 }
 
 New-Item -ItemType Directory -Force -Path $stampDirectory | Out-Null
-Remove-IncompatibleBuildBinaries -Root $Root -Architecture $Architecture -Toolset $Toolset `
-    -IdentityStamp $identityStamp
 $generationFingerprint = Get-ProjectGenerationFingerprint $Root
+$expectedOutputIdentity = `
+    "$identityGenerator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$toolchainIdentity|$generationFingerprint"
+Remove-IncompatibleBuildBinaries -Root $Root -Architecture $Architecture -Toolset $Toolset `
+    -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedOutputIdentity `
+    -IdentityStamp $outputIdentityStamp
+Set-Content -Path $outputIdentityStamp -Value $expectedOutputIdentity -Encoding ASCII
 Set-Content -Path (Join-Path $stampDirectory "$Generator.stamp") `
-    -Value "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
+    -Value "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$toolchainIdentity|$generationFingerprint" `
+    -Encoding ASCII
 if ($Generator -eq "compilecommands") {
     # Compile database generation produces the shared build.ninja too. Record its actual identity so a later Ninja
     # build with a different toolset cannot accept a stale stamp left by an earlier generation.
     Set-Content -Path (Join-Path $stampDirectory "ninja.stamp") `
-        -Value "ninja|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$generationFingerprint" -Encoding ASCII
+        -Value "ninja|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$toolchainIdentity|$generationFingerprint" `
+        -Encoding ASCII
 }

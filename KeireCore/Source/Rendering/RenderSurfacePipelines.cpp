@@ -43,6 +43,7 @@ namespace
         surface.GpuOcclusionAutomaticMinimumFrames = 0;
         surface.GpuOcclusionAutomaticCooldownFrames = 0;
         surface.GpuOcclusionValidationCooldown = false;
+        surface.GpuOcclusionValidationFallbackEventPending = false;
         surface.GpuOcclusionLatestCandidateTriangles = 0;
         surface.GpuOcclusionLatestVisibleTriangles = 0;
         surface.GpuOcclusionAutomaticActive = false;

@@ -1,5 +1,7 @@
 #include "Keire/Rendering/ShaderGraph.h"
 
+#include <algorithm>
+#include <ranges>
 #include <utility>
 
 namespace Keire
@@ -24,6 +26,35 @@ namespace Keire
         for (const auto& comment : m_Definition.Authoring.Comments)
             result += sizeof(comment) + comment.Title.capacity() + comment.Description.capacity() +
                       comment.Members.capacity() * sizeof(AssetId);
+        return result;
+    }
+
+    ShaderGraphInstanceAsset::ShaderGraphInstanceAsset(ShaderGraphInstanceDefinition definition)
+        : m_Definition(std::move(definition))
+    {
+    }
+
+    std::size_t ShaderGraphInstanceAsset::ResidentBytes() const noexcept
+    {
+        std::size_t result = sizeof(*this);
+        for (const auto& [name, value] : m_Definition.Properties)
+        {
+            (void)value;
+            result += name.size() + sizeof(MaterialPropertyValue);
+        }
+        for (const auto& [name, value] : m_Definition.KeywordOverrides)
+            result += name.size() + value.size();
+        return result;
+    }
+
+    std::vector<AssetId> ShaderGraphReferencedAssets(const ShaderGraphDefinition& definition)
+    {
+        std::vector<AssetId> result;
+        for (const auto& node : definition.Nodes)
+            if (node.ReferencedAsset)
+                result.push_back(node.ReferencedAsset);
+        std::ranges::sort(result);
+        result.erase(std::unique(result.begin(), result.end()), result.end());
         return result;
     }
 } // namespace Keire

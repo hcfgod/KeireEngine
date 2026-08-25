@@ -96,7 +96,7 @@ namespace KeireEditor
         case Keire::GpuOcclusionFallbackReason::NoSafeOccluders:
             return "no safe occluders";
         case Keire::GpuOcclusionFallbackReason::BelowAutomaticThreshold:
-            return "below the automatic candidate threshold";
+            return "below the Automatic activation threshold";
         case Keire::GpuOcclusionFallbackReason::NoEligibleCandidates:
             return "no eligible candidates";
         case Keire::GpuOcclusionFallbackReason::LegacyShaderAbi:
@@ -120,6 +120,11 @@ namespace KeireEditor
                 static_cast<std::uint64_t>(std::llround(std::min(static_cast<double>(value), maximum) * 10.0));
             return std::to_string(tenths / 10U) + "." + std::to_string(tenths % 10U);
         }
+
+        [[nodiscard]] inline std::string FallbackEventSummary(const std::uint32_t count)
+        {
+            return std::to_string(count) + (count == 1U ? " fallback event" : " fallback events");
+        }
     } // namespace Detail
 
     [[nodiscard]] inline GpuOcclusionDiagnostics
@@ -138,13 +143,27 @@ namespace KeireEditor
             return result;
         }
 
+        if (statistics.GpuOcclusionFallbackActive && !statistics.GpuOcclusionEnabled)
+        {
+            result.State = GpuOcclusionDiagnosticState::Fallback;
+            result.Status = "GPU occlusion fallback active (direct draws)";
+            result.Visibility = "Direct draws remain active";
+            result.Pyramid = "HZB unavailable during direct-draw fallback";
+            result.Readback = "Visibility readback unavailable while direct-draw fallback is active";
+            result.Recording = "Occlusion recording 0.0 ms";
+            result.Warning = true;
+            if (statistics.GpuOcclusionFallbacks != 0U)
+                result.Status += " / " + Detail::FallbackEventSummary(statistics.GpuOcclusionFallbacks);
+            return result;
+        }
+
         if (!statistics.GpuOcclusionEnabled)
         {
             result.State = GpuOcclusionDiagnosticState::Disabled;
             result.Status = "GPU occlusion disabled";
             result.Visibility = "Direct draws remain active";
             result.Pyramid = "HZB idle";
-            result.Readback = "Visibility readback idle";
+            result.Readback = "Visibility readback unavailable while GPU occlusion is disabled";
             result.Recording = "Occlusion recording 0.0 ms";
             result.Warning = statistics.GpuOcclusionFallbackActive;
             return result;
@@ -163,15 +182,15 @@ namespace KeireEditor
                             std::to_string(statistics.GpuOcclusionVisible) + " visible / " +
                             std::to_string(statistics.GpuOcclusionCulled) + " culled (" +
                             std::to_string(culledPercent) + "%)";
-        result.Pyramid = std::to_string(statistics.GpuOcclusionPyramidMipCount) + " HZB mips / " +
-                         std::to_string(statistics.GpuOcclusionSafeOccluders) + " safe occluders / " +
+        result.Pyramid = "Last completed frame: " + std::to_string(statistics.GpuOcclusionPyramidMipCount) +
+                         " HZB mips / " + std::to_string(statistics.GpuOcclusionSafeOccluders) + " safe occluders / " +
                          std::to_string(statistics.GpuOcclusionDispatches) + " dispatches / " +
                          std::to_string(statistics.GpuOcclusionIndirectDraws) + " indirect draws";
         result.Recording =
-            "Occlusion recording " + Detail::OcclusionMilliseconds(statistics.GpuOcclusionDepthPassMilliseconds) +
-            " ms depth / " + Detail::OcclusionMilliseconds(statistics.GpuOcclusionPyramidRecordingMilliseconds) +
-            " ms pyramid / " + Detail::OcclusionMilliseconds(statistics.GpuOcclusionCullingRecordingMilliseconds) +
-            " ms cull";
+            "Last completed frame occlusion recording " +
+            Detail::OcclusionMilliseconds(statistics.GpuOcclusionDepthPassMilliseconds) + " ms depth / " +
+            Detail::OcclusionMilliseconds(statistics.GpuOcclusionPyramidRecordingMilliseconds) + " ms pyramid / " +
+            Detail::OcclusionMilliseconds(statistics.GpuOcclusionCullingRecordingMilliseconds) + " ms cull";
 
         if (statistics.GpuOcclusionReadbackValid &&
             statistics.GpuOcclusionReadbackAge != std::numeric_limits<std::uint32_t>::max())
@@ -189,8 +208,30 @@ namespace KeireEditor
 
         if (statistics.GpuOcclusionFallbackActive)
         {
-            result.State = GpuOcclusionDiagnosticState::Fallback;
-            result.Status = "GPU occlusion fallback active (direct draws)";
+            result.State = statistics.GpuOcclusionReadbackValid ? GpuOcclusionDiagnosticState::Active
+                                                                : GpuOcclusionDiagnosticState::WaitingForReadback;
+            result.Status = "GPU occlusion active";
+            if (statistics.GpuOcclusionActiveSurfaces != 0U)
+            {
+                result.Status += " on " + std::to_string(statistics.GpuOcclusionActiveSurfaces) +
+                                 (statistics.GpuOcclusionActiveSurfaces == 1U ? " surface" : " surfaces");
+            }
+            if (statistics.GpuOcclusionFallbackSurfaces != 0U)
+            {
+                result.Status += " / direct-draw fallback on " +
+                                 std::to_string(statistics.GpuOcclusionFallbackSurfaces) +
+                                 (statistics.GpuOcclusionFallbackSurfaces == 1U ? " surface" : " surfaces");
+            }
+            if (statistics.GpuOcclusionPartialFallbackSurfaces != 0U)
+            {
+                result.Status += " / partial direct draws on " +
+                                 std::to_string(statistics.GpuOcclusionPartialFallbackSurfaces) + " active " +
+                                 (statistics.GpuOcclusionPartialFallbackSurfaces == 1U ? "surface" : "surfaces");
+            }
+            if (statistics.GpuOcclusionFallbackSurfaces == 0U && statistics.GpuOcclusionPartialFallbackSurfaces == 0U)
+            {
+                result.Status += " / some draws use direct-draw fallback";
+            }
             result.Warning = true;
         }
         else if (!statistics.GpuOcclusionReadbackValid)
@@ -211,7 +252,7 @@ namespace KeireEditor
             result.Warning = true;
         }
         if (statistics.GpuOcclusionFallbacks != 0U)
-            result.Status += " / " + std::to_string(statistics.GpuOcclusionFallbacks) + " fallback events";
+            result.Status += " / " + Detail::FallbackEventSummary(statistics.GpuOcclusionFallbacks);
         return result;
     }
 
@@ -234,13 +275,13 @@ namespace KeireEditor
                             " culled (" + std::to_string(culledPercent) + "%)";
         result.Pyramid = std::to_string(diagnostics.PyramidMipCount) + " HZB mips / " +
                          std::to_string(diagnostics.SafeOccluders) + " safe occluders";
-        if (aggregate)
+        if (aggregate && diagnostics.State == Keire::GpuOcclusionSurfaceState::Active)
         {
-            result.Pyramid += " / frame aggregate: " + std::to_string(aggregate->GpuOcclusionDispatches) +
-                              " dispatches / " + std::to_string(aggregate->GpuOcclusionIndirectDraws) +
-                              " indirect draws";
+            result.Pyramid +=
+                " / last completed frame aggregate: " + std::to_string(aggregate->GpuOcclusionDispatches) +
+                " dispatches / " + std::to_string(aggregate->GpuOcclusionIndirectDraws) + " indirect draws";
             result.Recording =
-                "Frame occlusion recording " +
+                "Last completed frame occlusion recording " +
                 Detail::OcclusionMilliseconds(aggregate->GpuOcclusionDepthPassMilliseconds) + " ms depth / " +
                 Detail::OcclusionMilliseconds(aggregate->GpuOcclusionPyramidRecordingMilliseconds) + " ms pyramid / " +
                 Detail::OcclusionMilliseconds(aggregate->GpuOcclusionCullingRecordingMilliseconds) + " ms cull";
@@ -266,15 +307,20 @@ namespace KeireEditor
         case Keire::GpuOcclusionSurfaceState::Disabled:
             result.State = GpuOcclusionDiagnosticState::Disabled;
             result.Status = "GPU occlusion disabled (requested " + requested + ")";
+            result.Readback = "Visibility readback unavailable while GPU occlusion is disabled";
             break;
         case Keire::GpuOcclusionSurfaceState::Unsupported:
             result.State = GpuOcclusionDiagnosticState::Unavailable;
             result.Status = "GPU occlusion unsupported: " + reason;
+            result.Readback = "Visibility readback unavailable on the active renderer backend";
             result.Warning = diagnostics.RequestedMode == Keire::GpuOcclusionMode::Forced;
             break;
         case Keire::GpuOcclusionSurfaceState::Idle:
             result.State = GpuOcclusionDiagnosticState::Disabled;
-            result.Status = "GPU occlusion idle: " + reason;
+            result.Status = diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::None
+                                ? "GPU occlusion idle; surface was not rendered in the last completed frame"
+                                : "GPU occlusion idle: " + reason;
+            result.Readback = "Visibility readback unavailable while GPU occlusion is idle";
             break;
         case Keire::GpuOcclusionSurfaceState::Active:
             result.State = diagnostics.ReadbackValid ? GpuOcclusionDiagnosticState::Active
@@ -290,6 +336,7 @@ namespace KeireEditor
         case Keire::GpuOcclusionSurfaceState::Fallback:
             result.State = GpuOcclusionDiagnosticState::Fallback;
             result.Status = "GPU occlusion fallback: " + reason + " (direct draws)";
+            result.Readback = "Visibility readback unavailable while direct-draw fallback is active";
             result.Warning = true;
             break;
         }

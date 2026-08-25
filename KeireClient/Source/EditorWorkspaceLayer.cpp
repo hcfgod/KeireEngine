@@ -1360,7 +1360,8 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         Keire::ProfileScope sceneViewport(profiler, Keire::ProfileCategory::User, "Editor UI / Scene viewport");
         m_SceneViewportPanel->Draw(ui);
         if (!playActive)
-            DrawPerformanceOverlay(ui, m_SceneViewportPanel->ViewportRect(), "SCENE");
+            DrawPerformanceOverlay(ui, m_SceneViewportPanel->ViewportRect(), "SCENE",
+                                   m_SceneViewportPanel->OcclusionDiagnostics());
     }
     {
         Keire::ProfileScope gameViewport(profiler, Keire::ProfileCategory::User, "Editor UI / Game viewport");

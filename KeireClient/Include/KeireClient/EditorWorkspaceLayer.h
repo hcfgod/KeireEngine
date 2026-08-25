@@ -203,7 +203,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawProfiler(Keire::UiFrame& ui);
     void DrawRenderGraph(Keire::UiFrame& ui);
     void DrawArchitectureDashboard(Keire::UiFrame& ui);
-    void DrawPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport, std::string_view label);
+    void DrawPerformanceOverlay(Keire::UiFrame& ui, Keire::UiItemRect viewport, std::string_view label,
+                                std::optional<Keire::GpuOcclusionSurfaceDiagnostics> occlusionSurface = std::nullopt);
     void DrawProject(Keire::UiFrame& ui);
     [[nodiscard]] const Keire::UiThemeDefinition& AssetBrowserTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> AssetBrowserDatabase() const noexcept override;

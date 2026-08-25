@@ -276,6 +276,11 @@ namespace Keire
         std::uint32_t GpuOcclusionDispatches = 0;
         std::uint32_t GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
         std::uint32_t GpuOcclusionFallbacks = 0;
+        // Last completed frame's submitted surfaces. Partial-fallback surfaces are a subset of active surfaces;
+        // fallback surfaces are terminal direct-draw/unsupported surfaces and exclude disabled or idle surfaces.
+        std::uint32_t GpuOcclusionActiveSurfaces = 0;
+        std::uint32_t GpuOcclusionFallbackSurfaces = 0;
+        std::uint32_t GpuOcclusionPartialFallbackSurfaces = 0;
         std::uint64_t ForwardPlusUploadBytes = 0;
         std::uint64_t DynamicUploadBytes = 0;
         std::uint64_t DepthTriangles = 0;

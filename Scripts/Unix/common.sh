@@ -35,8 +35,43 @@ workspace_lock_remove_stale() {
     fi
 }
 
+workspace_lock_prepare_parent() {
+    local root="${1:?lock root is required}" parent="${2:?lock parent is required}"
+    local relative current component
+    [[ -d "$root" ]] || {
+        printf 'Workspace lock root is not an existing directory: %s\n' "$root" >&2
+        return 1
+    }
+    case "$parent" in
+        "$root") return 0 ;;
+        "$root"/*) relative="${parent#"$root"/}" ;;
+        *) printf '%s\n' 'Lock path must remain inside its declared root.' >&2; return 1 ;;
+    esac
+    current="$root"
+    while [[ -n "$relative" ]]; do
+        component="${relative%%/*}"
+        if [[ "$relative" == */* ]]; then relative="${relative#*/}"; else relative=""; fi
+        current="$current/$component"
+        if [[ -L "$current" || (-e "$current" && ! -d "$current") ]]; then
+            printf 'Workspace lock parent contains a non-directory or symbolic-link component: %s\n' \
+                "$current" >&2
+            return 1
+        fi
+        if [[ ! -e "$current" ]] && ! mkdir "$current" 2>/dev/null && [[ ! -d "$current" ]]; then
+            printf 'Could not create workspace lock parent: %s\n' "$current" >&2
+            return 1
+        fi
+        if [[ -L "$current" || ! -d "$current" ]]; then
+            printf 'Workspace lock parent contains a non-directory or symbolic-link component: %s\n' \
+                "$current" >&2
+            return 1
+        fi
+    done
+}
+
 workspace_lock_acquire() {
     local root="${1:?repository root is required}" command_name="${2:?command name is required}"
+    local lock_relative="${3:-Tools/.locks/project-command.lock}"
     local timeout_seconds stale_seconds heartbeat_seconds lock_parent lock inherited_token existing_token
     local token deadline reported_wait=0 owner_host owner_platform owner_pid owner_command owner_started
     local heartbeat lease first_write second_write now quarantine safe_command safe_host owner_temporary
@@ -48,10 +83,23 @@ workspace_lock_acquire() {
         return 1
     }
 
-    lock_parent="$root/Tools/.locks"
-    lock="$lock_parent/project-command.lock"
-    mkdir -p "$lock_parent"
+    [[ "$lock_relative" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$ &&
+       "/$lock_relative/" != *'/../'* && "/$lock_relative/" != *'/./'* ]] || {
+        printf '%s\n' 'Lock path must remain inside its declared root.' >&2
+        return 1
+    }
+    lock="$root/$lock_relative"
+    case "$lock/" in
+        "$root"/*) ;;
+        *) printf '%s\n' 'Lock path must remain inside its declared root.' >&2; return 1 ;;
+    esac
+    lock_parent="$(dirname "$lock")"
+    workspace_lock_prepare_parent "$root" "$lock_parent" || return 1
     inherited_token="${KEIRE_WORKSPACE_LOCK_TOKEN:-}"
+    [[ ! -L "$lock" ]] || {
+        printf "Workspace lock path must not be a symbolic link: '%s'.\n" "$lock" >&2
+        return 1
+    }
     if [[ -d "$lock" ]]; then
         existing_token="$(workspace_lock_owner_value "$lock" token)"
         if [[ -n "$inherited_token" && "$existing_token" == "$inherited_token" ]]; then
@@ -64,7 +112,7 @@ workspace_lock_acquire() {
     token="unix-$$-$RANDOM-$RANDOM"
     deadline=$(($(date +%s) + timeout_seconds))
     while ! mkdir "$lock" 2>/dev/null; do
-        [[ -d "$lock" ]] || {
+        [[ -d "$lock" && ! -L "$lock" ]] || {
             printf "Workspace lock path is not a directory: '%s'. Remove it manually after confirming no project command is running.\n" "$lock" >&2
             return 1
         }
@@ -151,6 +199,117 @@ workspace_lock_release() {
         unset KEIRE_WORKSPACE_LOCK_TOKEN
     fi
     KEIRE_WORKSPACE_LOCK_OWNED=0
+}
+
+locked_git_source_validate() {
+    local path="${1:?source path is required}" expected_commit="${2:?expected commit is required}"
+    local name="${3:?dependency name is required}" actual changes
+    if [[ ! -d "$path" || -L "$path" || ! -d "$path/.git" || -L "$path/.git" ]]; then
+        printf 'Locked %s source cache is not an ordinary Git checkout: %s\n' "$name" "$path" >&2
+        return 1
+    fi
+    actual="$(git -C "$path" rev-parse HEAD 2>/dev/null || true)"
+    [[ "$actual" == "$expected_commit" ]] || {
+        printf 'Locked %s source cache is not the expected commit: %s\n' "$name" "$path" >&2
+        return 1
+    }
+    if ! changes="$(git -C "$path" status --porcelain=v1 --untracked-files=all 2>/dev/null)"; then
+        printf 'Could not validate the locked %s source cache: %s\n' "$name" "$path" >&2
+        return 1
+    fi
+    [[ -z "$changes" ]] || {
+        printf 'Locked %s source cache contains modified or untracked files: %s\n' "$name" "$path" >&2
+        return 1
+    }
+}
+
+workspace_identity() {
+    local root="${1:?workspace root is required}" canonical descriptor digest
+    [[ -d "$root" ]] || { printf 'Workspace root is not an existing directory: %s\n' "$root" >&2; return 1; }
+    canonical="$(cd -P "$root" && pwd -P)" || return 1
+    [[ -n "$canonical" && "$canonical" != / ]] || {
+        printf '%s\n' 'Workspace root must resolve to a non-root directory.' >&2
+        return 1
+    }
+    descriptor="$canonical"
+    if command -v sha256sum >/dev/null 2>&1; then
+        digest="$(printf '%s' "$descriptor" | sha256sum | awk '{print $1}')" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        digest="$(printf '%s' "$descriptor" | shasum -a 256 | awk '{print $1}')" || return 1
+    else
+        printf '%s\n' 'Workspace identity requires sha256sum or shasum.' >&2
+        return 1
+    fi
+    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+    printf '%s\n' "${digest:0:16}" | LC_ALL=C tr '[:upper:]' '[:lower:]'
+}
+
+coral_build_variant_key() {
+    local platform="${1:?platform is required}" architecture="${2:?target architecture is required}"
+    local toolset="${3:?toolset is required}" compiler_identity="${4:?compiler identity is required}"
+    local dotnet_sdk_version="${5:?.NET SDK version is required}" dotnet_root="${6:?.NET SDK root is required}"
+    local deployment_target="${7:-none}" nethost_identity="${8:?nethost identity is required}"
+    local workspace_key="${9:?workspace identity is required}"
+    local system normalized_architecture output_architecture descriptor digest
+    case "$platform" in
+        Linux) system=linux ;;
+        Mac) system=macosx ;;
+        *) printf "Unsupported Coral platform '%s'. Expected Linux or Mac.\n" "$platform" >&2; return 1 ;;
+    esac
+    normalized_architecture="$(normalize_architecture "$architecture")" || return 1
+    output_architecture="$(architecture_output_name "$normalized_architecture")" || return 1
+    [[ "$toolset" == gcc || "$toolset" == clang ]] || {
+        printf "Unsupported Coral toolset '%s'. Expected gcc or clang.\n" "$toolset" >&2
+        return 1
+    }
+    [[ -n "$compiler_identity" && "$compiler_identity" != *$'\n'* && "$compiler_identity" != *$'\r'* ]] || {
+        printf '%s\n' 'Coral compiler identity must be one non-empty line.' >&2
+        return 1
+    }
+    [[ "$dotnet_sdk_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+        printf '%s\n' 'Coral .NET SDK identity must be an exact numeric SDK version.' >&2
+        return 1
+    }
+    [[ "$dotnet_root" == /* && "$dotnet_root" != *$'\n'* && "$dotnet_root" != *$'\r'* ]] || {
+        printf '%s\n' 'Coral .NET SDK root must be one non-empty absolute path.' >&2
+        return 1
+    }
+    [[ -n "$nethost_identity" && "$nethost_identity" != *$'\n'* && "$nethost_identity" != *$'\r'* ]] || {
+        printf '%s\n' 'Coral nethost identity must be one non-empty line.' >&2
+        return 1
+    }
+    [[ "$workspace_key" =~ ^[0-9a-f]{16}$ ]] || {
+        printf '%s\n' 'Coral workspace identity must be a 16-character lowercase SHA-256 prefix.' >&2
+        return 1
+    }
+    if [[ "$platform" == Mac ]]; then
+        [[ "$deployment_target" =~ ^[0-9]+\.[0-9]+$ ]] || {
+            printf '%s\n' 'Coral macOS deployment target must be a pinned major.minor version.' >&2
+            return 1
+        }
+    else
+        deployment_target=none
+    fi
+    descriptor="coral-native-unix-v3
+$system
+$normalized_architecture
+$toolset
+$compiler_identity
+$dotnet_sdk_version
+$dotnet_root
+$deployment_target
+$nethost_identity
+$workspace_key"
+    if command -v sha256sum >/dev/null 2>&1; then
+        digest="$(printf '%s' "$descriptor" | sha256sum | awk '{print $1}')" || return 1
+    elif command -v shasum >/dev/null 2>&1; then
+        digest="$(printf '%s' "$descriptor" | shasum -a 256 | awk '{print $1}')" || return 1
+    else
+        printf '%s\n' 'Coral cache identity requires sha256sum or shasum.' >&2
+        return 1
+    fi
+    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+    printf '%s-%s-%s\n' "$system" "$output_architecture" "${digest:0:24}"
 }
 
 config_value() {
@@ -302,6 +461,65 @@ pinned_dotnet_sdk_root() {
     selected_version="${selected_version//$'\r'/}"
     [[ "$selected_version" == "$version" ]] || return 1
     printf '%s\n' "$install_root"
+}
+
+dotnet_apphost_pack_metadata() {
+    local bundled_versions="${1:?bundled versions file is required}"
+    local target_framework="${2:?target framework is required}"
+    [[ -f "$bundled_versions" && ! -L "$bundled_versions" ]] || {
+        printf 'The pinned .NET SDK host-pack manifest is not an ordinary file: %s\n' \
+            "$bundled_versions" >&2
+        return 1
+    }
+    [[ "$target_framework" =~ ^net[0-9]+\.0$ ]] || {
+        printf 'Invalid .NET target framework for host-pack discovery: %s\n' "$target_framework" >&2
+        return 1
+    }
+    command -v python3 >/dev/null 2>&1 || {
+        printf '%s\n' 'Pinned .NET host-pack discovery requires Python 3.' >&2
+        return 1
+    }
+
+    python3 - "$bundled_versions" "$target_framework" <<'PY'
+import sys
+import xml.etree.ElementTree as ET
+
+
+def local_name(tag):
+    return tag.rsplit("}", 1)[-1]
+
+
+manifest, target_framework = sys.argv[1:]
+try:
+    root = ET.parse(manifest).getroot()
+except (OSError, ET.ParseError) as error:
+    print(f"Could not parse the pinned .NET SDK host-pack manifest: {error}", file=sys.stderr)
+    raise SystemExit(1)
+
+matches = [
+    element
+    for element in root.iter()
+    if local_name(element.tag) == "KnownAppHostPack"
+    and element.get("Include") == "Microsoft.NETCore.App"
+    and element.get("TargetFramework") == target_framework
+]
+if len(matches) != 1:
+    print(
+        f"The pinned .NET SDK must describe exactly one {target_framework} "
+        "Microsoft.NETCore.App host pack.",
+        file=sys.stderr,
+    )
+    raise SystemExit(1)
+
+pack = matches[0]
+version = pack.get("AppHostPackVersion", "")
+runtime_identifiers = pack.get("AppHostRuntimeIdentifiers", "")
+if any(character in version or character in runtime_identifiers for character in "\r\n"):
+    print("The pinned .NET SDK host-pack metadata contains an unexpected line break.", file=sys.stderr)
+    raise SystemExit(1)
+print(version)
+print(runtime_identifiers)
+PY
 }
 
 dotnet_sdk_root() {

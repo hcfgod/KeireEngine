@@ -60,19 +60,15 @@ namespace Keire::RenderBackend
                                                        [](const auto& candidate) { return candidate->Id; });
                 if (surface == liveSurfaces.end())
                     continue;
-                if ((*surface)->Generation != pending.SurfaceGeneration ||
-                    (*surface)->GpuOcclusionSubmissionEpoch != pending.SubmissionEpoch ||
-                    (*surface)->GpuOcclusionSubmittedMode != pending.RequestedMode)
-                {
+                if (!CanPublishGpuOcclusionReadback(**surface, pending))
                     continue;
-                }
                 auto& diagnostics = (*surface)->GpuOcclusionDiagnostics;
                 auto* mapped = SDL_MapGPUTransferBuffer(Device, pending.Transfer, false);
                 if (!mapped)
                 {
-                    diagnostics.ReadbackValid = false;
-                    diagnostics.ReadbackAge = std::numeric_limits<std::uint32_t>::max();
+                    (void)PublishGpuOcclusionReadbackValidationFailure(**surface, pending.RequestedMode);
                     (*surface)->GpuOcclusionAutomaticActive = false;
+                    (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
                     (*surface)->GpuOcclusionAutomaticCooldownFrames = 60U;
                     (*surface)->GpuOcclusionValidationCooldown = true;
                     KEIRE_CORE_WARN("GPU occlusion status readback failed for surface '{}': {}",
@@ -84,9 +80,9 @@ namespace Keire::RenderBackend
                 SDL_UnmapGPUTransferBuffer(Device, pending.Transfer);
                 if (status.ErrorFlags != 0U || status.Visible > pending.Candidates)
                 {
-                    diagnostics.ReadbackValid = false;
-                    diagnostics.ReadbackAge = std::numeric_limits<std::uint32_t>::max();
+                    (void)PublishGpuOcclusionReadbackValidationFailure(**surface, pending.RequestedMode);
                     (*surface)->GpuOcclusionAutomaticActive = false;
+                    (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
                     (*surface)->GpuOcclusionAutomaticCooldownFrames = 60U;
                     (*surface)->GpuOcclusionValidationCooldown = true;
                     KEIRE_CORE_WARN("GPU occlusion status was invalid for surface '{}' (flags={}, visible={}, "
@@ -150,45 +146,11 @@ namespace Keire::RenderBackend
             Statistics.FenceRetiredBytes -= std::min(Statistics.FenceRetiredBytes, frame.RetiredBytes);
             SDL_ReleaseGPUFence(Device, frame.Fence);
         };
-        const auto publishReadbacks = [this, &liveSurfaces]()
-        {
-            Statistics.GpuOcclusionCandidates = 0;
-            Statistics.GpuOcclusionVisible = 0;
-            Statistics.GpuOcclusionCulled = 0;
-            Statistics.GpuOcclusionCandidateTriangles = 0;
-            Statistics.GpuOcclusionCulledTriangles = 0;
-            Statistics.GpuOcclusionReadbackAge = 0;
-            Statistics.GpuOcclusionReadbackValid = false;
-            for (const auto& surface : liveSurfaces)
-            {
-                auto& diagnostics = surface->GpuOcclusionDiagnostics;
-                if (!diagnostics.ReadbackValid)
-                    continue;
-                const auto age =
-                    Statistics.Frame >= diagnostics.SourceFrame ? Statistics.Frame - diagnostics.SourceFrame : 0U;
-                diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
-                                              ? std::numeric_limits<std::uint32_t>::max()
-                                              : static_cast<std::uint32_t>(age);
-                Statistics.GpuOcclusionCandidates += diagnostics.Candidates;
-                Statistics.GpuOcclusionVisible += diagnostics.Visible;
-                Statistics.GpuOcclusionCulled += diagnostics.Culled;
-                Statistics.GpuOcclusionCandidateTriangles += surface->GpuOcclusionLatestCandidateTriangles;
-                Statistics.GpuOcclusionCulledTriangles += surface->GpuOcclusionLatestCandidateTriangles -
-                                                          std::min(surface->GpuOcclusionLatestCandidateTriangles,
-                                                                   surface->GpuOcclusionLatestVisibleTriangles);
-                Statistics.GpuOcclusionReadbackAge =
-                    std::max(Statistics.GpuOcclusionReadbackAge, diagnostics.ReadbackAge);
-                Statistics.GpuOcclusionReadbackValid = true;
-            }
-            if (!Statistics.GpuOcclusionReadbackValid)
-                Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
-        };
-
         while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
             releaseFrontFrame();
         if (InFlight.size() < Specification.MaximumFramesInFlight)
         {
-            publishReadbacks();
+            PublishGpuOcclusionReadbackStatistics();
             return;
         }
 
@@ -204,7 +166,40 @@ namespace Keire::RenderBackend
         releaseFrontFrame();
         while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
             releaseFrontFrame();
-        publishReadbacks();
+        PublishGpuOcclusionReadbackStatistics();
+    }
+
+    void RenderSharedState::PublishGpuOcclusionReadbackStatistics()
+    {
+        Statistics.GpuOcclusionCandidates = 0;
+        Statistics.GpuOcclusionVisible = 0;
+        Statistics.GpuOcclusionCulled = 0;
+        Statistics.GpuOcclusionCandidateTriangles = 0;
+        Statistics.GpuOcclusionCulledTriangles = 0;
+        Statistics.GpuOcclusionReadbackAge = 0;
+        Statistics.GpuOcclusionReadbackValid = false;
+        for (const auto& surface : LiveSurfaces())
+        {
+            auto& diagnostics = surface->GpuOcclusionDiagnostics;
+            if (diagnostics.State != GpuOcclusionSurfaceState::Active || !diagnostics.ReadbackValid)
+                continue;
+            const auto age =
+                Statistics.Frame >= diagnostics.SourceFrame ? Statistics.Frame - diagnostics.SourceFrame : 0U;
+            diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
+                                          ? std::numeric_limits<std::uint32_t>::max()
+                                          : static_cast<std::uint32_t>(age);
+            Statistics.GpuOcclusionCandidates += diagnostics.Candidates;
+            Statistics.GpuOcclusionVisible += diagnostics.Visible;
+            Statistics.GpuOcclusionCulled += diagnostics.Culled;
+            Statistics.GpuOcclusionCandidateTriangles += surface->GpuOcclusionLatestCandidateTriangles;
+            Statistics.GpuOcclusionCulledTriangles +=
+                surface->GpuOcclusionLatestCandidateTriangles -
+                std::min(surface->GpuOcclusionLatestCandidateTriangles, surface->GpuOcclusionLatestVisibleTriangles);
+            Statistics.GpuOcclusionReadbackAge = std::max(Statistics.GpuOcclusionReadbackAge, diagnostics.ReadbackAge);
+            Statistics.GpuOcclusionReadbackValid = true;
+        }
+        if (!Statistics.GpuOcclusionReadbackValid)
+            Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
     }
 
     void RenderSharedState::BeginFrame()
@@ -259,18 +254,10 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionCandidates = 0;
         Statistics.GpuOcclusionVisible = 0;
         Statistics.GpuOcclusionCulled = 0;
-        Statistics.GpuOcclusionSafeOccluders = 0;
-        Statistics.GpuOcclusionIndirectDraws = 0;
-        Statistics.GpuOcclusionPyramidMipCount = 0;
-        Statistics.GpuOcclusionDispatches = 0;
         Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
-        Statistics.GpuOcclusionFallbacks = 0;
         Statistics.GpuOcclusionCandidateTriangles = 0;
         Statistics.GpuOcclusionCulledTriangles = 0;
-        Statistics.GpuOcclusionDepthTriangles = 0;
-        Statistics.GpuOcclusionEnabled = false;
         Statistics.GpuOcclusionReadbackValid = false;
-        Statistics.GpuOcclusionFallbackActive = false;
         CollectCompletedFrames();
         const auto vfxRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight) + 2U;
         for (auto iterator = GpuVfxWorlds.begin(); iterator != GpuVfxWorlds.end();)
@@ -320,6 +307,9 @@ namespace Keire::RenderBackend
             surface->FrameClearColor = surface->Specification.ClearColor;
             EnsureSurface(*surface);
         }
+        // EnsureSurface can invalidate a completed readback during resize or resource recovery. Keep the frame
+        // aggregate consistent with the per-surface state exposed to diagnostics during this frame.
+        PublishGpuOcclusionReadbackStatistics();
     }
 
     void RenderSharedState::CancelFrame() noexcept
@@ -433,6 +423,7 @@ namespace Keire::RenderBackend
             surface.GpuOcclusionAutomaticMinimumFrames = 0;
             surface.GpuOcclusionAutomaticCooldownFrames = 0;
             surface.GpuOcclusionValidationCooldown = false;
+            surface.GpuOcclusionValidationFallbackEventPending = false;
             surface.GpuOcclusionLatestCandidateTriangles = 0;
             surface.GpuOcclusionLatestVisibleTriangles = 0;
         }

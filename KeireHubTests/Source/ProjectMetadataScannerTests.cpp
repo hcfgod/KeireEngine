@@ -44,7 +44,7 @@ namespace
                                   {"createdAt", std::string(CreatedAt)},
                                   {"lastSavedWithEngineVersion", "0.2.0"}};
         if (includeTemplate)
-            descriptor["template"] = {{"id", "keire.sandbox"}, {"version", "1.2.0"}};
+            descriptor["template"] = {{"id", "keire.sandbox"}, {"version", "1.3.0"}};
         KeireHubTests::WriteText(root / "ProjectSettings/Project.keireproject", descriptor.dump(2) + '\n');
     }
 
@@ -134,7 +134,7 @@ TEST_CASE("Project metadata scanning publishes bounded decoded thumbnail pixels 
     CHECK(result.Metadata.SizeBytes == ProjectSize(root));
     CHECK(result.Metadata.ModifiedUnixSeconds.has_value());
     CHECK(result.TemplateId == "keire.sandbox");
-    CHECK(result.TemplateVersion == "1.2.0");
+    CHECK(result.TemplateVersion == "1.3.0");
     REQUIRE(result.Thumbnail.has_value());
     CHECK(result.Thumbnail->Path == std::filesystem::weakly_canonical(root / "ProjectSettings/HubThumbnail.png"));
     CHECK(result.Thumbnail->SizeBytes == thumbnailBytes);

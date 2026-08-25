@@ -77,6 +77,25 @@ In the Profiler and Render Graph panel:
 4. Investigate persistent fallback events by their typed reason. Direct draws must remain visually complete.
 5. Warm the scene and confirm buffer reallocations settle to zero; compare frame P95/P99 with identical content and path.
 
+The Scene metadata and Render Graph show the most recently finalized frame aggregate while the next frame is being
+prepared. The Profiler publishes that same completed workload after presentation. Dispatch and indirect-draw values
+therefore remain nonzero and internally consistent through editor UI recording instead of briefly displaying reset
+values. When the mode is Disabled, visibility readback is explicitly unavailable; a pending readback is reserved for an
+active surface that has not yet produced its asynchronous result.
+
+For a deterministic Automatic-mode demonstration, open
+`Assets/Scenes/GpuOcclusionStress.keirescene` in KeireSandbox and enter Play Mode so the authored primary camera is
+used. Keep Project Settings > Rendering > GPU Occlusion Culling on Automatic. The authored view is validated at 16:9
+resolutions from 1280x720 through 3840x2160. After the qualifying frames and readback latency, expect 161 candidates
+per full-size surface, one safe occluder, nonzero dispatch/indirect work, and approximately 144 culled hidden spheres
+per surface. Aggregate diagnostics can report 322 candidates and 288 culled when both Scene and Game surfaces render
+the authored camera. Main Camera Preview is independent of Game Preview and may intentionally report
+**NoSafeOccluders** with direct draws at its compact size even while the full-size surface is Active. Verify the
+full-size Scene or Game surface, or turn off the Scene toolbar's camera-preview icon; aggregate surface and candidate
+counts vary with the visible preview surfaces. Sixteen control spheres remain visible outside the wall. Disabled mode
+must render every target directly; Forced mode remains useful for comparing the same scene without Automatic's
+profitability gate.
+
 The Render Graph panel reports graphics-capture availability without loading or launching a tool. If RenderDoc was
 injected before editor startup and reports Ready, **Capture Next GPU Frame** queues exactly one capture. Unavailable and
 already-active states remain non-destructive and never overlap a capture.

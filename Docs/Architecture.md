@@ -225,6 +225,12 @@ statistics expose current recording work while visibility totals arrive asynchro
 Pending readbacks also carry the surface generation, an internal submission epoch, and requested mode. Resource resets
 and every mode transition advance that epoch, so a late result from a pre-resize frame or a Forced-Disabled-Forced ABA
 sequence cannot revalidate stale visibility counters.
+Execution-produced aggregate counters reset on the render owner immediately before frame execution, not at the earlier
+application `BeginFrame` boundary. Editor UI built between those boundaries therefore observes one coherent finalized
+workload; after execution, profiling and telemetry observe the newly finalized frame.
+The active and terminal-fallback surface counts cover only surfaces submitted in that completed frame; partial-fallback
+surfaces remain active and form a subset of the active count. A completed frame without a request idles that surface,
+invalidates its pending-readback epoch, and prevents old visibility results from repopulating terminal diagnostics.
 The editor's session-transient visualization request is a value-only per-surface contract. The renderer composites
 visibility bounds or a selected hierarchical-depth mip in its overlay pass and keeps the debug texture private; the
 separate metadata overlay reports mode, fallback, mip availability, source frame, and readback age. External GPU capture
@@ -1072,6 +1078,15 @@ include/archive paths and platform requirements. SDK packages preserve SDL's off
 `Keire::Core` transitively depends on the private ImGui, Zstd, Assimp, Jolt, Recast/Detour, miniaudio, Coral.Native,
 and nethost libraries
 followed by `SDL3::SDL3-static`. Gameplay middleware headers never cross the supported include tree.
+
+Windows may share immutable locked source downloads across clones and linked worktrees. Checkout-bound aliases cannot
+be shared: the Assimp submodule alias and short shader-compiler source junction include a deterministic identity derived
+from the canonical repository root. This preserves short ASCII build paths while allowing independent worktrees to use
+the same `LOCALAPPDATA`, `TEMP`, and `TMP` values concurrently. Unix dependency and shader-tool paths remain directly
+checkout-local. Shared cache publication is serialized per dependency, and every reuse verifies both the locked commit
+and a clean ordinary checkout. Cache schema changes invalidate stale CMake source paths before reuse, with recursive
+replacement rejecting reparse-point ancestors. Windows generation stamps also include the exact Visual Studio, MSVC,
+and Windows SDK identity so a compiler change invalidates both final binaries and matching intermediate objects.
 
 On Windows, every generated final executable that links KeireCore stages `nethost.dll` beside itself as part of its
 own build rather than relying on a launcher side effect. The editor's generated Visual Studio, Xcode, and Make projects

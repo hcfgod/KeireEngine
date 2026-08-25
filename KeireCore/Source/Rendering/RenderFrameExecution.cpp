@@ -11,6 +11,43 @@
 
 namespace Keire::RenderBackend
 {
+    namespace
+    {
+        void PublishIdleGpuOcclusionSurface(RenderSurfaceState& surface) noexcept
+        {
+            auto& diagnostics = surface.GpuOcclusionDiagnostics;
+            if (diagnostics.State == GpuOcclusionSurfaceState::Idle)
+                return;
+
+            surface.GpuOcclusionSubmissionEpoch =
+                surface.GpuOcclusionSubmissionEpoch == std::numeric_limits<std::uint64_t>::max()
+                    ? 1U
+                    : surface.GpuOcclusionSubmissionEpoch + 1U;
+            diagnostics.RequestedMode = surface.GpuOcclusionSubmittedMode;
+            diagnostics.EffectiveMode = GpuOcclusionMode::Disabled;
+            diagnostics.State = GpuOcclusionSurfaceState::Idle;
+            diagnostics.FallbackReason = GpuOcclusionFallbackReason::None;
+            diagnostics.SourceFrame = 0;
+            diagnostics.ReadbackAge = std::numeric_limits<std::uint32_t>::max();
+            diagnostics.Candidates = 0;
+            diagnostics.Visible = 0;
+            diagnostics.Culled = 0;
+            diagnostics.SafeOccluders = 0;
+            diagnostics.PyramidMipCount = 0;
+            diagnostics.PyramidValid = false;
+            diagnostics.ReadbackValid = false;
+            surface.GpuOcclusionLatestCandidateTriangles = 0;
+            surface.GpuOcclusionLatestVisibleTriangles = 0;
+            surface.GpuOcclusionAutomaticActive = false;
+            surface.GpuOcclusionAutomaticQualifyingFrames = 0;
+            surface.GpuOcclusionAutomaticMinimumFrames = 0;
+            surface.GpuOcclusionAutomaticCooldownFrames = 0;
+            surface.GpuOcclusionValidationCooldown = false;
+            surface.GpuOcclusionValidationFallbackEventPending = false;
+            surface.GpuOcclusionDebugMipLevel = 0;
+        }
+    } // namespace
+
     void RenderSharedState::EndFrame(ImDrawData* drawData)
     {
         RequireOwner("EndFrame");
@@ -58,6 +95,19 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionDepthPassMilliseconds = 0.0F;
         Statistics.GpuOcclusionPyramidRecordingMilliseconds = 0.0F;
         Statistics.GpuOcclusionCullingRecordingMilliseconds = 0.0F;
+        // Editor UI is built after BeginFrame but before execution. Retain the finalized previous-frame workload until
+        // this point so diagnostics never mistake a reset aggregate for the frame that actually reached the GPU.
+        Statistics.GpuOcclusionSafeOccluders = 0;
+        Statistics.GpuOcclusionIndirectDraws = 0;
+        Statistics.GpuOcclusionPyramidMipCount = 0;
+        Statistics.GpuOcclusionDispatches = 0;
+        Statistics.GpuOcclusionFallbacks = 0;
+        Statistics.GpuOcclusionActiveSurfaces = 0;
+        Statistics.GpuOcclusionFallbackSurfaces = 0;
+        Statistics.GpuOcclusionPartialFallbackSurfaces = 0;
+        Statistics.GpuOcclusionDepthTriangles = 0;
+        Statistics.GpuOcclusionEnabled = false;
+        Statistics.GpuOcclusionFallbackActive = false;
         Statistics.ForwardPlusCacheHits = 0;
         Statistics.FrameUploadSubmissions = 0;
         if (InjectDeviceLossAtNextFrame.exchange(false, std::memory_order_acq_rel))
@@ -84,7 +134,29 @@ namespace Keire::RenderBackend
                     throw std::runtime_error("SDL_AcquireGPUCommandBuffer(surface) failed: " + LastSdlError());
                 surfaceCommands.push_back(surfaceCommandBuffer);
                 RecordSurface(surfaceCommandBuffer, *request.Surface, surfaceCommands);
+                const auto& diagnostics = request.Surface->GpuOcclusionDiagnostics;
+                if (diagnostics.State == GpuOcclusionSurfaceState::Active)
+                {
+                    ++Statistics.GpuOcclusionActiveSurfaces;
+                    if (diagnostics.FallbackReason != GpuOcclusionFallbackReason::None)
+                        ++Statistics.GpuOcclusionPartialFallbackSurfaces;
+                }
+                else if (diagnostics.State == GpuOcclusionSurfaceState::Fallback ||
+                         diagnostics.State == GpuOcclusionSurfaceState::Unsupported)
+                {
+                    ++Statistics.GpuOcclusionFallbackSurfaces;
+                }
             }
+            // Surface diagnostics describe the most recently completed surface work. Invalidate a live surface after
+            // its first completed frame without a scene request so editor overlays cannot report stale active work.
+            for (const auto& surface : LiveSurfaces())
+            {
+                if (!surface->Submitted)
+                    PublishIdleGpuOcclusionSurface(*surface);
+            }
+            // RecordSurface and the idle transition above can invalidate readbacks that were still valid at
+            // BeginFrame. Publish the completed execution state as one coherent aggregate for profiling and tools.
+            PublishGpuOcclusionReadbackStatistics();
             Statistics.CommandRecordingMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - recordingStarted).count();
             const auto attributedRecordingMilliseconds =

@@ -126,6 +126,87 @@ export KEIRE_DOTNET_FIXTURE_SELECTED=10.0.400
 assert_false pinned_dotnet_sdk_root "$dotnet_listing_fixture/installation/dotnet" 10.0.302
 unset KEIRE_DOTNET_FIXTURE_SELECTED
 rm -rf "$dotnet_listing_fixture"
+dotnet_host_pack_fixture="$(mktemp -d)"
+printf '%s\n' \
+  '<Project>' \
+  '  <ItemGroup>' \
+  '    <KnownAppHostPack' \
+  '      Include="Microsoft.NETCore.App"' \
+  '      TargetFramework="net10.0"' \
+  '      AppHostPackVersion="10.0.10"' \
+  '      AppHostRuntimeIdentifiers="linux-x64;linux-arm64;osx-x64;osx-arm64" />' \
+  '    <KnownAppHostPack Include="Microsoft.NETCore.App" TargetFramework="net9.0"' \
+  '      AppHostPackVersion="9.0.18" AppHostRuntimeIdentifiers="linux-x64" />' \
+  '  </ItemGroup>' \
+  '</Project>' > "$dotnet_host_pack_fixture/Microsoft.NETCoreSdk.BundledVersions.props"
+dotnet_host_pack_metadata="$(dotnet_apphost_pack_metadata \
+  "$dotnet_host_pack_fixture/Microsoft.NETCoreSdk.BundledVersions.props" net10.0)"
+assert_equal "$dotnet_host_pack_metadata" \
+  "$(printf '%s\n%s' 10.0.10 'linux-x64;linux-arm64;osx-x64;osx-arm64')" \
+  'portable multiline .NET app-host pack discovery'
+assert_false dotnet_apphost_pack_metadata \
+  "$dotnet_host_pack_fixture/Microsoft.NETCoreSdk.BundledVersions.props" net8.0 2>/dev/null
+assert_false dotnet_apphost_pack_metadata \
+  "$dotnet_host_pack_fixture/Microsoft.NETCoreSdk.BundledVersions.props" '../escape' 2>/dev/null
+rm -rf "$dotnet_host_pack_fixture"
+workspace_identity_fixture="$(mktemp -d)"
+mkdir -p "$workspace_identity_fixture/first" "$workspace_identity_fixture/second"
+first_workspace_identity="$(workspace_identity "$workspace_identity_fixture/first")"
+second_workspace_identity="$(workspace_identity "$workspace_identity_fixture/second")"
+[[ "$first_workspace_identity" =~ ^[0-9a-f]{16}$ ]] || exit 1
+assert_equal "$(workspace_identity "$workspace_identity_fixture/first/.")" \
+  "$first_workspace_identity" 'stable Unix workspace identity'
+assert_true test "$first_workspace_identity" != "$second_workspace_identity"
+rm -rf "$workspace_identity_fixture"
+fixture_nethost='linux-x64|10.0.10|fixture|hash|none'
+coral_variant="$(coral_build_variant_key Linux x86_64 gcc \
+  '/usr/bin/gcc|gcc fixture|/usr/bin/g++|g++ fixture' 10.0.302 /fixture/dotnet none \
+  "$fixture_nethost" "$first_workspace_identity")"
+[[ "$coral_variant" =~ ^linux-x86_64-[0-9a-f]{24}$ ]] || {
+  printf 'Unexpected Unix Coral build variant key: %s\n' "$coral_variant" >&2
+  exit 1
+}
+assert_equal "$(coral_build_variant_key Linux x86_64 gcc \
+  '/usr/bin/gcc|gcc fixture|/usr/bin/g++|g++ fixture' 10.0.302 /fixture/dotnet none \
+  "$fixture_nethost" "$first_workspace_identity")" \
+  "$coral_variant" 'stable Unix Coral build variant identity'
+assert_true test "$(coral_build_variant_key Linux ARM64 gcc \
+  '/usr/bin/gcc|gcc fixture|/usr/bin/g++|g++ fixture' 10.0.302 /fixture/dotnet none \
+  'linux-arm64|10.0.10|fixture|hash|none' "$first_workspace_identity")" != \
+  "$coral_variant"
+assert_true test "$(coral_build_variant_key Linux x86_64 clang \
+  '/usr/bin/clang|clang fixture|/usr/bin/clang++|clang fixture' 10.0.302 /fixture/dotnet none \
+  "$fixture_nethost" "$first_workspace_identity")" != \
+  "$coral_variant"
+assert_true test "$(coral_build_variant_key Linux x86_64 gcc \
+  '/usr/bin/gcc|gcc changed|/usr/bin/g++|g++ changed' 10.0.302 /fixture/dotnet none \
+  "$fixture_nethost" "$first_workspace_identity")" != \
+  "$coral_variant"
+assert_true test "$(coral_build_variant_key Linux x86_64 gcc \
+  '/usr/bin/gcc|gcc fixture|/usr/bin/g++|g++ fixture' 10.0.303 /fixture/dotnet none \
+  "$fixture_nethost" "$first_workspace_identity")" != \
+  "$coral_variant"
+assert_true test "$(coral_build_variant_key Linux x86_64 gcc \
+  '/usr/bin/gcc|gcc fixture|/usr/bin/g++|g++ fixture' 10.0.302 /fixture/other-dotnet none \
+  "$fixture_nethost" "$first_workspace_identity")" != \
+  "$coral_variant"
+assert_true test "$(coral_build_variant_key Linux x86_64 gcc \
+  '/usr/bin/gcc|gcc fixture|/usr/bin/g++|g++ fixture' 10.0.302 /fixture/dotnet none \
+  'linux-x64|10.0.11|fixture|hash|none' "$first_workspace_identity")" != "$coral_variant"
+assert_true test "$(coral_build_variant_key Linux x86_64 gcc \
+  '/usr/bin/gcc|gcc fixture|/usr/bin/g++|g++ fixture' 10.0.302 /fixture/dotnet none \
+  "$fixture_nethost" "$second_workspace_identity")" != "$coral_variant"
+mac_coral_variant="$(coral_build_variant_key Mac ARM64 clang \
+  '/usr/bin/clang|clang fixture|/usr/bin/clang++|clang fixture' 10.0.302 /fixture/dotnet 13.5 \
+  'osx-arm64|10.0.10|fixture|hash|runtime' "$first_workspace_identity")"
+assert_true test "$(coral_build_variant_key Mac ARM64 clang \
+  '/usr/bin/clang|clang fixture|/usr/bin/clang++|clang fixture' 10.0.302 /fixture/dotnet 14.0 \
+  'osx-arm64|10.0.10|fixture|hash|runtime' "$first_workspace_identity")" != \
+  "$mac_coral_variant"
+assert_false coral_build_variant_key Linux x86_64 gcc compiler 10.0-preview /fixture/dotnet none \
+  "$fixture_nethost" "$first_workspace_identity" 2>/dev/null
+assert_false coral_build_variant_key Windows x86_64 gcc compiler 10.0.302 /fixture/dotnet none \
+  "$fixture_nethost" "$first_workspace_identity" 2>/dev/null
 ffmpeg_argument_fixture="$(mktemp -d)"
 touch "$ffmpeg_argument_fixture/sentinel"
 ffmpeg_test_platform=Linux
@@ -249,9 +330,71 @@ workspace_lock_acquire "$workspace_lock_fixture" recovery
 assert_equal "$KEIRE_WORKSPACE_LOCK_OWNED" 1 'expired cross-platform workspace lock recovery'
 workspace_lock_release
 assert_false test -e "$workspace_lock_stale"
+workspace_lock_acquire "$workspace_lock_fixture" dependency-source-fixture \
+  '.locks/dependency-fixture.lock'
+assert_equal "$KEIRE_WORKSPACE_LOCK_PATH" \
+  "$workspace_lock_fixture/.locks/dependency-fixture.lock" 'Unix shared-cache lock path'
+set +e
+(
+  unset KEIRE_WORKSPACE_LOCK_TOKEN
+  workspace_lock_acquire "$workspace_lock_fixture" dependency-source-contender \
+    '.locks/dependency-fixture.lock'
+) >/dev/null 2>&1
+workspace_cache_contender_status=$?
+set -e
+assert_equal "$workspace_cache_contender_status" 1 'concurrent Unix shared-cache lock timeout'
+workspace_lock_release
+workspace_lock_external="$(mktemp -d)"
+rmdir "$workspace_lock_fixture/.locks"
+touch "$workspace_lock_external/sentinel"
+ln -s "$workspace_lock_external" "$workspace_lock_fixture/.locks"
+set +e
+workspace_lock_acquire "$workspace_lock_fixture" redirected '.locks/redirected.lock' >/dev/null 2>&1
+workspace_lock_redirected_status=$?
+set -e
+assert_equal "$workspace_lock_redirected_status" 1 \
+  'symbolic Unix shared-cache lock parent rejection'
+assert_true test -f "$workspace_lock_external/sentinel"
+rm -f "$workspace_lock_fixture/.locks"
+rm -rf "$workspace_lock_external"
+set +e
+workspace_lock_acquire "$workspace_lock_fixture" escape '../outside.lock' >/dev/null 2>&1
+workspace_lock_escape_status=$?
+set -e
+assert_equal "$workspace_lock_escape_status" 1 'escaping Unix shared-cache lock path rejection'
 rm -rf "$workspace_lock_fixture"
 unset KEIRE_WORKSPACE_LOCK_TIMEOUT_SECONDS KEIRE_WORKSPACE_LOCK_STALE_SECONDS \
   KEIRE_WORKSPACE_LOCK_HEARTBEAT_SECONDS
+locked_source_fixture="$(mktemp -d)"
+git -C "$locked_source_fixture" init --quiet
+printf '%s\n' fixture > "$locked_source_fixture/source.txt"
+git -C "$locked_source_fixture" add source.txt
+git -C "$locked_source_fixture" -c user.name=fixture -c user.email=fixture@example.invalid \
+  commit --quiet -m fixture
+locked_source_commit="$(git -C "$locked_source_fixture" rev-parse HEAD)"
+locked_git_source_validate "$locked_source_fixture" "$locked_source_commit" fixture
+locked_source_link="$locked_source_fixture-link"
+ln -s "$locked_source_fixture" "$locked_source_link"
+set +e
+locked_git_source_validate "$locked_source_link" "$locked_source_commit" fixture >/dev/null 2>&1
+locked_source_link_status=$?
+set -e
+assert_equal "$locked_source_link_status" 1 'symbolic locked-source cache rejection'
+rm -f "$locked_source_link"
+printf '%s\n' dirty > "$locked_source_fixture/untracked.txt"
+set +e
+locked_git_source_validate "$locked_source_fixture" "$locked_source_commit" fixture >/dev/null 2>&1
+locked_source_dirty_status=$?
+set -e
+assert_equal "$locked_source_dirty_status" 1 'untracked locked-source cache rejection'
+rm -f "$locked_source_fixture/untracked.txt"
+printf '%s\n' modified > "$locked_source_fixture/source.txt"
+set +e
+locked_git_source_validate "$locked_source_fixture" "$locked_source_commit" fixture >/dev/null 2>&1
+locked_source_modified_status=$?
+set -e
+assert_equal "$locked_source_modified_status" 1 'modified locked-source cache rejection'
+rm -rf "$locked_source_fixture"
 assert_false grep -R -E -q 'declare[[:space:]]+-A|local[[:space:]]+-A' \
   "$ROOT/Scripts/Unix" "$ROOT/Scripts/Linux" "$ROOT/Scripts/Mac"
 python3 "$ROOT/Scripts/Tests/check-repository-layout.py"
@@ -563,6 +706,27 @@ assert_true grep -F -q 'if [[ "$DEPENDENCY" == Tracy ]]' "$ROOT/Scripts/Unix/ven
 assert_true grep -F -q 'git add Config/Dependencies.lock' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -F -q 'git add Vendor/%s Config/Dependencies.lock' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q -- '-DKEIRE_ASSIMP_SOURCE="$ROOT/Vendor/assimp"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'locked_git_source_validate "$source_path" "$commit" "$name" || return 1' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q '".locks/$name-$commit.lock"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'locked_git_source_validate "$source_path" "$coral_commit" Coral' \
+  "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q '".locks/coral-$cache_key.lock"' "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'expected_stamp="$coral_commit|$patch_digest|$variant_key|' \
+  "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'workspace_key="$(workspace_identity "$ROOT")"' "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'Microsoft.NETCoreSdk.BundledVersions.props' "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'dotnet_apphost_pack_metadata "$bundled_versions" "$target_framework"' \
+  "$ROOT/Scripts/Unix/coral.sh"
+assert_false grep -F -q "RS='/>'" "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'CORAL_DOTNET_ROOT=%s' "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'workspace_lock_acquire "$ROOT" dependencies' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'Coral Debug and Release metadata must resolve to one checkout-isolated build variant' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q '"$platform" "$architecture" "$toolset"' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'cache_root="$ROOT/Build/Tools/ShaderCompiler/Cache/' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true grep -q 'SDL_DUMMYVIDEO=ON' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_OFFSCREEN=ON' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_GPU=ON' "$ROOT/Scripts/Unix/dependencies.sh"
@@ -873,7 +1037,7 @@ assert_true grep -R -q 'renderer->Tint()' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'ResolveLighting' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'DirectionalLightComponent' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'AmbientAndExposure' "$ROOT/KeireCore/Source/Rendering" \
-  "$ROOT/KeireCore/Include/KeireInternal/Rendering/RenderBackendInternal.h"
+  "$ROOT/KeireCore/Include/KeireInternal/Rendering"
 assert_true grep -q 'LightDirection' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -q 'worldNormal' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -R -q 'ReadbackRGBA8' "$ROOT/KeireCore/Source/Rendering"

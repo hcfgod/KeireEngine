@@ -714,6 +714,18 @@ namespace Keire
                                                             static_cast<double>(statistics.GpuOcclusionVisible));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion culled",
                                                             static_cast<double>(statistics.GpuOcclusionCulled));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion dispatches",
+                                                            static_cast<double>(statistics.GpuOcclusionDispatches));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion indirect draws",
+                                                            static_cast<double>(statistics.GpuOcclusionIndirectDraws));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion active surfaces",
+                                                            static_cast<double>(statistics.GpuOcclusionActiveSurfaces));
+                        m_Impl->ProfilerService->SetCounter(
+                            ProfileCategory::Rendering, "GPU occlusion fallback surfaces",
+                            static_cast<double>(statistics.GpuOcclusionFallbackSurfaces));
+                        m_Impl->ProfilerService->SetCounter(
+                            ProfileCategory::Rendering, "GPU occlusion partial fallback surfaces",
+                            static_cast<double>(statistics.GpuOcclusionPartialFallbackSurfaces));
                         m_Impl->ProfilerService->SetCounter(
                             ProfileCategory::Rendering, "GPU occlusion recording (ms)",
                             static_cast<double>(statistics.GpuOcclusionDepthPassMilliseconds +
