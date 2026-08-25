@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <ranges>
 
 namespace Keire::RenderBackend::GeometryDetail
 {
@@ -16,6 +15,11 @@ namespace Keire::RenderBackend::GeometryDetail
         float Y;
         float Z;
         float W;
+    };
+
+    struct FrustumPlanes final
+    {
+        std::array<ClipPoint, 6> Values;
     };
 
     [[nodiscard]] inline ClipPoint TransformClip(const Matrix4& matrix, const Vector3 point) noexcept
@@ -59,32 +63,56 @@ namespace Keire::RenderBackend::GeometryDetail
         return length > 0.000001F ? Scale(value, 1.0F / length) : fallback;
     }
 
+    [[nodiscard]] inline FrustumPlanes BuildFrustumPlanes(const Matrix4& clipFromLocal) noexcept
+    {
+        const auto& matrix = clipFromLocal.Elements;
+        return {std::array<ClipPoint, 6>{
+            ClipPoint{matrix[3] + matrix[0], matrix[7] + matrix[4], matrix[11] + matrix[8], matrix[15] + matrix[12]},
+            ClipPoint{matrix[3] - matrix[0], matrix[7] - matrix[4], matrix[11] - matrix[8], matrix[15] - matrix[12]},
+            ClipPoint{matrix[3] + matrix[1], matrix[7] + matrix[5], matrix[11] + matrix[9], matrix[15] + matrix[13]},
+            ClipPoint{matrix[3] - matrix[1], matrix[7] - matrix[5], matrix[11] - matrix[9], matrix[15] - matrix[13]},
+            ClipPoint{matrix[2], matrix[6], matrix[10], matrix[14]},
+            ClipPoint{matrix[3] - matrix[2], matrix[7] - matrix[6], matrix[11] - matrix[10], matrix[15] - matrix[14]}}};
+    }
+
+    [[nodiscard]] inline bool Encloses(const MeshBounds outer, const MeshBounds inner) noexcept
+    {
+        return outer.Minimum.X <= outer.Maximum.X && outer.Minimum.Y <= outer.Maximum.Y &&
+               outer.Minimum.Z <= outer.Maximum.Z && inner.Minimum.X <= inner.Maximum.X &&
+               inner.Minimum.Y <= inner.Maximum.Y && inner.Minimum.Z <= inner.Maximum.Z &&
+               outer.Minimum.X <= inner.Minimum.X && outer.Minimum.Y <= inner.Minimum.Y &&
+               outer.Minimum.Z <= inner.Minimum.Z && outer.Maximum.X >= inner.Maximum.X &&
+               outer.Maximum.Y >= inner.Maximum.Y && outer.Maximum.Z >= inner.Maximum.Z;
+    }
+
+    [[nodiscard]] inline bool IntersectsFrustum(const FrustumPlanes& frustum, const MeshBounds bounds) noexcept
+    {
+        for (const auto plane : frustum.Values)
+        {
+            const auto x = plane.X >= 0.0F ? bounds.Maximum.X : bounds.Minimum.X;
+            const auto y = plane.Y >= 0.0F ? bounds.Maximum.Y : bounds.Minimum.Y;
+            const auto z = plane.Z >= 0.0F ? bounds.Maximum.Z : bounds.Minimum.Z;
+            if (plane.X * x + plane.Y * y + plane.Z * z + plane.W < 0.0F)
+                return false;
+        }
+        return true;
+    }
+
     [[nodiscard]] inline bool IntersectsFrustum(const Matrix4& clipFromLocal, const MeshBounds bounds) noexcept
     {
-        const std::array corners{Vector3{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},
-                                 Vector3{bounds.Maximum.X, bounds.Minimum.Y, bounds.Minimum.Z},
-                                 Vector3{bounds.Minimum.X, bounds.Maximum.Y, bounds.Minimum.Z},
-                                 Vector3{bounds.Maximum.X, bounds.Maximum.Y, bounds.Minimum.Z},
-                                 Vector3{bounds.Minimum.X, bounds.Minimum.Y, bounds.Maximum.Z},
-                                 Vector3{bounds.Maximum.X, bounds.Minimum.Y, bounds.Maximum.Z},
-                                 Vector3{bounds.Minimum.X, bounds.Maximum.Y, bounds.Maximum.Z},
-                                 Vector3{bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z}};
-        std::array<ClipPoint, corners.size()> clip{};
-        std::ranges::transform(corners, clip.begin(),
-                               [&](const auto corner) { return TransformClip(clipFromLocal, corner); });
-        const auto all = [&](const auto predicate) { return std::ranges::all_of(clip, predicate); };
-        return !all([](const auto point) { return point.X < -point.W; }) &&
-               !all([](const auto point) { return point.X > point.W; }) &&
-               !all([](const auto point) { return point.Y < -point.W; }) &&
-               !all([](const auto point) { return point.Y > point.W; }) &&
-               !all([](const auto point) { return point.Z < 0.0F; }) &&
-               !all([](const auto point) { return point.Z > point.W; });
+        return IntersectsFrustum(BuildFrustumPlanes(clipFromLocal), bounds);
     }
 
     [[nodiscard]] inline bool IsFrustumVisible(const Matrix4& clipFromLocal, const MeshBounds bounds,
                                                const bool alwaysVisible) noexcept
     {
         return alwaysVisible || IntersectsFrustum(clipFromLocal, bounds);
+    }
+
+    [[nodiscard]] inline bool IsFrustumVisible(const FrustumPlanes& frustum, const MeshBounds bounds,
+                                               const bool alwaysVisible) noexcept
+    {
+        return alwaysVisible || IntersectsFrustum(frustum, bounds);
     }
 
     [[nodiscard]] inline float ProjectedHeight(const Matrix4& viewFromLocal, const Matrix4& projection,

@@ -496,7 +496,9 @@ namespace Keire::Detail
         std::uint64_t remaining = static_cast<std::uint64_t>(status.st_size);
         while (remaining != 0)
         {
-            const auto count = read(file.Get(), buffer.data(), (std::min)(remaining, buffer.size()));
+            const auto count =
+                read(file.Get(), buffer.data(),
+                     static_cast<std::size_t>((std::min)(remaining, static_cast<std::uint64_t>(buffer.size()))));
             if (count < 0)
             {
                 if (errno == EINTR)
@@ -689,7 +691,8 @@ namespace Keire::Detail
             std::uint64_t remaining = size;
             while (remaining != 0)
             {
-                const auto count = static_cast<std::size_t>((std::min)(remaining, buffer.size()));
+                const auto count =
+                    static_cast<std::size_t>((std::min)(remaining, static_cast<std::uint64_t>(buffer.size())));
                 const auto chunk = std::span(buffer).first(count);
                 reader(chunk);
                 DWORD written = 0;

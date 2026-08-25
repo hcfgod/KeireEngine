@@ -8,7 +8,9 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <tuple>
 #include <vector>
@@ -16,7 +18,9 @@
 namespace
 {
     using Keire::RenderBackend::GeometryDetail::Add;
+    using Keire::RenderBackend::GeometryDetail::BuildFrustumPlanes;
     using Keire::RenderBackend::GeometryDetail::Cross;
+    using Keire::RenderBackend::GeometryDetail::IntersectsFrustum;
     using Keire::RenderBackend::GeometryDetail::NormalizeOr;
     using Keire::RenderBackend::GeometryDetail::Scale;
     using Keire::RenderBackend::GeometryDetail::Subtract;
@@ -24,7 +28,7 @@ namespace
 
 namespace Keire::RenderBackend
 {
-    PreparedCpuVfx RenderSharedState::PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands,
+    PreparedCpuVfx RenderSharedState::PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                          const SceneRenderPacket& packet)
     {
         const auto particles = packet.Vfx.Particles();
@@ -35,6 +39,8 @@ namespace Keire::RenderBackend
         {
             const VfxRenderParticle* Particle = nullptr;
             Vector3 RibbonStart;
+            Vector3 BillboardRight;
+            Vector3 BillboardUp;
             float Depth = 0.0F;
         };
         std::vector<Vector3> ribbonStarts(particles.size());
@@ -72,35 +78,95 @@ namespace Keire::RenderBackend
 
         std::vector<PreparedParticle> particlesByDepth;
         particlesByDepth.reserve(particles.size());
+        const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
+        const auto frustum = BuildFrustumPlanes(viewProjection);
+        const auto cameraWorld = Math::Inverse(packet.Camera.View);
+        const auto cameraRight = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
+        const auto cameraUp = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
+        const auto cameraForward = NormalizeOr(Cross(cameraRight, cameraUp), {0.0F, 0.0F, 1.0F});
+        constexpr float degreesToRadians = 0.01745329251994329577F;
         for (std::size_t index = 0; index < particles.size(); ++index)
         {
             const auto& particle = particles[index];
-            if (particle.Renderer != VfxRendererType::Mesh)
+            if (particle.Renderer == VfxRendererType::Mesh || particle.Size <= 0.0F)
+                continue;
+            const auto start = particle.Renderer == VfxRendererType::Ribbon ? ribbonStarts[index] : particle.Position;
+            Vector3 billboardRight;
+            Vector3 billboardUp;
+            Vector3 extent{particle.Size, particle.Size, particle.Size};
+            if (particle.Renderer != VfxRendererType::Ribbon)
             {
-                particlesByDepth.push_back({std::addressof(particle), ribbonStarts[index],
-                                            Math::TransformPoint(packet.Camera.View, particle.Position).Z});
+                const auto angle = particle.Rotation.Z * degreesToRadians;
+                const auto cosine = std::cos(angle);
+                const auto sine = std::sin(angle);
+                billboardRight = Scale(Add(Scale(cameraRight, cosine), Scale(cameraUp, sine)), particle.Size * 0.5F);
+                billboardUp = Scale(Add(Scale(cameraUp, cosine), Scale(cameraRight, -sine)), particle.Size * 0.5F);
+                extent = {std::abs(billboardRight.X) + std::abs(billboardUp.X),
+                          std::abs(billboardRight.Y) + std::abs(billboardUp.Y),
+                          std::abs(billboardRight.Z) + std::abs(billboardUp.Z)};
             }
+            const MeshBounds bounds{
+                {std::min(start.X, particle.Position.X) - extent.X, std::min(start.Y, particle.Position.Y) - extent.Y,
+                 std::min(start.Z, particle.Position.Z) - extent.Z},
+                {std::max(start.X, particle.Position.X) + extent.X, std::max(start.Y, particle.Position.Y) + extent.Y,
+                 std::max(start.Z, particle.Position.Z) + extent.Z}};
+            if (!IntersectsFrustum(frustum, bounds))
+            {
+                ++Statistics.CulledCpuVfxParticles;
+                continue;
+            }
+            particlesByDepth.push_back({std::addressof(particle), start, billboardRight, billboardUp,
+                                        Math::TransformPoint(packet.Camera.View, particle.Position).Z});
         }
         if (particlesByDepth.empty())
             return {};
         std::ranges::stable_sort(particlesByDepth, [](const auto& left, const auto& right)
                                  { return Detail::TransparentBackToFront(left.Depth, right.Depth); });
 
-        const auto cameraWorld = Math::Inverse(packet.Camera.View);
-        const auto cameraRight = Math::TransformDirection(cameraWorld, {1.0F, 0.0F, 0.0F});
-        const auto cameraUp = Math::TransformDirection(cameraWorld, {0.0F, 1.0F, 0.0F});
-        const auto cameraForward = NormalizeOr(Cross(cameraRight, cameraUp), {0.0F, 0.0F, 1.0F});
-        std::vector<RenderVertex> spriteVertices;
+        std::vector<GpuRenderVertex> spriteVertices;
         spriteVertices.reserve(particlesByDepth.size() * 6U);
         PreparedCpuVfx result;
-        result.Particles.reserve(particlesByDepth.size());
-        constexpr float degreesToRadians = 0.01745329251994329577F;
+        result.Batches.reserve(particlesByDepth.size());
+        const auto samples = ToSdlSampleCount(surface.ActualSamples);
         for (const auto& value : particlesByDepth)
         {
             const auto& particle = *value.Particle;
+            if (particle.Size <= 0.0F)
+                continue;
+            if (spriteVertices.size() > std::numeric_limits<std::uint32_t>::max() - 6U)
+                throw std::length_error("CPU VFX vertices exceed the renderer's 32-bit draw limit.");
+
+            const auto* composed = particle.Material ? ResolveAssetMaterial(particle.Material, samples) : nullptr;
+            Color tint = particle.Tint;
+            std::array<float, 4> surfaceParameters{};
+            if (composed)
+            {
+                if (composed->TintSlot && *composed->TintSlot < composed->NumericProperties.size())
+                {
+                    const auto& materialTint = composed->NumericProperties[*composed->TintSlot];
+                    tint.Red *= materialTint.X;
+                    tint.Green *= materialTint.Y;
+                    tint.Blue *= materialTint.Z;
+                    tint.Alpha *= materialTint.W;
+                }
+                surfaceParameters = {!composed->Textures.empty() ? 1.0F : 0.0F, composed->Surface.AlphaCutoff,
+                                     static_cast<float>(composed->Surface.AlphaMode), 1.0F};
+            }
+            else
+            {
+                surfaceParameters[0] = particle.Sprite ? 1.0F : 0.0F;
+            }
+            const auto& texture = particle.Sprite ? ResolveTexture(particle.Sprite) : WhiteTexture;
+            const SDL_GPUTextureSamplerBinding textureBinding =
+                composed && !composed->Textures.empty()
+                    ? composed->Textures.front()
+                    : SDL_GPUTextureSamplerBinding{texture.Texture, texture.Sampler};
+
             const auto firstVertex = static_cast<std::uint32_t>(spriteVertices.size());
-            result.Particles.push_back({value.Particle, firstVertex});
-            constexpr Vector3 white{1.0F, 1.0F, 1.0F};
+            AppendPreparedCpuVfxBatch(result.Batches, firstVertex, 6U, textureBinding, surfaceParameters);
+            const Vector4 gpuTint{tint.Red, tint.Green, tint.Blue, tint.Alpha};
+            const auto appendVertex = [&](const Vector3 position, const float u, const float v, const float mode)
+            { spriteVertices.push_back({{position.X, position.Y, position.Z, 1.0F}, gpuTint, {u, v, mode, 0.0F}}); };
             if (particle.Renderer == VfxRendererType::Ribbon)
             {
                 const auto segment = Subtract(particle.Position, value.RibbonStart);
@@ -110,34 +176,33 @@ namespace Keire::RenderBackend
                 const auto endRight = Add(particle.Position, side);
                 const auto endLeft = Subtract(particle.Position, side);
                 constexpr float mode = 1.0F;
-                spriteVertices.push_back({startLeft, white, {0.0F, 0.0F, mode}});
-                spriteVertices.push_back({startRight, white, {0.0F, 1.0F, mode}});
-                spriteVertices.push_back({endRight, white, {1.0F, 1.0F, mode}});
-                spriteVertices.push_back({startLeft, white, {0.0F, 0.0F, mode}});
-                spriteVertices.push_back({endRight, white, {1.0F, 1.0F, mode}});
-                spriteVertices.push_back({endLeft, white, {1.0F, 0.0F, mode}});
+                appendVertex(startLeft, 0.0F, 0.0F, mode);
+                appendVertex(startRight, 0.0F, 1.0F, mode);
+                appendVertex(endRight, 1.0F, 1.0F, mode);
+                appendVertex(startLeft, 0.0F, 0.0F, mode);
+                appendVertex(endRight, 1.0F, 1.0F, mode);
+                appendVertex(endLeft, 1.0F, 0.0F, mode);
                 continue;
             }
-            const auto angle = particle.Rotation.Z * degreesToRadians;
-            const auto cosine = std::cos(angle);
-            const auto sine = std::sin(angle);
-            const auto right = Scale(Add(Scale(cameraRight, cosine), Scale(cameraUp, sine)), particle.Size * 0.5F);
-            const auto up = Scale(Add(Scale(cameraUp, cosine), Scale(cameraRight, -sine)), particle.Size * 0.5F);
-            const auto lowerLeft = Subtract(Subtract(particle.Position, right), up);
-            const auto lowerRight = Add(Subtract(particle.Position, up), right);
-            const auto upperRight = Add(Add(particle.Position, right), up);
-            const auto upperLeft = Add(Subtract(particle.Position, right), up);
+            const auto lowerLeft = Subtract(Subtract(particle.Position, value.BillboardRight), value.BillboardUp);
+            const auto lowerRight = Add(Subtract(particle.Position, value.BillboardUp), value.BillboardRight);
+            const auto upperRight = Add(Add(particle.Position, value.BillboardRight), value.BillboardUp);
+            const auto upperLeft = Add(Subtract(particle.Position, value.BillboardRight), value.BillboardUp);
             const auto mode = particle.Renderer == VfxRendererType::Volumetric ? 2.0F : 0.0F;
-            spriteVertices.push_back({lowerLeft, white, {0.0F, 0.0F, mode}});
-            spriteVertices.push_back({lowerRight, white, {1.0F, 0.0F, mode}});
-            spriteVertices.push_back({upperRight, white, {1.0F, 1.0F, mode}});
-            spriteVertices.push_back({lowerLeft, white, {0.0F, 0.0F, mode}});
-            spriteVertices.push_back({upperRight, white, {1.0F, 1.0F, mode}});
-            spriteVertices.push_back({upperLeft, white, {0.0F, 1.0F, mode}});
+            appendVertex(lowerLeft, 0.0F, 0.0F, mode);
+            appendVertex(lowerRight, 1.0F, 0.0F, mode);
+            appendVertex(upperRight, 1.0F, 1.0F, mode);
+            appendVertex(lowerLeft, 0.0F, 0.0F, mode);
+            appendVertex(upperRight, 1.0F, 1.0F, mode);
+            appendVertex(upperLeft, 0.0F, 1.0F, mode);
         }
 
-        result.SpriteBuffer = UploadVertexBuffer(commands, spriteVertices);
-        FrameTransientBuffers.push_back(result.SpriteBuffer);
+        if (!spriteVertices.empty())
+        {
+            result.SpriteBuffer = UploadDynamicBuffer(
+                commands, surface.DynamicUploads.CpuVfxVertices, surface.DynamicUploads.CpuVfxTransfer,
+                std::as_bytes(std::span(spriteVertices)), SDL_GPU_BUFFERUSAGE_VERTEX, "CPU VFX vertices");
+        }
         return result;
     }
 
@@ -422,7 +487,7 @@ namespace Keire::RenderBackend
             }
         }
 
-        if (preparedCpu.Particles.empty() || !preparedCpu.SpriteBuffer || !pipelines.Vfx)
+        if (preparedCpu.Batches.empty() || !preparedCpu.SpriteBuffer || !pipelines.Vfx)
             return;
 
         SDL_BindGPUGraphicsPipeline(pass, pipelines.Vfx);
@@ -437,49 +502,18 @@ namespace Keire::RenderBackend
             std::array<float, 4> Tint{};
             std::array<float, 4> SurfaceParameters{};
         };
-        const auto samples = ToSdlSampleCount(surface.ActualSamples);
-        for (const auto& value : preparedCpu.Particles)
+        SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
+        const SDL_GPUBufferBinding vertexBinding{preparedCpu.SpriteBuffer, 0};
+        SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+        for (const auto& batch : preparedCpu.Batches)
         {
-            const auto& particle = *value.Particle;
-            if (particle.Size <= 0.0F)
-                continue;
-            if (particle.Renderer != VfxRendererType::Mesh)
-            {
-                const auto* composed = particle.Material ? ResolveAssetMaterial(particle.Material, samples) : nullptr;
-                CpuMaterialUniforms material{
-                    {particle.Tint.Red, particle.Tint.Green, particle.Tint.Blue, particle.Tint.Alpha}, {}};
-                if (composed)
-                {
-                    if (composed->TintSlot && *composed->TintSlot < composed->NumericProperties.size())
-                    {
-                        const auto& tint = composed->NumericProperties[*composed->TintSlot];
-                        material.Tint[0] *= tint.X;
-                        material.Tint[1] *= tint.Y;
-                        material.Tint[2] *= tint.Z;
-                        material.Tint[3] *= tint.W;
-                    }
-                    material.SurfaceParameters = {!composed->Textures.empty() ? 1.0F : 0.0F,
-                                                  composed->Surface.AlphaCutoff,
-                                                  static_cast<float>(composed->Surface.AlphaMode), 1.0F};
-                }
-                else
-                {
-                    material.SurfaceParameters[0] = particle.Sprite ? 1.0F : 0.0F;
-                }
-                const SDL_GPUBufferBinding vertexBinding{preparedCpu.SpriteBuffer, 0};
-                SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
-                SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
-                const auto& texture = particle.Sprite ? ResolveTexture(particle.Sprite) : WhiteTexture;
-                const SDL_GPUTextureSamplerBinding textureBinding =
-                    composed && !composed->Textures.empty()
-                        ? composed->Textures.front()
-                        : SDL_GPUTextureSamplerBinding{texture.Texture, texture.Sampler};
-                SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
-                SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
-                SDL_DrawGPUPrimitives(pass, 6, 1, value.SpriteFirstVertex, 0);
-                ++Statistics.DrawCalls;
-                Statistics.Triangles += 2;
-            }
+            CpuMaterialUniforms material{{1.0F, 1.0F, 1.0F, 1.0F}, batch.SurfaceParameters};
+            SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
+            SDL_BindGPUFragmentSamplers(pass, 0, &batch.Texture, 1);
+            SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
+            ++Statistics.DrawCalls;
+            ++Statistics.CpuVfxDrawBatches;
+            Statistics.Triangles += batch.VertexCount / 3U;
         }
     }
 

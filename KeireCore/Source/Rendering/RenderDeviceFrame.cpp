@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "KeireInternal/Rendering/ImageBasedLightingInternal.h"
+#include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 
 #include "Keire/BuiltinUnlitShaders.h"
 #include "Keire/Log.h"
@@ -1174,6 +1175,21 @@ namespace Keire::RenderBackend
             result.IndexCount = static_cast<std::uint32_t>(mesh.Indices().size());
             result.Submeshes.assign(mesh.Submeshes().begin(), mesh.Submeshes().end());
             result.Lods.assign(mesh.Lods().begin(), mesh.Lods().end());
+            result.Bounds = mesh.Bounds();
+            const auto boundsEnclose =
+                [&](const MeshBounds bounds, const std::uint32_t first, const std::uint32_t count)
+            {
+                const auto submeshes = std::span(result.Submeshes).subspan(first, count);
+                return !submeshes.empty() &&
+                       std::ranges::all_of(submeshes, [&](const MeshSubmesh& submesh)
+                                           { return GeometryDetail::Encloses(bounds, submesh.Bounds); });
+            };
+            result.BoundsEncloseSubmeshes =
+                boundsEnclose(result.Bounds, 0, static_cast<std::uint32_t>(result.Submeshes.size()));
+            result.LodBoundsEncloseSubmeshes.reserve(result.Lods.size());
+            for (const auto& lod : result.Lods)
+                result.LodBoundsEncloseSubmeshes.push_back(
+                    boundsEnclose(lod.Bounds, lod.FirstSubmesh, lod.SubmeshCount));
             result.DefaultMaterials.reserve(mesh.MaterialSlots().size());
             for (const auto& slot : mesh.MaterialSlots())
                 result.DefaultMaterials.push_back(slot.DefaultMaterial);

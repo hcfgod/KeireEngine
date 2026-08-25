@@ -177,11 +177,15 @@ namespace Keire
         std::uint32_t Passes = 0;
         std::uint32_t Surfaces = 0;
         std::uint32_t DrawCalls = 0;
+        std::uint32_t DepthDrawCalls = 0;
+        std::uint32_t ShadowDrawCalls = 0;
         std::uint32_t Triangles = 0;
         std::uint32_t VisibleSubmeshes = 0;
         std::uint32_t CulledSubmeshes = 0;
+        std::uint32_t CulledShadowSubmeshes = 0;
         std::uint32_t InstanceBatches = 0;
         std::uint32_t VisibleLocalLights = 0;
+        std::uint32_t CulledLocalLights = 0;
         std::uint32_t OverflowedLightTiles = 0;
         std::uint32_t DirectionalShadowCascades = 0;
         std::uint32_t VfxSpriteParticles = 0;
@@ -194,10 +198,16 @@ namespace Keire
         std::uint32_t TransientResourceAllocations = 0;
         std::uint32_t RendererQueueHighWaterMark = 0;
         std::uint32_t ForwardPlusBufferReallocations = 0;
+        std::uint32_t DynamicUploadBufferReallocations = 0;
+        std::uint32_t CpuVfxDrawBatches = 0;
         std::uint32_t ForwardPlusCacheHits = 0;
         std::uint32_t FrameUploadSubmissions = 0;
         std::uint32_t AllowedFramesInFlight = 0;
         std::uint64_t ForwardPlusUploadBytes = 0;
+        std::uint64_t DynamicUploadBytes = 0;
+        std::uint64_t DepthTriangles = 0;
+        std::uint64_t ShadowTriangles = 0;
+        std::uint64_t CulledCpuVfxParticles = 0;
         std::uint64_t DroppedVfxParticles = 0;
         std::uint64_t VfxGpuBufferBytes = 0;
         std::uint64_t FenceRetiredBytes = 0;
@@ -249,6 +259,7 @@ namespace Keire
         [[nodiscard]] Ref<RenderSurface> CreateSurface(const RenderSurfaceSpecification& specification = {});
         [[nodiscard]] Ref<RenderView> CreateView(const RenderSurfaceSpecification& specification = {});
         void Submit(const SceneRenderRequest& request);
+        void Submit(SceneRenderRequest&& request);
         void SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree);
         void RequestGpuVfxPipelineWarmup();
 

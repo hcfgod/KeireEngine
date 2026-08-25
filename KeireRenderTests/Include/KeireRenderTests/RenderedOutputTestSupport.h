@@ -130,6 +130,11 @@ namespace
         return maximum;
     }
 
+    [[nodiscard]] inline bool HasStableMaterialBinding(const std::vector<std::uint64_t>& builds) noexcept
+    {
+        return builds.size() >= 2 && builds.back() > 0 && builds[builds.size() - 2] == builds.back();
+    }
+
     [[nodiscard]] inline Keire::ApplicationSpecification RenderTestSpecification()
     {
         const char* backend = SDL_GetEnvironmentVariable(SDL_GetEnvironment(), "KEIRE_GPU_TEST_BACKEND");

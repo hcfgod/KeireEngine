@@ -217,6 +217,14 @@ ln -sfn "$(dirname "$coral_nethost_library")" "$nethost_link"
 dotnet_root="$(dotnet_sdk_root dotnet 10)" || exit 1
 ln -sfn "$dotnet_root" "$dotnet_sdk_link"
 nethost_name="$(basename "$coral_nethost_library")"
+nethost_runtime_name="$nethost_name"
+if [[ "$platform" == Mac ]]; then
+  nethost_runtime_name=libnethost.dylib
+  [[ -f "$(dirname "$coral_nethost_library")/$nethost_runtime_name" ]] || {
+    printf 'Coral nethost runtime is missing: %s\n' "$(dirname "$coral_nethost_library")/$nethost_runtime_name" >&2
+    exit 1
+  }
+fi
 
 managed_output="$ROOT/Build/Managed"
 mkdir -p "$managed_output"
@@ -234,7 +242,7 @@ sodium_extension=so
 [[ "$platform" == Mac ]] && sodium_extension=dylib
 platform_links='{ "dl", "m", "pthread" }'
 if [[ "$platform" == Mac ]]; then
-  platform_links='{ "Cocoa.framework", "CoreVideo.framework", "IOKit.framework", "CoreFoundation.framework", "CoreAudio.framework", "AudioToolbox.framework", "ForceFeedback.framework", "GameController.framework", "CoreHaptics.framework", "Carbon.framework", "Metal.framework", "QuartzCore.framework", "UniformTypeIdentifiers.framework" }'
+  platform_links='{ "Cocoa.framework", "CoreVideo.framework", "IOKit.framework", "CoreFoundation.framework", "CoreAudio.framework", "AudioToolbox.framework", "ForceFeedback.framework", "GameController.framework", "CoreHaptics.framework", "Carbon.framework", "Metal.framework", "QuartzCore.framework", "UniformTypeIdentifiers.framework", "UserNotifications.framework", "Security.framework" }'
 fi
 cat > "$ROOT/Build/Generated/Dependencies.lua" <<EOF
 DependencyManifest = {
@@ -255,6 +263,7 @@ DependencyManifest = {
     CoralManagedDebug = "../Build/Dependencies/coral-patched/Build/Debug",
     CoralManagedRelease = "../Build/Dependencies/coral-patched/Build/Release",
     CoralNetHostLibrary = "../Build/Dependencies/coral-nethost/$nethost_name",
+    CoralNetHostRuntime = "../Build/Dependencies/coral-nethost/$nethost_runtime_name",
     SDL3Include = "$debug_install/include",
     SDL3DebugLibrary = "$debug_install/lib/libSDL3.a",
     SDL3ReleaseLibrary = "$release_install/lib/libSDL3.a",

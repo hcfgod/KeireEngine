@@ -183,6 +183,26 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool Empty() const noexcept { return !Lights && !Tiles && !LightIndices; }
     };
 
+    struct DynamicGpuBuffer final
+    {
+        SDL_GPUBuffer* Buffer = nullptr;
+        std::uint32_t CapacityBytes = 0;
+    };
+
+    struct SurfaceDynamicUploadResources final
+    {
+        std::vector<DynamicGpuBuffer> InstanceBatches;
+        SDL_GPUTransferBuffer* InstanceTransfer = nullptr;
+        std::uint32_t InstanceTransferCapacityBytes = 0;
+        DynamicGpuBuffer CpuVfxVertices;
+        SDL_GPUTransferBuffer* CpuVfxTransfer = nullptr;
+
+        [[nodiscard]] bool Empty() const noexcept
+        {
+            return InstanceBatches.empty() && !InstanceTransfer && !CpuVfxVertices.Buffer && !CpuVfxTransfer;
+        }
+    };
+
     struct RenderSharedState;
 
     struct RenderSurfaceState final
@@ -200,6 +220,7 @@ namespace Keire::RenderBackend
         Color FrameClearColor;
         SurfaceResources Resources;
         ForwardPlusGpuResources ForwardPlus;
+        SurfaceDynamicUploadResources DynamicUploads;
         Detail::ShadowAtlasAllocator ShadowAtlas{4096, 256};
         std::uint64_t ForwardPlusContentHash = 0;
         bool ForwardPlusContentValid = false;
@@ -226,6 +247,9 @@ namespace Keire::RenderBackend
         std::uint32_t IndexCount = 0;
         std::vector<MeshSubmesh> Submeshes;
         std::vector<MeshLod> Lods;
+        MeshBounds Bounds;
+        std::vector<bool> LodBoundsEncloseSubmeshes;
+        bool BoundsEncloseSubmeshes = false;
         std::vector<AssetId> DefaultMaterials;
         std::vector<ShapeSample> ShapeSamples;
         float ShapeSampleWeight = 0.0F;
@@ -687,6 +711,28 @@ namespace Keire::RenderBackend
                              false};
     }
 
+    [[nodiscard]] inline bool RequiresGpuDepthCollision(const std::span<const VfxGpuEmitter> emitters) noexcept
+    {
+        return std::ranges::any_of(
+            emitters,
+            [](const VfxGpuEmitter& emitter)
+            {
+                const auto legacyCount =
+                    std::min<std::size_t>(emitter.ParticleOperationCount, emitter.ParticleOperations.size());
+                const auto operations =
+                    emitter.Execution
+                        ? std::span<const VfxGpuParticleOperation>{emitter.Execution->ParticleOperations}
+                        : std::span<const VfxGpuParticleOperation>{emitter.ParticleOperations}.first(legacyCount);
+                return std::ranges::any_of(operations,
+                                           [](const VfxGpuParticleOperation& operation)
+                                           {
+                                               return operation.Kind == VfxGpuParticleOperationKind::Collision &&
+                                                      operation.Setting ==
+                                                          static_cast<std::uint32_t>(VfxCollisionMode::GpuDepth);
+                                           });
+            });
+    }
+
     enum class SceneLocalLightType : std::uint8_t
     {
         Point,
@@ -1126,6 +1172,8 @@ namespace Keire::RenderBackend
         std::uint32_t First = 0;
         std::uint32_t Count = 0;
         std::uint32_t GpuFirstInstance = 0;
+        std::uint32_t InstanceDataFirst = 0;
+        std::uint32_t InstanceDataCount = 0;
         SDL_GPUBuffer* InstanceBuffer = nullptr;
     };
 
@@ -1141,15 +1189,37 @@ namespace Keire::RenderBackend
         PreparedSceneDrawList Transparent;
     };
 
-    struct PreparedCpuVfxParticle final
+    struct PreparedCpuVfxBatch final
     {
-        const VfxRenderParticle* Particle = nullptr;
-        std::uint32_t SpriteFirstVertex = 0;
+        std::uint32_t FirstVertex = 0;
+        std::uint32_t VertexCount = 0;
+        SDL_GPUTextureSamplerBinding Texture{};
+        std::array<float, 4> SurfaceParameters{};
+
+        [[nodiscard]] bool Matches(const SDL_GPUTextureSamplerBinding binding,
+                                   const std::array<float, 4>& surfaceParameters) const noexcept
+        {
+            return Texture.texture == binding.texture && Texture.sampler == binding.sampler &&
+                   SurfaceParameters == surfaceParameters;
+        }
     };
+
+    inline void AppendPreparedCpuVfxBatch(std::vector<PreparedCpuVfxBatch>& batches, const std::uint32_t firstVertex,
+                                          const std::uint32_t vertexCount, const SDL_GPUTextureSamplerBinding texture,
+                                          const std::array<float, 4>& surfaceParameters)
+    {
+        if (!batches.empty() && batches.back().FirstVertex + batches.back().VertexCount == firstVertex &&
+            batches.back().Matches(texture, surfaceParameters))
+        {
+            batches.back().VertexCount += vertexCount;
+            return;
+        }
+        batches.push_back({firstVertex, vertexCount, texture, surfaceParameters});
+    }
 
     struct PreparedCpuVfx final
     {
-        std::vector<PreparedCpuVfxParticle> Particles;
+        std::vector<PreparedCpuVfxBatch> Batches;
         SDL_GPUBuffer* SpriteBuffer = nullptr;
     };
 
@@ -1226,7 +1296,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] PreparedSceneDrawLists PrepareSceneDrawLists(SDL_GPUCommandBuffer* commands,
                                                                    RenderSurfaceState& surface,
                                                                    const SceneRenderPacket& packet);
-        [[nodiscard]] PreparedCpuVfx PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands,
+        [[nodiscard]] PreparedCpuVfx PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                         const SceneRenderPacket& packet);
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                        const SceneRenderPacket& packet, const ShadowFrameData& shadows, SceneDrawPhase phase,
@@ -1237,7 +1307,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet);
         void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
-                                const SceneRenderPacket& packet);
+                                const SceneRenderPacket& packet, const PreparedSceneDrawList& opaqueDraws);
         void RecordSurface(SDL_GPUCommandBuffer*& commands, RenderSurfaceState& surface,
                            std::vector<SDL_GPUCommandBuffer*>& frameCommands);
         void RecordSwapchain(SDL_GPUCommandBuffer*& commands, ImDrawData* drawData);
@@ -1254,7 +1324,16 @@ namespace Keire::RenderBackend
         void ReleaseGpuSkinResources(GpuSkinResources& resources) noexcept;
         void ReleaseTextureResources(GpuTextureResources& resources) noexcept;
         void ReleaseForwardPlusResources(ForwardPlusGpuResources& resources) noexcept;
+        void ReleaseDynamicUploadResources(SurfaceDynamicUploadResources& resources) noexcept;
+        [[nodiscard]] SDL_GPUBuffer* UploadDynamicBuffer(SDL_GPUCommandBuffer* commands, DynamicGpuBuffer& buffer,
+                                                         SDL_GPUTransferBuffer*& transfer,
+                                                         std::span<const std::byte> bytes,
+                                                         SDL_GPUBufferUsageFlags usage, const char* diagnostic);
+        void UploadSceneInstances(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                  PreparedSceneDrawLists& draws, std::span<const GpuInstanceUniform> instances);
         void Retire(GpuTextureResources resources) noexcept;
+        void Retire(SDL_GPUBuffer* buffer) noexcept;
+        void Retire(SDL_GPUTransferBuffer* transfer) noexcept;
         void Retire(SDL_GPUGraphicsPipeline* pipeline) noexcept;
         void Retire(GpuMeshResources resources) noexcept;
         void Retire(GpuSkinResources resources) noexcept;

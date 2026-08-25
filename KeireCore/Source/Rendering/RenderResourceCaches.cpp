@@ -7,6 +7,7 @@
 #include "Keire/Log.h"
 
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 
 #include <algorithm>
 #include <bit>
@@ -114,10 +115,14 @@ namespace Keire::RenderBackend
         Statistics.Passes = 0;
         Statistics.Surfaces = 0;
         Statistics.DrawCalls = 0;
+        Statistics.DepthDrawCalls = 0;
+        Statistics.ShadowDrawCalls = 0;
         Statistics.Triangles = 0;
         Statistics.VisibleSubmeshes = 0;
         Statistics.CulledSubmeshes = 0;
+        Statistics.CulledShadowSubmeshes = 0;
         Statistics.InstanceBatches = 0;
+        Statistics.CulledLocalLights = 0;
         Statistics.VisibleLocalLights = 0;
         Statistics.OverflowedLightTiles = 0;
         Statistics.DirectionalShadowCascades = 0;
@@ -125,10 +130,12 @@ namespace Keire::RenderBackend
         Statistics.VfxMeshParticles = 0;
         Statistics.VfxRibbonParticles = 0;
         Statistics.VfxVolumetricParticles = 0;
+        Statistics.CulledCpuVfxParticles = 0;
         Statistics.DroppedVfxParticles = 0;
         Statistics.VfxComputeThreadGroups = 0;
         Statistics.VfxComputeDispatches = 0;
         Statistics.VfxIndirectDraws = 0;
+        Statistics.CpuVfxDrawBatches = 0;
         Statistics.VfxGpuWorlds = 0;
         Statistics.VfxGpuParticleCapacity = 0;
         Statistics.VfxGpuBufferBytes = 0;
@@ -141,6 +148,10 @@ namespace Keire::RenderBackend
             static_cast<std::uint32_t>(SceneFrameGraph.Compiled.TransientAllocations.size());
         Statistics.ForwardPlusBufferReallocations = 0;
         Statistics.ForwardPlusUploadBytes = 0;
+        Statistics.DynamicUploadBufferReallocations = 0;
+        Statistics.DynamicUploadBytes = 0;
+        Statistics.DepthTriangles = 0;
+        Statistics.ShadowTriangles = 0;
         CollectCompletedFrames();
         const auto vfxRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight) + 2U;
         for (auto iterator = GpuVfxWorlds.begin(); iterator != GpuVfxWorlds.end();)
@@ -298,6 +309,17 @@ namespace Keire::RenderBackend
         packet.GlobalMaterialProperties = std::move(request.GlobalMaterialProperties);
         packet.Lighting = ResolveLighting(request.Scene);
         packet.LocalLights = ResolveLocalLights(request.Scene);
+        const auto lightFrustum = GeometryDetail::BuildFrustumPlanes(Math::Multiply(camera.Projection, camera.View));
+        Statistics.CulledLocalLights += static_cast<std::uint32_t>(
+            std::erase_if(packet.LocalLights,
+                          [&](const SceneLocalLight& light)
+                          {
+                              const auto radius = std::max(light.Range, 0.0F);
+                              const MeshBounds bounds{
+                                  {light.Position.X - radius, light.Position.Y - radius, light.Position.Z - radius},
+                                  {light.Position.X + radius, light.Position.Y + radius, light.Position.Z + radius}};
+                              return !GeometryDetail::IntersectsFrustum(lightFrustum, bounds);
+                          }));
         packet.BakedLighting = request.Scene->BakedLighting();
         packet.ReflectionProbes = ResolveReflectionProbes(request.Scene);
         packet.LightProbeVolumes = ResolveLightProbeVolumes(request.Scene);

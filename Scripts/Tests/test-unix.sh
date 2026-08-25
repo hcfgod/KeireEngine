@@ -767,6 +767,18 @@ assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")' \
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'return ":" .. library' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'os.host() ~= "macosx"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'filter { "system:linux", "toolset:gcc or clang" }' \
+  "$ROOT/Scripts/Premake/Common.lua"
+assert_false grep -F -q 'filter { "system:linux or macosx", "toolset:gcc or clang" }' \
+  "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'linkoptions { "-Wl,-rpath,@executable_path" }' \
+  "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'macRuntimeDirectory .. "/libnethost.dylib"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'CoralNetHostRuntime = "../Build/Dependencies/coral-nethost/$nethost_runtime_name"' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q '"UserNotifications.framework", "Security.framework"' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q 'buildoptions { "-Wno-error=tsan" }' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'DependencyLink(DependencyManifest.AssimpDebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'DependencyLink(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"

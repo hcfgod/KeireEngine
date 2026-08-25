@@ -195,6 +195,8 @@ namespace Keire::RenderBackend
                     continue;
                 resources.InvalidateSequencing();
             }
+            for (const auto& request : Requests)
+                request.Surface->SampledDepthValid = false;
             FrameActive = false;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
@@ -228,6 +230,7 @@ namespace Keire::RenderBackend
         {
             ReleaseResources(surface->Resources);
             ReleaseForwardPlusResources(surface->ForwardPlus);
+            ReleaseDynamicUploadResources(surface->DynamicUploads);
             surface->Owner.reset();
             surface->Width = 0;
             surface->Height = 0;

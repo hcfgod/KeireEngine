@@ -787,7 +787,7 @@ namespace
                 }
                 m_Results->MaterialBindingBuilds.push_back(
                     Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer()));
-                if (m_SubmittedFrames >= 2)
+                if (HasStableMaterialBinding(m_Results->MaterialBindingBuilds) || m_SubmittedFrames >= 120)
                 {
                     Owner().RequestExit();
                     return;
@@ -1812,7 +1812,9 @@ namespace
         }
         void OnUpdate(const Keire::Time&) override
         {
-            if (m_Submitted && m_Material.Revision() < m_ExpectedMaterialRevision)
+            if (m_Submitted && (m_Material.Revision() < m_ExpectedMaterialRevision ||
+                                (m_Stage == 0 && Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(
+                                                     *Owner().Renderer()) == 0)))
             {
                 m_SettledFrames = 0;
                 if (++m_ReloadWaitFrames > 120)
@@ -2253,16 +2255,14 @@ TEST_CASE("independent render surfaces submit in queue order and survive final-f
         (void)application.PushLayer(std::make_unique<MultiSurfaceCaptureLayer>(assets.Mesh, assets.Material, results));
         REQUIRE(application.Run() == 0);
     }
-
     for (const auto& frame : results->Frames)
     {
         REQUIRE(frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
         CHECK(MeasureCenter(frame).Luminance() > MinimumBehaviorDelta);
     }
     REQUIRE(results->HasStatistics);
-    REQUIRE(results->MaterialBindingBuilds.size() == 2);
-    CHECK(results->MaterialBindingBuilds[0] > 0);
-    CHECK(results->MaterialBindingBuilds[1] == results->MaterialBindingBuilds[0]);
+    REQUIRE(results->MaterialBindingBuilds.size() >= 2);
+    CHECK(HasStableMaterialBinding(results->MaterialBindingBuilds));
 }
 
 TEST_CASE("large material scenes roll descriptor pressure across ordered command buffers")

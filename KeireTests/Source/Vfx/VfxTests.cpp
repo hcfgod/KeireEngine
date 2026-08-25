@@ -993,6 +993,21 @@ TEST_CASE("VFX graph compiler lowers Blackboard bindings and bounded Portable Cu
     CHECK(compiled.CustomInstructions[0].ScaleByDeltaTime);
     CHECK(compiled.CustomInstructions[1].Target == Keire::VfxCustomTarget::Size);
 
+    auto suffixedLiteral = definition;
+    const auto suffixedCustom =
+        std::ranges::find(suffixedLiteral.Systems.front().Nodes, Id(204), &Keire::VfxGraphNode::Id);
+    REQUIRE(suffixedCustom != suffixedLiteral.Systems.front().Nodes.end());
+    suffixedCustom->CustomHlsl = "Size *= 0.5F;";
+    CHECK_NOTHROW(Keire::ValidateVfxEffect(suffixedLiteral));
+
+    auto malformedLiteral = definition;
+    const auto malformedCustom =
+        std::ranges::find(malformedLiteral.Systems.front().Nodes, Id(204), &Keire::VfxGraphNode::Id);
+    REQUIRE(malformedCustom != malformedLiteral.Systems.front().Nodes.end());
+    malformedCustom->CustomHlsl = "Size *= 0.5garbage;";
+    CHECK_THROWS_WITH_AS(Keire::ValidateVfxEffect(malformedLiteral),
+                         "Portable Custom HLSL contains an invalid numeric literal.", std::invalid_argument);
+
     auto duplicateDriver = definition;
     Keire::VfxGraphConnection duplicateConnection;
     duplicateConnection.Id = Id(208);

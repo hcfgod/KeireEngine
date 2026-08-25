@@ -338,7 +338,8 @@ TEST_CASE("conditional atomic file publication preserves unchanged files")
     std::filesystem::last_write_time(path, preservedTime);
 
     CHECK_FALSE(Keire::Detail::WriteTextFileAtomicallyIfChanged(path, "solution"));
-    CHECK(std::filesystem::last_write_time(path) == preservedTime);
+    const bool timestampWasPreserved = std::filesystem::last_write_time(path) == preservedTime;
+    CHECK(timestampWasPreserved);
     CHECK(Keire::Detail::WriteTextFileAtomicallyIfChanged(path, "updated solution"));
     CHECK(Keire::Detail::ReadTextFile(path, 1024) == "updated solution");
 

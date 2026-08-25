@@ -228,6 +228,24 @@ TEST_CASE("Entities own required Transforms and stale handles become inert after
     CHECK_FALSE(root.GetComponent<Keire::TransformComponent>());
 }
 
+TEST_CASE("unchanged local transforms do not dirty their scene")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    const auto entity = scene->CreateEntity("Stable");
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(transform);
+
+    transform->SetLocalPosition({1.0F, 2.0F, 3.0F});
+    transform->SetLocalRotation(Keire::Math::EulerDegreesToQuaternion({10.0F, 20.0F, 30.0F}));
+    transform->SetLocalScale({2.0F, 3.0F, 4.0F});
+    scene->MarkSaved();
+
+    transform->SetLocalPosition(transform->LocalPosition());
+    transform->SetLocalRotation(transform->LocalRotation());
+    transform->SetLocalScale(transform->LocalScale());
+    CHECK_FALSE(scene->Dirty());
+}
+
 TEST_CASE("Entity tags and scene queries stay indexed deterministic and serialized")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());

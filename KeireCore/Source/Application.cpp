@@ -617,12 +617,31 @@ namespace Keire
                         m_Impl->ProfilerService->SetCounter(
                             ProfileCategory::Rendering, "Forward+ buffer reallocations",
                             static_cast<double>(statistics.ForwardPlusBufferReallocations));
+                        m_Impl->ProfilerService->SetCounter(
+                            ProfileCategory::Rendering, "Dynamic upload buffer reallocations",
+                            static_cast<double>(statistics.DynamicUploadBufferReallocations));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Dynamic upload bytes",
+                                                            static_cast<double>(statistics.DynamicUploadBytes));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Forward+ cache hits",
                                                             static_cast<double>(statistics.ForwardPlusCacheHits));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Depth draw calls",
+                                                            static_cast<double>(statistics.DepthDrawCalls));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Depth triangles",
+                                                            static_cast<double>(statistics.DepthTriangles));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Shadow draw calls",
+                                                            static_cast<double>(statistics.ShadowDrawCalls));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Shadow triangles",
+                                                            static_cast<double>(statistics.ShadowTriangles));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Culled shadow submeshes",
+                                                            static_cast<double>(statistics.CulledShadowSubmeshes));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Culled local lights",
+                                                            static_cast<double>(statistics.CulledLocalLights));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Forward+ upload bytes",
                                                             static_cast<double>(statistics.ForwardPlusUploadBytes));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU worlds",
                                                             static_cast<double>(statistics.VfxGpuWorlds));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Culled CPU VFX particles",
+                                                            static_cast<double>(statistics.CulledCpuVfxParticles));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Dropped VFX particles",
                                                             static_cast<double>(statistics.DroppedVfxParticles));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX GPU buffer bytes",
@@ -641,6 +660,8 @@ namespace Keire
                                                             static_cast<double>(statistics.VfxComputeThreadGroups));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX indirect draws",
                                                             static_cast<double>(statistics.VfxIndirectDraws));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "CPU VFX draw batches",
+                                                            static_cast<double>(statistics.CpuVfxDrawBatches));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX pipeline warmup pending",
                                                             statistics.VfxPipelineWarmupPending ? 1.0 : 0.0);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "VFX pipelines ready",

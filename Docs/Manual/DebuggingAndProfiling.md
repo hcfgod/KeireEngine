@@ -44,6 +44,17 @@ Open **Window > Profiler** for the complete workspace or **Window > Viewport Per
 6. Distinguish GPU timestamp duration from fence-completion latency; the latter is not a true GPU execution time.
 7. Copy a focused row, complete snapshot, or export rolling frame CSV for comparison.
 
+For dense rendered scenes, compare **Dynamic upload bytes** with **Dynamic upload buffer reallocations**. Bytes measure
+the payload copied that frame; reallocations should settle to zero after the surface reaches its working-set peak. A
+high particle count with a low **CPU VFX draw batches** value means compatible depth-ordered particles are sharing draw
+state. Persistent reallocations or a batch count close to the particle count usually indicates changing capacity,
+textures, or material surface state and is worth inspecting before increasing content budgets.
+
+Use **Depth draw calls/triangles** and **Shadow draw calls/triangles** to account for work that is not part of the main
+scene draw total. **Culled shadow submeshes**, **Culled local lights**, and **Culled CPU VFX particles** should increase
+when the same camera path excludes more work. Compare these counters with identical content, camera, resolution, shadow
+settings, and warm-up; a higher cull count alone is not evidence of a faster frame if frame-time percentiles regress.
+
 Profiler storage is bounded. A capture reports dropped spans/counters when capacity is exceeded rather than growing
 without limit.
 

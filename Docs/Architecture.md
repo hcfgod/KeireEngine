@@ -199,6 +199,13 @@ frame graph publishes an immutable inspection snapshot containing deterministic 
 transitions, estimated bytes, and physical alias slots. The Render Graph panel reads that snapshot rather than compiling
 a second graph and performs JSON or Graphviz export only after an explicit atomic-save action.
 
+Each render surface retains grow-only dynamic upload storage for scene instances and CPU VFX vertices. Instance data is
+mapped once into a cyclic transfer arena and copied to reusable per-batch storage in one copy pass; CPU VFX uses the same
+cyclic transfer/GPU-buffer contract and combines only adjacent, depth-ordered particles whose texture and surface state
+match. Replaced buffers enter the normal submission-fence retirement queue, and surface close releases retained storage
+only after renderer shutdown has made GPU access inert. `RenderStatistics` reports dynamic bytes, buffer reallocations,
+and CPU VFX draw batches so a warmed-up scene can distinguish expected payload traffic from resource churn.
+
 ## Fixed-tick replay and deterministic profiles
 
 Gameplay input is latched at fixed-tick boundaries. Digital edges remain pending until a tick consumes them, analog
@@ -305,6 +312,13 @@ draw preparation, frame-graph passes, and residual orchestration overhead. Each 
 command-buffer sequence. Material-heavy opaque and transparent passes continue in bounded batches that store and reload
 their color/depth attachments between submissions, preventing backend-local descriptor heaps from becoming an
 unbounded per-frame resource while preserving the final fence as the retirement boundary for the full sequence.
+
+Draw preparation extracts one conservative frustum per object, rejects the selected LOD bounds before testing its
+submeshes, and applies the same plane representation to local-light ranges and non-mesh CPU VFX bounds. Shadow recording
+retains off-camera casters, selects one highest-detail LOD, and rejects only static caster bounds outside each light
+frustum; skinned and `Always Visible` casters bypass that rejection. Sampled scene depth is redrawn only while a GPU
+depth-collision operation needs it, MSAA HDR resolves once after transparency, and a scene with no visible local lights
+uses a constant-size Forward+ grid independent of viewport and camera changes.
 
 The public `RenderSystem.cpp` PImpl facade delegates to separately compiled private backend units for device/frame
 lifecycle, resource caches, surface/pipeline management, and scene recording. Frame execution, skinning, sampled-depth
@@ -565,6 +579,11 @@ transactional hierarchy mutation, and explicit dirty/open lifecycle. `SceneSyste
 pending operations. Asset workers decode immutable data; `Application` pumps completions, then Scenes commit loads,
 unloads, and active changes at a safe frame boundary before Input and layer updates. Failed loads never replace the
 last-good loaded set.
+
+Mutable scenes retain deterministic hierarchy order and parent-to-child adjacency until a create, destroy, reparent, or
+reorder invalidates the cache. Transform changes walk that adjacency once to dirty the affected subtree; an already
+dirty root proves its current descendants are dirty and needs no repeated scan. Callback-bearing lifecycle operations
+copy cached hierarchy views before invoking component code so structural mutation cannot invalidate their traversal.
 
 The editor owns authoring selection, undo/redo, atomic source writes, dirty decisions, and recovery files. Runtime scene
 activation is refreshed only after source validation/import succeeds. JSON remains private to the scene importer.
@@ -1188,9 +1207,10 @@ snapshot. Explicit asset mutations advance the revision and wake reconciliation,
 from overwriting a newer editor transaction.
 
 Forward+ retains its deterministic CPU fallback while caching the projected grid and GPU storage uploads by viewport,
-camera, and local-light content. The capability flag keeps a future GPU-compute implementation ABI-compatible without
-claiming support on backends that cannot provide it. The editor hierarchy builds prefab membership and parent-child
-adjacency once per snapshot, preserving scene order while avoiding recursive full-scene searches.
+camera, and local-light content. An empty visible-light set uses one cached dummy tile and does not depend on camera or
+viewport identity. The capability flag keeps a future GPU-compute implementation ABI-compatible without claiming
+support on backends that cannot provide it. The editor hierarchy builds prefab membership and parent-child adjacency
+once per snapshot, preserving scene order while avoiding recursive full-scene searches.
 
 ## Animator Controller Authoring
 

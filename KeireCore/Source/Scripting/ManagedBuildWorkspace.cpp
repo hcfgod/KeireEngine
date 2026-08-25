@@ -1,6 +1,7 @@
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <ranges>
 #include <regex>
@@ -122,7 +123,7 @@ namespace Keire
                     throw std::filesystem::filesystem_error("Could not read managed API source timestamp.", source,
                                                             error);
                 fingerprint += PathText(relative) + "|" + std::to_string(size) + "|" +
-                               std::to_string(writeTime.time_since_epoch().count()) + "\n";
+                               std::to_string(static_cast<std::int64_t>(writeTime.time_since_epoch().count())) + "\n";
             }
             return fingerprint;
         }

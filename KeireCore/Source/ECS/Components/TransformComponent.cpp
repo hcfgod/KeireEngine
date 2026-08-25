@@ -49,13 +49,20 @@ namespace Keire
     {
         if (!Math::IsFinite(value))
             throw std::invalid_argument("Transform position must be finite.");
+        if (m_LocalPosition == value)
+            return;
         m_LocalPosition = value;
         NotifyChanged();
     }
 
     void TransformComponent::SetLocalRotation(const Quaternion value)
     {
-        m_LocalRotation = Math::Normalize(value);
+        if (m_LocalRotation == value)
+            return;
+        const auto normalized = Math::Normalize(value);
+        if (m_LocalRotation == normalized)
+            return;
+        m_LocalRotation = normalized;
         NotifyChanged();
     }
 
@@ -70,6 +77,8 @@ namespace Keire
     {
         if (!IsValidLocalScale(value))
             throw std::invalid_argument("Transform scale axes must be finite with a magnitude of at least 0.000001.");
+        if (m_LocalScale == value)
+            return;
         m_LocalScale = value;
         NotifyChanged();
     }

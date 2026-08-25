@@ -16,9 +16,11 @@
 #include <cstring>
 #include <iterator>
 #include <limits>
+#include <locale>
 #include <map>
 #include <queue>
 #include <set>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -1578,22 +1580,20 @@ namespace Keire
                 value.substr(1), [](const char character)
                 { return std::isalnum(static_cast<unsigned char>(character)) != 0 || character == '_'; });
         }
-
         [[nodiscard]] float ParsePortableFloat(std::string_view value)
         {
             value = Trim(value);
             if (!value.empty() && (value.back() == 'f' || value.back() == 'F'))
                 value.remove_suffix(1);
             float result = 0.0F;
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result);
-            if (value.empty() || parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
-                !std::isfinite(result) || std::abs(result) > MaximumAuthoredScalar)
-            {
+            std::istringstream parser{std::string(value)};
+            parser.imbue(std::locale::classic());
+            if (value.empty() || !(parser >> std::noskipws >> result) ||
+                parser.peek() != std::char_traits<char>::eof() || !std::isfinite(result) ||
+                std::abs(result) > MaximumAuthoredScalar)
                 throw std::invalid_argument("Portable Custom HLSL contains an invalid numeric literal.");
-            }
             return result;
         }
-
         struct PortableLiteral
         {
             VfxValueType Type = VfxValueType::Scalar;

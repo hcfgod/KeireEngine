@@ -5,6 +5,7 @@
 #include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "KeireInternal/SceneState.h"
+#include "KeireInternal/Scenes/SceneHierarchyCache.h"
 #include "KeireInternal/Scenes/SceneIdentityIndex.h"
 #include "KeireInternal/Scenes/SceneSerialization.h"
 
@@ -109,32 +110,15 @@ namespace Keire
                 return found == Entities.end() ? nullptr : Registry.try_get<EntityRecord>(found->second);
             }
 
-            [[nodiscard]] std::vector<EntityId> HierarchyOrder() const
+            [[nodiscard]] EntityId ParentOf(const EntityId id) const noexcept
             {
-                std::unordered_map<EntityId, std::vector<EntityId>> children;
-                std::vector<EntityId> roots;
-                for (const auto id : Order)
-                {
-                    const auto* record = Find(id);
-                    if (!record)
-                        continue;
-                    if (record->Parent)
-                        children[record->Parent].push_back(id);
-                    else
-                        roots.push_back(id);
-                }
-                std::vector<EntityId> result;
-                result.reserve(Entities.size());
-                const auto append = [&](const auto& self, const EntityId id) -> void
-                {
-                    result.push_back(id);
-                    if (const auto found = children.find(id); found != children.end())
-                        for (const auto child : found->second)
-                            self(self, child);
-                };
-                for (const auto root : roots)
-                    append(append, root);
-                return result;
+                const auto* record = Find(id);
+                return record ? record->Parent : EntityId{};
+            }
+
+            [[nodiscard]] const std::vector<EntityId>& HierarchyOrder() const
+            {
+                return Hierarchy.Ordered(Order, [this](const EntityId id) { return ParentOf(id); });
             }
 
             [[nodiscard]] bool DescendsFrom(EntityId candidate, const EntityId ancestor) const noexcept
@@ -153,12 +137,11 @@ namespace Keire
 
             void MarkWorldDirty(const EntityId root)
             {
-                if (auto* record = Find(root))
-                    record->WorldDirty = true;
-                for (const auto id : Order)
-                    if (id != root && DescendsFrom(id, root))
-                        if (auto* child = Find(id))
-                            child->WorldDirty = true;
+                if (const auto* record = Find(root); !record || record->WorldDirty)
+                    return;
+                Hierarchy.VisitSubtree(
+                    root, Order, [this](const EntityId id) { return ParentOf(id); },
+                    [this](const EntityId id) { Find(id)->WorldDirty = true; });
             }
 
             [[nodiscard]] Ref<TransformComponent> Transform(const EntityId id) const noexcept
@@ -271,6 +254,7 @@ namespace Keire
             std::unordered_map<ComponentTypeId, std::unordered_map<EntityId, std::vector<Ref<Component>>>>
                 ComponentPools;
             std::vector<EntityId> Order;
+            SceneHierarchyCache Hierarchy;
             WeakRef<SceneState> Self;
             std::vector<std::function<void()>> Deferred;
             std::set<EntityId> PendingDestroyedEntities;
@@ -371,7 +355,8 @@ namespace Keire
                                    .Lighting = m_Impl->Lighting,
                                    .BakedLighting = m_Impl->BakedLightingAsset};
             result.Objects.reserve(m_Impl->Entities.size());
-            for (const auto id : m_Impl->HierarchyOrder())
+            const auto hierarchy = m_Impl->HierarchyOrder();
+            for (const auto id : hierarchy)
             {
                 const auto* record = m_Impl->Find(id);
                 SceneObjectDefinition object{id.Value(), record->Parent.Value(), record->Name, record->Active};
@@ -478,6 +463,7 @@ namespace Keire
                 m_Impl->IndexIdentity(id, *m_Impl->Find(id));
                 m_Impl->IndexComponent(id, transform);
                 m_Impl->Order.push_back(id);
+                m_Impl->Hierarchy.Invalidate();
                 m_Impl->Dirty = true;
                 if (m_Impl->Playing)
                 {
@@ -621,6 +607,7 @@ namespace Keire
                         m_Impl->IndexComponent(id, component);
                     }
                     m_Impl->Order.push_back(id);
+                    m_Impl->Hierarchy.Invalidate();
                     committed.push_back(id);
                     SynchronizeEntityLayer(id);
                 }
@@ -666,6 +653,7 @@ namespace Keire
             }
             catch (...)
             {
+                m_Impl->Hierarchy.Invalidate();
                 for (auto iterator = committed.rbegin(); iterator != committed.rend(); ++iterator)
                 {
                     if (auto* record = m_Impl->Find(*iterator))
@@ -688,6 +676,7 @@ namespace Keire
                     m_Impl->Registry.destroy(native);
                     m_Impl->Entities.erase(*iterator);
                     std::erase(m_Impl->Order, *iterator);
+                    m_Impl->Hierarchy.Invalidate();
                 }
                 throw;
             }
@@ -746,6 +735,7 @@ namespace Keire
                     m_Impl->Registry.destroy(native);
                     m_Impl->Entities.erase(current);
                     std::erase(m_Impl->Order, current);
+                    m_Impl->Hierarchy.Invalidate();
                     m_Impl->PendingDestroyedEntities.erase(current);
                     std::erase_if(m_Impl->PendingDestroyedComponents,
                                   [current](const auto& pending) { return pending.first == current; });
@@ -962,7 +952,8 @@ namespace Keire
             m_Impl->Dirty = true;
             if (m_Impl->Playing)
             {
-                for (const auto candidate : m_Impl->HierarchyOrder())
+                const auto hierarchy = m_Impl->HierarchyOrder();
+                for (const auto candidate : hierarchy)
                 {
                     if (!m_Impl->DescendsFrom(candidate, id))
                         continue;
@@ -992,9 +983,11 @@ namespace Keire
         {
             RequireOwner("Children");
             std::vector<Entity> result;
-            for (const auto candidate : m_Impl->Order)
-                if (const auto* record = m_Impl->Find(candidate); record && record->Parent == id)
-                    result.push_back(Entity(m_Impl->Self, candidate));
+            const auto children = m_Impl->Hierarchy.Children(id, m_Impl->Order, [this](const EntityId candidate)
+                                                             { return m_Impl->ParentOf(candidate); });
+            result.reserve(children.size());
+            for (const auto child : children)
+                result.push_back(Entity(m_Impl->Self, child));
             return result;
         }
 
@@ -1011,6 +1004,7 @@ namespace Keire
             const auto previousWorld = WorldMatrix(id);
             const auto previousParent = record->Parent;
             record->Parent = parent;
+            m_Impl->Hierarchy.Invalidate();
             m_Impl->LifecycleComponentsDirty = true;
             m_Impl->MarkWorldDirty(id);
             if (preserveWorldTransform)
@@ -1023,6 +1017,7 @@ namespace Keire
                 if (!Math::DecomposeTransform(local, position, rotation, scale))
                 {
                     record->Parent = previousParent;
+                    m_Impl->Hierarchy.Invalidate();
                     m_Impl->MarkWorldDirty(id);
                     throw std::invalid_argument("Reparenting would produce a non-decomposable local transform.");
                 }
@@ -1056,6 +1051,7 @@ namespace Keire
 
             SetParent(id, parent, preserveWorldTransform);
             m_Impl->Order.swap(reordered);
+            m_Impl->Hierarchy.Invalidate();
             m_Impl->LifecycleComponentsDirty = true;
             m_Impl->Dirty = true;
         }
@@ -1465,7 +1461,8 @@ namespace Keire
             EndPlay();
             try
             {
-                for (const auto id : m_Impl->HierarchyOrder())
+                const auto hierarchy = m_Impl->HierarchyOrder();
+                for (const auto id : hierarchy)
                     if (auto* record = m_Impl->Find(id))
                         for (const auto& component : record->Components)
                             try
@@ -1489,6 +1486,7 @@ namespace Keire
             m_Impl->TagIndex.clear();
             m_Impl->ComponentPools.clear();
             m_Impl->Order.clear();
+            m_Impl->Hierarchy.Clear();
             m_Impl->Open = false;
             m_Impl->Self.Reset();
         }

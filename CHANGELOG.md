@@ -35,6 +35,17 @@ versions.
   modes so Windows-mounted builds cannot install world-writable files.
 - Removed repeated per-submesh material dependency walks within a rendered frame, and moved CPU VFX billboard/ribbon
   uploads into each surface command buffer so steady-state effects no longer add a blocking upload submission.
+- Reused cyclic per-surface GPU and transfer buffers for scene instance and CPU VFX vertex uploads, coalesced adjacent
+  CPU VFX particles with identical render state into one draw, and exposed steady-state dynamic-upload and VFX batch
+  counters so dense scenes no longer allocate and bind hundreds of transient GPU resources every frame.
+- Reduced rendered-frame work with selected-LOD coarse culling, conservative local-light and CPU VFX rejection,
+  light-frustum shadow culling, one shadow LOD per caster, conditional sampled-depth recording, a single final MSAA
+  resolve, and a constant-size Forward+ no-light path. Added depth, shadow, and culling counters for capture comparison.
+- Cached mutable-scene hierarchy order and child adjacency between structural edits, propagated transform dirtiness by
+  subtree instead of repeated ancestor walks, moved queued render requests without deep-copying them, and ignored exact
+  no-op local transform assignments.
+- Fixed Apple Clang/libc++ portability for filesystem clock values and Portable Custom HLSL numeric parsing, and made
+  generated macOS links use native archive paths, complete SDL framework dependencies, and an app-local nethost RPATH.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and
   component-only, preventing record-generated `ToString()` from recursively formatting self-typed computed properties
   and overflowing the stack in logs.

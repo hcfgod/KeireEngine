@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <ranges>
 #include <stdexcept>
 #include <utility>
@@ -14,7 +15,9 @@
 namespace Keire::RenderBackend
 {
     using GeometryDetail::Add;
+    using GeometryDetail::BuildFrustumPlanes;
     using GeometryDetail::Cross;
+    using GeometryDetail::IntersectsFrustum;
     using GeometryDetail::Length;
     using GeometryDetail::NormalizeOr;
     using GeometryDetail::Scale;
@@ -22,8 +25,10 @@ namespace Keire::RenderBackend
     using GeometryDetail::TransformClip;
 
     void RenderSharedState::RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
-                                               const SceneRenderPacket& packet)
+                                               const SceneRenderPacket& packet,
+                                               const PreparedSceneDrawList& opaqueDraws)
     {
+        surface.SampledDepthValid = false;
         if (!surface.Resources.SampledDepth || !SceneDepthPipeline)
             return;
         SDL_GPUDepthStencilTargetInfo depth{};
@@ -38,33 +43,35 @@ namespace Keire::RenderBackend
             throw std::runtime_error("SDL_BeginGPURenderPass(sampled depth) failed: " + LastSdlError());
         SDL_BindGPUGraphicsPipeline(pass, SceneDepthPipeline);
         const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
-        const auto samples = ToSdlSampleCount(surface.ActualSamples);
-        for (const auto& item : packet.DrawItems)
+        const SceneDrawItem* boundItem = nullptr;
+        SDL_GPUBuffer* boundVertices = nullptr;
+        SDL_GPUBuffer* boundIndices = nullptr;
+        for (const auto& draw : opaqueDraws.Draws)
         {
+            const auto& item = *draw.Item;
             const auto& mesh = ResolveMesh(item.Mesh);
-            if (mesh.Empty())
-                continue;
-            const auto object = Math::Multiply(viewProjection, item.World);
-            SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
-            const SDL_GPUBufferBinding vertexBinding{
-                item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices, 0};
-            const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
-            SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
-            SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-            for (const auto& submesh : mesh.Submeshes)
+            if (boundItem != draw.Item)
             {
-                AssetId materialId;
-                if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot])
-                    materialId = item.Materials[submesh.MaterialSlot];
-                else if (submesh.MaterialSlot < mesh.DefaultMaterials.size())
-                    materialId = mesh.DefaultMaterials[submesh.MaterialSlot];
-                if (const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr;
-                    material && IsTransparentMaterial(material->Surface.AlphaMode))
-                {
-                    continue;
-                }
-                SDL_DrawGPUIndexedPrimitives(pass, submesh.IndexCount, 1, submesh.FirstIndex, 0, 0);
+                const auto object = Math::Multiply(viewProjection, item.World);
+                SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                boundItem = draw.Item;
             }
+            auto* vertices = item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices;
+            if (vertices != boundVertices)
+            {
+                const SDL_GPUBufferBinding vertexBinding{vertices, 0};
+                SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                boundVertices = vertices;
+            }
+            if (mesh.Indices != boundIndices)
+            {
+                const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
+                SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                boundIndices = mesh.Indices;
+            }
+            SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, 1, draw.Submesh.FirstIndex, 0, 0);
+            ++Statistics.DepthDrawCalls;
+            Statistics.DepthTriangles += draw.Submesh.IndexCount / 3U;
         }
         SDL_EndGPURenderPass(pass);
         ++Statistics.Passes;
@@ -81,6 +88,41 @@ namespace Keire::RenderBackend
         result.LocalLayers.fill(-1.0F);
         if (!ShadowPipeline || !ShadowSampler)
             return result;
+
+        struct PreparedShadowCaster final
+        {
+            const SceneDrawItem* Item = nullptr;
+            const GpuMeshResources* Mesh = nullptr;
+            std::uint32_t FirstSubmesh = 0;
+            std::uint32_t SubmeshCount = 0;
+            MeshBounds Bounds;
+            bool Cullable = true;
+            bool CoarseCullable = false;
+        };
+        std::vector<PreparedShadowCaster> shadowCasters;
+        shadowCasters.reserve(packet.DrawItems.size());
+        for (const auto& item : packet.DrawItems)
+        {
+            if (!item.CastShadows)
+                continue;
+            const auto& mesh = ResolveMesh(item.Mesh);
+            if (mesh.Empty() || mesh.Submeshes.empty())
+                continue;
+            std::uint32_t firstSubmesh = 0;
+            std::uint32_t submeshCount = static_cast<std::uint32_t>(mesh.Submeshes.size());
+            auto bounds = mesh.Bounds;
+            bool coarseCullable = mesh.BoundsEncloseSubmeshes;
+            if (!mesh.Lods.empty())
+            {
+                const auto& lod = mesh.Lods.front();
+                firstSubmesh = lod.FirstSubmesh;
+                submeshCount = lod.SubmeshCount;
+                bounds = lod.Bounds;
+                coarseCullable = mesh.LodBoundsEncloseSubmeshes.front();
+            }
+            shadowCasters.push_back({std::addressof(item), std::addressof(mesh), firstSubmesh, submeshCount, bounds,
+                                     !item.AlwaysVisible && !item.SkinnedAssetVertices, coarseCullable});
+        }
 
         const auto ensureTexture = [&](SDL_GPUTexture*& texture, std::uint32_t& currentResolution,
                                        std::uint32_t& currentLayers, const std::uint32_t resolution,
@@ -113,22 +155,50 @@ namespace Keire::RenderBackend
 
         const auto drawScene = [&](SDL_GPURenderPass* pass, const Matrix4& lightMatrix)
         {
-            for (const auto& item : packet.DrawItems)
+            SDL_GPUBuffer* boundVertices = nullptr;
+            SDL_GPUBuffer* boundIndices = nullptr;
+            for (const auto& caster : shadowCasters)
             {
-                if (!item.CastShadows)
-                    continue;
-                const auto& mesh = ResolveMesh(item.Mesh);
-                if (mesh.Empty())
-                    continue;
+                const auto& item = *caster.Item;
+                const auto& mesh = *caster.Mesh;
                 const auto object = Math::Multiply(lightMatrix, item.World);
-                SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
-                const SDL_GPUBufferBinding vertexBinding{
-                    item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices, 0};
-                const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
-                SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
-                SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
-                for (const auto& submesh : mesh.Submeshes)
+                const auto frustum = BuildFrustumPlanes(object);
+                if (caster.Cullable && caster.CoarseCullable && !IntersectsFrustum(frustum, caster.Bounds))
+                {
+                    Statistics.CulledShadowSubmeshes += caster.SubmeshCount;
+                    continue;
+                }
+                bool objectBound = false;
+                for (std::uint32_t offset = 0; offset < caster.SubmeshCount; ++offset)
+                {
+                    const auto& submesh = mesh.Submeshes[caster.FirstSubmesh + offset];
+                    if (caster.Cullable && !IntersectsFrustum(frustum, submesh.Bounds))
+                    {
+                        ++Statistics.CulledShadowSubmeshes;
+                        continue;
+                    }
+                    if (!objectBound)
+                    {
+                        SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
+                        auto* vertices = item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices;
+                        if (vertices != boundVertices)
+                        {
+                            const SDL_GPUBufferBinding vertexBinding{vertices, 0};
+                            SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                            boundVertices = vertices;
+                        }
+                        if (mesh.Indices != boundIndices)
+                        {
+                            const SDL_GPUBufferBinding indexBinding{mesh.Indices, 0};
+                            SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                            boundIndices = mesh.Indices;
+                        }
+                        objectBound = true;
+                    }
                     SDL_DrawGPUIndexedPrimitives(pass, submesh.IndexCount, 1, submesh.FirstIndex, 0, 0);
+                    ++Statistics.ShadowDrawCalls;
+                    Statistics.ShadowTriangles += submesh.IndexCount / 3U;
+                }
             }
         };
         const auto drawLayer = [&](SDL_GPUTexture* texture, const std::uint32_t layer, const Matrix4& lightMatrix)

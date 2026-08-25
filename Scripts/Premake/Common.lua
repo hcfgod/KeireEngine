@@ -94,7 +94,7 @@ end
 
 local function DependencyLink(path)
     local resolved = GeneratorRootPath(path)
-    if (_ACTION == "ninja" or _ACTION == "gmake") and SelectedToolset ~= "msc" then
+    if (_ACTION == "ninja" or _ACTION == "gmake") and SelectedToolset ~= "msc" and os.host() ~= "macosx" then
         local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")
         if directory ~= nil then
             libdirs { directory }
@@ -118,7 +118,7 @@ function LinkKeireCore()
 
     -- Core is split into domain archives so an isolated edit does not rewrite a monolithic library. GNU-family
     -- linkers need archive grouping because subsystem references intentionally cross those internal boundaries.
-    filter { "system:linux or macosx", "toolset:gcc or clang" }
+    filter { "system:linux", "toolset:gcc or clang" }
         linkgroups "On"
 
     filter { "system:windows", "toolset:gcc" }
@@ -157,6 +157,7 @@ function LinkKeireCore()
 
     filter "system:macosx"
         links { "Foundation.framework" }
+        linkoptions { "-Wl,-rpath,@executable_path" }
 
     filter {}
 
@@ -179,6 +180,24 @@ function LinkKeireCore()
 
         filter {}
     end
+
+    -- Apple nethost is a dylib referenced through @rpath. Stage it beside each executable and provide a matching
+    -- executable-relative LC_RPATH so packaged and direct builds launch without DYLD_LIBRARY_PATH.
+    local commandRepositoryRoot = (_ACTION == "ninja" or _ACTION == "gmake") and "." or ".."
+    local macNetHostRuntime = DependencyManifest.CoralNetHostRuntime
+    if _ACTION == "ninja" or _ACTION == "gmake" then
+        macNetHostRuntime = macNetHostRuntime:gsub("^%.%./", "")
+    end
+    local macRuntimeDirectory = commandRepositoryRoot .. "/Build/Bin/" .. OutputDir .. "/%{prj.name}"
+
+    filter "system:macosx"
+        postbuildcommands
+        {
+            CopyFileIfChangedCommand(macNetHostRuntime, macRuntimeDirectory .. "/libnethost.dylib",
+                                     commandRepositoryRoot)
+        }
+
+    filter {}
 end
 
 function LinkKeireHubNativeHttp()

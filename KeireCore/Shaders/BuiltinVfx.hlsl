@@ -3096,7 +3096,7 @@ float4 PSMesh(VfxMeshVertexOutput input) : SV_Target0
 struct VfxCpuVertexInput
 {
     float3 Position : TEXCOORD0;
-    float3 Color : TEXCOORD1;
+    float4 Color : TEXCOORD1;
     float3 Data : TEXCOORD2;
 };
 
@@ -3125,7 +3125,7 @@ VfxCpuVertexOutput VSCpu(VfxCpuVertexInput input)
 {
     VfxCpuVertexOutput output;
     output.Position = mul(CpuViewProjection, float4(input.Position, 1.0F));
-    output.Tint = float4(input.Color, 1.0F);
+    output.Tint = input.Color;
     output.Data = input.Data;
     return output;
 }

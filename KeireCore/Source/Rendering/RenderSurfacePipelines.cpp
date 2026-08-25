@@ -10,12 +10,27 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 namespace
 {
+    [[nodiscard]] std::uint32_t DynamicUploadCapacity(const std::size_t required)
+    {
+        if (required == 0 || required > std::numeric_limits<std::uint32_t>::max())
+            throw std::invalid_argument("Dynamic GPU upload exceeds SDL's 32-bit buffer limit.");
+        auto capacity = std::uint32_t{256};
+        while (capacity < required && capacity <= std::numeric_limits<std::uint32_t>::max() / 2U)
+            capacity *= 2U;
+        return capacity < required ? static_cast<std::uint32_t>(required) : capacity;
+    }
+
     [[nodiscard]] Keire::Ref<Keire::Texture2DAsset> CreateDefaultSky()
     {
         constexpr std::uint32_t width = 256;
@@ -247,6 +262,186 @@ namespace Keire::RenderBackend
         resources = {};
     }
 
+    void RenderSharedState::ReleaseDynamicUploadResources(SurfaceDynamicUploadResources& resources) noexcept
+    {
+        if (Device)
+        {
+            for (auto& batch : resources.InstanceBatches)
+                if (batch.Buffer)
+                    SDL_ReleaseGPUBuffer(Device, batch.Buffer);
+            if (resources.InstanceTransfer)
+                SDL_ReleaseGPUTransferBuffer(Device, resources.InstanceTransfer);
+            if (resources.CpuVfxVertices.Buffer)
+                SDL_ReleaseGPUBuffer(Device, resources.CpuVfxVertices.Buffer);
+            if (resources.CpuVfxTransfer)
+                SDL_ReleaseGPUTransferBuffer(Device, resources.CpuVfxTransfer);
+        }
+        resources = {};
+    }
+
+    SDL_GPUBuffer* RenderSharedState::UploadDynamicBuffer(SDL_GPUCommandBuffer* commands, DynamicGpuBuffer& buffer,
+                                                          SDL_GPUTransferBuffer*& transfer,
+                                                          const std::span<const std::byte> bytes,
+                                                          const SDL_GPUBufferUsageFlags usage, const char* diagnostic)
+    {
+        if (!commands)
+            throw std::invalid_argument("A dynamic GPU upload requires an active command buffer.");
+        const auto required = DynamicUploadCapacity(bytes.size());
+        if (!buffer.Buffer || !transfer || buffer.CapacityBytes < required)
+        {
+            SDL_GPUBufferCreateInfo bufferInformation{};
+            bufferInformation.usage = usage;
+            bufferInformation.size = required;
+            auto* replacementBuffer = SDL_CreateGPUBuffer(Device, &bufferInformation);
+            if (!replacementBuffer)
+                throw std::runtime_error(std::string("SDL_CreateGPUBuffer(") + diagnostic +
+                                         ") failed: " + LastSdlError());
+            SDL_GPUTransferBuffer* replacementTransfer = nullptr;
+            try
+            {
+                SDL_GPUTransferBufferCreateInfo transferInformation{};
+                transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+                transferInformation.size = required;
+                replacementTransfer = SDL_CreateGPUTransferBuffer(Device, &transferInformation);
+                if (!replacementTransfer)
+                {
+                    throw std::runtime_error(std::string("SDL_CreateGPUTransferBuffer(") + diagnostic +
+                                             ") failed: " + LastSdlError());
+                }
+            }
+            catch (...)
+            {
+                SDL_ReleaseGPUBuffer(Device, replacementBuffer);
+                throw;
+            }
+            Retire(std::exchange(buffer.Buffer, replacementBuffer));
+            Retire(std::exchange(transfer, replacementTransfer));
+            buffer.CapacityBytes = required;
+            ++Statistics.DynamicUploadBufferReallocations;
+        }
+
+        auto* mapped = SDL_MapGPUTransferBuffer(Device, transfer, true);
+        if (!mapped)
+            throw std::runtime_error(std::string("SDL_MapGPUTransferBuffer(") + diagnostic +
+                                     ") failed: " + LastSdlError());
+        std::memcpy(mapped, bytes.data(), bytes.size());
+        SDL_UnmapGPUTransferBuffer(Device, transfer);
+
+        auto* copy = SDL_BeginGPUCopyPass(commands);
+        if (!copy)
+            throw std::runtime_error(std::string("SDL_BeginGPUCopyPass(") + diagnostic + ") failed: " + LastSdlError());
+        const SDL_GPUTransferBufferLocation source{transfer, 0};
+        const SDL_GPUBufferRegion destination{buffer.Buffer, 0, static_cast<std::uint32_t>(bytes.size())};
+        SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+        SDL_EndGPUCopyPass(copy);
+        Statistics.DynamicUploadBytes += bytes.size();
+        return buffer.Buffer;
+    }
+
+    void RenderSharedState::UploadSceneInstances(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                 PreparedSceneDrawLists& draws,
+                                                 const std::span<const GpuInstanceUniform> instances)
+    {
+        if (instances.empty())
+            return;
+        if (!commands)
+            throw std::invalid_argument("Scene instance uploads require an active command buffer.");
+        const auto bytes = std::as_bytes(instances);
+        const auto requiredTransferCapacity = DynamicUploadCapacity(bytes.size());
+        auto& resources = surface.DynamicUploads;
+        if (!resources.InstanceTransfer || resources.InstanceTransferCapacityBytes < requiredTransferCapacity)
+        {
+            SDL_GPUTransferBufferCreateInfo information{};
+            information.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            information.size = requiredTransferCapacity;
+            auto* replacement = SDL_CreateGPUTransferBuffer(Device, &information);
+            if (!replacement)
+                throw std::runtime_error("SDL_CreateGPUTransferBuffer(scene instances) failed: " + LastSdlError());
+            Retire(std::exchange(resources.InstanceTransfer, replacement));
+            resources.InstanceTransferCapacityBytes = requiredTransferCapacity;
+            ++Statistics.DynamicUploadBufferReallocations;
+        }
+
+        std::vector<PreparedSceneBatch*> uploadBatches;
+        uploadBatches.reserve(draws.Opaque.Batches.size() + draws.Transparent.Batches.size());
+        const auto collect = [&](PreparedSceneDrawList& list)
+        {
+            for (auto& batch : list.Batches)
+                if (batch.InstanceDataCount != 0)
+                    uploadBatches.push_back(std::addressof(batch));
+        };
+        collect(draws.Opaque);
+        collect(draws.Transparent);
+        resources.InstanceBatches.resize(std::max(resources.InstanceBatches.size(), uploadBatches.size()));
+
+        for (std::size_t index = 0; index < uploadBatches.size(); ++index)
+        {
+            auto& allocation = resources.InstanceBatches[index];
+            const auto requiredBytes =
+                static_cast<std::size_t>(uploadBatches[index]->InstanceDataCount) * sizeof(GpuInstanceUniform);
+            const auto requiredCapacity = DynamicUploadCapacity(requiredBytes);
+            if (!allocation.Buffer || allocation.CapacityBytes < requiredCapacity)
+            {
+                SDL_GPUBufferCreateInfo information{};
+                information.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+                information.size = requiredCapacity;
+                auto* replacement = SDL_CreateGPUBuffer(Device, &information);
+                if (!replacement)
+                    throw std::runtime_error("SDL_CreateGPUBuffer(scene instance batch) failed: " + LastSdlError());
+                Retire(std::exchange(allocation.Buffer, replacement));
+                allocation.CapacityBytes = requiredCapacity;
+                ++Statistics.DynamicUploadBufferReallocations;
+            }
+            uploadBatches[index]->InstanceBuffer = allocation.Buffer;
+        }
+
+        auto* mapped = SDL_MapGPUTransferBuffer(Device, resources.InstanceTransfer, true);
+        if (!mapped)
+            throw std::runtime_error("SDL_MapGPUTransferBuffer(scene instances) failed: " + LastSdlError());
+        std::memcpy(mapped, bytes.data(), bytes.size());
+        SDL_UnmapGPUTransferBuffer(Device, resources.InstanceTransfer);
+
+        auto* copy = SDL_BeginGPUCopyPass(commands);
+        if (!copy)
+            throw std::runtime_error("SDL_BeginGPUCopyPass(scene instances) failed: " + LastSdlError());
+        for (const auto* batch : uploadBatches)
+        {
+            const auto offset = static_cast<std::uint32_t>(static_cast<std::size_t>(batch->InstanceDataFirst) *
+                                                           sizeof(GpuInstanceUniform));
+            const auto byteSize = static_cast<std::uint32_t>(static_cast<std::size_t>(batch->InstanceDataCount) *
+                                                             sizeof(GpuInstanceUniform));
+            const SDL_GPUTransferBufferLocation source{resources.InstanceTransfer, offset};
+            const SDL_GPUBufferRegion destination{batch->InstanceBuffer, 0, byteSize};
+            SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+        }
+        SDL_EndGPUCopyPass(copy);
+        Statistics.DynamicUploadBytes += bytes.size();
+    }
+
+    void RenderSharedState::Retire(SDL_GPUBuffer* buffer) noexcept
+    {
+        if (!buffer)
+            return;
+        if (Open && Device && FrameActive)
+            FrameTransientBuffers.push_back(buffer);
+        else if (Open && Device && !InFlight.empty())
+            InFlight.back().TransientBuffers.push_back(buffer);
+        else if (Device)
+            SDL_ReleaseGPUBuffer(Device, buffer);
+    }
+
+    void RenderSharedState::Retire(SDL_GPUTransferBuffer* transfer) noexcept
+    {
+        if (!transfer)
+            return;
+        if (Open && Device && FrameActive)
+            FrameUploadTransfers.push_back(transfer);
+        else if (Open && Device && !InFlight.empty())
+            InFlight.back().TransientTransferBuffers.push_back(transfer);
+        else if (Device)
+            SDL_ReleaseGPUTransferBuffer(Device, transfer);
+    }
+
     void RenderSharedState::Retire(ForwardPlusGpuResources resources) noexcept
     {
         if (resources.Empty())
@@ -362,6 +557,12 @@ namespace Keire::RenderBackend
     {
         Retire(std::exchange(surface.Resources, {}));
         Retire(std::exchange(surface.ForwardPlus, {}));
+        for (auto& batch : surface.DynamicUploads.InstanceBatches)
+            Retire(std::exchange(batch.Buffer, nullptr));
+        Retire(std::exchange(surface.DynamicUploads.InstanceTransfer, nullptr));
+        Retire(std::exchange(surface.DynamicUploads.CpuVfxVertices.Buffer, nullptr));
+        Retire(std::exchange(surface.DynamicUploads.CpuVfxTransfer, nullptr));
+        surface.DynamicUploads = {};
         surface.Owner.reset();
         surface.Width = 0;
         surface.Height = 0;

@@ -695,6 +695,7 @@ Assert-True ($premakePolicy.Contains('buildoptions { "-fms-runtime-lib=dll_dbg" 
     "Clang uses the dependency-compatible Windows C++ runtime"
 Assert-True ($premakePolicy.Contains('function GeneratorRootPath(path)') -and
              $premakePolicy.Contains('SelectedToolset ~= "msc"') -and
+             $premakePolicy.Contains('os.host() ~= "macosx"') -and
              $premakePolicy.Contains('path:gsub("^%.%./", "")') -and
              $premakePolicy.Contains('local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")') -and
              $premakePolicy.Contains('return ":" .. library') -and

@@ -22,11 +22,12 @@
 
 namespace
 {
-    // Dense project shaders can bind sixteen or more samplers per draw. Keep the command-buffer-local D3D12
-    // descriptor working set below SDL's rollover threshold instead of waiting for a failed binding or corrupted
-    // texture table before continuing the surface.
-    constexpr std::size_t MaximumSceneBatchesPerCommandBuffer = 12U;
+    // Dense project shaders can bind sixteen or more samplers per draw. CPU VFX now coalesces compatible particles,
+    // leaving enough command-buffer-local D3D12 descriptor capacity for this scene budget without the submission
+    // overhead of the former twelve-batch workaround.
+    constexpr std::size_t MaximumSceneBatchesPerCommandBuffer = 32U;
 
+    using Keire::RenderBackend::GeometryDetail::BuildFrustumPlanes;
     using Keire::RenderBackend::GeometryDetail::IsFrustumVisible;
     using Keire::RenderBackend::GeometryDetail::ProjectedHeight;
 
@@ -116,16 +117,27 @@ namespace Keire::RenderBackend
                 continue;
             const auto viewFromLocal = Math::Multiply(camera.View, item.World);
             const auto clipFromLocal = Math::Multiply(camera.Projection, viewFromLocal);
+            const auto frustum = BuildFrustumPlanes(clipFromLocal);
             std::uint32_t firstSubmesh = 0;
             std::uint32_t submeshCount = static_cast<std::uint32_t>(mesh.Submeshes.size());
+            const MeshBounds* selectedBounds = mesh.BoundsEncloseSubmeshes ? std::addressof(mesh.Bounds) : nullptr;
             if (!mesh.Lods.empty())
             {
                 const auto height = ProjectedHeight(viewFromLocal, camera.Projection, mesh.Lods.front().Bounds);
                 const auto selected =
                     std::ranges::find_if(mesh.Lods, [&](const auto& lod) { return height >= lod.MinimumScreenHeight; });
-                const auto& lod = selected != mesh.Lods.end() ? *selected : mesh.Lods.back();
+                const auto lodIndex = selected != mesh.Lods.end()
+                                          ? static_cast<std::size_t>(selected - mesh.Lods.begin())
+                                          : mesh.Lods.size() - 1U;
+                const auto& lod = mesh.Lods[lodIndex];
                 firstSubmesh = lod.FirstSubmesh;
                 submeshCount = lod.SubmeshCount;
+                selectedBounds = mesh.LodBoundsEncloseSubmeshes[lodIndex] ? std::addressof(lod.Bounds) : nullptr;
+            }
+            if (selectedBounds && !IsFrustumVisible(frustum, *selectedBounds, item.AlwaysVisible))
+            {
+                Statistics.CulledSubmeshes += submeshCount;
+                continue;
             }
             for (std::uint32_t offset = 0; offset < submeshCount; ++offset)
             {
@@ -136,14 +148,14 @@ namespace Keire::RenderBackend
                     materialId = item.Materials[submesh.MaterialSlot];
                 else if (submesh.MaterialSlot < mesh.DefaultMaterials.size())
                     materialId = mesh.DefaultMaterials[submesh.MaterialSlot];
-                MaterialSurfaceState surfaceState;
-                if (const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr)
-                    surfaceState = material->Surface;
-                if (!IsFrustumVisible(clipFromLocal, submesh.Bounds, item.AlwaysVisible))
+                if (!IsFrustumVisible(frustum, submesh.Bounds, item.AlwaysVisible))
                 {
                     ++Statistics.CulledSubmeshes;
                     continue;
                 }
+                MaterialSurfaceState surfaceState;
+                if (const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr)
+                    surfaceState = material->Surface;
                 const Vector3 center{(submesh.Bounds.Minimum.X + submesh.Bounds.Maximum.X) * 0.5F,
                                      (submesh.Bounds.Minimum.Y + submesh.Bounds.Maximum.Y) * 0.5F,
                                      (submesh.Bounds.Minimum.Z + submesh.Bounds.Maximum.Z) * 0.5F};
@@ -182,6 +194,8 @@ namespace Keire::RenderBackend
         sortDraws(result.Opaque.Draws);
         sortDraws(result.Transparent.Draws);
 
+        std::vector<GpuInstanceUniform> instanceData;
+        instanceData.reserve(result.Opaque.Draws.size() + result.Transparent.Draws.size());
         const auto prepareBatches = [&](PreparedSceneDrawList& list)
         {
             std::vector<InstanceBatchKey> instanceKeys;
@@ -202,27 +216,29 @@ namespace Keire::RenderBackend
                 const auto drawIndex = static_cast<std::size_t>(batch.First);
                 const auto& draw = list.Draws[drawIndex];
                 const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
-                SDL_GPUBuffer* instanceBuffer = nullptr;
+                std::uint32_t instanceDataFirst = 0;
+                std::uint32_t instanceDataCount = 0;
                 if (material && material->UsesInstancing)
                 {
-                    std::vector<GpuInstanceUniform> instances;
-                    instances.reserve(batch.Count);
+                    if (instanceData.size() > std::numeric_limits<std::uint32_t>::max() - batch.Count)
+                        throw std::length_error("Scene instance data exceeds the renderer's 32-bit draw limit.");
+                    instanceDataFirst = static_cast<std::uint32_t>(instanceData.size());
+                    instanceDataCount = batch.Count;
                     for (std::uint32_t instance = 0; instance < batch.Count; ++instance)
                     {
                         const auto& instanceDraw = list.Draws[drawIndex + instance];
-                        instances.push_back({instanceDraw.Item->World,
-                                             Transpose(Math::Inverse(instanceDraw.Item->World)),
-                                             instanceDraw.Item->Tint});
+                        instanceData.push_back({instanceDraw.Item->World,
+                                                Transpose(Math::Inverse(instanceDraw.Item->World)),
+                                                instanceDraw.Item->Tint});
                     }
-                    instanceBuffer = UploadBuffer(commands, std::as_bytes(std::span(instances)),
-                                                  SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
-                    FrameTransientBuffers.push_back(instanceBuffer);
                 }
-                list.Batches.push_back({batch.First, batch.Count, batch.GpuFirstInstance(), instanceBuffer});
+                list.Batches.push_back({batch.First, batch.Count, batch.GpuFirstInstance(), instanceDataFirst,
+                                        instanceDataCount, nullptr});
             }
         };
         prepareBatches(result.Opaque);
         prepareBatches(result.Transparent);
+        UploadSceneInstances(commands, surface, result, instanceData);
 
         if (packet.Environment.Environment)
             (void)ResolveTexture(packet.Environment.Environment);
@@ -665,6 +681,8 @@ namespace Keire::RenderBackend
         const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
         PreparedSceneDrawLists preparedDraws;
         PreparedCpuVfx preparedCpuVfx;
+        bool sampledDepthRecorded = false;
+        bool gpuDepthCollisionRequired = false;
         if (request != Requests.end())
         {
             auto started = std::chrono::steady_clock::now();
@@ -672,13 +690,22 @@ namespace Keire::RenderBackend
             Statistics.SkinningPreparationMilliseconds +=
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
             started = std::chrono::steady_clock::now();
-            PrepareGpuVfx(commands, request->Packet.Vfx, surface);
-            preparedCpuVfx = PrepareCpuVfxDraws(commands, request->Packet);
-            Statistics.VfxPreparationMilliseconds +=
-                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
-            started = std::chrono::steady_clock::now();
             preparedDraws = PrepareSceneDrawLists(commands, surface, request->Packet);
             Statistics.DrawPreparationMilliseconds +=
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+            gpuDepthCollisionRequired = RequiresGpuDepthCollision(request->Packet.Vfx.GpuEmitters());
+            if (gpuDepthCollisionRequired && !surface.SampledDepthValid)
+            {
+                started = std::chrono::steady_clock::now();
+                RecordSampledDepth(commands, surface, request->Packet, preparedDraws.Opaque);
+                Statistics.DepthPassMilliseconds +=
+                    std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                sampledDepthRecorded = surface.SampledDepthValid;
+            }
+            started = std::chrono::steady_clock::now();
+            PrepareGpuVfx(commands, request->Packet.Vfx, surface);
+            preparedCpuVfx = PrepareCpuVfxDraws(commands, surface, request->Packet);
+            Statistics.VfxPreparationMilliseconds +=
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
         }
         ShadowFrameData shadows;
@@ -719,35 +746,40 @@ namespace Keire::RenderBackend
                             contentHash *= 1099511628211ULL;
                         }
                     };
-                    hashValue(surface.Width);
-                    hashValue(surface.Height);
-                    hashValue(request->Packet.BakedLighting.High());
-                    hashValue(request->Packet.BakedLighting.Low());
-                    hashValue(request->Packet.Lighting.Cookie.High());
-                    hashValue(request->Packet.Lighting.Cookie.Low());
-                    for (const auto value : request->Packet.Camera.View.Elements)
-                        hashValue(value);
-                    for (const auto value : request->Packet.Camera.Projection.Elements)
-                        hashValue(value);
-                    for (const auto& light : request->Packet.LocalLights)
+                    const bool hasLocalLights = !request->Packet.LocalLights.empty();
+                    hashValue(hasLocalLights);
+                    if (hasLocalLights)
                     {
-                        hashValue(light.Position.X);
-                        hashValue(light.Position.Y);
-                        hashValue(light.Position.Z);
-                        hashValue(light.Range);
-                        hashValue(light.Direction.X);
-                        hashValue(light.Direction.Y);
-                        hashValue(light.Direction.Z);
-                        hashValue(light.OuterConeCosine);
-                        hashValue(light.ColorAndIntensity.Red);
-                        hashValue(light.ColorAndIntensity.Green);
-                        hashValue(light.ColorAndIntensity.Blue);
-                        hashValue(light.ColorAndIntensity.Alpha);
-                        hashValue(light.InnerConeCosine);
-                        hashValue(light.Type);
-                        hashValue(light.Cookie.High());
-                        hashValue(light.Cookie.Low());
-                        hashValue(light.ContactShadows);
+                        hashValue(surface.Width);
+                        hashValue(surface.Height);
+                        hashValue(request->Packet.BakedLighting.High());
+                        hashValue(request->Packet.BakedLighting.Low());
+                        hashValue(request->Packet.Lighting.Cookie.High());
+                        hashValue(request->Packet.Lighting.Cookie.Low());
+                        for (const auto value : request->Packet.Camera.View.Elements)
+                            hashValue(value);
+                        for (const auto value : request->Packet.Camera.Projection.Elements)
+                            hashValue(value);
+                        for (const auto& light : request->Packet.LocalLights)
+                        {
+                            hashValue(light.Position.X);
+                            hashValue(light.Position.Y);
+                            hashValue(light.Position.Z);
+                            hashValue(light.Range);
+                            hashValue(light.Direction.X);
+                            hashValue(light.Direction.Y);
+                            hashValue(light.Direction.Z);
+                            hashValue(light.OuterConeCosine);
+                            hashValue(light.ColorAndIntensity.Red);
+                            hashValue(light.ColorAndIntensity.Green);
+                            hashValue(light.ColorAndIntensity.Blue);
+                            hashValue(light.ColorAndIntensity.Alpha);
+                            hashValue(light.InnerConeCosine);
+                            hashValue(light.Type);
+                            hashValue(light.Cookie.High());
+                            hashValue(light.Cookie.Low());
+                            hashValue(light.ContactShadows);
+                        }
                     }
                     Statistics.VisibleLocalLights += static_cast<std::uint32_t>(request->Packet.LocalLights.size());
                     if (surface.ForwardPlusContentValid && surface.ForwardPlusContentHash == contentHash &&
@@ -764,8 +796,18 @@ namespace Keire::RenderBackend
                     for (const auto& light : request->Packet.LocalLights)
                         localLightBounds.push_back(
                             {Math::TransformPoint(request->Packet.Camera.View, light.Position), light.Range});
-                    const auto tiles = BuildForwardPlusCpuTiles(surface.Width, surface.Height,
-                                                                request->Packet.Camera.Projection, localLightBounds);
+                    const auto tiles = [&]
+                    {
+                        if (hasLocalLights)
+                            return BuildForwardPlusCpuTiles(surface.Width, surface.Height,
+                                                            request->Packet.Camera.Projection, localLightBounds);
+                        ForwardPlusTileGrid empty;
+                        empty.Columns = 1;
+                        empty.Rows = 1;
+                        empty.Offsets.push_back(0);
+                        empty.Counts.push_back(0);
+                        return empty;
+                    }();
                     Statistics.OverflowedLightTiles += tiles.OverflowedTiles;
                     std::vector<AssetLocalLightUniform> gpuLights(
                         std::max<std::size_t>(1, request->Packet.LocalLights.size()));
@@ -927,18 +969,13 @@ namespace Keire::RenderBackend
                     {
                         if (chunk != 0U)
                             acquireContinuation();
-                        const auto finalChunk = chunk + 1U == chunkTotal;
                         SDL_GPUColorTargetInfo color{};
                         color.texture = surface.Resources.MultisampleHdrColor ? surface.Resources.MultisampleHdrColor
                                                                               : surface.Resources.HdrColor;
                         color.clear_color = {surface.FrameClearColor.Red, surface.FrameClearColor.Green,
                                              surface.FrameClearColor.Blue, surface.FrameClearColor.Alpha};
                         color.load_op = chunk == 0U ? SDL_GPU_LOADOP_CLEAR : SDL_GPU_LOADOP_LOAD;
-                        color.store_op = surface.Resources.MultisampleHdrColor && finalChunk
-                                             ? SDL_GPU_STOREOP_RESOLVE_AND_STORE
-                                             : SDL_GPU_STOREOP_STORE;
-                        color.resolve_texture =
-                            surface.Resources.MultisampleHdrColor && finalChunk ? surface.Resources.HdrColor : nullptr;
+                        color.store_op = SDL_GPU_STOREOP_STORE;
                         SDL_GPUDepthStencilTargetInfo depth{};
                         SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
                         if (surface.Resources.Depth)
@@ -972,8 +1009,10 @@ namespace Keire::RenderBackend
                 if (frameGraphPass == SceneFrameGraph.ResolveDepth)
                 {
                     const auto started = std::chrono::steady_clock::now();
-                    if (request != Requests.end())
-                        RecordSampledDepth(commands, surface, request->Packet);
+                    if (request != Requests.end() && gpuDepthCollisionRequired && !sampledDepthRecorded)
+                        RecordSampledDepth(commands, surface, request->Packet, preparedDraws.Opaque);
+                    else if (!gpuDepthCollisionRequired)
+                        surface.SampledDepthValid = false;
                     Statistics.DepthPassMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;

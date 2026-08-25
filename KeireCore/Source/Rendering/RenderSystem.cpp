@@ -169,7 +169,8 @@ namespace Keire
         return CreateRef<RenderView>(std::make_unique<RenderView::Impl>(CreateSurface(std::move(specification))));
     }
 
-    void RenderSystem::Submit(const SceneRenderRequest& request) { m_Impl->State->Submit(std::move(request)); }
+    void RenderSystem::Submit(const SceneRenderRequest& request) { m_Impl->State->Submit(request); }
+    void RenderSystem::Submit(SceneRenderRequest&& request) { m_Impl->State->Submit(std::move(request)); }
     void RenderSystem::SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree)
     {
         auto& state = *m_Impl->State;

@@ -3,6 +3,7 @@
 #include <KeireHubRuntimeInternal/Persistence.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <limits>
 
@@ -81,7 +82,8 @@ namespace KeireHub
 
         [[nodiscard]] std::string FileETag(const std::uint64_t size, const std::filesystem::file_time_type modified)
         {
-            return "\"file-" + std::to_string(size) + '-' + std::to_string(modified.time_since_epoch().count()) + "\"";
+            return "\"file-" + std::to_string(size) + '-' +
+                   std::to_string(static_cast<std::int64_t>(modified.time_since_epoch().count())) + "\"";
         }
     } // namespace
 

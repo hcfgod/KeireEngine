@@ -154,7 +154,7 @@ namespace Keire::RenderBackend
             buffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
             const std::array attributes{
                 SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuRenderVertex, Position)},
-                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuRenderVertex, Color)},
+                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuRenderVertex, Color)},
                 SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuRenderVertex, Normal)}};
 
             SDL_GPUGraphicsPipelineCreateInfo information{};
