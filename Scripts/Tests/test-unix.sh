@@ -778,6 +778,10 @@ assert_false grep -F -q 'filter { "system:linux or macosx", "toolset:gcc or clan
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'linkoptions { "-Wl,-rpath,@executable_path" }' \
   "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'local function LinkCoralNetHost()' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'LinkDependency(DependencyManifest.CoralNetHostRuntime)' \
+  "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'filter { "system:windows or linux" }' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'macRuntimeDirectory .. "/libnethost.dylib"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'CoralNetHostRuntime = "../Build/Dependencies/coral-nethost/$nethost_runtime_name"' \
   "$ROOT/Scripts/Unix/dependencies.sh"

@@ -121,6 +121,19 @@ local function LinkDependencies(paths)
     end
 end
 
+local function LinkCoralNetHost()
+    -- The macOS static nethost archive defines weak libc++ exception RTTI. On x86_64 that can preempt the system
+    -- libc++ definitions and break exception matching across first-party archives. Link the staged @rpath dylib on
+    -- Apple platforms; Windows and Linux retain their established native host libraries.
+    filter "system:macosx"
+        LinkDependency(DependencyManifest.CoralNetHostRuntime)
+
+    filter { "system:windows or linux" }
+        LinkDependency(DependencyManifest.CoralNetHostLibrary)
+
+    filter {}
+end
+
 function LinkKeireCore()
     links(CoreArchiveTargets)
     links { DearImGuiProject, ZstdProject }
@@ -156,7 +169,7 @@ function LinkKeireCore()
         LinkDependencies(DependencyManifest.RecastReleaseLibraries)
 
     filter {}
-        LinkDependency(DependencyManifest.CoralNetHostLibrary)
+        LinkCoralNetHost()
 
     filter "system:windows"
         links { "crypt32", "winhttp" }

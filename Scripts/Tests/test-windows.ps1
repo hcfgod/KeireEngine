@@ -548,6 +548,10 @@ $distributionPublisherProject = Get-Content `
     (Join-Path (Get-RepositoryRoot) `
         "Services\KeireDistributionService\Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
+Assert-True ($premakePolicy.Contains('local function LinkCoralNetHost()') -and
+             $premakePolicy.Contains('LinkDependency(DependencyManifest.CoralNetHostRuntime)') -and
+             $premakePolicy.Contains('filter { "system:windows or linux" }')) `
+    "Premake links macOS against the nethost dylib without changing Windows or Linux native host linkage"
 $unixDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\dependencies.sh") -Raw
 $windowsDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\dependencies.ps1") -Raw
 Assert-True ($unixDependencies.Contains('CPP_RTTI_ENABLED=ON') -and
