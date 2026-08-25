@@ -2,6 +2,8 @@
 
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorPanels.h"
+#include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
 #include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
@@ -10,6 +12,7 @@
 #include "KeireClient/Editor/ReplayPanelState.h"
 
 #include "KeireInternal/Build/PlayerSupport.h"
+#include "KeireInternal/Diagnostics/GraphicsCaptureInternal.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
@@ -1141,6 +1144,16 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                 ui.Text("Visibility   " + std::to_string(statistics.VisibleSubmeshes) + " visible / " +
                         std::to_string(statistics.CulledSubmeshes) + " culled / " +
                         std::to_string(statistics.InstanceBatches) + " batches");
+                const auto occlusion = KeireEditor::BuildGpuOcclusionDiagnostics(renderer->Capabilities(), statistics);
+                ui.TextColored(occlusion.Warning ? m_Theme.Warning
+                               : occlusion.State == KeireEditor::GpuOcclusionDiagnosticState::Active
+                                   ? m_Theme.Success
+                                   : m_Theme.MutedText,
+                               occlusion.Status);
+                ui.Text("GPU visibility " + occlusion.Visibility);
+                ui.Text("HZB workload   " + occlusion.Pyramid);
+                ui.Text("Readback       " + occlusion.Readback);
+                ui.Text(occlusion.Recording);
                 ui.Text("Frame graph  " + std::to_string(statistics.ExecutedFrameGraphPasses) + " / " +
                         std::to_string(statistics.PlannedFrameGraphPasses) + " passes / " +
                         std::to_string(statistics.FrameGraphTransitions) + " transitions");
@@ -1381,12 +1394,63 @@ void EditorWorkspaceLayer::DrawRenderGraph(Keire::UiFrame& ui)
         }
 
         const auto snapshot = renderer->CaptureFrameGraph();
+        const auto statistics = renderer->Statistics();
+        const auto sceneSurface = m_SceneViewportPanel ? m_SceneViewportPanel->OcclusionDiagnostics()
+                                                       : std::optional<Keire::GpuOcclusionSurfaceDiagnostics>{};
+        const auto occlusion =
+            KeireEditor::BuildGpuOcclusionPanelDiagnostics(renderer->Capabilities(), statistics, sceneSurface);
+        const auto occlusionStatus = sceneSurface ? "Scene surface: " + occlusion.Status : occlusion.Status;
+        ui.TextColored(occlusion.Warning                                                     ? m_Theme.Warning
+                       : occlusion.State == KeireEditor::GpuOcclusionDiagnosticState::Active ? m_Theme.Success
+                                                                                             : m_Theme.MutedText,
+                       occlusionStatus);
+        ui.Text(occlusion.Pyramid + " | " + occlusion.Readback);
         ui.Text("Passes: " + std::to_string(snapshot.Passes.size()) +
                 " | Resources: " + std::to_string(snapshot.Resources.size()));
         ui.Text("Transient: " + std::to_string(snapshot.ActiveTransientBytes) +
                 " bytes | Unaliased: " + std::to_string(snapshot.TheoreticalUnaliasedBytes) +
                 " | Saved: " + std::to_string(snapshot.SavedAliasingBytes));
         ui.Text("Fence-retired: " + std::to_string(snapshot.FenceRetiredBytes) + " bytes");
+
+        const auto capture = Keire::Internal::QueryGraphicsCaptureStatus();
+        const auto captureProvider = capture.Provider == Keire::Internal::GraphicsCaptureProvider::RenderDoc
+                                         ? std::string_view("RenderDoc")
+                                         : std::string_view("none");
+        const auto captureState = [&capture]() -> std::string_view
+        {
+            switch (capture.State)
+            {
+            case Keire::Internal::GraphicsCaptureState::Unavailable:
+                return "unavailable; inject RenderDoc before launching the editor";
+            case Keire::Internal::GraphicsCaptureState::Ready:
+                return "ready for a one-frame GPU capture";
+            case Keire::Internal::GraphicsCaptureState::Capturing:
+                return "capture active";
+            }
+            return "state unavailable";
+        }();
+        ui.TextColored(capture.State == Keire::Internal::GraphicsCaptureState::Ready       ? m_Theme.Success
+                       : capture.State == Keire::Internal::GraphicsCaptureState::Capturing ? m_Theme.Warning
+                                                                                           : m_Theme.MutedText,
+                       "GPU capture provider: " + std::string(captureProvider) + " / " + std::string(captureState));
+        if (auto disabled = ui.BeginDisabled(capture.State != Keire::Internal::GraphicsCaptureState::Ready); disabled)
+        {
+            if (ui.Button("Capture Next GPU Frame"))
+            {
+                switch (Keire::Internal::QueueGraphicsCaptureNextFrame())
+                {
+                case Keire::Internal::GraphicsCaptureRequestResult::Unavailable:
+                    m_RenderGraphStatus = "GPU capture unavailable; inject RenderDoc before launching the editor";
+                    break;
+                case Keire::Internal::GraphicsCaptureRequestResult::CaptureAlreadyActive:
+                    m_RenderGraphStatus = "A GPU capture is already active";
+                    break;
+                case Keire::Internal::GraphicsCaptureRequestResult::Queued:
+                    m_RenderGraphStatus = "RenderDoc capture queued for the next submitted GPU frame";
+                    break;
+                }
+            }
+        }
 
         if (ui.Button("Export JSON"))
         {

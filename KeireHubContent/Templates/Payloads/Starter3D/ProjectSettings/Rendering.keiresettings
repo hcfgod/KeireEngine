@@ -7,5 +7,6 @@
   ],
   "ambientIntensity": 0.45,
   "exposure": 1.0,
-  "schemaVersion": 1
+  "gpuOcclusion": "automatic",
+  "schemaVersion": 3
 }

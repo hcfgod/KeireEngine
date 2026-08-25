@@ -195,6 +195,7 @@ namespace KeireEditor
         void Draw(Keire::UiFrame& ui);
         [[nodiscard]] const Keire::UiItemRect& ViewportRect() const noexcept { return m_ViewportRect; }
         [[nodiscard]] const Keire::RenderCamera& LastCamera() const noexcept { return m_LastCamera; }
+        [[nodiscard]] std::optional<Keire::GpuOcclusionSurfaceDiagnostics> OcclusionDiagnostics() const noexcept;
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:

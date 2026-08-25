@@ -18,7 +18,7 @@ assert_false() {
   fi
 }
 
-for generator in builtin-shaders builtin-skinning builtin-vfx; do
+for generator in builtin-shaders builtin-skinning builtin-vfx builtin-occlusion; do
   assert_true grep -F -q 'generated-content-cache.sh' "$ROOT/Scripts/Unix/$generator.sh"
   assert_true grep -F -q 'generated_content_is_current' "$ROOT/Scripts/Unix/$generator.sh"
   assert_true grep -F -q 'generated_content_acquire_lock' "$ROOT/Scripts/Unix/$generator.sh"

@@ -1,5 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
+#include "KeireInternal/Diagnostics/TelemetryInternal.h"
+
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -31,6 +33,13 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::ExecuteFrame(ImDrawData* drawData)
     {
+        KEIRE_TELEMETRY_ZONE_SCOPED("Execute render frame");
+        thread_local bool telemetryThreadNamed = false;
+        if (!telemetryThreadNamed)
+        {
+            Keire::Internal::TelemetrySetThreadName("Render owner");
+            telemetryThreadNamed = true;
+        }
         Statistics.CommandRecordingMilliseconds = 0.0F;
         Statistics.SkinningPreparationMilliseconds = 0.0F;
         Statistics.VfxPreparationMilliseconds = 0.0F;
@@ -46,6 +55,9 @@ namespace Keire::RenderBackend
         Statistics.UiRecordingMilliseconds = 0.0F;
         Statistics.GpuSubmissionMilliseconds = 0.0F;
         Statistics.GpuFrameMilliseconds = 0.0F;
+        Statistics.GpuOcclusionDepthPassMilliseconds = 0.0F;
+        Statistics.GpuOcclusionPyramidRecordingMilliseconds = 0.0F;
+        Statistics.GpuOcclusionCullingRecordingMilliseconds = 0.0F;
         Statistics.ForwardPlusCacheHits = 0;
         Statistics.FrameUploadSubmissions = 0;
         if (InjectDeviceLossAtNextFrame.exchange(false, std::memory_order_acq_rel))
@@ -79,7 +91,9 @@ namespace Keire::RenderBackend
                 Statistics.SkinningPreparationMilliseconds + Statistics.VfxPreparationMilliseconds +
                 Statistics.DrawPreparationMilliseconds + Statistics.ShadowRecordingMilliseconds +
                 Statistics.ForwardPlusCullingMilliseconds + Statistics.ScenePassMilliseconds +
-                Statistics.DepthPassMilliseconds + Statistics.ToneMapMilliseconds;
+                Statistics.DepthPassMilliseconds + Statistics.ToneMapMilliseconds +
+                Statistics.GpuOcclusionDepthPassMilliseconds + Statistics.GpuOcclusionPyramidRecordingMilliseconds +
+                Statistics.GpuOcclusionCullingRecordingMilliseconds;
             Statistics.CommandRecordingUnattributedMilliseconds =
                 std::max(0.0F, Statistics.CommandRecordingMilliseconds - attributedRecordingMilliseconds);
 
@@ -137,8 +151,9 @@ namespace Keire::RenderBackend
             InFlight.push_back({fence, std::move(PendingRetired), std::move(PendingRetiredMeshes),
                                 std::move(PendingRetiredSkins), std::move(PendingRetiredTextures),
                                 std::move(PendingRetiredPipelines), std::move(PendingRetiredForwardPlus),
-                                std::move(FrameTransientBuffers), std::move(FrameUploadTransfers), submissionStarted,
-                                Statistics.VfxGpuWorlds != 0, PendingRetiredBytes});
+                                std::move(FrameTransientBuffers), std::move(FrameUploadTransfers),
+                                std::move(FrameGpuOcclusionReadbacks), submissionStarted, Statistics.VfxGpuWorlds != 0,
+                                PendingRetiredBytes});
             PendingRetiredBytes = 0;
             PendingRetired.clear();
             PendingRetiredMeshes.clear();
@@ -148,6 +163,7 @@ namespace Keire::RenderBackend
             PendingRetiredForwardPlus.clear();
             FrameTransientBuffers.clear();
             FrameUploadTransfers.clear();
+            FrameGpuOcclusionReadbacks.clear();
             GpuSubmissionSerial = ActiveGpuSubmissionSerial;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
@@ -187,6 +203,7 @@ namespace Keire::RenderBackend
             for (auto* buffer : FrameTransientBuffers)
                 SDL_ReleaseGPUBuffer(Device, buffer);
             FrameTransientBuffers.clear();
+            FrameGpuOcclusionReadbacks.clear();
             // A canceled command buffer invalidates the emitter sequencing recorded for every world it touched.
             for (auto& [worldId, resources] : GpuVfxWorlds)
             {
@@ -274,6 +291,7 @@ namespace Keire::RenderBackend
         for (auto* transfer : FrameUploadTransfers)
             SDL_ReleaseGPUTransferBuffer(Device, transfer);
         FrameUploadTransfers.clear();
+        FrameGpuOcclusionReadbacks.clear();
         FrameUploadPass = nullptr;
         FrameUploadCommands = nullptr;
         for (auto& frame : InFlight)
@@ -409,6 +427,7 @@ namespace Keire::RenderBackend
         }
         GpuVfxWorlds.clear();
         ReleaseGpuVfxPipelines();
+        ReleaseGpuOcclusionPipelines();
         VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::NotStarted, std::memory_order_relaxed);
         if (ToneMapPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);

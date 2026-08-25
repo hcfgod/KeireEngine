@@ -1,5 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -27,10 +29,10 @@ void EditorWorkspaceLayer::DrawPerformanceOverlay(Keire::UiFrame& ui, const Keir
     const auto framesPerSecond = static_cast<std::uint32_t>(std::lround(1'000'000.0 / frame.DurationMicroseconds));
     const auto performanceColor =
         frameMilliseconds <= 16.7 ? m_Theme.Success : (frameMilliseconds <= 33.3 ? m_Theme.Warning : m_Theme.Error);
-    if (m_ShowAdvancedPerformanceOverlay && viewport.Size().Width >= 380.0F && viewport.Size().Height >= 230.0F)
+    if (m_ShowAdvancedPerformanceOverlay && viewport.Size().Width >= 380.0F && viewport.Size().Height >= 254.0F)
     {
         constexpr float width = 318.0F;
-        constexpr float height = 172.0F;
+        constexpr float height = 194.0F;
         const Keire::UiItemRect overlay{{viewport.Maximum.X - width - 12.0F, viewport.Minimum.Y + 48.0F},
                                         {viewport.Maximum.X - 12.0F, viewport.Minimum.Y + 48.0F + height}};
         ui.DrawFilledRectangle(overlay, {0.018F, 0.024F, 0.035F, 0.92F}, 7.0F);
@@ -67,6 +69,19 @@ void EditorWorkspaceLayer::DrawPerformanceOverlay(Keire::UiFrame& ui, const Keir
         row(overlay.Minimum.Y + 117.0F, "Animation", frame.AnimationMicroseconds, {0.95F, 0.62F, 0.28F, 1.0F});
         row(overlay.Minimum.Y + 137.0F, "Assets + audio", frame.AssetsMicroseconds + frame.AudioMicroseconds,
             {0.42F, 0.66F, 0.94F, 1.0F});
+        if (const auto renderer = Owner().Renderer())
+        {
+            const auto occlusion =
+                KeireEditor::BuildGpuOcclusionDiagnostics(renderer->Capabilities(), renderer->Statistics());
+            const auto occlusionColor = occlusion.Warning ? m_Theme.Warning
+                                        : occlusion.State == KeireEditor::GpuOcclusionDiagnosticState::Active
+                                            ? m_Theme.Success
+                                            : m_Theme.MutedText;
+            ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 163.0F}, occlusionColor,
+                               occlusion.Status, 10.0F, overlay);
+            ui.DrawOverlayText({overlay.Minimum.X + 12.0F, overlay.Minimum.Y + 178.0F}, m_Theme.MutedText,
+                               occlusion.Visibility, 10.0F, overlay);
+        }
         return;
     }
     const Keire::UiItemRect overlay{{viewport.Minimum.X + 12.0F, viewport.Minimum.Y + 12.0F},

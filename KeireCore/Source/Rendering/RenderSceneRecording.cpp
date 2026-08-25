@@ -1,3 +1,4 @@
+#include "KeireInternal/Diagnostics/TelemetryInternal.h"
 #include "KeireInternal/Rendering/ForwardPlusInternal.h"
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
@@ -638,7 +639,15 @@ namespace Keire::RenderBackend
                     item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
                 if (material->UsesInstancing)
-                    SDL_BindGPUVertexStorageBuffers(pass, 0, &batch.InstanceBuffer, 1);
+                {
+                    const std::array<std::uint32_t, 4> instanceParameters{
+                        batch.GpuOcclusion ? batch.GpuOcclusionInstanceBase : 0U, 0U, 0U, 0U};
+                    if (material->InstanceAddressingAbiVersion == 2U)
+                        SDL_PushGPUVertexUniformData(commands, 2, instanceParameters.data(),
+                                                     sizeof(instanceParameters));
+                    auto* instances = batch.GpuOcclusion ? prepared.GpuOcclusionVisibleInstances : batch.InstanceBuffer;
+                    SDL_BindGPUVertexStorageBuffers(pass, 0, &instances, 1);
+                }
             }
             else
             {
@@ -664,8 +673,17 @@ namespace Keire::RenderBackend
                     item.SkinnedBuiltinVertices ? item.SkinnedBuiltinVertices : mesh.Vertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
             }
-            SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, instanceCount, draw.Submesh.FirstIndex, 0,
-                                         batch.GpuFirstInstance);
+            if (batch.GpuOcclusion)
+            {
+                SDL_DrawGPUIndexedPrimitivesIndirect(pass, prepared.GpuOcclusionIndirectArguments,
+                                                     batch.GpuOcclusionIndirectOffset, 1);
+                ++Statistics.GpuOcclusionIndirectDraws;
+            }
+            else
+            {
+                SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, instanceCount, draw.Submesh.FirstIndex, 0,
+                                             batch.GpuFirstInstance);
+            }
             ++Statistics.DrawCalls;
             Statistics.Triangles += draw.Submesh.IndexCount / 3 * instanceCount;
             Statistics.InstanceBatches += instanceCount > 1 ? 1U : 0U;
@@ -675,11 +693,13 @@ namespace Keire::RenderBackend
     void RenderSharedState::RecordSurface(SDL_GPUCommandBuffer*& commands, RenderSurfaceState& surface,
                                           std::vector<SDL_GPUCommandBuffer*>& frameCommands)
     {
+        KEIRE_TELEMETRY_ZONE_SCOPED("Record render surface");
         if (!surface.Resources.SampledColor || !surface.Resources.HdrColor)
             return;
 
         const auto request = std::ranges::find(Requests, &surface, &QueuedSceneRequest::Surface);
         PreparedSceneDrawLists preparedDraws;
+        PreparedGpuOcclusion preparedOcclusion;
         PreparedCpuVfx preparedCpuVfx;
         bool sampledDepthRecorded = false;
         bool gpuDepthCollisionRequired = false;
@@ -691,6 +711,7 @@ namespace Keire::RenderBackend
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
             started = std::chrono::steady_clock::now();
             preparedDraws = PrepareSceneDrawLists(commands, surface, request->Packet);
+            preparedOcclusion = PrepareGpuOcclusion(commands, surface, request->Packet, preparedDraws);
             Statistics.DrawPreparationMilliseconds +=
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
             gpuDepthCollisionRequired = RequiresGpuDepthCollision(request->Packet.Vfx.GpuEmitters());
@@ -957,6 +978,27 @@ namespace Keire::RenderBackend
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;
                 }
+                if (frameGraphPass == SceneFrameGraph.GpuOcclusionDepthPass)
+                {
+                    if (request != Requests.end())
+                    {
+                        RecordGpuOcclusionDepth(commands, request->Packet, preparedDraws, preparedOcclusion);
+                    }
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.GpuOcclusionPyramidPass)
+                {
+                    RecordGpuOcclusionPyramid(commands, surface, preparedOcclusion);
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.GpuOcclusionCullingPass)
+                {
+                    if (request != Requests.end())
+                    {
+                        RecordGpuOcclusionCulling(commands, surface, request->Packet, preparedDraws, preparedOcclusion);
+                    }
+                    return;
+                }
                 if (frameGraphPass == SceneFrameGraph.Opaque)
                 {
                     const auto started = std::chrono::steady_clock::now();
@@ -1074,6 +1116,12 @@ namespace Keire::RenderBackend
                     RecordToneMap(commands, surface);
                     Statistics.ToneMapMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.Overlays)
+                {
+                    if (request != Requests.end())
+                        RecordGpuOcclusionDebug(commands, surface, request->Packet, preparedOcclusion);
                 }
             });
         SceneFrameGraph.Graph.Execute(SceneFrameGraph.Compiled, execution);

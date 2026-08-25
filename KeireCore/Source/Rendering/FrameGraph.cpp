@@ -247,6 +247,11 @@ namespace Keire::RenderBackend
         const auto uploads = result.Graph.AddResource({"Uploaded resources", FrameGraphResourceKind::Buffer, true});
         const auto shadows = result.Graph.AddResource({"Directional shadows", FrameGraphResourceKind::Texture, true});
         const auto lightTiles = result.Graph.AddResource({"Forward+ tile lists", FrameGraphResourceKind::Buffer, true});
+        result.GpuOcclusionDepth = result.Graph.AddResource({"Occlusion depth", FrameGraphResourceKind::Texture, true});
+        result.GpuOcclusionPyramid =
+            result.Graph.AddResource({"Occlusion depth pyramid", FrameGraphResourceKind::Texture, true});
+        result.GpuOcclusionIndirectArguments =
+            result.Graph.AddResource({"Occlusion indirect arguments", FrameGraphResourceKind::Buffer, true});
         result.HdrScene = result.Graph.AddResource({"HDR scene color", FrameGraphResourceKind::Texture, false, 4});
         result.SampledDepth = result.Graph.AddResource({"Sampled scene depth", FrameGraphResourceKind::Texture, true});
         const auto skyComplete = result.Graph.AddResource({"Sky complete", FrameGraphResourceKind::Buffer, true});
@@ -262,14 +267,29 @@ namespace Keire::RenderBackend
             result.Graph.AddPass({"Directional shadow maps", {uploads}, {shadows}, FrameGraphPassKind::Graphics});
         result.ForwardPlusCulling =
             result.Graph.AddPass({"Forward+ light culling", {uploads}, {lightTiles}, FrameGraphPassKind::Compute});
-        result.Opaque = result.Graph.AddPass({"Opaque and mask", {uploads, shadows, lightTiles}, {result.HdrScene}});
+        result.GpuOcclusionDepthPass = result.Graph.AddPass(
+            {"Occlusion depth", {uploads}, {result.GpuOcclusionDepth}, FrameGraphPassKind::Graphics});
+        result.GpuOcclusionPyramidPass = result.Graph.AddPass({"Occlusion depth pyramid",
+                                                               {result.GpuOcclusionDepth},
+                                                               {result.GpuOcclusionPyramid},
+                                                               FrameGraphPassKind::Compute});
+        result.GpuOcclusionCullingPass = result.Graph.AddPass({"GPU occlusion culling",
+                                                               {uploads, result.GpuOcclusionPyramid},
+                                                               {result.GpuOcclusionIndirectArguments},
+                                                               FrameGraphPassKind::Compute});
+        result.Opaque = result.Graph.AddPass({"Opaque and mask",
+                                              {uploads, shadows, lightTiles, result.GpuOcclusionIndirectArguments},
+                                              {result.HdrScene}});
         result.ResolveDepth =
             result.Graph.AddPass({"Sampled scene depth", {uploads, result.HdrScene}, {result.SampledDepth}});
         result.Sky = result.Graph.AddPass({"Sky", {result.HdrScene}, {skyComplete}});
         result.Transparency = result.Graph.AddPass(
             {"Transparency", {result.HdrScene, result.SampledDepth, skyComplete, lightTiles}, {transparencyComplete}});
         result.ToneMap = result.Graph.AddPass({"ACES tone map", {result.HdrScene, transparencyComplete}, {toneMapped}});
-        result.Overlays = result.Graph.AddPass({"Editor overlays", {toneMapped}, {overlays}});
+        result.Overlays =
+            result.Graph.AddPass({"Editor overlays",
+                                  {toneMapped, result.GpuOcclusionPyramid, result.GpuOcclusionIndirectArguments},
+                                  {overlays}});
         result.Readback = result.Graph.AddPass({"Readback", {overlays}, {readback}, FrameGraphPassKind::Transfer});
         result.Presentation =
             result.Graph.AddPass({"Presentation", {overlays}, {presentation}, FrameGraphPassKind::Present});

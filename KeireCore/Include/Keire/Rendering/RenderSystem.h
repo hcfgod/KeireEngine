@@ -11,6 +11,7 @@
 #include <compare>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <memory>
 #include <string>
@@ -48,6 +49,63 @@ namespace Keire
         Eight = 8
     };
 
+    enum class GpuOcclusionMode : std::uint8_t
+    {
+        Disabled,
+        Automatic,
+        Forced
+    };
+
+    enum class GpuOcclusionDebugView : std::uint8_t
+    {
+        None,
+        VisibilityBounds,
+        HierarchicalDepth
+    };
+
+    enum class GpuOcclusionSurfaceState : std::uint8_t
+    {
+        Disabled,
+        Unsupported,
+        Idle,
+        Active,
+        Fallback
+    };
+
+    enum class GpuOcclusionFallbackReason : std::uint8_t
+    {
+        None,
+        DisabledBySetting,
+        UnsupportedBackend,
+        PipelineUnavailable,
+        ResourceAllocationFailed,
+        NoSafeOccluders,
+        BelowAutomaticThreshold,
+        NoEligibleCandidates,
+        LegacyShaderAbi,
+        OversizedBatch,
+        ReadbackValidationFailed
+    };
+
+    struct GpuOcclusionSurfaceDiagnostics
+    {
+        GpuOcclusionMode RequestedMode = GpuOcclusionMode::Automatic;
+        GpuOcclusionMode EffectiveMode = GpuOcclusionMode::Disabled;
+        GpuOcclusionSurfaceState State = GpuOcclusionSurfaceState::Disabled;
+        GpuOcclusionFallbackReason FallbackReason = GpuOcclusionFallbackReason::None;
+        std::uint64_t SourceFrame = 0;
+        std::uint32_t ReadbackAge = std::numeric_limits<std::uint32_t>::max();
+        std::uint32_t Candidates = 0;
+        std::uint32_t Visible = 0;
+        std::uint32_t Culled = 0;
+        std::uint32_t SafeOccluders = 0;
+        std::uint32_t PyramidMipCount = 0;
+        bool PyramidValid = false;
+        bool ReadbackValid = false;
+
+        auto operator<=>(const GpuOcclusionSurfaceDiagnostics&) const noexcept = default;
+    };
+
     struct RenderSpecification
     {
         RenderMode Mode = RenderMode::Automatic;
@@ -82,9 +140,13 @@ namespace Keire
         [[nodiscard]] std::uint64_t Generation() const noexcept;
         [[nodiscard]] bool Available() const noexcept;
         [[nodiscard]] bool SampledDepthAvailable() const noexcept;
+        [[nodiscard]] GpuOcclusionSurfaceDiagnostics OcclusionDiagnostics() const noexcept;
+        [[nodiscard]] GpuOcclusionDebugView OcclusionDebugView() const noexcept;
+        [[nodiscard]] std::uint32_t OcclusionDebugMip() const noexcept;
 
         void RequestSize(std::uint32_t width, std::uint32_t height);
         void SetClearColor(Color color);
+        void SetOcclusionDebugView(GpuOcclusionDebugView view, std::uint32_t mip = 0);
 
       private:
         friend class RenderSystem;
@@ -106,7 +168,7 @@ namespace Keire
 
     struct RenderEnvironmentSettings
     {
-        std::uint32_t SchemaVersion = 2;
+        std::uint32_t SchemaVersion = 3;
         Color AmbientColor{0.20F, 0.22F, 0.26F, 1.0F};
         float AmbientIntensity = 0.75F;
         float Exposure = 1.0F;
@@ -119,6 +181,7 @@ namespace Keire
         std::uint32_t DirectionalShadowCascadeCount = 4;
         std::uint32_t DirectionalShadowResolution = 2048;
         float DirectionalShadowSplitLambda = 0.65F;
+        GpuOcclusionMode GpuOcclusion = GpuOcclusionMode::Automatic;
 
         auto operator<=>(const RenderEnvironmentSettings&) const noexcept = default;
     };
@@ -169,6 +232,7 @@ namespace Keire
         bool DynamicMeshPackets = false;
         bool SampledResolvedDepth = false;
         bool GpuDepthCollision = false;
+        bool GpuOcclusionCulling = false;
     };
 
     struct RenderStatistics
@@ -203,6 +267,15 @@ namespace Keire
         std::uint32_t ForwardPlusCacheHits = 0;
         std::uint32_t FrameUploadSubmissions = 0;
         std::uint32_t AllowedFramesInFlight = 0;
+        std::uint32_t GpuOcclusionCandidates = 0;
+        std::uint32_t GpuOcclusionVisible = 0;
+        std::uint32_t GpuOcclusionCulled = 0;
+        std::uint32_t GpuOcclusionSafeOccluders = 0;
+        std::uint32_t GpuOcclusionIndirectDraws = 0;
+        std::uint32_t GpuOcclusionPyramidMipCount = 0;
+        std::uint32_t GpuOcclusionDispatches = 0;
+        std::uint32_t GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
+        std::uint32_t GpuOcclusionFallbacks = 0;
         std::uint64_t ForwardPlusUploadBytes = 0;
         std::uint64_t DynamicUploadBytes = 0;
         std::uint64_t DepthTriangles = 0;
@@ -215,6 +288,9 @@ namespace Keire
         std::uint64_t TheoreticalUnaliasedBytes = 0;
         std::uint64_t SavedAliasingBytes = 0;
         std::uint64_t VfxComputeThreadGroups = 0;
+        std::uint64_t GpuOcclusionCandidateTriangles = 0;
+        std::uint64_t GpuOcclusionCulledTriangles = 0;
+        std::uint64_t GpuOcclusionDepthTriangles = 0;
         std::uint32_t VfxComputeDispatches = 0;
         std::uint32_t VfxIndirectDraws = 0;
         std::uint32_t VfxGpuWorlds = 0;
@@ -224,6 +300,9 @@ namespace Keire
         bool GpuTimingSupported = false;
         bool ForwardPlusGpuCullingSupported = false;
         bool SampledResolvedDepthAvailable = false;
+        bool GpuOcclusionEnabled = false;
+        bool GpuOcclusionReadbackValid = false;
+        bool GpuOcclusionFallbackActive = false;
         float CpuPreparationMilliseconds = 0.0F;
         float CpuPreparationP95Milliseconds = 0.0F;
         float CommandRecordingMilliseconds = 0.0F;
@@ -246,6 +325,12 @@ namespace Keire
         float VfxGpuCompletionLatencyMilliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;
         float VfxPipelineWarmupMilliseconds = 0.0F;
+        /// CPU time spent recording the occlusion depth pass; SDL_GPU does not expose GPU timestamps.
+        float GpuOcclusionDepthPassMilliseconds = 0.0F;
+        /// CPU time spent recording depth-pyramid dispatches; this is not GPU execution time.
+        float GpuOcclusionPyramidRecordingMilliseconds = 0.0F;
+        /// CPU time spent recording culling/compaction dispatches; this is not GPU execution time.
+        float GpuOcclusionCullingRecordingMilliseconds = 0.0F;
     };
 
     class KEIRE_API RenderSystem final : public RefCounted

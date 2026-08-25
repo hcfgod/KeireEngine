@@ -131,6 +131,7 @@ workspace(ProjectConfig.PROJECT_IDENTIFIER)
     configurations {
         "Debug",
         "Release",
+        "Profile",
         "Dist",
         "DebugASan",
         "DebugUBSan",

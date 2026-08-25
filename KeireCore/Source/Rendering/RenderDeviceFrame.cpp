@@ -323,6 +323,15 @@ namespace Keire::RenderBackend
             }
             if (DepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID || ShadowDepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID)
                 throw std::runtime_error("The active GPU exposes no compatible scene and sampled shadow depth format.");
+            const auto selectedShaderFormats = SDL_GetGPUShaderFormats(Device);
+            const bool occlusionShaderFormat =
+                (selectedShaderFormats &
+                 (SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL)) != 0;
+            const SDL_GPUTextureUsageFlags occlusionPyramidUsage =
+                SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
+            GpuOcclusionCapability =
+                occlusionShaderFormat && SDL_GPUTextureSupportsFormat(Device, SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
+                                                                      SDL_GPU_TEXTURETYPE_2D, occlusionPyramidUsage);
             KEIRE_CORE_INFO("Selected GPU attachment formats (output={}, scene={}, depth={}, shadowDepth={}).",
                             static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(SceneColorFormat),
                             static_cast<std::uint32_t>(DepthFormat), static_cast<std::uint32_t>(ShadowDepthFormat));
@@ -435,6 +444,8 @@ namespace Keire::RenderBackend
             resources = {};
             return;
         }
+        for (auto& frame : resources.GpuOcclusionFrames)
+            ReleaseGpuOcclusionFrameResources(frame);
         if (resources.LocalShadow)
             SDL_ReleaseGPUTexture(Device, resources.LocalShadow);
         if (resources.DirectionalShadow)

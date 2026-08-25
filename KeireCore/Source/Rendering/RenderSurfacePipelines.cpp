@@ -31,6 +31,24 @@ namespace
         return capacity < required ? static_cast<std::uint32_t>(required) : capacity;
     }
 
+    void ResetGpuOcclusionSurfaceState(Keire::RenderBackend::RenderSurfaceState& surface) noexcept
+    {
+        surface.GpuOcclusionSubmissionEpoch =
+            surface.GpuOcclusionSubmissionEpoch == std::numeric_limits<std::uint64_t>::max()
+                ? 1U
+                : surface.GpuOcclusionSubmissionEpoch + 1U;
+        surface.GpuOcclusionDiagnostics = {};
+        surface.GpuOcclusionDiagnostics.RequestedMode = surface.GpuOcclusionSubmittedMode;
+        surface.GpuOcclusionAutomaticQualifyingFrames = 0;
+        surface.GpuOcclusionAutomaticMinimumFrames = 0;
+        surface.GpuOcclusionAutomaticCooldownFrames = 0;
+        surface.GpuOcclusionValidationCooldown = false;
+        surface.GpuOcclusionLatestCandidateTriangles = 0;
+        surface.GpuOcclusionLatestVisibleTriangles = 0;
+        surface.GpuOcclusionAutomaticActive = false;
+        surface.GpuOcclusionDebugMipLevel = 0;
+    }
+
     [[nodiscard]] Keire::Ref<Keire::Texture2DAsset> CreateDefaultSky()
     {
         constexpr std::uint32_t width = 256;
@@ -275,6 +293,39 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUBuffer(Device, resources.CpuVfxVertices.Buffer);
             if (resources.CpuVfxTransfer)
                 SDL_ReleaseGPUTransferBuffer(Device, resources.CpuVfxTransfer);
+        }
+        resources = {};
+    }
+
+    void RenderSharedState::ReleaseGpuOcclusionFrameResources(GpuOcclusionFrameResources& resources) noexcept
+    {
+        if (Device)
+        {
+            const auto releaseBuffer = [this](GpuOcclusionBuffer& buffer)
+            {
+                if (buffer.Buffer)
+                    SDL_ReleaseGPUBuffer(Device, buffer.Buffer);
+            };
+            releaseBuffer(resources.Status);
+            releaseBuffer(resources.IndirectArguments);
+            releaseBuffer(resources.VisibleInstances);
+            releaseBuffer(resources.ChunkOffsets);
+            releaseBuffer(resources.Batches);
+            releaseBuffer(resources.ChunkCounts);
+            releaseBuffer(resources.Chunks);
+            releaseBuffer(resources.LocalOffsets);
+            releaseBuffer(resources.Visibility);
+            releaseBuffer(resources.InputInstances);
+            releaseBuffer(resources.Candidates);
+            if (resources.Readback)
+                SDL_ReleaseGPUTransferBuffer(Device, resources.Readback);
+            if (resources.Upload)
+                SDL_ReleaseGPUTransferBuffer(Device, resources.Upload);
+            for (auto* texture : resources.Pyramid)
+                if (texture)
+                    SDL_ReleaseGPUTexture(Device, texture);
+            if (resources.Depth)
+                SDL_ReleaseGPUTexture(Device, resources.Depth);
         }
         resources = {};
     }
@@ -681,6 +732,7 @@ namespace Keire::RenderBackend
                 surface.HasOutput = false;
                 surface.SampledDepthValid = false;
                 ++surface.Generation;
+                ResetGpuOcclusionSurfaceState(surface);
             }
             return;
         }
@@ -691,6 +743,7 @@ namespace Keire::RenderBackend
                 surface.Width = surface.RequestedWidth;
                 surface.Height = surface.RequestedHeight;
                 ++surface.Generation;
+                ResetGpuOcclusionSurfaceState(surface);
             }
             return;
         }
@@ -713,6 +766,7 @@ namespace Keire::RenderBackend
             ++surface.Generation;
             surface.HasOutput = false;
             surface.SampledDepthValid = false;
+            ResetGpuOcclusionSurfaceState(surface);
         }
         catch (const std::exception& error)
         {
@@ -1071,7 +1125,9 @@ namespace Keire::RenderBackend
             !vertex ? (definition.UsesForwardPlus ? 3U : 0U) + definition.UserReadOnlyBuffers : 0U;
         if (vertex && definition.UsesInstancing)
             information.num_storage_buffers = 1U;
-        information.num_uniform_buffers = vertex ? (definition.UsesVertexMaterialParameters ? 2U : 1U)
+        information.num_uniform_buffers = vertex ? (definition.InstanceAddressingAbiVersion == 2U
+                                                        ? 3U
+                                                        : (definition.UsesVertexMaterialParameters ? 2U : 1U))
                                                  : 2U + (definition.UsesImageBasedLighting ? 2U
                                                          : definition.ReceivesShadows      ? 1U
                                                                                            : 0U);

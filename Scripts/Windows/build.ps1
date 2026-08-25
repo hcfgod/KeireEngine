@@ -2,7 +2,7 @@
 param(
     [ValidateSet("vs2026", "vs2022", "vs2019", "ninja", "gmake")]
     [string]$Generator = "vs2022",
-    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
+    [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration = "Debug",
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
@@ -51,6 +51,9 @@ $expectedStamp = "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|
 $stamp = Join-Path $Root "Build\Generated\$Generator.stamp"
 
 Assert-SupportedBuildCombination $Generator $Configuration $Architecture $Toolset
+if ($Configuration -eq "Profile") {
+    & (Join-Path $PSScriptRoot "vendor.ps1") -IncludeProfileDependencies
+}
 
 function Invoke-GenerationIfNeeded {
     param([string]$ExpectedFile)
@@ -159,7 +162,7 @@ else {
 }
 if ($Generator -eq "ninja" -and $runtimeStagingTarget -in @($Project.HUB_TARGET, $Project.CLIENT_TARGET)) {
     $outputArchitecture = Get-ArchitectureOutputName $Architecture
-    $dependencyConfiguration = if ($Configuration -in @("Release", "Dist")) { "Release" } else { "Debug" }
+    $dependencyConfiguration = if ($Configuration -in @("Release", "Profile", "Dist")) { "Release" } else { "Debug" }
     $sodiumRuntime = Join-Path $Root `
         "Build\Dependencies\windows-$outputArchitecture-$Toolset\$dependencyConfiguration\install\bin\libsodium.dll"
     $targetDirectory = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeStagingTarget"

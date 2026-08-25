@@ -49,6 +49,12 @@ struct ImDrawData;
 
 namespace Keire::RenderBackend
 {
+    inline constexpr std::uint32_t MaximumGpuOcclusionPyramidLevels = 14;
+    inline constexpr std::uint32_t GpuOcclusionScanBlockSize = 256;
+    inline constexpr std::uint32_t MaximumGpuDispatchGroupsPerDimension = 65'535;
+    inline constexpr std::uint32_t MaximumGpuOcclusionBatchInstances =
+        GpuOcclusionScanBlockSize * GpuOcclusionScanBlockSize;
+
     [[nodiscard]] inline std::string LastSdlError()
     {
         const char* error = SDL_GetError();
@@ -146,6 +152,42 @@ namespace Keire::RenderBackend
         }
     }
 
+    struct GpuOcclusionBuffer final
+    {
+        SDL_GPUBuffer* Buffer = nullptr;
+        std::uint32_t CapacityBytes = 0;
+    };
+
+    struct GpuOcclusionFrameResources final
+    {
+        SDL_GPUTexture* Depth = nullptr;
+        std::vector<SDL_GPUTexture*> Pyramid;
+        GpuOcclusionBuffer Candidates;
+        GpuOcclusionBuffer InputInstances;
+        GpuOcclusionBuffer Visibility;
+        GpuOcclusionBuffer LocalOffsets;
+        GpuOcclusionBuffer Chunks;
+        GpuOcclusionBuffer ChunkCounts;
+        GpuOcclusionBuffer Batches;
+        GpuOcclusionBuffer ChunkOffsets;
+        GpuOcclusionBuffer VisibleInstances;
+        GpuOcclusionBuffer IndirectArguments;
+        GpuOcclusionBuffer Status;
+        SDL_GPUTransferBuffer* Upload = nullptr;
+        SDL_GPUTransferBuffer* Readback = nullptr;
+        std::uint32_t UploadCapacityBytes = 0;
+        std::uint32_t Width = 0;
+        std::uint32_t Height = 0;
+
+        [[nodiscard]] bool Empty() const noexcept
+        {
+            return !Depth && Pyramid.empty() && !Candidates.Buffer && !InputInstances.Buffer && !Visibility.Buffer &&
+                   !LocalOffsets.Buffer && !Chunks.Buffer && !ChunkCounts.Buffer && !Batches.Buffer &&
+                   !ChunkOffsets.Buffer && !VisibleInstances.Buffer && !IndirectArguments.Buffer && !Status.Buffer &&
+                   !Upload && !Readback;
+        }
+    };
+
     struct SurfaceResources final
     {
         SDL_GPUTexture* SampledColor = nullptr;
@@ -156,6 +198,7 @@ namespace Keire::RenderBackend
         SDL_GPUTexture* SampledDepth = nullptr;
         SDL_GPUTexture* DirectionalShadow = nullptr;
         SDL_GPUTexture* LocalShadow = nullptr;
+        std::vector<GpuOcclusionFrameResources> GpuOcclusionFrames;
         std::vector<SDL_GPUTexture*> TransientTextures;
         std::uint32_t DirectionalShadowResolution = 0;
         std::uint32_t DirectionalShadowLayers = 0;
@@ -165,7 +208,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool Empty() const noexcept
         {
             return !SampledColor && !ExchangeColor && !HdrColor && !MultisampleHdrColor && !Depth && !SampledDepth &&
-                   !DirectionalShadow && !LocalShadow;
+                   !DirectionalShadow && !LocalShadow && GpuOcclusionFrames.empty();
         }
     };
 
@@ -227,6 +270,18 @@ namespace Keire::RenderBackend
         Matrix4 SampledDepthViewProjection;
         Matrix4 SampledDepthInverseViewProjection;
         bool SampledDepthValid = false;
+        GpuOcclusionSurfaceDiagnostics GpuOcclusionDiagnostics;
+        GpuOcclusionMode GpuOcclusionSubmittedMode = GpuOcclusionMode::Automatic;
+        std::uint64_t GpuOcclusionSubmissionEpoch = 1;
+        GpuOcclusionDebugView GpuOcclusionDebugMode = GpuOcclusionDebugView::None;
+        std::uint32_t GpuOcclusionDebugMipLevel = 0;
+        std::uint32_t GpuOcclusionAutomaticQualifyingFrames = 0;
+        std::uint32_t GpuOcclusionAutomaticMinimumFrames = 0;
+        std::uint32_t GpuOcclusionAutomaticCooldownFrames = 0;
+        std::uint64_t GpuOcclusionLatestCandidateTriangles = 0;
+        std::uint64_t GpuOcclusionLatestVisibleTriangles = 0;
+        bool GpuOcclusionAutomaticActive = false;
+        bool GpuOcclusionValidationCooldown = false;
         std::uint64_t Generation = 0;
         bool Submitted = false;
         bool HasOutput = false;
@@ -275,6 +330,20 @@ namespace Keire::RenderBackend
 
     struct GpuSkinResources;
 
+    struct GpuOcclusionPendingReadback final
+    {
+        SDL_GPUTransferBuffer* Transfer = nullptr;
+        std::uint64_t SurfaceId = 0;
+        std::uint64_t SurfaceGeneration = 0;
+        std::uint64_t SubmissionEpoch = 0;
+        std::uint64_t SourceFrame = 0;
+        GpuOcclusionMode RequestedMode = GpuOcclusionMode::Automatic;
+        std::uint32_t Candidates = 0;
+        std::uint32_t SafeOccluders = 0;
+        std::uint32_t PyramidMipCount = 0;
+        std::uint64_t CandidateTriangles = 0;
+    };
+
     struct InFlightFrame final
     {
         SDL_GPUFence* Fence = nullptr;
@@ -286,6 +355,7 @@ namespace Keire::RenderBackend
         std::vector<ForwardPlusGpuResources> RetiredForwardPlus;
         std::vector<SDL_GPUBuffer*> TransientBuffers;
         std::vector<SDL_GPUTransferBuffer*> TransientTransferBuffers;
+        std::vector<GpuOcclusionPendingReadback> GpuOcclusionReadbacks;
         std::chrono::steady_clock::time_point SubmittedAt;
         bool IncludesGpuVfx = false;
         std::uint64_t RetiredBytes = 0;
@@ -339,12 +409,18 @@ namespace Keire::RenderBackend
         std::map<std::string, PropertyBinding, std::less<>> Properties;
         std::optional<std::size_t> TintSlot;
         MaterialSurfaceState Surface;
+        ShaderPrimitiveTopology Topology = ShaderPrimitiveTopology::TriangleList;
+        ShaderCullMode Culling = ShaderCullMode::Back;
+        ShaderOcclusionSupport OcclusionSupport = ShaderOcclusionSupport::None;
         bool ReceivesShadows = false;
+        bool DepthTest = true;
+        bool DepthWrite = true;
         bool UsesForwardPlus = false;
         bool UsesInstancing = false;
         bool UsesImageBasedLighting = false;
         bool UsesSpatialLighting = false;
         bool UsesVertexMaterialParameters = false;
+        std::uint8_t InstanceAddressingAbiVersion = 0;
     };
 
     struct GpuMaterialBindingEntry final
@@ -519,6 +595,76 @@ namespace Keire::RenderBackend
         Matrix4 NormalMatrix;
         Color Tint;
     };
+
+    struct alignas(16) GpuOcclusionCandidate final
+    {
+        Vector4 BoundsMinimum;
+        Vector4 BoundsMaximum;
+        std::array<std::uint32_t, 4> Metadata{};
+    };
+
+    struct alignas(16) GpuOcclusionChunk final
+    {
+        std::uint32_t CandidateFirst = 0;
+        std::uint32_t CandidateCount = 0;
+        std::uint32_t BatchIndex = 0;
+        std::uint32_t Padding = 0;
+    };
+
+    struct alignas(16) GpuOcclusionBatch final
+    {
+        std::uint32_t CandidateFirst = 0;
+        std::uint32_t CandidateCount = 0;
+        std::uint32_t OutputFirst = 0;
+        std::uint32_t ChunkFirst = 0;
+        std::uint32_t ChunkCount = 0;
+        std::uint32_t IndirectByteOffset = 0;
+        std::uint32_t TriangleCount = 0;
+        std::uint32_t Padding = 0;
+    };
+
+    struct alignas(16) GpuOcclusionStatus final
+    {
+        std::uint32_t Visible = 0;
+        std::uint32_t VisibleTriangleLow = 0;
+        std::uint32_t VisibleTriangleHigh = 0;
+        std::uint32_t ErrorFlags = 0;
+    };
+
+    struct alignas(16) GpuOcclusionDepthUniforms final
+    {
+        Matrix4 ViewProjection;
+        std::array<std::uint32_t, 4> InstanceParameters{};
+    };
+
+    struct alignas(16) GpuOcclusionPyramidUniforms final
+    {
+        std::array<std::uint32_t, 4> SourceTargetSize{};
+    };
+
+    struct alignas(16) GpuOcclusionClassifyUniforms final
+    {
+        Matrix4 ViewProjection;
+        Vector4 ViewportBiasLevels;
+        std::array<std::uint32_t, 4> DispatchCounts{};
+        std::array<std::array<std::uint32_t, 4>, MaximumGpuOcclusionPyramidLevels> HierarchySizes{};
+    };
+
+    struct alignas(16) GpuOcclusionDispatchUniforms final
+    {
+        std::array<std::uint32_t, 4> DispatchCounts{};
+    };
+
+    static_assert(sizeof(GpuInstanceUniform) == 144);
+    static_assert(sizeof(GpuOcclusionCandidate) == 48);
+    static_assert(sizeof(GpuOcclusionChunk) == 16);
+    static_assert(sizeof(GpuOcclusionBatch) == 32);
+    static_assert(sizeof(GpuOcclusionStatus) == 16);
+    static_assert(sizeof(GpuOcclusionDepthUniforms) == 80);
+    static_assert(sizeof(GpuOcclusionPyramidUniforms) == 16);
+    static_assert(sizeof(GpuOcclusionClassifyUniforms) == 320);
+    static_assert(sizeof(GpuOcclusionDispatchUniforms) == 16);
+    static_assert(sizeof(SDL_GPUIndexedIndirectDrawCommand) == 20);
 
     inline constexpr std::size_t MaximumShaderLocalLights = 62;
 
@@ -1175,18 +1321,42 @@ namespace Keire::RenderBackend
         std::uint32_t InstanceDataFirst = 0;
         std::uint32_t InstanceDataCount = 0;
         SDL_GPUBuffer* InstanceBuffer = nullptr;
+        std::uint32_t GpuOcclusionInstanceBase = 0;
+        std::uint32_t GpuOcclusionIndirectOffset = 0;
+        bool GpuOcclusion = false;
     };
 
     struct PreparedSceneDrawList final
     {
         std::vector<PreparedSceneDraw> Draws;
         std::vector<PreparedSceneBatch> Batches;
+        SDL_GPUBuffer* GpuOcclusionVisibleInstances = nullptr;
+        SDL_GPUBuffer* GpuOcclusionIndirectArguments = nullptr;
     };
 
     struct PreparedSceneDrawLists final
     {
         PreparedSceneDrawList Opaque;
         PreparedSceneDrawList Transparent;
+    };
+
+    struct PreparedGpuOccluderBatch final
+    {
+        std::uint32_t SceneBatchIndex = 0;
+        std::uint32_t InstanceFirst = 0;
+        std::uint32_t InstanceCount = 0;
+        SDL_GPUCullMode CullMode = SDL_GPU_CULLMODE_NONE;
+    };
+
+    struct PreparedGpuOcclusion final
+    {
+        GpuOcclusionFrameResources* Resources = nullptr;
+        std::vector<PreparedGpuOccluderBatch> Occluders;
+        std::uint32_t CandidateCount = 0;
+        std::uint32_t BatchCount = 0;
+        std::uint32_t ChunkCount = 0;
+        std::uint64_t CandidateTriangles = 0;
+        bool Enabled = false;
     };
 
     struct PreparedCpuVfxBatch final
@@ -1284,6 +1454,8 @@ namespace Keire::RenderBackend
                                                     MaterialSurfaceState surface, bool explicitSurface);
         [[nodiscard]] const ResolvedAssetMaterial* ResolveAssetMaterial(AssetId id, SDL_GPUSampleCount samples);
         [[nodiscard]] bool EnsureSkinningPipeline();
+        [[nodiscard]] bool EnsureGpuOcclusionPipelines();
+        void ReleaseGpuOcclusionPipelines() noexcept;
         void StartGpuVfxPipelineWarmup();
         void CompileGpuVfxPipelines();
         void ReleaseGpuVfxPipelines() noexcept;
@@ -1296,6 +1468,19 @@ namespace Keire::RenderBackend
         [[nodiscard]] PreparedSceneDrawLists PrepareSceneDrawLists(SDL_GPUCommandBuffer* commands,
                                                                    RenderSurfaceState& surface,
                                                                    const SceneRenderPacket& packet);
+        [[nodiscard]] PreparedGpuOcclusion PrepareGpuOcclusion(SDL_GPUCommandBuffer* commands,
+                                                               RenderSurfaceState& surface,
+                                                               const SceneRenderPacket& packet,
+                                                               PreparedSceneDrawLists& draws);
+        void RecordGpuOcclusionDepth(SDL_GPUCommandBuffer* commands, const SceneRenderPacket& packet,
+                                     const PreparedSceneDrawLists& draws, const PreparedGpuOcclusion& occlusion);
+        void RecordGpuOcclusionPyramid(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                       const PreparedGpuOcclusion& occlusion);
+        void RecordGpuOcclusionCulling(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                       const SceneRenderPacket& packet, PreparedSceneDrawLists& draws,
+                                       const PreparedGpuOcclusion& occlusion);
+        void RecordGpuOcclusionDebug(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                     const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         [[nodiscard]] PreparedCpuVfx PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                         const SceneRenderPacket& packet);
         void DrawScene(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
@@ -1325,6 +1510,7 @@ namespace Keire::RenderBackend
         void ReleaseTextureResources(GpuTextureResources& resources) noexcept;
         void ReleaseForwardPlusResources(ForwardPlusGpuResources& resources) noexcept;
         void ReleaseDynamicUploadResources(SurfaceDynamicUploadResources& resources) noexcept;
+        void ReleaseGpuOcclusionFrameResources(GpuOcclusionFrameResources& resources) noexcept;
         [[nodiscard]] SDL_GPUBuffer* UploadDynamicBuffer(SDL_GPUCommandBuffer* commands, DynamicGpuBuffer& buffer,
                                                          SDL_GPUTransferBuffer*& transfer,
                                                          std::span<const std::byte> bytes,
@@ -1377,8 +1563,18 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
         SDL_GPUGraphicsPipeline* RuntimeUiPipeline = nullptr;
+        std::array<SDL_GPUGraphicsPipeline*, 3> GpuOcclusionDepthPipelines{};
+        SDL_GPUComputePipeline* GpuOcclusionBuildBasePipeline = nullptr;
+        SDL_GPUComputePipeline* GpuOcclusionReducePipeline = nullptr;
+        SDL_GPUComputePipeline* GpuOcclusionClassifyPipeline = nullptr;
+        SDL_GPUComputePipeline* GpuOcclusionScanBlocksPipeline = nullptr;
+        SDL_GPUComputePipeline* GpuOcclusionScanBatchesPipeline = nullptr;
+        SDL_GPUComputePipeline* GpuOcclusionScatterPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* GpuOcclusionDebugPyramidPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* GpuOcclusionDebugBoundsPipeline = nullptr;
         SDL_GPUSampler* ShadowSampler = nullptr;
         SDL_GPUSampler* ToneMapSampler = nullptr;
+        SDL_GPUSampler* GpuOcclusionSampler = nullptr;
         SDL_GPUTexture* EmptyShadowTexture = nullptr;
         GpuMeshResources DefaultMesh;
         GpuMeshResources ErrorMesh;
@@ -1423,10 +1619,14 @@ namespace Keire::RenderBackend
         std::uint64_t PendingRetiredBytes = 0;
         std::vector<SDL_GPUBuffer*> FrameTransientBuffers;
         std::vector<SDL_GPUTransferBuffer*> FrameUploadTransfers;
+        std::vector<GpuOcclusionPendingReadback> FrameGpuOcclusionReadbacks;
         SDL_GPUCommandBuffer* FrameUploadCommands = nullptr;
         SDL_GPUCopyPass* FrameUploadPass = nullptr;
         SDL_GPUComputePipeline* SkinningPipeline = nullptr;
         bool SkinningPipelineAttempted = false;
+        std::string GpuOcclusionPipelineFailure;
+        bool GpuOcclusionCapability = false;
+        bool GpuOcclusionPipelinesAttempted = false;
         SDL_GPUComputePipeline* VfxInitializePipeline = nullptr;
         SDL_GPUComputePipeline* VfxResetPipeline = nullptr;
         SDL_GPUComputePipeline* VfxKillPipeline = nullptr;

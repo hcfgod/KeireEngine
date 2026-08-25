@@ -43,7 +43,12 @@ Assert-True ($buildScript.Contains('Enter-GeneratedContentLock -Name "native-bui
     "Windows launcher builds serialize shared checkout outputs"
 Assert-True (Test-Path -LiteralPath $copyScript -PathType Leaf) "Content-aware runtime staging script exists"
 
-foreach ($generatorName in @("builtin-shaders.ps1", "builtin-skinning.ps1", "builtin-vfx.ps1")) {
+foreach ($generatorName in @(
+        "builtin-shaders.ps1",
+        "builtin-skinning.ps1",
+        "builtin-vfx.ps1",
+        "builtin-occlusion.ps1"
+    )) {
     $generator = Get-Content -LiteralPath (Join-Path $windows $generatorName) -Raw
     Assert-True ($generator.Contains('Get-GeneratedContentFingerprint') -and
                  $generator.Contains('Test-GeneratedContentCurrent') -and

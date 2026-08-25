@@ -76,6 +76,7 @@ namespace
     struct MultiSurfaceResults final
     {
         std::array<std::vector<std::uint8_t>, 3> Frames;
+        std::array<Keire::GpuOcclusionSurfaceDiagnostics, 3> OcclusionDiagnostics;
         std::vector<std::uint64_t> MaterialBindingBuilds;
         Keire::RenderStatistics Statistics;
         bool HasStatistics = false;
@@ -125,6 +126,18 @@ namespace
             }
         }
         return result;
+    }
+
+    [[nodiscard]] float MaximumPixelDifference(const std::vector<std::uint8_t>& left,
+                                               const std::vector<std::uint8_t>& right) noexcept
+    {
+        if (left.size() != right.size())
+            return 1.0F;
+        float maximum = 0.0F;
+        for (std::size_t index = 0; index < left.size(); ++index)
+            maximum = std::max(maximum,
+                               std::abs(static_cast<float>(left[index]) - static_cast<float>(right[index])) / 255.0F);
+        return maximum;
     }
 
     [[nodiscard]] constexpr Keire::AssetId RenderVfxId(const std::uint64_t value) noexcept
@@ -330,7 +343,9 @@ namespace
 
         explicit RenderAssetFixture(const bool includeShaderGraph = false,
                                     const bool includeProceduralVertexOffset = false,
-                                    const bool parameterDrivenVertexOffset = false)
+                                    const bool parameterDrivenVertexOffset = false,
+                                    const bool includeTransparentShaderGraph = false,
+                                    const bool includeOcclusionStressMesh = false)
             : Root(std::filesystem::temp_directory_path() /
                    ("Keire-RenderAssetTests-" +
                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
@@ -378,6 +393,19 @@ namespace
             const auto builtInCube = Keire::MeshAsset::Cube();
             CubeMesh = Database->CreateAsset("Cube.keiremesh", meshImporter,
                                              Keire::MeshAsset::Encode(builtInCube->Vertices(), builtInCube->Indices()));
+            if (includeOcclusionStressMesh)
+            {
+                std::vector<std::uint32_t> stressIndices;
+                stressIndices.reserve(builtInCube->Indices().size() * 70U);
+                for (std::size_t repeat = 0; repeat < 70U; ++repeat)
+                {
+                    stressIndices.insert(stressIndices.end(), builtInCube->Indices().begin(),
+                                         builtInCube->Indices().end());
+                }
+                OcclusionStressMesh =
+                    Database->CreateAsset("OcclusionStress.keiremesh", meshImporter,
+                                          Keire::MeshAsset::Encode(builtInCube->Vertices(), stressIndices));
+            }
             Keire::VfxVolumeDefinition volumeDefinition;
             volumeDefinition.Cells = {{{-0.9F, -0.25F, -0.05F}, {-0.55F, 0.25F, 0.05F}, 1.0F},
                                       {{0.45F, -0.15F, -0.05F}, {0.65F, 0.15F, 0.05F}, 0.2F}};
@@ -487,6 +515,28 @@ namespace
                 if (!record || record->SubAssets.empty())
                     throw std::runtime_error("The Shader Graph import did not publish its runtime material.");
                 ShaderGraphMaterial = record->SubAssets.back();
+
+                if (includeTransparentShaderGraph)
+                {
+                    auto transparentGraph = Keire::CreateDefaultShaderGraph();
+                    transparentGraph.Output = Keire::ShaderGraphOutput::Transparent;
+                    auto transparentBaseColor = std::ranges::find(transparentGraph.Nodes.front().Pins, "BaseColor",
+                                                                  &Keire::ShaderGraphPin::Name);
+                    auto transparentOpacity =
+                        std::ranges::find(transparentGraph.Nodes.front().Pins, "Opacity", &Keire::ShaderGraphPin::Name);
+                    if (transparentBaseColor == transparentGraph.Nodes.front().Pins.end() ||
+                        transparentOpacity == transparentGraph.Nodes.front().Pins.end())
+                        throw std::logic_error("The default Shader Graph does not expose transparent surface inputs.");
+                    transparentBaseColor->DefaultValue = Keire::Color{0.0F, 1.0F, 0.0F, 1.0F};
+                    transparentOpacity->DefaultValue = 0.5F;
+                    TransparentShaderGraph =
+                        Database->CreateAsset("Transparent.keireshadergraph", materialGraphImporter,
+                                              Keire::ShaderGraphAsset::EncodeSource(transparentGraph));
+                    const auto transparentRecord = Database->Find(TransparentShaderGraph);
+                    if (!transparentRecord || transparentRecord->SubAssets.empty())
+                        throw std::runtime_error("The transparent Shader Graph did not publish its runtime material.");
+                    TransparentShaderGraphMaterial = transparentRecord->SubAssets.back();
+                }
             }
             Catalog = Database->ImportAll(Keire::AssetImportPolicy::KeepLastGood).CatalogPath;
         }
@@ -565,9 +615,12 @@ namespace
         Keire::AssetId Skeleton;
         Keire::AssetId Skin;
         Keire::AssetId CubeMesh;
+        Keire::AssetId OcclusionStressMesh;
         Keire::AssetId Material;
         Keire::AssetId ShaderGraph;
         Keire::AssetId ShaderGraphMaterial;
+        Keire::AssetId TransparentShaderGraph;
+        Keire::AssetId TransparentShaderGraphMaterial;
         Keire::AssetId Shader;
         Keire::AssetId Texture;
         Keire::AssetId TransparentTexture;
@@ -769,6 +822,8 @@ namespace
                 m_Results->Statistics = Owner().Renderer()->Statistics();
                 m_Results->HasStatistics = true;
             }
+            for (std::size_t index = 0; index < m_Views.size(); ++index)
+                m_Results->OcclusionDiagnostics[index] = m_Views[index]->Surface()->OcclusionDiagnostics();
             if (m_Scene)
                 m_Scene->Close();
             for (auto& view : m_Views)
@@ -797,8 +852,13 @@ namespace
             Keire::RenderEnvironmentSettings environment;
             environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             environment.AmbientIntensity = 1.0F;
-            for (const auto& view : m_Views)
-                Owner().Renderer()->Submit({m_Scene, view, false, environment});
+            constexpr std::array modes{Keire::GpuOcclusionMode::Disabled, Keire::GpuOcclusionMode::Automatic,
+                                       Keire::GpuOcclusionMode::Forced};
+            for (std::size_t index = 0; index < m_Views.size(); ++index)
+            {
+                environment.GpuOcclusion = modes[index];
+                Owner().Renderer()->Submit({m_Scene, m_Views[index], false, environment});
+            }
             ++m_SubmittedFrames;
         }
 
@@ -1964,6 +2024,344 @@ namespace
         std::size_t m_ReloadWaitFrames = 0;
         bool m_Submitted = false;
     };
+
+    enum class GpuOcclusionCaptureScenario : std::uint8_t
+    {
+        HiddenTarget,
+        RevealTarget,
+        ResetToDisabled,
+        AlwaysVisibleTarget,
+        DebugViews,
+        LifecycleReset,
+        SkinnedTarget,
+        TerminalFallback
+    };
+
+    struct GpuOcclusionCaptureResults final
+    {
+        std::vector<std::vector<std::uint8_t>> Frames;
+        std::vector<Keire::GpuOcclusionSurfaceDiagnostics> Diagnostics;
+        std::vector<Keire::GpuOcclusionDebugView> DebugViews;
+        std::vector<std::uint32_t> DebugMips;
+        std::vector<Keire::GpuOcclusionSurfaceDiagnostics> ObservedAfterReset;
+        std::vector<Keire::GpuOcclusionSurfaceDiagnostics> ObservedAfterReforce;
+        Keire::RenderStatistics Statistics;
+        Keire::FrameGraphSnapshot FrameGraph;
+        std::uint64_t ReforcedFrameFloor = 0;
+        bool SawBelowAutomaticThreshold = false;
+        bool TimedOut = false;
+    };
+
+    class GpuOcclusionCaptureLayer final : public Keire::Layer
+    {
+      public:
+        GpuOcclusionCaptureLayer(const Keire::AssetId mesh, const Keire::AssetId material,
+                                 const Keire::GpuOcclusionMode mode,
+                                 std::shared_ptr<GpuOcclusionCaptureResults> results,
+                                 const GpuOcclusionCaptureScenario scenario = GpuOcclusionCaptureScenario::HiddenTarget,
+                                 const std::uint32_t width = SurfaceSize, const std::uint32_t height = SurfaceSize,
+                                 const Keire::AssetId targetMaterial = {}, const std::uint32_t targetCount = 1U,
+                                 const float occluderScale = 2.2F, const Keire::AssetId targetSkin = {},
+                                 const Keire::AssetId targetSkeleton = {})
+            : Layer("GPU occlusion rendered output"), m_Mesh(mesh), m_Material(material), m_Mode(mode),
+              m_TargetMaterial(targetMaterial ? targetMaterial : material), m_Results(std::move(results)),
+              m_Scenario(scenario), m_Width(width), m_Height(height), m_TargetCount(targetCount),
+              m_OccluderScale(occluderScale), m_TargetSkin(targetSkin), m_TargetSkeleton(targetSkeleton)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("GPU occlusion lab"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            auto occluder = m_Scene->CreateEntity("Occlusion wall");
+            const auto occluderRenderer = occluder.AddComponent<Keire::MeshRendererComponent>();
+            occluderRenderer->SetMesh(m_Mesh);
+            occluderRenderer->SetMaterial(m_Material);
+            occluderRenderer->SetTint({1.0F, 1.0F, 1.0F, 1.0F});
+            const auto occluderTransform = occluder.GetComponent<Keire::TransformComponent>();
+            occluderTransform->SetLocalScale({m_OccluderScale, m_OccluderScale, 0.2F});
+
+            for (std::uint32_t index = 0; index < m_TargetCount; ++index)
+            {
+                auto target = m_Scene->CreateEntity("Occluded target " + std::to_string(index));
+                const auto targetRenderer = target.AddComponent<Keire::MeshRendererComponent>();
+                targetRenderer->SetMesh(m_Mesh);
+                targetRenderer->SetMaterial(m_TargetMaterial);
+                targetRenderer->SetTint({0.75F, 1.0F, 0.75F, 1.0F});
+                targetRenderer->SetAlwaysVisible(m_Scenario == GpuOcclusionCaptureScenario::AlwaysVisibleTarget);
+                if (m_TargetSkin)
+                {
+                    const auto animator = target.AddComponent<Keire::AnimatorComponent>();
+                    animator->SetSkeleton(m_TargetSkeleton);
+                    animator->SetSkinnedMesh(m_TargetSkin);
+                    const std::array palette{Keire::Math::ComposeTransform({}, {}, {1.0F, 1.0F, 1.0F})};
+                    animator->SetRuntimePose("GPU occlusion test", 0.0F, true, palette);
+                }
+                const auto targetTransform = target.GetComponent<Keire::TransformComponent>();
+                const auto column = m_TargetCount == 1U ? 0 : static_cast<std::int32_t>(index % 11U) - 5;
+                const auto row = m_TargetCount == 1U ? 0 : static_cast<std::int32_t>(index / 11U) - 5;
+                targetTransform->SetLocalPosition(
+                    {static_cast<float>(column) * 0.12F, static_cast<float>(row) * 0.12F, -1.5F});
+                const float scale = m_TargetCount == 1U ? 0.5F : 0.12F;
+                targetTransform->SetLocalScale({scale, scale, scale});
+                if (index == 0U)
+                    m_TargetTransform = targetTransform;
+            }
+
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "GPU occlusion lab";
+            surface.Width = m_Width;
+            surface.Height = m_Height;
+            surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({0.0F, 0.0F, 5.0F}, {}, {0.0F, 1.0F, 0.0F});
+            camera.Projection = Keire::Math::Perspective(55.0F, static_cast<float>(m_Width) / m_Height, 0.1F, 100.0F);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+            m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
+            m_Environment.AmbientIntensity = 1.0F;
+            m_Environment.SkyVisible = false;
+            m_Environment.GpuOcclusion = m_Mode;
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (Owner().Renderer() && m_Results->Frames.empty())
+            {
+                m_Results->Statistics = Owner().Renderer()->Statistics();
+                m_Results->FrameGraph = Owner().Renderer()->CaptureFrameGraph();
+            }
+            if (m_View && m_Results->Diagnostics.empty())
+                m_Results->Diagnostics.push_back(m_View->Surface()->OcclusionDiagnostics());
+            if (m_Scene)
+                m_Scene->Close();
+            m_TargetTransform.Reset();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            const auto surface = m_View->Surface();
+            const auto recordDiagnostics = [&](const Keire::GpuOcclusionSurfaceDiagnostics& diagnostics)
+            {
+                m_Results->Diagnostics.push_back(diagnostics);
+                m_Results->DebugViews.push_back(surface->OcclusionDebugView());
+                m_Results->DebugMips.push_back(surface->OcclusionDebugMip());
+            };
+            if (m_Scenario == GpuOcclusionCaptureScenario::LifecycleReset && m_LifecycleStage != 0U)
+            {
+                const auto diagnostics = surface->OcclusionDiagnostics();
+                if (m_LifecycleStage == 1U && !surface->Available() && surface->Width() == 0U &&
+                    surface->Height() == 0U)
+                {
+                    recordDiagnostics(diagnostics);
+                    Keire::RenderSystemInternalAccess::RequestSurfaceSize(*surface, ResetWidth, ResetHeight);
+                    m_LifecycleStage = 2U;
+                }
+                else if (m_LifecycleStage == 2U && surface->Available() && surface->Width() == ResetWidth &&
+                         surface->Height() == ResetHeight)
+                {
+                    recordDiagnostics(diagnostics);
+                    auto camera = m_View->Camera();
+                    camera.Projection =
+                        Keire::Math::Perspective(55.0F, static_cast<float>(ResetWidth) / ResetHeight, 0.1F, 100.0F);
+                    m_View->SetCamera(camera);
+                    m_Environment.GpuOcclusion = Keire::GpuOcclusionMode::Forced;
+                    Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment});
+                    m_LifecycleStage = 3U;
+                }
+                else if (m_LifecycleStage == 3U)
+                {
+                    m_Results->ObservedAfterReset.push_back(diagnostics);
+                    m_Environment.GpuOcclusion = Keire::GpuOcclusionMode::Disabled;
+                    Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment});
+                    m_LifecycleStage = 4U;
+                }
+                else if (m_LifecycleStage == 4U)
+                {
+                    m_Results->ObservedAfterReset.push_back(diagnostics);
+                    if (diagnostics.State == Keire::GpuOcclusionSurfaceState::Disabled)
+                    {
+                        recordDiagnostics(diagnostics);
+                        m_Environment.GpuOcclusion = Keire::GpuOcclusionMode::Forced;
+                        m_Results->ReforcedFrameFloor = Owner().Renderer()->Statistics().Frame;
+                        Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment});
+                        m_LifecycleStage = 5U;
+                    }
+                    else
+                        Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment});
+                }
+                else if (m_LifecycleStage == 5U)
+                {
+                    m_Results->ObservedAfterReset.push_back(diagnostics);
+                    m_Results->ObservedAfterReforce.push_back(diagnostics);
+                    if (diagnostics.State == Keire::GpuOcclusionSurfaceState::Active && diagnostics.ReadbackValid &&
+                        diagnostics.Culled > 0U && diagnostics.SourceFrame >= m_Results->ReforcedFrameFloor)
+                    {
+                        recordDiagnostics(diagnostics);
+                        Owner().RequestExit();
+                        return;
+                    }
+                    Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment});
+                }
+
+                if (++m_Frame > 180U)
+                {
+                    m_Results->TimedOut = true;
+                    Owner().RequestExit();
+                }
+                return;
+            }
+
+            if (m_Submitted)
+            {
+                auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *surface);
+                const auto diagnostics = surface->OcclusionDiagnostics();
+                const auto materialBindingBuilds =
+                    Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer());
+                const auto expectedMaterialBindings = m_TargetMaterial == m_Material ? 1U : 2U;
+                const bool skinReady = !m_TargetSkin || Keire::RenderSystemInternalAccess::SkinningStaticBuildCount(
+                                                            *Owner().Renderer()) > 0U;
+                const bool resourcesReady = materialBindingBuilds >= expectedMaterialBindings && skinReady;
+                m_ResourceReadyFrames = resourcesReady ? m_ResourceReadyFrames + 1U : 0U;
+                if (diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::BelowAutomaticThreshold)
+                    m_Results->SawBelowAutomaticThreshold = true;
+                const auto capture = [&]()
+                {
+                    m_Results->Frames.push_back(std::move(pixels));
+                    recordDiagnostics(diagnostics);
+                    m_Results->Statistics = Owner().Renderer()->Statistics();
+                    m_Results->FrameGraph = Owner().Renderer()->CaptureFrameGraph();
+                };
+                const bool fallback = diagnostics.State == Keire::GpuOcclusionSurfaceState::Fallback ||
+                                      diagnostics.State == Keire::GpuOcclusionSurfaceState::Unsupported;
+                if (m_Mode == Keire::GpuOcclusionMode::Disabled && m_Frame >= 3U && m_ResourceReadyFrames >= 2U)
+                {
+                    capture();
+                    Owner().RequestExit();
+                    return;
+                }
+                if (m_Scenario == GpuOcclusionCaptureScenario::TerminalFallback && fallback &&
+                    m_ResourceReadyFrames >= 2U)
+                {
+                    capture();
+                    Owner().RequestExit();
+                    return;
+                }
+                if (m_Scenario == GpuOcclusionCaptureScenario::ResetToDisabled && m_FollowUpPending &&
+                    m_View->Surface()->Width() == ResetWidth && m_View->Surface()->Height() == ResetHeight &&
+                    diagnostics.State == Keire::GpuOcclusionSurfaceState::Disabled)
+                {
+                    capture();
+                    Owner().RequestExit();
+                    return;
+                }
+                if (m_Scenario == GpuOcclusionCaptureScenario::DebugViews && m_FollowUpPending)
+                {
+                    capture();
+                    if (m_DebugStage == 1U)
+                    {
+                        m_View->Surface()->SetOcclusionDebugView(Keire::GpuOcclusionDebugView::HierarchicalDepth,
+                                                                 std::numeric_limits<std::uint32_t>::max());
+                        m_DebugStage = 2U;
+                    }
+                    else
+                    {
+                        Owner().RequestExit();
+                        return;
+                    }
+                }
+                const bool classificationReady =
+                    m_ResourceReadyFrames >= 2U && diagnostics.ReadbackValid &&
+                    (diagnostics.Culled > 0U ||
+                     (m_Scenario == GpuOcclusionCaptureScenario::AlwaysVisibleTarget && diagnostics.Candidates >= 2U &&
+                      diagnostics.Visible == diagnostics.Candidates) ||
+                     (m_Scenario == GpuOcclusionCaptureScenario::SkinnedTarget && diagnostics.Candidates == 1U &&
+                      diagnostics.Visible == diagnostics.Candidates));
+                if (!m_FollowUpPending && classificationReady)
+                {
+                    if (m_Scenario == GpuOcclusionCaptureScenario::LifecycleReset)
+                        surface->SetOcclusionDebugView(Keire::GpuOcclusionDebugView::HierarchicalDepth,
+                                                       std::numeric_limits<std::uint32_t>::max());
+                    capture();
+                    if (m_Scenario == GpuOcclusionCaptureScenario::HiddenTarget ||
+                        m_Scenario == GpuOcclusionCaptureScenario::AlwaysVisibleTarget ||
+                        m_Scenario == GpuOcclusionCaptureScenario::SkinnedTarget)
+                    {
+                        Owner().RequestExit();
+                        return;
+                    }
+                    if (m_Scenario == GpuOcclusionCaptureScenario::RevealTarget)
+                        m_TargetTransform->SetLocalPosition({1.65F, 0.0F, -1.5F});
+                    else if (m_Scenario == GpuOcclusionCaptureScenario::ResetToDisabled)
+                    {
+                        m_View->Surface()->RequestSize(ResetWidth, ResetHeight);
+                        m_Environment.GpuOcclusion = Keire::GpuOcclusionMode::Disabled;
+                    }
+                    else if (m_Scenario == GpuOcclusionCaptureScenario::DebugViews)
+                    {
+                        m_View->Surface()->SetOcclusionDebugView(Keire::GpuOcclusionDebugView::VisibilityBounds);
+                        m_DebugStage = 1U;
+                    }
+                    else if (m_Scenario == GpuOcclusionCaptureScenario::LifecycleReset)
+                    {
+                        Keire::RenderSystemInternalAccess::RequestSurfaceSize(*surface, 0U, 0U);
+                        m_LifecycleStage = 1U;
+                        m_FollowUpPending = true;
+                        return;
+                    }
+                    m_FollowUpPending = true;
+                }
+                else if (m_Scenario == GpuOcclusionCaptureScenario::RevealTarget && m_FollowUpPending)
+                {
+                    capture();
+                    Owner().RequestExit();
+                    return;
+                }
+            }
+
+            if (++m_Frame > 120U)
+            {
+                m_Results->TimedOut = true;
+                Owner().RequestExit();
+                return;
+            }
+            Owner().Renderer()->Submit({m_Scene, m_View, false, m_Environment});
+            m_Submitted = true;
+        }
+
+      private:
+        Keire::AssetId m_Mesh;
+        Keire::AssetId m_Material;
+        Keire::AssetId m_TargetMaterial;
+        Keire::GpuOcclusionMode m_Mode = Keire::GpuOcclusionMode::Automatic;
+        std::shared_ptr<GpuOcclusionCaptureResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::TransformComponent> m_TargetTransform;
+        Keire::RenderEnvironmentSettings m_Environment;
+        static constexpr std::uint32_t ResetWidth = 101U;
+        static constexpr std::uint32_t ResetHeight = 67U;
+        std::uint32_t m_Frame = 0;
+        GpuOcclusionCaptureScenario m_Scenario = GpuOcclusionCaptureScenario::HiddenTarget;
+        std::uint32_t m_Width = SurfaceSize;
+        std::uint32_t m_Height = SurfaceSize;
+        std::uint32_t m_TargetCount = 1;
+        float m_OccluderScale = 2.2F;
+        Keire::AssetId m_TargetSkin;
+        Keire::AssetId m_TargetSkeleton;
+        std::uint32_t m_DebugStage = 0;
+        std::uint32_t m_LifecycleStage = 0;
+        std::uint32_t m_ResourceReadyFrames = 0;
+        bool m_Submitted = false;
+        bool m_FollowUpPending = false;
+    };
 } // namespace
 namespace KeireRenderTests
 {
@@ -2263,6 +2661,12 @@ TEST_CASE("independent render surfaces submit in queue order and survive final-f
     REQUIRE(results->HasStatistics);
     REQUIRE(results->MaterialBindingBuilds.size() >= 2);
     CHECK(HasStableMaterialBinding(results->MaterialBindingBuilds));
+    CHECK(results->OcclusionDiagnostics[0].RequestedMode == Keire::GpuOcclusionMode::Disabled);
+    CHECK(results->OcclusionDiagnostics[0].State == Keire::GpuOcclusionSurfaceState::Disabled);
+    CHECK(results->OcclusionDiagnostics[1].RequestedMode == Keire::GpuOcclusionMode::Automatic);
+    CHECK(results->OcclusionDiagnostics[2].RequestedMode == Keire::GpuOcclusionMode::Forced);
+    CHECK(results->OcclusionDiagnostics[2].State == Keire::GpuOcclusionSurfaceState::Fallback);
+    CHECK(results->OcclusionDiagnostics[2].FallbackReason == Keire::GpuOcclusionFallbackReason::LegacyShaderAbi);
 }
 
 TEST_CASE("large material scenes roll descriptor pressure across ordered command buffers")
@@ -2282,6 +2686,432 @@ TEST_CASE("large material scenes roll descriptor pressure across ordered command
     REQUIRE(results->Frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4));
     CHECK(MeasureCenter(results->Frame).Luminance() > MinimumBehaviorDelta);
     CHECK(results->MaterialDependencyChecks == 1);
+}
+
+TEST_CASE("forced GPU occlusion removes hidden instances without changing rendered pixels")
+{
+    RenderAssetFixture assets(true);
+    const auto run = [&](const Keire::GpuOcclusionMode mode)
+    {
+        auto results = std::make_shared<GpuOcclusionCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(
+                std::make_unique<GpuOcclusionCaptureLayer>(assets.CubeMesh, assets.ShaderGraphMaterial, mode, results));
+            REQUIRE(application.Run() == 0);
+        }
+        REQUIRE_FALSE(results->Diagnostics.empty());
+        CAPTURE(static_cast<int>(results->Diagnostics.back().State));
+        CAPTURE(static_cast<int>(results->Diagnostics.back().FallbackReason));
+        CAPTURE(results->Diagnostics.back().Candidates);
+        CAPTURE(results->Diagnostics.back().Visible);
+        CAPTURE(results->Diagnostics.back().Culled);
+        CAPTURE(results->Diagnostics.back().SafeOccluders);
+        CAPTURE(results->Diagnostics.back().ReadbackValid);
+        REQUIRE_FALSE(results->TimedOut);
+        REQUIRE(results->Frames.size() == 1);
+        REQUIRE(results->Diagnostics.size() == 1);
+        return results;
+    };
+
+    const auto direct = run(Keire::GpuOcclusionMode::Disabled);
+    const auto occluded = run(Keire::GpuOcclusionMode::Forced);
+    CHECK(direct->Diagnostics.front().State == Keire::GpuOcclusionSurfaceState::Disabled);
+    CHECK(occluded->Diagnostics.front().State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(occluded->Diagnostics.front().PyramidValid);
+    CHECK(occluded->Diagnostics.front().ReadbackValid);
+    CHECK(occluded->Diagnostics.front().Candidates >= 2U);
+    CHECK(occluded->Diagnostics.front().Culled > 0U);
+    CHECK(occluded->Statistics.GpuOcclusionCulledTriangles > 0U);
+    CAPTURE(MeasureCenter(direct->Frames.front()).Luminance());
+    CAPTURE(MeasureCenter(occluded->Frames.front()).Luminance());
+    CHECK(MaximumPixelDifference(direct->Frames.front(), occluded->Frames.front()) <= ColorTolerance);
+
+    const auto passOrder = [&occluded](const std::string_view name) -> std::optional<std::uint32_t>
+    {
+        const auto pass = std::ranges::find(occluded->FrameGraph.Passes, name, &Keire::FrameGraphSnapshotPass::Name);
+        if (pass == occluded->FrameGraph.Passes.end())
+            return std::nullopt;
+        return pass->Order;
+    };
+    const auto depthOrder = passOrder("Occlusion depth");
+    const auto pyramidOrder = passOrder("Occlusion depth pyramid");
+    const auto cullingOrder = passOrder("GPU occlusion culling");
+    const auto opaqueOrder = passOrder("Opaque and mask");
+    REQUIRE(depthOrder);
+    REQUIRE(pyramidOrder);
+    REQUIRE(cullingOrder);
+    REQUIRE(opaqueOrder);
+    CHECK(*depthOrder < *pyramidOrder);
+    CHECK(*pyramidOrder < *cullingOrder);
+    CHECK(*cullingOrder < *opaqueOrder);
+}
+
+TEST_CASE("same-frame GPU occlusion reveals a moved target on the next rendered frame")
+{
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::RevealTarget));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 2);
+    REQUIRE(results->Diagnostics.size() == 2);
+    CHECK(results->Diagnostics.front().ReadbackValid);
+    CHECK(results->Diagnostics.front().Culled > 0U);
+    CHECK(MaximumPixelDifference(results->Frames[0], results->Frames[1]) > MinimumBehaviorDelta);
+}
+
+TEST_CASE("depth-tested transparent Shader Graph singletons are occludees but never safe occluders")
+{
+    RenderAssetFixture assets(true, false, false, true);
+    const auto run = [&](const Keire::GpuOcclusionMode mode)
+    {
+        auto results = std::make_shared<GpuOcclusionCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+                assets.CubeMesh, assets.ShaderGraphMaterial, mode, results, GpuOcclusionCaptureScenario::HiddenTarget,
+                SurfaceSize, SurfaceSize, assets.TransparentShaderGraphMaterial));
+            REQUIRE(application.Run() == 0);
+        }
+        REQUIRE_FALSE(results->TimedOut);
+        REQUIRE(results->Frames.size() == 1);
+        REQUIRE(results->Diagnostics.size() == 1);
+        return results;
+    };
+
+    const auto direct = run(Keire::GpuOcclusionMode::Disabled);
+    const auto occluded = run(Keire::GpuOcclusionMode::Forced);
+    CHECK(occluded->Diagnostics.front().State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(occluded->Diagnostics.front().ReadbackValid);
+    CHECK(occluded->Diagnostics.front().Candidates >= 2U);
+    CHECK(occluded->Diagnostics.front().SafeOccluders == 1U);
+    CHECK(occluded->Diagnostics.front().Culled > 0U);
+    CHECK(MaximumPixelDifference(direct->Frames.front(), occluded->Frames.front()) <= ColorTolerance);
+}
+
+TEST_CASE("Automatic GPU occlusion activates after two profitable frames without pixel regression")
+{
+    constexpr std::uint32_t hiddenTargets = 127U;
+    RenderAssetFixture assets(true, false, false, false, true);
+    const auto run = [&](const Keire::GpuOcclusionMode mode)
+    {
+        auto results = std::make_shared<GpuOcclusionCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+                assets.OcclusionStressMesh, assets.ShaderGraphMaterial, mode, results,
+                GpuOcclusionCaptureScenario::HiddenTarget, SurfaceSize, SurfaceSize, Keire::AssetId{}, hiddenTargets,
+                4.5F));
+            REQUIRE(application.Run() == 0);
+        }
+        REQUIRE_FALSE(results->TimedOut);
+        REQUIRE(results->Frames.size() == 1);
+        REQUIRE(results->Diagnostics.size() == 1);
+        return results;
+    };
+
+    const auto direct = run(Keire::GpuOcclusionMode::Disabled);
+    const auto automatic = run(Keire::GpuOcclusionMode::Automatic);
+    const auto& diagnostics = automatic->Diagnostics.front();
+    CHECK(automatic->SawBelowAutomaticThreshold);
+    CHECK(diagnostics.RequestedMode == Keire::GpuOcclusionMode::Automatic);
+    CHECK(diagnostics.EffectiveMode == Keire::GpuOcclusionMode::Automatic);
+    CHECK(diagnostics.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(diagnostics.ReadbackValid);
+    CHECK(diagnostics.Candidates >= hiddenTargets + 1U);
+    CHECK(diagnostics.SafeOccluders == 1U);
+    CHECK(diagnostics.Culled >= hiddenTargets);
+    CHECK(automatic->Statistics.GpuOcclusionCandidateTriangles >= 100'000U);
+    CHECK(MaximumPixelDifference(direct->Frames.front(), automatic->Frames.front()) <= ColorTolerance);
+}
+
+TEST_CASE("forced GPU occlusion reports legacy shader fallback while preserving direct draws")
+{
+    RenderAssetFixture assets;
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.Material, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::TerminalFallback));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 1);
+    REQUIRE(results->Diagnostics.size() == 1);
+    CHECK(results->Diagnostics.front().State == Keire::GpuOcclusionSurfaceState::Fallback);
+    CHECK(results->Diagnostics.front().FallbackReason == Keire::GpuOcclusionFallbackReason::LegacyShaderAbi);
+    CHECK(MeasureCenter(results->Frames.front()).Luminance() > MinimumBehaviorDelta);
+}
+
+TEST_CASE("always-visible instances remain in forced GPU occlusion indirect draws")
+{
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::AlwaysVisibleTarget));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Diagnostics.size() == 1);
+    const auto& diagnostics = results->Diagnostics.front();
+    CHECK(diagnostics.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(diagnostics.ReadbackValid);
+    CHECK(diagnostics.Candidates >= 2U);
+    CHECK(diagnostics.Visible == diagnostics.Candidates);
+    CHECK(diagnostics.Culled == 0U);
+}
+
+TEST_CASE("skinned instances bypass forced GPU occlusion even before deformation output is ready")
+{
+    RenderAssetFixture assets(true);
+    const auto run = [&](const Keire::GpuOcclusionMode mode)
+    {
+        auto results = std::make_shared<GpuOcclusionCaptureResults>();
+        auto specification = RenderTestSpecification();
+        specification.Assets.Mode = Keire::AssetMode::Development;
+        specification.Assets.DevelopmentCatalog = assets.Catalog;
+        {
+            Keire::Application application(std::move(specification));
+            (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+                assets.Mesh, assets.ShaderGraphMaterial, mode, results, GpuOcclusionCaptureScenario::SkinnedTarget,
+                SurfaceSize, SurfaceSize, Keire::AssetId{}, 1U, 2.2F, assets.Skin, assets.Skeleton));
+            REQUIRE(application.Run() == 0);
+        }
+        REQUIRE_FALSE(results->TimedOut);
+        REQUIRE(results->Frames.size() == 1);
+        REQUIRE(results->Diagnostics.size() == 1);
+        return results;
+    };
+
+    const auto direct = run(Keire::GpuOcclusionMode::Disabled);
+    const auto occluded = run(Keire::GpuOcclusionMode::Forced);
+    const auto& diagnostics = occluded->Diagnostics.front();
+    CHECK(diagnostics.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(diagnostics.ReadbackValid);
+    CHECK(diagnostics.Candidates == 1U);
+    CHECK(diagnostics.Visible == 1U);
+    CHECK(diagnostics.Culled == 0U);
+    CHECK(MaximumPixelDifference(direct->Frames.front(), occluded->Frames.front()) <= ColorTolerance);
+}
+
+TEST_CASE("procedural vertex displacement bypasses forced GPU occlusion without losing direct draws")
+{
+    RenderAssetFixture assets(true, true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::TerminalFallback));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 1);
+    REQUIRE(results->Diagnostics.size() == 1);
+    CHECK(results->Diagnostics.front().State == Keire::GpuOcclusionSurfaceState::Fallback);
+    CHECK(results->Diagnostics.front().FallbackReason == Keire::GpuOcclusionFallbackReason::NoEligibleCandidates);
+    CHECK(MeasureCenter(results->Frames.front()).Luminance() > MinimumBehaviorDelta);
+}
+
+TEST_CASE("odd-sized GPU occlusion pyramids conservatively reduce through a one-pixel mip")
+{
+    constexpr std::uint32_t width = 97U;
+    constexpr std::uint32_t height = 65U;
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::HiddenTarget, width, height));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->Diagnostics.empty());
+    CAPTURE(static_cast<int>(results->Diagnostics.back().State));
+    CAPTURE(static_cast<int>(results->Diagnostics.back().FallbackReason));
+    CAPTURE(results->Diagnostics.back().Candidates);
+    CAPTURE(results->Diagnostics.back().Visible);
+    CAPTURE(results->Diagnostics.back().Culled);
+    CAPTURE(results->Diagnostics.back().SafeOccluders);
+    CAPTURE(results->Diagnostics.back().ReadbackValid);
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 1);
+    REQUIRE(results->Frames.front().size() == static_cast<std::size_t>(width * height * 4U));
+    REQUIRE(results->Diagnostics.size() == 1);
+    CHECK(results->Diagnostics.front().PyramidValid);
+    CHECK(results->Diagnostics.front().PyramidMipCount == 7U);
+    CHECK(results->Diagnostics.front().Culled > 0U);
+}
+
+TEST_CASE("GPU occlusion debug views render real overlays and clamp hierarchical-depth mips")
+{
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::DebugViews));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 3);
+    REQUIRE(results->Diagnostics.size() == 3);
+    REQUIRE(results->DebugViews.size() == 3);
+    REQUIRE(results->DebugMips.size() == 3);
+    CHECK(results->DebugViews[0] == Keire::GpuOcclusionDebugView::None);
+    CHECK(results->DebugViews[1] == Keire::GpuOcclusionDebugView::VisibilityBounds);
+    CHECK(results->DebugViews[2] == Keire::GpuOcclusionDebugView::HierarchicalDepth);
+    CHECK(results->DebugMips[0] == 0U);
+    CHECK(results->DebugMips[1] == 0U);
+    REQUIRE(results->Diagnostics[2].PyramidMipCount > 0U);
+    CHECK(results->DebugMips[2] == results->Diagnostics[2].PyramidMipCount - 1U);
+    CHECK(MaximumPixelDifference(results->Frames[0], results->Frames[1]) > MinimumBehaviorDelta);
+    CHECK(MaximumPixelDifference(results->Frames[0], results->Frames[2]) > MinimumBehaviorDelta);
+}
+
+TEST_CASE("resize and mode changes clear stale GPU occlusion readback state")
+{
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::ResetToDisabled));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 2);
+    REQUIRE(results->Diagnostics.size() == 2);
+    CHECK(results->Diagnostics[0].State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(results->Diagnostics[0].ReadbackValid);
+    CHECK(results->Diagnostics[0].Culled > 0U);
+    CHECK(results->Diagnostics[1].RequestedMode == Keire::GpuOcclusionMode::Disabled);
+    CHECK(results->Diagnostics[1].State == Keire::GpuOcclusionSurfaceState::Disabled);
+    CHECK_FALSE(results->Diagnostics[1].PyramidValid);
+    CHECK_FALSE(results->Diagnostics[1].ReadbackValid);
+    CHECK(results->Diagnostics[1].Candidates == 0U);
+    CHECK(results->Diagnostics[1].SourceFrame == 0U);
+    CHECK(results->Diagnostics[1].ReadbackAge == std::numeric_limits<std::uint32_t>::max());
+    CHECK(results->Frames[1].size() == static_cast<std::size_t>(101U * 67U * 4U));
+}
+
+TEST_CASE("active GPU occlusion survives minimize restore and Forced Disabled Forced epoch changes")
+{
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::LifecycleReset));
+        REQUIRE(application.Run() == 0);
+    }
+
+    CAPTURE(results->Diagnostics.size());
+    CAPTURE(results->ObservedAfterReset.size());
+    CAPTURE(results->ObservedAfterReforce.size());
+    CAPTURE(results->ReforcedFrameFloor);
+    if (!results->ObservedAfterReset.empty())
+    {
+        MESSAGE("last reset state=" << static_cast<int>(results->ObservedAfterReset.back().State) << " fallback="
+                                    << static_cast<int>(results->ObservedAfterReset.back().FallbackReason)
+                                    << " source=" << results->ObservedAfterReset.back().SourceFrame
+                                    << " readback=" << results->ObservedAfterReset.back().ReadbackValid
+                                    << " candidates=" << results->ObservedAfterReset.back().Candidates
+                                    << " visible=" << results->ObservedAfterReset.back().Visible
+                                    << " culled=" << results->ObservedAfterReset.back().Culled
+                                    << " occluders=" << results->ObservedAfterReset.back().SafeOccluders
+                                    << " pyramid=" << results->ObservedAfterReset.back().PyramidValid);
+    }
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Diagnostics.size() == 5);
+    REQUIRE(results->DebugViews.size() == 5);
+    REQUIRE(results->DebugMips.size() == 5);
+    const auto& initial = results->Diagnostics[0];
+    const auto& minimized = results->Diagnostics[1];
+    const auto& restored = results->Diagnostics[2];
+    const auto& disabled = results->Diagnostics[3];
+    const auto& reactivated = results->Diagnostics[4];
+    CHECK(initial.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(initial.ReadbackValid);
+    CHECK(initial.Culled > 0U);
+    REQUIRE(initial.PyramidMipCount > 0U);
+    CHECK(results->DebugViews[0] == Keire::GpuOcclusionDebugView::HierarchicalDepth);
+    CHECK(results->DebugMips[0] == initial.PyramidMipCount - 1U);
+
+    for (const auto* reset : {&minimized, &restored, &disabled})
+    {
+        CHECK_FALSE(reset->PyramidValid);
+        CHECK_FALSE(reset->ReadbackValid);
+        CHECK(reset->Candidates == 0U);
+        CHECK(reset->SourceFrame == 0U);
+        CHECK(reset->ReadbackAge == std::numeric_limits<std::uint32_t>::max());
+    }
+    CHECK(disabled.State == Keire::GpuOcclusionSurfaceState::Disabled);
+    CHECK(results->DebugMips[1] == 0U);
+    CHECK(results->DebugMips[2] == 0U);
+
+    REQUIRE(results->ReforcedFrameFloor > initial.SourceFrame);
+    CHECK(reactivated.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(reactivated.ReadbackValid);
+    CHECK(reactivated.Culled > 0U);
+    CHECK(reactivated.SourceFrame >= results->ReforcedFrameFloor);
+    REQUIRE_FALSE(results->ObservedAfterReforce.empty());
+    CHECK(std::ranges::all_of(
+        results->ObservedAfterReforce, [&](const auto& diagnostics)
+        { return !diagnostics.ReadbackValid || diagnostics.SourceFrame >= results->ReforcedFrameFloor; }));
 }
 
 TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed indexed mesh")

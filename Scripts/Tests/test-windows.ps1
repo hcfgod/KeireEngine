@@ -470,6 +470,7 @@ Assert-Equal $lock.ASSIMP_COMMIT "392a658f9c271be965271f45e7521a1b80ea4392" "Ass
 Assert-Equal $lock.STB_COMMIT "2c980bb59875b0d32144a71867fbdebb2f77cd20" "stb lock"
 Assert-Equal $lock.FFMPEG_COMMIT "89153eb701d372f54a5d7d29de5067abc09e11d3" "FFmpeg lock"
 Assert-Equal $lock.LIBSODIUM_COMMIT "77e1ce5d6dee871c49ef211222ba18ef0c486bda" "libsodium lock"
+Assert-Equal $lock.TRACY_COMMIT "05cceee0df3b8d7c6fa87e9638af311dbabc63cb" "Tracy lock"
 $vendorScript = Get-Content (Join-Path $Windows "vendor.ps1") -Raw
 $vendorUpdateScript = Get-Content (Join-Path $Windows "vendor-update.ps1") -Raw
 Assert-True ($vendorScript.Contains('Vendor/imgui') -and $vendorScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui vendor mapping"
@@ -482,6 +483,19 @@ Assert-True ($vendorUpdateScript.Contains('"entt"') -and $vendorUpdateScript.Con
 Assert-True ($vendorScript.Contains('Vendor/SDL_shadercross') -and $vendorScript.Contains('SDL_SHADERCROSS_DXC_COMMIT') -and $vendorScript.Contains('SPIRV-Tools')) "Recursive shader compiler vendor mapping"
 Assert-True ($vendorUpdateScript.Contains('"SDL_shadercross"')) "Shader compiler vendor update support"
 Assert-True ($vendorScript.Contains('Vendor/assimp') -and $vendorScript.Contains('$Lock.ASSIMP_COMMIT') -and $vendorScript.Contains('Vendor/stb') -and $vendorScript.Contains('$Lock.STB_COMMIT')) "Asset importer vendor mappings"
+Assert-True ($vendorScript.Contains('[switch]$IncludeProfileDependencies') -and
+             $vendorScript.Contains('Build/Dependencies/tracy') -and
+             $vendorScript.Contains('$Lock.TRACY_COMMIT') -and
+             $vendorScript.Contains('$managedProfileCheckout') -and
+             $vendorScript.Contains('fetch --no-tags origin $dependency.Commit') -and
+             -not $vendorScript.Contains('Vendor/tracy')) `
+    "Tracy is an opt-in immutable Profile dependency outside Vendor"
+Assert-True ($vendorUpdateScript.Contains('"Tracy"') -and
+             $vendorUpdateScript.Contains('Build\Dependencies\tracy') -and
+             $vendorUpdateScript.Contains('if ($Dependency -eq "Tracy")') -and
+             $vendorUpdateScript.Contains('git add Config/Dependencies.lock') -and
+             $vendorUpdateScript.Contains('git add Vendor/$Dependency Config/Dependencies.lock')) `
+    "Tracy vendor updates are lock-only while submodule updates retain staging guidance"
 $dependencyScript = Get-Content (Join-Path $Windows "dependencies.ps1") -Raw
 Assert-True ($dependencyScript.Contains('$Lock.SDL_COMMIT') -and $dependencyScript.Contains('$compiler') -and $dependencyScript.Contains('keire-dependency.stamp')) "Dependency cache identity inputs"
 Assert-True ($dependencyScript.Contains('[string]::IsNullOrWhiteSpace($LinkTarget)') -and
@@ -545,6 +559,11 @@ Assert-True ($coralWarningPatch.Contains('memcpy(buffer, InString.data(), InStri
              $coralWarningPatch.Contains('target_compile_options(Coral.Native PRIVATE /wd4996)')) "Warning-clean Coral native host patch"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
+Assert-True ($premakePolicy.Contains('filter "configurations:Profile"') -and
+             $premakePolicy.Contains('"KEIRE_PROFILE_TELEMETRY"') -and
+             $premakePolicy.Contains('"TRACY_ON_DEMAND"') -and
+             $premakePolicy.Contains('"TRACY_ONLY_LOCALHOST"')) `
+    "Profile builds enable local on-demand Tracy telemetry"
 $unixDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\dependencies.sh") -Raw
 $windowsDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\dependencies.ps1") -Raw
 Assert-True ($unixDependencies.Contains('CPP_RTTI_ENABLED=ON') -and
@@ -744,7 +763,8 @@ $preparedContent = Get-Content (Join-Path $Windows "prepare-generated-content.ps
 Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              -not $windowsBuild.Contains('"build-info.ps1"') -and
              $preparedContent.Contains('"build-info.ps1"') -and
-             $preparedContent.Contains('"builtin-vfx.ps1"')) `
+             $preparedContent.Contains('"builtin-vfx.ps1"') -and
+             $preparedContent.Contains('"builtin-occlusion.ps1"')) `
     "One Core prebuild process owns generated identity and built-in content"
 Assert-True ($corePremake.Contains('pchheader "KeireInternal/KeireCorePch.h"') -and
              $corePremake.Contains('buildoptions { "/FIKeireInternal/KeireCorePch.h" }') -and
@@ -773,6 +793,7 @@ Assert-True ($editorDevPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "Edi
              $windowsRun.Contains('$editorDevTarget')) "Complete editor development aggregate"
 Assert-True ($windowsBuild.Contains('Resolve-CompilerCache') -and
              $windowsBuild.Contains('ProfileBuild') -and
+             $windowsBuild.Contains('    $dependencyConfiguration = if ($Configuration -in @("Release", "Profile", "Dist"))') -and
              $windowsBuild.Contains('/p:PreferredToolArchitecture=x64') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\patch-ninja-compiler-cache.py'))) `
     "Optional compiler cache, build profiling, and native x64 MSVC host tools"
@@ -816,6 +837,10 @@ Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') 
 $generatedContentScript = Get-Content (Join-Path $Windows 'prepare-generated-content.ps1') -Raw
 Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              $generatedContentScript.Contains('builtin-shaders.ps1') -and
+             $generatedContentScript.Contains('builtin-occlusion.ps1') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDepth.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugPyramid.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugBounds.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) `
     "First-party built-in shader generation"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |

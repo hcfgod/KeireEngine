@@ -61,7 +61,7 @@ project(ProjectConfig.CLIENT_TARGET)
                                          commandRepositoryRoot)
             }
 
-        filter { "configurations:Release or Dist" }
+        filter { "configurations:Release or Profile or Dist" }
             postbuildcommands
             {
                 CopyFileIfChangedCommand(postBuildPathPrefix .. DependencyManifest.SodiumReleaseRuntime,

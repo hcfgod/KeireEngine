@@ -206,6 +206,30 @@ match. Replaced buffers enter the normal submission-fence retirement queue, and 
 only after renderer shutdown has made GPU access inert. `RenderStatistics` reports dynamic bytes, buffer reallocations,
 and CPU VFX draw batches so a warmed-up scene can distinguish expected payload traffic from resource churn.
 
+GPU occlusion is a same-frame, per-surface extension of the private frame graph. Explicitly safe opaque geometry writes
+the occlusion depth pass, compute reductions build a hierarchical depth pyramid, and conservative bounds classification
+produces compact instance data plus indexed indirect arguments before the main opaque pass. Each dependent reduction is
+recorded with the synchronization required by SDL_GPU; no CPU visibility decision waits for the GPU. Transparent
+geometry never contributes occluder depth, though an eligible depth-tested singleton can be rejected without disturbing
+transparent ordering. Always-visible instances stay in their compacted batch with a force-visible bit. Unsafe deforming
+geometry, legacy instance-addressing shaders, and materials without conservative bounds remain on deterministic direct
+draws; only opaque geometry with matching depth-only behavior may become an occluder. Generated Shader Graph materials
+publish the eligibility metadata only when their vertex and depth behavior satisfies that contract.
+
+`Disabled`, `Automatic`, and `Forced` are persisted in rendering settings. Forced mode bypasses profitability
+thresholds, never safety checks. Allocation, pipeline, backend, content-eligibility, resize, and unavailable-surface
+failures preserve complete direct rendering and publish a typed reason instead of dropping geometry. Every surface owns
+its pyramid, visibility buffers, indirect arguments, readback ring, and value-only `GpuOcclusionSurfaceDiagnostics`;
+resize, minimize, device loss, and close retire those resources through the existing fence lifecycle. Aggregate
+statistics expose current recording work while visibility totals arrive asynchronously with their source frame and age.
+Pending readbacks also carry the surface generation, an internal submission epoch, and requested mode. Resource resets
+and every mode transition advance that epoch, so a late result from a pre-resize frame or a Forced-Disabled-Forced ABA
+sequence cannot revalidate stale visibility counters.
+The editor's session-transient visualization request is a value-only per-surface contract. The renderer composites
+visibility bounds or a selected hierarchical-depth mip in its overlay pass and keeps the debug texture private; the
+separate metadata overlay reports mode, fallback, mip availability, source frame, and readback age. External GPU capture
+remains the authoritative workflow for inspecting every pyramid resource and synchronization barrier.
+
 ## Fixed-tick replay and deterministic profiles
 
 Gameplay input is latched at fixed-tick boundaries. Digital edges remain pending until a tick consumes them, analog

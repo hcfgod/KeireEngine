@@ -960,6 +960,7 @@ normalize_configuration() {
     case "$value" in
         debug) printf 'Debug' ;;
         release) printf 'Release' ;;
+        profile) printf 'Profile' ;;
         dist) printf 'Dist' ;;
         debugasan) printf 'DebugASan' ;;
         debugubsan) printf 'DebugUBSan' ;;
@@ -1043,7 +1044,7 @@ invalidate_incompatible_binary_outputs() {
     local output_architecture
     output_architecture="$(architecture_output_name "$current_architecture")" || return 1
     local targets=()
-    for configuration in Debug Release Dist DebugASan DebugUBSan DebugTSan Coverage; do
+    for configuration in Debug Release Profile Dist DebugASan DebugUBSan DebugTSan Coverage; do
         target="$root/Build/Bin/$configuration-$system-$output_architecture"
         [[ -e "$target" || -L "$target" ]] && targets+=("$target")
     done
@@ -1398,7 +1399,7 @@ stage_unix_asset_worker_runtime() {
         "${project_namespace}EditorDev") ;;
         *) return 0 ;;
     esac
-    [[ "$configuration" == Release || "$configuration" == Dist ]] && dependency_configuration=Release
+    [[ "$configuration" == Release || "$configuration" == Profile || "$configuration" == Dist ]] && dependency_configuration=Release
     output_architecture="$(architecture_output_name "$architecture")"
     source_directory="$root/Build/Dependencies/ffmpeg/$dependency_configuration/install/lib"
     destination_directory="$root/Build/Bin/$configuration-$platform-$output_architecture/${project_namespace}AssetWorker"

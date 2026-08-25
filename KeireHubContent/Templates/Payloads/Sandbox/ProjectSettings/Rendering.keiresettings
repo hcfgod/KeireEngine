@@ -6,6 +6,16 @@
     1.0
   ],
   "ambientIntensity": 0.41600000858306885,
+  "directionalShadowCascadeCount": 4,
+  "directionalShadowDistance": 100.0,
+  "directionalShadowResolution": 2048,
+  "directionalShadowSplitLambda": 0.6499999761581421,
+  "environment": "",
+  "environmentDiffuseIntensity": 1.0,
+  "environmentRotationDegrees": 0.0,
+  "environmentSpecularIntensity": 1.0,
   "exposure": 1.0,
-  "schemaVersion": 1
+  "gpuOcclusion": "automatic",
+  "schemaVersion": 3,
+  "skyVisible": true
 }

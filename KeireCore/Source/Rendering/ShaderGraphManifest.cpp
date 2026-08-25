@@ -76,7 +76,8 @@ namespace Keire::Detail
                                          const std::filesystem::path& generatedSource,
                                          const std::span<const ShaderPropertyDefinition> properties,
                                          const std::span<const std::string> keywords,
-                                         const bool usesVertexMaterialParameters)
+                                         const bool usesVertexMaterialParameters,
+                                         const ShaderOcclusionSupport occlusionSupport)
     {
         Json encodedProperties = Json::array();
         for (const auto& property : properties)
@@ -103,6 +104,8 @@ namespace Keire::Detail
                             {"receivesShadows", lit},
                             {"usesForwardPlus", lit},
                             {"usesInstancing", true},
+                            {"instanceAddressingAbiVersion", 2},
+                            {"occlusionSupport", static_cast<std::uint8_t>(occlusionSupport)},
                             {"usesImageBasedLighting", lit},
                             {"usesVertexMaterialParameters", usesVertexMaterialParameters},
                             {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},

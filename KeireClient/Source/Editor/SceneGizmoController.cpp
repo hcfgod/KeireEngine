@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/SceneGizmoController.h"
 
+#include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
 #include "KeireClient/Editor/ScenePicker.h"
 
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
@@ -641,8 +642,10 @@ namespace KeireEditor
         }
     }
 
-    Keire::UiItemRect SceneGizmoController::DrawOverlayToolbar(Keire::UiFrame& ui, const Keire::UiItemRect viewport)
+    Keire::UiItemRect SceneGizmoController::DrawOverlayToolbar(Keire::UiFrame& ui, const Keire::UiItemRect viewport,
+                                                               const std::uint32_t occlusionPyramidMipCount)
     {
+        ClampOcclusionDebugMip(occlusionPyramidMipCount);
         constexpr float size = 28.0F;
         constexpr float gap = 3.0F;
         constexpr float padding = 8.0F;
@@ -692,6 +695,39 @@ namespace KeireEditor
             (void)ui.Checkbox("Light directions", m_Settings.ShowLightDirections);
             (void)ui.Checkbox("Physics gizmos", m_Settings.ShowPhysicsGizmos);
             (void)ui.Checkbox("Edit collider shapes", m_Settings.EditColliders);
+            ui.Separator();
+            ui.Text("GPU OCCLUSION DEBUG");
+            constexpr std::array debugViews{Keire::GpuOcclusionDebugView::None,
+                                            Keire::GpuOcclusionDebugView::VisibilityBounds,
+                                            Keire::GpuOcclusionDebugView::HierarchicalDepth};
+            if (auto combo = ui.BeginCombo("Visualization", GpuOcclusionDebugViewName(m_Settings.OcclusionDebugView));
+                combo)
+            {
+                for (const auto view : debugViews)
+                {
+                    if (ui.Selectable(GpuOcclusionDebugViewName(view), m_Settings.OcclusionDebugView == view))
+                    {
+                        m_Settings.OcclusionDebugView = view;
+                        m_Settings.OcclusionDebugMip = 0;
+                    }
+                }
+            }
+            if (m_Settings.OcclusionDebugView == Keire::GpuOcclusionDebugView::HierarchicalDepth)
+            {
+                auto mip = static_cast<std::int32_t>(m_Settings.OcclusionDebugMip);
+                if (auto disabled = ui.BeginDisabled(occlusionPyramidMipCount == 0U); disabled)
+                {
+                    if (ui.SliderInt("HZB Mip", mip, 0,
+                                     static_cast<std::int32_t>(std::max(1U, occlusionPyramidMipCount) - 1U)))
+                        m_Settings.OcclusionDebugMip = static_cast<std::uint32_t>(mip);
+                }
+                if (occlusionPyramidMipCount == 0U)
+                    ui.Text("No HZB mips are available on this surface.");
+                else
+                    ui.Text(std::to_string(occlusionPyramidMipCount) + " live HZB mips; mip 0 is highest resolution.");
+            }
+            (void)ui.Checkbox("Diagnostics metadata", m_Settings.ShowOcclusionMetadata);
+            ui.Text("Visualization is session-only. Metadata reports fallback and readback age.");
         }
         return {origin, {position.X - gap, origin.Y + size}};
     }
@@ -1276,10 +1312,12 @@ namespace KeireEditor
 
     void SceneGizmoController::Load(const std::filesystem::path& projectRoot)
     {
+        m_Settings.OcclusionDebugView = Keire::GpuOcclusionDebugView::None;
+        m_Settings.OcclusionDebugMip = 0;
         std::ifstream input(projectRoot / "Library/Editor/SceneTools.state");
         std::uint32_t version = 0;
         std::uint32_t tool = 0;
-        if (!(input >> version) || (version != 1 && version != 2 && version != 3) ||
+        if (!(input >> version) || (version != 1 && version != 2 && version != 3 && version != 4) ||
             !(input >> tool >> m_Settings.PositionSnap.X >> m_Settings.PositionSnap.Y >> m_Settings.PositionSnap.Z >>
               m_Settings.RotationSnapDegrees >> m_Settings.ScaleSnap >> m_Settings.Snapping >> m_Settings.LocalSpace >>
               m_Settings.ShowIcons >> m_Settings.ShowCameraFrustums >> m_Settings.ShowLightDirections) ||
@@ -1291,6 +1329,7 @@ namespace KeireEditor
         }
         m_Settings.EditColliders = false;
         m_Settings.ShowPhysicsGizmos = true;
+        m_Settings.ShowOcclusionMetadata = false;
         if (version >= 2 && !(input >> m_Settings.EditColliders))
         {
             m_Settings = {};
@@ -1298,6 +1337,12 @@ namespace KeireEditor
             return;
         }
         if (version >= 3 && !(input >> m_Settings.ShowPhysicsGizmos))
+        {
+            m_Settings = {};
+            m_Tool = SceneTool::Translate;
+            return;
+        }
+        if (version >= 4 && !(input >> m_Settings.ShowOcclusionMetadata))
         {
             m_Settings = {};
             m_Tool = SceneTool::Translate;
@@ -1321,14 +1366,15 @@ namespace KeireEditor
         {
             std::filesystem::create_directories(projectRoot / "Library/Editor");
             std::ostringstream output;
-            output << "3\n"
+            output << "4\n"
                    << static_cast<std::uint32_t>(m_Tool) << '\n'
                    << m_Settings.PositionSnap.X << ' ' << m_Settings.PositionSnap.Y << ' ' << m_Settings.PositionSnap.Z
                    << '\n'
                    << m_Settings.RotationSnapDegrees << ' ' << m_Settings.ScaleSnap << '\n'
                    << m_Settings.Snapping << ' ' << m_Settings.LocalSpace << ' ' << m_Settings.ShowIcons << ' '
                    << m_Settings.ShowCameraFrustums << ' ' << m_Settings.ShowLightDirections << ' '
-                   << m_Settings.EditColliders << ' ' << m_Settings.ShowPhysicsGizmos << '\n';
+                   << m_Settings.EditColliders << ' ' << m_Settings.ShowPhysicsGizmos << ' '
+                   << m_Settings.ShowOcclusionMetadata << '\n';
             Keire::Detail::WriteTextFileAtomically(projectRoot / "Library/Editor/SceneTools.state", output.str());
         }
         catch (...)

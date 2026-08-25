@@ -891,7 +891,7 @@ function Remove-IncompatibleBuildBinaries {
     if ($preserveOutputs) { return }
 
     $outputArchitecture = Get-ArchitectureOutputName $normalizedArchitecture
-    $targets = @("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
+    $targets = @("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage") |
         ForEach-Object { Join-Path $Root "Build\Bin\$_-windows-$outputArchitecture" } |
         Where-Object { Get-Item -LiteralPath $_ -Force -ErrorAction SilentlyContinue }
     if ($targets.Count -eq 0) { return }

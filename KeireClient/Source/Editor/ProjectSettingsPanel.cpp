@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -415,10 +416,32 @@ namespace KeireEditor
         ui.Spacing();
 
         auto settings = m_Document.Settings();
+        bool changed = false;
+        bool commit = false;
+        ui.Text("GPU Occlusion Culling");
+        constexpr std::array modes{Keire::GpuOcclusionMode::Disabled, Keire::GpuOcclusionMode::Automatic,
+                                   Keire::GpuOcclusionMode::Forced};
+        if (auto combo = ui.BeginCombo("Occlusion Mode", GpuOcclusionModeName(settings.GpuOcclusion)); combo)
+        {
+            for (const auto mode : modes)
+            {
+                if (ui.Selectable(GpuOcclusionModeName(mode), settings.GpuOcclusion == mode))
+                {
+                    settings.GpuOcclusion = mode;
+                    changed = true;
+                    commit = true;
+                }
+            }
+        }
+        ui.TextColored(theme.MutedText, GpuOcclusionModeDescription(settings.GpuOcclusion));
+        ui.TextColored(theme.MutedText,
+                       "Visibility counters use asynchronous readback and may describe an older completed frame.");
+        ui.Spacing();
+
         Keire::UiColor ambient{settings.AmbientColor.Red, settings.AmbientColor.Green, settings.AmbientColor.Blue,
                                settings.AmbientColor.Alpha};
-        bool changed = ui.ColorEdit("Ambient Color", ambient);
-        bool commit = ui.LastItemState().DeactivatedAfterEdit;
+        changed |= ui.ColorEdit("Ambient Color", ambient);
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
         changed |= ui.SliderFloat("Ambient Intensity", settings.AmbientIntensity, 0.0F, 8.0F);
         commit |= ui.LastItemState().DeactivatedAfterEdit;
         changed |= ui.SliderFloat("Exposure", settings.Exposure, 0.1F, 4.0F);

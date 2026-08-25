@@ -38,7 +38,7 @@ target_directory="$root/Build/Bin/$configuration-$system-$output_architecture/$t
 [[ -d "$target_directory" ]] || exit 0
 
 coral_configuration=Debug
-[[ "$configuration" == Release || "$configuration" == Dist ]] && coral_configuration=Release
+[[ "$configuration" == Release || "$configuration" == Profile || "$configuration" == Dist ]] && coral_configuration=Release
 coral_directory="$root/Build/Dependencies/coral-patched/Build/$coral_configuration"
 managed_directory="$target_directory/Managed"
 dotnet_root="$root/Build/Dependencies/dotnet-sdk"

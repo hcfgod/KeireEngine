@@ -116,7 +116,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 16);
+    CHECK(importer.Version == 17);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -173,7 +173,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 4);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 3);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 4);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -186,7 +186,26 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("materialGraphSourceSchemaVersion") == Keire::ShaderGraphSourceSchemaVersion);
     CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::ShaderGraphGeneratedShaderVersion);
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
-    CHECK(variant.Hlsl.find("Generator version 3, source schema 4") != std::string::npos);
+    CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
+    CHECK(manifest.at("occlusionSupport") == 3U);
+    CHECK(variant.Hlsl.find("Generator version 4, source schema 4") != std::string::npos);
+    CHECK(variant.Hlsl.find("cbuffer InstanceAddressingData : register(b2, space1)") != std::string::npos);
+    CHECK(variant.Hlsl.find("uint4 InstanceParameters;") != std::string::npos);
+    CHECK(variant.Hlsl.find("Instances[InstanceParameters.x + instanceId]") != std::string::npos);
+
+    auto legacyManifest = manifest;
+    legacyManifest.erase("instanceAddressingAbiVersion");
+    legacyManifest.erase("occlusionSupport");
+    const auto legacyManifestText = legacyManifest.dump();
+    const auto legacyShader = Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(legacyManifestText)));
+    CHECK(legacyShader.InstanceAddressingAbiVersion == 0U);
+    CHECK(legacyShader.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
+
+    auto invalidManifest = manifest;
+    invalidManifest["instanceAddressingAbiVersion"] = 1U;
+    const auto invalidManifestText = invalidManifest.dump();
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(invalidManifestText))),
+                    std::invalid_argument);
 
     const auto future = nlohmann::json{{"schemaVersion", Keire::ShaderGraphSourceSchemaVersion + 1U}}.dump();
     const auto futureBytes = std::as_bytes(std::span(future));
@@ -353,12 +372,15 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
     { return ReadBytes(root / relative); };
     const auto importer = Keire::CreateShaderAssetImporter();
+    CHECK(importer.Version == 3);
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
+    CHECK(shader->Definition().InstanceAddressingAbiVersion == 2U);
+    CHECK(shader->Definition().OcclusionSupport == Keire::ShaderOcclusionSupport::None);
     CHECK(imported.Diagnostics.empty());
     CHECK(compilation.Variants.front().Hlsl.find("MaterialNoise") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("MaterialValueNoise") != std::string::npos);
@@ -381,6 +403,21 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     CHECK(compilation.Variants.front().Hlsl.find("SV_Depth") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("Keep the fixed interpolator ABI dense") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("SurfaceParameters.y > 0.5F") != std::string::npos);
+
+    auto invalidBindingSource = compilation.Variants.front().Hlsl;
+    const auto binding = invalidBindingSource.find("register(b2, space1)");
+    REQUIRE(binding != std::string::npos);
+    invalidBindingSource.replace(binding, std::string_view("register(b2, space1)").size(), "register(b3, space1)");
+    WriteText(source, invalidBindingSource);
+    CHECK_THROWS_WITH_AS((void)importer.ContextualImport(context, ReadBytes(manifest)),
+                         "Shader instance-addressing ABI v2 requires uint4 InstanceParameters at vertex b2/space1.",
+                         std::invalid_argument);
+    invalidBindingSource +=
+        "\n// cbuffer InstanceAddressingData : register(b2, space1) { uint4 InstanceParameters; };\n";
+    WriteText(source, invalidBindingSource);
+    CHECK_THROWS_WITH_AS((void)importer.ContextualImport(context, ReadBytes(manifest)),
+                         "Shader instance-addressing ABI v2 requires uint4 InstanceParameters at vertex b2/space1.",
+                         std::invalid_argument);
 }
 
 TEST_CASE("Shader Graph advanced node library lowers modern layered materials and reports cost")
@@ -607,6 +644,7 @@ TEST_CASE("Shader Graph vertex displacement only declares material uniforms when
     REQUIRE(compilation.Succeeded());
     REQUIRE(compilation.Variants.size() == 1);
     CHECK(compilation.Variants.front().Manifest.find("\"usesVertexMaterialParameters\": false") != std::string::npos);
+    CHECK(nlohmann::json::parse(compilation.Variants.front().Manifest).at("occlusionSupport") == 0U);
     CHECK(compilation.Variants.front().Hlsl.find("cbuffer VertexMaterialData") == std::string::npos);
 }
 

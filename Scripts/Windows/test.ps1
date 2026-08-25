@@ -2,7 +2,7 @@
 param(
     [ValidateSet("vs2026", "vs2022", "vs2019", "ninja", "gmake")]
     [string]$Generator = "vs2022",
-    [ValidateSet("Debug", "Release", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
+    [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
     [string]$Configuration = "Debug",
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]

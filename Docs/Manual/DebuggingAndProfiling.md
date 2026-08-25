@@ -55,6 +55,39 @@ scene draw total. **Culled shadow submeshes**, **Culled local lights**, and **Cu
 when the same camera path excludes more work. Compare these counters with identical content, camera, resolution, shadow
 settings, and warm-up; a higher cull count alone is not evidence of a faster frame if frame-time percentiles regress.
 
+## GPU Occlusion Checks
+
+Project Settings > Rendering selects **Disabled**, **Automatic**, or **Forced** GPU occlusion. Automatic keeps direct
+draws below the renderer's profitability threshold. Forced is the diagnostic mode: it bypasses that threshold but still
+rejects unsafe occluders, unsupported backends, legacy shader ABIs, and effects whose depth-only geometry can differ from
+their visible geometry.
+
+Use the Scene gizmo settings popup to select the session-transient renderer visualization: **None**, **Visibility
+Bounds**, or **Hierarchical Depth**. Hierarchical Depth exposes only mips currently reported by the selected surface;
+resizing or disabling occlusion clamps the selection safely. **Diagnostics metadata** is separate and reports that
+surface's requested/effective mode, typed fallback, mip count, safe occluders, source frame, and readback age. Neither
+control is evidence that every hidden pyramid resource is correct. Inspect those resources with a RenderDoc, PIX, Xcode
+GPU, or equivalent platform capture and verify every mip is a conservative reduction of the previous level.
+
+In the Profiler and Render Graph panel:
+
+1. Confirm the occlusion depth, pyramid, classification, and indirect-argument passes execute before opaque drawing.
+2. Compare candidates, visible, culled, candidate/culled triangles, safe occluders, dispatches, and indirect draws.
+3. Treat visibility totals as valid only when **Readback valid** is true; pair them with **Readback age** and source frame.
+4. Investigate persistent fallback events by their typed reason. Direct draws must remain visually complete.
+5. Warm the scene and confirm buffer reallocations settle to zero; compare frame P95/P99 with identical content and path.
+
+The Render Graph panel reports graphics-capture availability without loading or launching a tool. If RenderDoc was
+injected before editor startup and reports Ready, **Capture Next GPU Frame** queues exactly one capture. Unavailable and
+already-active states remain non-destructive and never overlap a capture.
+
+Rendered-output acceptance compares Disabled and Forced captures, then moves a fully hidden target outside its occluder's
+silhouette. The images must match while hidden and the target must appear on the next rendered frame. Repeat on D3D12 and
+Vulkan; validate Metal on macOS hardware. Also exercise independent Scene/Game views, resize, minimize/restore, device
+loss, empty scenes, no-safe-occluder scenes, always-visible geometry, and legacy/custom shader fallback. After a valid
+readback, run Forced-Disabled-Forced around a resize and confirm no older source frame becomes valid again. GPU capture
+is required evidence for pyramid contents and barriers; editor metadata alone cannot prove them.
+
 Profiler storage is bounded. A capture reports dropped spans/counters when capacity is exceeded rather than growing
 without limit.
 

@@ -3,6 +3,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "$ROOT/Scripts/Unix/common.sh"
 LOCK="$ROOT/Config/Dependencies.lock"
+INCLUDE_PROFILE_DEPENDENCIES=0
+[[ "${1:-}" == --include-profile-dependencies ]] && INCLUDE_PROFILE_DEPENDENCIES=1
 command -v git >/dev/null 2>&1 || { printf 'Git is required.\n' >&2; exit 1; }
 git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 || git -C "$ROOT" init
 
@@ -16,7 +18,7 @@ install_dependency() {
     elif [[ ! -e "$directory" ]]; then git clone --quiet "$url" "$directory"; git -C "$directory" checkout --quiet "$commit"
     elif ! git -C "$directory" rev-parse --is-inside-work-tree >/dev/null 2>&1; then printf '%s is not a Git repository.\n' "$path" >&2; return 1; fi
     actual="$(git -C "$directory" rev-parse HEAD)"
-    if [[ "$actual" != "$commit" && "$entry" == 160000\ * ]]; then
+    if [[ "$actual" != "$commit" && ( "$entry" == 160000\ * || "$path" == Build/Dependencies/tracy ) ]]; then
         printf '==> Restoring %s working tree to committed hash %s\n' "$name" "$commit"
         git -C "$directory" cat-file -e "$commit^{commit}" 2>/dev/null || git -C "$directory" fetch --no-tags origin "$commit"
         git -C "$directory" checkout --quiet --detach "$commit"
@@ -37,6 +39,10 @@ install_dependency glm Vendor/glm "$(config_value "$LOCK" GLM_URL)" "$(config_va
 install_dependency SDL_shadercross Vendor/SDL_shadercross "$(config_value "$LOCK" SDL_SHADERCROSS_URL)" "$(config_value "$LOCK" SDL_SHADERCROSS_COMMIT)"
 install_dependency assimp Vendor/assimp "$(config_value "$LOCK" ASSIMP_URL)" "$(config_value "$LOCK" ASSIMP_COMMIT)"
 install_dependency stb Vendor/stb "$(config_value "$LOCK" STB_URL)" "$(config_value "$LOCK" STB_COMMIT)"
+if [[ $INCLUDE_PROFILE_DEPENDENCIES -eq 1 ]]; then
+  install_dependency Tracy Build/Dependencies/tracy "$(config_value "$LOCK" TRACY_URL)" \
+    "$(config_value "$LOCK" TRACY_COMMIT)"
+fi
 install_dependency ffmpeg Vendor/ffmpeg "$(config_value "$LOCK" FFMPEG_URL)" "$(config_value "$LOCK" FFMPEG_COMMIT)"
 git -C "$ROOT/Vendor/SDL_shadercross" submodule update --init --recursive
 imgui_files=(
@@ -87,4 +93,10 @@ asset_dependency_files=(Vendor/assimp/CMakeLists.txt Vendor/assimp/LICENSE Vendo
 for file in "${asset_dependency_files[@]}"; do
   [[ -f "$ROOT/$file" ]] || { printf 'Renderable asset dependency integration is incomplete: %s\n' "$file" >&2; exit 1; }
 done
+if [[ $INCLUDE_PROFILE_DEPENDENCIES -eq 1 ]]; then
+  tracy_files=(Build/Dependencies/tracy/public/TracyClient.cpp Build/Dependencies/tracy/public/tracy/Tracy.hpp Build/Dependencies/tracy/LICENSE)
+  for file in "${tracy_files[@]}"; do
+    [[ -f "$ROOT/$file" ]] || { printf 'Tracy Profile integration is incomplete: %s\n' "$file" >&2; exit 1; }
+  done
+fi
 printf '==> Vendor libraries are ready; Git staging was not modified\n'

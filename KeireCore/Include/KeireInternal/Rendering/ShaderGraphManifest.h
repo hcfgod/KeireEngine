@@ -12,5 +12,6 @@ namespace Keire::Detail
                                                        const std::filesystem::path& generatedSource,
                                                        std::span<const ShaderPropertyDefinition> properties,
                                                        std::span<const std::string> keywords,
-                                                       bool usesVertexMaterialParameters);
+                                                       bool usesVertexMaterialParameters,
+                                                       ShaderOcclusionSupport occlusionSupport);
 } // namespace Keire::Detail

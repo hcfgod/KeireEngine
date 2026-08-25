@@ -62,6 +62,8 @@ namespace
         std::uint64_t ResizedGeneration = 0;
         std::uint64_t MinimizedGeneration = 0;
         std::uint64_t RestoredGeneration = 0;
+        Keire::GpuOcclusionSurfaceDiagnostics MinimizedOcclusion;
+        Keire::GpuOcclusionSurfaceDiagnostics RestoredOcclusion;
         bool Resized = false;
         bool Minimized = false;
         bool Restored = false;
@@ -106,12 +108,14 @@ namespace
             {
                 m_Results->MinimizedGeneration = m_Surface->Generation();
                 m_Results->Minimized = !m_Surface->Available() && m_Surface->Width() == 0 && m_Surface->Height() == 0;
+                m_Results->MinimizedOcclusion = m_Surface->OcclusionDiagnostics();
                 Keire::RenderSystemInternalAccess::RequestSurfaceSize(*m_Surface, 96, 48);
             }
             else
             {
                 m_Results->RestoredGeneration = m_Surface->Generation();
                 m_Results->Restored = m_Surface->Available() && m_Surface->Width() == 96 && m_Surface->Height() == 48;
+                m_Results->RestoredOcclusion = m_Surface->OcclusionDiagnostics();
                 Owner().RequestExit();
                 return;
             }
@@ -160,6 +164,11 @@ TEST_CASE("renderer thread handles resize minimize restore and bounded queue sat
     CHECK(results->ResizedGeneration > results->InitialGeneration);
     CHECK(results->MinimizedGeneration > results->ResizedGeneration);
     CHECK(results->RestoredGeneration > results->MinimizedGeneration);
+    CHECK_FALSE(results->MinimizedOcclusion.PyramidValid);
+    CHECK_FALSE(results->MinimizedOcclusion.ReadbackValid);
+    CHECK(results->MinimizedOcclusion.Candidates == 0);
+    CHECK_FALSE(results->RestoredOcclusion.PyramidValid);
+    CHECK_FALSE(results->RestoredOcclusion.ReadbackValid);
 }
 
 TEST_CASE("injected GPU device loss propagates and renderer shutdown remains safe")

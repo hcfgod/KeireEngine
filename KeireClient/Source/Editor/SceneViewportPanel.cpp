@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/AssetBrowserPanel.h"
+#include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
 #include "KeireClient/Editor/SceneCameraController.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/SceneGizmoController.h"
@@ -84,6 +85,17 @@ KeireEditor::SceneViewportPanel::SceneViewportPanel(ISceneViewportController& co
 }
 
 KeireEditor::SceneViewportPanel::~SceneViewportPanel() = default;
+
+std::optional<Keire::GpuOcclusionSurfaceDiagnostics>
+KeireEditor::SceneViewportPanel::OcclusionDiagnostics() const noexcept
+{
+    if (!m_RenderView)
+        return std::nullopt;
+    const auto surface = m_RenderView->Surface();
+    if (!surface)
+        return std::nullopt;
+    return surface->OcclusionDiagnostics();
+}
 
 void KeireEditor::SceneViewportPanel::Initialize(const std::filesystem::path& projectRoot)
 {
@@ -202,6 +214,11 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         else
             camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
         m_RenderView->SetCamera(camera);
+        const auto renderSurface = m_RenderView->Surface();
+        renderSurface->SetOcclusionDebugView(m_Gizmos->Settings().OcclusionDebugView,
+                                             m_Gizmos->Settings().OcclusionDebugMip);
+        m_Gizmos->SetOcclusionDebugView(renderSurface->OcclusionDebugView());
+        m_Gizmos->SetOcclusionDebugMip(renderSurface->OcclusionDebugMip());
         auto environment = m_Controller.SceneViewportSettings();
         if (const auto sceneCamera = SelectGameCamera(renderScene))
             environment.SkyVisible =
@@ -280,7 +297,10 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         }
         return;
     }
-    const auto toolbarRect = m_Gizmos->DrawOverlayToolbar(ui, imageRect);
+    const auto occlusionSurfaceState = m_RenderView->Surface()->OcclusionDiagnostics();
+    const auto occlusionDebugView = m_RenderView->Surface()->OcclusionDebugView();
+    const auto occlusionDebugMip = m_RenderView->Surface()->OcclusionDebugMip();
+    const auto toolbarRect = m_Gizmos->DrawOverlayToolbar(ui, imageRect, occlusionSurfaceState.PyramidMipCount);
     constexpr float overlaySize = 28.0F;
     constexpr float overlayGap = 3.0F;
     constexpr float overlayPadding = 8.0F;
@@ -379,6 +399,38 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
          {statusPosition.X + static_cast<float>(viewportStatus.size()) * 7.0F + 5.0F, statusPosition.Y + 18.0F}},
         {0.03F, 0.04F, 0.06F, 0.72F}, 4.0F);
     ui.DrawOverlayText(statusPosition, theme.MutedText, viewportStatus);
+    if (m_Gizmos->Settings().ShowOcclusionMetadata && imageRect.Size().Width >= 440.0F &&
+        imageRect.Size().Height >= 180.0F)
+    {
+        const auto statistics = renderer->Statistics();
+        const auto diagnostics = BuildGpuOcclusionSurfaceDiagnostics(occlusionSurfaceState, &statistics);
+        auto diagnosticsTitle = "GPU OCCLUSION / " + std::string(GpuOcclusionDebugViewName(occlusionDebugView));
+        if (occlusionDebugView == Keire::GpuOcclusionDebugView::HierarchicalDepth)
+            diagnosticsTitle += " / MIP " + std::to_string(occlusionDebugMip);
+        constexpr float diagnosticsWidth = 416.0F;
+        constexpr float diagnosticsHeight = 94.0F;
+        const float maximumY = m_CameraPreviewVisible && cameraPreviewRect.Size().Height > 0.0F
+                                   ? cameraPreviewRect.Minimum.Y - 8.0F
+                                   : imageRect.Maximum.Y - 8.0F;
+        const Keire::UiItemRect diagnosticsRect{
+            {imageRect.Maximum.X - diagnosticsWidth - 8.0F, maximumY - diagnosticsHeight},
+            {imageRect.Maximum.X - 8.0F, maximumY}};
+        const auto stateColor = diagnostics.Warning                                        ? theme.Warning
+                                : diagnostics.State == GpuOcclusionDiagnosticState::Active ? theme.Success
+                                                                                           : theme.MutedText;
+        ui.DrawFilledRectangle(diagnosticsRect, {0.018F, 0.024F, 0.035F, 0.90F}, 6.0F);
+        ui.DrawRectangle(diagnosticsRect, {stateColor.Red, stateColor.Green, stateColor.Blue, 0.72F}, 1.0F, 6.0F);
+        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 7.0F}, stateColor,
+                           diagnosticsTitle, 10.0F, diagnosticsRect);
+        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 23.0F}, theme.Text,
+                           diagnostics.Status, 11.0F, diagnosticsRect);
+        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 39.0F}, theme.MutedText,
+                           diagnostics.Visibility, 11.0F, diagnosticsRect);
+        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 55.0F}, theme.MutedText,
+                           diagnostics.Pyramid, 11.0F, diagnosticsRect);
+        ui.DrawOverlayText({diagnosticsRect.Minimum.X + 10.0F, diagnosticsRect.Minimum.Y + 71.0F}, theme.MutedText,
+                           diagnostics.Readback, 11.0F, diagnosticsRect);
+    }
     const bool pointerBlocked = toolbarRect.Contains(ui.PointerState().Position) ||
                                 orientationRect.Contains(ui.PointerState().Position) ||
                                 (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));

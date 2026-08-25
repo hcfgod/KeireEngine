@@ -520,6 +520,7 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" ASSIMP_COMMIT)" 39
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)" 2c980bb59875b0d32144a71867fbdebb2f77cd20 'stb lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" FFMPEG_COMMIT)" 89153eb701d372f54a5d7d29de5067abc09e11d3 'FFmpeg lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_COMMIT)" 77e1ce5d6dee871c49ef211222ba18ef0c486bda 'libsodium lock'
+assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" TRACY_COMMIT)" 05cceee0df3b8d7c6fa87e9638af311dbabc63cb 'Tracy lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_SDK_VERSION)" 10.0.302 '.NET SDK lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_VERSION)" 6.0.3 'PyYAML lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_SOURCE_SHA256)" \
@@ -552,6 +553,15 @@ assert_true grep -q 'Vendor/assimp' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Vendor/stb' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'Vendor/ffmpeg' "$ROOT/Scripts/Unix/vendor.sh"
 assert_true grep -q 'SDL_SHADERCROSS_DXC_COMMIT' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -F -q -- '--include-profile-dependencies' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -F -q 'Build/Dependencies/tracy' "$ROOT/Scripts/Unix/vendor.sh" \
+  "$ROOT/Scripts/Unix/vendor-update.sh"
+assert_false grep -F -q 'Vendor/tracy' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -F -q '"$path" == Build/Dependencies/tracy' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -F -q 'fetch --no-tags origin "$commit"' "$ROOT/Scripts/Unix/vendor.sh"
+assert_true grep -F -q 'if [[ "$DEPENDENCY" == Tracy ]]' "$ROOT/Scripts/Unix/vendor-update.sh"
+assert_true grep -F -q 'git add Config/Dependencies.lock' "$ROOT/Scripts/Unix/vendor-update.sh"
+assert_true grep -F -q 'git add Vendor/%s Config/Dependencies.lock' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_DUMMYVIDEO=ON' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'SDL_OFFSCREEN=ON' "$ROOT/Scripts/Unix/dependencies.sh"
@@ -717,9 +727,11 @@ assert_true grep -F -q 'readelf -d "$published_compiler"' "$ROOT/Scripts/Unix/sh
 assert_true grep -F -q "install_name_tool -add_rpath '@executable_path'" "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true grep -F -q 'cp -L "$runtime_library"' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true grep -F -q '"$published_compiler" --help' "$ROOT/Scripts/Unix/shader-compiler.sh"
-assert_false grep -F -q 'for (index =' "$ROOT/Scripts/Unix/builtin-skinning.sh" "$ROOT/Scripts/Unix/builtin-vfx.sh"
+assert_false grep -F -q 'for (index =' "$ROOT/Scripts/Unix/builtin-skinning.sh" \
+  "$ROOT/Scripts/Unix/builtin-vfx.sh" "$ROOT/Scripts/Unix/builtin-occlusion.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-skinning.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-vfx.sh"
+assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-occlusion.sh"
 while IFS= read -r source_file; do
   if grep -E -q 'std::ranges::(all_of|any_of|none_of|find|find_if|sort|stable_sort|count|count_if|equal|transform|for_each|min_element|max_element|clamp)' "$source_file"; then
     assert_true grep -F -q '#include <algorithm>' "$source_file"
@@ -764,6 +776,10 @@ assert_true env PERL5LIB="$ROOT/Scripts/Dependencies" perl -MJSON -e \
   'die unless decode_json("{\"ready\":true}")->{ready}'
 assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'filter "configurations:Profile"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q '"KEIRE_PROFILE_TELEMETRY"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q '"TRACY_ON_DEMAND"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q '"TRACY_ONLY_LOCALHOST"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")' \
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'return ":" .. library' "$ROOT/Scripts/Premake/Common.lua"
@@ -849,6 +865,10 @@ assert_false grep -q 'touch-ninja-stamp.ps1' "$ROOT/KeireAssetWorker/premake5.lu
 assert_true test -f "$ROOT/Scripts/Windows/touch-ninja-stamp.ps1"
 assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -R -q 'BuiltinUnlitShaders.h' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -F -q 'builtin-occlusion.sh' "$ROOT/KeireCore/premake5.lua"
+assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinOcclusionDepth.hlsl"
+assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinOcclusionDebugPyramid.hlsl"
+assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinOcclusionDebugBounds.hlsl"
 assert_true grep -R -q 'renderer->Tint()' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'ResolveLighting' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'DirectionalLightComponent' "$ROOT/KeireCore/Source/Rendering"

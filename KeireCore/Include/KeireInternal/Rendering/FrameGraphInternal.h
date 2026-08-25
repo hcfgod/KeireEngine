@@ -145,9 +145,15 @@ namespace Keire::RenderBackend
         CompiledFrameGraph Compiled;
         FrameGraphResource HdrScene;
         FrameGraphResource SampledDepth;
+        FrameGraphResource GpuOcclusionDepth;
+        FrameGraphResource GpuOcclusionPyramid;
+        FrameGraphResource GpuOcclusionIndirectArguments;
         FrameGraphPass ResourceUploads;
         FrameGraphPass DirectionalShadows;
         FrameGraphPass ForwardPlusCulling;
+        FrameGraphPass GpuOcclusionDepthPass;
+        FrameGraphPass GpuOcclusionPyramidPass;
+        FrameGraphPass GpuOcclusionCullingPass;
         FrameGraphPass Opaque;
         FrameGraphPass ResolveDepth;
         FrameGraphPass Sky;
