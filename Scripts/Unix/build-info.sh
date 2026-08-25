@@ -15,6 +15,7 @@ is_semantic_version "$PROJECT_VERSION" || { printf 'PROJECT_VERSION must be a va
 
 c_string_escape() {
   local value="$1"
+  local LC_ALL=C
   local output="" character code escaped
   while [[ -n "$value" ]]; do
     character="${value:0:1}"
@@ -24,7 +25,7 @@ c_string_escape() {
       \") output+='\"' ;;
       $'\t') output+='\t' ;;
       *)
-        printf -v code '%d' "'$character"
+        code="$(printf '%s' "$character" | od -An -tu1)"
         if ((code < 32 || code == 127)); then
           printf -v escaped '\\%03o' "$code"
           output+="$escaped"

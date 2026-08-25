@@ -261,7 +261,7 @@ const readinessWeight = readinessScoreRows.reduce((sum, row) => sum + Number.par
 const readinessWeightedScore = Math.round(readinessScoreRows.reduce((sum, row) =>
     sum + Number.parseInt(row[1], 10) * Number.parseInt(row[2], 10), 0) / readinessWeight);
 assert(readinessWeight === 100 &&
-    productionReview.includes(`| Weighted current-source readiness | **100%** | **B+** | **${readinessWeightedScore}/100** |`),
+    productionReview.includes(`| Weighted current-source readiness | **100%** | **A-** | **${readinessWeightedScore}/100** |`),
     "Production-readiness overall score does not match its weighted domain scores.");
 
 const vfxManifest = JSON.parse(await readFile(path.join(docsRoot, "VfxParityManifest.json"), "utf8"));

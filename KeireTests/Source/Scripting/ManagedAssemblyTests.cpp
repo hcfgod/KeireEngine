@@ -170,8 +170,10 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     std::filesystem::last_write_time(workspace.Projects.front(), preservedTime);
     const auto regenerated = scripts->GenerateIdeWorkspace(request, "My Game");
     CHECK(regenerated.Solution == workspace.Solution);
-    CHECK(std::filesystem::last_write_time(workspace.Solution) == preservedTime);
-    CHECK(std::filesystem::last_write_time(workspace.Projects.front()) == preservedTime);
+    const bool solutionTimePreserved = std::filesystem::last_write_time(workspace.Solution) == preservedTime;
+    const bool projectTimePreserved = std::filesystem::last_write_time(workspace.Projects.front()) == preservedTime;
+    CHECK(solutionTimePreserved);
+    CHECK(projectTimePreserved);
 }
 
 TEST_CASE("Managed IDE workspace references the engine API project in source checkouts")
@@ -317,7 +319,8 @@ TEST_CASE("Managed builds publish only successful replacements")
     CHECK(scripts->BuildStatus().State == Keire::ManagedBuildState::Failed);
     CHECK_FALSE(scripts->BuildStatus().Diagnostics.empty());
     CHECK(std::filesystem::is_regular_file(active));
-    CHECK(std::filesystem::last_write_time(active) == successfulWrite);
+    const bool activeWritePreserved = std::filesystem::last_write_time(active) == successfulWrite;
+    CHECK(activeWritePreserved);
     scripts->Close();
     REQUIRE(blocker.Wait(std::chrono::seconds(2)));
     jobs->Close();

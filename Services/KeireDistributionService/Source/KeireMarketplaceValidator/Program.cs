@@ -100,7 +100,7 @@ internal static class ValidatorProgram
     private static void PrintUsage()
     {
         Console.WriteLine("""
-            Kéire Marketplace Validator 0.4.0
+            Kéire Marketplace Validator 0.4.1
 
             validate-local --package <quarantined.keireassetpackage>
                            --upload-id <uuid> --version-id <uuid>

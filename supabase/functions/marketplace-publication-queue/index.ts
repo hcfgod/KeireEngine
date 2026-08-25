@@ -164,7 +164,7 @@ Deno.serve(async (request: Request) => {
         if (!url || !key) throw new RequestError(503, "publication.not_configured", "The publication queue is not configured.");
         const admin = createClient(url, key, {
             auth: { autoRefreshToken: false, persistSession: false },
-            global: { headers: { "X-Client-Info": "keire-publication-queue/0.4.0" } },
+            global: { headers: { "X-Client-Info": "keire-publication-queue/0.4.1" } },
         });
         const input = await readJson(request);
         const action = stringField(input, "action", 4, 16);

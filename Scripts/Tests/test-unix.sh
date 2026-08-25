@@ -521,6 +521,8 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)" 2c980
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" FFMPEG_COMMIT)" 89153eb701d372f54a5d7d29de5067abc09e11d3 'FFmpeg lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_COMMIT)" 77e1ce5d6dee871c49ef211222ba18ef0c486bda 'libsodium lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_SDK_VERSION)" 10.0.302 '.NET SDK lock'
+assert_true grep -F -q '<RuntimeFrameworkVersion>10.0.10</RuntimeFrameworkVersion>' \
+  "$ROOT/Services/KeireDistributionService/Source/KeireDistributionPublisher/KeireDistributionPublisher.csproj"
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_VERSION)" 6.0.3 'PyYAML lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_SOURCE_SHA256)" \
   d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f 'PyYAML source lock'
@@ -673,6 +675,7 @@ assert_true grep -F -q 'stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION"
 assert_true grep -F -q 'pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"' \
   "$ROOT/Scripts/Unix/coral.sh"
 assert_true grep -F -q '"-DDOTNET_EXE=$dotnet_executable"' "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q 'dotnet-$dotnet_sdk_version' "$ROOT/Scripts/Unix/coral.sh"
 assert_equal "$(grep -F -c 'DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"' \
   "$ROOT/Scripts/Unix/coral.sh")" 2 'Coral pinned .NET configure and build environment'
 assert_true grep -F -q 'ubuntu-22.04 ubuntu-24.04 ubuntu-26.04 debian-12 fedora arch tumbleweed rocky-9' \
@@ -768,20 +771,26 @@ assert_true grep -F -q 'local directory, library = resolved:match("^(.*)/(lib[^/
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'return ":" .. library' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'os.host() ~= "macosx"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'os.host() == "macosx"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'linkoptions { '\''"'\'' .. resolved .. '\''"'\'' }' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'filter { "system:linux", "toolset:gcc or clang" }' \
   "$ROOT/Scripts/Premake/Common.lua"
 assert_false grep -F -q 'filter { "system:linux or macosx", "toolset:gcc or clang" }' \
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'linkoptions { "-Wl,-rpath,@executable_path" }' \
   "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'local function LinkCoralNetHost()' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'LinkDependency(DependencyManifest.CoralNetHostRuntime)' \
+  "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'filter { "system:windows or linux" }' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'macRuntimeDirectory .. "/libnethost.dylib"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'CoralNetHostRuntime = "../Build/Dependencies/coral-nethost/$nethost_runtime_name"' \
   "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q '"UserNotifications.framework", "Security.framework"' \
   "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q 'buildoptions { "-Wno-error=tsan" }' "$ROOT/Scripts/Premake/Common.lua"
-assert_true grep -F -q 'DependencyLink(DependencyManifest.AssimpDebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
-assert_true grep -F -q 'DependencyLink(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'LinkDependencies(DependencyManifest.RecastDebugLibraries)' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'LinkDependency(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'project_generation_fingerprint' "$ROOT/Scripts/Linux/generate.sh"
 assert_true grep -F -q 'invalidate_incompatible_binary_outputs "$ROOT" linux' \
   "$ROOT/Scripts/Linux/generate.sh"
@@ -955,6 +964,11 @@ assert_true grep -F -q 'for component in avformat avcodec swresample avutil' \
   "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'lib$component.dylib' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'lib$component.so' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'install/share/licenses/ffmpeg/COPYING.LGPLv2.1' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'install/share/licenses/ffmpeg/COPYING.LGPLv3' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'install/share/licenses/ffmpeg/SOURCE.txt' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'receiveStatus == AVERROR(EAGAIN)' \
   "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
 assert_true grep -F -q 'frame.format == AV_PIX_FMT_GRAYF16' \
@@ -1300,15 +1314,16 @@ bash "$identity_fixture/Scripts/Unix/build-info.sh"
 identity_header="$identity_fixture/Build/Generated/IdentityFixture/BuildInfo.generated.h"
 assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_VERSION "1.2.3-alpha.1+build.5"' "$identity_header"
 assert_true grep -Fq '#define KEIRE_BUILD_PROJECT_NAME "Quoted \"Kéire\" \\\\ Client"' "$identity_header"
+assert_false grep -Fq '\1777777777777777777' "$identity_header"
 assert_true grep -Fq "#define KEIRE_BUILD_GIT_COMMIT \"$first_commit\"" "$identity_header"
 assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
 touch "$identity_fixture/.ninja_lock"
 bash "$identity_fixture/Scripts/Unix/build-info.sh"
 assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
-touch "$identity_fixture/Build/identity-marker"
 sleep 1
+touch "$identity_fixture/Build/identity-marker"
 bash "$identity_fixture/Scripts/Unix/build-info.sh"
-[[ "$identity_header" -ot "$identity_fixture/Build/identity-marker" ]] || fail 'Unchanged identity header was rewritten'
+assert_true test "$identity_header" -ot "$identity_fixture/Build/identity-marker"
 printf '%s\n' untracked > "$identity_fixture/untracked.txt"
 bash "$identity_fixture/Scripts/Unix/build-info.sh"
 assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY true' "$identity_header"

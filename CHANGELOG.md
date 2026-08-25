@@ -1,8 +1,5 @@
 # Changelog
 
-- Prevent Hub package validation from spuriously cancelling marketplace synchronization under loaded Windows builds by
-  using a bounded, scheduler-friendly integration-test wait with actionable failure diagnostics.
-
 All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
 versions.
 
@@ -22,7 +19,7 @@ versions.
 
 ### Changed
 
-- Published Kéire 0.4.0 Windows and Linux x86-64 packages through signed distribution catalog sequence 15 and updated
+- Published Kéire 0.4.1 Windows and Linux x86-64 packages through signed distribution catalog sequence 16 and updated
   the website's release metadata to expose only those catalog-verified downloads.
 - Linux native installer assembly can reuse an explicit, absolute `KEIRE_EXISTING_PACKAGE_STAGE` after performing the
   same package-stage validation, allowing compatibility-baseline binaries to be wrapped by another distribution's
@@ -30,6 +27,11 @@ versions.
 
 ### Fixed
 
+- Hardened final release packaging by rejecting incomplete cached FFmpeg outputs without their required license and
+  source notices, creating the artifact destination before wrapping an externally validated Linux package stage, and
+  making the Unix BuildInfo identity check reliable on macOS Bash 3.2 filesystems with one-second timestamp precision.
+- Prevented Hub package validation from spuriously cancelling marketplace synchronization under loaded builds by
+  using a bounded, scheduler-friendly integration-test wait with actionable failure diagnostics.
 - Required patchelf 0.19 or newer on Linux so RPATH updates preserve relocated ELF initializer addresses instead of
   producing shader-compiler binaries that can crash in the dynamic loader on Rocky Linux 9.
 - Made packaged runtimes retry cooked input-map activation until its asynchronous asset is ready, made partial layer
@@ -50,7 +52,14 @@ versions.
   4.99 ms (32.4 to 200.3 FPS), P95 fell from 39.77 ms to 8.14 ms, and draw calls fell from 1,390 to 61 with zero
   steady-state dynamic-buffer reallocations.
 - Fixed Apple Clang/libc++ portability for filesystem clock values and Portable Custom HLSL numeric parsing, and made
-  generated macOS links use native archive paths, complete SDL framework dependencies, and an app-local nethost RPATH.
+  generated macOS links use native archive paths, complete SDL framework dependencies, an app-local nethost RPATH,
+  and a macOS 12-compatible Hub activation channel. Managed-client failure reporting no longer restarts logging after
+  application shutdown, avoiding a late async-logger abort when a graphics backend is unavailable. macOS now links
+  the app-local nethost dylib instead of its static archive so bundled weak RTTI cannot preempt libc++ exception types.
+  Coral dependency caches now include the pinned .NET SDK version so stale managed host outputs cannot request a
+  different runtime patch. The distribution publisher now pins its .NET runtime patch so locked restores remain
+  reproducible across installed SDK patch levels. Asset-package extraction accepts canonical macOS temporary-directory
+  aliases without weakening staging confinement, and Unix BuildInfo generation preserves UTF-8 under macOS Bash 3.2.
 - Made managed `Vector2`, `Vector3`, `Vector4`, `Quaternion`, and `Color` interpolation deterministic and
   component-only, preventing record-generated `ToString()` from recursively formatting self-typed computed properties
   and overflowing the stack in logs.

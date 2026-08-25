@@ -541,7 +541,7 @@ namespace Keire
             }
         }
 
-        [[nodiscard]] std::filesystem::path CanonicalStagingParent(const AssetPackageExtractionRequest& request)
+        [[nodiscard]] std::filesystem::path CanonicalStagingRoot(const AssetPackageExtractionRequest& request)
         {
             if (request.AllowedStagingParent.empty() || request.StagingRoot.empty() ||
                 !std::filesystem::is_directory(request.AllowedStagingParent) ||
@@ -550,9 +550,9 @@ namespace Keire
                                             "authorized parent.");
             const auto parent = Detail::CanonicalExistingPath(request.AllowedStagingParent);
             const auto staging = std::filesystem::absolute(request.StagingRoot).lexically_normal();
-            if (staging.parent_path() != parent)
+            if (staging.filename().empty() || Detail::CanonicalExistingPath(staging.parent_path()) != parent)
                 throw std::invalid_argument("Asset-package staging root escapes its authorized parent.");
-            return parent;
+            return parent / staging.filename();
         }
     } // namespace
 
@@ -878,10 +878,10 @@ namespace Keire
 
     AssetPackageExtractionResult ExtractAssetPackageToStaging(const AssetPackageExtractionRequest& request)
     {
-        static_cast<void>(CanonicalStagingParent(request));
+        const auto stagingRoot = CanonicalStagingRoot(request);
         auto [metadata, reader] = ReadHeader(request.Archive);
         VerifyMetadata(metadata, request.Verification);
-        std::filesystem::create_directory(request.StagingRoot);
+        std::filesystem::create_directory(stagingRoot);
         std::uint64_t completed = 0;
         try
         {
@@ -889,7 +889,7 @@ namespace Keire
             for (const auto& file : metadata.Manifest.Files)
             {
                 ThrowIfCancelled(request.Callbacks);
-                const auto target = request.StagingRoot / file.Path;
+                const auto target = stagingRoot / file.Path;
                 std::filesystem::create_directories(target.parent_path());
                 std::ofstream output(target, std::ios::binary | std::ios::trunc);
                 if (!output)
@@ -927,9 +927,9 @@ namespace Keire
         catch (...)
         {
             std::error_code ignored;
-            std::filesystem::remove_all(request.StagingRoot, ignored);
+            std::filesystem::remove_all(stagingRoot, ignored);
             throw;
         }
-        return {.Metadata = std::move(metadata), .StagingRoot = request.StagingRoot};
+        return {.Metadata = std::move(metadata), .StagingRoot = stagingRoot};
     }
 } // namespace Keire

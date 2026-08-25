@@ -134,7 +134,7 @@ export async function authenticate(request: Request): Promise<Caller> {
         assuranceLevel: typeof claims?.aal === "string" ? claims.aal : null,
         admin: createClient(url, adminKey, {
             auth: { autoRefreshToken: false, persistSession: false },
-            global: { headers: { "X-Client-Info": "keire-marketplace-edge/0.4.0" } },
+            global: { headers: { "X-Client-Info": "keire-marketplace-edge/0.4.1" } },
         }),
     };
 }

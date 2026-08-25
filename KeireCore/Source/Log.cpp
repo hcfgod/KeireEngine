@@ -627,6 +627,25 @@ namespace Keire
 
     LoggerHandle Log::GetClientLogger() { return LoggerHandle(GetOrCreateState(), Detail::LogChannel::Client); }
 
+    bool Detail::LogInternalAccess::WriteAndFlushIfOpen(const LogChannel channel, const LogLevel level,
+                                                        const std::string_view message,
+                                                        const std::source_location location) noexcept
+    {
+        try
+        {
+            const auto state = GetCurrentState();
+            if (!state || !state->IsOpen())
+                return false;
+            state->Write(channel, level, message, location);
+            state->Flush(channel);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     std::vector<Detail::RetainedLogRecord> Detail::LogInternalAccess::ReadRecordsSince(const std::uint64_t sequence)
     {
         const auto state = GetCurrentState();

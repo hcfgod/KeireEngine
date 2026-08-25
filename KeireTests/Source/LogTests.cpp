@@ -143,6 +143,28 @@ TEST_CASE("Logger handles provide copyable lifecycle-safe operations")
     std::filesystem::remove_all(directory);
 }
 
+TEST_CASE("Failure reporting does not restart logging after managed shutdown")
+{
+    const auto directory = MakeTestDirectory("closed-failure-reporting");
+    std::filesystem::remove_all(directory);
+    {
+        CurrentDirectoryGuard currentDirectory(directory);
+        Keire::Log::Shutdown();
+        CHECK_FALSE(Keire::Detail::LogInternalAccess::WriteAndFlushIfOpen(Keire::Detail::LogChannel::Client,
+                                                                          Keire::LogLevel::Critical, "closed failure"));
+        CHECK_FALSE(std::filesystem::exists(directory / "Logs"));
+    }
+
+    LogFixture fixture("open-failure-reporting");
+    Keire::Log::Initialize(fixture.Config);
+    CHECK(Keire::Detail::LogInternalAccess::WriteAndFlushIfOpen(Keire::Detail::LogChannel::Client,
+                                                                Keire::LogLevel::Critical, "open failure"));
+    Keire::Log::Shutdown();
+    CHECK(ReadFile(fixture.Directory / fixture.Config.ClientLogFile).find("open failure") != std::string::npos);
+
+    std::filesystem::remove_all(directory);
+}
+
 #if KEIRE_COMPILED_LOG_LEVEL > KEIRE_LOG_LEVEL_DEBUG
 TEST_CASE("Compiled-out logging macros do not evaluate arguments")
 {

@@ -3,7 +3,9 @@
 #include "Keire/Log.h"
 
 #include <cstdint>
+#include <source_location>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Keire::Detail
@@ -19,6 +21,9 @@ namespace Keire::Detail
     class LogInternalAccess final
     {
       public:
+        [[nodiscard]] static bool
+        WriteAndFlushIfOpen(LogChannel channel, LogLevel level, std::string_view message,
+                            std::source_location location = std::source_location::current()) noexcept;
         [[nodiscard]] static std::vector<RetainedLogRecord> ReadRecordsSince(std::uint64_t sequence);
     };
 } // namespace Keire::Detail

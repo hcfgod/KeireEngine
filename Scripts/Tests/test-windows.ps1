@@ -516,6 +516,7 @@ $unixCoralScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\cor
 $unixCommonScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\common.sh") -Raw
 Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"') -and
              $unixCoralScript.Contains('"-DDOTNET_EXE=$dotnet_executable"') -and
+             $unixCoralScript.Contains('dotnet-$dotnet_sdk_version') -and
              ([regex]::Matches(
                  $unixCoralScript,
                  [regex]::Escape('DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"')).Count -eq 2) -and
@@ -524,8 +525,9 @@ Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$
 Assert-True ($coralScript.Contains('git -C $TemporarySource config core.autocrlf false')) `
     "Coral source cache uses deterministic LF checkouts"
 Assert-True ($coralScript.Contains('Get-Command dotnet -CommandType Application') -and
-             $coralScript.Contains('$env:DOTNET_ROOT = Split-Path -Parent $DotnetExecutable')) `
-    "Coral resolves DOTNET_ROOT when the hosted SDK is available only through PATH"
+             $coralScript.Contains('$env:DOTNET_ROOT = Split-Path -Parent $DotnetExecutable') -and
+             $coralScript.Contains('dotnet-$($Lock.DOTNET_SDK_VERSION)')) `
+    "Coral resolves DOTNET_ROOT and keys managed build caches by the pinned SDK"
 Assert-True ($coralScript.Contains('Microsoft.NETCore.App.Host.win-$DotnetHostArchitecture') -and
              $coralScript.Contains("Where-Object { `$_.Name -match '^10\.' }")) `
     "Coral selects the native architecture's .NET 10 nethost pack"
@@ -544,7 +546,14 @@ Assert-True ($coralWarningPatch.Contains('memcpy(buffer, InString.data(), InStri
              $coralWarningPatch.Contains('reinterpret_cast<const UCChar*>(UINTPTR_MAX)') -and
              $coralWarningPatch.Contains('target_compile_options(Coral.Native PRIVATE /wd4996)')) "Warning-clean Coral native host patch"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
+$distributionPublisherProject = Get-Content `
+    (Join-Path (Get-RepositoryRoot) `
+        "Services\KeireDistributionService\Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
+Assert-True ($premakePolicy.Contains('local function LinkCoralNetHost()') -and
+             $premakePolicy.Contains('LinkDependency(DependencyManifest.CoralNetHostRuntime)') -and
+             $premakePolicy.Contains('filter { "system:windows or linux" }')) `
+    "Premake links macOS against the nethost dylib without changing Windows or Linux native host linkage"
 $unixDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\dependencies.sh") -Raw
 $windowsDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\dependencies.ps1") -Raw
 Assert-True ($unixDependencies.Contains('CPP_RTTI_ENABLED=ON') -and
@@ -602,6 +611,12 @@ Assert-True ($windowsFfmpegBuild.Contains('foreach ($component in $RuntimeContra
              $windowsFfmpegContractBuild.Contains('FileName = "avutil-61.dll"') -and
              -not $windowsFfmpegBuild.Contains('lib\avformat.lib')) `
     "Windows FFmpeg cache validation requires every installed runtime and import library"
+Assert-True ($windowsFfmpegBuild.Contains('$candidateLicenseRoot') -and
+             $windowsFfmpegBuild.Contains('"COPYING.LGPLv2.1", "COPYING.LGPLv3", "SOURCE.txt"') -and
+             $unixFfmpegBuild.Contains('install/share/licenses/ffmpeg/COPYING.LGPLv2.1') -and
+             $unixFfmpegBuild.Contains('install/share/licenses/ffmpeg/COPYING.LGPLv3') -and
+             $unixFfmpegBuild.Contains('install/share/licenses/ffmpeg/SOURCE.txt')) `
+    "FFmpeg cache validation requires package-distribution license inputs"
 Assert-True ($windowsFfmpegBuild.Contains('$Toolset -eq "gcc"') -and
              $windowsFfmpegBuild.Contains('do not support the gcc toolset') -and
              $windowsFfmpegBuild.Contains('Enter-WindowsToolEnvironment "vs2022" "msc" $Architecture') -and
@@ -696,13 +711,17 @@ Assert-True ($premakePolicy.Contains('buildoptions { "-fms-runtime-lib=dll_dbg" 
 Assert-True ($premakePolicy.Contains('function GeneratorRootPath(path)') -and
              $premakePolicy.Contains('SelectedToolset ~= "msc"') -and
              $premakePolicy.Contains('os.host() ~= "macosx"') -and
+             $premakePolicy.Contains('os.host() == "macosx"') -and
+             $premakePolicy.Contains('linkoptions { ''"'' .. resolved .. ''"'' }') -and
              $premakePolicy.Contains('path:gsub("^%.%./", "")') -and
              $premakePolicy.Contains('local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")') -and
              $premakePolicy.Contains('return ":" .. library') -and
-             $premakePolicy.Contains('links(DependencyLinks(DependencyManifest.RecastDebugLibraries))') -and
-             $premakePolicy.Contains('DependencyLink(DependencyManifest.SDL3DebugLibrary)') -and
+             $premakePolicy.Contains('LinkDependencies(DependencyManifest.RecastDebugLibraries)') -and
+             $premakePolicy.Contains('LinkDependency(DependencyManifest.SDL3DebugLibrary)') -and
              $assetWorkerPremake.Contains('libdirs { GeneratorRootPath(ffmpegDebug .. "/lib") }')) `
     "Toolset-aware root-relative Ninja and GNU Make dependency links"
+Assert-True ($distributionPublisherProject.Contains('<RuntimeFrameworkVersion>10.0.10</RuntimeFrameworkVersion>')) `
+    "Distribution publisher runtime patch lock"
 Assert-True ($assetToolSource.Contains("--worker-timeout-seconds") -and
              $assetToolSource.Contains("commandLine.WorkerTimeout")) "Configurable asset-worker CLI timeout"
 Assert-True ($assetToolSource.Contains("extract-asset-package") -and
