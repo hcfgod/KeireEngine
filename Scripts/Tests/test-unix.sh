@@ -521,6 +521,8 @@ assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" STB_COMMIT)" 2c980
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" FFMPEG_COMMIT)" 89153eb701d372f54a5d7d29de5067abc09e11d3 'FFmpeg lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_COMMIT)" 77e1ce5d6dee871c49ef211222ba18ef0c486bda 'libsodium lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_SDK_VERSION)" 10.0.302 '.NET SDK lock'
+assert_true grep -F -q '<RuntimeFrameworkVersion>10.0.10</RuntimeFrameworkVersion>' \
+  "$ROOT/Services/KeireDistributionService/Source/KeireDistributionPublisher/KeireDistributionPublisher.csproj"
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_VERSION)" 6.0.3 'PyYAML lock'
 assert_equal "$(config_value "$ROOT/Config/Dependencies.lock" PYYAML_SOURCE_SHA256)" \
   d76623373421df22fb4cf8817020cbb7ef15c725b9d5e45f17e189bfc384190f 'PyYAML source lock'
@@ -768,6 +770,8 @@ assert_true grep -F -q 'local directory, library = resolved:match("^(.*)/(lib[^/
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'return ":" .. library' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'os.host() ~= "macosx"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'os.host() == "macosx"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'linkoptions { '\''"'\'' .. resolved .. '\''"'\'' }' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'filter { "system:linux", "toolset:gcc or clang" }' \
   "$ROOT/Scripts/Premake/Common.lua"
 assert_false grep -F -q 'filter { "system:linux or macosx", "toolset:gcc or clang" }' \
@@ -780,8 +784,8 @@ assert_true grep -F -q 'CoralNetHostRuntime = "../Build/Dependencies/coral-netho
 assert_true grep -F -q '"UserNotifications.framework", "Security.framework"' \
   "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q 'buildoptions { "-Wno-error=tsan" }' "$ROOT/Scripts/Premake/Common.lua"
-assert_true grep -F -q 'DependencyLink(DependencyManifest.AssimpDebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
-assert_true grep -F -q 'DependencyLink(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'LinkDependencies(DependencyManifest.RecastDebugLibraries)' "$ROOT/Scripts/Premake/Common.lua"
+assert_true grep -F -q 'LinkDependency(DependencyManifest.SDL3DebugLibrary)' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'project_generation_fingerprint' "$ROOT/Scripts/Linux/generate.sh"
 assert_true grep -F -q 'invalidate_incompatible_binary_outputs "$ROOT" linux' \
   "$ROOT/Scripts/Linux/generate.sh"

@@ -544,6 +544,9 @@ Assert-True ($coralWarningPatch.Contains('memcpy(buffer, InString.data(), InStri
              $coralWarningPatch.Contains('reinterpret_cast<const UCChar*>(UINTPTR_MAX)') -and
              $coralWarningPatch.Contains('target_compile_options(Coral.Native PRIVATE /wd4996)')) "Warning-clean Coral native host patch"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
+$distributionPublisherProject = Get-Content `
+    (Join-Path (Get-RepositoryRoot) `
+        "Services\KeireDistributionService\Source\KeireDistributionPublisher\KeireDistributionPublisher.csproj") -Raw
 Assert-True ($premakePolicy.Contains('SDL3DebugLibrary') -and $premakePolicy.Contains('SDL3ReleaseLibrary')) "Premake SDL variant selection"
 $unixDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\dependencies.sh") -Raw
 $windowsDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\dependencies.ps1") -Raw
@@ -696,13 +699,17 @@ Assert-True ($premakePolicy.Contains('buildoptions { "-fms-runtime-lib=dll_dbg" 
 Assert-True ($premakePolicy.Contains('function GeneratorRootPath(path)') -and
              $premakePolicy.Contains('SelectedToolset ~= "msc"') -and
              $premakePolicy.Contains('os.host() ~= "macosx"') -and
+             $premakePolicy.Contains('os.host() == "macosx"') -and
+             $premakePolicy.Contains('linkoptions { ''"'' .. resolved .. ''"'' }') -and
              $premakePolicy.Contains('path:gsub("^%.%./", "")') -and
              $premakePolicy.Contains('local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")') -and
              $premakePolicy.Contains('return ":" .. library') -and
-             $premakePolicy.Contains('links(DependencyLinks(DependencyManifest.RecastDebugLibraries))') -and
-             $premakePolicy.Contains('DependencyLink(DependencyManifest.SDL3DebugLibrary)') -and
+             $premakePolicy.Contains('LinkDependencies(DependencyManifest.RecastDebugLibraries)') -and
+             $premakePolicy.Contains('LinkDependency(DependencyManifest.SDL3DebugLibrary)') -and
              $assetWorkerPremake.Contains('libdirs { GeneratorRootPath(ffmpegDebug .. "/lib") }')) `
     "Toolset-aware root-relative Ninja and GNU Make dependency links"
+Assert-True ($distributionPublisherProject.Contains('<RuntimeFrameworkVersion>10.0.10</RuntimeFrameworkVersion>')) `
+    "Distribution publisher runtime patch lock"
 Assert-True ($assetToolSource.Contains("--worker-timeout-seconds") -and
              $assetToolSource.Contains("commandLine.WorkerTimeout")) "Configurable asset-worker CLI timeout"
 Assert-True ($assetToolSource.Contains("extract-asset-package") -and

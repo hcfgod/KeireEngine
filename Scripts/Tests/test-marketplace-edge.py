@@ -88,16 +88,16 @@ routes = "\n".join(
 )
 
 require(
-    '"X-Client-Info": "keire-marketplace-edge/0.4.0"' in shared,
-    "Marketplace Edge requests must identify the current 0.4.0 source client.",
+    '"X-Client-Info": "keire-marketplace-edge/0.4.1"' in shared,
+    "Marketplace Edge requests must identify the current 0.4.1 source client.",
 )
 require(
-    '"X-Client-Info": "keire-validator-queue/0.4.0"' in validator_queue,
-    "Marketplace validator queue requests must identify the current 0.4.0 source client.",
+    '"X-Client-Info": "keire-validator-queue/0.4.1"' in validator_queue,
+    "Marketplace validator queue requests must identify the current 0.4.1 source client.",
 )
 require(
-    '"X-Client-Info": "keire-publication-queue/0.4.0"' in publication_queue,
-    "Marketplace publication queue requests must identify the current 0.4.0 source client.",
+    '"X-Client-Info": "keire-publication-queue/0.4.1"' in publication_queue,
+    "Marketplace publication queue requests must identify the current 0.4.1 source client.",
 )
 require(
     '"X-Client-Info": "keire-website-contact/1.0"' in website_contact,

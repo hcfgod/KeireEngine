@@ -7,7 +7,7 @@ public static class MarketplaceValidationContract
     public const int ReportSchemaVersion = 2;
     public const int AttestationSchemaVersion = 1;
     public const int EvidenceSchemaVersion = 1;
-    public const string ValidatorVersion = "0.4.0";
+    public const string ValidatorVersion = "0.4.1";
     public const string PolicyVersion = "marketplace-2026-08-13";
     public const long MaximumPackageBytes = 64L * 1024 * 1024 * 1024;
     public const int MaximumEvidenceBytes = 8 * 1024 * 1024;

@@ -104,12 +104,21 @@ local function DependencyLink(path)
     return resolved
 end
 
-local function DependencyLinks(paths)
-    local result = {}
-    for _, path in ipairs(paths) do
-        table.insert(result, DependencyLink(path))
+local function LinkDependency(path)
+    local resolved = GeneratorRootPath(path)
+    if (_ACTION == "ninja" or _ACTION == "gmake") and SelectedToolset ~= "msc" and os.host() == "macosx" then
+        -- Premake normalizes archive paths passed through links into GNU-style -llibname.a tokens. Apple ld does not
+        -- support that syntax, so keep the exact archive path as a trailing linker argument instead.
+        linkoptions { '"' .. resolved .. '"' }
+        return
     end
-    return result
+    links { DependencyLink(path) }
+end
+
+local function LinkDependencies(paths)
+    for _, path in ipairs(paths) do
+        LinkDependency(path)
+    end
 end
 
 function LinkKeireCore()
@@ -125,29 +134,29 @@ function LinkKeireCore()
         linkgroups "On"
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
-        links
+        LinkDependencies
         {
-            DependencyLink(DependencyManifest.AssimpDebugLibrary),
-            DependencyLink(DependencyManifest.AssimpZlibDebugLibrary),
-            DependencyLink(DependencyManifest.JoltDebugLibrary),
-            DependencyLink(DependencyManifest.MiniaudioDebugLibrary),
-            DependencyLink(DependencyManifest.CoralDebugLibrary)
+            DependencyManifest.AssimpDebugLibrary,
+            DependencyManifest.AssimpZlibDebugLibrary,
+            DependencyManifest.JoltDebugLibrary,
+            DependencyManifest.MiniaudioDebugLibrary,
+            DependencyManifest.CoralDebugLibrary
         }
-        links(DependencyLinks(DependencyManifest.RecastDebugLibraries))
+        LinkDependencies(DependencyManifest.RecastDebugLibraries)
 
     filter { "configurations:Release or Dist" }
-        links
+        LinkDependencies
         {
-            DependencyLink(DependencyManifest.AssimpReleaseLibrary),
-            DependencyLink(DependencyManifest.AssimpZlibReleaseLibrary),
-            DependencyLink(DependencyManifest.JoltReleaseLibrary),
-            DependencyLink(DependencyManifest.MiniaudioReleaseLibrary),
-            DependencyLink(DependencyManifest.CoralReleaseLibrary)
+            DependencyManifest.AssimpReleaseLibrary,
+            DependencyManifest.AssimpZlibReleaseLibrary,
+            DependencyManifest.JoltReleaseLibrary,
+            DependencyManifest.MiniaudioReleaseLibrary,
+            DependencyManifest.CoralReleaseLibrary
         }
-        links(DependencyLinks(DependencyManifest.RecastReleaseLibraries))
+        LinkDependencies(DependencyManifest.RecastReleaseLibraries)
 
     filter {}
-        links { DependencyLink(DependencyManifest.CoralNetHostLibrary) }
+        LinkDependency(DependencyManifest.CoralNetHostLibrary)
 
     filter "system:windows"
         links { "crypt32", "winhttp" }
@@ -228,10 +237,10 @@ function LinkSDL3()
     links { DependencyManifest.SDL3PlatformLinks }
 
     filter { "configurations:Debug or DebugASan or DebugUBSan or DebugTSan or Coverage" }
-        links { DependencyLink(DependencyManifest.SDL3DebugLibrary) }
+        LinkDependency(DependencyManifest.SDL3DebugLibrary)
 
     filter { "configurations:Release or Dist" }
-        links { DependencyLink(DependencyManifest.SDL3ReleaseLibrary) }
+        LinkDependency(DependencyManifest.SDL3ReleaseLibrary)
 
     filter {}
 end
