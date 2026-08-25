@@ -8,9 +8,26 @@ public sealed class Mover : Behaviour
     [SerializeField, StableFieldId("4cf59f74-236e-43c2-bb37-863a0ee5500c")]
     private float _speed = 4.0f;
 
+    [SerializeField, StableFieldId("3f88533e-d180-4f33-a77f-86cb3bbc91bc")]
+    private InputActionAsset? _inputActions = null;
+
+    private InputAction? _move;
+
+    protected override void OnEnable()
+    {
+        _move = _inputActions?.FindAction("Player/Move");
+        _move?.Enable();
+    }
+
+    protected override void OnDisable()
+    {
+        _move?.Disable();
+        _move = null;
+    }
+
     protected override void Update()
     {
-        Vector2 input = Input.Axis2D("Move");
+        Vector2 input = _move?.ReadValue<Vector2>() ?? Vector2.Zero;
         Vector3 movement = new(input.X, 0.0f, input.Y);
         Entity.Transform.Position += movement * (_speed * Time.DeltaTime);
     }

@@ -5,10 +5,9 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-Kéire is currently version 0.4.0 and pre-1.0. The version identifies current source and release-candidate metadata;
-catalog sequence 15 and matching 0.4.0 artifacts are not yet active. Guides describe the checked-in implementation and
-identify unfinished release work honestly. Roadmap material is labeled as roadmap material and does not redefine the
-supported API or activate a release.
+Kéire is currently version 0.4.0 and pre-1.0. Immutable Windows and Linux x86-64 packages are active through signed
+catalog sequence 15. Guides describe the checked-in implementation and identify unfinished work honestly. Roadmap
+material is labeled as roadmap material and does not redefine the supported API or activate a release.
 
 ## Choose a Starting Point
 

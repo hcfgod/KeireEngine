@@ -111,8 +111,8 @@ bash Scripts/project.sh run --generator ninja --configuration Debug --toolset gc
 ```
 
 The Linux workflow has source-build coverage on Ubuntu 22.04/24.04, Debian 12, current Fedora and Arch, openSUSE
-Tumbleweed, and Rocky Linux 9. Release 0.3.2 additionally passed exact-artifact acceptance for its DEB on Ubuntu 22.04
-and Debian and for its RPM on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed. Ubuntu 26.04 remains a setup and
+Tumbleweed, and Rocky Linux 9. Release 0.4.0 passed exact-artifact acceptance for its DEB on Ubuntu 22.04 and Debian 13
+and for its RPM on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed. Ubuntu 26.04 remains a setup and
 container-matrix target pending complete native validation.
 `Scripts/setup-linux.sh` detects the host and runs the authoritative bootstrap, workstation doctor, and optional test
 gate as one command. The bootstrap supports the `apt`, `dnf`, `pacman`, and `zypper` package families and

@@ -358,16 +358,15 @@ separately. After the replacement Hub has been distributed and the transition po
 public key is a separate release decision. Packaging overrides may supply an operating-system path-separated
 `KEIRE_DISTRIBUTION_TRUSTED_KEYS` list during an overlap; the legacy singular key variable remains supported.
 
-The active stable snapshot reviewed on 2026-08-16 is
-`release-0.3.2-sequence-14-4b96626`. Its Windows x86-64 catalog contains `keire.editor@0.3.2` and
-`keire.hub@0.3.2`; its Linux x86-64 catalog contains the Editor archive plus distinct DEB and RPM Hub records. The
+The active stable snapshot published on 2026-08-24 is
+`release-0.4.0-sequence-15-9de86e6`. Its Windows x86-64 catalog contains `keire.editor@0.4.0` and
+`keire.hub@0.4.0`; its Linux x86-64 catalog contains the Editor archive plus distinct DEB and RPM Hub records. The
 Windows EXE and RPM are catalog/hash verified but do not carry Authenticode or RPM GPG signatures. Earlier versions
 were retired as an explicit release decision because they contain known major defects; ordinary future publication
 remains additive unless another documented retirement is approved.
 
-The repository and Hub-facing source metadata now identify 0.4.0 as a release candidate. Hub must continue to select
-only the signed catalog above until a sequence-15 snapshot and exact 0.4.0 artifacts exist and are activated; source
-labels alone never advance the catalog.
+The repository, website, and Hub-facing metadata identify 0.4.0 as the active public preview. Hub selects only the
+signed catalog above; source labels alone never advance the catalog.
 
 ## Launch and activation
 
