@@ -21,8 +21,8 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
     {
         id: "now",
         label: "Now",
-        timeframe: "Kéire 0.4.0 current release",
-        statement: "Extend release evidence for the published unified graph and scripting milestone.",
+        timeframe: "Kéire 0.4.1 current release",
+        statement: "Extend release evidence for the performance and cross-platform reliability update.",
         initiatives: [
             {
                 title: "Unified graph and scripting authoring",
@@ -34,7 +34,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
                     "Executable Operator, Block, and System VFX Subgraphs",
                     "Unity-shaped managed objects, direct asset references, and managed-state v2",
                 ],
-                evidenceUrl: "/changelog/0.4.0/",
+                evidenceUrl: "/changelog/0.4.1/",
             },
             {
                 title: "Windows and Linux release reliability",
@@ -46,7 +46,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
                     "Direct3D 12 and Vulkan validation",
                     "Actionable launch, installation, and recovery diagnostics",
                 ],
-                evidenceUrl: "/changelog/0.4.0/",
+                evidenceUrl: "/changelog/0.4.1/",
             },
             {
                 title: "Marketplace and package workflows",

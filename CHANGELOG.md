@@ -8,6 +8,8 @@ versions.
 
 ## Unreleased
 
+## 0.4.1 - 2026-08-24
+
 - Fixed Linux standalone Hub installer packaging after payload permission normalization by deriving the Hub worker
   target in the installer process before restoring executable modes.
 

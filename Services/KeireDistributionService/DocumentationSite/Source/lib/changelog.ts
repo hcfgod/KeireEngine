@@ -108,6 +108,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
 ];
 
 const summaries: Readonly<Record<string, string>> = {
+    "0.4.1": "A performance and portability update that dramatically reduces dense-scene rendering cost, eliminates steady-state upload churn, and validates the release pipeline across Windows, Linux, and macOS source builds.",
     "0.4.0": "A unified graph-authoring and Unity-shaped scripting milestone with schema-4 Shader/Material graphs, executable VFX subgraphs, and explicit catalog-publication boundaries.",
     "0.3.2": "A cross-platform preview adding procedural humanoid locomotion, Linux Hub packages, and stronger release/runtime reliability.",
     "0.3.1": "A production-oriented preview centered on the asset ecosystem, modern authoring workflows, audio, animation, Hub reliability, and cross-platform release foundations.",
@@ -152,6 +153,10 @@ function pickHighlights(changes: ReleaseChange[], version: string): ReleaseChang
         return changes.slice(0, Math.min(4, changes.length));
     }
     const preferred = [
+        /reused cyclic per-surface GPU and transfer buffers/i,
+        /reduced rendered-frame work with selected-LOD coarse culling/i,
+        /cached mutable-scene hierarchy order/i,
+        /fixed Apple Clang\/libc\+\+ portability/i,
         /explicit native Hub package-format identity/i,
         /zero-clip `ProceduralHumanoid`/i,
         /Play Mode crash when procedural state-change/i,
