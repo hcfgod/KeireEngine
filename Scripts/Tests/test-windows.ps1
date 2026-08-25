@@ -611,6 +611,12 @@ Assert-True ($windowsFfmpegBuild.Contains('foreach ($component in $RuntimeContra
              $windowsFfmpegContractBuild.Contains('FileName = "avutil-61.dll"') -and
              -not $windowsFfmpegBuild.Contains('lib\avformat.lib')) `
     "Windows FFmpeg cache validation requires every installed runtime and import library"
+Assert-True ($windowsFfmpegBuild.Contains('$candidateLicenseRoot') -and
+             $windowsFfmpegBuild.Contains('"COPYING.LGPLv2.1", "COPYING.LGPLv3", "SOURCE.txt"') -and
+             $unixFfmpegBuild.Contains('install/share/licenses/ffmpeg/COPYING.LGPLv2.1') -and
+             $unixFfmpegBuild.Contains('install/share/licenses/ffmpeg/COPYING.LGPLv3') -and
+             $unixFfmpegBuild.Contains('install/share/licenses/ffmpeg/SOURCE.txt')) `
+    "FFmpeg cache validation requires package-distribution license inputs"
 Assert-True ($windowsFfmpegBuild.Contains('$Toolset -eq "gcc"') -and
              $windowsFfmpegBuild.Contains('do not support the gcc toolset') -and
              $windowsFfmpegBuild.Contains('Enter-WindowsToolEnvironment "vs2022" "msc" $Architecture') -and

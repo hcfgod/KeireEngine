@@ -103,7 +103,10 @@ valid_ffmpeg_output() {
   local expected_stamp="${2:?FFmpeg stamp is required}"
   [[ -f "$path/install/include/libavformat/avformat.h" && -f "$path/config_components.h" &&
       "$(grep -F '#define CONFIG_EXR_DECODER 1' "$path/config_components.h" || true)" &&
-      -f "$path/keire-ffmpeg.stamp" && "$(cat "$path/keire-ffmpeg.stamp")" == "$expected_stamp" ]] &&
+      -f "$path/install/share/licenses/ffmpeg/COPYING.LGPLv2.1" &&
+      -f "$path/install/share/licenses/ffmpeg/COPYING.LGPLv3" &&
+      -f "$path/install/share/licenses/ffmpeg/SOURCE.txt" && -f "$path/keire-ffmpeg.stamp" &&
+      "$(cat "$path/keire-ffmpeg.stamp")" == "$expected_stamp" ]] &&
     valid_ffmpeg_component_artifacts "$path"
 }
 

@@ -54,6 +54,13 @@ function Test-FfmpegOutput([string]$Path, [string]$ExpectedStamp) {
         return $false
     }
 
+    $candidateLicenseRoot = Join-Path $candidateInstall "share\licenses\ffmpeg"
+    foreach ($license in @("COPYING.LGPLv2.1", "COPYING.LGPLv3", "SOURCE.txt")) {
+        if (-not (Test-Path -LiteralPath (Join-Path $candidateLicenseRoot $license) -PathType Leaf)) {
+            return $false
+        }
+    }
+
     foreach ($component in $RuntimeContract.Files) {
         $importLibrary = Join-Path $candidateInstall "bin\$($component.Component).lib"
         $runtimeLibrary = Join-Path $candidateInstall "bin\$($component.FileName)"

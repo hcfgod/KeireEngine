@@ -964,6 +964,11 @@ assert_true grep -F -q 'for component in avformat avcodec swresample avutil' \
   "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'lib$component.dylib' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'lib$component.so' "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'install/share/licenses/ffmpeg/COPYING.LGPLv2.1' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'install/share/licenses/ffmpeg/COPYING.LGPLv3' \
+  "$ROOT/Scripts/Unix/ffmpeg.sh"
+assert_true grep -F -q 'install/share/licenses/ffmpeg/SOURCE.txt' "$ROOT/Scripts/Unix/ffmpeg.sh"
 assert_true grep -F -q 'receiveStatus == AVERROR(EAGAIN)' \
   "$ROOT/KeireAssetWorker/Source/FfmpegTextureImportBackend.cpp"
 assert_true grep -F -q 'frame.format == AV_PIX_FMT_GRAYF16' \
@@ -1315,10 +1320,10 @@ assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
 touch "$identity_fixture/.ninja_lock"
 bash "$identity_fixture/Scripts/Unix/build-info.sh"
 assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY false' "$identity_header"
-touch "$identity_fixture/Build/identity-marker"
 sleep 1
+touch "$identity_fixture/Build/identity-marker"
 bash "$identity_fixture/Scripts/Unix/build-info.sh"
-[[ "$identity_header" -ot "$identity_fixture/Build/identity-marker" ]] || fail 'Unchanged identity header was rewritten'
+assert_true test "$identity_header" -ot "$identity_fixture/Build/identity-marker"
 printf '%s\n' untracked > "$identity_fixture/untracked.txt"
 bash "$identity_fixture/Scripts/Unix/build-info.sh"
 assert_true grep -Fq '#define KEIRE_BUILD_GIT_DIRTY true' "$identity_header"

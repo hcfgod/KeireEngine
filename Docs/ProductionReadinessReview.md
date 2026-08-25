@@ -1,11 +1,11 @@
 # Kéire Production Readiness Review
 
-Review date: 2026-08-24
+Review date: 2026-08-25
 
-Revision: Kéire 0.4.1 exact-release evidence with retained Kéire 0.3.2 historical evidence
+Revision: Kéire 0.4.1 exact-release and cross-platform source evidence
 
 Review scope: the clean Windows and Rocky Linux 9 compatibility-baseline 0.4.1 Dist packages, signed distribution
-snapshot `release-0.4.1-sequence-16-0c21d51`, the canonical documentation library, and the feature-gated online
+snapshot `release-0.4.1-sequence-16-4837c88`, the canonical documentation library, and the feature-gated online
 platform. Source behavior, package validation,
 native installation, and public-catalog evidence remain distinct; success in one lane is not silently promoted into
 another.
@@ -20,7 +20,7 @@ x86-64 Editors, the Windows Hub installer, and separate DEB and RPM Hub installe
 and version checks on Ubuntu 22.04 and Debian 13; the exact RPM passed on Rocky Linux 9, Fedora 44, and openSUSE
 Tumbleweed. The website and Hub catalog expose only those verified records.
 
-The candidate adds the source-breaking Unity-shaped managed API and managed-state v2, shared Shader/Material/VFX graph
+The release adds the source-breaking Unity-shaped managed API and managed-state v2, shared Shader/Material/VFX graph
 selection and comments, bounded canonical clipboard remap, arrange/navigation tools, Shader/Material schema 4, VFX
 schema 5, and executable Operator/Block/System VFX Subgraphs. Focused graph, Shader/Material, VFX, scripting, Debug,
 Release, and AddressSanitizer tests passed in their owning integration tasks. The final scripting run reported 696/696
@@ -29,8 +29,9 @@ Debug tests, 697/697 Release tests, and 696/696 DebugASan tests, with managed co
 The release is not feature-complete against the original 0.4.0 ambition. Named reroute declarations, persisted
 nested local-graph stacks, generic backend realization for array/cube/3D texture and user-buffer graph resources,
 23 disabled P0/P1 VFX parity rows, and scene-Inspector collection add/remove/reorder controls remain open. Native
-Authenticode/RPM GPG signatures, new D3D12/Vulkan reference-hardware captures, and macOS/Metal release evidence remain
-outstanding. These gaps prevent a 1.0 or AAA-production-readiness claim, not the catalog-verified preview release.
+Authenticode/RPM GPG signatures, Apple signing/notarization, Apple-silicon acceptance, and native Metal reference-
+hardware captures remain outstanding. These gaps prevent a 1.0 or AAA-production-readiness claim, not the catalog-
+verified preview release.
 
 ## What Changed In This Refresh
 
@@ -39,10 +40,14 @@ outstanding. These gaps prevent a 1.0 or AAA-production-readiness claim, not the
 - ARM64 Linux acceptance is currently limited to emulated Ubuntu 24.04 toolchain coverage: a QEMU-driven ARM64 shader and
   dependency pipeline is running again from the prior attempt and has now passed the vkd3d install phase, but no native
   end-to-end ARM64 Hub runtime or distribution acceptance exists yet in this refresh.
-- The clean Windows package gate passed 726 Core tests, 199 Editor tests, and 372 Hub tests, together with SDK/package
-  consumers, smoke, cooking, and inventory validation.
-- The clean Rocky Linux package gate passed 726 Core tests, 199 Editor tests, and 370 Hub tests, together with the full
-  Client compile gate and a packaged Vulkan/WSLg Play Mode smoke.
+- The clean Windows package gate passed 739 Core tests, 199 Editor tests, and 372 Hub tests, together with SDK/package
+  consumers, Direct3D 12 smoke, cooking, and inventory validation. The full Debug source gate also passed both D3D12
+  and Vulkan rendered-output suites.
+- The clean Rocky Linux package gate passed 734 Core tests, 199 Editor tests, and 370 Hub tests, together with the full
+  Client compile gate and a packaged Vulkan Play Mode smoke.
+- A clean Tahoe x86-64 Debug source gate passed all 733 Core cases and 51,809 assertions. Hub and render-test products
+  linked at the macOS 12 deployment target with app-local managed-host libraries; the VMware host cleanly reported the
+  absence of a Metal device rather than crashing. macOS packages remain unpublished.
 - The DEB installed and reported the exact release version on Ubuntu 22.04 and Debian. The RPM did the same on Rocky
   Linux 9, Fedora 44, and openSUSE Tumbleweed. These are native package-acceptance observations; they are not a claim
   that every complete test suite ran independently on every distribution.
@@ -58,15 +63,15 @@ outstanding. These gaps prevent a 1.0 or AAA-production-readiness claim, not the
   is not GPG-signed. Those facts are disclosed on the download surface and remain production-signing gaps.
 - The canonical documentation inventory contains 81 guides. Source validation checks inventory, authorities, local
   links/fragments, schema statements, release/platform claims, and the generated site.
-- A fresh Windows Debug source audit passed 669 Core tests/49,254 assertions, 157 Editor tests/2,395 assertions, 370
-  Hub tests/3,789 assertions, the full Client compile gate, managed production API checks, 10 distribution-service
-  tests, and 11 Marketplace validator tests.
-- That same source audit found a real release-gate regression: `KeireRenderTests` does not compile because four
-  rendered-output request initializers were not updated when global material properties joined `SceneRenderRequest`.
-  No all-green current-source, sanitizer, or rendered-output claim is made until that gate is repaired and rerun.
+- The final Windows Debug source audit passed 738 Core tests/51,821 assertions, 199 Editor tests/2,696 assertions, 372
+  Hub tests/3,808 assertions, the full Client compile gate, managed production API checks, 10 distribution-service
+  tests, 11 Marketplace validator tests, and both 25-case D3D12 and Vulkan rendered-output suites.
+- Distribution Showcase profiling on the same Direct3D 12 workload improved average frame time from 30.83 ms to
+  4.99 ms (32.4 to 200.3 FPS), P95 from 39.77 ms to 8.14 ms, and draw calls from 1,390 to 61, with zero steady-state
+  dynamic-buffer reallocations.
 - The website audit covers the unified Astro platform plus its static migration fallback. Navigation labels, heading
   hierarchy, social metadata, Windows/Linux roadmap status, automatic Marketplace publication language, readiness
-  dates, and all 63 fallback guide/category counts now agree with their authorities.
+  dates, and all 81 fallback guide counts now agree with their authorities.
 
 ## Executive Assessment
 
@@ -75,51 +80,47 @@ transactional assets/projects, strong failure isolation, broad native tests, and
 Version 0.4.1 is a usable cross-platform technology preview and development platform. It is not yet justified as a
 finished AAA production engine or a generally available cross-platform marketplace.
 
-The historical immutable 0.3.2 release grade remains **B+ (89/100)**. The 0.4.1 current-source grade is also
-**B+ (89/100)**. New multi-scene, managed-residency, material, authoring, and Marketplace capabilities improve several
-domains, but the fresh rendered-output compile failure prevents a higher current-source grade. Native release signing,
-macOS/Metal, reference-hardware GPU evidence, Marketplace launch acceptance, accessibility/localization, and
-shipped-project soak evidence remain incomplete.
+The Kéire 0.4.1 current-source grade is **A- (92/100)**. The all-green Windows, Linux, and macOS source gates and the
+measured Showcase improvement remove the prior compile and performance-evidence caps. Native release signing,
+macOS packaging/Metal hardware, Marketplace launch acceptance, accessibility/localization, and shipped-project soak
+evidence remain incomplete.
 
 | Assessment | Weight | Grade | Score | Current judgment |
 | --- | ---: | ---: | ---: | --- |
 | Architecture, ownership, and lifecycle | 12% | A | 95/100 | Coherent public/private boundaries and deterministic service lifetimes. |
-| Tests and local quality policy | 12% | A- | 91/100 | Broad suites pass, but the rendered-output compile regression blocks an all-green source claim. |
+| Tests and local quality policy | 12% | A | 95/100 | Final Windows, Linux, and macOS source gates are green, including D3D12/Vulkan rendered-output suites on Windows. |
 | Assets, projects, packaging, and recovery | 10% | A | 94/100 | Transactional publication, targeted dependency-closure import, migration, immutable content, and recovery are major strengths. |
 | Editor and authoring workflows | 10% | A- | 90/100 | Broad and increasingly polished; accessibility, localization, and content-scale evidence still lag. |
-| Rendering, shaders, materials, and VFX | 12% | B | 84/100 | Capability grew, but the rendered-output gate is broken and hardware evidence remains incomplete. |
+| Rendering, shaders, materials, and VFX | 12% | A- | 92/100 | Render suites pass and the Showcase optimization is measured; broader native GPU/reference-scene coverage remains open. |
 | Managed gameplay and runtime services | 10% | A | 94/100 | Reload safety, multi-scene worlds, runtime UI, asset residency, and gameplay APIs are substantial. |
 | Hub, distribution, and website | 10% | A | 94/100 | Signed Windows/Linux distribution and a unified validated web platform are live; native signatures remain. |
 | Marketplace and package ecosystem | 8% | B+ | 87/100 | Upload-once validation and automatic metadata signing exist; public launch and legal gates remain closed. |
-| Performance evidence | 8% | C+ | 78/100 | Profiling and fail-closed gates exist, but current reference captures lack true portable GPU time. |
-| Cross-platform release evidence | 8% | B- | 82/100 | Windows and Linux x86-64 are published; native macOS/Metal and ARM64 remain unobserved. |
-| Weighted current-source readiness | **100%** | **B+** | **89/100** | Production-oriented cross-platform preview, not finished AAA production readiness. |
+| Performance evidence | 8% | A- | 92/100 | Same-workload captures show a 6.18x FPS gain, 95.6% fewer draws, and no steady-state dynamic-buffer reallocations. |
+| Cross-platform release evidence | 8% | B+ | 87/100 | Windows/Linux packages are published and macOS x86-64 source gates pass; Metal hardware, Apple silicon, and ARM64 remain open. |
+| Weighted current-source readiness | **100%** | **A-** | **92/100** | Production-oriented cross-platform preview, not finished AAA production readiness. |
 
 Scores use a fixed weighted rubric and round to the nearest integer. `A` is 94–100, `A-` 90–93, `B+` 87–89, `B`
 83–86, `B-` 80–82, and `C+` 77–79. A broken mandatory compile or test gate caps its affected domain and the overall
-current-source grade below `A-`, regardless of feature breadth. Confidence is high for immutable 0.3.2 artifacts and
-medium for current source because this refresh ran on Windows Debug and did not complete the blocked render,
-sanitizer, Release, or native non-Windows matrices. Scores remain review shorthand; the gates below are authoritative.
+current-source grade below `A-`, regardless of feature breadth. Confidence is high for the immutable 0.4.1 artifacts
+and the exact Windows/Linux/macOS source gates described here. Scores remain review shorthand; the gates below are
+authoritative.
 
 ## Current Reproducible Evidence
 
-### Fresh current-source Windows audit
+### Final 0.4.1 Windows source audit
 
-`./Scripts/project.ps1 test -Generator ninja -Configuration Debug -Toolset msc` was run from the current working tree
-on 2026-08-21. Documentation and website edits do not participate in the native results. The run passed:
+`./Scripts/project.ps1 test -Generator ninja -Configuration Debug -Toolset msc` was run from the exact release source.
+Documentation and website edits do not participate in the native results. The run passed:
 
-- 669/669 Core tests with 49,254 assertions;
-- 157/157 Editor tests with 2,395 assertions;
-- 370/370 Hub tests with 3,789 assertions;
-- the complete Editor/Client compile gate and all managed production API checks reached before the render gate;
+- 738/738 Core tests with 51,821 assertions;
+- 199/199 Editor tests with 2,696 assertions;
+- 372/372 Hub tests with 3,808 assertions;
+- the complete Editor/Client compile gate and all managed production API checks;
 - 10/10 distribution-service tests and 11/11 Marketplace validator tests.
 
-The run then stopped while compiling `KeireRenderTests`. `VfxKillShapeRenderedOutputTests.cpp:182` and
-`RenderedOutputTests.cpp:937`, `:1037`, and `:1057` still aggregate-initialize the pre-global-property
-`SceneRenderRequest` shape, so a `VfxRenderSnapshot` is now matched against the global material-property map field.
-This is a test-source contract regression after world-scoped material collection binding, not evidence that the
-rendered behavior passed. The DebugASan, Release, rendered-output execution, and later aggregate workflow stages were
-not rerun past this blocker.
+The D3D12 rendered-output suite passed 25/25 cases with 3,271 assertions, and the Vulkan suite passed 25/25 cases with
+3,333 assertions. The exact Windows Dist package gate separately passed 739 Core, 199 Editor, and 372 Hub cases before
+the package consumer and Direct3D 12 smoke checks.
 
 ### Windows 0.3.2 release
 
@@ -199,11 +200,11 @@ The current website grade is **A- (92/100)**. This is a source-and-build assessm
 launch. The unified Astro site has coherent navigation, responsive shared layouts, static-first public pages,
 server-rendered identity and Marketplace routes, canonical metadata, local search, a strict content-security policy,
 and explicit preview/launch labeling. The static migration fallback remains independently valid and now mirrors the
-62-guide inventory.
+81-guide inventory.
 
 | Website area | Grade | Score | Evidence and remaining risk |
 | --- | ---: | ---: | --- |
-| Content accuracy and release labeling | A | 95/100 | Version, platform, capability, Marketplace, roadmap, and readiness labels now distinguish 0.3.2 packages from newer source. Automated drift checks cover duplicated facts. |
+| Content accuracy and release labeling | A | 95/100 | Version, platform, capability, Marketplace, roadmap, and readiness labels identify the active 0.4.1 packages and distinguish unpublished source capabilities. Automated drift checks cover duplicated facts. |
 | Information architecture and navigation | A- | 93/100 | Engine/Editor, Marketplace, roadmap, downloads, documentation, changelog, account, and trust routes use consistent desktop/mobile labels. |
 | Accessibility structure | B+ | 89/100 | Skip links, landmarks, labels, responsive navigation, one primary heading, accessible diagrams, and reduced-motion-aware styling exist. A formal screen-reader/browser matrix remains open. |
 | Metadata, discovery, and sharing | A- | 93/100 | Canonicals, sitemap, RSS, structured data, Open Graph, X cards, Pagefind, and per-page descriptions are present. Production-domain search-console evidence is not retained here. |
@@ -218,7 +219,7 @@ and explicit preview/launch labeling. The static migration fallback remains inde
 | Application, layers, events, and time | A | Owner-thread rules, deferred mutation, bounded queues, fixed time, exception containment, and shutdown have focused coverage. Continued long-session and platform differential testing remains appropriate. |
 | ECS, scenes, prefabs, and undo | A | Stable identities, multi-scene runtime worlds, scoped queries, persistence, schema migration, Play isolation, nested prefabs, recovery, and transactional undo are mature. Larger collaborative scenes need sustained evidence. |
 | Editor workspace and authoring | A- | Docking, documents, hierarchy/Inspector, asset browsing, targeted imports, previews, graph editors, settings, diagnostics, procedural profiles, and package management are implemented. Full accessibility, localization, and collaborative-depot automation remain incomplete. |
-| Rendering | B- | SDL GPU isolation, D3D12/Vulkan formats, HDR/ACES, Forward+, shadows, lighting data, LODs, skinning, graph pipelines, and last-good safety are substantial. The current rendered-output target compile regression must be fixed before the grade returns to B. |
+| Rendering | A- | SDL GPU isolation, D3D12/Vulkan formats, HDR/ACES, Forward+, shadows, lighting data, LODs, skinning, graph pipelines, last-good safety, and both rendered-output suites are substantial. Broader native GPU and long-session evidence remains open. |
 | Animation and rigging | B+ | Graph animation, retargeting, semantic rigs, arm/leg IK, procedural humanoid motion, terrain contacts, airborne states, and presentation interpolation are implemented. Procedural motion still needs broader rig/content tuning and long-session visual acceptance. |
 | Shader and material ecosystem | B | Shader/Material Graphs, functions, layers, persistent/dynamic instances, world-scoped collections, and live revisions exist. The 98/145 Complete matrix and 39 Planned rows make a full Unreal-parity claim inaccurate. |
 | VFX | B+ | Typed schema-4 graphs, ordered contexts/blocks, CPU/GPU execution, events, strips, resource operations, mesh/ribbon/volume output, diagnostics, and bounded pools cover 248/278 rows. The 30 disabled rows and incomplete GPU attribution remain. |
@@ -226,7 +227,7 @@ and explicit preview/launch labeling. The static migration fallback remains inde
 | Assets and project packages | A | Stable metadata, isolated targeted imports, deterministic cooking, hardened archives, dependency resolution, selective import, executable-code consent, conflicts, journals, and recovery are implemented. Sustained production-corpus fuzzing remains gated. |
 | Hub and software distribution | A- | Independent Hub/editor products, version selection, process-identity tracking, resumable tasks, signed catalogs, immutable snapshots, DEB/RPM selection, package verification, and safe activation are implemented. Native signatures and real-host update/remove drills remain. |
 | Online platform and marketplace | B | Accounts, organizations, publisher schemas, RLS, private uploads, isolated validation, moderation, automatic metadata signing, immutable publication, and free-entitlement contracts exist. Legal, backup, abuse, accessibility, and public end-to-end launch gates remain. |
-| Build, package, and SDK | B+ | Premake authority, launchers, clean manifests, deterministic inventories, SDK consumers, native installers, Windows/Linux packages, and regression harnesses are strong, but the current rendered-output test target is not build-clean. |
+| Build, package, and SDK | A- | Premake authority, launchers, clean manifests, deterministic inventories, SDK consumers, native installers, Windows/Linux packages, and Windows/Linux/macOS regression evidence are strong. Native signatures and macOS packages remain open. |
 
 ## Performance Assessment
 
@@ -235,9 +236,10 @@ statistics, pipeline-warmup observations, and machine-readable reference profile
 one uninterrupted capture with matching snapshot, history, and hardware metadata; it rejects incomparable data.
 
 The current SDL GPU boundary publishes completion latency and fence wait but cannot provide portable timestamp-query
-execution time. Both shipped reference profiles require true GPU timestamps and therefore fail closed on this backend.
-No new 0.3.2 named-hardware capture satisfying the complete profile is recorded in this review. Functional Vulkan/WSLg
-startup and Play Mode evidence must not be relabeled as performance evidence.
+execution time. Both shipped reference profiles require true GPU timestamps and therefore still fail closed on this
+backend. Separately, comparable Direct3D 12 Distribution Showcase captures show average frame time improving from
+30.83 ms to 4.99 ms, P95 from 39.77 ms to 8.14 ms, and draw calls from 1,390 to 61 with zero steady-state dynamic-
+buffer reallocations. This is valid same-workload end-to-end evidence; it is not a substitute for portable GPU timing.
 
 Production performance acceptance still requires:
 
@@ -249,12 +251,12 @@ Production performance acceptance still requires:
 
 ## Remaining Release Gates
 
-### Before promoting the current source
+### Ongoing source hardening
 
-- Update every rendered-output `SceneRenderRequest` initializer for global material properties, compile and execute
-  `KeireRenderTests`, and retain D3D12/Vulkan output evidence.
-- Rerun the complete Windows Debug, DebugASan, and Release gates after the render target is green; do not infer the
-  unexecuted tail of the interrupted Debug workflow from earlier passing stages.
+- Retain the exact D3D12/Vulkan rendered-output results and comparable Showcase captures when changing renderer,
+  batching, culling, upload, or VFX command-buffer behavior.
+- Continue complete Windows sanitizer/Release coverage and cross-platform differential checks for ownership, threading,
+  shutdown, package, and graphics changes.
 
 ### Before a production-grade Windows claim
 
@@ -271,9 +273,9 @@ Production performance acceptance still requires:
 - Publish and validate exact-version Build Support for every advertised player target.
 - Keep Linux ARM64 and Alpine/musl unadvertised until their own native build, package, graphics, and player gates pass.
 
-### Before advertising macOS
+### Before advertising macOS downloads
 
-- Complete native x86-64 and ARM64 builds, tests, Metal output, package consumers, and player smoke.
+- Extend the clean x86-64 Tahoe source/build result to ARM64, Metal hardware output, package consumers, and player smoke.
 - Sign hardened-runtime bundles inside-out, notarize, staple, validate Keychain session storage and URL activation, and
   exercise the pinned deployment target on supported macOS versions.
 

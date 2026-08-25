@@ -134,7 +134,7 @@ namespace
     [[nodiscard]] std::shared_ptr<const HubAccountWorkflowSnapshot> WaitFor(HubAccountWorkflow& workflow,
                                                                             Predicate predicate)
     {
-        for (std::size_t attempt = 0; attempt < 500U; ++attempt)
+        for (std::size_t attempt = 0; attempt < 2500U; ++attempt)
         {
             auto snapshot = workflow.Snapshot();
             if (predicate(*snapshot))

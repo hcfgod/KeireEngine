@@ -279,6 +279,7 @@ validate_linux_installer_tree() {
 
 installer_format="$(resolve_linux_installer_format)"
 printf '==> Selected native Linux Hub installer format: %s\n' "${installer_format^^}"
+mkdir -p "$ROOT/Artifacts"
 
 if [[ "$installer_format" == deb ]]; then
     command -v dpkg-deb >/dev/null 2>&1 || {

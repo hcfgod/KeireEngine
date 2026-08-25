@@ -1,8 +1,5 @@
 # Changelog
 
-- Prevent Hub package validation from spuriously cancelling marketplace synchronization under loaded Windows builds by
-  using a bounded, scheduler-friendly integration-test wait with actionable failure diagnostics.
-
 All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
 versions.
 
@@ -37,6 +34,11 @@ versions.
 
 ### Fixed
 
+- Hardened final release packaging by rejecting incomplete cached FFmpeg outputs without their required license and
+  source notices, creating the artifact destination before wrapping an externally validated Linux package stage, and
+  making the Unix BuildInfo identity check reliable on macOS Bash 3.2 filesystems with one-second timestamp precision.
+- Prevented Hub package validation from spuriously cancelling marketplace synchronization under loaded builds by
+  using a bounded, scheduler-friendly integration-test wait with actionable failure diagnostics.
 - Required patchelf 0.19 or newer on Linux so RPATH updates preserve relocated ELF initializer addresses instead of
   producing shader-compiler binaries that can crash in the dynamic loader on Rocky Linux 9.
 - Made packaged runtimes retry cooked input-map activation until its asynchronous asset is ready, made partial layer
