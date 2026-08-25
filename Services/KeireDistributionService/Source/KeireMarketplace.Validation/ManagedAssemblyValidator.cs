@@ -203,7 +203,7 @@ internal static partial class ManagedAssemblyValidator
         if ((definition.Packages?.Count ?? 0) != 0)
         {
             throw new InvalidDataException(
-                "Marketplace managed assemblies may not restore publisher-selected NuGet packages in validator 0.4.1.");
+                "Marketplace managed assemblies may not restore publisher-selected NuGet packages in validator 0.4.2.");
         }
 
         if (definition.AllowUnsafe == true)

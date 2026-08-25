@@ -15,7 +15,7 @@ internal sealed class PublicationQueueApi : IDisposable
         m_Http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: true);
         m_Http.BaseAddress = options.SupabaseUrl;
         m_Http.Timeout = Timeout.InfiniteTimeSpan;
-        m_Http.DefaultRequestHeaders.UserAgent.ParseAdd("KeireMarketplacePublicationSigner/0.4.1");
+        m_Http.DefaultRequestHeaders.UserAgent.ParseAdd("KeireMarketplacePublicationSigner/0.4.2");
     }
 
     public async Task<PublicationLease?> LeaseAsync(string signingKeyId, CancellationToken cancellationToken)

@@ -969,7 +969,7 @@ namespace Keire
                                                 ? attribute("SheenRoughness")
                                                 : optionalInput("SheenRoughness", ShaderGraphValueType::Scalar, "0.5F");
                 const auto normal = unlit || (!hasMaterialAttributes && !inputConnected("Normal")) ? "input.Normal"
-                                    : hasMaterialAttributes                                        ? attribute("Normal")
+                                    : hasMaterialAttributes ? attribute("Normal")
                                                             : input("Normal", ShaderGraphValueType::Vector3);
                 const bool hasDetailNormal = !unlit && !hasMaterialAttributes && inputConnected("DetailNormal");
                 const auto detailNormal = hasDetailNormal ? input("DetailNormal", ShaderGraphValueType::Vector3)

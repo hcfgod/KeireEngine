@@ -229,21 +229,23 @@ function validatePreviewMetadata(metadata) {
 
 function validatePreviewReleaseStatus(metadata) {
     const status = metadata?.releaseStatus;
-    if (!semanticVersion(status?.version) || typeof status.message !== "string" ||
+    const targetVersion = semanticVersion(status?.version);
+    const activeCatalogVersion = semanticVersion(status?.activeCatalogVersion);
+    if (!targetVersion || typeof status.message !== "string" ||
         status.message.length < 20 || status.message.length > 240) {
         return null;
     }
     if (status.state === "preparing") {
-        return status;
+        return activeCatalogVersion && compareVersions(targetVersion, activeCatalogVersion) > 0 ? status : null;
     }
     return status.state === "active" && status.activeCatalogVersion === status.version ? status : null;
 }
 
-function currentReleaseCandidates(candidates, releaseStatus) {
-    if (!releaseStatus) {
+function releaseCandidates(candidates, version) {
+    if (!semanticVersion(version)) {
         return [];
     }
-    return candidates.filter((candidate) => candidate.version.raw === releaseStatus.version);
+    return candidates.filter((candidate) => candidate.version.raw === version);
 }
 
 function bytes(value) {
@@ -440,6 +442,8 @@ async function loadDownloads() {
         candidates: await loadCatalog(hostPlatform, architecture),
     })));
     const previews = await loadPreviewDownloads().catch(() => []);
+    const catalogVersion = previewReleaseStatus?.state === "preparing" ?
+        previewReleaseStatus.activeCatalogVersion : previewReleaseStatus?.version;
     for (const hostPlatform of ["windows", "macos", "linux"]) {
         const card = document.querySelector(`[data-platform="${hostPlatform}"]`);
         if (!(card instanceof HTMLElement)) {
@@ -452,14 +456,15 @@ async function loadDownloads() {
         }
         const matching = results.filter((result) => result.status === "fulfilled" && result.value.platform === hostPlatform);
         for (const result of matching) {
-            const eligibleCandidates = currentReleaseCandidates(result.value.candidates, previewReleaseStatus);
+            const eligibleCandidates = releaseCandidates(result.value.candidates, catalogVersion);
             const latestVersion = eligibleCandidates[0]?.version.raw;
             for (const candidate of eligibleCandidates.filter((value) => value.version.raw === latestVersion)) {
                 renderVariant(variants, hostPlatform, result.value.architecture, candidate);
             }
         }
-        const platformPreviews = currentReleaseCandidates(
-            previews.filter((candidate) => candidate.packageRecord.platform === hostPlatform), previewReleaseStatus);
+        const platformPreviews = releaseCandidates(
+            previews.filter((candidate) => candidate.packageRecord.platform === hostPlatform),
+            previewReleaseStatus?.version);
         const latestPreviewVersion = platformPreviews[0]?.version.raw;
         const currentPreviews = platformPreviews.filter((candidate) => candidate.version.raw === latestPreviewVersion);
         if (variants.children.length === 0 && currentPreviews.length > 0) {

@@ -25,7 +25,7 @@ def require(condition: bool, message: str) -> None:
 
 
 definitions = module.PACKAGES
-require(module.VERSION == "0.4.1", "Official packages must follow the current project version.")
+require(module.VERSION == "0.4.2", "Official packages must follow the current project version.")
 require(
     len(definitions) == 5,
     "The official release set must contain exactly five launch products.",
@@ -64,9 +64,9 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
             f"{definition.slug} changed its reviewed entry points.",
         )
         require(
-            manifest["version"] == "0.4.1"
-            and manifest["compatibility"]["minimumEngineVersion"] == "0.4.1"
-            and manifest["compatibility"]["managedApiVersion"] == "0.4.1",
+            manifest["version"] == "0.4.2"
+            and manifest["compatibility"]["minimumEngineVersion"] == "0.4.2"
+            and manifest["compatibility"]["managedApiVersion"] == "0.4.2",
             f"{definition.slug} does not identify the current first-party source release.",
         )
         require(
@@ -86,6 +86,24 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
             ),
             f"{definition.slug} contains a prohibited marketplace payload type.",
         )
+
+    sub_asset_payload = temporary_root / "sub-asset-dependency"
+    sub_asset_payload.mkdir()
+    (sub_asset_payload / "parent.keiredata").write_text("{}\n", encoding="utf-8")
+    (sub_asset_payload / "parent.keiredata.keiremeta").write_text(
+        '{"dependencies":[],"id":"parent","subAssets":["child"],"type":"data"}\n',
+        encoding="utf-8",
+    )
+    (sub_asset_payload / "consumer.keiredata").write_text("{}\n", encoding="utf-8")
+    (sub_asset_payload / "consumer.keiredata.keiremeta").write_text(
+        '{"dependencies":["child"],"id":"consumer","subAssets":[],"type":"data"}\n',
+        encoding="utf-8",
+    )
+    sub_asset_inventory = module.asset_inventory(sub_asset_payload)
+    require(
+        len(sub_asset_inventory) == 2,
+        "Official packages must resolve dependencies through included sub-assets.",
+    )
 
 print(
     "Official marketplace package selection validation passed for five deterministic products."

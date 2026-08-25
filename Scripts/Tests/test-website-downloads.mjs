@@ -81,15 +81,18 @@ assert.equal(ordered.length, 3);
 assert.equal(ordered[0].version.raw, "2.0.0");
 assert.equal(ordered[1].version.raw, "2.0.0-beta.1");
 
-context.fixtureCandidates = validate(catalog([packageRecord("0.3.2"), packageRecord("0.4.0")]));
-context.fixtureReleaseStatus = { version: "0.4.0" };
-const currentCandidates = vm.runInContext(
-    "currentReleaseCandidates(fixtureCandidates, fixtureReleaseStatus)", context);
+context.fixtureCandidates = validate(catalog([
+    packageRecord("0.3.2"),
+    packageRecord("0.4.0"),
+    packageRecord("0.4.1"),
+]));
+const currentCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.0')", context);
 assert.deepEqual(Array.from(currentCandidates, (candidate) => candidate.version.raw), ["0.4.0"]);
+const activeCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.3.2')", context);
+assert.deepEqual(Array.from(activeCandidates, (candidate) => candidate.version.raw), ["0.3.2"]);
 context.fixtureCandidates = validate(catalog([packageRecord("0.3.2")]));
-assert.equal(vm.runInContext(
-    "currentReleaseCandidates(fixtureCandidates, fixtureReleaseStatus).length", context), 0);
-assert.equal(vm.runInContext("currentReleaseCandidates(fixtureCandidates, null).length", context), 0);
+assert.equal(vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.0').length", context), 0);
+assert.equal(vm.runInContext("releaseCandidates(fixtureCandidates, null).length", context), 0);
 
 const compact = packageRecord("2.1.0", {
     manifest: { sizeBytes: 1024, sha256: "c".repeat(64) },
@@ -145,6 +148,7 @@ const pendingRelease = {
     releaseStatus: {
         state: "preparing",
         version: "0.3.1",
+        activeCatalogVersion: "0.3.0",
         message: "Kéire Hub 0.3.1 is being prepared while release validation completes.",
     },
     packages: [],
@@ -161,6 +165,12 @@ const activeRelease = {
     },
 };
 assert.equal(validateReleaseStatus(activeRelease).version, "0.3.1");
+assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,
+    activeCatalogVersion: "next" } }), null);
+assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,
+    activeCatalogVersion: "0.3.1" } }), null);
+assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,
+    activeCatalogVersion: "0.3.2" } }), null);
 assert.equal(validateReleaseStatus({ ...activeRelease, releaseStatus: { ...activeRelease.releaseStatus,
     activeCatalogVersion: "0.3.0" } }), null);
 assert.equal(validateReleaseStatus({ ...pendingRelease, releaseStatus: { ...pendingRelease.releaseStatus,
@@ -195,6 +205,7 @@ const multiFormatPreview = {
     releaseStatus: {
         state: "preparing",
         version: "0.1.0",
+        activeCatalogVersion: "0.0.9",
         message: "Kéire Hub 0.1.0 development previews are available for focused validation.",
     },
     packages: [preview.packages[0], linuxDeb, linuxRpm],
@@ -313,6 +324,56 @@ assert.deepEqual(
     cards.get("linux").variants.children.map((variant) => variant.children[3].textContent),
     ["Download DEB preview", "Download RPM preview"],
 );
+
+const preparingCards = new Map();
+for (const platform of ["windows", "macos", "linux"]) {
+    const card = new RenderElement("article");
+    card.state = new RenderElement("p");
+    card.variants = new RenderElement("div");
+    card.querySelector = (selector) => selector === "[data-download-state]" ? card.state : card.variants;
+    preparingCards.set(platform, card);
+}
+const preparingRenderContext = vm.createContext({
+    console,
+    Date,
+    HTMLElement: RenderElement,
+    navigator: { platform: "Win32", userAgent: "website-preparing-download-test", clipboard: { writeText: async () => {} } },
+    document: {
+        createElement(name) {
+            return new RenderElement(name);
+        },
+        querySelector(selector) {
+            const match = /data-platform="([a-z]+)"/.exec(selector);
+            return match ? preparingCards.get(match[1]) : null;
+        },
+        querySelectorAll() {
+            return [];
+        },
+    },
+    fetch: async (url) => {
+        if (url === "/assets/preview-downloads.json") {
+            return { ok: true, status: 200, json: async () => pendingRelease };
+        }
+        if (url === "/v2/catalog/stable/windows/x86_64") {
+            return {
+                ok: true,
+                status: 200,
+                json: async () => catalog([packageRecord("0.3.0"), packageRecord("0.3.1")]),
+            };
+        }
+        return { ok: false, status: 404 };
+    },
+    window: { setTimeout },
+});
+vm.runInContext(source, preparingRenderContext, { filename: "downloads-preparing-render.js" });
+for (let index = 0; index < 10 && preparingCards.get("windows").variants.children.length === 0; ++index) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+}
+const preparingVariant = preparingCards.get("windows").variants.children[0];
+assert.ok(preparingVariant);
+assert.equal(preparingVariant.className, "download-variant");
+assert.equal(preparingVariant.children[1].textContent, "Hub v0.3.0 · Verified by signed Kéire catalog");
+assert.match(preparingCards.get("windows").state.textContent, /Catalog-verified releases/);
 
 const historyTargets = new Map();
 const historyStates = new Map();

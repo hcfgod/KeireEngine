@@ -7,12 +7,16 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlsplit
 import json
+import re
 import sys
 import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[2]
 WEBSITE = ROOT / "Services" / "KeireDistributionService" / "Website"
+STABLE_SEMANTIC_VERSION = re.compile(
+    r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+)
 PUBLIC_ROUTES = {
     "/",
     "/features/",
@@ -145,6 +149,13 @@ def validate_page(page: Path) -> None:
 
 
 def main() -> int:
+    project_version = next(
+        line.removeprefix("PROJECT_VERSION=")
+        for line in (ROOT / "Config" / "Project.conf")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.startswith("PROJECT_VERSION=")
+    )
     pages = sorted(WEBSITE.rglob("*.html"))
     if len(pages) != 9:
         raise ValueError(
@@ -181,6 +192,7 @@ def main() -> int:
     if (
         manifest.get("start_url") != "/"
         or manifest.get("icons", [{}])[0].get("src") != "/assets/keire.png"
+        or project_version not in str(manifest.get("description", ""))
     ):
         raise ValueError("Website manifest identity is invalid.")
     sitemap = ET.parse(WEBSITE / "sitemap.xml")
@@ -241,12 +253,17 @@ def main() -> int:
     )
     packages = previews.get("packages", [])
     release_status = previews.get("releaseStatus")
-    project_version = next(
-        line.removeprefix("PROJECT_VERSION=")
-        for line in (ROOT / "Config" / "Project.conf")
-        .read_text(encoding="utf-8")
-        .splitlines()
-        if line.startswith("PROJECT_VERSION=")
+    active_version_match = STABLE_SEMANTIC_VERSION.fullmatch(
+        str(release_status.get("activeCatalogVersion", ""))
+        if isinstance(release_status, dict)
+        else ""
+    )
+    target_version_match = STABLE_SEMANTIC_VERSION.fullmatch(project_version)
+    preparing_active_version_is_older = (
+        active_version_match is not None
+        and target_version_match is not None
+        and tuple(map(int, active_version_match.groups()))
+        < tuple(map(int, target_version_match.groups()))
     )
     valid_release_status = (
         isinstance(release_status, dict)
@@ -254,8 +271,14 @@ def main() -> int:
         and str(release_status.get("version", "")) == project_version
         and 20 <= len(str(release_status.get("message", ""))) <= 240
         and (
-            release_status.get("state") != "active"
-            or str(release_status.get("activeCatalogVersion", "")) == project_version
+            (
+                release_status.get("state") == "active"
+                and str(release_status.get("activeCatalogVersion", "")) == project_version
+            )
+            or (
+                release_status.get("state") == "preparing"
+                and preparing_active_version_is_older
+            )
         )
     )
     if previews.get("schemaVersion") != 2 or not isinstance(packages, list):

@@ -10,11 +10,12 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.4.1 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.4.2 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.1 is published through the immutable, signed sequence-16 catalog. Catalog-verified Hub downloads are
-available for Windows and Linux x86-64; macOS downloads remain gated pending platform and signing validation.
+Version 0.4.2 release validation and signed catalog sequence 17 preparation are in progress. The immutable 0.4.1
+sequence-16 catalog remains the active Windows and Linux x86-64 download boundary until that activation completes;
+macOS downloads remain gated pending platform and signing validation.
 
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·
@@ -58,7 +59,9 @@ Kéire already includes substantial, integrated engine and authoring foundations
   persistent collapsible parent/child source groups, receipts, rollback, and recovery.
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
-  Material Parameter Collections, tagged custom-shader materials, LODs, spatial lighting data, animation,
+  Material Parameter Collections, tagged custom-shader materials, LODs, same-frame camera-local GPU occlusion with
+  compacted indirect draws, deterministic direct fallback, and per-surface bounds/HZB diagnostics, spatial lighting
+  data, animation,
   importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot grounding, zero-clip procedural
   humanoid locomotion, presentation interpolation, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
@@ -330,7 +333,7 @@ documentation authorities.
 ## Documentation
 
 The [documentation library](Docs/README.md) contains 81 maintained guides grouped around real tasks. Project authors
-should begin with the [Kéire 0.4.1 User Manual](Docs/Manual/README.md):
+should begin with the [Kéire 0.4.2 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
   [C# Scripting Fundamentals](Docs/Manual/ScriptingFundamentals.md), and

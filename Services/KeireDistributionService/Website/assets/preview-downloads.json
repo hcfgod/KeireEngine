@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
   "releaseStatus": {
-    "state": "active",
-    "version": "0.4.1",
+    "state": "preparing",
+    "version": "0.4.2",
     "activeCatalogVersion": "0.4.1",
-    "message": "Kéire 0.4.1 signed downloads are active for Windows and Linux x86-64; macOS downloads remain gated."
+    "message": "Kéire 0.4.2 signed catalog sequence 17 is being prepared; existing 0.4.1 downloads remain active until activation."
   },
   "packages": []
 }

@@ -4,7 +4,8 @@ import { currentRelease, formatChangelogInline, releaseNotes } from "../../lib/c
 
 export const prerender = true;
 
-const releaseDate = currentRelease.releaseDate
+const publishedReleaseDate = currentRelease.published ? currentRelease.releaseDate : null;
+const releaseDate = publishedReleaseDate
     ? new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${currentRelease.releaseDate}T00:00:00Z`))
     : "Release in progress";
 const structuredData = {
@@ -30,14 +31,14 @@ const structuredData = {
                     <a class="button button--secondary" href="/downloads/">Download Kéire Hub</a>
                 </div>
             </div>
-            <aside class="current-release-card" aria-label={`Current release ${currentRelease.version}`}>
-                <span class="release-kicker">Current preview</span>
+            <aside class="current-release-card" aria-label={`Current ${currentRelease.published ? "release" : "release candidate"} ${currentRelease.version}`}>
+                <span class="release-kicker">{currentRelease.published ? "Current preview" : "Release candidate"}</span>
                 <strong>{currentRelease.version}</strong>
                 <p>{currentRelease.summary}</p>
                 <dl>
-                    <div><dt>Released</dt><dd><time datetime={currentRelease.releaseDate ?? undefined}>{releaseDate}</time></dd></div>
+                    <div><dt>{currentRelease.published ? "Released" : "Publication"}</dt><dd>{currentRelease.published ? <time datetime={publishedReleaseDate ?? undefined}>{releaseDate}</time> : "Sequence 17 preparing"}</dd></div>
                     <div><dt>Documented changes</dt><dd>{currentRelease.changeCount}</dd></div>
-                    <div><dt>Public package</dt><dd>Windows + Linux x86-64</dd></div>
+                    <div><dt>Public package</dt><dd>{currentRelease.published ? "Windows + Linux x86-64" : "0.4.1 remains active"}</dd></div>
                 </dl>
             </aside>
         </div>
@@ -72,12 +73,12 @@ const structuredData = {
                 {releaseNotes.map((release) => (
                     <article>
                         <div>
-                            <span>{release.current ? "Current preview" : "Archive"}</span>
+                            <span>{release.current ? (release.published ? "Current preview" : "Release candidate") : "Archive"}</span>
                             <h3>Kéire {release.version}</h3>
                             <p>{release.summary}</p>
                         </div>
                         <div class="release-archive__meta">
-                            <time datetime={release.releaseDate ?? undefined}>{release.releaseDate ?? "Unscheduled"}</time>
+                            <time datetime={release.published ? release.releaseDate ?? undefined : undefined}>{release.published ? release.releaseDate ?? "Unscheduled" : "Activation pending"}</time>
                             <a href={`/changelog/${release.version}/`}>View {release.changeCount} changes <span aria-hidden="true">→</span></a>
                         </div>
                     </article>

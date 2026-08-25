@@ -25,13 +25,14 @@ pointers or stage Git changes.
 
 | Platform | Current evidence | Public preview |
 | --- | --- | --- |
-| Windows x86-64 | Clean 0.4.1 Dist Editor and Hub packages; 739 Core, 199 Editor, and 372 Hub tests plus SDK/package consumers, Direct3D 12 package smoke, and inventory validation | Signed sequence-16 catalog; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
-| Linux x86-64 (glibc) | Clean 0.4.1 Rocky Linux 9 compatibility-baseline packages; 734 Core, 199 Editor, and 370 Hub tests; DEB acceptance on Ubuntu 22.04 and Debian 13; RPM acceptance on Rocky Linux 9, Fedora 44, and openSUSE Tumbleweed; packaged Vulkan smoke | Signed sequence-16 catalog with Editor archive plus native DEB and RPM Hub packages; the RPM is catalog/hash verified but not GPG-signed |
+| Windows x86-64 | Kéire 0.4.2 GPU-occlusion production validation and package generation are in progress; the last activated package gate remains the clean 0.4.1 Dist Editor/Hub suite | Signed 0.4.1 sequence-16 catalog until sequence 17 activation; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
+| Linux x86-64 (glibc) | Kéire 0.4.2 Rocky Linux 9 compatibility-baseline validation is pending; 0.4.1 passed the exact Editor, DEB, RPM, and packaged Vulkan gates described below | Signed 0.4.1 sequence-16 catalog until sequence 17 activation; the RPM is catalog/hash verified but not GPG-signed |
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64 | Clean Debug source build on Tahoe with 733 Core tests and 51,809 assertions; Hub and render-test products link at the macOS 12 deployment target; VMware has no Metal device for rendered execution | Not published; native signing, notarization, Apple silicon, and Metal-hardware acceptance remain open |
 
-Version 0.4.1 is the active public preview through immutable snapshot
-`release-0.4.1-sequence-16-4837c88`. Building current source does not relabel those packages or advance the catalog.
+Version 0.4.2 targets immutable signed catalog sequence 17. Until its newly built packages are verified and activated,
+version 0.4.1 remains the active public preview through snapshot `release-0.4.1-sequence-16-4837c88`; building current
+source does not relabel those packages or advance the catalog.
 
 The [Downloads page](https://keireengine.duckdns.org/downloads/) shows the current Hub release. The
 [release archive](https://keireengine.duckdns.org/downloads/archive/) preserves historical metadata without crowding

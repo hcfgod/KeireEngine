@@ -365,7 +365,8 @@ Windows EXE and RPM are catalog/hash verified but do not carry Authenticode or R
 were retired as an explicit release decision because they contain known major defects; ordinary future publication
 remains additive unless another documented retirement is approved.
 
-The repository, website, and Hub-facing metadata identify 0.4.1 as the active public preview. Hub selects only the
+The repository identifies 0.4.2 as the current source release and sequence 17 as its pending publication boundary.
+The website and Hub continue to identify 0.4.1 as the active public preview until activation. Hub selects only the
 signed catalog above; source labels alone never advance the catalog.
 
 ## Launch and activation

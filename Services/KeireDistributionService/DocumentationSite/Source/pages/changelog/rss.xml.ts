@@ -15,7 +15,7 @@ function escapeXml(value: string): string {
 
 export const GET: APIRoute = ({ site }) => {
     const origin = site ?? new URL("https://keireengine.duckdns.org");
-    const items = releaseNotes.map((release) => {
+    const items = releaseNotes.filter((release) => release.published).map((release) => {
         const link = new URL(`/changelog/${release.version}/`, origin).toString();
         const publicationDate = release.releaseDate
             ? new Date(`${release.releaseDate}T00:00:00Z`).toUTCString()

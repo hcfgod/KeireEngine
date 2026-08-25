@@ -28,6 +28,25 @@ function assert(condition, message) {
     }
 }
 
+function stableVersionParts(value) {
+    const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value);
+    return match ? match.slice(1).map(Number) : null;
+}
+
+function olderStableVersion(left, right) {
+    const leftParts = stableVersionParts(left);
+    const rightParts = stableVersionParts(right);
+    if (!leftParts || !rightParts) {
+        return false;
+    }
+    for (let index = 0; index < leftParts.length; ++index) {
+        if (leftParts[index] !== rightParts[index]) {
+            return leftParts[index] < rightParts[index];
+        }
+    }
+    return false;
+}
+
 function markdownAnchors(source) {
     const anchors = new Set();
     const occurrences = new Map();
@@ -261,7 +280,7 @@ const readinessWeight = readinessScoreRows.reduce((sum, row) => sum + Number.par
 const readinessWeightedScore = Math.round(readinessScoreRows.reduce((sum, row) =>
     sum + Number.parseInt(row[1], 10) * Number.parseInt(row[2], 10), 0) / readinessWeight);
 assert(readinessWeight === 100 &&
-    productionReview.includes(`| Weighted current-source readiness | **100%** | **A-** | **${readinessWeightedScore}/100** |`),
+    productionReview.includes(`| Weighted audited 0.4.1 readiness | **100%** | **A-** | **${readinessWeightedScore}/100** |`),
     "Production-readiness overall score does not match its weighted domain scores.");
 
 const vfxManifest = JSON.parse(await readFile(path.join(docsRoot, "VfxParityManifest.json"), "utf8"));
@@ -307,8 +326,9 @@ for (const sourcePath of ["GettingStarted.md", "TestingAndRelease.md", "ProjectH
 }
 const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "index.astro"), "utf8");
 for (const contract of [
-    `Kéire ${projectVersion} is the current release`,
+    `Kéire ${projectVersion} is the current release target`,
     "Package links are populated exclusively from the active, signed distribution catalog",
+    "the separately active 0.4.1 catalog remains downloadable",
     "Every link shown here has an active catalog record and verified artifact hash",
     "Use the active catalog-verified DEB on Ubuntu or Debian and the RPM on Rocky Linux, Fedora, or openSUSE",
 ]) {
@@ -316,15 +336,16 @@ for (const contract of [
 }
 const previewDownloadMetadata = JSON.parse(await readFile(path.join(repositoryRoot, "Services",
     "KeireDistributionService", "Website", "assets", "preview-downloads.json"), "utf8"));
-const activeCatalogVersion = projectVersion;
 const releaseStatus = previewDownloadMetadata?.releaseStatus;
+const activeCatalogVersion = releaseStatus?.activeCatalogVersion;
 assert(releaseStatus?.version === projectVersion && ["preparing", "active"].includes(releaseStatus.state),
     "Download fallback metadata must identify the current release and its publication state.");
 if (releaseStatus.state === "active") {
     assert(releaseStatus.activeCatalogVersion === projectVersion,
         "An active download fallback must identify the current signed catalog version.");
 } else {
-    assert(previewDownloadMetadata.packages?.length === 0 && /catalog|activation/i.test(releaseStatus.message),
+    assert(olderStableVersion(activeCatalogVersion, projectVersion) && previewDownloadMetadata.packages?.length === 0 &&
+        /catalog|activation/i.test(releaseStatus.message),
         "A preparing download fallback must not invent packages and must explain catalog activation.");
 }
 for (const [displayPath, source] of [
@@ -377,9 +398,9 @@ const middleware = await readFile(path.join(siteRoot, "Source", "middleware.ts")
 const healthRoute = await readFile(path.join(siteRoot, "Source", "pages", "health", "index.ts"), "utf8");
 const contactRoute = await readFile(path.join(siteRoot, "Source", "pages", "contact", "submit.ts"), "utf8");
 assert(healthRoute.includes(`version: "${projectVersion}"`) &&
-    healthRoute.includes('releaseState: "current"') &&
+    healthRoute.includes(`releaseState: "${releaseStatus.state === "active" ? "current" : "preparing"}"`) &&
     healthRoute.includes(`targetCatalogVersion: "${projectVersion}"`) &&
-    healthRoute.includes('catalogState: "active"') &&
+    healthRoute.includes(`catalogState: "${releaseStatus.state}"`) &&
     healthRoute.includes(`activeCatalogVersion: "${activeCatalogVersion}"`),
     "Health metadata must identify the current release target and the separately verified active catalog.");
 for (const source of [middleware, healthRoute, contactRoute]) {
@@ -530,7 +551,7 @@ assert(roadmapPage.includes("Windows + Linux x86-64") &&
     !roadmapModel.includes("current Windows technology preview") && !roadmapModel.includes("offline signing"),
     "The roadmap contains stale platform or Marketplace publication labels.");
 assert(roadmapPage.includes(`${projectVersion} current`) &&
-    roadmapPage.includes("Sequence 15 active") &&
+    roadmapPage.includes(`Sequence 17 ${releaseStatus.state === "active" ? "active" : "preparing"}`) &&
     roadmapModel.includes(`Kéire ${projectVersion} current release`) &&
     roadmapModel.includes("Catalog-verified Windows, DEB, and RPM packages"),
     "The roadmap must identify the current release and its active signed package boundary.");
@@ -554,7 +575,9 @@ assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('h
     "Roadmap, changelog, Community, and policies must remain reachable from the global footer.");
 assert(platformFooter.includes(`Kéire ${projectVersion}`) &&
     platformFooter.includes("current pre-1.0 release") &&
-    platformFooter.includes("signed sequence-16 packages are active"),
+    platformFooter.includes(releaseStatus.state === "active"
+        ? "signed sequence-17 packages are active"
+        : "signed sequence-17 activation is in progress"),
     "The global footer must identify the current release and catalog-controlled availability.");
 const platformHome = await readFile(path.join(siteRoot, "Source", "pages", "index.astro"), "utf8");
 assert(platformHome.includes(`softwareVersion: "${projectVersion}"`) &&
@@ -566,15 +589,16 @@ const changelogDetail = await readFile(path.join(siteRoot, "Source", "pages", "c
 const changelogModel = await readFile(path.join(siteRoot, "Source", "lib", "changelog.ts"), "utf8");
 const changelogFeed = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "rss.xml.ts"), "utf8");
 assert(changelogModel.includes('CHANGELOG.md?raw') && changelogModel.includes('version === "Unreleased"') &&
-    changelogModel.includes("groupChanges(changes)"),
+    changelogModel.includes("groupChanges(changes)") && changelogModel.includes("currentReleasePublished"),
     "The website changelog must derive its complete release train from the canonical repository changelog.");
 assert(changelogIndex.includes("currentRelease.highlights") && changelogIndex.includes("releaseNotes.map") &&
+    changelogIndex.includes("currentRelease.published") && changelogDetail.includes("release.published") &&
     changelogDetail.includes("ReleaseChangeList") && changelogDetail.includes("availability-legend") &&
     changelogDetail.includes('id="validation-known-limitations"') &&
     changelogDetail.includes("release.evidence.limitations"),
     "Changelog landing and release-detail pages must expose highlights, archive navigation, and availability evidence.");
 assert(changelogFeed.includes('Content-Type": "application/rss+xml; charset=utf-8"') &&
-    changelogFeed.includes("releaseNotes.map"),
+    changelogFeed.includes("releaseNotes.filter((release) => release.published).map"),
     "The changelog RSS endpoint must publish the canonical release archive.");
 
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");

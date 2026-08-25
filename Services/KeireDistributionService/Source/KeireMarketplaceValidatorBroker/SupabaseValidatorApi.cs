@@ -18,7 +18,7 @@ internal sealed class SupabaseValidatorApi : IDisposable
         m_Http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: true);
         m_Http.BaseAddress = options.SupabaseUrl;
         m_Http.Timeout = Timeout.InfiniteTimeSpan;
-        m_Http.DefaultRequestHeaders.UserAgent.ParseAdd("KeireMarketplaceValidatorBroker/0.4.1");
+        m_Http.DefaultRequestHeaders.UserAgent.ParseAdd("KeireMarketplaceValidatorBroker/0.4.2");
     }
 
     public async Task<ValidationLease?> LeaseAsync(CancellationToken cancellationToken)

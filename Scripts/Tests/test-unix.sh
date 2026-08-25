@@ -849,7 +849,8 @@ assert_true grep -F -q 'stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION"
 assert_true grep -F -q 'pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"' \
   "$ROOT/Scripts/Unix/coral.sh"
 assert_true grep -F -q '"-DDOTNET_EXE=$dotnet_executable"' "$ROOT/Scripts/Unix/coral.sh"
-assert_true grep -F -q 'dotnet-$dotnet_sdk_version' "$ROOT/Scripts/Unix/coral.sh"
+assert_true grep -F -q '"$dotnet_sdk_version" "$dotnet_root" "$macos_deployment_target"' \
+  "$ROOT/Scripts/Unix/coral.sh"
 assert_equal "$(grep -F -c 'DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH"' \
   "$ROOT/Scripts/Unix/coral.sh")" 2 'Coral pinned .NET configure and build environment'
 assert_true grep -F -q 'ubuntu-22.04 ubuntu-24.04 ubuntu-26.04 debian-12 fedora arch tumbleweed rocky-9' \

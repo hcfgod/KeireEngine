@@ -14,14 +14,15 @@ interface Props {
 }
 
 const { release } = Astro.props;
-const releaseDate = release.releaseDate
+const publishedReleaseDate = release.published ? release.releaseDate : null;
+const releaseDate = publishedReleaseDate
     ? new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(new Date(`${release.releaseDate}T00:00:00Z`))
     : "Release in progress";
 const structuredData = {
     "@context": "https://schema.org",
     "@type": "TechArticle",
     headline: `Kéire ${release.version} release notes`,
-    datePublished: release.releaseDate,
+    ...(publishedReleaseDate ? { datePublished: publishedReleaseDate } : {}),
     description: release.summary,
     mainEntityOfPage: new URL(Astro.url.pathname, Astro.site).toString(),
     about: { "@type": "SoftwareApplication", name: "Kéire Engine", softwareVersion: release.version },
@@ -34,19 +35,21 @@ const structuredData = {
             <a class="release-back" href="/changelog/"><span aria-hidden="true">←</span> All releases</a>
             <div class="release-detail-hero__grid">
                 <div>
-                    <p class="eyebrow">{release.current ? "Current preview" : "Release archive"}</p>
+                    <p class="eyebrow">{release.current ? (release.published ? "Current preview" : "Release candidate") : "Release archive"}</p>
                     <h1>Kéire {release.version}</h1>
                     <p class="lead">{release.summary}</p>
                 </div>
                 <dl class="release-facts">
-                    <div><dt>Release date</dt><dd><time datetime={release.releaseDate ?? undefined}>{releaseDate}</time></dd></div>
+                    <div><dt>Release date</dt><dd><time datetime={publishedReleaseDate ?? undefined}>{releaseDate}</time></dd></div>
                     <div><dt>Notable changes</dt><dd>{release.changeCount}</dd></div>
-                    <div><dt>Release channel</dt><dd>{release.current ? "Technology preview" : "Historical"}</dd></div>
+                    <div><dt>Release channel</dt><dd>{release.current ? (release.published ? "Technology preview" : "Source release candidate") : "Historical"}</dd></div>
                 </dl>
             </div>
             {release.current && (
                 <div class="availability-legend" aria-label="Change availability labels">
-                    <div><span class="availability-label availability-label--released">Public package</span><p>Included in the published {release.version} release record.</p></div>
+                    {release.published
+                        ? <div><span class="availability-label availability-label--released">Public package</span><p>Included in the published {release.version} release record.</p></div>
+                        : <div><span class="availability-label availability-label--source">Release candidate</span><p>Implemented in source while signed {release.version} packages complete their activation gate.</p></div>}
                     <div><span class="availability-label availability-label--live">Live platform</span><p>Deployed through the website or Marketplace service.</p></div>
                     <div><span class="availability-label availability-label--source">Source update</span><p>Implemented for the next packaged {release.version} refresh.</p></div>
                 </div>

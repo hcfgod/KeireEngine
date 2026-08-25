@@ -2,16 +2,24 @@
 
 Review date: 2026-08-25
 
-Revision: Kéire 0.4.1 exact-release and cross-platform source evidence
+Revision: Kéire 0.4.2 GPU-occlusion release candidate and 0.4.1 exact-release evidence
 
-Review scope: the clean Windows and Rocky Linux 9 compatibility-baseline 0.4.1 Dist packages, signed distribution
-snapshot `release-0.4.1-sequence-16-4837c88`, the canonical documentation library, and the feature-gated online
+Review scope: the merged 0.4.2 GPU-occlusion source candidate, the clean Windows and Rocky Linux 9
+compatibility-baseline 0.4.1 Dist packages, signed distribution snapshot `release-0.4.1-sequence-16-4837c88`, the
+canonical documentation library, and the feature-gated online
 platform. Source behavior, package validation,
 native installation, and public-catalog evidence remain distinct; success in one lane is not silently promoted into
 another.
 
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
+
+## 0.4.2 Release Candidate Update
+
+Version 0.4.2 adds same-frame camera-local GPU occlusion culling, compacted indirect draws, deterministic direct
+fallback, completed-frame diagnostics, viewport-owned performance overlays, and a dedicated stress scene. Signed
+catalog sequence 17 remains pending until clean Windows and Rocky Linux package gates and exact-artifact verification
+finish; no 0.4.1 package is relabeled as 0.4.2.
 
 ## 0.4.1 Release Update
 
@@ -80,7 +88,7 @@ transactional assets/projects, strong failure isolation, broad native tests, and
 Version 0.4.1 is a usable cross-platform technology preview and development platform. It is not yet justified as a
 finished AAA production engine or a generally available cross-platform marketplace.
 
-The Kéire 0.4.1 current-source grade is **A- (92/100)**. The all-green Windows, Linux, and macOS source gates and the
+The last fully audited Kéire 0.4.1 source grade is **A- (92/100)**. The all-green Windows, Linux, and macOS source gates and the
 measured Showcase improvement remove the prior compile and performance-evidence caps. Native release signing,
 macOS packaging/Metal hardware, Marketplace launch acceptance, accessibility/localization, and shipped-project soak
 evidence remain incomplete.
@@ -97,11 +105,11 @@ evidence remain incomplete.
 | Marketplace and package ecosystem | 8% | B+ | 87/100 | Upload-once validation and automatic metadata signing exist; public launch and legal gates remain closed. |
 | Performance evidence | 8% | A- | 92/100 | Same-workload captures show a 6.18x FPS gain, 95.6% fewer draws, and no steady-state dynamic-buffer reallocations. |
 | Cross-platform release evidence | 8% | B+ | 87/100 | Windows/Linux packages are published and macOS x86-64 source gates pass; Metal hardware, Apple silicon, and ARM64 remain open. |
-| Weighted current-source readiness | **100%** | **A-** | **92/100** | Production-oriented cross-platform preview, not finished AAA production readiness. |
+| Weighted audited 0.4.1 readiness | **100%** | **A-** | **92/100** | Production-oriented cross-platform preview, not finished AAA production readiness. |
 
 Scores use a fixed weighted rubric and round to the nearest integer. `A` is 94–100, `A-` 90–93, `B+` 87–89, `B`
 83–86, `B-` 80–82, and `C+` 77–79. A broken mandatory compile or test gate caps its affected domain and the overall
-current-source grade below `A-`, regardless of feature breadth. Confidence is high for the immutable 0.4.1 artifacts
+audited-source grade below `A-`, regardless of feature breadth. Confidence is high for the immutable 0.4.1 artifacts
 and the exact Windows/Linux/macOS source gates described here. Scores remain review shorthand; the gates below are
 authoritative.
 

@@ -5,6 +5,37 @@ versions.
 
 ## Unreleased
 
+## 0.4.2 - 2026-08-25
+
+### Added
+
+- Added production same-frame GPU occlusion culling with per-surface depth pyramids, conservative compute
+  classification, compacted indexed indirect draws, and deterministic direct-draw fallback.
+- Added source-frame-qualified, camera-local occlusion diagnostics with project mode controls, Scene/Game bounds and
+  HZB status overlays, completed-frame profiler counters, and Render Graph reporting.
+- Added the `GpuOcclusionStress` Sandbox scene and synchronized template payload, with hidden/reveal, presenter,
+  lifecycle, fallback, stress-scene, and Direct3D 12/Vulkan rendered-output verification.
+- Added local on-demand Tracy telemetry in the Profile configuration plus graphics-capture lifecycle metadata, so
+  performance evidence identifies the backend, adapter, build, project, scene, frame, and capture path.
+
+### Changed
+
+- Restricted GPU occlusion eligibility to explicitly safe opaque Shader Graph geometry and retained conservative
+  direct drawing whenever a backend, shader, surface, frame resource, or diagnostic result is unavailable.
+
+### Fixed
+
+- Reported GPU occlusion dispatch and indirect-draw totals from the most recently completed frame instead of exposing
+  pre-aggregation zeroes, and now describes Disabled-mode visibility as unavailable instead of perpetually pending.
+- Made Scene and Game viewport occlusion diagnostics camera-local, so editor-camera movement updates its own culled
+  bounds without implying that the Game camera shares visibility results.
+- Kept the performance overlay viewport-owned in Edit and Play modes, preventing the empty detached Debug panel while
+  retaining the full FPS, frame-time, GPU-mode, candidate, visible, and culled diagnostics.
+- Applied Inspector camera-transform drags continuously while coalescing each gesture into one undo record and one
+  Play-mode change, eliminating the severe interaction-time frame drop caused by repeated document transactions.
+- Isolated dependency source/build caches by checkout, toolchain, pinned .NET SDK, nethost payload, and relevant build
+  environment so linked worktrees no longer reuse incompatible global dependency junctions.
+
 ## 0.4.1 - 2026-08-24
 
 - Fixed Linux standalone Hub installer packaging after payload permission normalization by deriving the Hub worker

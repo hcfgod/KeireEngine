@@ -1,5 +1,6 @@
 import changelogSource from "../../../../../CHANGELOG.md?raw";
 import projectConfiguration from "../../../../../Config/Project.conf?raw";
+import publicationStatusSource from "../../../Website/assets/preview-downloads.json?raw";
 import { parseChangelog } from "./changelog-model.mjs";
 
 export type ChangeAvailability = "released" | "live" | "source";
@@ -28,6 +29,7 @@ export interface ReleaseNote {
     };
     changeCount: number;
     current: boolean;
+    published: boolean;
 }
 
 interface ParsedChangelogRelease {
@@ -108,6 +110,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
 ];
 
 const summaries: Readonly<Record<string, string>> = {
+    "0.4.2": "A GPU-occlusion and editor-diagnostics update adding same-frame camera-local culling, compacted indirect draws, deterministic fallbacks, and production stress/render verification.",
     "0.4.1": "A performance and portability update that dramatically reduces dense-scene rendering cost, eliminates steady-state upload churn, and validates the release pipeline across Windows, Linux, and macOS source builds.",
     "0.4.0": "A unified graph-authoring and Unity-shaped scripting milestone with schema-4 Shader/Material graphs, executable VFX subgraphs, and explicit catalog-publication boundaries.",
     "0.3.2": "A cross-platform preview adding procedural humanoid locomotion, Linux Hub packages, and stronger release/runtime reliability.",
@@ -118,7 +121,10 @@ const summaries: Readonly<Record<string, string>> = {
 };
 
 const parsedReleases = parseChangelog(changelogSource) as ParsedChangelogRelease[];
-const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.4.1";
+const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.4.2";
+const publicationStatus = JSON.parse(publicationStatusSource)?.releaseStatus;
+const currentReleasePublished = publicationStatus?.state === "active" &&
+    publicationStatus.version === currentVersion && publicationStatus.activeCatalogVersion === currentVersion;
 
 function flatten(release: ParsedChangelogRelease | undefined): string[] {
     return release?.groups.flatMap((group) => group.entries) ?? [];
@@ -153,6 +159,10 @@ function pickHighlights(changes: ReleaseChange[], version: string): ReleaseChang
         return changes.slice(0, Math.min(4, changes.length));
     }
     const preferred = [
+        /production same-frame GPU occlusion culling/i,
+        /GPU occlusion dispatch and indirect-draw totals/i,
+        /Scene and Game viewport occlusion diagnostics/i,
+        /performance overlay viewport-owned/i,
         /reused cyclic per-surface GPU and transfer buffers/i,
         /reduced rendered-frame work with selected-LOD coarse culling/i,
         /cached mutable-scene hierarchy order/i,
@@ -172,8 +182,12 @@ function pickHighlights(changes: ReleaseChange[], version: string): ReleaseChang
 }
 
 function buildReleaseNote(release: ParsedChangelogRelease): ReleaseNote {
-    const baseChanges: ReleaseChange[] = flatten(release).map((text) => ({ text, availability: "released" }));
     const isCurrent = release.version === currentVersion;
+    const published = !isCurrent || currentReleasePublished;
+    const baseChanges: ReleaseChange[] = flatten(release).map((text) => ({
+        text,
+        availability: published ? "released" : "source",
+    }));
     const sourceRelease = parsedReleases.find((candidate) => candidate.version === "Unreleased");
     const updates: ReleaseChange[] = isCurrent
         ? flatten(sourceRelease).map((text) => ({
@@ -190,7 +204,9 @@ function buildReleaseNote(release: ParsedChangelogRelease): ReleaseNote {
         ],
         limitations: [
             `Kéire ${currentVersion} remains a pre-1.0 technology preview rather than a completed AAA production claim.`,
-            `Windows and Linux x86-64 ${currentVersion} packages are downloadable through the active signed catalog; macOS remains gated pending Metal, signing, and notarization validation.`,
+            currentReleasePublished
+                ? `Windows and Linux x86-64 ${currentVersion} packages are active through signed catalog sequence 17; macOS remains gated pending Metal, signing, and notarization validation.`
+                : `Windows and Linux x86-64 ${currentVersion} packages remain gated until signed catalog sequence 17 is activated; macOS also remains gated pending Metal, signing, and notarization validation.`,
             `Marketplace, publisher, community, and paid-checkout capabilities remain subject to their explicit feature flags and launch gates; paid checkout is disabled for ${currentVersion}.`,
         ],
     } as const;
@@ -206,6 +222,7 @@ function buildReleaseNote(release: ParsedChangelogRelease): ReleaseNote {
         },
         changeCount: changes.length,
         current: isCurrent,
+        published,
     };
 }
 

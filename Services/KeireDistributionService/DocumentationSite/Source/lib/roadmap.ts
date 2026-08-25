@@ -21,8 +21,8 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
     {
         id: "now",
         label: "Now",
-        timeframe: "Kéire 0.4.1 current release",
-        statement: "Extend release evidence for the performance and cross-platform reliability update.",
+        timeframe: "Kéire 0.4.2 current release",
+        statement: "Extend release evidence for GPU occlusion, editor diagnostics, and cross-platform reliability.",
         initiatives: [
             {
                 title: "Unified graph and scripting authoring",
@@ -34,7 +34,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
                     "Executable Operator, Block, and System VFX Subgraphs",
                     "Unity-shaped managed objects, direct asset references, and managed-state v2",
                 ],
-                evidenceUrl: "/changelog/0.4.1/",
+                evidenceUrl: "/changelog/0.4.0/",
             },
             {
                 title: "Windows and Linux release reliability",

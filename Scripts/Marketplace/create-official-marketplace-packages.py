@@ -243,17 +243,24 @@ def asset_inventory(payload: pathlib.Path) -> list[dict[str, object]]:
         identity = document.get("id")
         asset_type = document.get("type")
         dependencies = document.get("dependencies")
+        sub_assets = document.get("subAssets")
         if (
             not isinstance(identity, str)
             or not isinstance(asset_type, str)
             or not isinstance(dependencies, list)
+            or not all(isinstance(dependency, str) for dependency in dependencies)
+            or not isinstance(sub_assets, list)
+            or not all(isinstance(sub_asset, str) for sub_asset in sub_assets)
         ):
             raise RuntimeError(f"Asset metadata is incomplete: {metadata}")
-        if identity in identities:
+        declared_identities = [identity, *sub_assets]
+        if len(set(declared_identities)) != len(declared_identities) or any(
+            declared_identity in identities for declared_identity in declared_identities
+        ):
             raise RuntimeError(
-                f"Duplicate asset identity in official package: {identity}"
+                f"Duplicate asset or sub-asset identity in official package: {metadata}"
             )
-        identities.add(identity)
+        identities.update(declared_identities)
         assets.append(
             {
                 "dependencies": sorted(dependencies),
