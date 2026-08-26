@@ -502,6 +502,14 @@ TEST_CASE("Play changes review remains pending until it is explicitly resolved")
     CHECK_FALSE(panel.Pending());
 }
 
+TEST_CASE("Play changes review bounds its scrollable change list")
+{
+    CHECK(KeireEditor::ScenePlayChangesPanel::ChangeListHeight(0) == doctest::Approx(180.0F));
+    CHECK(KeireEditor::ScenePlayChangesPanel::ChangeListHeight(8) == doctest::Approx(192.0F));
+    CHECK(KeireEditor::ScenePlayChangesPanel::ChangeListHeight(18) == doctest::Approx(420.0F));
+    CHECK(KeireEditor::ScenePlayChangesPanel::ChangeListHeight(10'000) == doctest::Approx(420.0F));
+}
+
 TEST_CASE("scene document owns selection and deterministic close state")
 {
     KeireEditor::SceneDocument document;

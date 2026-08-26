@@ -2,6 +2,7 @@
 
 #include "KeireHubRuntime/HubProjectCatalog.h"
 #include "KeireHubRuntime/ProjectMetadataScanner.h"
+#include "KeireHubRuntime/ProjectSchema.h"
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
@@ -33,7 +34,7 @@ namespace
     constexpr std::uint64_t CreatedUnixSeconds = 1'786'019'696;
 
     void WriteProject(const std::filesystem::path& root, const std::string_view id = ProjectA,
-                      const std::string_view name = "Project", const std::uint32_t schema = 3,
+                      const std::string_view name = "Project", const std::uint32_t schema = CurrentProjectSchemaVersion,
                       const bool includeTemplate = false)
     {
         nlohmann::json descriptor{{"schemaVersion", schema},
@@ -102,7 +103,7 @@ TEST_CASE("Project metadata scanning publishes bounded decoded thumbnail pixels 
 {
     KeireHubTests::TemporaryDirectory temporary;
     const auto root = temporary.Path() / "Sandbox";
-    WriteProject(root, ProjectA, "Sandbox", 3, true);
+    WriteProject(root, ProjectA, "Sandbox", CurrentProjectSchemaVersion, true);
     KeireHubTests::WriteText(root / "Assets/Data.bin", "payload");
     const auto thumbnailBytes = WriteValidPng(root / "ProjectSettings/HubThumbnail.png");
 
@@ -126,7 +127,7 @@ TEST_CASE("Project metadata scanning publishes bounded decoded thumbnail pixels 
     CHECK(result.State == ProjectMetadataItemState::Ready);
     CHECK(result.DisplayName == "Sandbox");
     CHECK(result.Metadata.Status == HubProjectStatus::Ready);
-    CHECK(result.Metadata.ProjectSchemaVersion == 3);
+    CHECK(result.Metadata.ProjectSchemaVersion == CurrentProjectSchemaVersion);
     CHECK(result.Metadata.CreatedUnixSeconds == CreatedUnixSeconds);
     CHECK(result.Metadata.CreatedWithEngineVersion == "0.1.0");
     CHECK(result.Metadata.LastSavedWithEngineVersion == "0.2.0");
@@ -160,7 +161,7 @@ TEST_CASE("Project metadata scanning reports missing malformed and unsupported p
     const auto malformed = temporary.Path() / "Malformed";
     const auto unsupported = temporary.Path() / "Future";
     KeireHubTests::WriteText(malformed / "ProjectSettings/Project.keireproject", "{not json");
-    WriteProject(unsupported, ProjectB, "Future", 4);
+    WriteProject(unsupported, ProjectB, "Future", CurrentProjectSchemaVersion + 1U);
 
     ProjectMetadataScanRequest request;
     request.Projects = {{std::string(ProjectA), temporary.Path() / "Missing"},
@@ -187,7 +188,7 @@ TEST_CASE("Project metadata scanning reports missing malformed and unsupported p
     const auto& future = scanned.Value()->Results[2];
     CHECK(future.State == ProjectMetadataItemState::Ready);
     CHECK(future.Metadata.Status == HubProjectStatus::UnsupportedSchema);
-    CHECK(future.Metadata.ProjectSchemaVersion == 4);
+    CHECK(future.Metadata.ProjectSchemaVersion == CurrentProjectSchemaVersion + 1U);
     CHECK(future.Metadata.SizeBytes.has_value());
 }
 

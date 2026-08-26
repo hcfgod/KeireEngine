@@ -5,6 +5,29 @@ versions.
 
 ## Unreleased
 
+- Fixed Editor Play managed rendering, audio, physics, and UI services during primary-scene `Awake`/`OnEnable` by
+  resolving the pending Play session before it is adopted into the runtime world.
+
+### Fixed
+
+- Made input map/action enablement idempotent, preserved enabled-map intent across hot reload, and made retained input
+  handles, subscriptions, and capture overrides inert after shutdown instead of exposing stale phase or edge state;
+  managed actions also stop native snapshot polling when their final callback is removed.
+- Resolved editor and packaged managed polling through the project's stable default map ID, and attached generated
+  Input Actions wrappers to the selected runtime assembly without restricting scripts to a fixed project folder.
+- Fixed Axis1D composite evaluation, composite-root behaviors, Value-action interactions, focus-loss release edges,
+  same-frame gamepad stick axes, opposing D-pad directions, disconnected pairing state, and invalid device-type bounds.
+- Added canonical mouse-wheel direction pulses and gamepad stick-click controls, and corrected the Sandbox numeric-key
+  bindings so sprint, weapon cycling, and weapon-slot showcase controls can fire.
+- Hardened C# wrapper generation against member collisions, trailing-dot namespaces, and control-character string
+  injection, and reject incomplete or duplicated input composite definitions before runtime context creation.
+- Preserved joint runtime IDs through scene cloning and managed reload, and applied Light Probe Volume bounds and
+  spacing atomically so valid sparse grids no longer fail against temporary default values during deserialization.
+- Bounded Play Mode Changes review content inside a scrollable viewport so large runtime physics diffs cannot push the
+  apply, discard, and cancel controls beyond the monitor.
+- Routed managed callback faults into the Editor Console once per runtime diagnostic, including generation, type,
+  callback, entity, and exception details without replaying retained faults every frame.
+
 ## 0.4.2 - 2026-08-25
 
 ### Added

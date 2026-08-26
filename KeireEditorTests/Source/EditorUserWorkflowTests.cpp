@@ -71,6 +71,10 @@ TEST_CASE("managed script creation stays in the selected folder and extends runt
     CHECK(std::ranges::find(gameplay.SourceRoots, sibling.SourceRootToAdd) != gameplay.SourceRoots.end());
     CHECK_FALSE(KeireEditor::ExtendManagedAssemblySourceRoots(gameplay, "Assets/Characters/Enemies/Nested"));
 
+    const auto generated = KeireEditor::ResolveManagedScriptPlacement(assemblies, "Scripts/Generated");
+    CHECK(generated.Assembly == gameplayId);
+    CHECK(generated.SourceRootToAdd == std::filesystem::path("Assets/Scripts/Generated"));
+
     CHECK(KeireEditor::ExtendManagedAssemblySourceRoots(gameplay, "Assets/Scripts"));
     CHECK(std::ranges::find(gameplay.SourceRoots, std::filesystem::path("Assets/Scripts/Gameplay")) ==
           gameplay.SourceRoots.end());

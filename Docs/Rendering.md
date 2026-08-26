@@ -61,7 +61,8 @@ Reflection Probe components author oriented boxes, blend distance, importance, i
 projection. The renderer deterministically selects the two strongest containing probes for each draw, blends their
 prefiltered specular response, and intersects the reflection ray with each oriented local box when box projection is
 enabled. Light Probe Volume components author oriented bounds, spacing, priority, and normal/view bias; the runtime
-trilinearly samples their baked SH9 lattice.
+trilinearly samples their baked SH9 lattice. Use `LightProbeVolumeComponent::ConfigureGrid` when changing bounds and
+spacing together so the final grid is validated and published as one update.
 
 `LightingBaker` is an offline, backend-neutral boundary used by the editor worker and `KeireAssetTool bake-lighting`.
 It fingerprints the scene, transitive asset digests, settings, platform-independent baker version, and output schema.

@@ -1,5 +1,6 @@
 #include "KeireHubRuntime/ProjectMetadataScanner.h"
 
+#include "KeireHubRuntime/ProjectSchema.h"
 #include "KeireHubRuntime/ProjectStatusProbe.h"
 
 #include <KeireHubRuntimeInternal/DistributionEncoding.h>
@@ -444,9 +445,10 @@ namespace KeireHub
                 result.Metadata.CreatedWithEngineVersion = std::move(createdWith);
                 result.Metadata.MinimumEngineVersion = std::move(minimum);
                 result.Metadata.LastSavedWithEngineVersion = std::move(lastSaved);
-                result.Metadata.Status = schema > 3   ? HubProjectStatus::UnsupportedSchema
-                                         : schema < 3 ? HubProjectStatus::UpgradeAvailable
-                                                      : HubProjectStatus::Ready;
+                result.Metadata.Status = schema > CurrentProjectSchemaVersion ? HubProjectStatus::UnsupportedSchema
+                                         : schema < MinimumProjectWorkflowSchemaVersion
+                                             ? HubProjectStatus::UpgradeAvailable
+                                             : HubProjectStatus::Ready;
 
                 const auto createdAt = parsed.Value().find("createdAt");
                 if (schema >= 3 && (createdAt == parsed.Value().end() || !createdAt->is_string()))

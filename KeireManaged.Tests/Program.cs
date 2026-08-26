@@ -444,20 +444,29 @@ static unsafe void ManagedInputActionContract()
         Keire.InputActionMap map = context.FindActionMap("Player")!;
         Keire.InputAction action = map.FindAction("Interact")!;
         int performed = 0;
-        action.performed += callback =>
+        Action<Keire.InputAction.CallbackContext> onPerformed = callback =>
         {
             Assert(callback.ReadValue<bool>() && callback.Phase == Keire.InputActionPhase.Performed,
                    "Action callback contexts must preserve values and phases.");
             ++performed;
         };
+        action.performed += onPerformed;
         map.Enable();
+        Assert(NativeInputFixture.LastContextOperation == 2 &&
+                   NativeInputFixture.LastContextTarget == new Keire.AssetId(41, 43),
+               "Map wrappers must enable their stable map ID instead of relying on implicit context state.");
         Keire.InputActionRuntime.DispatchEvents();
         Keire.InputActionRuntime.DispatchEvents();
         Assert(action.Enabled && action.IsPressed && action.WasPressedThisFrame && action.WasPerformedThisFrame &&
                    performed == 1,
                "Managed actions must expose values, edges, and at-most-once transition callbacks per frame.");
         Assert(action.BeginInteractiveRebind(new Keire.AssetId(71, 73)).IsValid,
-               "Interactive rebinding must retain the action's explicit context.");
+                "Interactive rebinding must retain the action's explicit context.");
+        action.performed -= onPerformed;
+        int snapshotsBeforeUnregisteredDispatch = NativeInputFixture.ActionSnapshotCalls;
+        Keire.InputActionRuntime.DispatchEvents();
+        Assert(NativeInputFixture.ActionSnapshotCalls == snapshotsBeforeUnregisteredDispatch,
+               "Removing an action's final callback must unregister its per-frame native snapshot polling.");
 
         Keire.Keyboard keyboard = Keire.Input.Keyboard.Current!;
         Keire.ButtonControl key = keyboard.wKey;
@@ -466,7 +475,12 @@ static unsafe void ManagedInputActionContract()
         Assert(keyboard.eKey.Path == "<Keyboard>/e" && keyboard.f12Key.Path == "<Keyboard>/f12",
                "Unity-style keyboard properties must cover ordinary and function keys.");
         Assert(Keire.Input.Gamepad.Current?.DeviceId == 7,
-               "Current direct devices must follow the native player's paired device selection.");
+                "Current direct devices must follow the native player's paired device selection.");
+        Assert(Keire.Input.Mouse.Current?.WheelUp.Path == "<Mouse>/wheelUp" &&
+                   Keire.Input.Mouse.Current?.WheelDown.Path == "<Mouse>/wheelDown" &&
+                   Keire.Input.Gamepad.Current?.LeftStickButton.Path == "<Gamepad>/leftStickPress" &&
+                   Keire.Input.Gamepad.Current?.RightStickButton.Path == "<Gamepad>/rightStickPress",
+               "Direct input must expose wheel pulses and both gamepad stick buttons through canonical paths.");
     }
     finally
     {

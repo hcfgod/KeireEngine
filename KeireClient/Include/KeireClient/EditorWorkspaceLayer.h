@@ -9,6 +9,7 @@
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/LightingPanel.h"
 #include "KeireClient/Editor/ManagedDataTypeCache.h"
+#include "KeireClient/Editor/ManagedRuntimeDiagnostics.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/RiggingStudioPanel.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
@@ -658,6 +659,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     ManagedRuntimeSession(Keire::AssetId entity = {}) const noexcept;
     void AddConsoleMessage(std::string category, std::string message, Keire::UiColor color,
                            Keire::LogLevel level = Keire::LogLevel::Info) noexcept;
+    void CaptureManagedRuntimeDiagnostics() noexcept;
     void ReportError(std::string category, std::string message) noexcept;
     void SetAssetError(std::string message) noexcept;
     void CreateScene();
@@ -770,6 +772,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::Ref<Keire::AssetDatabase> m_AssetDatabase;
     std::vector<Keire::AssetSourceRecord> m_AssetRecords;
     KeireEditor::ManagedDataTypeCache m_ManagedDataTypeCache;
+    KeireEditor::ManagedRuntimeDiagnosticsBridge m_ManagedRuntimeDiagnostics;
+    Keire::WeakRef<Keire::ScriptSystem> m_ManagedRuntimeDiagnosticSource;
     std::uint64_t m_AssetRecordRevision = 0;
     bool m_ManagedIdeWorkspaceOpened = false;
     Keire::AssetId m_SelectedAsset;

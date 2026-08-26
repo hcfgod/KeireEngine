@@ -1,5 +1,6 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/InputActionsCodeGenerator.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -54,15 +55,28 @@ std::filesystem::path EditorWorkspaceLayer::GenerateInputActionsWrapper(const st
                                                                         const std::string_view nameSpace)
 {
     const auto project = Owner().GetProject();
-    if (!project || !m_InputActionsDocument->Asset())
+    if (!project || !m_AssetDatabase || !m_InputActionsDocument->Asset())
         throw std::logic_error("Open an input action asset before generating its C# wrapper.");
     const auto source =
         KeireEditor::GenerateInputActionsCSharp(m_InputActionsDocument->Definition(), className, nameSpace);
+    std::vector<KeireEditor::ManagedScriptAssemblyCandidate> assemblies;
+    for (const auto& record : m_AssetDatabase->Records())
+    {
+        if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
+            continue;
+        const auto assembly = Keire::ManagedAssemblyAsset::Decode(
+            KeireEditor::Detail::ReadBytes(project->Root() / "Assets" / record.RelativePath));
+        assemblies.push_back({record.Id, assembly->Definition()});
+    }
+    const auto generatedFolder = std::filesystem::path("Scripts") / "Generated";
+    const auto placement = KeireEditor::ResolveManagedScriptPlacement(assemblies, generatedFolder);
     const auto relative =
-        std::filesystem::path("Assets") / "Scripts" / "Generated" / (std::string(className) + ".InputActions.g.cs");
+        std::filesystem::path("Assets") / generatedFolder / (std::string(className) + ".InputActions.g.cs");
     const auto destination = project->Root() / relative;
     std::filesystem::create_directories(destination.parent_path());
     (void)Keire::Detail::WriteTextFileAtomicallyIfChanged(destination, source);
+    if (!placement.SourceRootToAdd.empty())
+        ExtendManagedAssemblySourceRoot(placement.Assembly, placement.SourceRootToAdd);
     ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
     return relative;
 }

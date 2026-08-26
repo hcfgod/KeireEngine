@@ -17,6 +17,8 @@
 
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
+    m_ManagedRuntimeDiagnostics.Reset();
+    m_ManagedRuntimeDiagnosticSource.Reset();
     PersistEditorSessionPreferences();
     ShutdownPlayerBuild();
     m_PackageManagerPanel->Shutdown();

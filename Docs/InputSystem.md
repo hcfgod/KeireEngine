@@ -40,9 +40,18 @@ const Keire::InputVector2 value = move.Value().AsAxis2D();
 
 Action phases are `Started`, `Performed`, and `Canceled`, with `Waiting` and `Disabled` polling states. RAII
 subscriptions disconnect safely, including from inside a callback. Successful asset revisions cancel active actions
-before rebuilding and preserve enabled map IDs, users, schemes, subscriptions, and valid binding overrides. A malformed
-reload stays on the last-good asset revision. A press and release received within one outer frame still publishes its
-phase transitions even though the final polled value is released.
+before rebuilding and preserve enabled map intent, users, schemes, subscriptions, and valid binding overrides. Actions
+added to an enabled map by a hot reload become enabled; explicit per-action disables remain disabled. Enabling an
+already-enabled map or action is idempotent and never rewinds its live phase or value. A malformed reload stays on the
+last-good asset revision. A press and release received within one outer frame still publishes its phase transitions
+even though the final polled value is released. Focus loss publishes release edges before canceling active actions, and
+retained handles, subscriptions, and capture overrides become inert after shutdown.
+
+Axis1D composites require exactly `Negative` and `Positive` parts; Vector2 composites require exactly `Up`, `Down`,
+`Left`, and `Right`. Parts are contiguous and unique. Composite-root processors and interactions apply to the combined
+value. Mouse wheel directions are exposed as same-frame `<Mouse>/wheelUp` and `<Mouse>/wheelDown` button pulses while
+`<Mouse>/scroll` retains its vector delta. Gamepad stick clicks use `<Gamepad>/leftStickPress` and
+`<Gamepad>/rightStickPress`; keyboard digits use `<Keyboard>/digit0` through `<Keyboard>/digit9`.
 
 Fixed-tick capture is also the bridge to the application-owned Replay service. `CaptureFixedTick()` produces the
 stable, sorted action snapshot and input-map fingerprint recorded in `.keirereplay`; verified playback applies that

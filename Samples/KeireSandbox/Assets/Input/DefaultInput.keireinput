@@ -444,7 +444,7 @@
           "interactions": [],
           "name": "",
           "part": "",
-          "path": "<Keyboard>/1",
+          "path": "<Keyboard>/digit1",
           "processors": []
         },
         {
@@ -457,7 +457,7 @@
           "interactions": [],
           "name": "",
           "part": "",
-          "path": "<Keyboard>/2",
+          "path": "<Keyboard>/digit2",
           "processors": []
         },
         {
@@ -470,7 +470,7 @@
           "interactions": [],
           "name": "",
           "part": "",
-          "path": "<Keyboard>/3",
+          "path": "<Keyboard>/digit3",
           "processors": []
         },
         {

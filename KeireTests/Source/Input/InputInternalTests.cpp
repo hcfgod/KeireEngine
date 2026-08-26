@@ -99,6 +99,8 @@ TEST_CASE("Input internal helpers map gamepad controls and reject unknown enums"
         {SDL_GAMEPAD_BUTTON_BACK, "<Gamepad>/select"},
         {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, "<Gamepad>/leftShoulder"},
         {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, "<Gamepad>/rightShoulder"},
+        {SDL_GAMEPAD_BUTTON_LEFT_STICK, "<Gamepad>/leftStickPress"},
+        {SDL_GAMEPAD_BUTTON_RIGHT_STICK, "<Gamepad>/rightStickPress"},
         {SDL_GAMEPAD_BUTTON_DPAD_UP, "<Gamepad>/dpad/up"},
         {SDL_GAMEPAD_BUTTON_DPAD_DOWN, "<Gamepad>/dpad/down"},
         {SDL_GAMEPAD_BUTTON_DPAD_LEFT, "<Gamepad>/dpad/left"},

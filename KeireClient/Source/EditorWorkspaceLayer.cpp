@@ -751,6 +751,8 @@ EditorWorkspaceLayer::~EditorWorkspaceLayer() = default;
 
 void EditorWorkspaceLayer::OnAttach()
 {
+    m_ManagedRuntimeDiagnostics.Reset();
+    m_ManagedRuntimeDiagnosticSource.Reset();
     auto& workspace = Owner().GetUiWorkspace();
     m_AssetBrowserPanel->SetJobSystem(Owner().Jobs());
     m_ShaderGraphDocument->SetJobSystem(Owner().Jobs());
@@ -1060,6 +1062,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
         UpdateManagedBuild(time);
         ContinuePendingPlayMode();
     }
+    CaptureManagedRuntimeDiagnostics();
     UpdatePlayerBuild();
     if (!m_AssetDatabase)
         return;

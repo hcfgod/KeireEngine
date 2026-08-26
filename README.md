@@ -254,6 +254,8 @@ Markdown, and its source validation checks these values against the correspondin
 Managed gameplay targets .NET 10 and C# 14. A project declares source roots through `.keireasm` assets; successful
 generations publish assemblies for editor discovery and player builds. Gameplay types inherit from `Keire.Behaviour`,
 use stable component and field identities, and access runtime systems through canonical entity, component, and asset objects.
+Scripts may live anywhere under `Assets`; script creation and generated Input Actions wrappers extend the selected
+runtime assembly's source roots when their folder is not already covered.
 Camera, Mesh Renderer, and typed light components expose live presentation state, while bounded material property blocks
 override Material/Shader Graph properties per renderer without mutating shared asset definitions.
 Native presentation assets are direct `Asset` objects. Scripts may pass those objects directly to Audio, VFX,

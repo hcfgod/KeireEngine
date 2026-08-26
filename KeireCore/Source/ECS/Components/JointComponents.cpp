@@ -34,7 +34,8 @@ namespace Keire
 
         [[nodiscard]] std::vector<ComponentProperty> CreateJointProperties()
         {
-            return {{"connectedEntity", "Connected Entity", "Connection", ComponentPropertyKind::Entity},
+            return {{"runtimeId", "Runtime ID", "Runtime", ComponentPropertyKind::Asset, true},
+                    {"connectedEntity", "Connected Entity", "Connection", ComponentPropertyKind::Entity},
                     {"localAnchor", "Local Anchor", "Connection", ComponentPropertyKind::Vector3},
                     {"connectedAnchor", "Connected Anchor", "Connection", ComponentPropertyKind::Vector3},
                     {"enableCollision", "Enable Collision", "Connection", ComponentPropertyKind::Boolean},

@@ -702,6 +702,12 @@ component path and editor-produced value before simulation advances again, so th
 Runtime, and Mixed final values. Its dependency graph locks required created ancestors/components and rejects
 delete/edit or remove/edit contradictions before definition validation.
 
+The primary Play session is assigned before its managed `Awake`/`OnEnable` traversal and adopted into the runtime world
+after startup succeeds. Editor managed services therefore resolve the pending primary session when world lookup has not
+yet become available; this matches packaged runtime startup and keeps rendering, audio, physics, and UI component access
+valid throughout lifecycle callbacks. Managed callback failures retained by `ScriptSystem` are advanced through a
+per-service cursor and published once to the Editor Console with their generation, type, callback, entity, and message.
+
 Play-stop decisions are queued from UI callbacks and executed at the next update safe boundary. Render submission
 captures camera, lighting, transforms, mesh/material identities, and tint into an immutable frame-local packet, so
 device recording never queries a Scene that another lifecycle transition has closed. Docked panel focus is requested
@@ -1072,7 +1078,10 @@ and haptic backends; unsupported future ports or custom SDL builds degrade rumbl
 affecting keyboard or mouse input.
 
 Every managed `InputActionContext` owns an independent native context and is released explicitly or with its managed
-asset generation. Map and action disable operations synchronously publish cancellation before removing enabled state.
+asset generation. Enabled-map intent is distinct from the effective action set so hot reload can enable new actions in
+an enabled map while preserving explicit per-action disables. Enable operations are idempotent; map and action disable
+operations synchronously publish cancellation before removing enabled state. Retained action handles, subscriptions,
+and capture overrides become inert when their context or the input service closes.
 Managed transition callbacks are dispatched at most once per immutable input frame before fixed/update gameplay
 callbacks. Direct controls read the same paired-user snapshots, including held, pressed, and released edges; they do
 not bypass editor Play/Game-view routing. Fixed-tick replay schema 2 records sparse raw controls as well as resolved
@@ -1084,6 +1093,9 @@ action type, value type, control scheme, composite, interaction, and processor w
 documents and uses the public Kéire UI facade. Details live in [Input Actions Editor](InputActionsEditor.md).
 Project descriptor schema 4 stores both the default input asset and stable default map ID. The editor and packaged
 runtime resolve that map at Play startup, falling back to the asset's first map only for an unset legacy selection.
+Managed legacy polling resolves actions through that selected stable map ID in both editor Play Mode and packaged
+players. Generated input wrappers use ordinary folder-independent managed-script placement and extend the selected
+runtime assembly's source roots when `Assets/Scripts/Generated` is not already covered.
 
 ## Event And Time Runtime
 

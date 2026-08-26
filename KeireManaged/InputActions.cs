@@ -198,19 +198,19 @@ public sealed class InputAction
     public event Action<CallbackContext> started
     {
         add { _started += value; InputActionRuntime.Register(this); }
-        remove { _started -= value; }
+        remove { _started -= value; UnregisterIfUnused(); }
     }
 
     public event Action<CallbackContext> performed
     {
         add { _performed += value; InputActionRuntime.Register(this); }
-        remove { _performed -= value; }
+        remove { _performed -= value; UnregisterIfUnused(); }
     }
 
     public event Action<CallbackContext> canceled
     {
         add { _canceled += value; InputActionRuntime.Register(this); }
-        remove { _canceled -= value; }
+        remove { _canceled -= value; UnregisterIfUnused(); }
     }
 
     public void Enable() => _context.Operate(InputContextOperation.EnableAction, Id);
@@ -229,6 +229,12 @@ public sealed class InputAction
     private NativeInputActionSnapshot Snapshot => NativeInput.ActionSnapshot(_context.Handle, Id);
 
     internal bool BelongsTo(InputActionContext context) => ReferenceEquals(_context, context);
+
+    private void UnregisterIfUnused()
+    {
+        if (_started is null && _performed is null && _canceled is null)
+            InputActionRuntime.Unregister(this);
+    }
 
     internal void Dispatch()
     {
@@ -297,6 +303,12 @@ internal static class InputActionRuntime
     {
         lock (Sync)
             Actions.RemoveAll(reference => !reference.TryGetTarget(out InputAction? action) || action.BelongsTo(context));
+    }
+
+    internal static void Unregister(InputAction action)
+    {
+        lock (Sync)
+            Actions.RemoveAll(reference => !reference.TryGetTarget(out InputAction? value) || ReferenceEquals(value, action));
     }
 
     internal static void DispatchEvents()
