@@ -324,12 +324,9 @@ namespace KeireHub
             m_RequestAccountDialog = true;
         ui.SetTooltip(snapshot.AccountSignedIn ? snapshot.AccountEmail : "Kéire account", {.Delayed = true});
         ui.SameLine();
-        if (ui.IconButton("HubDocs", Keire::UiIcon::Documentation, false, {44.0F, buttonHeight}))
-        {
-            command = {.Type = HubUiCommandType::OpenUrl,
-                       .Url = "https://github.com/hcfgod/KeireEngine/tree/master/Docs"};
-        }
-        ui.SetTooltip("Open documentation", {.Delayed = true});
+        if (ui.IconButton("HubHelp", Keire::UiIcon::Information, false, {44.0F, buttonHeight}))
+            ui.OpenPopup("HubHelpPopover");
+        ui.SetTooltip("Help", {.Delayed = true});
         ui.SameLine();
         const auto appearance = snapshot.Settings.Appearance == HubAppearance::System ? "Auto"
                                 : snapshot.Settings.Appearance == HubAppearance::Dark ? "Dark"
@@ -361,6 +358,17 @@ namespace KeireHub
             m_NotificationCenterOpen = true;
             m_TaskCenterOpen = false;
             m_CloseTaskCenter = true;
+        }
+
+        if (auto help = ui.BeginPopup("HubHelpPopover"); help)
+        {
+            if (ui.MenuItem("Collect Diagnostics..."))
+                command.Type = HubUiCommandType::CopyDiagnostics;
+            if (ui.MenuItem("Open Documentation"))
+            {
+                command = {.Type = HubUiCommandType::OpenUrl,
+                           .Url = "https://github.com/hcfgod/KeireEngine/tree/master/Docs"};
+            }
         }
 
 #if !defined(__APPLE__)
@@ -1279,7 +1287,7 @@ namespace KeireHub
         if (ui.Button("Save settings", {116.0F, 34.0F}))
             command = {.Type = HubUiCommandType::SaveSettings, .Settings = settings};
         ui.SameLine();
-        if (ui.Button("Copy diagnostics", {132.0F, 34.0F}))
+        if (ui.Button("Collect diagnostics...", {160.0F, 34.0F}))
             command.Type = HubUiCommandType::CopyDiagnostics;
         ui.SameLine();
         if (ui.Button("Open logs", {96.0F, 34.0F}))

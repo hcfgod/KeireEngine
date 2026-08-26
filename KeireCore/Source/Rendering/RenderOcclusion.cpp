@@ -542,7 +542,7 @@ namespace Keire::RenderBackend
         {
             if (!commands || Specification.MaximumFramesInFlight == 0)
                 throw std::logic_error("GPU occlusion preparation requires an active rendered frame.");
-            auto& frames = surface.Resources.GpuOcclusionFrames;
+            auto& frames = surface.ActiveWorkset().GpuOcclusionFrames;
             frames.resize(Specification.MaximumFramesInFlight);
             auto& resources = frames[frameIndex];
 
@@ -598,6 +598,16 @@ namespace Keire::RenderBackend
                         levelWidth = (levelWidth + 1U) / 2U;
                         levelHeight = (levelHeight + 1U) / 2U;
                     }
+                }
+                catch (const GpuDeviceLostError&)
+                {
+                    throw;
+                }
+                catch (const std::exception& error)
+                {
+                    ThrowIfDeviceLost("GPU occlusion frame-resource creation", error.what());
+                    ReleaseGpuOcclusionFrameResources(replacement);
+                    throw;
                 }
                 catch (...)
                 {
@@ -763,8 +773,13 @@ namespace Keire::RenderBackend
             Policy::RegisterAllocationSuccess(surface.GpuOcclusionAllocationRetry, frameIndex);
             return prepared;
         }
+        catch (const GpuDeviceLostError&)
+        {
+            throw;
+        }
         catch (const std::exception& error)
         {
+            ThrowIfDeviceLost("GPU occlusion resource preparation", error.what());
             for (auto* batch : preparedBatches)
             {
                 batch->GpuOcclusion = false;
@@ -1049,7 +1064,7 @@ namespace Keire::RenderBackend
             return;
         }
         auto& resources = *occlusion.Resources;
-        auto* target = surface.HasOutput ? surface.Resources.ExchangeColor : surface.Resources.SampledColor;
+        auto* target = surface.Resources.WriterColor(surface.ActiveWorksetSlot);
         if (!target)
             return;
 
@@ -1074,8 +1089,11 @@ namespace Keire::RenderBackend
         auto* pass = SDL_BeginGPURenderPass(commands, &color, 1, nullptr);
         if (!pass)
         {
+            const auto detail = LastSdlError();
+            if (const auto diagnostic = ClassifyDeviceFailure("SDL_BeginGPURenderPass(occlusion debug)", detail))
+                throw GpuDeviceLostError(*diagnostic);
             KEIRE_CORE_WARN("Could not begin GPU occlusion debug pass for surface '{}': {}", surface.Specification.Name,
-                            LastSdlError());
+                            detail);
             return;
         }
 

@@ -5,17 +5,21 @@
 #include "KeireInternal/Build/PlayerPackage.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 #include "KeireInternal/WindowInternal.h"
 #include "KeireRuntimeInternal/ManagedWorldRuntime.h"
+#include "KeireRuntimeInternal/RuntimeAdditiveValidation.h"
+#include "KeireRuntimeInternal/RuntimeCommandLine.h"
+#include "KeireRuntimeInternal/RuntimeRenderBenchmark.h"
+#include "KeireRuntimeInternal/RuntimeSceneRendering.h"
 #include "KeireRuntimeInternal/RuntimeUiInput.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
@@ -30,31 +34,8 @@
 
 namespace
 {
-    enum class RuntimeReplayAction : std::uint8_t
-    {
-        None,
-        Record,
-        Play,
-        Verify
-    };
-
-    struct RuntimeCommandLine final
-    {
-        std::filesystem::path Content;
-        std::uint32_t Frames = 0;
-        std::uint64_t TickLimit = 0;
-        Keire::AssetId Scene;
-        RuntimeReplayAction ReplayAction = RuntimeReplayAction::None;
-        std::filesystem::path ReplayPath;
-        std::filesystem::path OutputPath;
-        std::filesystem::path ManagedRuntime;
-        std::string ProductName = "Keire Runtime";
-        std::string ProductVersion;
-        std::string WindowTitle = "Kéire Runtime";
-        std::string ApplicationIdentifier;
-        Keire::ReplayProfile ReplayProfile = Keire::ReplayProfile::StrictVerified;
-        bool Headless = false;
-    };
+    using KeireRuntime::RuntimeCommandLine;
+    using KeireRuntime::RuntimeReplayAction;
 
     struct RuntimeManifest final
     {
@@ -74,13 +55,6 @@ namespace
         bool Audio = false;
         bool Navigation = false;
     };
-
-    template <typename T> void ParsePositiveCount(const std::string_view value, T& output, const char* option)
-    {
-        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), output);
-        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || output == 0)
-            throw Keire::CommandLineError(std::string(option) + " requires a positive count.");
-    }
 
     [[nodiscard]] nlohmann::json EncodeAnimatorCheckpoint(const Keire::SceneAnimatorCheckpoint& animator)
     {
@@ -169,102 +143,6 @@ namespace
         return result;
     }
 
-    [[nodiscard]] RuntimeCommandLine ParseCommandLine(const Keire::ApplicationCommandLineArguments& arguments)
-    {
-        RuntimeCommandLine result;
-        const auto executable =
-            std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).lexically_normal();
-        const auto packaged = Keire::Detail::LoadPackagedPlayerConfiguration(executable);
-        for (std::size_t index = 1; index < arguments.Size(); ++index)
-        {
-            const auto option = arguments[index];
-            if (option == "--content")
-            {
-                if (++index >= arguments.Size())
-                    throw Keire::CommandLineError("--content requires a path.");
-                result.Content = Keire::Detail::PathFromUtf8(arguments[index]);
-            }
-            else if (option == "--frames")
-            {
-                if (++index >= arguments.Size())
-                    throw Keire::CommandLineError("--frames requires a positive count.");
-                ParsePositiveCount(arguments[index], result.Frames, "--frames");
-            }
-            else if (option == "--tick-limit")
-            {
-                if (++index >= arguments.Size())
-                    throw Keire::CommandLineError("--tick-limit requires a positive count.");
-                ParsePositiveCount(arguments[index], result.TickLimit, "--tick-limit");
-            }
-            else if (option == "--headless")
-                result.Headless = true;
-            else if (option == "--scene")
-            {
-                if (++index >= arguments.Size())
-                    throw Keire::CommandLineError("--scene requires an asset ID.");
-                try
-                {
-                    result.Scene = Keire::AssetId::Parse(arguments[index]);
-                }
-                catch (const std::exception&)
-                {
-                    throw Keire::CommandLineError("--scene requires a valid asset ID.");
-                }
-            }
-            else if (option == "--record" || option == "--play" || option == "--verify")
-            {
-                if (result.ReplayAction != RuntimeReplayAction::None)
-                    throw Keire::CommandLineError("--record, --play, and --verify are mutually exclusive.");
-                if (++index >= arguments.Size())
-                    throw Keire::CommandLineError(std::string(option) + " requires a replay path.");
-                result.ReplayAction = option == "--record" ? RuntimeReplayAction::Record
-                                      : option == "--play" ? RuntimeReplayAction::Play
-                                                           : RuntimeReplayAction::Verify;
-                result.ReplayPath =
-                    std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments[index])).lexically_normal();
-            }
-            else if (option == "--profile")
-            {
-                if (++index >= arguments.Size())
-                    throw Keire::CommandLineError("--profile requires strict or performance.");
-                if (arguments[index] == "strict")
-                    result.ReplayProfile = Keire::ReplayProfile::StrictVerified;
-                else if (arguments[index] == "performance")
-                    result.ReplayProfile = Keire::ReplayProfile::PerformanceCapture;
-                else
-                    throw Keire::CommandLineError("--profile requires strict or performance.");
-            }
-            else if (option == "--output")
-            {
-                if (++index >= arguments.Size())
-                    throw Keire::CommandLineError("--output requires a path.");
-                result.OutputPath =
-                    std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments[index])).lexically_normal();
-            }
-            else
-                throw Keire::CommandLineError("Unknown runtime option: " + std::string(option));
-        }
-        if (packaged)
-        {
-            if (result.Content.empty())
-                result.Content = packaged->Content;
-            result.ManagedRuntime = packaged->ManagedRuntime;
-            result.ProductName = packaged->Settings.ProductName;
-            result.ProductVersion = packaged->Settings.Version;
-            result.WindowTitle = packaged->Settings.WindowTitle;
-            result.ApplicationIdentifier = packaged->Settings.ApplicationIdentifier;
-        }
-        if (result.Content.empty())
-            throw Keire::CommandLineError(
-                "KeireRuntime requires --content <path> unless launched from a packaged player.");
-        if (!result.OutputPath.empty() && result.ReplayAction == RuntimeReplayAction::None)
-            throw Keire::CommandLineError("--output requires --record, --play, or --verify.");
-        result.Content = std::filesystem::absolute(result.Content).lexically_normal();
-        if (result.ManagedRuntime.empty())
-            result.ManagedRuntime = executable.parent_path() / "Managed";
-        return result;
-    }
-
     [[nodiscard]] RuntimeManifest LoadManifest(const std::filesystem::path& content)
     {
         std::ifstream stream(content / "runtime-manifest.json", std::ios::binary);
@@ -290,24 +168,7 @@ namespace
             result.RequiredModules.push_back(
                 {module.at("id").get<std::string>(), module.at("version").get<std::string>()});
         result.StartupScene = Keire::AssetId::Parse(source.at("startupScene").get<std::string>());
-        if (const auto scenes = source.find("buildScenes"); scenes != source.end())
-        {
-            if (!scenes->is_array() || scenes->empty() || scenes->size() > 1024)
-                throw Keire::CommandLineError("Runtime manifest buildScenes must be a non-empty bounded array.");
-            for (const auto& encoded : *scenes)
-            {
-                const auto scene = Keire::AssetId::Parse(encoded.get<std::string>());
-                if (std::ranges::find(result.BuildScenes, scene) != result.BuildScenes.end())
-                    throw Keire::CommandLineError("Runtime manifest buildScenes contains a duplicate scene.");
-                result.BuildScenes.push_back(scene);
-            }
-            if (result.BuildScenes.front() != result.StartupScene)
-                throw Keire::CommandLineError("Runtime manifest startupScene must be the first enabled build scene.");
-        }
-        else
-        {
-            result.BuildScenes.push_back(result.StartupScene);
-        }
+        result.BuildScenes = KeireRuntime::ParseRuntimeValidationScenes(source, result.StartupScene);
         if (source.contains("defaultInput") && !source.at("defaultInput").is_null())
             result.DefaultInput = Keire::AssetId::Parse(source.at("defaultInput").get<std::string>());
         if (source.contains("defaultInputMap") && !source.at("defaultInputMap").is_null())
@@ -391,33 +252,6 @@ namespace
         return result;
     }
 
-    struct SceneCamera final
-    {
-        Keire::Entity Entity;
-        Keire::Ref<Keire::CameraComponent> Camera;
-        Keire::Ref<Keire::TransformComponent> Transform;
-    };
-
-    [[nodiscard]] std::optional<SceneCamera> SelectCamera(const Keire::Ref<Keire::Scene>& scene)
-    {
-        std::optional<SceneCamera> selected;
-        bool selectedPrimary = false;
-        for (const auto& entity : scene->Query<Keire::CameraComponent>())
-        {
-            const auto camera = entity.GetComponent<Keire::CameraComponent>();
-            const auto transform = entity.GetComponent<Keire::TransformComponent>();
-            if (!camera || !transform || !camera->Enabled() || !entity.ActiveInHierarchy())
-                continue;
-            if (!selected || (camera->Primary() && !selectedPrimary) ||
-                (camera->Primary() == selectedPrimary && camera->Priority() > selected->Camera->Priority()))
-            {
-                selected = SceneCamera{entity, camera, transform};
-                selectedPrimary = camera->Primary();
-            }
-        }
-        return selected;
-    }
-
     struct RuntimeReplayState final
     {
         Keire::Ref<Keire::SceneRuntimeSession> Session;
@@ -499,7 +333,14 @@ namespace
             : Layer("Runtime"), ManagedWorldRuntimeServices(false, rendering), m_StartupScene(startupScene),
               m_DefaultInput(defaultInput), m_DefaultInputMap(defaultInputMap), m_DefaultMixer(defaultMixer),
               m_CommandLine(std::move(commandLine)), m_ReplayFingerprints(std::move(fingerprints)),
-              m_ReplayState(std::move(replayState))
+              m_ReplayState(std::move(replayState)),
+              m_AdditiveValidation(m_CommandLine.AdditiveValidationOutput, m_CommandLine.ValidationScenes
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                                   ,
+                                   m_CommandLine.ValidateDeviceLoss
+#endif
+                                   ),
+              m_RenderBenchmark(m_CommandLine.RenderBenchmarkOutput, m_CommandLine.PresentMode)
         {
         }
 
@@ -589,10 +430,10 @@ namespace
         {
             if (!m_InputMapEnabled)
                 m_InputMapEnabled = TryEnableDefaultInputMap();
-            [[maybe_unused]] const bool transitioned = ProcessManagedSceneTransition(
-                m_CommandLine.ReplayAction != RuntimeReplayAction::None &&
-                    m_CommandLine.ReplayProfile == Keire::ReplayProfile::StrictVerified,
-                [](const Keire::Ref<Keire::Scene>& scene) { return SelectCamera(scene).has_value(); });
+            [[maybe_unused]] const bool transitioned =
+                ProcessManagedSceneTransition(m_CommandLine.ReplayAction != RuntimeReplayAction::None &&
+                                                  m_CommandLine.ReplayProfile == Keire::ReplayProfile::StrictVerified,
+                                              nullptr);
             if (!m_Runtime)
             {
                 if (m_Load->State() == Keire::SceneLoadState::Failed)
@@ -657,35 +498,32 @@ namespace
             world->Update(static_cast<float>(time.DeltaTime().Seconds()));
             if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
                 throw std::runtime_error("Startup scene runtime failed: " + m_Runtime->Diagnostic().Message);
-            KeireRuntime::SynchronizeRuntimeUiTextInput(m_Presentation, Owner().Windows(), Owner().MainWindow());
-            const auto selected = SelectCamera(m_Scene);
-            if (!selected)
-                throw std::runtime_error("The startup scene has no active camera.");
+            m_AdditiveValidation.Update(Owner(), world, static_cast<float>(width), static_cast<float>(height));
+            const auto activePresentation = Keire::Internal::ActiveRuntimePresentation(world);
+            KeireRuntime::SynchronizeRuntimeUiTextInput(activePresentation, Owner().Windows(), Owner().MainWindow());
+            const auto selected = Keire::Internal::SelectRuntimeRenderSession(world);
             m_View->Surface()->RequestSize(width, height);
             Keire::RenderCamera camera;
-            camera.View = Keire::Math::Inverse(selected->Transform->WorldMatrix());
-            camera.Projection =
-                selected->Camera->ProjectionMatrix(static_cast<float>(width) / static_cast<float>(height));
-            camera.ClearColor = selected->Camera->ClearColor();
-            camera.NearPlane = selected->Camera->NearPlane();
-            camera.FarPlane = selected->Camera->FarPlane();
+            if (selected.Camera)
+            {
+                camera.View = Keire::Math::Inverse(selected.Camera->Transform->WorldMatrix());
+                camera.Projection =
+                    selected.Camera->Camera->ProjectionMatrix(static_cast<float>(width) / static_cast<float>(height));
+                camera.ClearColor = selected.Camera->Camera->ClearColor();
+                camera.NearPlane = selected.Camera->Camera->NearPlane();
+                camera.FarPlane = selected.Camera->Camera->FarPlane();
+            }
             m_View->SetCamera(camera);
             auto environment = RenderEnvironment();
-            environment.SkyVisible =
-                environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-            const auto materialParameters = MaterialParameters();
-            for (const auto& session : world->Sessions())
-            {
-                if (!session || !session->RuntimeScene())
-                    continue;
-                Keire::SceneRenderRequest renderRequest{session->RuntimeScene(), m_View, false, environment,
-                                                        materialParameters};
-                if (const auto vfx = session->Vfx())
-                    renderRequest.Vfx = vfx->CaptureRenderSnapshot();
-                if (const auto presentation = session->Presentation())
-                    Owner().Renderer()->SubmitRuntimeUi(presentation->Ui());
-                Owner().Renderer()->Submit(std::move(renderRequest));
-            }
+            environment.SkyVisible = selected.Camera && environment.SkyVisible &&
+                                     selected.Camera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+            KeireRuntime::SubmitRuntimeWorldRendering(Owner().Renderer(), world, m_View, environment,
+                                                      MaterialParameters(), selected.Session,
+                                                      selected.Camera.has_value());
+            if (m_AdditiveValidation.Enabled())
+                m_AdditiveValidation.ObserveSubmission(Owner(), Owner().Renderer(), m_View->Surface());
+            if (m_RenderBenchmark.Enabled())
+                m_RenderBenchmark.Update(Owner(), Owner().Renderer());
             if (m_CommandLine.Frames != 0 && ++m_RenderedFrames >= m_CommandLine.Frames)
                 Owner().RequestExit();
         }
@@ -712,12 +550,9 @@ namespace
                 logical.Width == 0 ? 1.0F : static_cast<float>(pixels.Width) / static_cast<float>(logical.Width);
             const float scaleY =
                 logical.Height == 0 ? 1.0F : static_cast<float>(pixels.Height) / static_cast<float>(logical.Height);
-            const auto sessions = world->Sessions();
-            for (auto current = sessions.rbegin(); current != sessions.rend(); ++current)
-                if (const auto presentation =
-                        *current ? (*current)->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
-                    KeireRuntime::ProcessRuntimeUiEvent(presentation, event, scaleX, scaleY, m_UiPointer);
-            KeireRuntime::SynchronizeRuntimeUiTextInput(m_Presentation, Owner().Windows(), Owner().MainWindow());
+            const auto focused =
+                KeireRuntime::ProcessRuntimeUiEventStack(world, m_Presentation, event, scaleX, scaleY, m_UiPointer);
+            KeireRuntime::SynchronizeRuntimeUiTextInput(focused, Owner().Windows(), Owner().MainWindow());
         }
 
         void WriteManagedLog(const Keire::ManagedLogLevel level, const std::string_view message) noexcept override
@@ -1206,6 +1041,8 @@ namespace
         RuntimeCommandLine m_CommandLine;
         Keire::ReplayFingerprints m_ReplayFingerprints;
         std::shared_ptr<RuntimeReplayState> m_ReplayState;
+        KeireRuntime::RuntimeAdditiveValidation m_AdditiveValidation;
+        KeireRuntime::RuntimeRenderBenchmark m_RenderBenchmark;
         std::uint32_t m_RenderedFrames = 0;
         std::uint64_t m_FixedTicks = 0;
         Keire::Ref<Keire::SceneLoadOperation> m_Load;
@@ -1524,8 +1361,10 @@ namespace Keire
 {
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
     {
-        const auto commandLine = ParseCommandLine(arguments);
+        auto commandLine = KeireRuntime::ParseRuntimeCommandLine(arguments);
         auto manifest = LoadManifest(commandLine.Content);
+        commandLine.ValidationScenes =
+            KeireRuntime::SelectRuntimeValidationScenes(commandLine.AdditiveValidationOutput, manifest.BuildScenes);
         ApplicationSpecification specification;
         specification.Windowing.ApplicationName = commandLine.ProductName;
         specification.Windowing.ApplicationVersion = commandLine.ProductVersion;
@@ -1544,6 +1383,7 @@ namespace Keire
         specification.Assets.Mounts.push_back({commandLine.Content / "catalog.json", 0, false});
         specification.Scenes.Mode = SceneMode::Enabled;
         specification.Render.Mode = RenderMode::Rendered;
+        specification.Render.PresentMode = commandLine.PresentMode;
         specification.Ui.Mode = UiMode::Disabled;
         specification.Input.Mode = InputMode::Enabled;
         specification.Input.AutoJoin = false;

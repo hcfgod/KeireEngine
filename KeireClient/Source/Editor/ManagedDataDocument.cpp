@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/ManagedDataDocument.h"
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <ranges>
 #include <set>
@@ -70,6 +71,7 @@ namespace KeireEditor
             case Keire::ManagedAssetPropertyKind::SerializableObject:
             case Keire::ManagedAssetPropertyKind::Array:
             case Keire::ManagedAssetPropertyKind::List:
+            case Keire::ManagedAssetPropertyKind::Dictionary:
                 value.Value = true;
                 break;
             }
@@ -84,7 +86,8 @@ namespace KeireEditor
         {
             return kind == Keire::ManagedAssetPropertyKind::Text ||
                    kind == Keire::ManagedAssetPropertyKind::SerializableObject ||
-                   kind == Keire::ManagedAssetPropertyKind::Array || kind == Keire::ManagedAssetPropertyKind::List;
+                   kind == Keire::ManagedAssetPropertyKind::Array || kind == Keire::ManagedAssetPropertyKind::List ||
+                   kind == Keire::ManagedAssetPropertyKind::Dictionary;
         }
 
         [[nodiscard]] const Keire::ManagedAssetPropertyDescriptor*
@@ -131,7 +134,95 @@ namespace KeireEditor
             {
                 for (const auto& child : value.Children)
                     CollectDependencies(child, property.Children.front(), destination);
+                return;
             }
+            if (property.Kind == Keire::ManagedAssetPropertyKind::Dictionary)
+            {
+                for (const auto& entry : value.Children)
+                {
+                    if (entry.Children.size() != 2 || property.Children.size() != 2)
+                        throw std::invalid_argument("Managed dictionary contains a malformed entry.");
+                    CollectDependencies(entry.Children[0], property.Children[0], destination);
+                    CollectDependencies(entry.Children[1], property.Children[1], destination);
+                }
+            }
+        }
+
+        [[nodiscard]] const Keire::ManagedReferenceGraphNode* FindGraphNode(const Keire::ManagedReferenceGraph& graph,
+                                                                            const std::uint32_t id) noexcept
+        {
+            const auto found = std::ranges::find(graph.Objects, id, &Keire::ManagedReferenceGraphNode::Id);
+            return found == graph.Objects.end() ? nullptr : std::addressof(*found);
+        }
+
+        [[nodiscard]] const Keire::ManagedAssetReferenceTypeDescriptor*
+        FindReferenceType(const std::span<const Keire::ManagedAssetReferenceTypeDescriptor> types,
+                          const Keire::ManagedTypeId id) noexcept
+        {
+            const auto found = std::ranges::find(types, id, &Keire::ManagedAssetReferenceTypeDescriptor::StableTypeId);
+            return found == types.end() ? nullptr : std::addressof(*found);
+        }
+
+        bool CollectGraphDependencies(const Keire::ManagedReferenceGraphValue& value,
+                                      const Keire::ManagedAssetPropertyDescriptor& property,
+                                      const Keire::ManagedReferenceGraph& graph,
+                                      const std::span<const Keire::ManagedAssetReferenceTypeDescriptor> types,
+                                      std::map<Keire::AssetId, Keire::ManagedDataAssetDependency>& destination,
+                                      std::set<std::pair<std::uint32_t, Keire::AssetId>>& expanded)
+        {
+            if (value.Reference == 0)
+            {
+                if (property.Kind == Keire::ManagedAssetPropertyKind::AssetReference)
+                    CollectDependencies(Keire::DecodeManagedAssetValue(value.Scalar, property), property, destination);
+                return false;
+            }
+
+            const auto* node = FindGraphNode(graph, value.Reference);
+            if (!node || !expanded.emplace(node->Id, property.StableFieldId).second)
+                return node == nullptr;
+            bool unknown = false;
+            if (node->Kind == Keire::ManagedReferenceGraphNodeKind::Object)
+            {
+                const auto* type = FindReferenceType(types, node->RuntimeType);
+                if (!type)
+                    return true;
+                for (const auto& field : node->Fields)
+                {
+                    const auto descriptor = std::ranges::find(type->Properties, field.StableFieldId,
+                                                              &Keire::ManagedAssetPropertyDescriptor::StableFieldId);
+                    if (descriptor == type->Properties.end())
+                    {
+                        unknown = true;
+                        continue;
+                    }
+                    unknown = CollectGraphDependencies(field.Value, *descriptor, graph, types, destination, expanded) ||
+                              unknown;
+                }
+                return unknown;
+            }
+            if (node->Kind == Keire::ManagedReferenceGraphNodeKind::Array ||
+                node->Kind == Keire::ManagedReferenceGraphNodeKind::List)
+            {
+                if (property.Children.size() != 1)
+                    return true;
+                for (const auto& item : node->Items)
+                    unknown = CollectGraphDependencies(item, property.Children.front(), graph, types, destination,
+                                                       expanded) ||
+                              unknown;
+                return unknown;
+            }
+            if (property.Children.size() != 2)
+                return true;
+            for (const auto& entry : node->Entries)
+            {
+                unknown =
+                    CollectGraphDependencies(entry.Key, property.Children[0], graph, types, destination, expanded) ||
+                    unknown;
+                unknown =
+                    CollectGraphDependencies(entry.Value, property.Children[1], graph, types, destination, expanded) ||
+                    unknown;
+            }
+            return unknown;
         }
 
         [[nodiscard]] bool IsDerivedFrom(const Keire::ManagedTypeId actual, const Keire::ManagedTypeId expected,
@@ -218,6 +309,7 @@ namespace KeireEditor
         }
         m_Host.Close();
         m_Descriptor.reset();
+        m_RejectedGraphDiagnostic.reset();
         m_Diagnostic.clear();
         m_SuppressPreview = false;
     }
@@ -248,6 +340,12 @@ namespace KeireEditor
             return result;
         result.Serialized = true;
         result.RawValue = field->Value;
+        if (property.ReferenceGraph || field->ReferenceGraph)
+        {
+            result.Diagnostic =
+                "KEIRE-MANAGED-SERIALIZATION-0003: Reference graph fields require graph Inspector editing.";
+            return result;
+        }
         if (field->ManagedTypeName != property.ManagedTypeName)
         {
             result.Diagnostic = "The serialized managed type does not match the current descriptor.";
@@ -264,11 +362,80 @@ namespace KeireEditor
         return result;
     }
 
+    ManagedDataGraphPropertyState
+    ManagedDataDocument::GraphProperty(const Keire::ManagedAssetPropertyDescriptor& property) const noexcept
+    {
+        ManagedDataGraphPropertyState result;
+        if (!property.ReferenceGraph)
+        {
+            result.Diagnostic =
+                "KEIRE-MANAGED-SERIALIZATION-0003: The requested Inspector field is not a reference graph.";
+            return result;
+        }
+        if (!m_Host.IsOpen())
+        {
+            result.Diagnostic = "The managed data document is not open.";
+            return result;
+        }
+        const auto field = std::ranges::find(m_Host.Draft().Fields, property.StableFieldId,
+                                             &Keire::ManagedDataFieldState::StableFieldId);
+        if (field == m_Host.Draft().Fields.end())
+            return result;
+        result.Serialized = true;
+        result.RawValue = field->Value;
+        if (!field->ReferenceGraph)
+        {
+            result.Diagnostic = "KEIRE-MANAGED-SERIALIZATION-0003: Serialized field '" + property.Name +
+                                "' is missing its reference-graph marker.";
+            return result;
+        }
+        if (field->ManagedTypeName != property.ManagedTypeName)
+        {
+            result.Diagnostic = "The serialized managed type does not match the current descriptor.";
+            return result;
+        }
+        try
+        {
+            if (!m_Host.Draft().ReferenceGraph.empty() && !field->ReferenceGraphRoot.empty())
+            {
+                const auto shared = Keire::DecodeManagedReferenceGraph(m_Host.Draft().ReferenceGraph);
+                result.Value = Keire::ExtractManagedReferenceGraphRoot(shared, field->ReferenceGraphRoot);
+            }
+            else
+            {
+                result.Value = Keire::DecodeManagedReferenceGraph(field->Value);
+            }
+            if (!m_Descriptor)
+                throw std::logic_error("Managed reference graph validation requires a current type descriptor.");
+            Keire::ValidateManagedReferenceGraph(result.Value, property, m_Descriptor->ReferenceTypes);
+            if (m_RejectedGraphDiagnostic && m_RejectedGraphDiagnostic->RootField == property.Name)
+            {
+                result.Diagnostic = m_Diagnostic;
+                result.StructuredDiagnostic = m_RejectedGraphDiagnostic;
+            }
+        }
+        catch (const Keire::ManagedSerializationError& error)
+        {
+            result.Diagnostic = error.what();
+            result.StructuredDiagnostic = error.Details();
+        }
+        catch (const std::exception& error)
+        {
+            result.Diagnostic = error.what();
+        }
+        return result;
+    }
+
     bool ManagedDataDocument::SetProperty(const Keire::ManagedAssetPropertyDescriptor& property,
                                           Keire::ManagedAssetValueNode value, const std::string_view undoName)
     {
         if (!m_Descriptor || !FindProperty(*m_Descriptor, property.StableFieldId))
             throw std::logic_error("Managed data property editing requires a current type descriptor.");
+        if (property.ReferenceGraph)
+        {
+            throw std::invalid_argument(
+                "KEIRE-MANAGED-SERIALIZATION-0003: Reference graph fields require SetGraphProperty().");
+        }
         if (!IsPresent(value) && !IsNullable(property.Kind))
             value = MaterializedDefaultValue(property);
         const auto encoded = Keire::EncodeManagedAssetValue(value, property);
@@ -284,26 +451,109 @@ namespace KeireEditor
         }
         else
         {
+            if (field->ReferenceGraph && !candidate.ReferenceGraph.empty() && !field->ReferenceGraphRoot.empty())
+            {
+                auto shared = Keire::DecodeManagedReferenceGraph(candidate.ReferenceGraph);
+                Keire::RemoveManagedReferenceGraphRoot(shared, field->ReferenceGraphRoot);
+                candidate.ReferenceGraph =
+                    shared.Roots.empty() ? std::string{} : Keire::EncodeManagedReferenceGraph(shared);
+            }
             field->Name = property.Name;
             field->ManagedTypeName = property.ManagedTypeName;
+            field->ReferenceGraph = false;
+            field->ReferenceGraphRoot.clear();
             field->Value = encoded;
         }
         RebuildDependencies(candidate);
         candidate = Keire::ManagedDataAsset::Canonicalize(std::move(candidate));
-        return m_Host.Edit(undoName, std::move(candidate));
+        const auto edited = m_Host.Edit(undoName, std::move(candidate));
+        if (edited)
+        {
+            m_RejectedGraphDiagnostic.reset();
+            m_Diagnostic.clear();
+        }
+        return edited;
+    }
+
+    bool ManagedDataDocument::SetGraphProperty(const Keire::ManagedAssetPropertyDescriptor& property,
+                                               Keire::ManagedReferenceGraph value, const std::string_view undoName)
+    {
+        if (!m_Descriptor || !FindProperty(*m_Descriptor, property.StableFieldId))
+            throw std::logic_error("Managed data graph editing requires a current type descriptor.");
+        if (!property.ReferenceGraph)
+        {
+            throw std::invalid_argument(
+                "KEIRE-MANAGED-SERIALIZATION-0003: SetGraphProperty requires a SerializeReference field.");
+        }
+
+        Keire::ValidateManagedReferenceGraph(value, property, m_Descriptor->ReferenceTypes);
+        const auto encoded = Keire::EncodeManagedReferenceGraph(value);
+        auto candidate = m_Host.Draft();
+        auto field =
+            std::ranges::find(candidate.Fields, property.StableFieldId, &Keire::ManagedDataFieldState::StableFieldId);
+        if (field == candidate.Fields.end())
+        {
+            const auto rootKey = "id:" + property.StableFieldId.ToString();
+            candidate.Fields.push_back({.StableFieldId = property.StableFieldId,
+                                        .Name = property.Name,
+                                        .ManagedTypeName = property.ManagedTypeName,
+                                        .ReferenceGraph = true,
+                                        .ReferenceGraphRoot = rootKey,
+                                        .Value = encoded});
+            field = std::prev(candidate.Fields.end());
+        }
+        else
+        {
+            field->Name = property.Name;
+            field->ManagedTypeName = property.ManagedTypeName;
+            field->ReferenceGraph = true;
+            if (field->ReferenceGraphRoot.empty())
+                field->ReferenceGraphRoot = "id:" + property.StableFieldId.ToString();
+            field->Value = encoded;
+        }
+        auto shared = candidate.ReferenceGraph.empty() ? Keire::ManagedReferenceGraph{.Version = 2}
+                                                       : Keire::DecodeManagedReferenceGraph(candidate.ReferenceGraph);
+        Keire::UpdateManagedReferenceGraphRoot(shared, field->ReferenceGraphRoot, value);
+        candidate.ReferenceGraph = Keire::EncodeManagedReferenceGraph(shared);
+        RebuildDependencies(candidate);
+        candidate = Keire::ManagedDataAsset::Canonicalize(std::move(candidate));
+        const auto edited = m_Host.Edit(undoName, std::move(candidate));
+        if (edited)
+        {
+            m_RejectedGraphDiagnostic.reset();
+            m_Diagnostic.clear();
+        }
+        return edited;
     }
 
     bool ManagedDataDocument::ClearProperty(const Keire::ManagedAssetPropertyDescriptor& property,
                                             const std::string_view undoName)
     {
         auto candidate = m_Host.Draft();
+        const auto found =
+            std::ranges::find(candidate.Fields, property.StableFieldId, &Keire::ManagedDataFieldState::StableFieldId);
+        const auto graphRoot =
+            found != candidate.Fields.end() && found->ReferenceGraph ? found->ReferenceGraphRoot : std::string{};
         const auto removed = std::erase_if(candidate.Fields, [&property](const Keire::ManagedDataFieldState& field)
                                            { return field.StableFieldId == property.StableFieldId; });
         if (removed == 0)
             return false;
+        if (!graphRoot.empty() && !candidate.ReferenceGraph.empty())
+        {
+            auto shared = Keire::DecodeManagedReferenceGraph(candidate.ReferenceGraph);
+            Keire::RemoveManagedReferenceGraphRoot(shared, graphRoot);
+            candidate.ReferenceGraph =
+                shared.Roots.empty() ? std::string{} : Keire::EncodeManagedReferenceGraph(shared);
+        }
         RebuildDependencies(candidate);
         candidate = Keire::ManagedDataAsset::Canonicalize(std::move(candidate));
-        return m_Host.Edit(undoName, std::move(candidate));
+        const auto edited = m_Host.Edit(undoName, std::move(candidate));
+        if (edited)
+        {
+            m_RejectedGraphDiagnostic.reset();
+            m_Diagnostic.clear();
+        }
+        return edited;
     }
 
     AssetDocumentReloadResult ManagedDataDocument::Reload(const Keire::ManagedDataDefinition& definition,
@@ -312,19 +562,70 @@ namespace KeireEditor
         if (definition == m_Host.Draft())
         {
             m_Host.AcknowledgeRevision(revision);
+            m_RejectedGraphDiagnostic.reset();
+            m_Diagnostic.clear();
             return AssetDocumentReloadResult::Unchanged;
         }
+        if (m_Host.Dirty())
+            return m_Host.Reload(definition, revision);
         m_SuppressPreview = true;
         try
         {
+            ValidateReloadCandidate(definition);
             const auto result = m_Host.Reload(definition, revision);
             m_SuppressPreview = false;
+            m_RejectedGraphDiagnostic.reset();
+            m_Diagnostic.clear();
             return result;
+        }
+        catch (const Keire::ManagedSerializationError& error)
+        {
+            m_SuppressPreview = false;
+            m_RejectedGraphDiagnostic = error.Details();
+            m_Diagnostic = error.what();
+            throw;
+        }
+        catch (const std::exception& error)
+        {
+            m_SuppressPreview = false;
+            m_RejectedGraphDiagnostic.reset();
+            m_Diagnostic = error.what();
+            throw;
         }
         catch (...)
         {
             m_SuppressPreview = false;
+            m_RejectedGraphDiagnostic.reset();
+            m_Diagnostic = "Managed data reload failed with an unknown error.";
             throw;
+        }
+    }
+
+    void ManagedDataDocument::ValidateReloadCandidate(const Keire::ManagedDataDefinition& definition) const
+    {
+        Keire::ManagedDataAsset::Validate(definition);
+        if (!m_Descriptor)
+            return;
+
+        for (const auto& field : definition.Fields)
+        {
+            const auto* property = FindProperty(*m_Descriptor, field.StableFieldId);
+            if (!property)
+                continue;
+            if (field.ReferenceGraph != property->ReferenceGraph)
+            {
+                throw std::invalid_argument("Managed field '" + property->Name +
+                                            "' has a SerializeReference marker that does not match the descriptor.");
+            }
+            if (field.ReferenceGraph)
+            {
+                const auto graph = Keire::DecodeManagedReferenceGraph(field.Value);
+                Keire::ValidateManagedReferenceGraph(graph, *property, m_Descriptor->ReferenceTypes);
+            }
+            else
+            {
+                (void)Keire::DecodeManagedAssetValue(field.Value, *property);
+            }
         }
     }
 
@@ -380,7 +681,22 @@ namespace KeireEditor
             }
             try
             {
-                CollectDependencies(Keire::DecodeManagedAssetValue(field.Value, *property), *property, dependencies);
+                if (field.ReferenceGraph || property->ReferenceGraph)
+                {
+                    if (field.ReferenceGraph != property->ReferenceGraph)
+                        throw std::invalid_argument("Managed reference graph marker does not match the descriptor.");
+                    const auto graph = Keire::DecodeManagedReferenceGraph(field.Value);
+                    Keire::ValidateManagedReferenceGraph(graph, *property, m_Descriptor->ReferenceTypes);
+                    std::set<std::pair<std::uint32_t, Keire::AssetId>> expanded;
+                    hasUnknownField = CollectGraphDependencies(graph.Root, *property, graph,
+                                                               m_Descriptor->ReferenceTypes, dependencies, expanded) ||
+                                      hasUnknownField;
+                }
+                else
+                {
+                    CollectDependencies(Keire::DecodeManagedAssetValue(field.Value, *property), *property,
+                                        dependencies);
+                }
             }
             catch (...)
             {

@@ -1,4 +1,5 @@
 #include "Keire/Core.h"
+#include "KeireInternal/RenderInternal.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
@@ -28,6 +29,7 @@ namespace
     {
         bool CameraValidationCompleted = false;
         bool EnvironmentValidationCompleted = false;
+        bool AdditiveSceneValidationCompleted = false;
     };
 
     [[nodiscard]] std::vector<std::pair<std::string_view, Keire::RenderEnvironmentSettings>> InvalidEnvironments()
@@ -67,6 +69,10 @@ namespace
         {
             m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
                                                      Keire::SceneAsset::EmptyDefinition("Public render contract"));
+            m_AdditionalScene = Keire::CreateRef<Keire::Scene>(
+                Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Additional render contribution"));
+            (void)m_Scene->CreateEntity("Primary renderer").AddComponent<Keire::MeshRendererComponent>();
+            (void)m_AdditionalScene->CreateEntity("Additional renderer").AddComponent<Keire::MeshRendererComponent>();
             m_View = Owner().Renderer()->CreateView({.Name = "Public render contract", .Width = 64, .Height = 64});
 
             auto camera = m_View->Camera();
@@ -119,10 +125,21 @@ namespace
             valid.DirectionalShadowSplitLambda = 1.0F;
             valid.GpuOcclusion = Keire::GpuOcclusionMode::Forced;
             CHECK_NOTHROW(Keire::ValidateRenderEnvironmentSettings(valid));
+
+            Keire::SceneRenderRequest rejected{m_Scene, m_View};
+            rejected.AdditionalScenes.push_back({});
+            CHECK_THROWS_AS(renderer->Submit(std::move(rejected)), std::invalid_argument);
+
             Keire::SceneRenderRequest request{m_Scene, m_View};
             request.Environment = valid;
+            request.AdditionalScenes.push_back({m_AdditionalScene});
             CHECK_NOTHROW(renderer->Submit(std::move(request)));
+            CHECK(Keire::RenderSystemInternalAccess::SceneContributionCount(*renderer, *m_View->Surface()) == 2U);
+            CHECK(Keire::RenderSystemInternalAccess::SceneDrawItemCount(*renderer, *m_View->Surface()) == 2U);
+            Keire::SceneRenderRequest duplicate{m_Scene, m_View};
+            CHECK_THROWS_AS(renderer->Submit(std::move(duplicate)), std::logic_error);
             m_Probe.EnvironmentValidationCompleted = true;
+            m_Probe.AdditiveSceneValidationCompleted = true;
             Owner().RequestExit();
         }
 
@@ -130,11 +147,14 @@ namespace
         {
             if (m_Scene)
                 m_Scene->Close();
+            if (m_AdditionalScene)
+                m_AdditionalScene->Close();
         }
 
       private:
         PublicRenderContractProbe& m_Probe;
         Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::Scene> m_AdditionalScene;
         Keire::Ref<Keire::RenderView> m_View;
     };
 
@@ -160,4 +180,5 @@ TEST_CASE("Public render camera and environment contracts reject invalid values 
     CHECK(application.Run() == 0);
     CHECK(probe.CameraValidationCompleted);
     CHECK(probe.EnvironmentValidationCompleted);
+    CHECK(probe.AdditiveSceneValidationCompleted);
 }

@@ -213,6 +213,9 @@ namespace Keire
             return;
         }
 
+        // Only mutations that existed at this safe boundary may become visible here. OnAttach can request more
+        // structural changes, but those belong to the next boundary just like mutations from any other traversal.
+        const auto pendingOperationCount = m_Impl->PendingOperations.size();
         for (auto& record : m_Impl->Layers)
         {
             if (!record.Attached && m_Impl->IsActive)
@@ -232,53 +235,53 @@ namespace Keire
             }
         }
 
-        while (!m_Impl->PendingOperations.empty())
+        std::vector<Impl::PendingOperation> operations;
+        operations.reserve(pendingOperationCount);
+        for (std::size_t index = 0; index < pendingOperationCount; ++index)
+            operations.push_back(std::move(m_Impl->PendingOperations[index]));
+        m_Impl->PendingOperations.erase(m_Impl->PendingOperations.begin(),
+                                        m_Impl->PendingOperations.begin() +
+                                            static_cast<std::ptrdiff_t>(pendingOperationCount));
+        for (auto& operation : operations)
         {
-            auto operations = std::move(m_Impl->PendingOperations);
-            m_Impl->PendingOperations.clear();
-            for (auto& operation : operations)
+            if (operation.Kind == Impl::PendingKind::Remove)
             {
-                if (operation.Kind == Impl::PendingKind::Remove)
-                {
-                    (void)Remove(operation.Id);
-                    continue;
-                }
+                (void)Remove(operation.Id);
+                continue;
+            }
 
-                std::size_t index = 0;
-                if (operation.Kind == Impl::PendingKind::AddLayer)
-                {
-                    index = m_Impl->OverlayStart;
-                    m_Impl->Layers.insert(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(m_Impl->OverlayStart),
-                                          {operation.Id, std::move(operation.Instance), false});
-                }
-                else
-                {
-                    index = m_Impl->Layers.size();
-                    m_Impl->Layers.push_back({operation.Id, std::move(operation.Instance), false});
-                }
+            std::size_t index = 0;
+            if (operation.Kind == Impl::PendingKind::AddLayer)
+            {
+                index = m_Impl->OverlayStart;
+                m_Impl->Layers.insert(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(m_Impl->OverlayStart),
+                                      {operation.Id, std::move(operation.Instance), false});
+            }
+            else
+            {
+                index = m_Impl->Layers.size();
+                m_Impl->Layers.push_back({operation.Id, std::move(operation.Instance), false});
+            }
 
-                if (m_Impl->IsActive)
+            if (m_Impl->IsActive)
+            {
+                const auto pendingSize = m_Impl->PendingOperations.size();
+                try
                 {
-                    const auto pendingSize = m_Impl->PendingOperations.size();
-                    try
-                    {
-                        Impl::TraversalScope traversal(*m_Impl);
-                        m_Impl->Layers[index].Instance->Attach(*m_Impl->Owner);
-                        m_Impl->Layers[index].Attached = true;
-                    }
-                    catch (...)
-                    {
-                        m_Impl->PendingOperations.resize(pendingSize);
-                        m_Impl->Layers.erase(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(index));
-                        throw;
-                    }
+                    Impl::TraversalScope traversal(*m_Impl);
+                    m_Impl->Layers[index].Instance->Attach(*m_Impl->Owner);
+                    m_Impl->Layers[index].Attached = true;
                 }
-
-                if (operation.Kind == Impl::PendingKind::AddLayer)
+                catch (...)
                 {
-                    ++m_Impl->OverlayStart;
+                    m_Impl->PendingOperations.resize(pendingSize);
+                    m_Impl->Layers.erase(m_Impl->Layers.begin() + static_cast<std::ptrdiff_t>(index));
+                    throw;
                 }
             }
+
+            if (operation.Kind == Impl::PendingKind::AddLayer)
+                ++m_Impl->OverlayStart;
         }
     }
 

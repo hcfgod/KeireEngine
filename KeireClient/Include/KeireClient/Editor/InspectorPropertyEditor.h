@@ -1,5 +1,6 @@
 #pragma once
 
+#include "KeireClient/Editor/ManagedReferenceGraphInspector.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 
 #include "Keire/Core.h"
@@ -8,7 +9,9 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace KeireEditor
@@ -22,7 +25,8 @@ namespace KeireEditor
             Keire::UiFrame& ui, std::span<const Keire::AssetSourceRecord> assets,
             const Keire::Ref<Keire::AssetSystem>& assetSystem, const Keire::Ref<Keire::Scene>& scene,
             AssetPicker& assetPicker, std::span<const Keire::ManagedAssetTypeDescriptor> managedAssetTypes = {},
-            std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> resolveManagedType = {});
+            std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> resolveManagedType = {},
+            std::unordered_map<std::string, std::uint32_t>* managedGraphFocus = nullptr);
 
         [[nodiscard]] bool EditBoundary() const noexcept;
         bool EditBoolean(std::string_view label, bool& value) override;
@@ -51,9 +55,17 @@ namespace KeireEditor
         bool EditComponentReference(std::string_view label, Keire::ComponentReferenceValue& value,
                                     const Keire::ComponentProperty& property) override;
         bool EditEvent(std::string_view label, Keire::ComponentEventValue& value, std::size_t argumentCount) override;
+        bool EditManagedReferenceGraph(std::string_view label, std::string& value,
+                                       const Keire::ManagedReferenceGraphDescriptor& descriptor) override;
+        bool EditManagedValue(std::string_view label, std::string& value,
+                              const Keire::ManagedAssetPropertyDescriptor& descriptor) override;
+        void
+        SetManagedReferenceGraphEditController(const ManagedReferenceGraphEditController* controller) noexcept override;
 
       private:
         [[nodiscard]] const std::vector<Keire::Entity>& SceneEntities();
+        bool DrawManagedValue(Keire::ManagedAssetValueNode& value,
+                              const Keire::ManagedAssetPropertyDescriptor& descriptor, std::string_view path);
         bool Track(bool changed);
 
         Keire::UiFrame& m_Ui;
@@ -63,6 +75,9 @@ namespace KeireEditor
         AssetPicker& m_AssetPicker;
         std::span<const Keire::ManagedAssetTypeDescriptor> m_ManagedAssetTypes;
         std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> m_ResolveManagedType;
+        std::unordered_map<std::string, std::uint32_t>* m_ManagedGraphFocus = nullptr;
+        ManagedReferenceGraphEditController m_ManagedGraphEdits;
+        const ManagedReferenceGraphEditController* m_BoundManagedGraphEdits = nullptr;
         std::optional<std::vector<Keire::Entity>> m_EntityCache;
         bool m_EditBoundary = false;
     };

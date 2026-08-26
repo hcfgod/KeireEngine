@@ -9,6 +9,16 @@ namespace
         Keire::ApplicationCommandLineOption{"--frames <count>", "Exit after a finite number of rendered frames."},
         Keire::ApplicationCommandLineOption{"--headless", "Run with a hidden window and headless audio."},
         Keire::ApplicationCommandLineOption{"--scene <asset-id>", "Override the cooked startup scene."},
+        Keire::ApplicationCommandLineOption{"--validate-additive-runtime <path>",
+                                            "Run the cooked additive-scene validation and write a JSON result."},
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        Keire::ApplicationCommandLineOption{"--validate-device-loss",
+                                            "Inject device loss during the cooked additive-scene validation."},
+#endif
+        Keire::ApplicationCommandLineOption{"--render-benchmark <path>",
+                                            "Run 300 warm-up and 2,000 measured rendered frames."},
+        Keire::ApplicationCommandLineOption{"--present-mode <vsync|immediate>",
+                                            "Select the presentation mode for --render-benchmark."},
         Keire::ApplicationCommandLineOption{"--tick-limit <count>", "Exit after a finite number of fixed ticks."},
         Keire::ApplicationCommandLineOption{"--record <path>", "Record a deterministic replay."},
         Keire::ApplicationCommandLineOption{"--play <path>", "Play a replay."},

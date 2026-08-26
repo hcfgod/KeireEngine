@@ -114,3 +114,20 @@ unique strings every frame.
 
 Open **Window > Profiler** for full captures, **Window > Viewport Performance Overlay** for the compact HUD, and the
 Console/Diagnostics panels for actionable failure text. Continue with [Debugging and Profiling](DebuggingAndProfiling.md).
+
+## Collect A Diagnostic Bundle
+
+In the Editor or Kéire Hub, choose **Help > Collect Diagnostics...**. Both actions show the exact frozen ZIP inventory
+before anything is written. The preview lists each archive filename, byte size, SHA-256 hash, redaction count, and
+omission reason. Deselect logs, project
+metadata, package versions, or crash information to rebuild the preview before saving.
+
+Bundles stay on the local computer until they are manually shared. They contain allowlisted build and hardware
+identity, cached renderer capabilities and bounded statistics, aggregate project metadata, package IDs and versions,
+stable failure counts, recognized Kéire last-failure availability, and sanitized tails from the two configured log
+files. Log tails are limited to 2 MiB per file and 8 MiB total.
+
+The collector does not scan project, home, package-cache, or operating-system crash directories. Project names and
+paths, assets, documents, private package contents, source URLs, credentials, entitlements, environment values,
+emails, signed URLs, private keys, and native dumps are excluded. Source and destination links are rejected, and the
+ZIP is published atomically; cancellation or failure does not leave a partial archive.

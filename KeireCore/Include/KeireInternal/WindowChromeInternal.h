@@ -19,6 +19,7 @@ namespace Keire::Detail
         ~WindowChromeHitTestCache();
 
         void Store(const WindowChromeLayout& layout) noexcept;
+        [[nodiscard]] WindowChromeLayout Snapshot() const noexcept;
         [[nodiscard]] WindowChromeRole RoleAt(WindowPosition position) const noexcept;
         [[nodiscard]] bool BeginCaptionPress(WindowChromeRole role) noexcept;
         [[nodiscard]] bool CompleteCaptionPress(WindowPosition position, WindowChromeRole& activatedRole) noexcept;

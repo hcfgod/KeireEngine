@@ -1,5 +1,6 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireClient/Editor/EditorReplayProfilingCoordinator.h"
 #include "KeireClient/Editor/ReplayPanelState.h"
 
 #include <iomanip>
@@ -47,6 +48,7 @@ namespace
 
 void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
 {
+    auto& replayState = m_ReplayProfilingCoordinator->Replay();
     if (auto panel = ui.BeginPanel(m_ArchitectureDashboard); panel)
     {
         if (const auto jobs = Owner().Jobs())
@@ -146,17 +148,17 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
             auto section = ui.BeginTreeNode("Replay and verification", true);
             if (!section)
                 return;
-            if (m_ReplayPath.empty())
+            if (replayState.Path.empty())
             {
                 const auto root = Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path(".");
-                m_ReplayPath = (root / "Library" / "Replays" / "editor.keirereplay").generic_string();
+                replayState.Path = (root / "Library" / "Replays" / "editor.keirereplay").generic_string();
             }
             const auto status = replay->Status();
             ui.Text(std::string(KeireEditor::Detail::ReplayStateName(status.State)) + "  tick " +
                     std::to_string(status.CurrentTick) + " / " + std::to_string(status.TickCount) + "  checkpoints " +
                     std::to_string(status.CheckpointCount));
-            (void)ui.InputText("Replay file", m_ReplayPath);
-            (void)ui.Checkbox("Performance capture profile", m_ReplayPerformanceProfile);
+            (void)ui.InputText("Replay file", replayState.Path);
+            (void)ui.Checkbox("Performance capture profile", replayState.PerformanceProfile);
 
             const auto fingerprints = [&]
             {
@@ -181,16 +183,16 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                 try
                 {
                     Keire::ReplayRecordRequest request;
-                    request.Path = m_ReplayPath;
-                    request.Profile = m_ReplayPerformanceProfile ? Keire::ReplayProfile::PerformanceCapture
-                                                                 : Keire::ReplayProfile::StrictVerified;
+                    request.Path = replayState.Path;
+                    request.Profile = replayState.PerformanceProfile ? Keire::ReplayProfile::PerformanceCapture
+                                                                     : Keire::ReplayProfile::StrictVerified;
                     request.Fingerprints = fingerprints();
                     replay->BeginRecording(std::move(request));
-                    m_ReplayActionStatus = "Recording started.";
+                    replayState.ActionStatus = "Recording started.";
                 }
                 catch (const std::exception& error)
                 {
-                    m_ReplayActionStatus = error.what();
+                    replayState.ActionStatus = error.what();
                 }
             }
             ui.SameLine();
@@ -198,12 +200,12 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
             {
                 try
                 {
-                    replay->BeginPlayback({m_ReplayPath, fingerprints(), false});
-                    m_ReplayActionStatus = "Playback started.";
+                    replay->BeginPlayback({replayState.Path, fingerprints(), false});
+                    replayState.ActionStatus = "Playback started.";
                 }
                 catch (const std::exception& error)
                 {
-                    m_ReplayActionStatus = error.what();
+                    replayState.ActionStatus = error.what();
                 }
             }
             ui.SameLine();
@@ -211,12 +213,12 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
             {
                 try
                 {
-                    replay->BeginPlayback({m_ReplayPath, fingerprints(), true});
-                    m_ReplayActionStatus = "Verification started.";
+                    replay->BeginPlayback({replayState.Path, fingerprints(), true});
+                    replayState.ActionStatus = "Verification started.";
                 }
                 catch (const std::exception& error)
                 {
-                    m_ReplayActionStatus = error.what();
+                    replayState.ActionStatus = error.what();
                 }
             }
             ui.SameLine();
@@ -225,23 +227,23 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                 try
                 {
                     replay->Stop();
-                    m_ReplayActionStatus = "Replay session stopped.";
+                    replayState.ActionStatus = "Replay session stopped.";
                 }
                 catch (const std::exception& error)
                 {
-                    m_ReplayActionStatus = error.what();
+                    replayState.ActionStatus = error.what();
                 }
             }
             const bool paused = status.State == Keire::ReplaySessionState::Paused;
-            const auto runReplayAction = [this](auto&& action)
+            const auto runReplayAction = [&replayState](auto&& action)
             {
                 try
                 {
-                    m_ReplayActionStatus = action();
+                    replayState.ActionStatus = action();
                 }
                 catch (const std::exception& error)
                 {
-                    m_ReplayActionStatus = error.what();
+                    replayState.ActionStatus = error.what();
                 }
             };
             const bool canTogglePause = KeireEditor::Detail::CanToggleReplayPause(status.State);
@@ -270,7 +272,7 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                         });
                 }
             }
-            (void)ui.DragInteger("Seek tick", m_ReplaySeekTick, 1.0, 0);
+            (void)ui.DragInteger("Seek tick", replayState.SeekTick, 1.0, 0);
             ui.SameLine();
             const bool canSeek = KeireEditor::Detail::CanSeekReplay(status.State);
             if (auto disabled = ui.BeginDisabled(!canSeek); disabled)
@@ -280,7 +282,7 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                     runReplayAction(
                         [&]
                         {
-                            return replay->Seek(static_cast<std::uint64_t>(m_ReplaySeekTick))
+                            return replay->Seek(static_cast<std::uint64_t>(replayState.SeekTick))
                                        ? "Checkpoint restored."
                                        : "No checkpoint is available for that tick.";
                         });
@@ -291,8 +293,8 @@ void EditorWorkspaceLayer::DrawArchitectureDashboard(Keire::UiFrame& ui)
                                                   status.Divergence->Message);
             if (!status.Diagnostic.empty())
                 ui.TextColored(m_Theme.Warning, status.Diagnostic);
-            if (!m_ReplayActionStatus.empty())
-                ui.Text(m_ReplayActionStatus);
+            if (!replayState.ActionStatus.empty())
+                ui.Text(replayState.ActionStatus);
         }
     }
 }

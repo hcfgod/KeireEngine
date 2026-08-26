@@ -9,6 +9,7 @@ for lifecycle, validation, and failure behavior; this is a navigation aid, not a
 | --- | --- |
 | Gameplay component | `Behaviour` plus `[StableComponentId]` |
 | Inspector field | `[SerializeField]`, `[StableFieldId]`, range/label/header attributes |
+| Reference graph | Field `[SerializeReference]`; concrete type `[Serializable]` plus `[StableSerializedTypeId]` |
 | Enable state | `Behaviour.Enabled`, `Entity.Active`, `Entity.ActiveInHierarchy` |
 | Lifecycle | `Awake`, `OnEnable`, `Start`, `FixedUpdate`, `Update`, `LateUpdate`, `OnDisable`, `OnDestroy` |
 | Reload | `OnBeforeReload`, `OnAfterReload`, `[HotReloadState]`, `LifetimeToken` |

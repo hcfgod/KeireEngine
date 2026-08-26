@@ -19,6 +19,35 @@ SDL_shadercross/DXC/SPIR-V license and notice files.
 Asset-backed rendered tests additionally cover custom indexed geometry and a real material/shader/Texture2D pipeline;
 packaging cooks the Sandbox dependency graph and runs `KeireRuntime` against the packaged catalog.
 
+Renderer lifecycle acceptance uses real rendered paths in addition to focused contracts. On a graphics-capable Windows
+host, `Scripts/Windows/test-render-device-loss.ps1` stages the Debug runtime as an isolated package, cooks all Sandbox
+build scenes, injects loss while the second scene loads, then runs the real Editor `--smoke-play` window/update/input
+loop through recovery. Both JSON reports are removed before execution and must match schema, build commit,
+configuration, recovery generation, exactly-one retry, and no-touch-lost-generation assertions. Release and Dist never
+contain these injection options. `Scripts/Windows/render-benchmark.ps1` runs the Release runtime with VSync on and off,
+using 300 warm-up and 2,000 measured frames; it rejects stale/missing artifacts, wrong identity or presentation mode,
+and non-monotonic frame IDs before publishing median/p95/p99 results beneath ignored `Build/Benchmarks` output.
+
+### Render benchmark evidence schema
+
+The benchmark publishes schema-1 JSON for each presentation mode and a schema-1 `render-matrix.json` that contains both
+runs. Each run must identify the workload (`warmupFrames=300`, `measuredFrames=2000`), presentation mode, and these
+evidence groups:
+
+- `build`: version, Git commit, dirty-worktree flag, Release configuration, compiler, platform, and architecture;
+- `hardware`: operating-system description/version, CPU model, logical processor count, physical memory, renderer
+  backend, GPU adapter, driver name/version/information, and device generation;
+- `pipeline`: accepted frame bound, frames-in-flight high-water mark, and renderer-queue high-water mark;
+- `summary`: median, p95, and p99 for owner update, capture, admission wait, queue delay, render CPU, GPU retirement,
+  and submit-to-present latency; and
+- `timelines`: exactly 2,000 consecutive frame IDs with those same finite, non-negative measurements plus the
+  outstanding-frame count observed at admission.
+
+The launcher compares the recorded build identity and dirty flag with the invoking checkout, requires both VSync and
+immediate runs, and rejects a frame or high-water count outside the configured 1–3 frame bound. A JSON file merely
+existing under `Build/Benchmarks` is not evidence: only a launcher-completed matrix from named graphics hardware is a
+passing characterization.
+
 Input changes additionally run canonical schema/import tests, an SDL-dummy outer-frame keyboard action test, cursor
 focus restoration, public dependency isolation/`KEIRE_API` assertions, and headless UI facade tests. Packages must
 contain the complete `samples/KeireSandbox` project; the staged asset tool imports its input and scene assets before
@@ -378,6 +407,44 @@ entrypoint. A bundled
 stage and an extracted archive copy are both validated before publication. The native editor installer consumes the
 backward-compatible but editor-only package; the standalone Hub installer consumes only this independent Hub stage.
 
+A Dist Hub archive is not accepted merely because `package-hub` emitted a file. The target-platform release sequence
+first runs the normal Debug test launcher (including `KeireHubTests` and the platform's package/installer regression
+harnesses), then `package-hub`, and finally `package-hub-installer` where a native installer is supported. Retain the
+validated stage, extracted-archive check, `hub-package.json`, archive checksum, native-installer checksum, hidden
+`--verify-installation` result, and exact command output as one evidence set. A Windows result does not satisfy Linux or
+macOS Hub package and native-installer gates; each artifact is built and validated on its target operating system.
+
+## Windows Installer Release Gate
+
+Keep transaction testing separate from architecture-specific Dist packaging. The Debug worker and actual-NSIS
+fixtures exercise both products with custom roots, interruptions, drift, unsafe links, and unowned nested
+`Config`, `Docs`, and `Samples` content. The normal Windows test launcher runs the Editor and Hub worker/NSIS matrices
+first and stops on the first failure; only then does it run the editor and Hub distribution-package contract gates:
+
+```powershell
+./Scripts/project.ps1 test -Generator ninja -Configuration Debug -Architecture x86_64 -Toolset msc
+```
+
+After that gate passes, build both native installers. Each command independently builds its product's Dist stage,
+rejects a worker containing the test-only interruption seam, executes the staged real executable's hidden
+`--verify-installation` path, validates the exact package inventory, and only then compiles the NSIS shell:
+
+```powershell
+./Scripts/project.ps1 package-installer -Generator ninja -Architecture x86_64 -Toolset msc
+./Scripts/project.ps1 package-hub-installer -Generator ninja -Architecture x86_64 -Toolset msc
+```
+
+Do not make an ARM64 or other Dist package recursively build the x86_64 Debug fixtures. For a focused transaction
+rerun after those Debug targets already exist, use `Scripts/Tests/test-installer-windows.ps1` followed by
+`Scripts/Tests/test-hub-installer-windows.ps1` before either package command.
+
+The shared worker durably journals `staged`, `backupMoved`, `payloadActivated`, `registrationWritten`, `verified`, and
+`committed` phases. Recovery accepts only a product- and transaction-bound locator whose digest matches that journal;
+cleanup authority is limited to the journal-verified staging, backup, and transaction entries. A failure before commit
+restores both the prior payload and prior registration, and replaying recovery or shutdown is idempotent. Optional
+shortcuts and protocol registration remain outside payload ownership and must either complete before commit or roll
+back to their exact prior values.
+
 ## Standalone Hub Native Installers
 
 Create a native installer without bundling an editor:
@@ -417,16 +484,25 @@ SHA-256 authenticate an artifact but do not replace Authenticode, RPM GPG signin
 catalog-verified Windows installer is rehashed and inspected before automatic handoff. A genuinely absent
 Authenticode signature is accepted only under the disclosed preview policy; a present invalid, revoked, or untrusted
 signature fails closed. Existing 0.4.1 Hubs still carry the older unconditional policy, so crossing that boundary
-requires either an Authenticode-signed bridge/target installer or a documented one-time manual install. The macOS
+  requires either an Authenticode-signed bridge/target installer or a documented one-time manual install. The macOS
 drag-to-Applications DMG remains a
 manual install: the Hub reveals the verified artifact and does not exit as though mounting it had replaced the app. The
 in-Hub flow downloads through the persistent task worker, verifies the catalog size and SHA-256, and waits for a second
 explicit install action only where a transactional native handoff exists. The Windows NSIS update mode accepts only the
 Hub-generated install root, resume token, and process-wait arguments, waits for that process to close, and verifies the
-registered root and ownership marker. Both update and overwrite paths extract and validate a staged payload first,
-journal the owned component swap, retain a rollback backup until commit, recover interrupted transactions, and preserve
-unknown top-level entries outside installer-owned directories. Run `Scripts/Tests/test-hub-installer-windows.ps1` after
-modifying this contract.
+  registered root and ownership marker. Production Windows packages include `KeireInstallWorker`; NSIS is the UI shell,
+  while that first-party worker owns canonical path and reparse validation, staging, exact hash validation, registration,
+  verification, activation, recovery, and removal. A fresh install accepts only an absent or empty ordinary directory. A
+  non-empty destination must have a product-bound JSON receipt and marker whose product ID, random installation ID,
+  version, package-manifest fingerprint, receipt SHA-256, canonical registry root, and exact file inventory agree. A
+  bounded legacy NSIS path migrates only complete marker-and-registration-bound installations created before receipts.
+  The active payload and prior registration remain recoverable until optional shell work succeeds and NSIS asks the
+  worker to commit. Interrupted work is rolled back idempotently; uninstall removes only unchanged receipt entries,
+  preserves drift and unknown neighbors at every depth, prunes empty owned directories, and never recursively removes
+  the selected root. Before commit, NSIS runs `bin/KeireHub.exe --verify-installation` with a 30-second bound. This hidden
+  real-executable path validates the exact Hub package manifest and every inventoried resource before application
+  construction, without preferences, projects, windows, singleton activation, or network. Run
+  `Scripts/Tests/test-hub-installer-windows.ps1` after modifying this contract.
 
 ### Development preview retention
 
@@ -462,12 +538,25 @@ bash Scripts/project.sh package-installer --generator ninja --toolset clang
 
 Run it on every release OS; installers are never cross-produced. Windows compiles
 `Installer/Windows/KeireEditor.nsi` with NSIS 3 and emits a per-user setup executable. Its wizard presents the license,
-optional shortcuts, an editable destination, and launch-on-finish. The stable uninstall registration supports upgrades,
-and removal requires both Kéire's registry ownership and installation marker before recursively deleting the dedicated
-installation directory. The finish action, uninstall-registration icon, Start Menu shortcut, and optional desktop
+  optional shortcuts, an editable destination, and launch-on-finish. The stable uninstall registration supports upgrades.
+  As with Hub, production NSIS delegates path validation and mutation to `KeireInstallWorker`. A fresh install accepts only
+  an absent or empty ordinary directory; a non-empty destination requires an exact Editor receipt, marker, canonical
+  product/uninstall registration, and reparse-free inventory. Replacements are staged beside the destination, validated
+  by size and SHA-256, journaled, and retained with the previous registration until shell shortcuts succeed and the worker
+  commits. Recovery is idempotent after interruption at any durable phase. Uninstall revalidates each receipt entry at its
+  mutation boundary, preserves modified and unrelated files at any depth, prunes only empty owned directories, and never
+  recursively removes a custom root. Before commit, NSIS runs `bin/KeireClient.exe --verify-installation` with a
+  30-second bound. This hidden real-executable path validates the exact Editor package manifest and every inventoried
+  dependency before application construction, without configuration/project loading, windows, or network. The finish
+  action, uninstall-registration icon,
+Start Menu shortcut, and optional desktop
 shortcut all target the editor executable; the installer contains and owns no Hub files or shortcuts. Set
-`KEIRE_WINDOWS_SIGNING_CERT_SHA1` to an Authenticode certificate thumbprint to sign and
+  `KEIRE_WINDOWS_SIGNING_CERT_SHA1` to an Authenticode certificate thumbprint to sign and
 verify the final setup executable. `KEIRE_WINDOWS_TIMESTAMP_URL` overrides the default RFC 3161 timestamp service.
+
+The package scripts reject a Dist worker containing the Debug/DebugASan-only interruption seam. Never enable
+`KEIRE_INSTALL_WORKER_FAULT_INJECTION` in Release or Dist output. Installer runtime tests use only test-capable builds;
+production packages must not contain the `KEIRE_INSTALL_WORKER_INTERRUPT_AFTER` environment-variable string.
 
 macOS uses the platform `hdiutil`, `sips`, and `iconutil` tools to create a self-contained Editor application in a
 drag-to-Applications DMG. Set `KEIRE_MACOS_SIGNING_IDENTITY` to Developer ID Application identity text to enable hardened

@@ -5,6 +5,7 @@
 #include "KeireHub/HubLocalContent.h"
 #include "KeireHub/HubPathMigration.h"
 
+#include "KeireHubRuntimeInternal/InstallTransactionInternal.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireProjectModules/SourceModulePack.h"
 
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -33,13 +35,37 @@ namespace
         Keire::ApplicationCommandLineOption{"--build-support <platform> <architecture>",
                                             "Open the matching editor's Build Support components."},
     };
+
+    std::optional<int> HandleHubCommandWithoutApplication(const Keire::ApplicationCommandLineArguments& arguments)
+    {
+        constexpr std::string_view command = "--verify-installation";
+        if (arguments.Size() == 2 && arguments[1] == command)
+        {
+            const auto executable =
+                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).lexically_normal();
+            const auto root = executable.parent_path().parent_path();
+            auto verified = KeireHub::Detail::ReadInstallerPackageManifest(root, KeireHub::InstallProduct::Hub);
+            if (!verified)
+            {
+                throw std::runtime_error("Hub installation verification failed: " + verified.Error().Message + " " +
+                                         verified.Error().AffectedItem + " " + verified.Error().TechnicalDetails);
+            }
+            return 0;
+        }
+        for (std::size_t index = 1; index < arguments.Size(); ++index)
+        {
+            if (arguments[index] == command)
+                throw Keire::CommandLineError("--verify-installation must be used alone.");
+        }
+        return std::nullopt;
+    }
 } // namespace
 
 namespace Keire
 {
     ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
     {
-        return {"[--smoke-ui] [activation action]", HubOptions};
+        return {"[--smoke-ui] [activation action]", HubOptions, HandleHubCommandWithoutApplication};
     }
 
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)

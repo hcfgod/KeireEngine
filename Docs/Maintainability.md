@@ -28,29 +28,40 @@ coverage; line movement alone is not a useful refactor.
 
 The highest-value seams are:
 
-- `ScriptSystem.cpp`: runtime hosting, native-call adapters, reload transactions, and managed jobs. Managed build workspace
-  generation, diagnostics parsing, source fingerprinting, and atomic text publication live behind the private
-  `ManagedBuildWorkspace` boundary; managed reflection state and metadata parsing live behind `ManagedReflection`;
-  the ECS lifecycle adapter lives behind `ManagedBehaviourComponent` and a weak value-only callback table.
+- managed scripting: `ScriptSystem.cpp` remains the public facade while lifecycle, reload transactions, Behaviour
+  integration, runtime animation, runtime foundations, and runtime services live in focused `ScriptSystem*`
+  implementation units behind `ScriptSystemInternal`. Managed build workspace generation, diagnostics parsing, source
+  fingerprinting, and atomic text publication remain behind the private `ManagedBuildWorkspace` boundary; managed
+  reflection state and metadata parsing remain behind `ManagedReflection`.
 - `MaterialGraph.cpp`: schema/validation, lowering, shader emission, and asset import/publication. The immutable node
   descriptor catalog and its lookup/type-ID contract live in `MaterialGraphNodeCatalog.cpp`; deterministic generated
   shader manifest assembly lives in `MaterialGraphManifest.cpp`. Both use private boundaries behind the existing typed
   material-graph API.
 - renderer recording: `RenderSceneRecording.cpp` now stays below the default ceiling and owns surface draw preparation;
   frame execution, skinning, shadow/sample-depth recording, and GPU VFX preparation/pipelines/drawing are separate units.
-- `ShaderGraph.cpp`: compilation and shader emission remain ratcheted while built-in and function-call construction is
-  isolated in `ShaderGraphNodes.cpp`.
-- `VfxAssets.cpp` and `VfxSystem.cpp`: encoding/import, compilation, CPU simulation, and GPU publication. Reusable JSON
-  encoding and strict decoding of asset IDs, vectors, matrices, colors, curves, and gradients now live behind the
-  private `VfxAssetValueCodec` boundary; effect construction/residency and checkpoint byte encoding have dedicated
-  private units.
+- animation and renderable assets: asset codecs/registrations, graph authoring and validation, runtime animator
+  evaluation, model import, binary renderable codecs, and texture import are separate implementation units. The public
+  `AnimationSystem` and rendering-asset APIs remain unchanged.
+- Shader Graph: `ShaderGraph.cpp` owns validation, analysis, and function expansion; source codec, compiler utilities,
+  expression lowering, HLSL assembly, public compilation, instances, and importers live in focused `ShaderGraph*`
+  implementation units. Compiler-only contracts remain private behind `ShaderGraphCompilerInternal`, while the public
+  Shader Graph API remains unchanged.
+- VFX assets: `VfxAssets.cpp` owns deterministic schema encoding, decoding, import, and canonical IR bytes;
+  `VfxAssetGraph.cpp`, `VfxAssetLowering.cpp`, `VfxAssetValidation.cpp`, and `VfxAssetCompilation.cpp` own graph
+  migration, lowering and Portable Custom HLSL, validation, and backend compilation respectively. Their shared
+  compiler contract remains private behind `VfxAssetCompilerInternal`; reusable JSON value codecs remain behind
+  `VfxAssetValueCodec`. Runtime effect construction, CPU simulation, GPU publication, and checkpoint encoding retain
+  their existing focused units and public APIs.
 - `RuntimeServices.cpp` and `SceneRuntime.cpp`: service orchestration and scene control stay readable by keeping audio
   implementation state and scene implementation state in private internal headers, with scene VFX, physics, and
   procedural animation advance/publication in dedicated implementation units.
 - editor asset/VFX panels: document commands, background operations, canvas interaction, and presentation. Editor file
   validation/diagnostics use `EditorAssetFileService`; asset inspection, VFX workspace operations, and architecture
   dashboard presentation have dedicated implementation units; VFX canvas node construction, stable IDs, colors, and
-  compatibility rules use the typed `VfxEffectPanelModel` boundary.
+  compatibility rules use the typed `VfxEffectPanelModel` boundary. Workspace asset-operation orchestration, asset
+  authoring, and graph-document persistence now live in separate `EditorWorkspace*` implementation units while
+  `EditorWorkspaceLayer` remains the owner-thread composition root. Its document/workspace coordinator uniquely owns
+  the primary document objects and exposes owner-checked references; the composition root does not co-own them.
 
 When a unit falls below the default ceiling, remove its exception in the same change. Do not increase a ceiling to
 make a check pass.

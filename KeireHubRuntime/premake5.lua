@@ -12,6 +12,9 @@ project(HubRuntimeTarget)
     filter { "system:windows", "toolset:msc" }
         buildoptions { "/FIKeireHubRuntime/HubRuntimePch.h" }
 
+    filter "configurations:Debug or DebugASan"
+        defines { "KEIRE_INSTALL_TRANSACTION_TESTING" }
+
     filter { "system:linux or macosx" }
         buildoptions { "-include KeireHubRuntime/HubRuntimePch.h" }
 

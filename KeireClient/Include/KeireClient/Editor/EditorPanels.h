@@ -286,6 +286,7 @@ namespace KeireEditor
         void ClearSceneState() noexcept
         {
             m_ComponentExpansion.clear();
+            m_ManagedGraphFocus.clear();
             m_AssetInspector->ClearState();
             m_EntityNameTarget = {};
             m_EntityNameDraft.clear();
@@ -315,6 +316,7 @@ namespace KeireEditor
         std::unique_ptr<AssetPicker> m_AssetPicker;
         Keire::UiPanelRegistration m_Registration;
         std::unordered_map<std::string, bool> m_ComponentExpansion;
+        std::unordered_map<std::string, std::uint32_t> m_ManagedGraphFocus;
         std::optional<ComponentClipboard> m_ComponentClipboard;
         std::string m_ComponentSearch;
         std::uint64_t m_EditSerial = 0;

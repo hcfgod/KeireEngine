@@ -11,12 +11,14 @@ project(ProjectConfig.TESTS_TARGET)
         "Source/**.c",
         "Source/**.cc",
         "Source/**.cpp",
-        "Source/**.cxx"
+        "Source/**.cxx",
+        "../KeireRuntime/Source/RuntimeUiInput.cpp"
     }
 
     includedirs
     {
         "Include",
+        "../KeireRuntime/Include",
         "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 

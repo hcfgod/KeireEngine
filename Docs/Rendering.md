@@ -124,13 +124,53 @@ renderer. UI-only applications therefore require no migration.
 ## Frame Contract
 
 Viewport layout happens before GPU recording. Scene and Game panels request pixel extents from their logical size and
-display scale, then submit a `SceneRenderRequest` to an opaque `RenderView`. The renderer applies pending resizes at a
-safe boundary, then a bounded dedicated submission thread records scene/grid passes, resolves multisampling,
-composites UI, acquires the swapchain, and submits one coordinated command buffer. Each surface exchanges two display
-textures, so UI consumes a stable front image while ACES writes the back image. A fence retires replaced textures,
-buffers, instance data, light lists, and pipelines without a device-idle wait during normal resize churn.
-Backend-only test hooks deterministically exercise device-loss propagation, bounded queue saturation, and
-resize/minimize/restore transitions without exposing fault injection through the supported renderer API.
+display scale, then retain owner-only pending requests for an opaque `RenderView`. `EndFrame` first reserves one of the
+configured 1–3 total accepted frame slots (default 2), then snapshots scene, VFX, runtime UI, and normalized ImGui data
+into an immutable packet and enqueues it without drops. Capture does not begin while admission is blocked. `Flush()` is
+an explicit owner-thread synchronous boundary; ordinary `EndFrame` returns after admission, capture, and enqueue.
+
+The render thread exclusively creates, uses, and releases GPU objects and mutable renderer caches. For depth `N`, each
+surface epoch owns `N` worksets and `N+1` final outputs: one published image plus one writer per accepted slot. Resize
+and device epochs remain leased until their packets and fences retire. A fence retires replaced textures, buffers,
+instance data, light lists, and pipelines without a device-idle wait during normal resize churn. Frame-ID timelines
+publish owner update, capture, admission, queue, render CPU, GPU retirement, and submit-to-present latency alongside
+outstanding/high-water statistics.
+
+Device loss pauses packet acceptance and simulation/managed/UI work at the Application owner safe boundary while
+window and exit events continue. Recovery preserves the selected backend, abandons the lost generation without idle,
+release, or cancel calls, recreates mandatory device/surface/UI resources on the render thread, and retries the
+interrupted immutable packet once. The default policy permits an immediate attempt and one attempt after 250 ms;
+attempt limits are configurable from 0–3 and reset only after 60 stable seconds plus 120 retired frames. Exhaustion
+latches the first terminal failure. Healthy close drains accepted work; loss/failure close cancels unstarted work and
+is idempotent. Test-only fault hooks are compiled only into test-capable configurations and are absent from Release and
+Dist binaries.
+
+The device lifecycle is explicit: `Running` transitions to `RecoveryPending` when a loss is classified,
+`RecoveryPending` waits for the owner safe-boundary pause, and `Recovering` owns recreation. A successful candidate
+returns to `Running`; an exhausted or non-recoverable attempt enters `Failed`. Shutdown transitions any live state
+through `Closing` to `Closed`. A loss first observed in `Closing` or `Closed` never starts recovery. `Close()` is
+`noexcept` and repeatable: healthy shutdown drains every accepted frame, while failed/lost-device shutdown cancels
+unstarted packets, abandons unusable handles without a GPU-idle wait, and preserves the first terminal diagnostic.
+Successful recovery resumes the same runtime or Play session without advancing simulation during the pause; only the
+interrupted immutable packet is retried, and only once. Exhausted recovery terminates Play safely before final close.
+
+One request may carry a primary scene plus up to 63 ordered `SceneRenderContribution` values. The primary scene owns
+camera, environment, global material parameters, clear color, and directional-light selection; every contribution owns
+its baked-lighting associations and adds geometry, local lights, probes, and independent CPU/GPU VFX snapshots.
+Opaque and transparent preparation is global, with contribution order then entity ID providing deterministic ties.
+Submitting a second independent request to the same surface remains an error, preserving one clear/tone-map/present
+operation per surface. Runtime UI submissions append in call order until the frame ends, so later additive-scene
+presentations draw above earlier ones; a null tree contributes nothing and does not clear prior commands.
+
+Runtime contribution order is session load order. Persistent sessions retain their positions, while an unloaded and
+later reloaded session appends. The active session supplies the primary camera, clear mode, environment, and the
+lowest-entity-ID qualifying directional light. If it has no camera, the first loaded session with a camera becomes the
+primary; if no loaded session has one, the surface renders only the clear result and UI. If the active session has no
+qualifying directional light, selection falls back to the first light in session/entity order. Unloaded sessions are
+absent from every packet captured after the lifecycle commit, while already accepted packets retain generation leases
+until retirement. Pointer input visits presentation trees from newest to oldest until handled; keyboard and text input
+go only to the focused presentation of the active session. A session with no presentation still contributes render
+content.
 
 Material dependencies are validated once per material, frame, and surface sample configuration; all draws in that
 configuration reuse the immutable resolved binding. CPU-simulated VFX billboard and ribbon vertices are prepared before

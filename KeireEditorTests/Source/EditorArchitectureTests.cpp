@@ -200,6 +200,7 @@ namespace
         };
         return result;
     }
+
 } // namespace
 
 TEST_CASE("runtime game UI is composited only into Game view")

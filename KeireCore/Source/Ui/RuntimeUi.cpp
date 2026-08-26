@@ -1,6 +1,7 @@
 #include "Keire/Ui/RuntimeUi.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <deque>
 #include <limits>
@@ -11,6 +12,11 @@ namespace Keire
 {
     namespace
     {
+        [[nodiscard]] constexpr std::size_t PointerButtonIndex(const RuntimeUiPointerButton button) noexcept
+        {
+            return static_cast<std::size_t>(button);
+        }
+
         [[nodiscard]] bool Finite(const float value) noexcept { return std::isfinite(value); }
 
         void ValidateInsets(const RuntimeUiInsets& value)
@@ -492,7 +498,7 @@ namespace Keire
         std::vector<RuntimeUiDrawCommand> Draws;
         std::deque<RuntimeUiEvent> Events;
         RuntimeUiElementId Hovered;
-        RuntimeUiElementId Pressed;
+        std::array<RuntimeUiElementId, 3> Pressed;
         RuntimeUiElementId Focused;
         std::uint64_t TreeGeneration = 1;
         std::size_t VisibleElements = 0;
@@ -561,8 +567,9 @@ namespace Keire
             m_Impl->Focused = {};
         if (m_Impl->Hovered == element)
             m_Impl->Hovered = {};
-        if (m_Impl->Pressed == element)
-            m_Impl->Pressed = {};
+        for (auto& pressed : m_Impl->Pressed)
+            if (pressed == element)
+                pressed = {};
         auto& node = m_Impl->Nodes[*index];
         node.Alive = false;
         node.State = {};
@@ -592,7 +599,7 @@ namespace Keire
         m_Impl->Events.clear();
         m_Impl->Focused = {};
         m_Impl->Hovered = {};
-        m_Impl->Pressed = {};
+        m_Impl->Pressed.fill({});
         ++m_Impl->TreeGeneration;
     }
 
@@ -776,14 +783,37 @@ namespace Keire
         }
     }
 
-    void RuntimeUiTree::PointerButton(const float x, const float y, const RuntimeUiPointerButton button,
+    void RuntimeUiTree::PointerLeave()
+    {
+        if (const auto old = m_Impl->Index(m_Impl->Hovered))
+        {
+            m_Impl->Nodes[*old].State.Hovered = false;
+            m_Impl->Queue({.Type = RuntimeUiEventType::PointerExit, .Target = m_Impl->Hovered});
+        }
+        m_Impl->Hovered = {};
+    }
+
+    bool RuntimeUiTree::PointerButton(const float x, const float y, const RuntimeUiPointerButton button,
                                       const bool pressed)
     {
+        if (button > RuntimeUiPointerButton::Middle)
+            throw std::invalid_argument("Runtime UI pointer button is invalid.");
         PointerMove(x, y);
         const auto target = m_Impl->Hovered;
+        const auto buttonIndex = PointerButtonIndex(button);
+        auto& pressedElement = m_Impl->Pressed[buttonIndex];
+        const auto pressedByAnotherButton = [this, buttonIndex](const RuntimeUiElementId element)
+        {
+            for (std::size_t index = 0; index < m_Impl->Pressed.size(); ++index)
+                if (index != buttonIndex && m_Impl->Pressed[index] == element)
+                    return true;
+            return false;
+        };
         if (pressed)
         {
-            m_Impl->Pressed = target;
+            if (const auto previous = m_Impl->Index(pressedElement); previous && pressedElement != target)
+                m_Impl->Nodes[*previous].State.Pressed = pressedByAnotherButton(pressedElement);
+            pressedElement = target;
             if (const auto index = m_Impl->Index(target))
             {
                 m_Impl->Nodes[*index].State.Pressed = true;
@@ -793,13 +823,17 @@ namespace Keire
                                .PointerX = x,
                                .PointerY = y,
                                .Button = button});
+                return true;
             }
-            return;
+            return false;
         }
-        const auto released = m_Impl->Pressed;
+        const auto released = pressedElement;
+        pressedElement = {};
+        bool handled = false;
         if (const auto index = m_Impl->Index(released))
         {
-            m_Impl->Nodes[*index].State.Pressed = false;
+            handled = true;
+            m_Impl->Nodes[*index].State.Pressed = pressedByAnotherButton(released);
             m_Impl->Queue({.Type = RuntimeUiEventType::PointerUp,
                            .Target = released,
                            .PointerX = x,
@@ -812,7 +846,28 @@ namespace Keire
                                .PointerY = y,
                                .Button = button});
         }
-        m_Impl->Pressed = {};
+        return handled;
+    }
+
+    bool RuntimeUiTree::CancelPointerButton(const RuntimeUiPointerButton button) noexcept
+    {
+        if (button > RuntimeUiPointerButton::Middle)
+            return false;
+        auto& pressedElement = m_Impl->Pressed[PointerButtonIndex(button)];
+        const auto released = std::exchange(pressedElement, {});
+        const auto index = m_Impl->Index(released);
+        if (!index)
+            return false;
+        m_Impl->Nodes[*index].State.Pressed = std::ranges::any_of(
+            m_Impl->Pressed, [released](const RuntimeUiElementId candidate) { return candidate == released; });
+        try
+        {
+            m_Impl->Queue({.Type = RuntimeUiEventType::PointerUp, .Target = released, .Button = button});
+        }
+        catch (...)
+        {
+        }
+        return true;
     }
 
     void RuntimeUiTree::Navigate(const RuntimeUiNavigation navigation)

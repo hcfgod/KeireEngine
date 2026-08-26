@@ -10,6 +10,7 @@
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorManagedRuntimeCoordinator.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
@@ -294,7 +295,7 @@ void EditorWorkspaceLayer::AddScriptToEntity(const Keire::EntityId entity, const
                                   build.State == Keire::ManagedBuildState::Compiling ||
                                   build.State == Keire::ManagedBuildState::Publishing;
             if (!building)
-                m_ManagedBuildDebounceSeconds = 0.0;
+                m_ManagedRuntimeCoordinator->ScheduleBuild(0.0);
             m_SceneDocument->SetStatus("Queued " + scriptName + " for attachment after managed compilation.");
             return;
         }

@@ -22,6 +22,15 @@ namespace KeireEditor
         std::string Diagnostic;
     };
 
+    struct ManagedDataGraphPropertyState final
+    {
+        bool Serialized = false;
+        Keire::ManagedReferenceGraph Value;
+        std::string RawValue;
+        std::string Diagnostic;
+        std::optional<Keire::ManagedSerializationDiagnostic> StructuredDiagnostic;
+    };
+
     class ManagedDataDocument final
     {
       public:
@@ -54,8 +63,12 @@ namespace KeireEditor
 
         [[nodiscard]] ManagedDataPropertyState
         Property(const Keire::ManagedAssetPropertyDescriptor& property) const noexcept;
+        [[nodiscard]] ManagedDataGraphPropertyState
+        GraphProperty(const Keire::ManagedAssetPropertyDescriptor& property) const noexcept;
         bool SetProperty(const Keire::ManagedAssetPropertyDescriptor& property, Keire::ManagedAssetValueNode value,
                          std::string_view undoName = "Edit Managed Data");
+        bool SetGraphProperty(const Keire::ManagedAssetPropertyDescriptor& property, Keire::ManagedReferenceGraph value,
+                              std::string_view undoName = "Edit Managed Reference Graph");
         bool ClearProperty(const Keire::ManagedAssetPropertyDescriptor& property,
                            std::string_view undoName = "Use Managed Default");
 
@@ -77,11 +90,13 @@ namespace KeireEditor
                               std::span<const Keire::ManagedAssetTypeDescriptor> types) noexcept;
 
       private:
+        void ValidateReloadCandidate(const Keire::ManagedDataDefinition& definition) const;
         void RebuildDependencies(Keire::ManagedDataDefinition& definition) const;
 
         Specification m_Specification;
         AssetDocumentHost<Keire::ManagedDataDefinition> m_Host;
         std::optional<Keire::ManagedAssetTypeDescriptor> m_Descriptor;
+        std::optional<Keire::ManagedSerializationDiagnostic> m_RejectedGraphDiagnostic;
         std::string m_Diagnostic;
         bool m_SuppressPreview = false;
     };

@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorPanels.h"
+#include "KeireClient/Editor/EditorReplayProfilingCoordinator.h"
 #include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
 #include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
@@ -739,27 +740,11 @@ void EditorWorkspaceLayer::StartManagedBuild()
     (void)scripts->StartBuild(std::move(request));
 }
 
-void EditorWorkspaceLayer::UpdateManagedBuild(const Keire::Time& time)
+void EditorWorkspaceLayer::UpdateManagedBuild()
 {
     const auto scripts = Owner().Scripts();
     if (!scripts)
         return;
-    if (m_ManagedBuildDebounceSeconds >= 0.0)
-    {
-        m_ManagedBuildDebounceSeconds -= time.UnscaledDeltaTime().Seconds();
-        if (m_ManagedBuildDebounceSeconds <= 0.0)
-        {
-            m_ManagedBuildDebounceSeconds = -1.0;
-            try
-            {
-                StartManagedBuild();
-            }
-            catch (const std::exception& error)
-            {
-                ReportError("Managed Build", error.what());
-            }
-        }
-    }
     const auto status = scripts->BuildStatus();
     const bool terminal = status.State == Keire::ManagedBuildState::Succeeded ||
                           status.State == Keire::ManagedBuildState::Failed ||
@@ -885,6 +870,7 @@ void EditorWorkspaceLayer::UpdateManagedBuild(const Keire::Time& time)
 
 void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
 {
+    auto& profilerState = m_ReplayProfilingCoordinator->Profiler();
     if (auto panel = ui.BeginPanel(m_Profiler); panel)
     {
         const auto profiler = Owner().GetProfiler();
@@ -897,33 +883,33 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
 
         const auto latestSummary = profiler->LatestSummary();
         constexpr double refreshIntervalMicroseconds = 100'000.0;
-        if (!m_ProfilerPaused &&
-            (m_CachedProfileFrame.Sequence == 0 ||
-             latestSummary.StartMicroseconds - m_CachedProfileFrame.StartMicroseconds >= refreshIntervalMicroseconds))
+        if (!profilerState.Paused && (profilerState.CachedFrame.Sequence == 0 ||
+                                      latestSummary.StartMicroseconds - profilerState.CachedFrame.StartMicroseconds >=
+                                          refreshIntervalMicroseconds))
         {
-            m_CachedProfileFrame = profiler->LatestFrame();
-            m_CachedProfileHistory = profiler->RecentSummaries(240);
+            profilerState.CachedFrame = profiler->LatestFrame();
+            profilerState.CachedHistory = profiler->RecentSummaries(240);
         }
-        const auto& liveFrame = m_CachedProfileFrame;
-        const auto& liveHistory = m_CachedProfileHistory;
-        if (ui.Checkbox("Freeze capture", m_ProfilerPaused))
+        const auto& liveFrame = profilerState.CachedFrame;
+        const auto& liveHistory = profilerState.CachedHistory;
+        if (ui.Checkbox("Freeze capture", profilerState.Paused))
         {
-            if (m_ProfilerPaused)
+            if (profilerState.Paused)
             {
-                m_FrozenProfileFrame = liveFrame;
-                m_FrozenProfileHistory = liveHistory;
+                profilerState.FrozenFrame = liveFrame;
+                profilerState.FrozenHistory = liveHistory;
             }
             else
             {
-                m_FrozenProfileFrame = {};
-                m_FrozenProfileHistory.clear();
+                profilerState.FrozenFrame = {};
+                profilerState.FrozenHistory.clear();
             }
         }
         ui.SameLine();
         (void)ui.Checkbox("Viewport FPS overlay", m_ShowPerformanceOverlay);
 
-        const auto& frame = m_ProfilerPaused ? m_FrozenProfileFrame : liveFrame;
-        const auto& history = m_ProfilerPaused ? m_FrozenProfileHistory : liveHistory;
+        const auto& frame = profilerState.Paused ? profilerState.FrozenFrame : liveFrame;
+        const auto& history = profilerState.Paused ? profilerState.FrozenHistory : liveHistory;
         if (frame.Sequence == 0)
         {
             DrawEmptyState(ui, "Waiting for capture", "The profiler has not completed an application frame yet.",
@@ -931,9 +917,9 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             return;
         }
 
-        if (m_ProfilerPresentation.FrameSequence != frame.Sequence)
+        if (profilerState.Presentation.FrameSequence != frame.Sequence)
         {
-            auto presentation = ProfilerPresentationCache{};
+            auto presentation = KeireEditor::EditorProfilerPresentation{};
             presentation.FrameSequence = frame.Sequence;
             std::vector<double> frameTimes;
             frameTimes.reserve(history.size());
@@ -1069,12 +1055,12 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                     presentation.ManagedCallbackLines.push_back(std::move(line));
                 }
             }
-            m_ProfilerPresentation = std::move(presentation);
+            profilerState.Presentation = std::move(presentation);
         }
-        const auto& presentation = m_ProfilerPresentation;
+        const auto& presentation = profilerState.Presentation;
 
-        ui.TextColored(m_ProfilerPaused ? m_Theme.Warning : m_Theme.Accent,
-                       m_ProfilerPaused ? "FROZEN PERFORMANCE CAPTURE" : "LIVE PERFORMANCE CAPTURE");
+        ui.TextColored(profilerState.Paused ? m_Theme.Warning : m_Theme.Accent,
+                       profilerState.Paused ? "FROZEN PERFORMANCE CAPTURE" : "LIVE PERFORMANCE CAPTURE");
         ui.Text(presentation.FrameLine);
         ui.TextColored(m_Theme.MutedText, presentation.HistoryLine);
         ui.TextColored(presentation.StutterCount == 0 ? m_Theme.Success : m_Theme.Warning, presentation.TailLine);
@@ -1302,8 +1288,8 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                 constexpr std::size_t compactCallbackRows = 12;
                 if (presentation.ManagedCallbackLines.size() > compactCallbackRows)
                     (void)ui.Checkbox("Show all callback rows###ProfilerShowAllCallbacks",
-                                      m_ProfilerShowAllManagedCallbacks);
-                const auto visibleRows = m_ProfilerShowAllManagedCallbacks
+                                      profilerState.ShowAllManagedCallbacks);
+                const auto visibleRows = profilerState.ShowAllManagedCallbacks
                                              ? presentation.ManagedCallbackLines.size()
                                              : std::min(compactCallbackRows, presentation.ManagedCallbackLines.size());
                 ui.TextColored(m_Theme.MutedText, "Type / lifecycle  |  instances  |  calls  |  average  |  maximum");
@@ -1324,8 +1310,8 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             ui.TextColored(m_Theme.MutedText, "Click any row to copy it.");
             constexpr std::size_t compactHotspotRows = 12;
             if (presentation.OrderedSpans.size() > compactHotspotRows)
-                (void)ui.Checkbox("Show all hotspot rows###ProfilerShowAllHotspots", m_ProfilerShowAllHotspots);
-            const auto visibleRows = m_ProfilerShowAllHotspots
+                (void)ui.Checkbox("Show all hotspot rows###ProfilerShowAllHotspots", profilerState.ShowAllHotspots);
+            const auto visibleRows = profilerState.ShowAllHotspots
                                          ? presentation.OrderedSpans.size()
                                          : std::min(compactHotspotRows, presentation.OrderedSpans.size());
             for (std::size_t index = 0; index < visibleRows; ++index)
@@ -1343,9 +1329,10 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             ui.TextColored(m_Theme.MutedText, "Click any row to copy it.");
             constexpr std::size_t compactCounterRows = 24;
             if (frame.Counters.size() > compactCounterRows)
-                (void)ui.Checkbox("Show all counter rows###ProfilerShowAllCounters", m_ProfilerShowAllCounters);
-            const auto visibleRows =
-                m_ProfilerShowAllCounters ? frame.Counters.size() : std::min(compactCounterRows, frame.Counters.size());
+                (void)ui.Checkbox("Show all counter rows###ProfilerShowAllCounters", profilerState.ShowAllCounters);
+            const auto visibleRows = profilerState.ShowAllCounters
+                                         ? frame.Counters.size()
+                                         : std::min(compactCounterRows, frame.Counters.size());
             for (std::size_t index = 0; index < visibleRows; ++index)
             {
                 const auto& line = presentation.CounterLines[index];

@@ -5,6 +5,7 @@
 #include "KeireInternal/FolderDialogInternal.h"
 #include "KeireInternal/TrayIconInternal.h"
 #include "KeireInternal/WindowChromeInternal.h"
+#include "KeireInternal/WindowFileDialogsInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
@@ -13,6 +14,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -22,27 +24,6 @@
 
 namespace Keire
 {
-    namespace Detail
-    {
-        class OpenFileDialogState final : public RefCounted
-        {
-          public:
-            mutable std::mutex Mutex;
-            OpenFileDialogStatus Status = OpenFileDialogStatus::Pending;
-            std::filesystem::path Path;
-            std::string Error;
-        };
-
-        class SaveFileDialogState final : public RefCounted
-        {
-          public:
-            mutable std::mutex Mutex;
-            SaveFileDialogStatus Status = SaveFileDialogStatus::Pending;
-            std::filesystem::path Path;
-            std::string Error;
-        };
-    } // namespace Detail
-
     namespace
     {
         std::atomic<bool> HasActiveSystem = false;
@@ -113,67 +94,9 @@ namespace Keire
             return error && *error ? std::string(error) : std::string("SDL did not provide a diagnostic");
         }
 
-        [[nodiscard]] std::string Utf8PathString(const std::filesystem::path& path)
-        {
-            const auto value = path.generic_u8string();
-            return {reinterpret_cast<const char*>(value.data()), value.size()};
-        }
-
         std::string BuildWindowErrorMessage(const std::string& operation, const std::string& diagnostic)
         {
             return "Window operation '" + operation + "' failed: " + diagnostic;
-        }
-
-        struct OpenFileDialogRequest final
-        {
-            WeakRef<Detail::OpenFileDialogState> State;
-        };
-
-        struct SaveFileDialogRequest final
-        {
-            WeakRef<Detail::SaveFileDialogState> State;
-        };
-
-        void SDLCALL OpenFileDialogCompleted(void* userData, const char* const* files, int)
-        {
-            std::unique_ptr<OpenFileDialogRequest> request(static_cast<OpenFileDialogRequest*>(userData));
-            const auto state = request->State.Lock();
-            if (!state)
-                return;
-            std::scoped_lock lock(state->Mutex);
-            if (!files)
-            {
-                state->Status = OpenFileDialogStatus::Failed;
-                state->Error = LastSdlError();
-            }
-            else if (!files[0])
-                state->Status = OpenFileDialogStatus::Cancelled;
-            else
-            {
-                state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
-                state->Status = OpenFileDialogStatus::Selected;
-            }
-        }
-
-        void SDLCALL SaveFileDialogCompleted(void* userData, const char* const* files, int)
-        {
-            std::unique_ptr<SaveFileDialogRequest> request(static_cast<SaveFileDialogRequest*>(userData));
-            const auto state = request->State.Lock();
-            if (!state)
-                return;
-            std::scoped_lock lock(state->Mutex);
-            if (!files)
-            {
-                state->Status = SaveFileDialogStatus::Failed;
-                state->Error = LastSdlError();
-            }
-            else if (!files[0])
-                state->Status = SaveFileDialogStatus::Cancelled;
-            else
-            {
-                state->Path = std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(files[0])));
-                state->Status = SaveFileDialogStatus::Selected;
-            }
         }
 
     } // namespace
@@ -204,62 +127,6 @@ namespace Keire
     {
         std::scoped_lock lock(m_State->Mutex);
         return m_State->Error;
-    }
-
-    OpenFileDialogOperation::OpenFileDialogOperation(Ref<Detail::OpenFileDialogState> state) : m_State(std::move(state))
-    {
-    }
-
-    OpenFileDialogOperation::~OpenFileDialogOperation() = default;
-
-    OpenFileDialogStatus OpenFileDialogOperation::Status() const noexcept
-    {
-        std::scoped_lock lock(m_State->Mutex);
-        return m_State->Status;
-    }
-
-    std::filesystem::path OpenFileDialogOperation::SelectedPath() const
-    {
-        std::scoped_lock lock(m_State->Mutex);
-        return m_State->Path;
-    }
-
-    std::string OpenFileDialogOperation::Diagnostic() const
-    {
-        std::scoped_lock lock(m_State->Mutex);
-        return m_State->Error;
-    }
-
-    class SaveFileDialogOperation::Impl final
-    {
-      public:
-        explicit Impl(Ref<Detail::SaveFileDialogState> state) : State(std::move(state)) {}
-        Ref<Detail::SaveFileDialogState> State;
-    };
-
-    SaveFileDialogOperation::SaveFileDialogOperation(std::unique_ptr<Impl> implementation)
-        : m_Impl(std::move(implementation))
-    {
-    }
-
-    SaveFileDialogOperation::~SaveFileDialogOperation() = default;
-
-    SaveFileDialogStatus SaveFileDialogOperation::Status() const noexcept
-    {
-        std::scoped_lock lock(m_Impl->State->Mutex);
-        return m_Impl->State->Status;
-    }
-
-    std::filesystem::path SaveFileDialogOperation::SelectedPath() const
-    {
-        std::scoped_lock lock(m_Impl->State->Mutex);
-        return m_Impl->State->Path;
-    }
-
-    std::string SaveFileDialogOperation::Diagnostic() const
-    {
-        std::scoped_lock lock(m_Impl->State->Mutex);
-        return m_Impl->State->Error;
     }
 
     class SystemTray::Impl final
@@ -492,21 +359,13 @@ namespace Keire
             }
         }
 
-        Ref<Window> CreateWindow(const Ref<Impl>& self, const WindowSpecification& specification)
+        [[nodiscard]] UniqueNativeWindow CreateNativeWindow(const WindowSpecification& specification)
         {
-            RequireOwner("CreateWindow");
-            Detail::ValidateWindowSpecification(specification);
-            DrainDeferredDestruction();
-
             const auto flags = static_cast<SDL_WindowFlags>(Detail::NativeWindowFlags(specification));
-
-            UniqueNativeWindow native(SDL_CreateWindow(specification.Title.c_str(),
-                                                       static_cast<int>(specification.Width),
+            UniqueNativeWindow native(SDL_CreateWindow(specification.Title.c_str(), static_cast<int>(specification.Width),
                                                        static_cast<int>(specification.Height), flags));
             if (!native)
-            {
                 throw WindowError("SDL_CreateWindow", LastSdlError());
-            }
             if (!specification.Icon.empty())
             {
                 const auto icon = Detail::LoadWindowIcon(specification.Icon);
@@ -518,6 +377,15 @@ namespace Keire
                     throw WindowError("SDL_SetWindowIcon", LastSdlError());
             }
             Detail::ConfigureMinimumWindowSize(native.get(), specification);
+            return native;
+        }
+
+        Ref<Window> CreateWindow(const Ref<Impl>& self, const WindowSpecification& specification)
+        {
+            RequireOwner("CreateWindow");
+            Detail::ValidateWindowSpecification(specification);
+            DrainDeferredDestruction();
+            auto native = CreateNativeWindow(specification);
 
             CachedWindow cached;
             cached.Native = native.get();
@@ -842,6 +710,94 @@ namespace Keire
         {
             RequireOwner("NativeWindow");
             return NativeFor(id);
+        }
+
+        [[nodiscard]] SDL_Window* RecreateNativeHandle(const WindowId id)
+        {
+            RequireOwner("RecreateNativeWindow");
+            WindowSpecification specification;
+            WindowPosition position;
+            CursorMode cursor = CursorMode::Normal;
+            SDL_Window* previousNative = nullptr;
+            SDL_WindowID previousNativeId = 0;
+            bool minimized = false;
+            bool closeRequested = false;
+            std::optional<WindowChromeLayout> chromeLayout;
+            {
+                std::scoped_lock lock(m_StateMutex);
+                const auto found = m_Windows.find(id.Value());
+                if (found == m_Windows.end() || !found->second.Open || !found->second.Native)
+                    throw WindowError("RecreateNativeWindow", "the opaque window is closed or unknown");
+                const auto& cached = found->second;
+                specification = cached.Specification;
+                position = cached.Position;
+                cursor = cached.Cursor;
+                previousNative = cached.Native;
+                previousNativeId = cached.NativeId;
+                minimized = cached.Minimized;
+                closeRequested = cached.CloseRequested;
+                if (cached.Chrome)
+                    chromeLayout = cached.Chrome->Snapshot();
+            }
+
+            auto replacementNative = CreateNativeWindow(specification);
+            (void)SDL_SetWindowPosition(replacementNative.get(), position.X, position.Y);
+            if (minimized)
+                (void)SDL_MinimizeWindow(replacementNative.get());
+
+            std::unique_ptr<Detail::WindowChromeHitTestCache> replacementChrome;
+            if (specification.Decoration == WindowDecoration::Custom)
+            {
+                replacementChrome = std::make_unique<Detail::WindowChromeHitTestCache>(specification.Resizable);
+                if (chromeLayout)
+                    replacementChrome->Store(*chromeLayout);
+                if (!replacementChrome->Attach(replacementNative.get()))
+                    throw WindowError("RecreateNativeWindow", "custom window chrome could not attach to the replacement");
+            }
+
+            const auto replacementNativeId = SDL_GetWindowID(replacementNative.get());
+            if (replacementNativeId == 0)
+                throw WindowError("SDL_GetWindowID", LastSdlError());
+
+            std::unique_ptr<Detail::WindowChromeHitTestCache> previousChrome;
+            {
+                std::scoped_lock lock(m_StateMutex);
+                const auto found = m_Windows.find(id.Value());
+                if (found == m_Windows.end() || found->second.Native != previousNative ||
+                    found->second.NativeId != previousNativeId || !found->second.Open)
+                {
+                    throw WindowError("RecreateNativeWindow", "the window changed during native replacement");
+                }
+                const auto [mapping, inserted] = m_NativeToWindow.emplace(replacementNativeId, id.Value());
+                (void)mapping;
+                if (!inserted)
+                    throw WindowError("RecreateNativeWindow", "the replacement SDL window ID is already registered");
+
+                m_NativeToWindow.erase(previousNativeId);
+                auto& cached = found->second;
+                previousChrome = std::move(cached.Chrome);
+                cached.Native = replacementNative.get();
+                cached.NativeId = replacementNativeId;
+                cached.Chrome = std::move(replacementChrome);
+                cached.LogicalSize = Detail::QueryLogicalSize(replacementNative.get());
+                cached.PixelSize = Detail::QueryPixelSize(replacementNative.get());
+                cached.Position = Detail::QueryWindowPosition(replacementNative.get());
+                cached.DisplayScale = SDL_GetWindowDisplayScale(replacementNative.get());
+                const auto flags = SDL_GetWindowFlags(replacementNative.get());
+                cached.Focused = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
+                cached.Visible = (flags & SDL_WINDOW_HIDDEN) == 0;
+                cached.Minimized = (flags & SDL_WINDOW_MINIMIZED) != 0;
+                cached.Maximized = (flags & SDL_WINDOW_MAXIMIZED) != 0;
+                cached.Mode = (flags & SDL_WINDOW_FULLSCREEN) != 0 ? WindowMode::BorderlessFullscreen
+                                                                   : WindowMode::Windowed;
+                cached.Cursor = cursor;
+                cached.CloseRequested = closeRequested;
+                ApplyCursorMode(cached, cached.Focused ? cursor : CursorMode::Normal);
+            }
+
+            previousChrome.reset();
+            SDL_DestroyWindow(previousNative);
+            return replacementNative.release();
         }
 
         [[nodiscard]] bool SetTextInput(const WindowId id, const bool enabled)
@@ -1374,46 +1330,13 @@ namespace Keire
     Ref<OpenFileDialogOperation> WindowSystem::ShowOpenFileDialog(const WindowId parent,
                                                                   const OpenFileDialogSpecification& specification)
     {
-        if (specification.Title.empty() || specification.Title.size() > 256 || specification.FilterName.size() > 128 ||
-            specification.Extension.size() > 32 || specification.Extension.find('*') != std::string::npos ||
-            specification.Extension.find('.') != std::string::npos)
-            throw std::invalid_argument("Open file dialog specification is invalid.");
-        auto state = CreateRef<Detail::OpenFileDialogState>();
-        auto operation = CreateRef<OpenFileDialogOperation>(state);
-        auto request = std::make_unique<OpenFileDialogRequest>();
-        request->State = state;
-        const auto location =
-            specification.DefaultLocation.empty() ? std::string{} : Utf8PathString(specification.DefaultLocation);
-        SDL_DialogFileFilter filter{specification.FilterName.c_str(), specification.Extension.c_str()};
-        const SDL_DialogFileFilter* filters = specification.Extension.empty() ? nullptr : &filter;
-        const int filterCount = filters ? 1 : 0;
-        SDL_ShowOpenFileDialog(OpenFileDialogCompleted, request.release(), m_Impl->NativeHandle(parent), filters,
-                               filterCount, location.empty() ? nullptr : location.c_str(), false);
-        return operation;
+        return Detail::ShowNativeOpenFileDialog(m_Impl->NativeHandle(parent), specification);
     }
 
     Ref<SaveFileDialogOperation> WindowSystem::ShowSaveFileDialog(const WindowId parent,
                                                                   const SaveFileDialogSpecification& specification)
     {
-        if (specification.Title.empty() || specification.Title.size() > 256 || specification.DefaultName.size() > 256 ||
-            specification.Extension.size() > 32 || specification.Extension.find('*') != std::string::npos ||
-            specification.Extension.find('.') != std::string::npos)
-            throw std::invalid_argument("Save file dialog specification is invalid.");
-        auto state = CreateRef<Detail::SaveFileDialogState>();
-        auto operation = CreateRef<SaveFileDialogOperation>(std::make_unique<SaveFileDialogOperation::Impl>(state));
-        auto request = std::make_unique<SaveFileDialogRequest>();
-        request->State = state;
-        const auto location =
-            specification.DefaultLocation.empty() ? std::string{} : Utf8PathString(specification.DefaultLocation);
-        const auto defaultPath = specification.DefaultName.empty()
-                                     ? location
-                                     : Utf8PathString(specification.DefaultLocation / specification.DefaultName);
-        SDL_DialogFileFilter filter{specification.FilterName.c_str(), specification.Extension.c_str()};
-        const SDL_DialogFileFilter* filters = specification.Extension.empty() ? nullptr : &filter;
-        const int filterCount = filters ? 1 : 0;
-        SDL_ShowSaveFileDialog(SaveFileDialogCompleted, request.release(), m_Impl->NativeHandle(parent), filters,
-                               filterCount, defaultPath.empty() ? nullptr : defaultPath.c_str());
-        return operation;
+        return Detail::ShowNativeSaveFileDialog(m_Impl->NativeHandle(parent), specification);
     }
 
     void WindowSystem::SetClipboardText(const std::string_view text) { m_Impl->SetClipboardText(text); }
@@ -1459,6 +1382,11 @@ namespace Keire
     SDL_Window* WindowSystemInternalAccess::NativeWindow(WindowSystem& system, const WindowId id)
     {
         return system.m_Impl->NativeHandle(id);
+    }
+
+    SDL_Window* WindowSystemInternalAccess::RecreateNativeWindow(WindowSystem& system, const WindowId id)
+    {
+        return system.m_Impl->RecreateNativeHandle(id);
     }
 
     bool WindowSystemInternalAccess::SetTextInput(WindowSystem& system, const WindowId id, const bool enabled)

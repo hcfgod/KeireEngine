@@ -57,4 +57,17 @@ namespace Keire
         result.erase(std::unique(result.begin(), result.end()), result.end());
         return result;
     }
+
+    AssetDecoderRegistration CreateShaderGraphAssetDecoder()
+    {
+        return {ShaderGraphAsset::StaticType(), ShaderGraphAsset::Error(),
+                [](const std::span<const std::byte> bytes) -> Ref<Asset> { return ShaderGraphAsset::Decode(bytes); }};
+    }
+
+    AssetDecoderRegistration CreateShaderGraphInstanceAssetDecoder()
+    {
+        return {ShaderGraphInstanceAsset::StaticType(), ShaderGraphInstanceAsset::Error(),
+                [](const std::span<const std::byte> bytes) -> Ref<Asset>
+                { return ShaderGraphInstanceAsset::Decode(bytes); }};
+    }
 } // namespace Keire

@@ -185,6 +185,12 @@ namespace
             {
                 return *result;
             }
+            const auto commandLine = Keire::GetApplicationCommandLineDescription();
+            if (commandLine.HandleWithoutApplication)
+            {
+                if (const auto result = commandLine.HandleWithoutApplication(arguments))
+                    return *result;
+            }
 
             auto application = Keire::CreateApplication(arguments);
             if (!application)

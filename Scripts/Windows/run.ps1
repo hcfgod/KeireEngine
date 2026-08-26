@@ -11,6 +11,9 @@ param(
     [switch]$SmokeWindow,
     [switch]$SmokeUi,
     [switch]$SmokeProject,
+    [switch]$SmokePlay,
+    [switch]$SmokePlayDeviceLoss,
+    [string]$SmokeOutput = "",
     [switch]$Editor,
     [string]$ProjectPath = "",
     [switch]$Update,
@@ -24,6 +27,12 @@ $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
+if ($SmokePlayDeviceLoss -and -not $SmokePlay) {
+    throw "-SmokePlayDeviceLoss requires -SmokePlay."
+}
+if ($SmokePlayDeviceLoss -and $Configuration -notin @("Debug", "DebugASan")) {
+    throw "-SmokePlayDeviceLoss requires Debug or DebugASan."
+}
 $ClientExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\$($Project.CLIENT_TARGET).exe"
 $HubExe = Join-Path $Root "Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.HUB_TARGET)\$($Project.HUB_TARGET).exe"
 $editorDevTarget = "$($Project.PROJECT_NAMESPACE)EditorDev"
@@ -31,7 +40,7 @@ $editorDevTarget = "$($Project.PROJECT_NAMESPACE)EditorDev"
 & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
     -Architecture $Architecture -Toolset $Toolset -Target $editorDevTarget -CI:$CI -Update:$Update -Generate:$Generate
 if (-not (Test-Path $ClientExe)) { throw "KeireClient executable was not found: $ClientExe" }
-if (-not $Editor -and -not $SmokeWindow -and -not $SmokeProject -and -not $ProjectPath) {
+if (-not $Editor -and -not $SmokeWindow -and -not $SmokeProject -and -not $SmokePlay -and -not $ProjectPath) {
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
         -Architecture $Architecture -Toolset $Toolset -Target $Project.HUB_TARGET -CI:$CI
     if (-not (Test-Path $HubExe)) { throw "Project hub executable was not found: $HubExe" }
@@ -54,6 +63,14 @@ try {
         $smokeProjectPath = if ($ProjectPath) { $ProjectPath } else { Join-Path $Root "Samples\KeireSandbox" }
         Write-Host "==> Running project-aware editor smoke $Configuration for $Architecture"
         & $ClientExe --project $smokeProjectPath --smoke-project
+    }
+    elseif ($SmokePlay) {
+        $smokeProjectPath = if ($ProjectPath) { $ProjectPath } else { Join-Path $Root "Samples\KeireSandbox" }
+        Write-Host "==> Running rendered additive Editor Play smoke $Configuration for $Architecture"
+        $smokeArguments = @("--project", $smokeProjectPath, "--smoke-play")
+        if ($SmokeOutput) { $smokeArguments += @("--smoke-play-output", $SmokeOutput) }
+        if ($SmokePlayDeviceLoss) { $smokeArguments += "--smoke-play-device-loss" }
+        & $ClientExe @smokeArguments
     }
     elseif ($CI -or $SmokeWindow) {
         Write-Host "==> Running KeireClient window smoke $Configuration for $Architecture"

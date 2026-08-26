@@ -8,6 +8,7 @@
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -407,7 +408,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     }
     {
         std::ofstream stream(root / "Scripts/Player.cs", std::ios::binary | std::ios::trunc);
-        stream << "using Keire; using Game.Support; namespace Game; "
+        stream << "using Keire; using Game.Support; using System.Collections.Generic; namespace Game; "
+                  "[System.Serializable, StableSerializedTypeId(\"73616e64-626f-4078-8000-000000000095\")] "
+                  "public sealed class PlayerGraphNode { public string Name = string.Empty; "
+                  "public PlayerGraphNode? Next; public Dictionary<string, PlayerGraphNode?> Links = new(); } "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000097\")] "
                   "public sealed class PlayerDependency : Behaviour { } "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
@@ -441,6 +445,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[SerializeField] public bool ProceduralMotionEventObserved = false; "
                   "[SerializeField] public byte ProceduralMotionEventState = 0; "
                   "[SerializeField] public PlayerTuning? Tuning = null; "
+                  "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000093\")] "
+                  "public Dictionary<string, List<int[]>> Inventory = new(); "
+                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-000000000094\")] "
+                  "public PlayerGraphNode? Graph = null; "
                   "protected override void Awake() { Speed += ReloadBonus; } "
                   "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
                   "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
@@ -609,8 +617,18 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                                     { return diagnostic.TypeName.starts_with("Keire."); }));
     CHECK_FALSE(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
                                     { return diagnostic.TypeName == "Game.ImplicitFieldTuning"; }));
-    CHECK(std::ranges::any_of(assetDiagnostics, [](const Keire::ManagedAssetTypeDiagnostic& diagnostic)
-                              { return diagnostic.TypeName == "Game.DuplicateFieldTuning"; }));
+    const auto duplicateFieldDiagnostic = std::ranges::find(assetDiagnostics, std::string("Game.DuplicateFieldTuning"),
+                                                            &Keire::ManagedAssetTypeDiagnostic::TypeName);
+    REQUIRE(duplicateFieldDiagnostic != assetDiagnostics.end());
+    CHECK(duplicateFieldDiagnostic->Code == "KEIRE-MANAGED-SERIALIZATION-0001");
+    CHECK(duplicateFieldDiagnostic->Phase == "metadata");
+    CHECK(duplicateFieldDiagnostic->Owner == "Game.DuplicateFieldTuning");
+    CHECK(duplicateFieldDiagnostic->RootField == "Game.DuplicateFieldTuning.Second");
+    CHECK(duplicateFieldDiagnostic->FieldPath == "Game.DuplicateFieldTuning.Second");
+    CHECK(duplicateFieldDiagnostic->DeclaredType == "System.Single");
+    CHECK(duplicateFieldDiagnostic->RuntimeType.empty());
+    CHECK(duplicateFieldDiagnostic->SerializedTypeId.empty());
+    CHECK_FALSE(duplicateFieldDiagnostic->ObjectId);
     const auto componentType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000099");
     const auto dependencyType = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000097");
     auto registry = Keire::ComponentRegistry::CreateDefault();
@@ -650,6 +668,89 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(tuningProperty->DeclaredManagedType == "Game.PlayerTuning");
     REQUIRE(tuningProperty->ExpectedAssetType);
     CHECK(*tuningProperty->ExpectedAssetType == Keire::ManagedDataAsset::StaticType());
+    const auto graphProperty =
+        std::ranges::find(registration->Properties, std::string("Graph"), &Keire::ComponentProperty::Key);
+    REQUIRE(graphProperty != registration->Properties.end());
+    CHECK(graphProperty->Kind == Keire::ComponentPropertyKind::ManagedReferenceGraph);
+    REQUIRE(graphProperty->ReferenceGraph);
+    CHECK(graphProperty->ReferenceGraph->Root.ReferenceGraph);
+    REQUIRE(graphProperty->ReferenceGraph->Root.ReferenceTypeChoices.size() == 1);
+    CHECK(graphProperty->ReferenceGraph->Root.ReferenceTypeChoices.front() ==
+          Keire::ManagedTypeId::Parse("73616e64-626f-4078-8000-000000000095"));
+
+    const auto graphComponent = registration->Factory();
+    REQUIRE(graphComponent);
+    auto graphValues = registration->Serialize(*graphComponent);
+    Keire::ManagedReferenceGraph authoredGraph{
+        .Root = {.Reference = 1},
+        .Objects = {{.Id = 1,
+                     .Kind = Keire::ManagedReferenceGraphNodeKind::Object,
+                     .RuntimeType = graphProperty->ReferenceGraph->Root.ReferenceTypeChoices.front()}}};
+    graphValues.insert_or_assign("Graph", Keire::EncodeManagedReferenceGraph(authoredGraph));
+    registration->Deserialize(*graphComponent, graphValues, registration->SchemaVersion);
+    const auto authoredValues = registration->Serialize(*graphComponent);
+    REQUIRE(authoredValues.contains("Graph"));
+    const auto authoredProjection =
+        Keire::DecodeManagedReferenceGraph(std::get<std::string>(authoredValues.at("Graph")));
+    CHECK(authoredProjection.Root.Reference != 0);
+    REQUIRE(authoredProjection.Objects.size() == 1);
+    CHECK(authoredProjection.Objects.front().RuntimeType == authoredGraph.Objects.front().RuntimeType);
+    REQUIRE(authoredValues.contains("managedState"));
+    const auto& authoredState = std::get<std::string>(authoredValues.at("managedState"));
+    INFO(authoredState);
+    CHECK(authoredState.find(R"("ReferenceGraphRoot":)") != std::string::npos);
+    const auto authoredDocument = nlohmann::json::parse(authoredState);
+    auto authoredObjectTable = authoredDocument.find("ReferenceGraph");
+    if (authoredObjectTable == authoredDocument.end())
+        authoredObjectTable = authoredDocument.find("referenceGraph");
+    REQUIRE(authoredObjectTable != authoredDocument.end());
+    REQUIRE(authoredObjectTable->is_object());
+    CHECK(authoredObjectTable->at("Version") == 2);
+    REQUIRE(authoredObjectTable->at("Roots").is_array());
+    CHECK(authoredObjectTable->at("Roots").size() == 1);
+
+    auto invalidGraphValues = authoredValues;
+    auto danglingGraph = authoredProjection;
+    danglingGraph.Root.Reference = 999;
+    invalidGraphValues.insert_or_assign("Graph", Keire::EncodeManagedReferenceGraph(danglingGraph));
+    CHECK_THROWS_AS(registration->Deserialize(*graphComponent, invalidGraphValues, registration->SchemaVersion),
+                    Keire::ManagedSerializationError);
+    CHECK(registration->Serialize(*graphComponent).at("managedState") == authoredValues.at("managedState"));
+
+    const auto inventoryProperty =
+        std::ranges::find(registration->Properties, std::string("Inventory"), &Keire::ComponentProperty::Key);
+    REQUIRE(inventoryProperty != registration->Properties.end());
+    CHECK(inventoryProperty->Kind == Keire::ComponentPropertyKind::ManagedReferenceGraph);
+    REQUIRE(inventoryProperty->ReferenceGraph);
+    CHECK_FALSE(inventoryProperty->ReferenceGraph->Root.ReferenceGraph);
+    CHECK(inventoryProperty->ReferenceGraph->Root.Kind == Keire::ManagedAssetPropertyKind::Dictionary);
+    REQUIRE(inventoryProperty->ReferenceGraph->Root.Children.size() == 2);
+    CHECK(inventoryProperty->ReferenceGraph->Root.Children[1].Kind == Keire::ManagedAssetPropertyKind::List);
+    REQUIRE(inventoryProperty->ReferenceGraph->Root.Children[1].Children.size() == 1);
+    CHECK(inventoryProperty->ReferenceGraph->Root.Children[1].Children[0].Kind ==
+          Keire::ManagedAssetPropertyKind::Array);
+
+    const auto collectionComponent = registration->Factory();
+    REQUIRE(collectionComponent);
+    const auto collectionBefore = registration->Serialize(*collectionComponent);
+    REQUIRE(collectionBefore.contains("Inventory"));
+    CHECK(std::get<std::string>(collectionBefore.at("Inventory")) == "[]");
+    auto duplicateCollection = collectionBefore;
+    duplicateCollection.insert_or_assign(
+        "Inventory", std::string(R"([{"key":"duplicate","value":[]},{"key":"duplicate","value":[]}])"));
+    std::string collectionDiagnostic;
+    try
+    {
+        registration->Deserialize(*collectionComponent, duplicateCollection, registration->SchemaVersion);
+    }
+    catch (const std::invalid_argument& error)
+    {
+        collectionDiagnostic = error.what();
+    }
+    CHECK(collectionDiagnostic.find("KEIRE-MANAGED-SERIALIZATION-0003") != std::string::npos);
+    CHECK(collectionDiagnostic.find("Inventory") != std::string::npos);
+    CHECK(collectionDiagnostic.find("duplicate key \"duplicate\"") != std::string::npos);
+    CHECK(std::get<std::string>(registration->Serialize(*collectionComponent).at("Inventory")) == "[]");
 
     const std::string duplicateState =
         R"({"Version":1,"Fields":[{"StableId":"","Name":"Speed","Type":"System.Single","Aliases":[],"Value":3.0},)"
@@ -675,6 +776,30 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto editingValuesBeforePlay = registration->Serialize(*editingComponent);
     REQUIRE(editingValuesBeforePlay.contains("managedState"));
     const auto editingStateBeforePlay = std::get<std::string>(editingValuesBeforePlay.at("managedState"));
+    const auto retainedLegacyField = [](const std::string_view state)
+    {
+        const auto document = nlohmann::json::parse(state);
+        const auto fields = document.find("Fields");
+        if (fields == document.end() || !fields->is_array())
+            return nlohmann::json{};
+        const auto field = std::ranges::find_if(*fields,
+                                                [](const nlohmann::json& candidate)
+                                                {
+                                                    const auto name = candidate.find("Name");
+                                                    return name != candidate.end() && name->is_string() &&
+                                                           name->get_ref<const std::string&>() == "LegacyOnly";
+                                                });
+        return field == fields->end() ? nlohmann::json{} : *field;
+    };
+    const nlohmann::json expectedLegacyField{{"StableId", ""},
+                                             {"Name", "LegacyOnly"},
+                                             {"Type", "System.Int32"},
+                                             {"Aliases", nlohmann::json::array()},
+                                             {"Value", 41}};
+    const auto editingLegacyField = retainedLegacyField(editingStateBeforePlay);
+    INFO(editingStateBeforePlay);
+    REQUIRE(editingLegacyField.is_object());
+    CHECK(editingLegacyField == expectedLegacyField);
     editingScene->MarkSaved();
 
     auto play = Keire::CreateRef<Keire::SceneRuntimeSession>(editingScene);
@@ -693,12 +818,14 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto& canonicalState = std::get<std::string>(runtimeValues.at("managedState"));
     const std::string stableSpeed = R"("StableId":"73616e64-626f-4078-8000-000000000098","Name":"Speed")";
     const std::string legacySpeed = R"("StableId":"","Name":"Speed")";
-    const std::string retainedUnknown = R"("Name":"LegacyOnly","Type":"System.Int32","Aliases":[],"Value":41)";
     const auto stableSpeedPosition = canonicalState.find(stableSpeed);
     REQUIRE(stableSpeedPosition != std::string::npos);
     CHECK(canonicalState.find(stableSpeed, stableSpeedPosition + stableSpeed.size()) == std::string::npos);
     CHECK(canonicalState.find(legacySpeed) == std::string::npos);
-    CHECK(canonicalState.find(retainedUnknown) != std::string::npos);
+    const auto canonicalLegacyField = retainedLegacyField(canonicalState);
+    INFO(canonicalState);
+    REQUIRE(canonicalLegacyField.is_object());
+    CHECK(canonicalLegacyField == editingLegacyField);
 
     runtimeValues.insert_or_assign("Speed", 12.25);
     registration->Deserialize(*runtimeComponent, runtimeValues, registration->SchemaVersion);

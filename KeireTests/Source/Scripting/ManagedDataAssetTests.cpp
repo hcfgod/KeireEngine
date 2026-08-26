@@ -6,9 +6,12 @@
 
 #include <array>
 #include <cstddef>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <variant>
 #include <vector>
 
 namespace
@@ -18,6 +21,47 @@ namespace
         std::vector<std::byte> result(text.size());
         for (std::size_t index = 0; index < text.size(); ++index)
             result[index] = static_cast<std::byte>(text[index]);
+        return result;
+    }
+
+    [[nodiscard]] std::string RepeatUtf8(const std::string_view value, const std::size_t count)
+    {
+        std::string result;
+        result.reserve(value.size() * count);
+        for (std::size_t index = 0; index < count; ++index)
+            result.append(value);
+        return result;
+    }
+
+    [[nodiscard]] std::string Text(const std::span<const std::byte> bytes)
+    {
+        return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+    }
+
+    [[nodiscard]] Keire::ManagedAssetPropertyDescriptor NestedArrayProperty(const std::size_t levels)
+    {
+        Keire::ManagedAssetPropertyDescriptor property{.StableFieldId = Keire::AssetId(0x2200000000004000ULL, 1),
+                                                       .Name = "Value",
+                                                       .DisplayName = "Value",
+                                                       .ManagedTypeName = "System.Int32",
+                                                       .Kind = Keire::ManagedAssetPropertyKind::Integer};
+        for (std::size_t level = 0; level < levels; ++level)
+        {
+            property = {.StableFieldId = Keire::AssetId(0x2200000000004000ULL, level + 2),
+                        .Name = "Values",
+                        .DisplayName = "Values",
+                        .ManagedTypeName = "System.Array",
+                        .Kind = Keire::ManagedAssetPropertyKind::Array,
+                        .Children = {std::move(property)}};
+        }
+        return property;
+    }
+
+    [[nodiscard]] std::string NestedArrayValue(const std::size_t levels)
+    {
+        std::string result = "7";
+        for (std::size_t level = 0; level < levels; ++level)
+            result = '[' + result + ']';
         return result;
     }
 
@@ -79,6 +123,292 @@ TEST_CASE("managed data assets round trip in canonical stable-ID order")
     REQUIRE(decoder.Fallback);
     REQUIRE(decoder.Decode);
     CHECK(decoder.Decode(encoded)->Type() == Keire::ManagedDataAsset::StaticType());
+}
+
+TEST_CASE("managed data dictionaries preserve nested values in canonical key order")
+{
+    Keire::ManagedAssetPropertyDescriptor element{.StableFieldId =
+                                                      Keire::AssetId::Parse("22000000-0000-4000-8000-000000000004"),
+                                                  .Name = "Element",
+                                                  .DisplayName = "Element",
+                                                  .ManagedTypeName = "System.Int32",
+                                                  .Kind = Keire::ManagedAssetPropertyKind::Integer};
+    Keire::ManagedAssetPropertyDescriptor value{.StableFieldId =
+                                                    Keire::AssetId::Parse("22000000-0000-4000-8000-000000000003"),
+                                                .Name = "Value",
+                                                .DisplayName = "Value",
+                                                .ManagedTypeName = "System.Collections.Generic.List`1[System.Int32]",
+                                                .Kind = Keire::ManagedAssetPropertyKind::List,
+                                                .Children = {element}};
+    Keire::ManagedAssetPropertyDescriptor key{.StableFieldId =
+                                                  Keire::AssetId::Parse("22000000-0000-4000-8000-000000000002"),
+                                              .Name = "Key",
+                                              .DisplayName = "Key",
+                                              .ManagedTypeName = "System.String",
+                                              .Kind = Keire::ManagedAssetPropertyKind::Text};
+    Keire::ManagedAssetPropertyDescriptor dictionary{
+        .StableFieldId = Keire::AssetId::Parse("22000000-0000-4000-8000-000000000001"),
+        .Name = "Values",
+        .DisplayName = "Values",
+        .ManagedTypeName = "System.Collections.Generic.Dictionary`2[System.String,System.Collections.Generic.List`1]",
+        .Kind = Keire::ManagedAssetPropertyKind::Dictionary,
+        .Children = {key, value}};
+
+    Keire::ManagedAssetTypeDescriptor descriptor;
+    descriptor.StableTypeId = Keire::ManagedTypeId::Parse("12000000-0000-4000-8000-000000000001");
+    descriptor.FullName = "Example.DictionaryAsset";
+    descriptor.DisplayName = "Dictionary Asset";
+    descriptor.DefaultFileName = "DictionaryAsset";
+    descriptor.Properties = {dictionary};
+    CHECK_NOTHROW(Keire::ValidateManagedAssetTypeDescriptor(descriptor));
+
+    auto decoded =
+        Keire::DecodeManagedAssetValue(R"([{"key":"zeta","value":[9]},{"key":"alpha","value":[1,2]}])", dictionary);
+    REQUIRE(decoded.Children.size() == 2);
+    CHECK(Keire::EncodeManagedAssetValue(decoded, dictionary) ==
+          R"([{"key":"alpha","value":[1,2]},{"key":"zeta","value":[9]}])");
+
+    decoded.Children.push_back(decoded.Children.front());
+    CHECK_THROWS_AS((void)Keire::EncodeManagedAssetValue(decoded, dictionary), std::invalid_argument);
+}
+
+TEST_CASE("managed data string limits count UTF-8 bytes")
+{
+    Keire::ManagedAssetPropertyDescriptor text{.StableFieldId =
+                                                   Keire::AssetId::Parse("22000000-0000-4000-8000-000000000011"),
+                                               .Name = "Message",
+                                               .DisplayName = "Message",
+                                               .ManagedTypeName = "System.String",
+                                               .Kind = Keire::ManagedAssetPropertyKind::Text};
+
+    Keire::ManagedAssetValueNode value{.StableFieldId = text.StableFieldId,
+                                       .Kind = Keire::ManagedAssetPropertyKind::Text,
+                                       .Value = RepeatUtf8("\xC3\xA9", 524'288)};
+    const auto exactTwoByte = Keire::EncodeManagedAssetValue(value, text);
+    const auto decodedTwoByte = Keire::DecodeManagedAssetValue(exactTwoByte, text);
+    REQUIRE(std::holds_alternative<std::string>(decodedTwoByte.Value));
+    CHECK(std::get<std::string>(decodedTwoByte.Value).size() == 1'048'576);
+
+    value.Value = RepeatUtf8("\xF0\x9F\x98\x80", 262'144);
+    const auto exactSurrogatePair = Keire::EncodeManagedAssetValue(value, text);
+    const auto decodedSurrogatePair = Keire::DecodeManagedAssetValue(exactSurrogatePair, text);
+    REQUIRE(std::holds_alternative<std::string>(decodedSurrogatePair.Value));
+    CHECK(std::get<std::string>(decodedSurrogatePair.Value).size() == 1'048'576);
+
+    std::get<std::string>(value.Value).append("\xF0\x9F\x98\x80");
+    CHECK_THROWS_WITH_AS(
+        (void)Keire::EncodeManagedAssetValue(value, text),
+        "KEIRE-MANAGED-SERIALIZATION-0003: Managed string field 'Message' declared as 'System.String' exceeds the "
+        "1,048,576 UTF-8 byte limit.",
+        std::invalid_argument);
+}
+
+TEST_CASE("managed reference graph values preserve cycles links and reject duplicate dictionary keys")
+{
+    const auto runtimeType = Keire::ManagedTypeId::Parse("12000000-0000-4000-8000-000000000101");
+    auto text = Keire::ManagedAssetPropertyDescriptor{.StableFieldId =
+                                                          Keire::AssetId::Parse("22000000-0000-4000-8000-000000000101"),
+                                                      .Name = "Name",
+                                                      .DisplayName = "Name",
+                                                      .ManagedTypeName = "System.String",
+                                                      .Kind = Keire::ManagedAssetPropertyKind::Text};
+    auto next = Keire::ManagedAssetPropertyDescriptor{.StableFieldId =
+                                                          Keire::AssetId::Parse("22000000-0000-4000-8000-000000000102"),
+                                                      .Name = "Next",
+                                                      .DisplayName = "Next",
+                                                      .ManagedTypeName = "Tests.GraphNode",
+                                                      .Kind = Keire::ManagedAssetPropertyKind::SerializableObject,
+                                                      .ReferenceGraph = true,
+                                                      .ReferenceTypeChoices = {runtimeType}};
+    auto key = Keire::ManagedAssetPropertyDescriptor{.StableFieldId =
+                                                         Keire::AssetId::Parse("22000000-0000-4000-8000-000000000104"),
+                                                     .Name = "Key",
+                                                     .DisplayName = "Key",
+                                                     .ManagedTypeName = "System.String",
+                                                     .Kind = Keire::ManagedAssetPropertyKind::Text};
+    auto value = next;
+    value.StableFieldId = Keire::AssetId::Parse("22000000-0000-4000-8000-000000000105");
+    value.Name = "Value";
+    value.DisplayName = "Value";
+    auto dictionary = Keire::ManagedAssetPropertyDescriptor{
+        .StableFieldId = Keire::AssetId::Parse("22000000-0000-4000-8000-000000000103"),
+        .Name = "Links",
+        .DisplayName = "Links",
+        .ManagedTypeName = "System.Collections.Generic.Dictionary`2[System.String,Tests.GraphNode]",
+        .Kind = Keire::ManagedAssetPropertyKind::Dictionary,
+        .Children = {key, value},
+        .ReferenceGraph = true};
+    Keire::ManagedAssetReferenceTypeDescriptor nodeType{.StableTypeId = runtimeType,
+                                                        .FullName = "Tests.GraphNode",
+                                                        .DisplayName = "Graph Node",
+                                                        .Properties = {text, next, dictionary}};
+    auto root = next;
+    root.StableFieldId = Keire::AssetId::Parse("22000000-0000-4000-8000-000000000100");
+    root.Name = "Root";
+    root.DisplayName = "Root";
+
+    Keire::ManagedReferenceGraph graph;
+    graph.Root = {.Reference = 1};
+    graph.Objects = {{.Id = 1,
+                      .Kind = Keire::ManagedReferenceGraphNodeKind::Object,
+                      .RuntimeType = runtimeType,
+                      .Fields = {{text.StableFieldId, text.Name, {.Scalar = R"("root")"}},
+                                 {next.StableFieldId, next.Name, {.Reference = 1}},
+                                 {dictionary.StableFieldId, dictionary.Name, {.Reference = 2}}}},
+                     {.Id = 2,
+                      .Kind = Keire::ManagedReferenceGraphNodeKind::Dictionary,
+                      .Entries = {{{.Scalar = R"("self")"}, {.Reference = 1}}}}};
+    CHECK_NOTHROW(Keire::ValidateManagedReferenceGraph(graph, root, std::span(&nodeType, 1)));
+    const auto encoded = Keire::EncodeManagedReferenceGraph(graph);
+    CHECK(Keire::DecodeManagedReferenceGraph(encoded) == graph);
+
+    graph.Objects[1].Entries.push_back(graph.Objects[1].Entries.front());
+    // Serialized object fields validate in deterministic field order. The self-linked Next field is visited before
+    // Links, so the first actionable route to this shared dictionary is the cycle-safe Root.Next.Links path.
+    CHECK_THROWS_WITH_AS(Keire::ValidateManagedReferenceGraph(graph, root, std::span(&nodeType, 1)),
+                         "KEIRE-MANAGED-SERIALIZATION-0003: Managed reference dictionary field 'Root.Next.Links' "
+                         "declared as 'System.Collections.Generic.Dictionary`2[System.String,Tests.GraphNode]' "
+                         "contains duplicate key \"self\".",
+                         std::invalid_argument);
+}
+
+TEST_CASE("managed reference graph document roots preserve cross-field sharing and prune transactionally")
+{
+    Keire::ManagedReferenceGraph shared{.Version = 2,
+                                        .Roots = {{"id:first", {.Reference = 1}}, {"id:second", {.Reference = 1}}},
+                                        .Objects = {{.Id = 1,
+                                                     .Kind = Keire::ManagedReferenceGraphNodeKind::Object,
+                                                     .Fields = {{{}, "Self", {.Reference = 1}}}}}};
+    CHECK_NOTHROW(Keire::ValidateManagedReferenceGraphDocument(shared));
+    const auto first = Keire::ExtractManagedReferenceGraphRoot(shared, "id:first");
+    const auto second = Keire::ExtractManagedReferenceGraphRoot(shared, "id:second");
+    CHECK(first.Root.Reference == second.Root.Reference);
+    CHECK(first.Objects == second.Objects);
+    CHECK(Keire::DecodeManagedReferenceGraph(Keire::EncodeManagedReferenceGraph(shared)) == shared);
+
+    Keire::RemoveManagedReferenceGraphRoot(shared, "id:first");
+    REQUIRE(shared.Roots.size() == 1);
+    CHECK(shared.Objects.size() == 1);
+    Keire::RemoveManagedReferenceGraphRoot(shared, "id:second");
+    CHECK(shared.Roots.empty());
+    CHECK(shared.Objects.empty());
+
+    Keire::ManagedReferenceGraph destination{
+        .Version = 2,
+        .Roots = {{"retained", {.Reference = 1}}},
+        .Objects = {{.Id = 1, .Kind = Keire::ManagedReferenceGraphNodeKind::Object}}};
+    Keire::ManagedReferenceGraph replacement{
+        .Root = {.Reference = 1},
+        .Objects = {{.Id = 1, .Kind = Keire::ManagedReferenceGraphNodeKind::Object},
+                    {.Id = 2, .Kind = Keire::ManagedReferenceGraphNodeKind::Object}}};
+    replacement.Objects[0].Fields.push_back({{}, "Next", {.Reference = 2}});
+    Keire::UpdateManagedReferenceGraphRoot(destination, "replacement", replacement);
+    REQUIRE(destination.Roots.size() == 2);
+    REQUIRE(destination.Objects.size() == 3);
+    CHECK(destination.Roots[0].Key == "replacement");
+    CHECK(destination.Roots[0].Value.Reference != destination.Roots[1].Value.Reference);
+}
+
+TEST_CASE("managed reference graph failures expose structured native diagnostics")
+{
+    try
+    {
+        (void)Keire::DecodeManagedReferenceGraph(
+            R"({"Version":1,"Root":{"Reference":1,"Scalar":null},"Objects":[{"Id":1,"Kind":"object","StableTypeId":"not-a-guid","Fields":[],"Items":[],"Entries":[]}]})");
+        FAIL("Malformed stable type IDs must be rejected.");
+    }
+    catch (const Keire::ManagedSerializationError& error)
+    {
+        CHECK(error.Details().Code == "KEIRE-MANAGED-SERIALIZATION-0003");
+        CHECK(error.Details().Phase == "validate");
+        CHECK(error.Details().RootField == "Root");
+        CHECK(error.Details().FieldPath == "Objects[1].StableTypeId");
+        CHECK(error.Details().SerializedTypeId == "not-a-guid");
+        CHECK(error.Details().ObjectId == 1);
+    }
+
+    Keire::ManagedAssetPropertyDescriptor root{
+        .StableFieldId = Keire::AssetId(0x2200000000004000ULL, 100),
+        .Name = "Graph",
+        .DisplayName = "Graph",
+        .ManagedTypeName = "Tests.GraphNode",
+        .Kind = Keire::ManagedAssetPropertyKind::SerializableObject,
+        .ReferenceGraph = true,
+        .ReferenceTypeChoices = {Keire::ManagedTypeId::Parse("12000000-0000-4000-8000-000000000101")}};
+    Keire::ManagedReferenceGraph missing{.Root = {.Reference = 999}};
+    try
+    {
+        Keire::ValidateManagedReferenceGraph(missing, root, {});
+        FAIL("Dangling graph links must be rejected.");
+    }
+    catch (const Keire::ManagedSerializationError& error)
+    {
+        CHECK(error.Details().Phase == "validate");
+        CHECK(error.Details().Owner == "Tests.GraphNode");
+        CHECK(error.Details().RootField == "Graph");
+        CHECK(error.Details().FieldPath == "Graph");
+        CHECK(error.Details().DeclaredType == "Tests.GraphNode");
+        CHECK(error.Details().ObjectId == 999);
+    }
+}
+
+TEST_CASE("managed value depth accepts 32 nested collections and rejects 33")
+{
+    const auto exactProperty = NestedArrayProperty(32);
+    const auto exactValue = NestedArrayValue(32);
+    const auto decoded = Keire::DecodeManagedAssetValue(exactValue, exactProperty);
+    CHECK(Keire::EncodeManagedAssetValue(decoded, exactProperty) == exactValue);
+
+    const auto oversizedProperty = NestedArrayProperty(33);
+    CHECK_THROWS_WITH_AS((void)Keire::DecodeManagedAssetValue(NestedArrayValue(33), oversizedProperty),
+                         doctest::Contains("exceeds 32 nested levels"), std::invalid_argument);
+}
+
+TEST_CASE("managed data schema three stores one object table and migrates per-field schema one graphs")
+{
+    const auto graphField = Keire::AssetId::Parse("20000000-0000-4000-8000-000000000010");
+    const auto sharedField = Keire::AssetId::Parse("20000000-0000-4000-8000-000000000011");
+    Keire::ManagedReferenceGraph shared{.Version = 2,
+                                        .Roots = {{"id:" + graphField.ToString(), {.Reference = 1}},
+                                                  {"id:" + sharedField.ToString(), {.Reference = 1}}},
+                                        .Objects = {{.Id = 1,
+                                                     .Kind = Keire::ManagedReferenceGraphNodeKind::Object,
+                                                     .Fields = {{{}, "Self", {.Reference = 1}}}}}};
+    Keire::ManagedDataDefinition definition;
+    definition.ManagedType = Keire::ManagedTypeId::Parse("10000000-0000-4000-8000-000000000001");
+    definition.ManagedTypeName = "Example.SharedGraph";
+    definition.ReferenceGraph = Keire::EncodeManagedReferenceGraph(shared);
+    definition.Fields = {{.StableFieldId = graphField,
+                          .Name = "Graph",
+                          .ManagedTypeName = "Tests.GraphNode",
+                          .ReferenceGraph = true,
+                          .ReferenceGraphRoot = shared.Roots[0].Key},
+                         {.StableFieldId = sharedField,
+                          .Name = "Shared",
+                          .ManagedTypeName = "Tests.GraphNode",
+                          .ReferenceGraph = true,
+                          .ReferenceGraphRoot = shared.Roots[1].Key}};
+    const auto encoded = Keire::ManagedDataAsset::Encode(definition);
+    const auto text = Text(encoded);
+    CHECK(text.find(R"("schemaVersion": 3)") != std::string::npos);
+    CHECK(text.find(R"("referenceGraph")") != std::string::npos);
+    const auto roundTrip = Keire::ManagedDataAsset::Decode(encoded)->Definition();
+    const auto roundTripGraph = Keire::DecodeManagedReferenceGraph(roundTrip.ReferenceGraph);
+    REQUIRE(roundTripGraph.Roots.size() == 2);
+    CHECK(roundTripGraph.Roots[0].Value.Reference == roundTripGraph.Roots[1].Value.Reference);
+
+    const auto standalone = Keire::EncodeManagedReferenceGraph(
+        Keire::ExtractManagedReferenceGraphRoot(roundTripGraph, roundTripGraph.Roots.front().Key));
+    const std::string legacy =
+        R"({"schemaVersion":1,"managedTypeId":"10000000-0000-4000-8000-000000000001","managedTypeName":"Example.SharedGraph","fields":[{"stableId":")" +
+        graphField.ToString() +
+        R"(","name":"Graph","managedTypeName":"Tests.GraphNode","formerNames":[],"referenceGraph":true,"value":)" +
+        standalone + R"(}],"dependencies":[]})";
+    const auto migrated = Keire::ManagedDataAsset::Decode(Bytes(legacy))->Definition();
+    CHECK(migrated.SchemaVersion == 3);
+    CHECK_FALSE(migrated.ReferenceGraph.empty());
+    REQUIRE(migrated.Fields.size() == 1);
+    CHECK_FALSE(migrated.Fields.front().ReferenceGraphRoot.empty());
 }
 
 TEST_CASE("managed data assets reject malformed duplicate and non-canonical source state")
@@ -242,6 +572,38 @@ TEST_CASE("managed asset type metadata validates property trees without editor i
     auto invalidMultiline = descriptor;
     invalidMultiline.Properties[0].TextLines = 4;
     CHECK_THROWS_AS(Keire::ValidateManagedAssetTypeDescriptor(invalidMultiline), std::invalid_argument);
+}
+
+TEST_CASE("managed reference type metadata enforces 1024 fields per concrete type")
+{
+    Keire::ManagedAssetTypeDescriptor descriptor;
+    descriptor.StableTypeId = Keire::ManagedTypeId::Parse("60000000-0000-4000-8000-000000000010");
+    descriptor.FullName = "Example.GraphOwner";
+    descriptor.DisplayName = "Graph Owner";
+    Keire::ManagedAssetReferenceTypeDescriptor referenceType;
+    referenceType.StableTypeId = Keire::ManagedTypeId::Parse("60000000-0000-4000-8000-000000000011");
+    referenceType.FullName = "Example.GraphNode";
+    referenceType.DisplayName = "Graph Node";
+    referenceType.Properties.reserve(1'025);
+    for (std::size_t index = 0; index < 1'024; ++index)
+    {
+        referenceType.Properties.push_back({.StableFieldId = Keire::AssetId(0x6100000000004000ULL, index + 1),
+                                            .Name = "Field" + std::to_string(index),
+                                            .DisplayName = "Field " + std::to_string(index),
+                                            .ManagedTypeName = "System.Int32",
+                                            .Kind = Keire::ManagedAssetPropertyKind::Integer});
+    }
+    descriptor.ReferenceTypes = {referenceType};
+    CHECK_NOTHROW(Keire::ValidateManagedAssetTypeDescriptor(descriptor));
+
+    descriptor.ReferenceTypes.front().Properties.push_back(
+        {.StableFieldId = Keire::AssetId(0x6100000000004000ULL, 1'025),
+         .Name = "Field1024",
+         .DisplayName = "Field 1024",
+         .ManagedTypeName = "System.Int32",
+         .Kind = Keire::ManagedAssetPropertyKind::Integer});
+    CHECK_THROWS_WITH_AS(Keire::ValidateManagedAssetTypeDescriptor(descriptor),
+                         doctest::Contains("depth or property-count limit"), std::invalid_argument);
 }
 
 TEST_CASE("managed type catalogs round trip deterministically and reject incompatible metadata")

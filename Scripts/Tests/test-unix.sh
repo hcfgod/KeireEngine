@@ -950,6 +950,10 @@ assert_true grep -F -q 'filter "configurations:Profile"' "$ROOT/Scripts/Premake/
 assert_true grep -F -q '"KEIRE_PROFILE_TELEMETRY"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q '"TRACY_ON_DEMAND"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q '"TRACY_ONLY_LOCALHOST"' "$ROOT/Scripts/Premake/Common.lua"
+assert_equal "$(grep -F -c '"KEIRE_ENABLE_TEST_HOOKS"' "$ROOT/Scripts/Premake/Common.lua")" 1
+assert_true perl -0ne \
+  'exit 0 if /filter "configurations:Debug or DebugASan"\s+defines\s+\{\s+"KEIRE_ENABLE_TEST_HOOKS"\s+\}/; exit 1' \
+  "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'local directory, library = resolved:match("^(.*)/(lib[^/]+%.a)$")' \
   "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'return ":" .. library' "$ROOT/Scripts/Premake/Common.lua"
@@ -1366,6 +1370,8 @@ assert_true grep -F -q -- '-exec cp -L {} "$stage/bin/"' "$ROOT/Scripts/Unix/pac
 assert_true grep -q 'developmentArtifact' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'manifest commit does not match' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -F -q 'package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq -- '--allow-dirty (package commands only; emits a local development artifact and is rejected in CI)' \
+  "$ROOT/Scripts/project.sh"
 assert_true grep -Fq 'ManagedApiConsumer.csproj' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'KeireManagedAssembly=' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -q 'package-editor' "$ROOT/Scripts/project.sh"
@@ -1381,6 +1387,48 @@ assert_true grep -F -q 'cp -RL "$dotnet_source/." "$dotnet_destination/"' \
 assert_true grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -Fq 'xvfb-run -a "$stage/bin/$runtime"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq -- '--validate-additive-runtime "$runtime_validation_output"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"inputHandledByActiveTopmostPresentation": true' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"gitCommit\": \"$commit\"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '$runtimeValidation.build.gitCommit -ne $commit' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '[[ "$runtime_validation_output" -nt "$runtime_validation_sentinel" ]]' \
+  "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'LastWriteTimeUtc -lt $runtimeValidationStartedAt' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq 'build_scenes_source="$ROOT/Samples/KeireSandbox/ProjectSettings/BuildScenes.keiresettings"' \
+  "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'cp "$build_scenes_source" "$build_scenes_destination"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '[[ -f "$build_scenes_destination" ]]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq -- '--validate-additive-runtime $runtimeValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq 'inputHandledByActiveTopmostPresentation' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '-SmokePlay -SmokeOutput $editorPlayValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '"--project", $smokeProjectPath, "--smoke-play"' "$ROOT/Scripts/Windows/run.ps1"
+assert_true grep -Fq -- '"--smoke-play-output", $SmokeOutput' "$ROOT/Scripts/Windows/run.ps1"
+assert_true grep -Fq '$Configuration -notin @("Debug", "DebugASan")' "$ROOT/Scripts/Windows/run.ps1"
+assert_true grep -Fq -- '--validate-device-loss' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq -- '-SmokePlayDeviceLoss' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'Copy-Item -Path (Join-Path $runtimeSource "*")' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'assetTool cook --project $sampleProject' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'build.gitCommit -ne $expectedCommit' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'operation -ne "test frame injection"' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'retryCount -ne 1' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'cookedRuntimeShutdownCompleted = $true' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq '@("vsync", "immediate")' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'warmupFrames -ne 300' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'measuredFrames -ne 2000' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'published non-monotonic frame IDs' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'build.gitCommit -ne $expectedCommit' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq '[bool]$report.build.dirty -ne $expectedDirty' \
+  "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'Assert-MetricSummary $report.summary.$metricName' \
+  "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'Assert-RequiredProperties $timeline $timelineFields' \
+  "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'Remove-Item -LiteralPath $matrixPath -Force' "$ROOT/Scripts/Windows/render-benchmark.ps1"
 assert_true grep -q 'editor product manifest must be a clean schema-2' \
   "$ROOT/KeireHubPackagePublisher/Source/Main.cpp"
 assert_true grep -q '@PROJECT_NAMESPACE@ImGui.a' "$ROOT/Config/PackageConfig.cmake.in"
@@ -1394,6 +1442,8 @@ grep -q 'ENABLE_ADVANCED_SECURITY' "$security_workflow" || fail 'Advanced securi
 ! grep -q 'continue-on-error' "$security_workflow" || fail 'Advanced security checks are not strict'
 python3 "$ROOT/Scripts/Tests/check-text-integrity.py"
 python3 "$ROOT/Scripts/Tests/check-source-budgets.py"
+python3 "$ROOT/Scripts/Tests/check-render-test-boundary.py"
+python3 "$ROOT/Scripts/Tests/check-diagnostic-bundle-integration.py"
 python3 "$ROOT/Scripts/Tests/validate-workflows.py"
 
 llvm_fixture="$(mktemp -d)"; old_path="$PATH"

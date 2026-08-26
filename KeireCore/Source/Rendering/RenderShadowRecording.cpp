@@ -29,10 +29,10 @@ namespace Keire::RenderBackend
                                                const PreparedSceneDrawList& opaqueDraws)
     {
         surface.SampledDepthValid = false;
-        if (!surface.Resources.SampledDepth || !SceneDepthPipeline)
+        if (!surface.ActiveWorkset().SampledDepth || !SceneDepthPipeline)
             return;
         SDL_GPUDepthStencilTargetInfo depth{};
-        depth.texture = surface.Resources.SampledDepth;
+        depth.texture = surface.ActiveWorkset().SampledDepth;
         depth.clear_depth = 1.0F;
         depth.load_op = SDL_GPU_LOADOP_CLEAR;
         depth.store_op = SDL_GPU_STOREOP_STORE;
@@ -224,8 +224,9 @@ namespace Keire::RenderBackend
         {
             const auto cascadeCount = std::clamp(packet.Environment.DirectionalShadowCascadeCount, 1U, 4U);
             const auto resolution = packet.Environment.DirectionalShadowResolution;
-            ensureTexture(surface.Resources.DirectionalShadow, surface.Resources.DirectionalShadowResolution,
-                          surface.Resources.DirectionalShadowLayers, resolution, cascadeCount);
+            ensureTexture(surface.ActiveWorkset().DirectionalShadow,
+                          surface.ActiveWorkset().DirectionalShadowResolution,
+                          surface.ActiveWorkset().DirectionalShadowLayers, resolution, cascadeCount);
             const float nearPlane = std::max(packet.Camera.NearPlane, 0.0001F);
             const float shadowDistance = std::min(
                 std::max(packet.Environment.DirectionalShadowDistance, nearPlane + 0.0001F), packet.Camera.FarPlane);
@@ -278,7 +279,7 @@ namespace Keire::RenderBackend
                 const auto view = Math::LookAt(eye, center, up);
                 const auto projection = Math::Orthographic(radius * 2.0F, 1.0F, 0.01F, radius * 4.0F);
                 result.Directional.DirectionalMatrices[cascade] = Math::Multiply(projection, view);
-                drawLayer(surface.Resources.DirectionalShadow, cascade,
+                drawLayer(surface.ActiveWorkset().DirectionalShadow, cascade,
                           result.Directional.DirectionalMatrices[cascade]);
                 switch (cascade)
                 {
@@ -310,8 +311,8 @@ namespace Keire::RenderBackend
                                                          { return light.Shadows != ShadowQuality::Disabled; });
         if (hasLocalShadows)
         {
-            ensureTexture(surface.Resources.LocalShadow, surface.Resources.LocalShadowResolution,
-                          surface.Resources.LocalShadowLayers, LocalShadowResolution, 1U);
+            ensureTexture(surface.ActiveWorkset().LocalShadow, surface.ActiveWorkset().LocalShadowResolution,
+                          surface.ActiveWorkset().LocalShadowLayers, LocalShadowResolution, 1U);
             const auto resolution = [](const ShadowResolutionHint hint) -> std::uint16_t
             {
                 switch (hint)
@@ -383,7 +384,7 @@ namespace Keire::RenderBackend
                 return Math::Multiply(atlasTransform, lightMatrix);
             };
             SDL_GPUDepthStencilTargetInfo localDepth{};
-            localDepth.texture = surface.Resources.LocalShadow;
+            localDepth.texture = surface.ActiveWorkset().LocalShadow;
             localDepth.clear_depth = 1.0F;
             localDepth.load_op = SDL_GPU_LOADOP_CLEAR;
             localDepth.store_op = SDL_GPU_STOREOP_STORE;

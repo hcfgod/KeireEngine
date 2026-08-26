@@ -456,16 +456,16 @@ namespace Keire
                 QueueUiEvent(entity.Id(), RuntimeUiEventType::ValueChanged);
         }
 
-        void ScrollAt(const float x, const float y, const float horizontal, const float vertical)
+        [[nodiscard]] bool ScrollAt(const float x, const float y, const float horizontal, const float vertical)
         {
             const auto hit = UiTree->HitTest(x, y);
             if (!hit)
-                return;
+                return false;
             const auto [entity, node] = FindUiControl<UiScrollViewComponent>(*hit);
             const auto scroll = entity ? entity.GetComponent<UiScrollViewComponent>() : Ref<UiScrollViewComponent>{};
             const auto state = UiTree->State(node);
             if (!scroll || !scroll->Interactable() || !state)
-                return;
+                return false;
             const float scale = std::max(UiTree->Statistics().Scale, 0.0001F);
             const auto content = scroll->ContentSize();
             const Vector2 maximum{std::max(0.0F, content.X - state->Rect.Width / scale),
@@ -477,9 +477,10 @@ namespace Keire
                 scroll->Vertical() ? std::clamp(previous.Y - vertical * scroll->Sensitivity(), 0.0F, maximum.Y)
                                    : previous.Y};
             if (candidate == previous)
-                return;
+                return false;
             scroll->SetOffset(candidate);
             QueueUiEvent(entity.Id(), RuntimeUiEventType::ValueChanged);
+            return true;
         }
 
         void AppendText(const std::string_view text)
@@ -1275,10 +1276,16 @@ namespace Keire
         m_Impl->DrainUiEvents();
     }
 
-    void ScenePresentationRuntime::PointerButton(const float x, const float y, const RuntimeUiPointerButton button,
+    void ScenePresentationRuntime::PointerLeave()
+    {
+        m_Impl->UiTree->PointerLeave();
+        m_Impl->DrainUiEvents();
+    }
+
+    bool ScenePresentationRuntime::PointerButton(const float x, const float y, const RuntimeUiPointerButton button,
                                                  const bool pressed)
     {
-        m_Impl->UiTree->PointerButton(x, y, button, pressed);
+        const bool handled = m_Impl->UiTree->PointerButton(x, y, button, pressed);
         if (button == RuntimeUiPointerButton::Primary)
         {
             if (pressed)
@@ -1295,14 +1302,30 @@ namespace Keire
                 m_Impl->ActiveSlider = {};
         }
         m_Impl->DrainUiEvents();
+        return handled;
     }
 
-    void ScenePresentationRuntime::PointerWheel(const float x, const float y, const float horizontal,
+    bool ScenePresentationRuntime::CancelPointerButton(const RuntimeUiPointerButton button) noexcept
+    {
+        const bool handled = m_Impl->UiTree->CancelPointerButton(button);
+        if (button == RuntimeUiPointerButton::Primary)
+            m_Impl->ActiveSlider = {};
+        try
+        {
+            m_Impl->DrainUiEvents();
+        }
+        catch (...)
+        {
+        }
+        return handled;
+    }
+
+    bool ScenePresentationRuntime::PointerWheel(const float x, const float y, const float horizontal,
                                                 const float vertical)
     {
         if (!std::isfinite(horizontal) || !std::isfinite(vertical))
             throw std::invalid_argument("Runtime UI pointer wheel must be finite.");
-        m_Impl->ScrollAt(x, y, horizontal, vertical);
+        return m_Impl->ScrollAt(x, y, horizontal, vertical);
     }
 
     void ScenePresentationRuntime::TextInput(const std::string_view text) { m_Impl->AppendText(text); }

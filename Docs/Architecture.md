@@ -786,6 +786,21 @@ warping the pointer. Hovering Scene therefore routes navigation exclusively to t
 runtime camera state.
 The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
 binding, notices, and modal arbitration.
+`EditorWorkspaceLayer` remains the owner-thread composition root, while non-copyable internal coordinators own document
+transitions and close conflicts, packages, replay/profiling presentation, managed-runtime build scheduling, Play Mode
+orchestration, asset-operation admission, and build/cook lifecycle. Each coordinator accepts narrow callbacks or
+document references, invalidates generation tokens before idempotent `Shutdown() noexcept`, and rejects off-owner
+updates before state or callbacks change. A fixed named-phase trace characterizes the legacy update and teardown order;
+delegation does not reorder those phases, late callbacks cannot re-enter a closed workspace, and one shutdown failure
+does not prevent later authorities from closing.
+The document/workspace coordinator is the sole owner of the primary document objects. The composition root keeps only
+owner-thread-affine, non-owning aliases for command and panel binding; replacing the active Scene document (including
+Prefab Mode entry and exit) transfers ownership through the coordinator. Mutable coordinator queries and document
+access are owner-thread checked, while only a captured generation token's `Current()` observation is cross-thread safe.
+Construction moves one complete document bundle into the coordinator before command binding and clears the staging
+owner, so the running workspace never co-owns a primary document.
+The named workspace teardown invokes `Shutdown() noexcept` while panels and callbacks are alive; destruction closes
+callback admission and releases the owned documents without re-entering already-destroyed workspace dependencies.
 All authoring mutations, including menu primitives and viewport mesh/material drops, cross `SceneDocument`; workspace
 code may inspect an active scene for presentation and picking but does not create, destroy, or edit scene objects itself.
 Hierarchy multi-moves validate every source, destination, insertion sibling, cycle, and preserved world transform before
@@ -1243,6 +1258,18 @@ sign individual Mach-O files and nested code bundles from the inside out, then s
 Microsoft .NET tree remains an independently signed third-party boundary whose signatures and bytes are verified but
 never rewritten. Only the managed editor host receives the reviewed JIT/runtime entitlements; the standalone Hub does
 not.
+
+On Windows, NSIS owns presentation and optional shell integration while `KeireInstallWorker` is the payload transaction
+authority shared by Editor and Hub. Its product-specific receipt binds the package identity, a random installation ID,
+manifest fingerprint, and exact regular-file size/SHA-256 inventory to the canonical HKCU registration. The worker
+accepts only an absent/empty ordinary root or a receipt/marker/registration-bound existing installation. It stages beside
+the root on the same volume, journals each durable phase, revalidates hashes and no-follow path components immediately
+before copy, rename, or deletion, and keeps the old payload recoverable until NSIS commits after shell work. Recovery is
+idempotent. Uninstall moves only unchanged receipt entries through the same journal, preserves drift and unknown
+neighbors, and never recursively deletes the selected root. The real Editor and Hub executables expose a hidden
+pre-Application `--verify-installation` handler that revalidates the product's exact schema-2 package manifest and file
+inventory without creating preferences, projects, windows, singleton activation, or network clients. NSIS runs that
+handler with a bounded timeout while rollback is still possible. Linux and macOS installer authorities are unchanged.
 
 A KeireCore prebuild step refreshes version and source-control identity under `Build/Generated` immediately before compilation, including tracked and untracked dirty state. The generator C-escapes configured strings and only rewrites the header when its content changes. Built-in rendering, skinning, and VFX headers are independently fingerprinted from their generator, compiler, and HLSL inputs. Cache misses use a repository-scoped inter-process lock, so parallel builds publish one complete header while waiters recheck and reuse it. Platform build launchers hold a checkout-wide lock while mutating the shared `Build` tree; compiler parallelism remains internal to that build, while another launcher waits instead of racing links, staging, or dependency publication. The compiler supplies configuration, compiler, platform, and architecture identity. Packaging regenerates identity and verifies the staged binary's commit prefix and dirty marker against its manifest. The resulting `Keire::BuildInfo` describes the binary itself rather than the machine inspecting it.
 

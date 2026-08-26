@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/EditorPanels.h"
+#include "KeireClient/Editor/EditorRuntimeUiInput.h"
 #include "KeireClient/Editor/LightingPanel.h"
 #include "KeireClient/Editor/ManagedDataTypeCache.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
@@ -21,7 +22,6 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
-#include <future>
 #include <memory>
 #include <optional>
 #include <span>
@@ -43,9 +43,21 @@ namespace KeireEditor
     class ConsolePanel;
     class DiagnosticsPanel;
     class EditorCommandRouter;
+    class EditorAssetOperationCoordinator;
+    class EditorBuildCookCoordinator;
+    class EditorDocumentWorkspaceCoordinator;
+    struct EditorDocumentWorkspaceDocuments;
+    enum class EditorDocumentTransitionAction : std::uint8_t;
+    class EditorManagedRuntimeCoordinator;
+    class EditorPackageCoordinator;
+    class EditorPlayModeCoordinator;
+    class EditorReplayProfilingCoordinator;
+    class EditorSmokePlayValidation;
+    class EditorWorkspaceLifecycleCoordinator;
     class ExternalAssetImportController;
     class InputActionsDocument;
     class MaterialDocument;
+    class MaterialGraphDocument;
     class PackageManagerPanel;
     class ShaderGraphDocument;
     class InputActionsPanel;
@@ -69,6 +81,11 @@ namespace KeireEditor
     class ViewportAssetDropRouter;
 } // namespace KeireEditor
 
+namespace Keire::Internal
+{
+    class DiagnosticBundleDialogController;
+}
+
 class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::ISceneViewportController,
                                    private KeireEditor::IHierarchyController,
@@ -88,7 +105,12 @@ class EditorWorkspaceLayer final : public Keire::Layer,
 {
   public:
     explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false, bool smokePlay = false,
-                                  std::filesystem::path executable = {});
+                                  std::filesystem::path executable = {}, std::filesystem::path smokePlayOutput = {}
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                                  ,
+                                  bool validateDeviceLoss = false
+#endif
+    );
     ~EditorWorkspaceLayer() override;
 
   protected:
@@ -114,15 +136,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         DirtyMaterialGraph,
         DirtyPlayerBuild,
         RenameEntity
-    };
-
-    enum class PendingSceneAction : std::uint8_t
-    {
-        None,
-        Create,
-        Open,
-        Close,
-        Exit
     };
 
     enum class PendingPlayTransition : std::uint8_t
@@ -190,6 +203,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                         std::optional<Keire::GpuOcclusionSurfaceDiagnostics> occlusionSurface,
                                         std::optional<Keire::UiItemRect> occupied = std::nullopt) override;
     void DrawGame(Keire::UiFrame& ui);
+    void UpdateSmokePlayValidation();
     [[nodiscard]] Keire::Ref<Keire::Scene> ActiveHierarchyScene() const noexcept override;
     [[nodiscard]] KeireEditor::SceneDocument& HierarchyDocument() noexcept override;
     [[nodiscard]] Keire::UiColor HierarchyAccent() const noexcept override;
@@ -373,7 +387,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                 Keire::AssetId reloadAsset = {});
     void CompletePendingMaterialAssignment(Keire::AssetId refreshedAsset);
     void QueueMaterialCatalogRefresh(Keire::AssetId reloadAsset = {});
-    void UpdateMaterialCatalogRefresh(const Keire::Time& time);
+    void UpdateMaterialCatalogRefresh(double unscaledDeltaSeconds);
     void FlushMaterialCatalogRefresh() noexcept;
     void CancelMaterialCatalogRefresh() noexcept;
     void CommitMaterialDraft();
@@ -381,7 +395,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawExternalAssetImport(Keire::UiFrame& ui);
     void CookAssets();
     void StartManagedBuild();
-    void UpdateManagedBuild(const Keire::Time& time);
+    void UpdateManagedBuild();
     void RequestPlayerBuild(bool runAfterBuild);
     void StartPlayerBuild(bool runAfterBuild);
     void UpdatePlayerBuild();
@@ -494,7 +508,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveShaderGraph();
     void OpenMaterialGraph(Keire::AssetId asset);
     void SaveMaterialGraph();
-    void UpdateMaterialGraphAutosave(const Keire::Time& time);
+    void UpdateMaterialGraphAutosave(double unscaledDeltaSeconds);
     [[nodiscard]] std::optional<Keire::ShaderInterfaceDefinition>
     ResolveMaterialGraphInterface(const Keire::MaterialShaderReference& shader) const;
     [[nodiscard]] std::optional<Keire::ShaderGraphDefinition> ResolveReusableGraph(Keire::AssetId asset) const;
@@ -677,7 +691,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void CloseScene();
     void ExecutePendingSceneAction();
     void RequestEditorExit();
-    void QueueSceneTransition(PendingSceneAction action, Keire::AssetId asset = {});
+    void QueueSceneTransition(KeireEditor::EditorDocumentTransitionAction action, Keire::AssetId asset = {});
     void ProcessSceneTransition();
     void WriteSceneRecovery();
     void RestoreSceneRecovery();
@@ -690,6 +704,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool ProjectRequiresManagedRuntime() const noexcept;
     void BeginPlayMode();
     void ContinuePendingPlayMode();
+    void CompletePendingPlayTransition();
+    void UpdatePlayRuntime(double deltaSeconds, double interpolationAlpha);
     void RequestStopPlayMode();
     void FinishPlayMode(bool apply);
     void ApplyManagedCursorMode() noexcept;
@@ -703,6 +719,18 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenPendingDialog(Keire::UiFrame& ui);
     void RequestTheme(Keire::UiWorkspace& workspace, Keire::UiThemeId id);
     void LoadTheme(Keire::UiWorkspace& workspace, Keire::UiThemeId id);
+    void OpenDiagnosticBundle();
+    void DrawDiagnosticBundle(Keire::UiFrame& ui);
+    [[nodiscard]] std::unique_ptr<KeireEditor::EditorDocumentWorkspaceDocuments> CreateDocumentWorkspaceDocuments();
+    [[nodiscard]] std::unique_ptr<KeireEditor::EditorDocumentWorkspaceCoordinator> CreateDocumentCoordinator();
+    [[nodiscard]] std::unique_ptr<KeireEditor::EditorManagedRuntimeCoordinator> CreateManagedRuntimeCoordinator();
+    [[nodiscard]] std::unique_ptr<KeireEditor::EditorPackageCoordinator> CreatePackageCoordinator();
+    [[nodiscard]] std::unique_ptr<KeireEditor::EditorPlayModeCoordinator> CreatePlayModeCoordinator();
+    [[nodiscard]] std::unique_ptr<KeireEditor::EditorAssetOperationCoordinator> CreateAssetOperationCoordinator();
+    [[nodiscard]] std::unique_ptr<KeireEditor::EditorBuildCookCoordinator> CreateBuildCookCoordinator();
+    void DrainQueuedAssetMutation();
+    void DrainQueuedPrefabCreation();
+    void PollAssetHotReload();
 
     Keire::UiPanelRegistration m_Game;
     Keire::UiPanelRegistration m_ThemeEditor;
@@ -722,18 +750,23 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::AssetBrowserPanel> m_AssetBrowserPanel;
     std::unique_ptr<KeireEditor::ConsolePanel> m_ConsolePanel;
     std::unique_ptr<KeireEditor::DiagnosticsPanel> m_DiagnosticsPanel;
-    std::unique_ptr<KeireEditor::SceneDocument> m_SceneDocument;
+    std::unique_ptr<KeireEditor::EditorDocumentWorkspaceDocuments> m_ConstructedDocuments;
+    KeireEditor::SceneDocument* m_SceneDocument = nullptr;
     std::unique_ptr<KeireEditor::SceneDocument> m_PrefabReturnDocument;
     std::optional<PrefabEditingStage> m_PrefabEditingStage;
-    std::unique_ptr<KeireEditor::InputActionsDocument> m_InputActionsDocument;
-    std::unique_ptr<KeireEditor::AnimatorControllerDocument> m_AnimatorControllerDocument;
-    std::unique_ptr<KeireEditor::AudioMixerDocument> m_AudioMixerDocument;
-    std::unique_ptr<KeireEditor::VfxEffectDocument> m_VfxEffectDocument;
-    std::unique_ptr<KeireEditor::ShaderGraphDocument> m_ShaderGraphDocument;
-    std::unique_ptr<KeireEditor::MaterialGraphDocument> m_MaterialGraphDocument;
-    std::unique_ptr<KeireEditor::ProjectSettingsDocument> m_ProjectSettingsDocument;
-    std::unique_ptr<KeireEditor::MaterialDocument> m_MaterialDocument;
+    KeireEditor::InputActionsDocument* m_InputActionsDocument = nullptr;
+    KeireEditor::AnimatorControllerDocument* m_AnimatorControllerDocument = nullptr;
+    KeireEditor::AudioMixerDocument* m_AudioMixerDocument = nullptr;
+    KeireEditor::VfxEffectDocument* m_VfxEffectDocument = nullptr;
+    KeireEditor::ShaderGraphDocument* m_ShaderGraphDocument = nullptr;
+    KeireEditor::MaterialGraphDocument* m_MaterialGraphDocument = nullptr;
+    KeireEditor::ProjectSettingsDocument* m_ProjectSettingsDocument = nullptr;
+    KeireEditor::MaterialDocument* m_MaterialDocument = nullptr;
+    std::unique_ptr<KeireEditor::EditorDocumentWorkspaceCoordinator> m_DocumentCoordinator;
     std::unique_ptr<KeireEditor::EditorCommandRouter> m_CommandRouter;
+    std::unique_ptr<KeireEditor::EditorWorkspaceLifecycleCoordinator> m_LifecycleCoordinator;
+    std::unique_ptr<KeireEditor::EditorReplayProfilingCoordinator> m_ReplayProfilingCoordinator;
+    std::unique_ptr<Keire::Internal::DiagnosticBundleDialogController> m_DiagnosticBundle;
     std::unique_ptr<KeireEditor::SceneViewportPanel> m_SceneViewportPanel;
     std::unique_ptr<KeireEditor::HierarchyPanel> m_HierarchyPanel;
     std::unique_ptr<KeireEditor::InspectorPanel> m_InspectorPanel;
@@ -747,6 +780,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::ProjectSettingsPanel> m_ProjectSettingsPanel;
     std::unique_ptr<KeireEditor::LightingPanel> m_LightingPanel;
     std::unique_ptr<KeireEditor::PackageManagerPanel> m_PackageManagerPanel;
+    std::unique_ptr<KeireEditor::EditorPackageCoordinator> m_PackageCoordinator;
     std::unique_ptr<KeireEditor::PropertyDrawerRegistry> m_PropertyDrawers;
     std::unique_ptr<KeireEditor::ViewportAssetDropRouter> m_ViewportAssetDropRouter;
     std::unique_ptr<KeireEditor::ScenePlayChangesPanel> m_PlayChangesPanel;
@@ -773,15 +807,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::uint64_t m_AssetRecordRevision = 0;
     bool m_ManagedIdeWorkspaceOpened = false;
     Keire::AssetId m_SelectedAsset;
-    struct PendingAssetPackageDialog
-    {
-        KeireEditor::AssetPackageSelection Selection;
-        KeireEditor::AssetPackageDraft Draft;
-        Keire::Ref<Keire::SaveFileDialogOperation> Dialog;
-    };
-    std::optional<PendingAssetPackageDialog> m_PendingAssetPackageDialog;
-    std::future<Keire::AssetPackageArchiveMetadata> m_AssetPackageExport;
-    std::filesystem::path m_AssetPackageOutput;
     std::filesystem::path m_ExecutablePath;
     std::filesystem::path m_EditorSessionPath;
     Keire::AssetId m_PendingStartupScene;
@@ -837,6 +862,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::Detail::ManagedMaterialParameterStore m_ManagedMaterialParameters;
     bool m_GameViewportInputActive = false;
     bool m_GameViewportCaptureSuspended = false;
+    KeireEditor::RuntimeUiPointerRoutingState m_GameRuntimeUiPointer;
     std::uint32_t m_SuppressManagedLookFrames = 0;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;
     std::vector<Keire::InputCaptureOverride> m_InputCaptureOverrides;
@@ -890,12 +916,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::Ref<Keire::UndoContext> m_ThemeUndoContext;
     Keire::Ref<Keire::UndoContext> m_ManagedDataUndoContext;
     Keire::Ref<Keire::UndoContext> m_ActiveUndoContext;
-    PendingSceneAction m_PendingSceneAction = PendingSceneAction::None;
     PendingPlayTransition m_PendingPlayTransition = PendingPlayTransition::None;
-    Keire::AssetId m_PendingSceneAsset;
     Keire::UiColor m_NoticeColor;
     std::uint32_t m_FrameCount = 0;
-    std::uint32_t m_SmokePlayFrameCount = 0;
     std::uint64_t m_AudioMixerDocumentRevision = 0;
     std::uint64_t m_VfxEffectDocumentRevision = 0;
     std::uint64_t m_MaterialGraphDocumentRevision = 0;
@@ -904,8 +927,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::uint32_t m_VfxEffectPreviewCapacity = 0;
     float m_VfxEffectPreviewSpeed = 1.0F;
     Keire::VfxBackend m_VfxEffectPreviewBackend = Keire::VfxBackend::Cpu;
-    double m_AssetPollSeconds = 0.0;
-    double m_ManagedBuildDebounceSeconds = -1.0;
     std::vector<std::pair<Keire::EntityId, Keire::AssetId>> m_PendingScriptAttachments;
     bool m_ResolvingPendingScriptAttachments = false;
     bool m_ThemeDirty = false;
@@ -918,42 +939,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_ShowPerformanceOverlay = false;
     bool m_ShowAdvancedPerformanceOverlay = false;
     bool m_MaximizeGameOnPlay = false;
-    bool m_ProfilerPaused = false;
-    bool m_ProfilerShowAllManagedCallbacks = false;
-    bool m_ProfilerShowAllHotspots = false;
-    bool m_ProfilerShowAllCounters = false;
-    std::string m_ReplayPath;
-    std::int64_t m_ReplaySeekTick = 0;
-    bool m_ReplayPerformanceProfile = false;
-    std::string m_ReplayActionStatus;
-    struct ProfilerPresentationCache
-    {
-        std::uint64_t FrameSequence = 0;
-        double FramesPerSecond = 0.0;
-        double AverageFrameMicroseconds = 0.0;
-        double AverageFramesPerSecond = 0.0;
-        double P95FrameMicroseconds = 0.0;
-        double P99FrameMicroseconds = 0.0;
-        double MaximumFrameMicroseconds = 0.0;
-        double OnePercentLow = 0.0;
-        std::size_t StutterCount = 0;
-        std::string FrameLine;
-        std::string HistoryLine;
-        std::string TailLine;
-        std::vector<Keire::ProfileSpan> OrderedSpans;
-        std::vector<Keire::ProfileSpan> TimelineSpans;
-        std::vector<std::string> SpanLines;
-        std::vector<std::string> TimelineLines;
-        std::vector<std::string> ThreadLines;
-        std::vector<std::string> CounterLines;
-        std::vector<std::string> ManagedCallbackLines;
-        bool ManagedCallbacksTruncated = false;
-    };
-    Keire::ProfileFrame m_CachedProfileFrame;
-    std::vector<Keire::ProfileFrameSummary> m_CachedProfileHistory;
-    Keire::ProfileFrame m_FrozenProfileFrame;
-    std::vector<Keire::ProfileFrameSummary> m_FrozenProfileHistory;
-    ProfilerPresentationCache m_ProfilerPresentation;
     Keire::ScenePlayState m_PlayResumeState = Keire::ScenePlayState::Stopped;
     std::unordered_set<Keire::AssetId> m_PlayEditorTouchedEntities;
     bool m_PlayStartPending = false;
@@ -967,4 +952,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_SmokePlay = false;
     bool m_SmokePlayRequested = false;
     int m_GameAspect = 0;
+    std::unique_ptr<KeireEditor::EditorManagedRuntimeCoordinator> m_ManagedRuntimeCoordinator;
+    std::unique_ptr<KeireEditor::EditorPlayModeCoordinator> m_PlayModeCoordinator;
+    std::unique_ptr<KeireEditor::EditorAssetOperationCoordinator> m_AssetOperationCoordinator;
+    std::unique_ptr<KeireEditor::EditorBuildCookCoordinator> m_BuildCookCoordinator;
+    std::unique_ptr<KeireEditor::EditorSmokePlayValidation> m_SmokePlayValidation;
 };

@@ -313,13 +313,13 @@ void EditorWorkspaceLayer::SaveMaterialGraph()
                                            : record->RelativePath.generic_string() + " is already saved.");
 }
 
-void EditorWorkspaceLayer::UpdateMaterialGraphAutosave(const Keire::Time& time)
+void EditorWorkspaceLayer::UpdateMaterialGraphAutosave(const double unscaledDeltaSeconds)
 {
     if (!m_MaterialGraphDocument || !m_MaterialGraphDocument->IsOpen())
         return;
     try
     {
-        if (!m_MaterialGraphDocument->AdvanceAutosave(time.UnscaledDeltaTime().Seconds()))
+        if (!m_MaterialGraphDocument->AdvanceAutosave(unscaledDeltaSeconds))
             return;
         const auto asset = m_MaterialGraphDocument->Asset();
         // PollChangedAssets owns source-file imports. Queueing here as well leaves the editor-authored change pending

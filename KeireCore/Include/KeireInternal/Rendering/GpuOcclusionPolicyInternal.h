@@ -25,8 +25,9 @@ namespace Keire::RenderBackend::GpuOcclusionPolicy
         bool MaximumDelayWarningPublished = false;
     };
 
-    // RenderSharedState validates RenderSpecification::MaximumFramesInFlight to the range 1..8.
-    inline constexpr std::size_t MaximumAllocationRetrySlots = 8U;
+    // RenderSharedState validates the total accepted-not-retired frame bound to 1..3. Occlusion retry state uses the
+    // same maximum so it cannot retain work beyond the renderer's admitted packet lifetime.
+    inline constexpr std::size_t MaximumAllocationRetrySlots = 3U;
 
     struct AllocationRetryState final
     {

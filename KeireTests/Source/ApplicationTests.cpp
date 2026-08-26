@@ -5,6 +5,8 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <memory>
 #include <stdexcept>
@@ -353,14 +355,27 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
-            auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();
-            const auto panel = tree->Create(Keire::RuntimeUiElementType::Panel);
+            auto lowerTree = Keire::CreateRef<Keire::RuntimeUiTree>();
+            const auto lowerPanel = lowerTree->Create(Keire::RuntimeUiElementType::Panel);
             Keire::RuntimeUiStyle style;
             style.Background = {0.2F, 0.4F, 0.8F, 1.0F};
-            REQUIRE(tree->SetStyle(panel, style));
-            tree->Layout(320.0F, 180.0F);
-            Owner().Renderer()->SubmitRuntimeUi(tree);
-            CHECK(Keire::RenderSystemInternalAccess::RuntimeUiCommandCount(*Owner().Renderer()) > 0);
+            REQUIRE(lowerTree->SetStyle(lowerPanel, style));
+            lowerTree->Layout(320.0F, 180.0F);
+            const auto lowerCommands = lowerTree->DrawCommands().size();
+            REQUIRE(lowerCommands > 0U);
+            Owner().Renderer()->SubmitRuntimeUi(lowerTree);
+
+            auto upperTree = Keire::CreateRef<Keire::RuntimeUiTree>();
+            const auto upperPanel = upperTree->Create(Keire::RuntimeUiElementType::Panel);
+            style.Background = {0.8F, 0.3F, 0.2F, 1.0F};
+            REQUIRE(upperTree->SetStyle(upperPanel, style));
+            upperTree->Layout(320.0F, 180.0F);
+            const auto upperCommands = upperTree->DrawCommands().size();
+            REQUIRE(upperCommands > 0U);
+            Owner().Renderer()->SubmitRuntimeUi(upperTree);
+            Owner().Renderer()->SubmitRuntimeUi({});
+            CHECK(Keire::RenderSystemInternalAccess::RuntimeUiCommandCount(*Owner().Renderer()) ==
+                  lowerCommands + upperCommands);
             m_Updated = true;
             Owner().RequestExit();
         }
@@ -679,6 +694,124 @@ namespace
             return specification;
         }
     };
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    struct RecoveryBoundaryProbe final
+    {
+        std::atomic<bool> RecoveryCompleted{false};
+        std::atomic<bool> QuitEventPushed{false};
+        int Updates = 0;
+        int UiFrames = 0;
+        int FixedUpdates = 0;
+        int DeferredAttaches = 0;
+        std::vector<double> UpdateDeltas;
+    };
+
+    class DeferredRecoveryAttachLayer final : public Keire::Layer
+    {
+      public:
+        explicit DeferredRecoveryAttachLayer(RecoveryBoundaryProbe& probe)
+            : Layer("deferred-recovery-attach"), m_Probe(probe)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            CHECK(m_Probe.RecoveryCompleted.load(std::memory_order_acquire));
+            ++m_Probe.DeferredAttaches;
+        }
+
+      private:
+        RecoveryBoundaryProbe& m_Probe;
+    };
+
+    class RecoveryBoundaryLayer final : public Keire::Layer
+    {
+      public:
+        RecoveryBoundaryLayer(RecoveryBoundaryProbe& probe, const bool exitDuringRecovery)
+            : Layer("recovery-boundary"), m_Probe(probe), m_ExitDuringRecovery(exitDuringRecovery)
+        {
+        }
+
+      protected:
+        void OnAttach() override { (void)Owner().PushLayer(std::make_unique<DeferredRecoveryAttachLayer>(m_Probe)); }
+
+        void OnFixedUpdate(const Keire::Time&) override
+        {
+            CHECK(m_Probe.RecoveryCompleted.load(std::memory_order_acquire));
+            ++m_Probe.FixedUpdates;
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            CHECK(m_Probe.RecoveryCompleted.load(std::memory_order_acquire));
+            ++m_Probe.Updates;
+            m_Probe.UpdateDeltas.push_back(Owner().GetTime().UnscaledDeltaTime().Seconds());
+        }
+
+        void OnUi(Keire::UiFrame&) override
+        {
+            CHECK(m_Probe.RecoveryCompleted.load(std::memory_order_acquire));
+            ++m_Probe.UiFrames;
+            if (m_Probe.Updates == 2)
+                Owner().RequestExit();
+        }
+
+        Keire::EventFlow OnEvent(const Keire::EventView& event) override
+        {
+            if (!event.Is<Keire::QuitEvent>())
+                return Keire::EventFlow::Continue;
+            if (m_ExitDuringRecovery)
+                return Keire::EventFlow::Continue;
+            m_Probe.RecoveryCompleted.store(true, std::memory_order_release);
+            Keire::RenderSystemInternalAccess::SetDeviceRecoveryStateForTest(*Owner().Renderer(),
+                                                                             Keire::RenderDeviceState::Running);
+            return Keire::EventFlow::Handled;
+        }
+
+      private:
+        RecoveryBoundaryProbe& m_Probe;
+        bool m_ExitDuringRecovery = false;
+    };
+
+    class RecoveryBoundaryApplication final : public Keire::Application
+    {
+      public:
+        RecoveryBoundaryApplication(RecoveryBoundaryProbe& probe, const bool exitDuringRecovery)
+            : Application(BuildSpecification()), m_Probe(probe)
+        {
+            (void)PushLayer(std::make_unique<RecoveryBoundaryLayer>(probe, exitDuringRecovery));
+        }
+
+      protected:
+        void OnInitialize() override
+        {
+            const auto renderer = Renderer();
+            REQUIRE(renderer);
+            Keire::RenderSystemInternalAccess::SetDeviceRecoveryStateForTest(*renderer,
+                                                                             Keire::RenderDeviceState::RecoveryPending);
+            SDL_Event quit{};
+            quit.type = SDL_EVENT_QUIT;
+            const bool pushed = SDL_PushEvent(&quit);
+            m_Probe.QuitEventPushed.store(pushed, std::memory_order_release);
+            REQUIRE(pushed);
+        }
+
+      private:
+        static Keire::ApplicationSpecification BuildSpecification()
+        {
+            auto specification = HiddenApplicationSpecification("recovery-boundary");
+            specification.Render.Mode = Keire::RenderMode::Headless;
+            specification.Ui.Mode = Keire::UiMode::Headless;
+            specification.Timing.FixedDeltaTime = Keire::TimeStep::FromSeconds(0.05);
+            specification.Timing.MaximumFixedStepsPerFrame = 8;
+            return specification;
+        }
+
+        RecoveryBoundaryProbe& m_Probe;
+    };
+#endif
 } // namespace
 
 TEST_CASE("LayerStack owns deterministic layer lifecycle and traversal order")
@@ -880,3 +1013,30 @@ TEST_CASE("Applications may keep background layer services alive while minimized
     CHECK(application.Run() == 8);
     CHECK(updates == 2);
 }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+TEST_CASE("Application recovery boundary pauses update and UI while continuing quit-event processing")
+{
+    UseApplicationDummyVideoDriver();
+    RecoveryBoundaryProbe exitProbe;
+    RecoveryBoundaryApplication exiting(exitProbe, true);
+    CHECK(exiting.Run() == 0);
+    CHECK(exitProbe.QuitEventPushed.load(std::memory_order_acquire));
+    CHECK(exitProbe.Updates == 0);
+    CHECK(exitProbe.UiFrames == 0);
+    CHECK(exitProbe.FixedUpdates == 0);
+    CHECK(exitProbe.DeferredAttaches == 0);
+
+    RecoveryBoundaryProbe resumeProbe;
+    RecoveryBoundaryApplication resuming(resumeProbe, false);
+    CHECK(resuming.Run() == 0);
+    CHECK(resumeProbe.RecoveryCompleted.load(std::memory_order_acquire));
+    CHECK(resumeProbe.Updates == 2);
+    CHECK(resumeProbe.UiFrames == 2);
+    CHECK(resumeProbe.FixedUpdates == 0);
+    CHECK(resumeProbe.DeferredAttaches == 1);
+    REQUIRE(resumeProbe.UpdateDeltas.size() == 2U);
+    CHECK(resumeProbe.UpdateDeltas[0] < 0.05);
+    CHECK(resumeProbe.UpdateDeltas[1] < 0.05);
+}
+#endif

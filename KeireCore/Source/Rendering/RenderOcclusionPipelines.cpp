@@ -165,6 +165,18 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUShader(Device, fragment);
                 SDL_ReleaseGPUShader(Device, vertex);
             }
+            catch (const GpuDeviceLostError&)
+            {
+                throw;
+            }
+            catch (const std::exception& error)
+            {
+                ThrowIfDeviceLost("GPU occlusion depth-pipeline creation", error.what());
+                if (fragment)
+                    SDL_ReleaseGPUShader(Device, fragment);
+                SDL_ReleaseGPUShader(Device, vertex);
+                throw;
+            }
             catch (...)
             {
                 if (fragment)
@@ -253,6 +265,7 @@ namespace Keire::RenderBackend
                 },
                 [&](const std::exception& error)
                 {
+                    ThrowIfDeviceLost("GPU occlusion HZB visualization", error.what());
                     if (GpuOcclusionDebugPyramidPipeline)
                         SDL_ReleaseGPUGraphicsPipeline(Device, GpuOcclusionDebugPyramidPipeline);
                     GpuOcclusionDebugPyramidPipeline = nullptr;
@@ -305,6 +318,7 @@ namespace Keire::RenderBackend
                 },
                 [&](const std::exception& error)
                 {
+                    ThrowIfDeviceLost("GPU occlusion bounds visualization", error.what());
                     if (GpuOcclusionDebugBoundsPipeline)
                         SDL_ReleaseGPUGraphicsPipeline(Device, GpuOcclusionDebugBoundsPipeline);
                     GpuOcclusionDebugBoundsPipeline = nullptr;
@@ -322,8 +336,13 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUShader(Device, debugBoundsVertex);
             return true;
         }
+        catch (const GpuDeviceLostError&)
+        {
+            throw;
+        }
         catch (const std::exception& error)
         {
+            ThrowIfDeviceLost("GPU occlusion pipeline creation", error.what());
             GpuOcclusionPipelineFailure = error.what();
             ReleaseGpuOcclusionPipelines();
             GpuOcclusionCapability = false;

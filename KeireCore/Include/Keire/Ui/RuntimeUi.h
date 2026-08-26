@@ -305,7 +305,9 @@ namespace Keire
         [[nodiscard]] std::optional<RuntimeUiElementId> HitTest(float x, float y) const noexcept;
 
         void PointerMove(float x, float y);
-        void PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
+        void PointerLeave();
+        bool PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
+        bool CancelPointerButton(RuntimeUiPointerButton button) noexcept;
         void Navigate(RuntimeUiNavigation navigation);
         [[nodiscard]] bool SetFocus(RuntimeUiElementId element);
         [[nodiscard]] RuntimeUiElementId Focus() const noexcept;

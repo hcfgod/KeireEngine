@@ -17,6 +17,7 @@ namespace Keire
         using EventSinkToken = std::uint64_t;
 
         [[nodiscard]] static SDL_Window* NativeWindow(WindowSystem& system, WindowId id);
+        [[nodiscard]] static SDL_Window* RecreateNativeWindow(WindowSystem& system, WindowId id);
         [[nodiscard]] static bool SetTextInput(WindowSystem& system, WindowId id, bool enabled);
         [[nodiscard]] static WindowChromeRole HitTestChromeLayout(const WindowChromeLayout& layout,
                                                                   WindowPosition position) noexcept;

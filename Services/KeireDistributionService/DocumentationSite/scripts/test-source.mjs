@@ -108,7 +108,7 @@ function parseUnsignedConstant(source, name) {
 
 const actual = await collectMarkdown(docsRoot);
 const expected = [...allDocSources].sort((left, right) => left.localeCompare(right));
-assert(allDocSources.length === 81, `Expected 81 documentation sources, found ${allDocSources.length}.`);
+assert(allDocSources.length === 82, `Expected 82 documentation sources, found ${allDocSources.length}.`);
 assert(new Set(allDocSources).size === allDocSources.length, "Documentation inventory contains duplicate source paths.");
 assert(JSON.stringify(actual) === JSON.stringify(expected), "Documentation inventory does not exactly cover Docs/**/*.md.");
 
@@ -152,7 +152,7 @@ assert(fallbackLanding.includes(`<span data-doc-count>${allDocSources.length} do
     "Fallback documentation count is stale.");
 for (const [fragment, count] of [
     ["user-manual", 18], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 11], ["assets-builds", 4],
-    ["vfx", 4], ["csharp", 16], ["production", 7], ["diagnostics", 5],
+    ["vfx", 4], ["csharp", 16], ["production", 8], ["diagnostics", 5],
 ]) {
     assert(new RegExp(`<a href="#${fragment}">[^<]*<span>[^<]+</span><b>${count}</b></a>`).test(fallbackLanding),
     `Fallback documentation category count is stale: ${fragment}.`);

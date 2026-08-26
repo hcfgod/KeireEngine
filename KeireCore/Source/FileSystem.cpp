@@ -82,8 +82,20 @@ namespace Keire::Detail
     class AnchoredFileSystem::Impl final
     {
       public:
-        explicit Impl(const std::filesystem::path& root) : m_Root(CanonicalExistingPath(root))
+        explicit Impl(const std::filesystem::path& root, const AnchoredRootPolicy rootPolicy)
+            : m_Root(rootPolicy == AnchoredRootPolicy::ResolveCanonical
+                         ? CanonicalExistingPath(root)
+                         : std::filesystem::absolute(root).lexically_normal())
         {
+            if (rootPolicy == AnchoredRootPolicy::RejectLink)
+            {
+                std::error_code error;
+                const auto status = std::filesystem::symlink_status(m_Root, error);
+                if (error)
+                    throw std::system_error(error, "Cannot inspect anchored filesystem root");
+                if (std::filesystem::is_symlink(status))
+                    throw std::invalid_argument("Anchored filesystem roots may not be symbolic links.");
+            }
 #if defined(_WIN32)
             m_RootHandle = CreateFileW(m_Root.c_str(), FILE_LIST_DIRECTORY | FILE_TRAVERSE | FILE_READ_ATTRIBUTES,
                                        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
@@ -103,7 +115,11 @@ namespace Keire::Detail
 #else
             m_RootDescriptor = open(m_Root.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
             if (m_RootDescriptor < 0)
+            {
+                if (rootPolicy == AnchoredRootPolicy::RejectLink && errno == ELOOP)
+                    throw std::invalid_argument("Anchored filesystem roots may not be symbolic links.");
                 throw std::system_error(errno, std::generic_category(), "Cannot anchor filesystem root");
+            }
 #endif
         }
 
@@ -435,7 +451,10 @@ namespace Keire::Detail
 #endif
     };
 
-    AnchoredFileSystem::AnchoredFileSystem(const std::filesystem::path& root) : m_Impl(std::make_unique<Impl>(root)) {}
+    AnchoredFileSystem::AnchoredFileSystem(const std::filesystem::path& root, const AnchoredRootPolicy rootPolicy)
+        : m_Impl(std::make_unique<Impl>(root, rootPolicy))
+    {
+    }
     AnchoredFileSystem::~AnchoredFileSystem() = default;
     AnchoredFileSystem::AnchoredFileSystem(AnchoredFileSystem&&) noexcept = default;
     AnchoredFileSystem& AnchoredFileSystem::operator=(AnchoredFileSystem&&) noexcept = default;
@@ -449,6 +468,68 @@ namespace Keire::Detail
         (void)ReadChunks(relative, maximumBytes, [&](const std::span<const std::byte> chunk)
                          { result.insert(result.end(), chunk.begin(), chunk.end()); });
         return result;
+    }
+
+    std::vector<std::byte> AnchoredFileSystem::ReadTail(const std::filesystem::path& relative,
+                                                        const std::size_t maximumBytes) const
+    {
+        const auto components = ConfinedComponents(relative);
+        auto parent = m_Impl->OpenParent(components, false);
+        InvokeAnchoredHook("read-tail", relative);
+#if defined(_WIN32)
+        auto file =
+            Impl::OpenRelative(parent.Get(), components.back(), FILE_READ_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+                               Impl::NtOpenExisting, Impl::NtFileNonDirectory);
+        LARGE_INTEGER fileSize{};
+        if (!GetFileSizeEx(file.Get(), &fileSize) || fileSize.QuadPart < 0)
+            Impl::ThrowWindows("Cannot inspect anchored file");
+        const auto count = static_cast<std::size_t>(
+            (std::min)(static_cast<std::uint64_t>(fileSize.QuadPart), static_cast<std::uint64_t>(maximumBytes)));
+        LARGE_INTEGER offset{};
+        offset.QuadPart = fileSize.QuadPart - static_cast<LONGLONG>(count);
+        if (!SetFilePointerEx(file.Get(), offset, nullptr, FILE_BEGIN))
+            Impl::ThrowWindows("Cannot seek anchored file");
+        std::vector<std::byte> result(count);
+        std::size_t completed = 0;
+        while (completed != result.size())
+        {
+            const auto remaining = result.size() - completed;
+            const auto requested = static_cast<DWORD>((std::min)(remaining, static_cast<std::size_t>(MAXDWORD)));
+            DWORD read = 0;
+            if (!ReadFile(file.Get(), result.data() + completed, requested, &read, nullptr) || read == 0)
+                Impl::ThrowWindows("Cannot read anchored file tail");
+            completed += read;
+        }
+        return result;
+#else
+        Impl::Descriptor file(openat(parent.Get(), components.back().c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC));
+        if (file.Get() < 0)
+            throw std::system_error(errno, std::generic_category(), "Cannot open anchored file");
+        struct stat status{};
+        if (fstat(file.Get(), &status) != 0 || !S_ISREG(status.st_mode) || status.st_size < 0)
+            throw std::runtime_error("Anchored path is not a regular file: " + PathToUtf8(relative));
+        const auto count = static_cast<std::size_t>(
+            (std::min)(static_cast<std::uint64_t>(status.st_size), static_cast<std::uint64_t>(maximumBytes)));
+        const auto offset = status.st_size - static_cast<off_t>(count);
+        std::vector<std::byte> result(count);
+        std::size_t completed = 0;
+        while (completed != result.size())
+        {
+            const auto readCount = pread(file.Get(), result.data() + completed, result.size() - completed,
+                                         offset + static_cast<off_t>(completed));
+            if (readCount < 0)
+            {
+                if (errno == EINTR)
+                    continue;
+                throw std::system_error(errno, std::generic_category(), "Cannot read anchored file tail");
+            }
+            if (readCount == 0)
+                throw std::runtime_error("Anchored file changed size while its tail was being read: " +
+                                         PathToUtf8(relative));
+            completed += static_cast<std::size_t>(readCount);
+        }
+        return result;
+#endif
     }
 
     AnchoredFileMetadata AnchoredFileSystem::ReadChunks(const std::filesystem::path& relative,
@@ -703,6 +784,7 @@ namespace Keire::Detail
             }
             if (!FlushFileBuffers(file.Get()))
                 Impl::ThrowWindows("Cannot flush anchored temporary file");
+            InvokeAnchoredHook("write-before-publish", relative);
             const auto failure = "Cannot publish anchored file '" + PathToUtf8(relative) + "'";
             Impl::RenameRelative(file.Get(), parent.Get(), components.back(), replaceExisting, failure);
         }
@@ -743,6 +825,7 @@ namespace Keire::Detail
             }
             if (fchmod(file.Get(), static_cast<mode_t>(permissions) & 0777) != 0 || fsync(file.Get()) != 0)
                 throw std::system_error(errno, std::generic_category(), "Cannot flush anchored temporary file");
+            InvokeAnchoredHook("write-before-publish", relative);
             Impl::RenameRelative(parent.Get(), temporary, parent.Get(), components.back(), replaceExisting,
                                  "Cannot publish anchored file");
             (void)fsync(parent.Get());

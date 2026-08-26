@@ -364,6 +364,7 @@ namespace Keire::RenderBackend
             }
             catch (...)
             {
+                RethrowIfDeviceLost("dynamic GPU upload-buffer allocation");
                 SDL_ReleaseGPUBuffer(Device, replacementBuffer);
                 throw;
             }
@@ -401,7 +402,7 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("Scene instance uploads require an active command buffer.");
         const auto bytes = std::as_bytes(instances);
         const auto requiredTransferCapacity = DynamicUploadCapacity(bytes.size());
-        auto& resources = surface.DynamicUploads;
+        auto& resources = surface.ActiveWorkset().DynamicUploads;
         if (!resources.InstanceTransfer || resources.InstanceTransferCapacityBytes < requiredTransferCapacity)
         {
             SDL_GPUTransferBufferCreateInfo information{};
@@ -609,13 +610,6 @@ namespace Keire::RenderBackend
     void RenderSharedState::RetireSurface(RenderSurfaceState& surface) noexcept
     {
         Retire(std::exchange(surface.Resources, {}));
-        Retire(std::exchange(surface.ForwardPlus, {}));
-        for (auto& batch : surface.DynamicUploads.InstanceBatches)
-            Retire(std::exchange(batch.Buffer, nullptr));
-        Retire(std::exchange(surface.DynamicUploads.InstanceTransfer, nullptr));
-        Retire(std::exchange(surface.DynamicUploads.CpuVfxVertices.Buffer, nullptr));
-        Retire(std::exchange(surface.DynamicUploads.CpuVfxTransfer, nullptr));
-        surface.DynamicUploads = {};
         surface.Owner.reset();
         surface.Width = 0;
         surface.Height = 0;
@@ -654,64 +648,78 @@ namespace Keire::RenderBackend
             sampled.layer_count_or_depth = 1;
             sampled.num_levels = 1;
             sampled.sample_count = SDL_GPU_SAMPLECOUNT_1;
-            result.SampledColor = SDL_CreateGPUTexture(Device, &sampled);
-            if (!result.SampledColor)
-                throw std::runtime_error("SDL_CreateGPUTexture(color) failed: " + LastSdlError());
-            result.ExchangeColor = SDL_CreateGPUTexture(Device, &sampled);
-            if (!result.ExchangeColor)
-                throw std::runtime_error("SDL_CreateGPUTexture(exchange color) failed: " + LastSdlError());
-
-            auto hdr = sampled;
-            hdr.format = SceneColorFormat;
-            result.TransientTextures.resize(SceneFrameGraph.Compiled.TransientAllocations.size());
-            for (std::size_t allocationIndex = 0;
-                 allocationIndex < SceneFrameGraph.Compiled.TransientAllocations.size(); ++allocationIndex)
+            result.FinalOutputs.resize(static_cast<std::size_t>(Specification.MaximumFramesInFlight) + 1U);
+            for (auto*& output : result.FinalOutputs)
             {
-                const auto& allocation = SceneFrameGraph.Compiled.TransientAllocations[allocationIndex];
-                if (allocation.Kind != FrameGraphResourceKind::Texture || allocation.CompatibilityKey != 4)
-                    throw std::logic_error("The scene frame graph contains an unsupported transient allocation.");
-                result.TransientTextures[allocationIndex] = SDL_CreateGPUTexture(Device, &hdr);
-                if (!result.TransientTextures[allocationIndex])
-                    throw std::runtime_error("SDL_CreateGPUTexture(graph transient) failed: " + LastSdlError());
+                output = SDL_CreateGPUTexture(Device, &sampled);
+                if (!output)
+                    throw std::runtime_error("SDL_CreateGPUTexture(final output) failed: " + LastSdlError());
             }
-            const auto hdrAllocation = SceneFrameGraph.Compiled.PhysicalResources[SceneFrameGraph.HdrScene.Value];
-            if (hdrAllocation >= result.TransientTextures.size())
-                throw std::logic_error("The scene frame graph did not allocate HDR scene color.");
-            result.HdrColor = result.TransientTextures[hdrAllocation];
-
-            if (samples != SDL_GPU_SAMPLECOUNT_1)
+            result.Worksets.resize(Specification.MaximumFramesInFlight);
+            for (auto& workset : result.Worksets)
             {
-                auto multisample = hdr;
-                multisample.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
-                multisample.sample_count = samples;
-                result.MultisampleHdrColor = SDL_CreateGPUTexture(Device, &multisample);
-                if (!result.MultisampleHdrColor)
-                    throw std::runtime_error("SDL_CreateGPUTexture(MSAA HDR color) failed: " + LastSdlError());
-            }
+                auto hdr = sampled;
+                hdr.format = SceneColorFormat;
+                workset.TransientTextures.resize(SceneFrameGraph.Compiled.TransientAllocations.size());
+                for (std::size_t allocationIndex = 0;
+                     allocationIndex < SceneFrameGraph.Compiled.TransientAllocations.size(); ++allocationIndex)
+                {
+                    const auto& allocation = SceneFrameGraph.Compiled.TransientAllocations[allocationIndex];
+                    if (allocation.Kind != FrameGraphResourceKind::Texture || allocation.CompatibilityKey != 4)
+                        throw std::logic_error("The scene frame graph contains an unsupported transient allocation.");
+                    workset.TransientTextures[allocationIndex] = SDL_CreateGPUTexture(Device, &hdr);
+                    if (!workset.TransientTextures[allocationIndex])
+                        throw std::runtime_error("SDL_CreateGPUTexture(graph transient) failed: " + LastSdlError());
+                }
+                const auto hdrAllocation = SceneFrameGraph.Compiled.PhysicalResources[SceneFrameGraph.HdrScene.Value];
+                if (hdrAllocation >= workset.TransientTextures.size())
+                    throw std::logic_error("The scene frame graph did not allocate HDR scene color.");
+                workset.HdrColor = workset.TransientTextures[hdrAllocation];
 
-            if (surface.Specification.Depth && DepthFormat)
-            {
-                SDL_GPUTextureCreateInfo depth{};
-                depth.type = SDL_GPU_TEXTURETYPE_2D;
-                depth.format = DepthFormat;
-                depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
-                depth.width = surface.RequestedWidth;
-                depth.height = surface.RequestedHeight;
-                depth.layer_count_or_depth = 1;
-                depth.num_levels = 1;
-                depth.sample_count = samples;
-                result.Depth = SDL_CreateGPUTexture(Device, &depth);
-                if (!result.Depth)
-                    throw std::runtime_error("SDL_CreateGPUTexture(depth) failed: " + LastSdlError());
+                if (samples != SDL_GPU_SAMPLECOUNT_1)
+                {
+                    auto multisample = hdr;
+                    multisample.usage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET;
+                    multisample.sample_count = samples;
+                    workset.MultisampleHdrColor = SDL_CreateGPUTexture(Device, &multisample);
+                    if (!workset.MultisampleHdrColor)
+                        throw std::runtime_error("SDL_CreateGPUTexture(MSAA HDR color) failed: " + LastSdlError());
+                }
 
-                depth.format = ShadowDepthFormat;
-                depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
-                depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
-                result.SampledDepth = SDL_CreateGPUTexture(Device, &depth);
-                if (!result.SampledDepth)
-                    throw std::runtime_error("SDL_CreateGPUTexture(sampled depth) failed: " + LastSdlError());
+                if (surface.Specification.Depth && DepthFormat)
+                {
+                    SDL_GPUTextureCreateInfo depth{};
+                    depth.type = SDL_GPU_TEXTURETYPE_2D;
+                    depth.format = DepthFormat;
+                    depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+                    depth.width = surface.RequestedWidth;
+                    depth.height = surface.RequestedHeight;
+                    depth.layer_count_or_depth = 1;
+                    depth.num_levels = 1;
+                    depth.sample_count = samples;
+                    workset.Depth = SDL_CreateGPUTexture(Device, &depth);
+                    if (!workset.Depth)
+                        throw std::runtime_error("SDL_CreateGPUTexture(depth) failed: " + LastSdlError());
+
+                    depth.format = ShadowDepthFormat;
+                    depth.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
+                    depth.sample_count = SDL_GPU_SAMPLECOUNT_1;
+                    workset.SampledDepth = SDL_CreateGPUTexture(Device, &depth);
+                    if (!workset.SampledDepth)
+                        throw std::runtime_error("SDL_CreateGPUTexture(sampled depth) failed: " + LastSdlError());
+                }
             }
             return result;
+        }
+        catch (const GpuDeviceLostError&)
+        {
+            throw;
+        }
+        catch (const std::exception& error)
+        {
+            ThrowIfDeviceLost("render surface resource creation", error.what());
+            ReleaseResources(result);
+            throw;
         }
         catch (...)
         {
@@ -733,6 +741,8 @@ namespace Keire::RenderBackend
                 surface.FailedHeight = 0;
                 surface.HasOutput = false;
                 surface.SampledDepthValid = false;
+                surface.PublishedTexture.store(nullptr, std::memory_order_release);
+                surface.PublishedDepthAvailable.store(false, std::memory_order_release);
                 ++surface.Generation;
                 ResetGpuOcclusionSurfaceState(surface);
             }
@@ -750,7 +760,8 @@ namespace Keire::RenderBackend
             return;
         }
         if (surface.Width == surface.RequestedWidth && surface.Height == surface.RequestedHeight &&
-            surface.Resources.SampledColor)
+            surface.Resources.PublishedColor() &&
+            surface.Resources.Worksets.size() == Specification.MaximumFramesInFlight)
             return;
         if (surface.FailedWidth == surface.RequestedWidth && surface.FailedHeight == surface.RequestedHeight)
             return;
@@ -768,10 +779,16 @@ namespace Keire::RenderBackend
             ++surface.Generation;
             surface.HasOutput = false;
             surface.SampledDepthValid = false;
+            surface.PublishedDepthAvailable.store(false, std::memory_order_release);
             ResetGpuOcclusionSurfaceState(surface);
+        }
+        catch (const GpuDeviceLostError&)
+        {
+            throw;
         }
         catch (const std::exception& error)
         {
+            ThrowIfDeviceLost("render surface resize", error.what());
             surface.FailedWidth = surface.RequestedWidth;
             surface.FailedHeight = surface.RequestedHeight;
             KEIRE_CORE_ERROR("Could not resize render surface '{}': {}", surface.Specification.Name, error.what());
@@ -853,6 +870,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("render pipeline creation");
             if (fragment)
                 SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);
@@ -890,6 +908,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("sky pipeline creation");
             if (fragment)
                 SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);
@@ -939,6 +958,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("grid pipeline creation");
             if (fragment)
                 SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);
@@ -994,6 +1014,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("depth pipeline creation");
             if (fragment)
                 SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);
@@ -1029,6 +1050,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("tone-map pipeline creation");
             if (fragment)
                 SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);
@@ -1057,6 +1079,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("surface pipeline-set creation");
             if (result.GpuVfxMesh)
                 SDL_ReleaseGPUGraphicsPipeline(Device, result.GpuVfxMesh);
             if (result.GpuVfxRibbon)
@@ -1232,6 +1255,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("asset shader pipeline creation");
             if (fragment)
                 SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);

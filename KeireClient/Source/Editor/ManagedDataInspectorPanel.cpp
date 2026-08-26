@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/ManagedDataDocument.h"
+#include "KeireClient/Editor/ManagedReferenceGraphInspector.h"
 
 #include <algorithm>
 #include <cmath>
@@ -91,6 +92,7 @@ namespace KeireEditor
     {
         m_Document->Close();
         m_AssetPicker->Clear();
+        m_GraphFocus.clear();
         m_Asset = {};
         m_Revision = 0;
     }
@@ -142,9 +144,15 @@ namespace KeireEditor
         }
         catch (const std::exception& error)
         {
-            Clear();
-            DrawRawFallback(ui, record, error.what());
-            return;
+            if (!m_Document->IsOpen() || m_Asset != record.Id)
+            {
+                Clear();
+                DrawRawFallback(ui, record, error.what());
+                return;
+            }
+            m_Controller.SetInspectorAssetStatus("The imported managed data revision was rejected; the previous valid "
+                                                 "Inspector state was preserved: " +
+                                                 std::string(error.what()));
         }
 
         m_Controller.ActivateInspectorManagedDataHistory();
@@ -210,8 +218,74 @@ namespace KeireEditor
         {
             if (property.Hidden)
                 continue;
-            auto state = m_Document->Property(property);
             const auto id = ui.PushId(property.StableFieldId.ToString());
+            if (property.ReferenceGraph)
+            {
+                auto state = m_Document->GraphProperty(property);
+                if (!state.Diagnostic.empty())
+                {
+                    const auto diagnostic =
+                        state.StructuredDiagnostic
+                            ? FormatManagedSerializationDiagnostic(state.Diagnostic, *state.StructuredDiagnostic)
+                            : state.Diagnostic;
+                    ui.TextColored(theme.Error, property.DisplayName + ": " + diagnostic);
+                    ui.TextColored(theme.MutedText, state.RawValue.substr(0, MaximumVisibleRawBytes));
+                    if (!property.ReadOnly && ui.Button("Reset to managed default"))
+                    {
+                        try
+                        {
+                            (void)m_Document->ClearProperty(property);
+                        }
+                        catch (const std::exception& error)
+                        {
+                            m_Controller.ReportInspectorAssetError(error.what());
+                        }
+                    }
+                    continue;
+                }
+                if (!state.Serialized)
+                {
+                    ui.Text(property.DisplayName);
+                    ui.SameLine();
+                    ui.TextColored(theme.MutedText, "Managed default");
+                    if (!property.ReadOnly && ui.Button("Override"))
+                    {
+                        try
+                        {
+                            (void)m_Document->SetGraphProperty(property, {}, "Override " + property.DisplayName);
+                        }
+                        catch (const std::exception& error)
+                        {
+                            m_Controller.ReportInspectorAssetError(error.what());
+                        }
+                    }
+                    continue;
+                }
+
+                try
+                {
+                    const auto disabled = ui.BeginDisabled(property.ReadOnly);
+                    auto& focusedObject = m_GraphFocus[property.StableFieldId.ToString()];
+                    ManagedReferenceGraphInspector inspector(ui, focusedObject, &m_GraphEdits);
+                    const Keire::ManagedReferenceGraphDescriptor graphDescriptor{
+                        .Root = property, .Types = currentDescriptor->ReferenceTypes};
+                    if (inspector.Draw(property.DisplayName, state.Value, graphDescriptor) && !property.ReadOnly)
+                    {
+                        (void)ApplyReferenceGraphEdit(m_GraphEdits, *m_Document, property, std::move(state.Value),
+                                                      "Edit " + property.DisplayName);
+                    }
+                    if (!property.ReadOnly && ui.Button("Use managed default"))
+                        (void)m_Document->ClearProperty(property, "Use " + property.DisplayName + " default");
+                }
+                catch (const std::exception& error)
+                {
+                    m_Controller.ReportInspectorAssetError("Managed graph edit failed: " +
+                                                           FormatManagedInspectorError(error));
+                }
+                continue;
+            }
+
+            auto state = m_Document->Property(property);
             if (!state.Diagnostic.empty())
             {
                 ui.TextColored(theme.Error, property.DisplayName + ": " + state.Diagnostic);
@@ -280,7 +354,8 @@ namespace KeireEditor
         const bool nullable = property.Kind == Keire::ManagedAssetPropertyKind::Text ||
                               property.Kind == Keire::ManagedAssetPropertyKind::SerializableObject ||
                               property.Kind == Keire::ManagedAssetPropertyKind::Array ||
-                              property.Kind == Keire::ManagedAssetPropertyKind::List;
+                              property.Kind == Keire::ManagedAssetPropertyKind::List ||
+                              property.Kind == Keire::ManagedAssetPropertyKind::Dictionary;
         bool changed = false;
         if (nullable && std::holds_alternative<std::monostate>(value.Value))
         {
@@ -424,6 +499,48 @@ namespace KeireEditor
             if (value.Children.size() < MaximumEditableCollectionElements && ui.Button("Add Element"))
             {
                 value.Children.push_back(ManagedDataDocument::MaterializedDefaultValue(property.Children.front()));
+                changed = true;
+            }
+            return changed;
+        }
+        case Keire::ManagedAssetPropertyKind::Dictionary:
+        {
+            bool changed = false;
+            const auto tree = ui.BeginTreeNode(label + " (" + std::to_string(value.Children.size()) + ')');
+            if (!tree)
+                return false;
+            if (property.Children.size() != 2)
+                throw std::invalid_argument("Managed dictionary descriptor requires Key and Value properties.");
+            for (std::size_t index = 0; index < value.Children.size();)
+            {
+                auto& entry = value.Children[index];
+                if (entry.Children.size() != 2)
+                    throw std::invalid_argument("Managed dictionary contains a malformed entry.");
+                const auto id = ui.PushId(std::to_string(index));
+                const auto entryTree = ui.BeginTreeNode("Entry " + std::to_string(index));
+                if (entryTree)
+                {
+                    changed = DrawProperty(ui, entry.Children[0], property.Children[0], types) || changed;
+                    changed = DrawProperty(ui, entry.Children[1], property.Children[1], types) || changed;
+                }
+                ui.SameLine();
+                if (ui.Button("Remove"))
+                {
+                    value.Children.erase(value.Children.begin() + static_cast<std::ptrdiff_t>(index));
+                    changed = true;
+                    continue;
+                }
+                ++index;
+            }
+            if (value.Children.size() < MaximumEditableCollectionElements && ui.Button("Add Entry"))
+            {
+                Keire::ManagedAssetValueNode entry;
+                entry.StableFieldId = property.StableFieldId;
+                entry.Kind = Keire::ManagedAssetPropertyKind::Dictionary;
+                entry.Value = true;
+                entry.Children.push_back(ManagedDataDocument::MaterializedDefaultValue(property.Children[0]));
+                entry.Children.push_back(ManagedDataDocument::MaterializedDefaultValue(property.Children[1]));
+                value.Children.push_back(std::move(entry));
                 changed = true;
             }
             return changed;

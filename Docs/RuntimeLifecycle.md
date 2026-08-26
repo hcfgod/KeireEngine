@@ -39,6 +39,12 @@ runtime session per additive scene plus any unloaded persistent carriers. Scene 
 commit only at application safe boundaries. Fixed/update traversal covers every session in stable load order; closing
 the world stops all sessions in reverse ownership teardown before application services close.
 
+The standalone player and Editor Game viewport snapshot those sessions in the same stable order into one bounded render
+request per surface. A session without a presentation still contributes scene and VFX content. Presentation trees are
+composited in session order, while pointer delivery traverses the same snapshot from newest to oldest so visual and
+input precedence agree. A failed additive load never enters the snapshot, and unload/reload changes only requests
+captured after the world commits that lifecycle boundary.
+
 ## Frame Order
 
 ```mermaid

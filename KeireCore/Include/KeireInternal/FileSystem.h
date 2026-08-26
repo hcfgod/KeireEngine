@@ -31,13 +31,20 @@ namespace Keire::Detail
         std::filesystem::perms Permissions = std::filesystem::perms::unknown;
     };
 
+    enum class AnchoredRootPolicy : std::uint8_t
+    {
+        ResolveCanonical,
+        RejectLink
+    };
+
     // Retains an operating-system handle to a trusted directory and resolves every operation relative to that
     // handle. Relative components are opened without following links/reparse points, so a concurrent namespace swap
     // cannot redirect an operation outside the root.
     class AnchoredFileSystem final
     {
       public:
-        explicit AnchoredFileSystem(const std::filesystem::path& root);
+        explicit AnchoredFileSystem(const std::filesystem::path& root,
+                                    AnchoredRootPolicy rootPolicy = AnchoredRootPolicy::ResolveCanonical);
         ~AnchoredFileSystem();
 
         AnchoredFileSystem(const AnchoredFileSystem&) = delete;
@@ -48,6 +55,8 @@ namespace Keire::Detail
         [[nodiscard]] const std::filesystem::path& Root() const noexcept;
         [[nodiscard]] std::vector<std::byte> Read(const std::filesystem::path& relative,
                                                   std::size_t maximumBytes) const;
+        [[nodiscard]] std::vector<std::byte> ReadTail(const std::filesystem::path& relative,
+                                                      std::size_t maximumBytes) const;
         [[nodiscard]] AnchoredFileMetadata ReadChunks(const std::filesystem::path& relative,
                                                       std::uintmax_t maximumBytes,
                                                       const AnchoredFileChunkVisitor& visitor) const;

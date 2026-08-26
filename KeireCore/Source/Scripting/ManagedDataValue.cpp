@@ -6,8 +6,11 @@
 #include <cmath>
 #include <memory>
 #include <ranges>
+#include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace Keire
 {
@@ -16,6 +19,25 @@ namespace Keire
         using Json = nlohmann::json;
 
         constexpr std::size_t MaximumCollectionElements = 16ULL * 1024U;
+        constexpr std::size_t MaximumStringBytes = 1ULL * 1024U * 1024U;
+        constexpr std::size_t MaximumDepth = 32;
+
+        [[nodiscard]] bool IsContainer(const ManagedAssetPropertyKind kind) noexcept
+        {
+            return kind == ManagedAssetPropertyKind::SerializableObject || kind == ManagedAssetPropertyKind::Array ||
+                   kind == ManagedAssetPropertyKind::List || kind == ManagedAssetPropertyKind::Dictionary;
+        }
+
+        void ValidateString(const std::string_view value, const ManagedAssetPropertyDescriptor& property,
+                            const std::string& path)
+        {
+            if (value.size() > MaximumStringBytes)
+            {
+                throw std::invalid_argument("KEIRE-MANAGED-SERIALIZATION-0003: Managed string field '" + path +
+                                            "' declared as '" + property.ManagedTypeName +
+                                            "' exceeds the 1,048,576 UTF-8 byte limit.");
+            }
+        }
 
         [[nodiscard]] const Json* Member(const Json& value, const std::string_view primary,
                                          const std::string_view fallback)
@@ -81,8 +103,12 @@ namespace Keire
         }
 
         [[nodiscard]] ManagedAssetValueNode DecodeNode(const Json& source,
-                                                       const ManagedAssetPropertyDescriptor& property)
+                                                       const ManagedAssetPropertyDescriptor& property,
+                                                       const std::string& path, const std::size_t parentDepth)
         {
+            const auto depth = parentDepth + (IsContainer(property.Kind) ? 1U : 0U);
+            if (depth > MaximumDepth)
+                throw std::invalid_argument("Managed data field '" + path + "' exceeds 32 nested levels.");
             auto result = DefaultNode(property);
             switch (property.Kind)
             {
@@ -116,7 +142,11 @@ namespace Keire
             }
             case ManagedAssetPropertyKind::Text:
                 if (!source.is_null())
-                    result.Value = source.get<std::string>();
+                {
+                    auto text = source.get<std::string>();
+                    ValidateString(text, property, path);
+                    result.Value = std::move(text);
+                }
                 break;
             case ManagedAssetPropertyKind::Vector2:
                 result.Value =
@@ -157,7 +187,8 @@ namespace Keire
                 {
                     const auto found = source.find(property.Children[index].Name);
                     if (found != source.end())
-                        result.Children[index] = DecodeNode(*found, property.Children[index]);
+                        result.Children[index] = DecodeNode(*found, property.Children[index],
+                                                            path + "." + property.Children[index].Name, depth);
                 }
                 break;
             }
@@ -174,8 +205,43 @@ namespace Keire
                     throw std::invalid_argument("Managed collection descriptor requires one element property.");
                 result.Value = true;
                 result.Children.reserve(source.size());
-                for (const auto& element : source)
-                    result.Children.push_back(DecodeNode(element, property.Children.front()));
+                for (std::size_t index = 0; index < source.size(); ++index)
+                    result.Children.push_back(DecodeNode(source[index], property.Children.front(),
+                                                         path + "[" + std::to_string(index) + "]", depth));
+                break;
+            }
+            case ManagedAssetPropertyKind::Dictionary:
+            {
+                if (source.is_null())
+                    break;
+                if (!source.is_array())
+                    throw std::invalid_argument("Managed dictionary data is not an array.");
+                if (source.size() > MaximumCollectionElements)
+                    throw std::invalid_argument("Managed dictionary data exceeds the editor element limit.");
+                if (property.Children.size() != 2)
+                    throw std::invalid_argument("Managed dictionary descriptor requires Key and Value properties.");
+                result.Value = true;
+                result.Children.reserve(source.size());
+                std::size_t index = 0;
+                for (const auto& encoded : source)
+                {
+                    if (!encoded.is_object() || encoded.size() != 2 || !encoded.contains("key") ||
+                        !encoded.contains("value"))
+                    {
+                        throw std::invalid_argument(
+                            "Managed dictionary entries require exactly key and value members.");
+                    }
+                    ManagedAssetValueNode entry;
+                    entry.StableFieldId = property.StableFieldId;
+                    entry.Kind = ManagedAssetPropertyKind::Dictionary;
+                    entry.Value = true;
+                    const auto entryPath = path + "[" + std::to_string(index) + "]";
+                    entry.Children.push_back(
+                        DecodeNode(encoded.at("key"), property.Children[0], entryPath + ".Key", depth));
+                    entry.Children.push_back(DecodeNode(encoded.at("value"), property.Children[1], entryPath, depth));
+                    result.Children.push_back(std::move(entry));
+                    ++index;
+                }
                 break;
             }
             }
@@ -188,8 +254,12 @@ namespace Keire
         }
 
         [[nodiscard]] Json EncodeNode(const ManagedAssetValueNode& value,
-                                      const ManagedAssetPropertyDescriptor& property)
+                                      const ManagedAssetPropertyDescriptor& property, const std::string& path,
+                                      const std::size_t parentDepth)
         {
+            const auto depth = parentDepth + (IsContainer(property.Kind) ? 1U : 0U);
+            if (depth > MaximumDepth)
+                throw std::invalid_argument("Managed data field '" + path + "' exceeds 32 nested levels.");
             if (value.StableFieldId != property.StableFieldId || value.Kind != property.Kind)
                 throw std::invalid_argument("Managed data value does not match its property descriptor.");
             switch (property.Kind)
@@ -217,7 +287,10 @@ namespace Keire
                 return result;
             }
             case ManagedAssetPropertyKind::Text:
-                return IsPresent(value) ? Json(std::get<std::string>(value.Value)) : Json(nullptr);
+                if (!IsPresent(value))
+                    return nullptr;
+                ValidateString(std::get<std::string>(value.Value), property, path);
+                return std::get<std::string>(value.Value);
             case ManagedAssetPropertyKind::Vector2:
             {
                 const auto vector = std::get<Vector2>(value.Value);
@@ -258,7 +331,8 @@ namespace Keire
                     const auto child = std::ranges::find(value.Children, childProperty.StableFieldId,
                                                          &ManagedAssetValueNode::StableFieldId);
                     if (child != value.Children.end() && IsPresent(*child))
-                        result[childProperty.Name] = EncodeNode(*child, childProperty);
+                        result[childProperty.Name] =
+                            EncodeNode(*child, childProperty, path + "." + childProperty.Name, depth);
                 }
                 return result;
             }
@@ -272,8 +346,47 @@ namespace Keire
                 if (property.Children.size() != 1)
                     throw std::invalid_argument("Managed collection descriptor requires one element property.");
                 Json result = Json::array();
-                for (const auto& element : value.Children)
-                    result.push_back(EncodeNode(element, property.Children.front()));
+                for (std::size_t index = 0; index < value.Children.size(); ++index)
+                    result.push_back(EncodeNode(value.Children[index], property.Children.front(),
+                                                path + "[" + std::to_string(index) + "]", depth));
+                return result;
+            }
+            case ManagedAssetPropertyKind::Dictionary:
+            {
+                if (!IsPresent(value))
+                    return nullptr;
+                if (value.Children.size() > MaximumCollectionElements)
+                    throw std::invalid_argument("Managed dictionary data exceeds the editor element limit.");
+                if (property.Children.size() != 2)
+                    throw std::invalid_argument("Managed dictionary descriptor requires Key and Value properties.");
+                std::set<std::string, std::less<>> keys;
+                std::vector<std::pair<std::string, Json>> entries;
+                entries.reserve(value.Children.size());
+                for (std::size_t index = 0; index < value.Children.size(); ++index)
+                {
+                    const auto& entry = value.Children[index];
+                    if (entry.Kind != ManagedAssetPropertyKind::Dictionary || entry.Children.size() != 2)
+                        throw std::invalid_argument("Managed dictionary field '" + path +
+                                                    "' contains malformed entry " + std::to_string(index) + ".");
+                    const auto entryPath = path + "[" + std::to_string(index) + "]";
+                    Json key = EncodeNode(entry.Children[0], property.Children[0], entryPath + ".Key", depth);
+                    auto order = key.dump();
+                    if (!keys.emplace(order).second)
+                        throw std::invalid_argument("KEIRE-MANAGED-SERIALIZATION-0003: Managed dictionary field '" +
+                                                    path + "' declared as '" + property.ManagedTypeName +
+                                                    "' contains duplicate key " + order + ".");
+                    entries.emplace_back(
+                        std::move(order),
+                        Json{{"key", std::move(key)},
+                             {"value", EncodeNode(entry.Children[1], property.Children[1], entryPath, depth)}});
+                }
+                std::ranges::sort(entries, {}, [](const auto& entry) -> const std::string& { return entry.first; });
+                Json result = Json::array();
+                for (auto& [unused, encoded] : entries)
+                {
+                    (void)unused;
+                    result.push_back(std::move(encoded));
+                }
                 return result;
             }
             }
@@ -286,7 +399,8 @@ namespace Keire
     {
         try
         {
-            return DecodeNode(Json::parse(value.begin(), value.end()), property);
+            const auto path = property.Name.empty() ? std::string("Root") : property.Name;
+            return DecodeNode(Json::parse(value.begin(), value.end()), property, path, 0);
         }
         catch (const Json::exception& error)
         {
@@ -299,7 +413,8 @@ namespace Keire
     {
         try
         {
-            return EncodeNode(value, property).dump();
+            const auto path = property.Name.empty() ? std::string("Root") : property.Name;
+            return EncodeNode(value, property, path, 0).dump();
         }
         catch (const Json::exception& error)
         {

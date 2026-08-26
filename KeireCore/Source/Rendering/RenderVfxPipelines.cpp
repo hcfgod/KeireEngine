@@ -184,6 +184,18 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUShader(Device, vertex);
             return result;
         }
+        catch (const GpuDeviceLostError&)
+        {
+            throw;
+        }
+        catch (const std::exception& error)
+        {
+            ThrowIfDeviceLost("CPU VFX output-pipeline creation", error.what());
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
         catch (...)
         {
             if (fragment)
@@ -258,6 +270,18 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUShader(Device, fragment);
             SDL_ReleaseGPUShader(Device, vertex);
             return result;
+        }
+        catch (const GpuDeviceLostError&)
+        {
+            throw;
+        }
+        catch (const std::exception& error)
+        {
+            ThrowIfDeviceLost("GPU VFX output-pipeline creation", error.what());
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
         }
         catch (...)
         {
@@ -347,6 +371,18 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUShader(Device, vertex);
             return result;
         }
+        catch (const GpuDeviceLostError&)
+        {
+            throw;
+        }
+        catch (const std::exception& error)
+        {
+            ThrowIfDeviceLost("GPU VFX mesh-pipeline creation", error.what());
+            if (fragment)
+                SDL_ReleaseGPUShader(Device, fragment);
+            SDL_ReleaseGPUShader(Device, vertex);
+            throw;
+        }
         catch (...)
         {
             if (fragment)
@@ -367,67 +403,98 @@ namespace Keire::RenderBackend
             return;
         }
 
+        const auto state = shared_from_this();
         try
         {
-            VfxPipelineWarmupJob = RenderJobs->Submit(
-                {.Name = "Warm GPU VFX pipelines",
-                 .Priority = JobPriority::Background,
-                 .Class = JobClass::Compute,
-                 .Domain = JobDomain::Rendering},
-                [state = shared_from_this()](JobContext& context)
-                {
-                    if (context.StopRequested())
-                        return;
-                    const auto started = std::chrono::steady_clock::now();
-                    try
-                    {
-                        state->CompileGpuVfxPipelines();
-                        if (context.StopRequested())
-                            return;
-                        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now() - started);
-                        state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                                   std::memory_order_relaxed);
-                        state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready,
-                                                            std::memory_order_release);
-                        KEIRE_CORE_INFO("GPU VFX pipelines warmed asynchronously in {:.2f} ms.",
-                                        static_cast<double>(elapsed.count()) / 1000.0);
-                    }
-                    catch (const std::exception& error)
-                    {
-                        state->ReleaseGpuVfxPipelines();
-                        state->VfxPipelineWarmupFailure = error.what();
-                        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now() - started);
-                        state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                                   std::memory_order_relaxed);
-                        state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
-                                                            std::memory_order_release);
-                        KEIRE_CORE_ERROR("GPU VFX pipeline warmup failed after {:.2f} ms: {}",
-                                         static_cast<double>(elapsed.count()) / 1000.0,
-                                         state->VfxPipelineWarmupFailure);
-                    }
-                    catch (...)
-                    {
-                        state->ReleaseGpuVfxPipelines();
-                        state->VfxPipelineWarmupFailure = "Unknown GPU backend failure.";
-                        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                            std::chrono::steady_clock::now() - started);
-                        state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                                   std::memory_order_relaxed);
-                        state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
-                                                            std::memory_order_release);
-                        KEIRE_CORE_ERROR("GPU VFX pipeline warmup failed after {:.2f} ms: {}",
-                                         static_cast<double>(elapsed.count()) / 1000.0,
-                                         state->VfxPipelineWarmupFailure);
-                    }
-                });
+            std::scoped_lock lock(RenderQueueMutex);
+            if (StopRenderQueue)
+                throw std::logic_error("Renderer submission queue is closed.");
+            RenderQueue.push_back(
+                {[state]
+                 {
+                     const auto started = std::chrono::steady_clock::now();
+                     bool retriedAfterDeviceLoss = false;
+                     for (;;)
+                     {
+                         try
+                         {
+                             state->CompileGpuVfxPipelines();
+                             const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                                 std::chrono::steady_clock::now() - started);
+                             state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                                        std::memory_order_relaxed);
+                             state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready,
+                                                                 std::memory_order_release);
+                             KEIRE_CORE_INFO("GPU VFX pipelines warmed on the render thread in {:.2f} ms.",
+                                             static_cast<double>(elapsed.count()) / 1000.0);
+                             return;
+                         }
+                         catch (...)
+                         {
+                             const auto failure = std::current_exception();
+                             bool deviceLost = false;
+                             std::string detail = "Unknown GPU backend failure.";
+                             try
+                             {
+                                 std::rethrow_exception(failure);
+                             }
+                             catch (const GpuDeviceLostError&)
+                             {
+                                 deviceLost = true;
+                             }
+                             catch (const std::exception& error)
+                             {
+                                 detail = error.what();
+                                 deviceLost = state->ClassifyDeviceFailure("GPU VFX pipeline warmup", detail)
+                                                  .has_value();
+                             }
+                             catch (...)
+                             {
+                             }
+                             if (deviceLost)
+                             {
+                                 state->HandleRenderThreadFailure(failure);
+                                 if (!retriedAfterDeviceLoss && state->DeviceLifecycle.load(std::memory_order_acquire) ==
+                                                                    RenderDeviceState::Running)
+                                 {
+                                     retriedAfterDeviceLoss = true;
+                                     continue;
+                                 }
+                                 state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
+                                                                     std::memory_order_release);
+                                 return;
+                             }
+
+                             state->ReleaseGpuVfxPipelines();
+                             state->VfxPipelineWarmupFailure = std::move(detail);
+                             const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                                 std::chrono::steady_clock::now() - started);
+                             state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                                        std::memory_order_relaxed);
+                             state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
+                                                                 std::memory_order_release);
+                             KEIRE_CORE_ERROR("GPU VFX pipeline warmup failed after {:.2f} ms: {}",
+                                              static_cast<double>(elapsed.count()) / 1000.0,
+                                              state->VfxPipelineWarmupFailure);
+                             return;
+                         }
+                     }
+                 },
+                 0U,
+                 {}});
+            const auto queueDepth = static_cast<std::uint32_t>(RenderQueue.size());
+            auto highWater = RenderQueueHighWaterMark.load(std::memory_order_relaxed);
+            while (highWater < queueDepth && !RenderQueueHighWaterMark.compare_exchange_weak(
+                                                   highWater, queueDepth, std::memory_order_relaxed))
+            {
+            }
         }
-        catch (const std::exception& error)
+        catch (...)
         {
-            VfxPipelineWarmupFailure = std::string("Unable to start the GPU pipeline compiler: ") + error.what();
             VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);
+            throw;
         }
+        RenderQueueReady.notify_one();
     }
 
     void RenderSharedState::CompileGpuVfxPipelines()
@@ -530,6 +597,7 @@ namespace Keire::RenderBackend
                 }
                 catch (const std::exception& error)
                 {
+                    RethrowIfDeviceLost("GPU VFX first-use pipeline compilation");
                     ReleaseGpuVfxPipelines();
                     VfxPipelineWarmupFailure = error.what();
                     VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);
@@ -537,6 +605,7 @@ namespace Keire::RenderBackend
                 }
                 catch (...)
                 {
+                    RethrowIfDeviceLost("GPU VFX first-use pipeline compilation");
                     ReleaseGpuVfxPipelines();
                     VfxPipelineWarmupFailure = "Unknown GPU backend failure.";
                     VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);

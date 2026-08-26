@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <numeric>
 #include <span>
 #include <stdexcept>
 #include <tuple>
@@ -31,7 +32,17 @@ namespace Keire::RenderBackend
     PreparedCpuVfx RenderSharedState::PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                          const SceneRenderPacket& packet)
     {
-        const auto particles = packet.Vfx.Particles();
+        std::vector<VfxRenderParticle> particles;
+        const auto particleCount =
+            std::accumulate(packet.VfxSnapshots.begin(), packet.VfxSnapshots.end(), std::size_t{},
+                            [](const std::size_t count, const VfxRenderSnapshot& snapshot)
+                            { return count + snapshot.Particles().size(); });
+        particles.reserve(particleCount);
+        for (const auto& snapshot : packet.VfxSnapshots)
+        {
+            const auto source = snapshot.Particles();
+            particles.insert(particles.end(), source.begin(), source.end());
+        }
         if (particles.empty())
             return {};
 
@@ -200,7 +211,8 @@ namespace Keire::RenderBackend
         if (!spriteVertices.empty())
         {
             result.SpriteBuffer = UploadDynamicBuffer(
-                commands, surface.DynamicUploads.CpuVfxVertices, surface.DynamicUploads.CpuVfxTransfer,
+                commands, surface.ActiveWorkset().DynamicUploads.CpuVfxVertices,
+                surface.ActiveWorkset().DynamicUploads.CpuVfxTransfer,
                 std::as_bytes(std::span(spriteVertices)), SDL_GPU_BUFFERUSAGE_VERTEX, "CPU VFX vertices");
         }
         return result;
@@ -225,34 +237,44 @@ namespace Keire::RenderBackend
         const std::array environmentBindings{
             SDL_GPUTextureSamplerBinding{environment.Texture, environment.Sampler},
             SDL_GPUTextureSamplerBinding{BrdfIntegrationLut.Texture, BrdfIntegrationLut.Sampler}};
-        const auto vfxBakedLighting = ResolveLightingSet(packet.BakedLighting);
-        const auto* vfxLightingSet = vfxBakedLighting ? &vfxBakedLighting->Definition() : nullptr;
-        const auto& vfxLightmaps =
-            vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Lightmaps) : DefaultLightingArray;
-        const auto& vfxDirectionality =
-            vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Directionality) : DefaultLightingArray;
-        const auto& vfxShadowMasks = vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->ShadowMasks, false, true)
-                                                    : DefaultLightingMaskArray;
-        const auto& vfxReflections = vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->ReflectionCubemaps, true)
-                                                    : DefaultReflectionCubeArray;
-        std::array<SDL_GPUTextureSamplerBinding, 5> vfxSpatialBindings{};
-        vfxSpatialBindings[0] = {vfxLightmaps.Texture, vfxLightmaps.Sampler};
-        vfxSpatialBindings[1] = {vfxDirectionality.Texture, vfxDirectionality.Sampler};
-        vfxSpatialBindings[2] = {vfxShadowMasks.Texture, vfxShadowMasks.Sampler};
-        vfxSpatialBindings[3] = {vfxReflections.Texture, vfxReflections.Sampler};
-        vfxSpatialBindings[4] = {WhiteTexture.Texture, WhiteTexture.Sampler};
-        AssetSpatialLightingUniforms vfxSpatialUniforms{};
-        vfxSpatialUniforms.LightmapScaleOffset = {1.0F, 1.0F, 0.0F, 0.0F};
-        vfxSpatialUniforms.ShadowMaskParameters.X =
-            vfxLightingSet ? static_cast<float>(vfxLightingSet->Renderers.size()) : 0.0F;
-        vfxSpatialUniforms.ViewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
-        vfxSpatialUniforms.DirectionalCookieAndContact = {0.0F, packet.Lighting.ContactShadows ? 1.0F : 0.0F, 0.35F,
-                                                          0.0025F};
-        if (packet.Vfx.WorldId() != 0 && pipelines.GpuVfx && pipelines.GpuVfxRibbon && pipelines.GpuVfxMesh)
+        if (pipelines.GpuVfx && pipelines.GpuVfxRibbon && pipelines.GpuVfxMesh)
         {
-            const auto world = GpuVfxWorlds.find(packet.Vfx.WorldId());
-            if (world != GpuVfxWorlds.end() && !world->second.Empty())
+            for (std::size_t snapshotIndex = 0; snapshotIndex < packet.VfxSnapshots.size(); ++snapshotIndex)
             {
+                const auto& snapshot = packet.VfxSnapshots[snapshotIndex];
+                if (snapshot.WorldId() == 0)
+                    continue;
+                const auto world = GpuVfxWorlds.find(snapshot.WorldId());
+                if (world == GpuVfxWorlds.end() || world->second.Empty())
+                    continue;
+                const auto bakedLighting = snapshotIndex < packet.SpatialContributions.size()
+                                               ? packet.SpatialContributions[snapshotIndex].BakedLighting
+                                               : packet.BakedLighting;
+                const auto vfxBakedLighting = ResolveLightingSet(bakedLighting);
+                const auto* vfxLightingSet = vfxBakedLighting ? &vfxBakedLighting->Definition() : nullptr;
+                const auto& vfxLightmaps =
+                    vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Lightmaps) : DefaultLightingArray;
+                const auto& vfxDirectionality =
+                    vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Directionality) : DefaultLightingArray;
+                const auto& vfxShadowMasks = vfxLightingSet
+                                                 ? ResolveLightingTexture(vfxLightingSet->ShadowMasks, false, true)
+                                                 : DefaultLightingMaskArray;
+                const auto& vfxReflections = vfxLightingSet
+                                                 ? ResolveLightingTexture(vfxLightingSet->ReflectionCubemaps, true)
+                                                 : DefaultReflectionCubeArray;
+                std::array<SDL_GPUTextureSamplerBinding, 5> vfxSpatialBindings{};
+                vfxSpatialBindings[0] = {vfxLightmaps.Texture, vfxLightmaps.Sampler};
+                vfxSpatialBindings[1] = {vfxDirectionality.Texture, vfxDirectionality.Sampler};
+                vfxSpatialBindings[2] = {vfxShadowMasks.Texture, vfxShadowMasks.Sampler};
+                vfxSpatialBindings[3] = {vfxReflections.Texture, vfxReflections.Sampler};
+                vfxSpatialBindings[4] = {WhiteTexture.Texture, WhiteTexture.Sampler};
+                AssetSpatialLightingUniforms vfxSpatialUniforms{};
+                vfxSpatialUniforms.LightmapScaleOffset = {1.0F, 1.0F, 0.0F, 0.0F};
+                vfxSpatialUniforms.ShadowMaskParameters.X =
+                    vfxLightingSet ? static_cast<float>(vfxLightingSet->Renderers.size()) : 0.0F;
+                vfxSpatialUniforms.ViewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
+                vfxSpatialUniforms.DirectionalCookieAndContact = {0.0F, packet.Lighting.ContactShadows ? 1.0F : 0.0F,
+                                                                  0.35F, 0.0025F};
                 struct alignas(16) CameraUniforms final
                 {
                     Matrix4 ViewProjection;
@@ -296,7 +318,7 @@ namespace Keire::RenderBackend
                 AssetLocalLightUniforms localLights{};
                 const auto localLightCount = std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
                 localLights.Counts.X = static_cast<float>(packet.LocalLights.size());
-                localLights.Counts.Y = static_cast<float>(surface.ForwardPlus.Columns);
+                localLights.Counts.Y = static_cast<float>(surface.ActiveWorkset().ForwardPlus.Columns);
                 for (std::size_t lightIndex = 0; lightIndex < localLightCount; ++lightIndex)
                 {
                     const auto& light = packet.LocalLights[lightIndex];
@@ -318,8 +340,9 @@ namespace Keire::RenderBackend
                                                                    light.Shadows == ShadowQuality::Soft ? 1.0F : 0.0F,
                                                                    std::max(light.ShadowBias * 0.01F, 0.0001F)};
                 }
-                const std::array forwardPlusBuffers{surface.ForwardPlus.Lights, surface.ForwardPlus.Tiles,
-                                                    surface.ForwardPlus.LightIndices};
+                const std::array forwardPlusBuffers{surface.ActiveWorkset().ForwardPlus.Lights,
+                                                    surface.ActiveWorkset().ForwardPlus.Tiles,
+                                                    surface.ActiveWorkset().ForwardPlus.LightIndices};
                 for (auto& [key, emitter] : world->second.Emitters)
                 {
                     (void)key;
@@ -403,12 +426,12 @@ namespace Keire::RenderBackend
                                 auto bindingCount = composed->Textures.size();
                                 if (composed->ReceivesShadows)
                                 {
-                                    bindings[bindingCount++] = {surface.Resources.DirectionalShadow
-                                                                    ? surface.Resources.DirectionalShadow
+                                    bindings[bindingCount++] = {surface.ActiveWorkset().DirectionalShadow
+                                                                    ? surface.ActiveWorkset().DirectionalShadow
                                                                     : EmptyShadowTexture,
                                                                 ShadowSampler};
-                                    bindings[bindingCount++] = {surface.Resources.LocalShadow
-                                                                    ? surface.Resources.LocalShadow
+                                    bindings[bindingCount++] = {surface.ActiveWorkset().LocalShadow
+                                                                    ? surface.ActiveWorkset().LocalShadow
                                                                     : EmptyShadowTexture,
                                                                 ShadowSampler};
                                 }

@@ -589,7 +589,7 @@ project_generation_fingerprint() {
     local root="$1" source_root
     {
         for source_root in "$CORE_DIRECTORY" "$CLIENT_DIRECTORY" "$HUB_DIRECTORY" "$TESTS_DIRECTORY" \
-          AssetTool KeireAssetWorker KeireEditorTests KeireHubRuntime KeireHubTests KeireHubWorker \
+          AssetTool KeireAssetWorker KeireEditorTests KeireHubRuntime KeireHubTests KeireHubWorker KeireInstallWorker \
           KeireRenderTests KeireRuntime KeireManaged KeireManaged.Tests SourceModules Scripts/Premake; do
             [[ -d "$root/$source_root" ]] || continue
             find "$root/$source_root" -type f \( \

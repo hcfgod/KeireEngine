@@ -101,8 +101,10 @@ namespace Keire
         [[nodiscard]] bool ConsumeClick(EntityId entity);
         [[nodiscard]] bool ConsumeUiEvent(EntityId entity, RuntimeUiEventType type);
         void PointerMove(float x, float y);
-        void PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
-        void PointerWheel(float x, float y, float horizontal, float vertical);
+        void PointerLeave();
+        bool PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
+        bool CancelPointerButton(RuntimeUiPointerButton button) noexcept;
+        bool PointerWheel(float x, float y, float horizontal, float vertical);
         void TextInput(std::string_view text);
         [[nodiscard]] bool KeyInput(RuntimeUiKey key);
         [[nodiscard]] bool TextInputFocused() const noexcept;

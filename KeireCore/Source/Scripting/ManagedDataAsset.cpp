@@ -24,13 +24,14 @@ namespace Keire
         using Json = nlohmann::json;
 
         constexpr std::size_t MaximumDocumentBytes = std::size_t{16} * 1024U * 1024U;
-        constexpr std::size_t MaximumFieldCount = std::size_t{16} * 1024U;
+        constexpr std::size_t MaximumFieldCount = 1'024;
         constexpr std::size_t MaximumDependencyCount = std::size_t{16} * 1024U;
         constexpr std::size_t MaximumAliasesPerField = 128;
         constexpr std::size_t MaximumTextBytes = 2048;
         constexpr std::size_t MaximumValueNodes = std::size_t{128} * 1024U;
         constexpr std::size_t MaximumValueDepth = 32;
         constexpr std::size_t MaximumTypeCatalogBytes = std::size_t{16} * 1024U * 1024U;
+        constexpr std::size_t MaximumStringBytes = std::size_t{1} * 1024U * 1024U;
 
         [[nodiscard]] bool HasVisibleText(const std::string_view value) noexcept
         {
@@ -53,6 +54,8 @@ namespace Keire
                 throw std::invalid_argument("Managed data field value exceeds the nesting or node limit.");
             if (value.is_discarded() || value.is_binary())
                 throw std::invalid_argument("Managed data field value contains an unsupported JSON value.");
+            if (value.is_string() && value.get_ref<const std::string&>().size() > MaximumStringBytes)
+                throw std::invalid_argument("Managed data field string exceeds the 1,048,576 UTF-8 byte limit.");
             if (value.is_array())
             {
                 for (const auto& element : value)
@@ -91,6 +94,11 @@ namespace Keire
             return left.StableFieldId < right.StableFieldId;
         }
 
+        [[nodiscard]] std::string ReferenceRootKey(const ManagedDataFieldState& field)
+        {
+            return "id:" + field.StableFieldId.ToString();
+        }
+
         [[nodiscard]] bool DependencyLess(const ManagedDataAssetDependency& left,
                                           const ManagedDataAssetDependency& right) noexcept
         {
@@ -106,7 +114,7 @@ namespace Keire
         [[nodiscard]] bool IsContainerProperty(const ManagedAssetPropertyKind kind) noexcept
         {
             return kind == ManagedAssetPropertyKind::SerializableObject || kind == ManagedAssetPropertyKind::Array ||
-                   kind == ManagedAssetPropertyKind::List;
+                   kind == ManagedAssetPropertyKind::List || kind == ManagedAssetPropertyKind::Dictionary;
         }
 
         [[nodiscard]] bool IsValidMenuPath(const std::string_view value) noexcept
@@ -137,7 +145,7 @@ namespace Keire
                 throw std::invalid_argument("Managed asset property tree exceeds the depth or property-count limit.");
             if (!property.StableFieldId)
                 throw std::invalid_argument("Managed asset properties require non-empty stable field IDs.");
-            if (property.Kind > ManagedAssetPropertyKind::AssetReference)
+            if (property.Kind > ManagedAssetPropertyKind::Dictionary)
                 throw std::invalid_argument("Managed asset property uses an unsupported property kind.");
             if (!HasVisibleText(property.Name) || !HasVisibleText(property.DisplayName) ||
                 !HasVisibleText(property.ManagedTypeName))
@@ -185,13 +193,30 @@ namespace Keire
             {
                 throw std::invalid_argument("Only managed asset-reference properties may declare asset constraints.");
             }
+            if (!property.ReferenceGraph && !property.ReferenceTypeChoices.empty())
+                throw std::invalid_argument("Only reference-graph properties may declare concrete type choices.");
+            if (property.ReferenceTypeChoices.size() > 256)
+                throw std::invalid_argument("Managed reference slots cannot expose more than 256 concrete types.");
+            std::set<ManagedTypeId> referenceChoices;
+            for (const auto type : property.ReferenceTypeChoices)
+            {
+                if (!type || !referenceChoices.emplace(type).second)
+                    throw std::invalid_argument("Managed reference slots require unique non-empty type choices.");
+            }
 
             if (!IsContainerProperty(property.Kind) && !property.Children.empty())
-                throw std::invalid_argument("Only object, array, and list properties may contain child descriptors.");
+                throw std::invalid_argument(
+                    "Only object, array, list, and dictionary properties may contain child descriptors.");
             if ((property.Kind == ManagedAssetPropertyKind::Array || property.Kind == ManagedAssetPropertyKind::List) &&
                 property.Children.size() != 1)
             {
                 throw std::invalid_argument("Managed array and list descriptors require exactly one element child.");
+            }
+            if (property.Kind == ManagedAssetPropertyKind::Dictionary &&
+                (property.Children.size() != 2 || property.Children[0].Name != "Key" ||
+                 property.Children[1].Name != "Value"))
+            {
+                throw std::invalid_argument("Managed dictionary descriptors require ordered Key and Value children.");
             }
 
             std::set<std::string, std::less<>> childNames;
@@ -218,6 +243,7 @@ namespace Keire
                         {"step", property.Step},
                         {"slider", property.Slider},
                         {"textLines", property.TextLines},
+                        {"referenceGraph", property.ReferenceGraph},
                         {"includeDerivedAssetTypes", property.IncludeDerivedAssetTypes}};
             if (property.Minimum)
                 result["minimum"] = *property.Minimum;
@@ -227,6 +253,9 @@ namespace Keire
                 result["expectedAssetType"] = property.ExpectedAssetType->ToString();
             if (property.ExpectedManagedType)
                 result["expectedManagedType"] = property.ExpectedManagedType->ToString();
+            result["referenceTypeChoices"] = Json::array();
+            for (const auto type : property.ReferenceTypeChoices)
+                result["referenceTypeChoices"].push_back(type.ToString());
             result["children"] = Json::array();
             for (const auto& child : property.Children)
                 result["children"].push_back(EncodePropertyDescriptor(child));
@@ -243,7 +272,7 @@ namespace Keire
             result.DisplayName = source.at("displayName").get<std::string>();
             result.ManagedTypeName = source.at("managedTypeName").get<std::string>();
             const auto kind = source.at("kind").get<std::uint32_t>();
-            if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::AssetReference))
+            if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::Dictionary))
                 throw std::invalid_argument("Managed type catalog contains an unsupported property kind.");
             result.Kind = static_cast<ManagedAssetPropertyKind>(kind);
             result.ReadOnly = source.value("readOnly", false);
@@ -257,11 +286,20 @@ namespace Keire
             result.Step = source.value("step", result.Step);
             result.Slider = source.value("slider", false);
             result.TextLines = source.value("textLines", result.TextLines);
+            result.ReferenceGraph = source.value("referenceGraph", false);
             if (const auto found = source.find("expectedAssetType"); found != source.end())
                 result.ExpectedAssetType = AssetTypeId::Parse(found->get<std::string>());
             if (const auto found = source.find("expectedManagedType"); found != source.end())
                 result.ExpectedManagedType = ManagedTypeId::Parse(found->get<std::string>());
             result.IncludeDerivedAssetTypes = source.value("includeDerivedAssetTypes", true);
+            if (const auto found = source.find("referenceTypeChoices"); found != source.end())
+            {
+                if (!found->is_array())
+                    throw std::invalid_argument("Managed reference type choices must be an array.");
+                result.ReferenceTypeChoices.reserve(found->size());
+                for (const auto& type : *found)
+                    result.ReferenceTypeChoices.push_back(ManagedTypeId::Parse(type.get<std::string>()));
+            }
             const auto& children = source.at("children");
             if (!children.is_array())
                 throw std::invalid_argument("Managed type catalog property children must be an array.");
@@ -269,6 +307,44 @@ namespace Keire
             for (const auto& child : children)
                 result.Children.push_back(DecodePropertyDescriptor(child));
             return result;
+        }
+
+        [[nodiscard]] Json EncodeReferenceTypeDescriptor(const ManagedAssetReferenceTypeDescriptor& descriptor)
+        {
+            Json properties = Json::array();
+            for (const auto& property : descriptor.Properties)
+                properties.push_back(EncodePropertyDescriptor(property));
+            return {{"stableTypeId", descriptor.StableTypeId.ToString()},
+                    {"fullName", descriptor.FullName},
+                    {"displayName", descriptor.DisplayName},
+                    {"properties", std::move(properties)}};
+        }
+
+        [[nodiscard]] ManagedAssetReferenceTypeDescriptor DecodeReferenceTypeDescriptor(const Json& source)
+        {
+            if (!source.is_object())
+                throw std::invalid_argument("Managed reference type catalog entries must be objects.");
+            ManagedAssetReferenceTypeDescriptor result;
+            result.StableTypeId = ManagedTypeId::Parse(source.at("stableTypeId").get<std::string>());
+            result.FullName = source.at("fullName").get<std::string>();
+            result.DisplayName = source.at("displayName").get<std::string>();
+            const auto& properties = source.at("properties");
+            if (!properties.is_array())
+                throw std::invalid_argument("Managed reference type properties must be an array.");
+            result.Properties.reserve(properties.size());
+            for (const auto& property : properties)
+                result.Properties.push_back(DecodePropertyDescriptor(property));
+            return result;
+        }
+
+        void ValidateReferenceChoices(const ManagedAssetPropertyDescriptor& property,
+                                      const std::set<ManagedTypeId>& registeredTypes)
+        {
+            for (const auto type : property.ReferenceTypeChoices)
+                if (!registeredTypes.contains(type))
+                    throw std::invalid_argument("Managed reference slots contain an unregistered type choice.");
+            for (const auto& child : property.Children)
+                ValidateReferenceChoices(child, registeredTypes);
         }
 
         void ValidateTypeCatalog(const std::span<const ManagedAssetTypeDescriptor> descriptors)
@@ -480,11 +556,98 @@ namespace Keire
                     ValidateValueForProperty(element, property.Children.front(), dependencies, includeDerivedByAsset,
                                              depth + 1);
                 return;
+            case ManagedAssetPropertyKind::Dictionary:
+            {
+                if (value.is_null())
+                    return;
+                if (!value.is_array())
+                    throw std::invalid_argument("Managed dictionary field value must be an array or null.");
+                if (property.Children.size() != 2)
+                    throw std::invalid_argument("Managed dictionary descriptor requires Key and Value children.");
+                std::set<std::string, std::less<>> keys;
+                for (const auto& entry : value)
+                {
+                    if (!entry.is_object() || entry.size() != 2 || !entry.contains("key") || !entry.contains("value"))
+                    {
+                        throw std::invalid_argument(
+                            "Managed dictionary entries require exactly key and value members.");
+                    }
+                    ValidateValueForProperty(entry.at("key"), property.Children[0], dependencies, includeDerivedByAsset,
+                                             depth + 1);
+                    ValidateValueForProperty(entry.at("value"), property.Children[1], dependencies,
+                                             includeDerivedByAsset, depth + 1);
+                    if (!keys.emplace(entry.at("key").dump()).second)
+                        throw std::invalid_argument("Managed dictionary field contains a duplicate key.");
+                }
+                return;
+            }
             case ManagedAssetPropertyKind::AssetReference:
                 AddExpectedDependency(dependencies, includeDerivedByAsset, ReadAssetReference(value), property);
                 return;
             }
             throw std::invalid_argument("Managed data field uses an unsupported property kind.");
+        }
+
+        void CollectGraphDependencies(const ManagedReferenceGraphValue& value,
+                                      const ManagedAssetPropertyDescriptor& property,
+                                      const ManagedReferenceGraph& graph,
+                                      const std::span<const ManagedAssetReferenceTypeDescriptor> referenceTypes,
+                                      std::map<AssetId, ManagedDataAssetDependency>& dependencies,
+                                      std::map<AssetId, bool>& includeDerivedByAsset,
+                                      std::set<std::pair<std::uint32_t, AssetId>>& expanded, const std::size_t depth)
+        {
+            if (depth > MaximumValueDepth)
+                throw std::invalid_argument("Managed reference graph dependency traversal exceeds the depth limit.");
+            if (value.Reference == 0)
+            {
+                if (!property.ReferenceGraph || property.ReferenceTypeChoices.empty())
+                {
+                    ValidateValueForProperty(Json::parse(value.Scalar), property, dependencies, includeDerivedByAsset,
+                                             depth);
+                }
+                return;
+            }
+            if (!expanded.emplace(value.Reference, property.StableFieldId).second)
+                return;
+            const auto node = std::ranges::find(graph.Objects, value.Reference, &ManagedReferenceGraphNode::Id);
+            if (node == graph.Objects.end())
+                throw std::invalid_argument("Managed reference graph dependency traversal found a dangling link.");
+            if (node->Kind == ManagedReferenceGraphNodeKind::Object)
+            {
+                const auto type = std::ranges::find(referenceTypes, node->RuntimeType,
+                                                    &ManagedAssetReferenceTypeDescriptor::StableTypeId);
+                if (type == referenceTypes.end())
+                    throw std::invalid_argument("Managed reference graph dependency traversal found an unknown type.");
+                for (const auto& field : node->Fields)
+                {
+                    const auto descriptor = std::ranges::find(type->Properties, field.StableFieldId,
+                                                              &ManagedAssetPropertyDescriptor::StableFieldId);
+                    if (descriptor == type->Properties.end())
+                    {
+                        throw std::invalid_argument(
+                            "Managed reference graph contains an unknown field that cannot be cooked safely.");
+                    }
+                    CollectGraphDependencies(field.Value, *descriptor, graph, referenceTypes, dependencies,
+                                             includeDerivedByAsset, expanded, depth + 1);
+                }
+                return;
+            }
+            if (node->Kind == ManagedReferenceGraphNodeKind::Array || node->Kind == ManagedReferenceGraphNodeKind::List)
+            {
+                for (const auto& item : node->Items)
+                {
+                    CollectGraphDependencies(item, property.Children.front(), graph, referenceTypes, dependencies,
+                                             includeDerivedByAsset, expanded, depth + 1);
+                }
+                return;
+            }
+            for (const auto& entry : node->Entries)
+            {
+                CollectGraphDependencies(entry.Key, property.Children[0], graph, referenceTypes, dependencies,
+                                         includeDerivedByAsset, expanded, depth + 1);
+                CollectGraphDependencies(entry.Value, property.Children[1], graph, referenceTypes, dependencies,
+                                         includeDerivedByAsset, expanded, depth + 1);
+            }
         }
 
         [[nodiscard]] bool
@@ -528,10 +691,45 @@ namespace Keire
 
     ManagedDataDefinition ManagedDataAsset::Canonicalize(ManagedDataDefinition definition)
     {
+        ManagedReferenceGraph shared{.Version = 2};
+        const bool hasSharedGraph = !definition.ReferenceGraph.empty();
+        if (hasSharedGraph)
+        {
+            shared = DecodeManagedReferenceGraph(definition.ReferenceGraph);
+            ValidateManagedReferenceGraphDocument(shared);
+            if (shared.Version != 2)
+                throw std::invalid_argument("Managed data requires a shared-v2 reference graph object table.");
+        }
         for (auto& field : definition.Fields)
         {
             std::ranges::sort(field.FormerNames);
-            field.Value = ParseFieldValue(field.Value).dump();
+            if (!field.ReferenceGraph)
+            {
+                field.ReferenceGraphRoot.clear();
+                field.Value = ParseFieldValue(field.Value).dump();
+                continue;
+            }
+            if (field.ReferenceGraphRoot.empty())
+                field.ReferenceGraphRoot = ReferenceRootKey(field);
+            if (!hasSharedGraph)
+            {
+                const auto graph =
+                    field.Value.empty() ? ManagedReferenceGraph{} : DecodeManagedReferenceGraph(field.Value);
+                UpdateManagedReferenceGraphRoot(shared, field.ReferenceGraphRoot, graph);
+            }
+        }
+        if (std::ranges::any_of(definition.Fields, &ManagedDataFieldState::ReferenceGraph))
+        {
+            ValidateManagedReferenceGraphDocument(shared);
+            definition.ReferenceGraph = EncodeManagedReferenceGraph(shared);
+            for (auto& field : definition.Fields)
+                if (field.ReferenceGraph)
+                    field.Value =
+                        EncodeManagedReferenceGraph(ExtractManagedReferenceGraphRoot(shared, field.ReferenceGraphRoot));
+        }
+        else
+        {
+            definition.ReferenceGraph.clear();
         }
         std::ranges::sort(definition.Fields, FieldLess);
         std::ranges::sort(definition.Dependencies, DependencyLess);
@@ -556,6 +754,7 @@ namespace Keire
 
         std::set<AssetId> stableIds;
         std::set<std::string, std::less<>> names;
+        std::set<std::string, std::less<>> graphRoots;
         for (const auto& field : definition.Fields)
         {
             if (!field.StableFieldId || !stableIds.emplace(field.StableFieldId).second)
@@ -579,7 +778,42 @@ namespace Keire
             }
             if (std::adjacent_find(field.FormerNames.begin(), field.FormerNames.end()) != field.FormerNames.end())
                 throw std::invalid_argument("Managed data former field names must be unique.");
-            (void)ParseFieldValue(field.Value);
+            if (field.ReferenceGraph)
+            {
+                if (!HasVisibleText(field.ReferenceGraphRoot) || !graphRoots.emplace(field.ReferenceGraphRoot).second)
+                    throw std::invalid_argument(
+                        "Managed reference fields require unique non-empty shared graph roots.");
+                const auto graph = DecodeManagedReferenceGraph(field.Value);
+                ValidateManagedReferenceGraphDocument(graph);
+                if (graph.Version != 1)
+                    throw std::invalid_argument("Managed field graph projections must use standalone-v1 graphs.");
+            }
+            else
+            {
+                if (!field.ReferenceGraphRoot.empty())
+                    throw std::invalid_argument("Managed inline fields cannot name a shared graph root.");
+                (void)ParseFieldValue(field.Value);
+            }
+        }
+
+        if (graphRoots.empty())
+        {
+            if (!definition.ReferenceGraph.empty())
+                throw std::invalid_argument("Managed data without reference fields cannot contain an object table.");
+        }
+        else
+        {
+            if (definition.ReferenceGraph.empty() || definition.ReferenceGraph.size() > MaximumDocumentBytes)
+                throw std::invalid_argument("Managed data reference graph object table is missing or oversized.");
+            const auto shared = DecodeManagedReferenceGraph(definition.ReferenceGraph);
+            ValidateManagedReferenceGraphDocument(shared);
+            if (shared.Version != 2)
+                throw std::invalid_argument("Managed data reference graph object tables must use version 2.");
+            std::set<std::string, std::less<>> encodedRoots;
+            for (const auto& root : shared.Roots)
+                encodedRoots.emplace(root.Key);
+            if (encodedRoots != graphRoots)
+                throw std::invalid_argument("Managed data fields and shared graph roots do not match.");
         }
 
         std::set<AssetId> assets;
@@ -610,9 +844,17 @@ namespace Keire
                 throw std::invalid_argument("Managed data document root must be an object.");
 
             ManagedDataDefinition definition;
-            definition.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+            const auto sourceVersion = document.at("schemaVersion").get<std::uint32_t>();
+            if (sourceVersion != 1 && sourceVersion != ManagedDataSchemaVersion)
+                throw std::invalid_argument("Managed data asset uses an unsupported schema version.");
+            definition.SchemaVersion = ManagedDataSchemaVersion;
             definition.ManagedType = ManagedTypeId::Parse(document.at("managedTypeId").get<std::string>());
             definition.ManagedTypeName = document.at("managedTypeName").get<std::string>();
+            if (sourceVersion == ManagedDataSchemaVersion)
+            {
+                if (const auto graph = document.find("referenceGraph"); graph != document.end())
+                    definition.ReferenceGraph = graph->dump();
+            }
             const auto& fields = document.at("fields");
             const auto& dependencies = document.at("dependencies");
             if (!fields.is_array() || !dependencies.is_array())
@@ -626,7 +868,12 @@ namespace Keire
                 field.Name = encoded.at("name").get<std::string>();
                 field.ManagedTypeName = encoded.at("managedTypeName").get<std::string>();
                 field.FormerNames = encoded.value("formerNames", std::vector<std::string>{});
-                field.Value = encoded.at("value").dump();
+                field.ReferenceGraph = encoded.value("referenceGraph", false);
+                field.ReferenceGraphRoot = encoded.value("referenceGraphRoot", std::string{});
+                if (const auto value = encoded.find("value"); value != encoded.end())
+                    field.Value = value->dump();
+                else if (!field.ReferenceGraph)
+                    throw std::invalid_argument("Managed inline data fields require a serialized value.");
                 definition.Fields.push_back(std::move(field));
             }
             for (const auto& encoded : dependencies)
@@ -641,6 +888,13 @@ namespace Keire
                 definition.Dependencies.push_back(dependency);
             }
 
+            if (!std::ranges::is_sorted(definition.Fields, FieldLess) ||
+                !std::ranges::is_sorted(definition.Dependencies, DependencyLess))
+            {
+                throw std::invalid_argument(
+                    "Managed data fields and dependencies must use deterministic stable-ID order.");
+            }
+            definition = Canonicalize(std::move(definition));
             Validate(definition);
             return CreateRef<ManagedDataAsset>(std::move(definition));
         }
@@ -658,11 +912,20 @@ namespace Keire
         Json fields = Json::array();
         for (const auto& field : definition.Fields)
         {
-            fields.push_back({{"stableId", field.StableFieldId.ToString()},
-                              {"name", field.Name},
-                              {"managedTypeName", field.ManagedTypeName},
-                              {"formerNames", field.FormerNames},
-                              {"value", ParseFieldValue(field.Value)}});
+            Json encoded{{"stableId", field.StableFieldId.ToString()},
+                         {"name", field.Name},
+                         {"managedTypeName", field.ManagedTypeName},
+                         {"formerNames", field.FormerNames}};
+            if (field.ReferenceGraph)
+            {
+                encoded["referenceGraph"] = true;
+                encoded["referenceGraphRoot"] = field.ReferenceGraphRoot;
+            }
+            else
+            {
+                encoded["value"] = ParseFieldValue(field.Value);
+            }
+            fields.push_back(std::move(encoded));
         }
 
         Json dependencies = Json::array();
@@ -674,11 +937,13 @@ namespace Keire
             dependencies.push_back(std::move(encoded));
         }
 
-        const Json document{{"schemaVersion", definition.SchemaVersion},
-                            {"managedTypeId", definition.ManagedType.ToString()},
-                            {"managedTypeName", definition.ManagedTypeName},
-                            {"fields", std::move(fields)},
-                            {"dependencies", std::move(dependencies)}};
+        Json document{{"schemaVersion", definition.SchemaVersion},
+                      {"managedTypeId", definition.ManagedType.ToString()},
+                      {"managedTypeName", definition.ManagedTypeName},
+                      {"fields", std::move(fields)},
+                      {"dependencies", std::move(dependencies)}};
+        if (!definition.ReferenceGraph.empty())
+            document["referenceGraph"] = Json::parse(definition.ReferenceGraph);
         const auto text = document.dump(2) + '\n';
         std::vector<std::byte> bytes(text.size());
         std::memcpy(bytes.data(), text.data(), text.size());
@@ -742,6 +1007,35 @@ namespace Keire
             }
             ValidateProperty(property, 0, count);
         }
+        if (descriptor.ReferenceTypes.size() > 4096)
+            throw std::invalid_argument("Managed asset descriptors cannot register more than 4096 graph types.");
+        std::set<ManagedTypeId> referenceTypeIds;
+        std::set<std::string, std::less<>> referenceTypeNames;
+        for (const auto& referenceType : descriptor.ReferenceTypes)
+        {
+            if (!referenceType.StableTypeId || !HasVisibleText(referenceType.FullName) ||
+                !HasVisibleText(referenceType.DisplayName) ||
+                !referenceTypeIds.emplace(referenceType.StableTypeId).second ||
+                !referenceTypeNames.emplace(referenceType.FullName).second)
+            {
+                throw std::invalid_argument(
+                    "Managed reference types require unique stable IDs, names, and display names.");
+            }
+            std::set<std::string, std::less<>> names;
+            std::set<AssetId> stableIds;
+            std::size_t referenceFieldCount = 0;
+            for (const auto& property : referenceType.Properties)
+            {
+                if (!names.emplace(property.Name).second || !stableIds.emplace(property.StableFieldId).second)
+                    throw std::invalid_argument("Managed reference type fields require unique sibling names and IDs.");
+                ValidateProperty(property, 0, referenceFieldCount);
+            }
+        }
+        for (const auto& property : descriptor.Properties)
+            ValidateReferenceChoices(property, referenceTypeIds);
+        for (const auto& referenceType : descriptor.ReferenceTypes)
+            for (const auto& property : referenceType.Properties)
+                ValidateReferenceChoices(property, referenceTypeIds);
     }
 
     std::string EncodeManagedAssetTypeCatalog(const std::span<const ManagedAssetTypeDescriptor> descriptors)
@@ -760,12 +1054,16 @@ namespace Keire
             Json properties = Json::array();
             for (const auto& property : descriptor->Properties)
                 properties.push_back(EncodePropertyDescriptor(property));
+            Json referenceTypes = Json::array();
+            for (const auto& referenceType : descriptor->ReferenceTypes)
+                referenceTypes.push_back(EncodeReferenceTypeDescriptor(referenceType));
             Json encoded{{"stableTypeId", descriptor->StableTypeId.ToString()},
                          {"fullName", descriptor->FullName},
                          {"displayName", descriptor->DisplayName},
                          {"menuPath", descriptor->MenuPath},
                          {"defaultFileName", descriptor->DefaultFileName},
-                         {"properties", std::move(properties)}};
+                         {"properties", std::move(properties)},
+                         {"referenceTypes", std::move(referenceTypes)}};
             if (descriptor->BaseTypeId)
                 encoded["baseTypeId"] = descriptor->BaseTypeId->ToString();
             types.push_back(std::move(encoded));
@@ -805,6 +1103,14 @@ namespace Keire
                 descriptor.Properties.reserve(properties.size());
                 for (const auto& property : properties)
                     descriptor.Properties.push_back(DecodePropertyDescriptor(property));
+                if (const auto found = source.find("referenceTypes"); found != source.end())
+                {
+                    if (!found->is_array())
+                        throw std::invalid_argument("Managed reference types must be an array.");
+                    descriptor.ReferenceTypes.reserve(found->size());
+                    for (const auto& referenceType : *found)
+                        descriptor.ReferenceTypes.push_back(DecodeReferenceTypeDescriptor(referenceType));
+                }
                 result.push_back(std::move(descriptor));
             }
             std::ranges::sort(result, {}, &ManagedAssetTypeDescriptor::FullName);
@@ -858,8 +1164,23 @@ namespace Keire
             }
             try
             {
-                const auto value = Json::parse(field.Value);
-                ValidateValueForProperty(value, *property, expectedDependencies, includeDerivedByAsset, 0);
+                if (field.ReferenceGraph != property->ReferenceGraph)
+                {
+                    throw std::invalid_argument("the SerializeReference marker does not match the active descriptor");
+                }
+                if (field.ReferenceGraph)
+                {
+                    const auto graph = DecodeManagedReferenceGraph(field.Value);
+                    ValidateManagedReferenceGraph(graph, *property, descriptor->ReferenceTypes);
+                    std::set<std::pair<std::uint32_t, AssetId>> expanded;
+                    CollectGraphDependencies(graph.Root, *property, graph, descriptor->ReferenceTypes,
+                                             expectedDependencies, includeDerivedByAsset, expanded, 0);
+                }
+                else
+                {
+                    const auto value = Json::parse(field.Value);
+                    ValidateValueForProperty(value, *property, expectedDependencies, includeDerivedByAsset, 0);
+                }
             }
             catch (const Json::exception& exception)
             {

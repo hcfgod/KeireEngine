@@ -904,6 +904,15 @@ namespace Keire
     {
         std::string TypeName;
         std::string Message;
+        std::string Code;
+        std::string Phase;
+        std::string Owner;
+        std::string RootField;
+        std::string FieldPath;
+        std::string DeclaredType;
+        std::string RuntimeType;
+        std::string SerializedTypeId;
+        std::optional<std::uint32_t> ObjectId;
         auto operator<=>(const ManagedAssetTypeDiagnostic&) const = default;
     };
 

@@ -160,9 +160,12 @@ namespace Keire::RenderBackend
             bool presentedSurface = false;
             SDL_GPUBuffer* runtimeUiBuffer = nullptr;
             std::uint32_t runtimeUiVertexCount = 0;
-            if (!RuntimeUiCommands.empty())
+            const auto runtimeUiCommands = ActiveFrame
+                                               ? std::span<const RuntimeUiDrawCommand>(ActiveFrame->RuntimeUiCommands)
+                                               : std::span<const RuntimeUiDrawCommand>{};
+            if (!runtimeUiCommands.empty())
             {
-                const auto vertices = BuildRuntimeUiVertices(RuntimeUiCommands);
+                const auto vertices = BuildRuntimeUiVertices(runtimeUiCommands);
                 if (!vertices.empty())
                 {
                     if (!RuntimeUiPipeline)
@@ -173,15 +176,17 @@ namespace Keire::RenderBackend
                     runtimeUiVertexCount = static_cast<std::uint32_t>(vertices.size());
                 }
             }
-            if (const auto presentation = PresentationSurface.lock();
-                presentation && presentation->Resources.SampledColor && presentation->Width != 0 &&
+            const auto presentation =
+                ActiveFrame ? ResolveSurface(ActiveFrame->PresentationSurface) : std::shared_ptr<RenderSurfaceState>{};
+            if (presentation && presentation->Resources.PublishedColor() && presentation->Width != 0 &&
                 presentation->Height != 0 && swapchainWidth != 0 && swapchainHeight != 0)
             {
-                const bool submitted = std::ranges::any_of(Requests, [surface = presentation.get()](const auto& request)
-                                                           { return request.Surface == surface; });
+                const bool submitted = std::ranges::any_of(
+                    ActiveFrame->Requests, [&presentation](const auto& request)
+                    { return request.Surface.Id == presentation->Id && request.Surface.Epoch == presentation->Epoch; });
                 SDL_GPUBlitInfo blit{};
-                blit.source.texture = submitted && presentation->HasOutput ? presentation->Resources.ExchangeColor
-                                                                           : presentation->Resources.SampledColor;
+                blit.source.texture = submitted ? presentation->Resources.WriterColor(ActiveFrame->FrameSlot)
+                                                : presentation->Resources.PublishedColor();
                 blit.source.w = presentation->Width;
                 blit.source.h = presentation->Height;
                 blit.destination.texture = swapchain;
@@ -242,10 +247,17 @@ namespace Keire::RenderBackend
         if (!ValidColor(Specification.SwapchainClearColor))
             throw std::invalid_argument("Render swapchain clear color must contain finite values in 0..1.");
         SceneFrameGraph = BuildStaticSceneFrameGraph();
-        if (Specification.MaximumFramesInFlight < 1 || Specification.MaximumFramesInFlight > 8)
-            throw std::invalid_argument("MaximumFramesInFlight must be in the range 1..8.");
+        if (Specification.MaximumFramesInFlight < 1 || Specification.MaximumFramesInFlight > 3)
+            throw std::invalid_argument("MaximumFramesInFlight must be in the range 1..3.");
+        if (Specification.DeviceLossRecoveryAttempts > 3)
+            throw std::invalid_argument("DeviceLossRecoveryAttempts must be in the range 0..3.");
         if (Specification.Mode == RenderMode::Automatic)
             throw std::invalid_argument("RenderSystem requires a resolved render mode.");
+        Statistics.AllowedFramesInFlight = Specification.MaximumFramesInFlight;
+        PublishedStatistics = Statistics;
+        InFlight.reserve(Specification.MaximumFramesInFlight);
+        for (std::uint32_t slot = 0; slot < Specification.MaximumFramesInFlight; ++slot)
+            AvailableFrameSlots.push_back(slot);
         if (Specification.Mode != RenderMode::Rendered)
             return;
         if (!Jobs)
@@ -258,87 +270,16 @@ namespace Keire::RenderBackend
         if (!NativeWindow)
             throw std::runtime_error("The renderer could not resolve the primary native window.");
 
-        constexpr SDL_GPUShaderFormat formats = static_cast<SDL_GPUShaderFormat>(
-            SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXBC | SDL_GPU_SHADERFORMAT_DXIL |
-            SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_METALLIB);
-        Device = SDL_CreateGPUDevice(formats, Specification.EnableGpuValidation, nullptr);
-        if (!Device)
-            throw std::runtime_error("SDL_CreateGPUDevice failed: " + LastSdlError());
-        KEIRE_CORE_INFO("Created SDL_GPU device (driver={}, shader formats=0x{:x}).", SDL_GetGPUDeviceDriver(Device),
-                        static_cast<std::uint32_t>(SDL_GetGPUShaderFormats(Device)));
-
+        PresentMode = ToSdlPresentMode(Specification.PresentMode);
         try
         {
-            if (!SDL_ClaimWindowForGPUDevice(Device, NativeWindow))
-                throw std::runtime_error("SDL_ClaimWindowForGPUDevice failed: " + LastSdlError());
-            WindowClaimed = true;
-
-            Statistics.AllowedFramesInFlight = SdlAllowedFramesInFlight(Specification.MaximumFramesInFlight);
-            if (!SDL_SetGPUAllowedFramesInFlight(Device, Statistics.AllowedFramesInFlight))
-                throw std::runtime_error("SDL_SetGPUAllowedFramesInFlight failed: " + LastSdlError());
-
-            PresentMode = ToSdlPresentMode(Specification.PresentMode);
-            if (!SDL_WindowSupportsGPUPresentMode(Device, NativeWindow, PresentMode))
-            {
-                KEIRE_CORE_WARN("Requested render present mode is unavailable; falling back to VSync.");
-                PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
-            }
-            if (!SDL_SetGPUSwapchainParameters(Device, NativeWindow, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, PresentMode))
-            {
-                throw std::runtime_error("SDL_SetGPUSwapchainParameters failed: " + LastSdlError());
-            }
-
-            ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
-            const SDL_GPUTextureUsageFlags colorUsage =
-                SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
-            if (!SDL_GPUTextureSupportsFormat(Device, ColorFormat, SDL_GPU_TEXTURETYPE_2D, colorUsage))
-                ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-
-            if (!SDL_GPUTextureSupportsFormat(Device, SceneColorFormat, SDL_GPU_TEXTURETYPE_2D, colorUsage))
-                throw std::runtime_error("The active GPU does not support RGBA16F sampled color attachments.");
-
-            constexpr SDL_GPUTextureFormat depthCandidates[] = {
-                SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREFORMAT_D24_UNORM, SDL_GPU_TEXTUREFORMAT_D16_UNORM};
-            for (const auto candidate : depthCandidates)
-            {
-                if (SDL_GPUTextureSupportsFormat(Device, candidate, SDL_GPU_TEXTURETYPE_2D,
-                                                 SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
-                {
-                    DepthFormat = candidate;
-                    break;
-                }
-            }
-            for (const auto candidate : depthCandidates)
-            {
-                if (SDL_GPUTextureSupportsFormat(Device, candidate, SDL_GPU_TEXTURETYPE_2D_ARRAY,
-                                                 SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
-                                                     SDL_GPU_TEXTUREUSAGE_SAMPLER) &&
-                    SDL_GPUTextureSupportsFormat(Device, candidate, SDL_GPU_TEXTURETYPE_2D,
-                                                 SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
-                                                     SDL_GPU_TEXTUREUSAGE_SAMPLER))
-                {
-                    ShadowDepthFormat = candidate;
-                    break;
-                }
-            }
-            if (DepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID || ShadowDepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID)
-                throw std::runtime_error("The active GPU exposes no compatible scene and sampled shadow depth format.");
-            const auto selectedShaderFormats = SDL_GetGPUShaderFormats(Device);
-            const bool occlusionShaderFormat =
-                (selectedShaderFormats &
-                 (SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL)) != 0;
-            const SDL_GPUTextureUsageFlags occlusionPyramidUsage =
-                SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE;
-            GpuOcclusionCapability =
-                occlusionShaderFormat && SDL_GPUTextureSupportsFormat(Device, SDL_GPU_TEXTUREFORMAT_R32_FLOAT,
-                                                                      SDL_GPU_TEXTURETYPE_2D, occlusionPyramidUsage);
-            KEIRE_CORE_INFO("Selected GPU attachment formats (output={}, scene={}, depth={}, shadowDepth={}).",
-                            static_cast<std::uint32_t>(ColorFormat), static_cast<std::uint32_t>(SceneColorFormat),
-                            static_cast<std::uint32_t>(DepthFormat), static_cast<std::uint32_t>(ShadowDepthFormat));
-            KEIRE_CORE_INFO("Configured {} GPU frame(s) in flight.", Statistics.AllowedFramesInFlight);
-
-            CreateGeometryResources();
             StartRenderThread();
+            DispatchRender(
+                [this]
+                {
+                    CreateDeviceAndMandatoryResources(false);
+                    PublishedStatistics = Statistics;
+                });
         }
         catch (...)
         {
@@ -351,7 +292,11 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::StartRenderThread()
     {
-        if (Specification.Mode != RenderMode::Rendered || RenderThread.joinable())
+        bool shouldStart = Specification.Mode == RenderMode::Rendered;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        shouldStart = shouldStart || (Specification.Mode == RenderMode::Headless && ThreadedHeadlessForTest);
+#endif
+        if (!shouldStart || RenderThread.joinable())
             return;
         RenderThread = std::jthread(
             [this]
@@ -359,17 +304,48 @@ namespace Keire::RenderBackend
                 RenderThreadId = std::this_thread::get_id();
                 for (;;)
                 {
-                    std::function<void()> work;
+                    RenderQueueItem item;
                     {
                         std::unique_lock lock(RenderQueueMutex);
-                        RenderQueueReady.wait(lock, [&] { return StopRenderQueue || !RenderQueue.empty(); });
+                        RenderQueueReady.wait_for(lock, std::chrono::milliseconds(1),
+                                                  [&] { return StopRenderQueue || !RenderQueue.empty(); });
                         if (StopRenderQueue && RenderQueue.empty())
+                        {
+                            lock.unlock();
+                            if (!DeviceLost)
+                            {
+                                try
+                                {
+                                    while (!InFlight.empty())
+                                        CollectCompletedFrames(true);
+                                }
+                                catch (...)
+                                {
+                                    HandleRenderThreadFailure(std::current_exception());
+                                }
+                            }
                             break;
-                        work = std::move(RenderQueue.front());
-                        RenderQueue.pop_front();
+                        }
+                        if (!RenderQueue.empty())
+                        {
+                            item = std::move(RenderQueue.front());
+                            RenderQueue.pop_front();
+                        }
                     }
                     RenderQueueSpace.notify_one();
-                    work();
+                    if (item.Work)
+                        item.Work();
+                    else if (!DeviceLost)
+                    {
+                        try
+                        {
+                            CollectCompletedFrames(false);
+                        }
+                        catch (...)
+                        {
+                            HandleRenderThreadFailure(std::current_exception());
+                        }
+                    }
                 }
             });
     }
@@ -398,13 +374,17 @@ namespace Keire::RenderBackend
         auto completion = task->get_future();
         {
             std::unique_lock lock(RenderQueueMutex);
-            constexpr std::size_t capacity = 2;
+            const auto capacity = static_cast<std::size_t>(Specification.MaximumFramesInFlight);
             RenderQueueSpace.wait(lock, [&] { return StopRenderQueue || RenderQueue.size() < capacity; });
             if (StopRenderQueue)
                 throw std::logic_error("Renderer submission queue is closed.");
-            RenderQueue.push_back([task] { (*task)(); });
-            Statistics.RendererQueueHighWaterMark =
-                std::max(Statistics.RendererQueueHighWaterMark, static_cast<std::uint32_t>(RenderQueue.size()));
+            RenderQueue.push_back({[task] { (*task)(); }, 0});
+            const auto queueDepth = static_cast<std::uint32_t>(RenderQueue.size());
+            auto queueHighWater = RenderQueueHighWaterMark.load(std::memory_order_relaxed);
+            while (queueHighWater < queueDepth && !RenderQueueHighWaterMark.compare_exchange_weak(
+                                                      queueHighWater, queueDepth, std::memory_order_relaxed))
+            {
+            }
         }
         RenderQueueReady.notify_one();
         completion.get();
@@ -419,22 +399,154 @@ namespace Keire::RenderBackend
             throw std::logic_error(std::string("RenderSystem::") + operation + " called after shutdown.");
     }
 
+    void RenderSharedState::RequireRenderThread(const char* operation) const
+    {
+        if (Specification.Mode == RenderMode::Rendered && std::this_thread::get_id() != RenderThreadId)
+            throw std::logic_error(std::string("RenderSystem::") + operation + " must run on the render thread.");
+    }
+
     std::vector<std::shared_ptr<RenderSurfaceState>> RenderSharedState::LiveSurfaces()
     {
+        std::scoped_lock lock(SurfaceMutex);
         std::vector<std::shared_ptr<RenderSurfaceState>> result;
         result.reserve(Surfaces.size());
-        std::erase_if(Surfaces,
-                      [&result](const std::weak_ptr<RenderSurfaceState>& weak)
-                      {
-                          if (auto surface = weak.lock())
-                          {
-                              result.push_back(std::move(surface));
-                              return false;
-                          }
-                          return true;
-                      });
+        for (const auto& entry : Surfaces)
+            if (entry.Current && entry.State)
+                result.push_back(entry.State);
         std::ranges::sort(result, {}, &RenderSurfaceState::Id);
         return result;
+    }
+
+    std::vector<std::shared_ptr<RenderSurfaceState>> RenderSharedState::AllSurfaceEpochs()
+    {
+        std::scoped_lock lock(SurfaceMutex);
+        std::vector<std::shared_ptr<RenderSurfaceState>> result;
+        result.reserve(Surfaces.size());
+        for (const auto& entry : Surfaces)
+            if (entry.State)
+                result.push_back(entry.State);
+        std::ranges::sort(result, [](const auto& first, const auto& second)
+                          { return std::tie(first->Id, first->Epoch) < std::tie(second->Id, second->Epoch); });
+        return result;
+    }
+
+    std::vector<RenderSurfaceToken> RenderSharedState::CaptureLiveSurfaceTokens()
+    {
+        std::scoped_lock lock(SurfaceMutex);
+        std::vector<RenderSurfaceToken> result;
+        result.reserve(Surfaces.size());
+        for (const auto& entry : Surfaces)
+        {
+            if (entry.Current && entry.State && entry.State->Lifetime)
+                result.push_back({entry.State->Id, entry.State->Epoch, entry.State->Lifetime});
+        }
+        std::ranges::sort(result, [](const auto& first, const auto& second)
+                          { return std::tie(first.Id, first.Epoch) < std::tie(second.Id, second.Epoch); });
+        return result;
+    }
+
+    RenderSurfaceToken RenderSharedState::CaptureSurfaceToken(const std::shared_ptr<RenderSurfaceState>& surface)
+    {
+        if (!surface)
+            return {};
+        std::scoped_lock lock(SurfaceMutex);
+        const auto found = std::ranges::find_if(Surfaces, [&surface](const RenderSurfaceRegistryEntry& entry)
+                                                { return entry.Current && entry.State == surface; });
+        if (found == Surfaces.end() || !surface->Lifetime)
+            throw std::invalid_argument("Render surface epoch is no longer current for frame capture.");
+        return {surface->Id, surface->Epoch, surface->Lifetime};
+    }
+
+    std::shared_ptr<RenderSurfaceState> RenderSharedState::ResolveSurface(const RenderSurfaceToken& token)
+    {
+        if (!token)
+            return {};
+        std::scoped_lock lock(SurfaceMutex);
+        const auto found = std::ranges::find_if(Surfaces,
+                                                [&token](const RenderSurfaceRegistryEntry& entry)
+                                                {
+                                                    return entry.State && entry.State->Id == token.Id &&
+                                                           entry.State->Epoch == token.Epoch &&
+                                                           entry.State->Lifetime == token.Lifetime;
+                                                });
+        return found == Surfaces.end() ? std::shared_ptr<RenderSurfaceState>{} : found->State;
+    }
+
+    std::shared_ptr<RenderSurfaceState>
+    RenderSharedState::CreateSurfaceEpoch(const std::shared_ptr<RenderSurfaceState>& previous,
+                                          const std::uint32_t width, const std::uint32_t height)
+    {
+        RequireOwner("CreateSurfaceEpoch");
+        if (!previous)
+            throw std::invalid_argument("Render surface resizing requires a current epoch.");
+        auto replacement = std::make_shared<RenderSurfaceState>();
+        replacement->Owner = shared_from_this();
+        replacement->Specification = previous->Specification;
+        replacement->Specification.Width = width;
+        replacement->Specification.Height = height;
+        replacement->Id = previous->Id;
+        replacement->Epoch = previous->Epoch + 1U;
+        replacement->RequestedWidth = width;
+        replacement->RequestedHeight = height;
+        replacement->FrameClearColor = previous->Specification.ClearColor;
+        replacement->GpuOcclusionDebugMode = previous->GpuOcclusionDebugMode;
+        replacement->GpuOcclusionDebugMipLevel = previous->GpuOcclusionDebugMipLevel;
+        replacement->Lifetime = std::make_shared<RenderSurfaceEpochLease>(replacement->Id, replacement->Epoch);
+        {
+            std::scoped_lock lock(SurfaceMutex);
+            const auto found = std::ranges::find_if(Surfaces, [&previous](const RenderSurfaceRegistryEntry& entry)
+                                                    { return entry.Current && entry.State == previous; });
+            if (found == Surfaces.end())
+                throw std::logic_error("Render surface epoch changed during resize.");
+            found->Current = false;
+            Surfaces.push_back({replacement, true});
+        }
+        return replacement;
+    }
+
+    void RenderSharedState::RequestSurfaceRetirement(const std::shared_ptr<RenderSurfaceState>& surface) noexcept
+    {
+        if (!surface)
+            return;
+        {
+            std::scoped_lock lock(SurfaceMutex);
+            if (const auto found = std::ranges::find_if(Surfaces, [&surface](const RenderSurfaceRegistryEntry& entry)
+                                                        { return entry.State == surface; });
+                found != Surfaces.end())
+            {
+                found->Current = false;
+            }
+        }
+        try
+        {
+            DispatchRender([self = shared_from_this()] { self->CollectRetiredSurfaceEpochs(); });
+        }
+        catch (...)
+        {
+            surface->Owner.reset();
+        }
+    }
+
+    void RenderSharedState::CollectRetiredSurfaceEpochs() noexcept
+    {
+        std::vector<std::shared_ptr<RenderSurfaceState>> retired;
+        {
+            std::scoped_lock lock(SurfaceMutex);
+            for (auto iterator = Surfaces.begin(); iterator != Surfaces.end();)
+            {
+                if (!iterator->Current && iterator->State && iterator->State->Lifetime.use_count() == 1)
+                {
+                    retired.push_back(std::move(iterator->State));
+                    iterator = Surfaces.erase(iterator);
+                }
+                else
+                {
+                    ++iterator;
+                }
+            }
+        }
+        for (const auto& surface : retired)
+            RetireSurface(*surface);
     }
 
     void RenderSharedState::ReleaseResources(SurfaceResources& resources) noexcept
@@ -444,25 +556,29 @@ namespace Keire::RenderBackend
             resources = {};
             return;
         }
-        for (auto& frame : resources.GpuOcclusionFrames)
-            ReleaseGpuOcclusionFrameResources(frame);
-        if (resources.LocalShadow)
-            SDL_ReleaseGPUTexture(Device, resources.LocalShadow);
-        if (resources.DirectionalShadow)
-            SDL_ReleaseGPUTexture(Device, resources.DirectionalShadow);
-        if (resources.Depth)
-            SDL_ReleaseGPUTexture(Device, resources.Depth);
-        if (resources.SampledDepth)
-            SDL_ReleaseGPUTexture(Device, resources.SampledDepth);
-        if (resources.MultisampleHdrColor)
-            SDL_ReleaseGPUTexture(Device, resources.MultisampleHdrColor);
-        for (auto* texture : resources.TransientTextures)
+        for (auto& workset : resources.Worksets)
+        {
+            for (auto& frame : workset.GpuOcclusionFrames)
+                ReleaseGpuOcclusionFrameResources(frame);
+            ReleaseForwardPlusResources(workset.ForwardPlus);
+            ReleaseDynamicUploadResources(workset.DynamicUploads);
+            if (workset.LocalShadow)
+                SDL_ReleaseGPUTexture(Device, workset.LocalShadow);
+            if (workset.DirectionalShadow)
+                SDL_ReleaseGPUTexture(Device, workset.DirectionalShadow);
+            if (workset.Depth)
+                SDL_ReleaseGPUTexture(Device, workset.Depth);
+            if (workset.SampledDepth)
+                SDL_ReleaseGPUTexture(Device, workset.SampledDepth);
+            if (workset.MultisampleHdrColor)
+                SDL_ReleaseGPUTexture(Device, workset.MultisampleHdrColor);
+            for (auto* texture : workset.TransientTextures)
+                if (texture)
+                    SDL_ReleaseGPUTexture(Device, texture);
+        }
+        for (auto* texture : resources.FinalOutputs)
             if (texture)
                 SDL_ReleaseGPUTexture(Device, texture);
-        if (resources.SampledColor)
-            SDL_ReleaseGPUTexture(Device, resources.SampledColor);
-        if (resources.ExchangeColor)
-            SDL_ReleaseGPUTexture(Device, resources.ExchangeColor);
         resources = {};
     }
 
@@ -731,6 +847,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("runtime UI pipeline creation");
             if (fragment)
                 SDL_ReleaseGPUShader(Device, fragment);
             if (vertex)
@@ -836,6 +953,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("GPU buffer upload");
             if (transfer)
                 SDL_ReleaseGPUTransferBuffer(Device, transfer);
             SDL_ReleaseGPUBuffer(Device, buffer);
@@ -1038,6 +1156,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("GPU texture upload");
             if (transfer)
                 SDL_ReleaseGPUTransferBuffer(Device, transfer);
             if (result.Texture)
@@ -1156,6 +1275,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("baked-lighting texture upload");
             if (transfer)
                 SDL_ReleaseGPUTransferBuffer(Device, transfer);
             if (result.Texture)
@@ -1233,6 +1353,7 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
+            RethrowIfDeviceLost("GPU VFX volume resource creation");
             if (result.Indices)
                 SDL_ReleaseGPUBuffer(Device, result.Indices);
             if (result.Vertices)

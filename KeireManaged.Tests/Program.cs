@@ -2,7 +2,9 @@ var tests = new (string Name, Action Run)[]
 {
     ("Prefab assets expose typed stable identity", PrefabAssetMarkerContract),
     ("Unity-shaped object API replaces public handles and marker components", UnityShapedObjectApiContract),
-    ("Managed state v2 tags direct entity component and asset references", DirectReferenceStateContract),
+    ("Managed state v3 tags direct entity component and asset references", DirectReferenceStateContract),
+    ("Managed serialization v3 preserves graphs nested dictionaries and transactions", ManagedSerializationV3Tests.Run),
+    ("Managed serialization v3 rejects exact boundary overflows atomically", ManagedSerializationV3BoundaryTests.Run),
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("Inspector attributes validate production editing metadata", InspectorAttributeContract),
     ("ScriptableObject authoring discovers and hydrates Unity-style public fields", ScriptableObjectAuthoringContract),
@@ -116,9 +118,9 @@ static void DirectReferenceStateContract()
     source.SetReferences(entity, new Keire.AudioSource(entity), prefab);
 
     string state = Keire.ManagedStateSerializer.Capture(source, string.Empty, false);
-    Assert(state.Contains("\"Version\":2", StringComparison.Ordinal) ||
-               state.Contains("\"version\":2", StringComparison.Ordinal),
-           "Managed authoring state must use the v2 reference format.");
+    Assert(state.Contains("\"Version\":3", StringComparison.Ordinal) ||
+               state.Contains("\"version\":3", StringComparison.Ordinal),
+           "Managed authoring state must use the v3 format while retaining direct reference records.");
     Assert(state.Contains("\"$ref\":\"entity\"", StringComparison.Ordinal) &&
                state.Contains("\"$ref\":\"component\"", StringComparison.Ordinal) &&
                state.Contains("\"$ref\":\"asset\"", StringComparison.Ordinal),
@@ -195,6 +197,69 @@ static void ScriptableObjectAuthoringContract()
     });
     target.RuntimeHydrateManagedData(hydration);
     Assert(target.Value == 42, "Implicit stable field IDs must hydrate the persistent ScriptableObject instance.");
+
+    string dictionaryName = typeof(DictionaryAuthoringProbe).FullName!;
+    System.Text.Json.JsonElement dictionaryDescriptor = document.RootElement.GetProperty("types").EnumerateArray()
+        .Single(type => type.GetProperty("fullName").GetString() == dictionaryName);
+    System.Text.Json.JsonElement dictionaryProperty = dictionaryDescriptor.GetProperty("properties").EnumerateArray()
+        .Single();
+    Assert(dictionaryProperty.GetProperty("kind").GetInt32() == 15 &&
+               dictionaryProperty.GetProperty("children").GetArrayLength() == 2 &&
+               dictionaryProperty.GetProperty("children")[0].GetProperty("name").GetString() == "Key" &&
+               dictionaryProperty.GetProperty("children")[1].GetProperty("name").GetString() == "Value",
+           "Managed asset metadata must describe exact dictionaries with deterministic Key and Value children.");
+
+    string dictionaryFieldId = dictionaryProperty.GetProperty("stableFieldId").GetString()!;
+    var dictionaryTarget = Keire.ScriptableObject.CreateInstance<DictionaryAuthoringProbe>();
+    string dictionaryHydration = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1,
+        managedTypeId = "73616e64-626f-4078-8000-00000000c002",
+        fields = new[]
+        {
+            new
+            {
+                stableId = dictionaryFieldId,
+                name = "Values",
+                value = new[] { new { key = "first", value = new[] { new[] { 4, 5, 6 } } } },
+            },
+        },
+    });
+    dictionaryTarget.RuntimeHydrateManagedData(dictionaryHydration);
+    Assert(dictionaryTarget.Values["first"][0].SequenceEqual([4, 5, 6]),
+           "Managed-data hydration must restore recursively nested dictionary/list/array values.");
+
+    string graphTypeName = typeof(ManagedGraphAuthoringProbe).FullName!;
+    System.Text.Json.JsonElement graphDescriptor = document.RootElement.GetProperty("types").EnumerateArray()
+        .Single(type => type.GetProperty("fullName").GetString() == graphTypeName);
+    System.Text.Json.JsonElement graphProperty = graphDescriptor.GetProperty("properties").EnumerateArray()
+        .Single(property => property.GetProperty("name").GetString() == nameof(ManagedGraphAuthoringProbe.Root));
+    const string graphRuntimeTypeId = "73616e64-626f-4078-8000-00000000d101";
+    Assert(graphProperty.GetProperty("referenceGraph").GetBoolean() &&
+               graphProperty.GetProperty("referenceTypeChoices").EnumerateArray()
+                   .Any(value => value.GetString() == graphRuntimeTypeId) &&
+               graphDescriptor.GetProperty("referenceTypes").EnumerateArray()
+                   .Any(type => type.GetProperty("stableTypeId").GetString() == graphRuntimeTypeId),
+           "ScriptableObject metadata must expose registered concrete choices for SerializeReference fields.");
+    ManagedSerializationV3Tests.ValidatePersistentManagedData(graphDescriptor);
+
+    string behaviourName = typeof(ManagedSerializationV3Probe).FullName!;
+    System.Text.Json.JsonElement behaviourDescriptor = document.RootElement.GetProperty("behaviours").EnumerateArray()
+        .Single(type => type.GetProperty("fullName").GetString() == behaviourName);
+    System.Text.Json.JsonElement[] behaviourProperties =
+        behaviourDescriptor.GetProperty("properties").EnumerateArray().ToArray();
+    System.Text.Json.JsonElement behaviourGraph = behaviourProperties.Single(property =>
+        property.GetProperty("name").GetString() == nameof(ManagedSerializationV3Probe.Root));
+    System.Text.Json.JsonElement behaviourDictionary = behaviourProperties.Single(property =>
+        property.GetProperty("name").GetString() == nameof(ManagedSerializationV3Probe.Nested));
+    Assert(behaviourGraph.GetProperty("referenceGraph").GetBoolean() &&
+               behaviourDescriptor.GetProperty("referenceTypes").EnumerateArray()
+                   .Any(type => type.GetProperty("stableTypeId").GetString() == graphRuntimeTypeId),
+           "Behaviour metadata must publish the same registered graph choices to the native Inspector.");
+    Assert(!behaviourDictionary.GetProperty("referenceGraph").GetBoolean() &&
+               behaviourDictionary.GetProperty("kind").GetInt32() == 15 &&
+               behaviourDictionary.GetProperty("children").GetArrayLength() == 2,
+           "Behaviour metadata must publish exact Dictionary shapes to the native Inspector.");
 }
 
 static unsafe void RuntimeFoundationContract()
@@ -2141,6 +2206,12 @@ file sealed class ManagedRuntimeAssetProbe : Keire.ScriptableObject;
 file sealed class ScriptableObjectAuthoringProbe : Keire.ScriptableObject
 {
     public int Value = 0;
+}
+
+[Keire.StableAssetTypeId("73616e64-626f-4078-8000-00000000c002")]
+file sealed class DictionaryAuthoringProbe : Keire.ScriptableObject
+{
+    public Dictionary<string, List<int[]>> Values = [];
 }
 
 file sealed class UnregisteredAssetProbe : Keire.Asset;

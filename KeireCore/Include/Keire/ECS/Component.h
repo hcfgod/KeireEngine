@@ -24,6 +24,7 @@ namespace Keire
     struct ProceduralMotionEvent;
     class Entity;
     class Component;
+    struct ManagedReferenceGraphDescriptor;
 
     namespace Detail
     {
@@ -81,7 +82,8 @@ namespace Keire
         Entity,
         Event,
         Curve,
-        Gradient
+        Gradient,
+        ManagedReferenceGraph
     };
 
     enum class ManagedReferenceKind : std::uint8_t
@@ -146,6 +148,7 @@ namespace Keire
         std::string DeclaredManagedType;
         std::vector<ComponentTypeId> CompatibleComponentTypes;
         std::vector<std::string> CompatibleBehaviourTypes;
+        std::shared_ptr<const ManagedReferenceGraphDescriptor> ReferenceGraph;
     };
 
     struct ComponentMethod

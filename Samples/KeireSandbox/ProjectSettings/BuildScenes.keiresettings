@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "scenes": [
+    {
+      "scene": "85be2f8e-31eb-5971-bca9-e5dd6b3f4029",
+      "enabled": true
+    },
+    {
+      "scene": "bf4f49b2-fef2-4d9e-9f5e-9df8e945a001",
+      "enabled": true
+    },
+    {
+      "scene": "3066b3d3-7652-42ad-b46a-93be8d01a304",
+      "enabled": true
+    }
+  ]
+}

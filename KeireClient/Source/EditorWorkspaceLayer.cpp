@@ -12,8 +12,17 @@
 #include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
+#include "KeireClient/Editor/EditorAssetOperationCoordinator.h"
+#include "KeireClient/Editor/EditorBuildCookCoordinator.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorDocumentWorkspaceCoordinator.h"
+#include "KeireClient/Editor/EditorManagedRuntimeCoordinator.h"
+#include "KeireClient/Editor/EditorPackageCoordinator.h"
+#include "KeireClient/Editor/EditorPlayModeCoordinator.h"
+#include "KeireClient/Editor/EditorReplayProfilingCoordinator.h"
 #include "KeireClient/Editor/EditorSessionState.h"
+#include "KeireClient/Editor/EditorSmokePlayValidation.h"
+#include "KeireClient/Editor/EditorWorkspaceLifecycleCoordinator.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
@@ -38,6 +47,7 @@
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
+#include "KeireInternal/Diagnostics/DiagnosticBundleUiInternal.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -300,70 +310,30 @@ namespace
 } // namespace
 
 EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initializeProject, const bool smokePlay,
-                                           std::filesystem::path executable)
+                                           std::filesystem::path executable, std::filesystem::path smokePlayOutput
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                                           ,
+                                           const bool validateDeviceLoss
+#endif
+                                           )
     : Layer("EditorWorkspaceLayer"), m_AssetBrowserPanel(std::make_unique<KeireEditor::AssetBrowserPanel>(
                                          static_cast<KeireEditor::IAssetBrowserController&>(*this))),
       m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>([this](const std::string_view text)
                                                                  { Owner().Windows()->SetClipboardText(text); })),
       m_DiagnosticsPanel(std::make_unique<KeireEditor::DiagnosticsPanel>()),
-      m_SceneDocument(std::make_unique<KeireEditor::SceneDocument>()),
-      m_InputActionsDocument(std::make_unique<KeireEditor::InputActionsDocument>()),
-      m_AnimatorControllerDocument(std::make_unique<KeireEditor::AnimatorControllerDocument>()),
-      m_AudioMixerDocument(
-          std::make_unique<KeireEditor::AudioMixerDocument>(KeireEditor::AudioMixerDocumentSpecification{
-              .Preview = [this](const Keire::AssetId asset, const Keire::AudioMixerDefinition& definition)
-              { PreviewAudioMixer(asset, definition); },
-              .StopPreview = [this](const Keire::AssetId) { StopAudioMixerPreview(); },
-              .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
-              { PersistAudioMixer(asset, bytes); },
-          })),
-      m_VfxEffectDocument(std::make_unique<KeireEditor::VfxEffectDocument>(KeireEditor::VfxEffectDocumentSpecification{
-          .Preview = [this](const Keire::AssetId asset, const Keire::VfxEffectDefinition& definition)
-          { PreviewVfxEffect(asset, definition); },
-          .StopPreview = [this](const Keire::AssetId) { StopVfxEffectPreview(); },
-          .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
-          { PersistVfxEffect(asset, bytes); },
-      })),
-      m_ShaderGraphDocument(
-          std::make_unique<KeireEditor::ShaderGraphDocument>(KeireEditor::ShaderGraphDocumentSpecification{
-              .Preview =
-                  [this](const Keire::AssetId, const Keire::ShaderGraphCompilation& compilation,
-                         const KeireEditor::ShaderGraphPreviewSettings& settings)
-              {
-                  if (m_ShaderGraphPanel)
-                      m_ShaderGraphPanel->UpdatePreview(compilation, settings);
-              },
-              .LiveApply = [this](const Keire::AssetId asset, const Keire::ShaderGraphDefinition& definition,
-                                  const Keire::ShaderGraphCompilation& compilation,
-                                  const std::span<const Keire::Ref<Keire::ShaderAsset>> developmentShaders)
-              { ApplyShaderGraphDevelopmentRevision(asset, definition, compilation, developmentShaders); },
-              .StopPreview =
-                  [this](const Keire::AssetId)
-              {
-                  if (m_ShaderGraphPanel)
-                      m_ShaderGraphPanel->ClearPreview();
-              },
-              .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
-              { PersistShaderGraph(asset, bytes); },
-          })),
-      m_MaterialGraphDocument(
-          std::make_unique<KeireEditor::MaterialGraphDocument>(KeireEditor::MaterialGraphDocumentSpecification{
-              .ResolveInterface = [this](const Keire::MaterialShaderReference& shader)
-              { return ResolveMaterialGraphInterface(shader); },
-              .ResolveTemplate = [this](const Keire::MaterialShaderReference& shader)
-              { return ResolveMaterialGraphTemplate(shader); },
-              .ResolveFunction = [this](const Keire::AssetId asset) { return ResolveReusableGraph(asset); },
-              .ResolveShader = [this](const Keire::MaterialShaderReference& shader)
-              { return ResolveMaterialGraphShader(shader); },
-              .Preview = [this](const Keire::AssetId asset, const Keire::MaterialAssetDefinition& material)
-              { ApplyMaterialGraphDevelopmentRevision(asset, material); },
-              .StopPreview = [](const Keire::AssetId) {},
-              .Persist = [this](const Keire::AssetId asset, const std::span<const std::byte> bytes)
-              { PersistMaterialGraph(asset, bytes); },
-          })),
-      m_ProjectSettingsDocument(std::make_unique<KeireEditor::ProjectSettingsDocument>()),
-      m_MaterialDocument(std::make_unique<KeireEditor::MaterialDocument>()),
+      m_ConstructedDocuments(CreateDocumentWorkspaceDocuments()), m_SceneDocument(m_ConstructedDocuments->Scene.get()),
+      m_InputActionsDocument(m_ConstructedDocuments->InputActions.get()),
+      m_AnimatorControllerDocument(m_ConstructedDocuments->AnimatorController.get()),
+      m_AudioMixerDocument(m_ConstructedDocuments->AudioMixer.get()),
+      m_VfxEffectDocument(m_ConstructedDocuments->VfxEffect.get()),
+      m_ShaderGraphDocument(m_ConstructedDocuments->ShaderGraph.get()),
+      m_MaterialGraphDocument(m_ConstructedDocuments->MaterialGraph.get()),
+      m_ProjectSettingsDocument(m_ConstructedDocuments->ProjectSettings.get()),
+      m_MaterialDocument(m_ConstructedDocuments->Material.get()), m_DocumentCoordinator(CreateDocumentCoordinator()),
       m_CommandRouter(std::make_unique<KeireEditor::EditorCommandRouter>()),
+      m_LifecycleCoordinator(std::make_unique<KeireEditor::EditorWorkspaceLifecycleCoordinator>()),
+      m_ReplayProfilingCoordinator(std::make_unique<KeireEditor::EditorReplayProfilingCoordinator>()),
+      m_DiagnosticBundle(std::make_unique<Keire::Internal::DiagnosticBundleDialogController>()),
       m_SceneViewportPanel(std::make_unique<KeireEditor::SceneViewportPanel>(
           static_cast<KeireEditor::ISceneViewportController&>(*this))),
       m_HierarchyPanel(
@@ -389,13 +359,25 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_LightingPanel(
           std::make_unique<KeireEditor::LightingPanel>(static_cast<KeireEditor::ILightingPanelController&>(*this))),
       m_PackageManagerPanel(std::make_unique<KeireEditor::PackageManagerPanel>()),
+      m_PackageCoordinator(CreatePackageCoordinator()),
       m_PropertyDrawers(std::make_unique<KeireEditor::PropertyDrawerRegistry>()),
       m_ViewportAssetDropRouter(std::make_unique<KeireEditor::ViewportAssetDropRouter>()),
       m_PlayChangesPanel(std::make_unique<KeireEditor::ScenePlayChangesPanel>()),
       m_SceneTransitions(std::make_unique<KeireEditor::SceneTransitionCoordinator>()),
       m_ExternalAssetImport(std::make_unique<KeireEditor::ExternalAssetImportController>()),
       m_ExecutablePath(std::move(executable)), m_Smoke(smoke), m_InitializeProject(initializeProject),
-      m_SmokePlay(smokePlay)
+      m_SmokePlay(smokePlay), m_ManagedRuntimeCoordinator(CreateManagedRuntimeCoordinator()),
+      m_PlayModeCoordinator(CreatePlayModeCoordinator()),
+      m_AssetOperationCoordinator(CreateAssetOperationCoordinator()),
+      m_BuildCookCoordinator(CreateBuildCookCoordinator()),
+      m_SmokePlayValidation(smokePlay
+                                ? std::make_unique<KeireEditor::EditorSmokePlayValidation>(std::move(smokePlayOutput)
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                                                                                               ,
+                                                                                           validateDeviceLoss
+#endif
+                                                                                           )
+                                : nullptr)
 {
     m_PropertyDrawers->RegisterOverride(
         Keire::TransformComponent::StaticType(), "rotation",
@@ -749,6 +731,12 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
 
 EditorWorkspaceLayer::~EditorWorkspaceLayer() = default;
 
+void EditorWorkspaceLayer::UpdateSmokePlayValidation()
+{
+    if (m_SmokePlayValidation)
+        m_SmokePlayValidation->Update(Owner(), m_PlayRuntimeWorld, m_PlayerBuildScenes);
+}
+
 void EditorWorkspaceLayer::OnAttach()
 {
     auto& workspace = Owner().GetUiWorkspace();
@@ -911,7 +899,8 @@ void EditorWorkspaceLayer::OnAttach()
                 {
                     if (event.Header.Window != Owner().MainWindow()->Id())
                         return Keire::EventFlow::Continue;
-                    if (m_PendingSceneAction != PendingSceneAction::None ||
+                    if (m_DocumentCoordinator->PendingTransition() !=
+                            KeireEditor::EditorDocumentTransitionAction::None ||
                         (m_SceneTransitions && m_SceneTransitions->Pending()))
                         return Keire::EventFlow::Handled;
                     RequestEditorExit();
@@ -948,7 +937,7 @@ void EditorWorkspaceLayer::OnAttach()
     if (const auto scripts = Owner().Scripts())
         scripts->SetRuntimeServices(this);
     if (Owner().Scripts() && m_AssetDatabase)
-        m_ManagedBuildDebounceSeconds = 0.0;
+        m_ManagedRuntimeCoordinator->ScheduleBuild(0.0);
     if (Keire::Detail::IsCurrentProcessElevated())
     {
         m_AssetStatus = "External asset drag-and-drop is unavailable while the Editor is running as administrator.";
@@ -960,234 +949,128 @@ void EditorWorkspaceLayer::OnAttach()
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
-    m_ConsolePanel->CaptureEngineLogs(time.FrameCount(), m_Theme);
-    {
-        Keire::ProfileScope transitions(Owner().GetProfiler(), Keire::ProfileCategory::Application, "Transitions");
-        ProcessSceneTransition();
-        FinalizePendingPlayEditorMutation();
-        if (m_PendingPlayTransition != PendingPlayTransition::None)
+    using Phase = KeireEditor::EditorWorkspaceUpdatePhase;
+    using Disposition = KeireEditor::EditorWorkspaceUpdateDisposition;
+
+    std::optional<Keire::ProfileScope> assetWork;
+    m_LifecycleCoordinator->Update(
+        [&](const Phase phase)
         {
-            const auto transition = std::exchange(m_PendingPlayTransition, PendingPlayTransition::None);
-            FinishPlayMode(transition == PendingPlayTransition::Apply);
-        }
-    }
-    if (m_Smoke)
-    {
-        ++m_FrameCount;
-        if (m_SmokePlay)
-        {
-            if (!m_SmokePlayRequested && m_SceneDocument->EditingScene())
+            switch (phase)
             {
-                m_SmokePlayRequested = true;
-                BeginPlayMode();
+            case Phase::CaptureConsole:
+                m_ConsolePanel->CaptureEngineLogs(time.FrameCount(), m_Theme);
+                break;
+            case Phase::SceneTransitions:
+            {
+                Keire::ProfileScope transitions(Owner().GetProfiler(), Keire::ProfileCategory::Application,
+                                                "Transitions");
+                m_PlayModeCoordinator->UpdateTransitions();
+                break;
             }
-            if (m_SceneDocument->PlaySession())
-            {
-                if (++m_SmokePlayFrameCount >= 120)
-                    Owner().RequestExit();
-            }
-            else if (m_FrameCount >= 3600)
-            {
-                throw std::runtime_error("Play Mode smoke timed out before a runtime scene became active.");
-            }
-        }
-        else if (m_FrameCount >= 8)
-            Owner().RequestExit();
-    }
-    if (m_PlayRuntimeWorld)
-    {
-        Keire::ProfileScope playUpdate(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Play update");
-        m_PlayRuntimeWorld->Process();
-        const auto active = m_PlayRuntimeWorld->Session(m_PlayRuntimeWorld->Active());
-        if (active && active != m_SceneDocument->PlaySession())
-        {
-            if (m_PlayChangeTracker)
-                m_PlayChangeTracker->BindSession(active);
-            m_PlayEditorTouchedEntities.clear();
-            m_PendingPlayEditorBefore.reset();
-            m_SceneDocument->SetPlaySession(active);
-        }
-        m_PlayRuntimeWorld->Update(static_cast<float>(time.DeltaTime().Seconds()),
-                                   static_cast<float>(time.InterpolationAlpha()));
-        const auto sessions = m_PlayRuntimeWorld->Sessions();
-        const auto faulted = std::ranges::find_if(sessions, [](const auto& session)
-                                                  { return session->State() == Keire::ScenePlayState::Faulted; });
-        if (faulted != sessions.end() && !m_PlayFaultReported)
-        {
-            const auto diagnostic = (*faulted)->Diagnostic();
-            m_SceneDocument->SetStatus(diagnostic.Callback + " failed: " + diagnostic.Message);
-            ReportError("Play Mode", m_SceneDocument->Status());
-            m_PlayFaultReported = true;
-        }
-    }
-    if (m_SceneDocument->PlaySession())
-    {
-        StopEditModeVfxPreviews();
-    }
-    else
-    {
-        try
-        {
-            SynchronizeEditModeVfxPreviews();
-        }
-        catch (const std::exception& error)
-        {
-            StopEditModeVfxPreviews();
-            ReportError("VFX", std::string("Edit-mode VFX preview synchronization failed: ") + error.what());
-        }
-        if (m_VfxEffectPreviewWorld)
-        {
-            const auto deltaSeconds = static_cast<float>(std::clamp(time.UnscaledDeltaTime().Seconds(), 0.0, 0.1));
-            m_VfxEffectPreviewWorld->Update(deltaSeconds);
-            if (m_VfxEffectPreviewAutoRestart && m_VfxEffectPreviewEffect &&
-                !m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
-            {
-                m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
-                    {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition,
-                     m_VfxEffectPreviewRotation, m_VfxEffectPreviewSeedOffset});
-                if (m_VfxEffectPreviewHandle)
+            case Phase::SmokeAutomation:
+                if (m_Smoke)
                 {
-                    m_VfxEffectPreviewWorld->SetSimulationSpeed(
-                        m_VfxEffectPreviewHandle, m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
+                    ++m_FrameCount;
+                    if (m_SmokePlay)
+                    {
+                        if (!m_SmokePlayRequested && m_SceneDocument->EditingScene())
+                        {
+                            m_SmokePlayRequested = true;
+                            BeginPlayMode();
+                        }
+                        UpdateSmokePlayValidation();
+                    }
+                    else if (m_FrameCount >= 8)
+                        Owner().RequestExit();
                 }
-            }
-        }
-    }
-    CompleteSaveSceneAs();
-    CompleteAssetBrowserPackage();
-    {
-        Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Managed build");
-        UpdateManagedBuild(time);
-        ContinuePendingPlayMode();
-    }
-    UpdatePlayerBuild();
-    if (!m_AssetDatabase)
-        return;
-    Keire::ProfileScope assetWork(Owner().GetProfiler(), Keire::ProfileCategory::Assets, "Asset work");
-    UpdateAssetOperations();
-    if (!m_PendingAssetMutations.empty() && m_AssetOperations && !m_AssetOperations->Busy())
-    {
-        auto pending = std::move(m_PendingAssetMutations.front());
-        m_PendingAssetMutations.erase(m_PendingAssetMutations.begin());
-        try
-        {
-            QueueAssetMutation(std::move(pending.State), pending.Phase);
-        }
-        catch (const std::exception& error)
-        {
-            SetAssetError(std::string("Queued asset trash operation failed: ") + error.what());
-        }
-    }
-    if (!m_PendingPrefabCreations.empty() && m_AssetOperations && !m_AssetOperations->Busy())
-    {
-        auto pending = std::move(m_PendingPrefabCreations.front());
-        m_PendingPrefabCreations.erase(m_PendingPrefabCreations.begin());
-        try
-        {
-            CreatePrefabFromObject(pending.Object, pending.Folder);
-        }
-        catch (const std::exception& error)
-        {
-            SetAssetError(std::string("Queued prefab creation failed: ") + error.what());
-        }
-    }
-    if (m_MaterialDocument->Dirty() && m_SelectedAsset != m_MaterialDocument->Asset())
-        CommitMaterialDraft();
-    UpdateMaterialGraphAutosave(time);
-    m_ShaderGraphDocument->AdvanceCompilation(time.UnscaledDeltaTime().Seconds());
-    UpdateMaterialCatalogRefresh(time);
-    if (m_SceneDocument->LoadOperation() && m_SceneDocument->LoadOperation()->State() == Keire::SceneLoadState::Failed)
-    {
-        m_SceneDocument->SetStatus("Scene runtime load failed: " +
-                                   m_SceneDocument->LoadOperation()->Diagnostic().Message);
-        m_SceneDocument->SetLoadOperation({});
-    }
-    else if (m_SceneDocument->LoadOperation() &&
-             m_SceneDocument->LoadOperation()->State() == Keire::SceneLoadState::Ready)
-    {
-        m_SceneDocument->SetStatus("Scene loaded and activated.");
-        m_SceneDocument->SetLoadOperation({});
-    }
-    if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
-    {
-        m_SceneDocument->AdvanceRecovery(time.UnscaledDeltaTime().Seconds());
-        if (m_SceneDocument->RecoverySeconds() >= 30.0)
-        {
-            m_SceneDocument->ResetRecoveryTimer();
-            try
-            {
-                WriteSceneRecovery();
-            }
-            catch (const std::exception& error)
-            {
-                m_SceneDocument->SetStatus(std::string("Scene recovery save failed: ") + error.what());
-                ReportError("Scene", m_SceneDocument->Status());
-            }
-        }
-    }
-    else
-        m_SceneDocument->ResetRecoveryTimer();
-    if ((m_ExternalAssetImport && m_ExternalAssetImport->Pending()) || (m_AssetOperations && m_AssetOperations->Busy()))
-        return;
-    m_AssetPollSeconds += time.UnscaledDeltaTime().Seconds();
-    if (m_AssetPollSeconds < 0.1)
-        return;
-    m_AssetPollSeconds = 0.0;
-    try
-    {
-        const auto changed = m_AssetDatabase->PollChangedAssets();
-        if (!changed.empty())
-        {
-            bool requiresFullAssetImport = false;
-            std::vector<Keire::AssetId> changedAssetSources;
-            for (const auto id : changed)
-            {
-                const auto record = m_AssetDatabase->Find(id);
-                const auto previous = std::ranges::find(m_AssetRecords, id, &Keire::AssetSourceRecord::Id);
-                const auto path = record                             ? record->RelativePath
-                                  : previous != m_AssetRecords.end() ? previous->RelativePath
-                                                                     : std::filesystem::path{};
-                KEIRE_CLIENT_INFO("[Asset Hot Reload] Change detected: asset={} path='{}' indexed={}.", id.ToString(),
-                                  Keire::Detail::PathToUtf8(path), record.has_value());
-                if (path.extension() == ".cs" || path.extension() == ".keireasm")
+                break;
+            case Phase::PlayRuntime:
+                m_PlayModeCoordinator->UpdateRuntime(time.DeltaTime().Seconds(), time.InterpolationAlpha());
+                break;
+            case Phase::EditModePreview:
+                if (m_SceneDocument->PlaySession())
                 {
-                    m_ManagedBuildDebounceSeconds = 0.1;
+                    StopEditModeVfxPreviews();
                 }
-                if (path.extension() != ".cs")
+                else
                 {
-                    if (record)
-                        changedAssetSources.push_back(id);
-                    else
-                        requiresFullAssetImport = true;
+                    try
+                    {
+                        SynchronizeEditModeVfxPreviews();
+                    }
+                    catch (const std::exception& error)
+                    {
+                        StopEditModeVfxPreviews();
+                        ReportError("VFX",
+                                    std::string("Edit-mode VFX preview synchronization failed: ") + error.what());
+                    }
+                    if (m_VfxEffectPreviewWorld)
+                    {
+                        const auto deltaSeconds =
+                            static_cast<float>(std::clamp(time.UnscaledDeltaTime().Seconds(), 0.0, 0.1));
+                        m_VfxEffectPreviewWorld->Update(deltaSeconds);
+                        if (m_VfxEffectPreviewAutoRestart && m_VfxEffectPreviewEffect &&
+                            !m_VfxEffectPreviewWorld->IsAlive(m_VfxEffectPreviewHandle))
+                        {
+                            m_VfxEffectPreviewHandle = m_VfxEffectPreviewWorld->Activate(
+                                {m_VfxEffectPreviewEffect, m_VfxEffectPreviewRevision, m_VfxEffectPreviewPosition,
+                                 m_VfxEffectPreviewRotation, m_VfxEffectPreviewSeedOffset});
+                            if (m_VfxEffectPreviewHandle)
+                            {
+                                m_VfxEffectPreviewWorld->SetSimulationSpeed(
+                                    m_VfxEffectPreviewHandle,
+                                    m_VfxEffectPreviewPaused ? 0.0F : m_VfxEffectPreviewSpeed);
+                            }
+                        }
+                    }
                 }
-            }
-            RefreshAssetBrowserRecords();
-            if (requiresFullAssetImport && m_AssetOperations)
+                break;
+            case Phase::PendingFileDialogs:
+                CompleteSaveSceneAs();
+                CompleteAssetBrowserPackage();
+                break;
+            case Phase::ManagedRuntime:
             {
-                KEIRE_CLIENT_WARN("[Asset Hot Reload] Scheduling full import because a removed or unindexed "
-                                  "non-script source cannot be targeted safely.");
-                m_AssetOperations->QueueImport(KeireEditor::AssetOperationPriority::AutomaticRefresh,
-                                               {.Reason = "automatic-refresh: removed or unindexed non-script source"});
+                Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting,
+                                                 "Managed build");
+                m_ManagedRuntimeCoordinator->Update(time.UnscaledDeltaTime().Seconds());
+                m_PlayModeCoordinator->ContinuePendingPlay();
+                break;
             }
-            else if (!changedAssetSources.empty() && m_AssetOperations)
-            {
-                KEIRE_CLIENT_INFO("[Asset Hot Reload] Scheduling targeted import for {} changed source(s).",
-                                  changedAssetSources.size());
-                m_AssetOperations->QueueAssetImport(std::move(changedAssetSources),
-                                                    KeireEditor::AssetOperationPriority::AutomaticRefresh,
-                                                    {.Reason = "automatic-refresh: changed indexed sources"});
+            case Phase::BuildAndCook:
+                if (!m_BuildCookCoordinator->Update())
+                    return Disposition::Stop;
+                assetWork.emplace(Owner().GetProfiler(), Keire::ProfileCategory::Assets, "Asset work");
+                break;
+            case Phase::AssetOperations:
+                m_AssetOperationCoordinator->UpdateOperations();
+                break;
+            case Phase::QueuedAssetMutations:
+                m_AssetOperationCoordinator->DrainQueuedMutation();
+                break;
+            case Phase::QueuedPrefabCreations:
+                m_AssetOperationCoordinator->DrainQueuedPrefab();
+                break;
+            case Phase::DocumentMaintenance:
+                m_DocumentCoordinator->UpdateMaintenance(m_SelectedAsset, time.UnscaledDeltaTime().Seconds());
+                break;
+            case Phase::SceneLoad:
+                m_DocumentCoordinator->UpdateSceneLoad();
+                break;
+            case Phase::SceneRecovery:
+                m_DocumentCoordinator->UpdateRecovery(time.UnscaledDeltaTime().Seconds());
+                break;
+            case Phase::AssetAdmission:
+                if (!m_AssetOperationCoordinator->AdmitPolling(time.UnscaledDeltaTime().Seconds()))
+                    return Disposition::Stop;
+                break;
+            case Phase::AssetHotReload:
+                m_AssetOperationCoordinator->PollHotReload();
+                break;
             }
-            if (const auto assets = Owner().Assets())
-            {
-                for (const auto id : changed)
-                    (void)assets->Reload(id);
-            }
-        }
-    }
-    catch (const std::exception& error)
-    {
-        SetAssetError(std::string("Asset hot reload failed: ") + error.what());
-    }
+            return Disposition::Continue;
+        });
 }
 
 void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
@@ -1330,6 +1213,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         DrawNotices(ui, workspace);
         DrawDialogs(ui, workspace);
         DrawExternalAssetImport(ui);
+        DrawDiagnosticBundle(ui);
     }
 
     const bool playActive =

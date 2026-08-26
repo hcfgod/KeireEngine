@@ -70,6 +70,7 @@ namespace Keire::Detail
             return std::addressof(type);
         };
         return {.SerializeField = required("Keire.SerializeFieldAttribute"),
+                .SerializeReference = required("Keire.SerializeReferenceAttribute"),
                 .HideInInspector = required("Keire.HideInInspectorAttribute"),
                 .Serializable = required("Keire.SerializableTypeAttribute"),
                 .Range = required("Keire.RangeAttribute"),
@@ -83,7 +84,8 @@ namespace Keire::Detail
                 .Tooltip = required("Keire.TooltipAttribute"),
                 .Group = required("Keire.InspectorGroupAttribute"),
                 .StableComponentId = required("Keire.StableComponentIdAttribute"),
-                .StableAssetTypeId = required("Keire.StableAssetTypeIdAttribute")};
+                .StableAssetTypeId = required("Keire.StableAssetTypeIdAttribute"),
+                .StableSerializedTypeId = required("Keire.StableSerializedTypeIdAttribute")};
     }
 
     [[nodiscard]] bool ManagedTypeDerivesFrom(Coral::Type& type, const std::string_view expected)
@@ -215,6 +217,7 @@ namespace Keire::Detail
         for (auto field : ownerType.GetFields())
         {
             bool serialized = field.GetAccessibility() == Coral::TypeAccessibility::Public;
+            bool serializeReference = false;
             bool hidden = false;
             bool readOnly = false;
             bool slider = false;
@@ -232,6 +235,11 @@ namespace Keire::Detail
             {
                 if (attributeTypes.SerializeField && attribute.GetType() == *attributeTypes.SerializeField)
                     serialized = true;
+                else if (attributeTypes.SerializeReference && attribute.GetType() == *attributeTypes.SerializeReference)
+                {
+                    serialized = true;
+                    serializeReference = true;
+                }
                 else if (attributeTypes.HideInInspector && attribute.GetType() == *attributeTypes.HideInInspector)
                     hidden = true;
                 else if (attributeTypes.Range && attribute.GetType() == *attributeTypes.Range)
@@ -272,6 +280,8 @@ namespace Keire::Detail
             const auto name = static_cast<std::string>(scopedName);
             const auto key = prefix.empty() ? name : std::string(prefix) + "." + name;
             auto& fieldType = field.GetType();
+            if (serializeReference)
+                continue;
             if (const auto kind = ManagedFieldKind(fieldType))
             {
                 if (std::ranges::find(result, key, &ComponentProperty::Key) != result.end())
@@ -345,8 +355,15 @@ namespace Keire::Detail
             const bool serializable =
                 (attributeTypes.Serializable && fieldType.HasAttribute(*attributeTypes.Serializable)) ||
                 ManagedTypeHasAttribute(fieldType, "System.SerializableAttribute");
-            if (depth >= 4 || fieldType.IsSZArray() || !serializable ||
-                std::ranges::find(typeStack, fieldType.GetTypeId()) != typeStack.end())
+            const auto fieldTypeName = ManagedTypeName(fieldType);
+            if (fieldType.IsSZArray() || fieldTypeName.starts_with("System.Collections.Generic.List`") ||
+                fieldTypeName.starts_with("System.Collections.Generic.Dictionary`"))
+            {
+                // Composite fields are described by the managed v3 metadata pass so their exact nested shape is
+                // available to the shared collection/reference Inspector.
+                continue;
+            }
+            if (depth >= 4 || !serializable || std::ranges::find(typeStack, fieldType.GetTypeId()) != typeStack.end())
             {
                 continue;
             }
@@ -493,6 +510,8 @@ namespace Keire::Detail
             return Curve1D{};
         case ComponentPropertyKind::Gradient:
             return ColorGradient{};
+        case ComponentPropertyKind::ManagedReferenceGraph:
+            return std::string(R"({"Version":1,"Root":{"Reference":0,"Scalar":null},"Objects":[]})");
         }
         throw std::logic_error("Unsupported managed Inspector property kind.");
     }
@@ -605,6 +624,8 @@ namespace Keire::Detail
         case ComponentPropertyKind::Curve:
         case ComponentPropertyKind::Gradient:
             throw std::logic_error("Managed fields do not expose native authoring curve values.");
+        case ComponentPropertyKind::ManagedReferenceGraph:
+            return value.dump();
         }
         throw std::logic_error("Unsupported managed Inspector property kind.");
     }
@@ -701,6 +722,8 @@ namespace Keire::Detail
         case ComponentPropertyKind::Curve:
         case ComponentPropertyKind::Gradient:
             throw std::logic_error("Managed fields do not expose native authoring curve values.");
+        case ComponentPropertyKind::ManagedReferenceGraph:
+            return nlohmann::json::parse(std::get<std::string>(value));
         }
         throw std::logic_error("Unsupported managed Inspector property kind.");
     }
@@ -808,6 +831,48 @@ namespace Keire::Detail
         return *value;
     }
 
+    [[nodiscard]] std::string ManagedStateGraphRootKey(const nlohmann::json& field, const std::string_view propertyKey)
+    {
+        if (const auto* root = JsonMember(field, "ReferenceGraphRoot", "referenceGraphRoot"))
+        {
+            if (!root->is_string() || root->get_ref<const std::string&>().empty())
+                throw std::invalid_argument("Managed reference-graph root keys must be non-empty strings.");
+            return root->get<std::string>();
+        }
+        if (const auto* stableId = JsonMember(field, "StableId", "stableId");
+            stableId && stableId->is_string() && !stableId->get_ref<const std::string&>().empty())
+        {
+            auto value = stableId->get<std::string>();
+            std::ranges::transform(value, value.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::tolower(character)); });
+            return "id:" + value;
+        }
+        return "field:" + std::string(propertyKey);
+    }
+
+    [[nodiscard]] ManagedReferenceGraph ManagedStateSharedGraph(const nlohmann::json& document)
+    {
+        const auto* encoded = JsonMember(document, "ReferenceGraph", "referenceGraph");
+        if (!encoded)
+            return {.Version = 2};
+        if (!encoded->is_object())
+            throw std::invalid_argument("Managed state shared reference graph must be an object.");
+        auto graph = DecodeManagedReferenceGraph(encoded->dump());
+        if (graph.Version != 2)
+            throw std::invalid_argument("Managed state shared reference graph must use version 2.");
+        ValidateManagedReferenceGraphDocument(graph);
+        return graph;
+    }
+
+    void SetManagedStateSharedGraph(nlohmann::json& document, const ManagedReferenceGraph& graph)
+    {
+        auto encoded = nlohmann::json::parse(EncodeManagedReferenceGraph(graph));
+        if (!document.contains("ReferenceGraph") && document.contains("referenceGraph"))
+            document["referenceGraph"] = std::move(encoded);
+        else
+            document["ReferenceGraph"] = std::move(encoded);
+    }
+
     [[nodiscard]] ComponentPropertyBag ProjectManagedState(const std::string& state,
                                                            const std::vector<ComponentProperty>& properties)
     {
@@ -816,8 +881,82 @@ namespace Keire::Detail
         for (const auto& property : properties)
         {
             const auto* value = ManagedStateValue(document, property.Key);
-            result.emplace(property.Key, value ? ReadManagedPropertyValue(*value, property.Kind, property.ReferenceKind)
-                                               : DefaultManagedPropertyValue(property.Kind, property.ReferenceKind));
+            auto projected = DefaultManagedPropertyValue(property.Kind, property.ReferenceKind);
+            if (property.Kind == ComponentPropertyKind::ManagedReferenceGraph)
+            {
+                if (!property.ReferenceGraph)
+                {
+                    throw std::logic_error("Managed graph property metadata is missing its graph descriptor.");
+                }
+                const auto segments = ManagedPropertyPath(property.Key);
+                const auto* field = segments.empty() ? nullptr : ManagedStateField(document, segments.front());
+                const auto* marker = field ? JsonMember(*field, "ReferenceGraph", "referenceGraph") : nullptr;
+                if (property.ReferenceGraph->Root.ReferenceGraph)
+                {
+                    if (field && (!marker || !marker->is_boolean() || !marker->get<bool>()))
+                    {
+                        throw std::invalid_argument("KEIRE-MANAGED-SERIALIZATION-0003: Managed Behaviour field '" +
+                                                    property.Key + "' is missing its reference-graph marker.");
+                    }
+                    const auto* rootKey =
+                        field ? JsonMember(*field, "ReferenceGraphRoot", "referenceGraphRoot") : nullptr;
+                    ManagedReferenceGraph graph;
+                    if (rootKey)
+                    {
+                        if (!rootKey->is_string() || rootKey->get_ref<const std::string&>().empty())
+                            throw std::invalid_argument("Managed Behaviour field '" + property.Key +
+                                                        "' has an invalid reference-graph root key.");
+                        const auto* shared = JsonMember(document, "ReferenceGraph", "referenceGraph");
+                        if (!shared || !shared->is_object())
+                            throw std::invalid_argument("Managed Behaviour field '" + property.Key +
+                                                        "' references a missing shared object table.");
+                        graph = ExtractManagedReferenceGraphRoot(DecodeManagedReferenceGraph(shared->dump()),
+                                                                 rootKey->get_ref<const std::string&>());
+                    }
+                    else
+                    {
+                        projected = value ? ReadManagedPropertyValue(*value, property.Kind, property.ReferenceKind)
+                                          : DefaultManagedPropertyValue(property.Kind, property.ReferenceKind);
+                        graph = DecodeManagedReferenceGraph(std::get<std::string>(projected));
+                    }
+                    ValidateManagedReferenceGraph(graph, property.ReferenceGraph->Root, property.ReferenceGraph->Types);
+                    projected = EncodeManagedReferenceGraph(graph);
+                }
+                else
+                {
+                    if (marker && (!marker->is_boolean() || marker->get<bool>()))
+                    {
+                        throw std::invalid_argument(
+                            "KEIRE-MANAGED-SERIALIZATION-0003: Managed Behaviour collection field '" + property.Key +
+                            "' declared as '" + property.DeclaredManagedType +
+                            "' is incorrectly marked as a reference graph.");
+                    }
+                    try
+                    {
+                        const auto kind = property.ReferenceGraph->Root.Kind;
+                        const auto fallback = kind == ManagedAssetPropertyKind::Array ||
+                                                      kind == ManagedAssetPropertyKind::List ||
+                                                      kind == ManagedAssetPropertyKind::Dictionary
+                                                  ? "[]"
+                                                  : "null";
+                        const auto decoded =
+                            DecodeManagedAssetValue(value ? value->dump() : fallback, property.ReferenceGraph->Root);
+                        projected = EncodeManagedAssetValue(decoded, property.ReferenceGraph->Root);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        throw std::invalid_argument(
+                            "KEIRE-MANAGED-SERIALIZATION-0003: Managed Behaviour collection field '" + property.Key +
+                            "' declared as '" + property.DeclaredManagedType + "' is invalid: " + error.what());
+                    }
+                }
+            }
+            else
+            {
+                projected = value ? ReadManagedPropertyValue(*value, property.Kind, property.ReferenceKind)
+                                  : DefaultManagedPropertyValue(property.Kind, property.ReferenceKind);
+            }
+            result.emplace(property.Key, std::move(projected));
         }
         return result;
     }
@@ -836,8 +975,71 @@ namespace Keire::Detail
             const auto value = values.find(property.Key);
             if (value == values.end())
                 continue;
-            EnsureManagedStateValue(document, fields, property.Key) =
-                WriteManagedPropertyValue(value->second, property);
+            if (property.Kind == ComponentPropertyKind::ManagedReferenceGraph)
+            {
+                if (!property.ReferenceGraph)
+                    throw std::logic_error("Managed graph property metadata is missing its graph descriptor.");
+                const auto& encoded = std::get<std::string>(value->second);
+                std::string canonical;
+                if (property.ReferenceGraph->Root.ReferenceGraph)
+                {
+                    const auto graph = DecodeManagedReferenceGraph(encoded);
+                    ValidateManagedReferenceGraph(graph, property.ReferenceGraph->Root, property.ReferenceGraph->Types);
+                    const auto segments = ManagedPropertyPath(property.Key);
+                    if (segments.empty())
+                        throw std::logic_error("Managed graph property path is empty.");
+                    (void)EnsureManagedStateValue(document, fields, property.Key);
+                    auto* field = ManagedStateField(document, segments.front());
+                    if (!field)
+                        throw std::logic_error("Managed graph state field could not be materialized.");
+                    const auto rootKey = ManagedStateGraphRootKey(*field, property.Key);
+                    auto shared = ManagedStateSharedGraph(document);
+                    UpdateManagedReferenceGraphRoot(shared, rootKey, graph);
+                    SetManagedStateSharedGraph(document, shared);
+                    field->erase("Value");
+                    field->erase("value");
+                    (*field)["ReferenceGraph"] = true;
+                    (*field)["ReferenceGraphRoot"] = rootKey;
+                    field->erase("referenceGraph");
+                    field->erase("referenceGraphRoot");
+                    continue;
+                }
+                else
+                {
+                    try
+                    {
+                        const auto decoded = DecodeManagedAssetValue(encoded, property.ReferenceGraph->Root);
+                        canonical = EncodeManagedAssetValue(decoded, property.ReferenceGraph->Root);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        throw std::invalid_argument(
+                            "KEIRE-MANAGED-SERIALIZATION-0003: Managed Behaviour collection field '" + property.Key +
+                            "' declared as '" + property.DeclaredManagedType + "' is invalid: " + error.what());
+                    }
+                }
+                EnsureManagedStateValue(document, fields, property.Key) = nlohmann::json::parse(canonical);
+                const auto segments = ManagedPropertyPath(property.Key);
+                if (segments.empty())
+                    throw std::logic_error("Managed graph property path is empty.");
+                auto* field = ManagedStateField(document, segments.front());
+                if (!field)
+                    throw std::logic_error("Managed graph state field could not be materialized.");
+                if (property.ReferenceGraph->Root.ReferenceGraph)
+                    (*field)["ReferenceGraph"] = true;
+                else
+                {
+                    field->erase("ReferenceGraph");
+                    field->erase("referenceGraph");
+                    field->erase("ReferenceGraphRoot");
+                    field->erase("referenceGraphRoot");
+                }
+            }
+            else
+            {
+                EnsureManagedStateValue(document, fields, property.Key) =
+                    WriteManagedPropertyValue(value->second, property);
+            }
         }
         return document.dump();
     }
@@ -850,7 +1052,7 @@ namespace Keire::Detail
         result.DisplayName = source.at("displayName").get<std::string>();
         result.ManagedTypeName = source.at("managedTypeName").get<std::string>();
         const auto kind = source.at("kind").get<std::uint32_t>();
-        if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::AssetReference))
+        if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::Dictionary))
             throw std::runtime_error("Managed asset metadata contains an unsupported property kind.");
         result.Kind = static_cast<ManagedAssetPropertyKind>(kind);
         result.ReadOnly = source.value("readOnly", false);
@@ -864,11 +1066,20 @@ namespace Keire::Detail
         result.Step = source.value("step", result.Step);
         result.Slider = source.value("slider", false);
         result.TextLines = source.value("textLines", result.TextLines);
+        result.ReferenceGraph = source.value("referenceGraph", false);
         if (const auto found = source.find("expectedAssetType"); found != source.end())
             result.ExpectedAssetType = AssetTypeId(AssetId::Parse(found->get<std::string>()));
         if (const auto found = source.find("expectedManagedType"); found != source.end())
             result.ExpectedManagedType = ManagedTypeId::Parse(found->get<std::string>());
         result.IncludeDerivedAssetTypes = source.value("includeDerivedAssetTypes", true);
+        if (const auto found = source.find("referenceTypeChoices"); found != source.end())
+        {
+            if (!found->is_array())
+                throw std::runtime_error("Managed asset metadata reference type choices are malformed.");
+            result.ReferenceTypeChoices.reserve(found->size());
+            for (const auto& type : *found)
+                result.ReferenceTypeChoices.push_back(ManagedTypeId::Parse(type.get<std::string>()));
+        }
         if (const auto found = source.find("children"); found != source.end())
         {
             if (!found->is_array())
@@ -876,6 +1087,33 @@ namespace Keire::Detail
             result.Children.reserve(found->size());
             for (const auto& child : *found)
                 result.Children.push_back(ParseManagedAssetPropertyDescriptor(child));
+        }
+        return result;
+    }
+
+    [[nodiscard]] std::vector<ManagedAssetReferenceTypeDescriptor>
+    ParseManagedReferenceTypes(const nlohmann::json& source)
+    {
+        const auto referenceTypes = source.find("referenceTypes");
+        if (referenceTypes == source.end())
+            return {};
+        if (!referenceTypes->is_array())
+            throw std::runtime_error("Managed asset metadata reference types are malformed.");
+        std::vector<ManagedAssetReferenceTypeDescriptor> result;
+        result.reserve(referenceTypes->size());
+        for (const auto& encoded : *referenceTypes)
+        {
+            ManagedAssetReferenceTypeDescriptor referenceType;
+            referenceType.StableTypeId = ManagedTypeId::Parse(encoded.at("stableTypeId").get<std::string>());
+            referenceType.FullName = encoded.at("fullName").get<std::string>();
+            referenceType.DisplayName = encoded.at("displayName").get<std::string>();
+            const auto& fields = encoded.at("properties");
+            if (!fields.is_array())
+                throw std::runtime_error("Managed asset metadata reference type fields are malformed.");
+            referenceType.Properties.reserve(fields.size());
+            for (const auto& field : fields)
+                referenceType.Properties.push_back(ParseManagedAssetPropertyDescriptor(field));
+            result.push_back(std::move(referenceType));
         }
         return result;
     }
@@ -908,19 +1146,57 @@ namespace Keire::Detail
             descriptor.Properties.reserve(properties.size());
             for (const auto& property : properties)
                 descriptor.Properties.push_back(ParseManagedAssetPropertyDescriptor(property));
+            descriptor.ReferenceTypes = ParseManagedReferenceTypes(source);
             ValidateManagedAssetTypeDescriptor(descriptor);
             result.Types.push_back(std::move(descriptor));
+        }
+        if (const auto behaviours = document.find("behaviours"); behaviours != document.end())
+        {
+            if (!behaviours->is_array())
+                throw std::runtime_error("Managed Behaviour graph metadata is malformed.");
+            result.Behaviours.reserve(behaviours->size());
+            for (const auto& source : *behaviours)
+            {
+                ManagedAssetMetadataResult::BehaviourGraph behaviour;
+                behaviour.FullName = source.at("fullName").get<std::string>();
+                const auto& properties = source.at("properties");
+                if (!properties.is_array())
+                    throw std::runtime_error("Managed Behaviour graph fields are malformed.");
+                const auto referenceTypes = ParseManagedReferenceTypes(source);
+                behaviour.Fields.reserve(properties.size());
+                for (const auto& property : properties)
+                {
+                    ManagedReferenceGraphDescriptor graph;
+                    graph.Root = ParseManagedAssetPropertyDescriptor(property);
+                    graph.Types = referenceTypes;
+                    behaviour.Fields.push_back(std::move(graph));
+                }
+                result.Behaviours.push_back(std::move(behaviour));
+            }
         }
         result.Diagnostics.reserve(diagnostics.size());
         for (const auto& source : diagnostics)
         {
-            result.Diagnostics.push_back(
-                {source.at("typeName").get<std::string>(), source.at("message").get<std::string>()});
+            result.Diagnostics.push_back({.TypeName = source.at("typeName").get<std::string>(),
+                                          .Message = source.at("message").get<std::string>(),
+                                          .Code = source.value("code", std::string{}),
+                                          .Phase = source.value("phase", std::string{}),
+                                          .Owner = source.value("owner", std::string{}),
+                                          .RootField = source.value("rootField", std::string{}),
+                                          .FieldPath = source.value("fieldPath", std::string{}),
+                                          .DeclaredType = source.value("declaredType", std::string{}),
+                                          .RuntimeType = source.value("runtimeType", std::string{}),
+                                          .SerializedTypeId = source.value("serializedTypeId", std::string{}),
+                                          .ObjectId = source.contains("objectId") && !source.at("objectId").is_null()
+                                                          ? std::optional(source.at("objectId").get<std::uint32_t>())
+                                                          : std::nullopt});
         }
 
         std::ranges::sort(result.Types, {}, &ManagedAssetTypeDescriptor::FullName);
-        std::ranges::sort(result.Diagnostics, {}, [](const ManagedAssetTypeDiagnostic& diagnostic)
-                          { return std::tie(diagnostic.TypeName, diagnostic.Message); });
+        std::ranges::sort(result.Behaviours, {}, &ManagedAssetMetadataResult::BehaviourGraph::FullName);
+        std::ranges::sort(
+            result.Diagnostics, {}, [](const ManagedAssetTypeDiagnostic& diagnostic)
+            { return std::tie(diagnostic.TypeName, diagnostic.FieldPath, diagnostic.Code, diagnostic.Message); });
         std::set<ManagedTypeId> stableTypeIds;
         std::set<std::string, std::less<>> fullNames;
         std::set<std::string, std::less<>> menuPaths;

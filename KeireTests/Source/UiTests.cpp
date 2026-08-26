@@ -1,5 +1,7 @@
 #include "Keire/Core.h"
 
+#include "KeireInternal/UiRenderBackendInternal.h"
+
 #include <doctest/doctest.h>
 
 #include <SDL3/SDL.h>
@@ -853,4 +855,44 @@ TEST_CASE("UI item rectangles report bounded screen-space geometry")
     CHECK(rect.Contains({55.0F, 45.0F}));
     CHECK_FALSE(rect.Contains({9.0F, 45.0F}));
     CHECK_FALSE(rect.Contains({55.0F, 71.0F}));
+}
+
+TEST_CASE("lost-device UI abandonment preserves CPU textures without releasing invalid GPU handles")
+{
+    ImGuiContext* context = ImGui::CreateContext();
+    ImGui::SetCurrentContext(context);
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.BackendRendererUserData = ImGui::MemAlloc(128);
+    io.BackendRendererName = "imgui_impl_sdlgpu3";
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures |
+                       ImGuiBackendFlags_RendererHasViewports;
+
+    auto texture = std::make_unique<ImTextureData>();
+    texture->Create(ImTextureFormat_RGBA32, 1, 1);
+    texture->SetTexID(static_cast<ImTextureID>(0xDEADBEEF));
+    texture->SetStatus(ImTextureStatus_OK);
+    ImGui::RegisterUserTexture(texture.get());
+    ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
+    platform.Textures.push_back(texture.get());
+    ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+    REQUIRE(mainViewport);
+    mainViewport->RendererUserData = reinterpret_cast<void*>(0xBADF00D);
+
+    Keire::Detail::AbandonLostGpuBackend(context);
+    Keire::Detail::AbandonLostGpuBackend(context);
+
+    CHECK(io.BackendRendererUserData == nullptr);
+    CHECK(io.BackendRendererName == nullptr);
+    CHECK((io.BackendFlags & (ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures |
+                              ImGuiBackendFlags_RendererHasViewports)) == 0);
+    CHECK(texture->GetTexID() == ImTextureID_Invalid);
+    CHECK(texture->Status == ImTextureStatus_WantCreate);
+    CHECK(mainViewport->RendererUserData == nullptr);
+    CHECK(platform.Renderer_CreateWindow == nullptr);
+
+    platform.Textures.clear();
+    ImGui::UnregisterUserTexture(texture.get());
+    texture.reset();
+    ImGui::DestroyContext(context);
 }

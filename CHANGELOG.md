@@ -5,6 +5,50 @@ versions.
 
 ## Unreleased
 
+### Changed
+
+- Bounded rendering now admits 1–3 immutable frames (default 2) before capture, publishes complete owner/render/GPU
+  timelines, provides an explicit owner-thread `Flush()`, and keeps slot-indexed surface outputs leased until fence
+  retirement without dropping frames.
+- Added retained-backend SDL GPU device-loss recovery with safe owner-boundary pause, render-thread resource rebuild,
+  exactly-once interrupted-frame retry, actionable generation/adapter/driver diagnostics, and no-touch abandonment of
+  lost handles. Debug validation runs the real cooked multi-scene runtime and rendered Editor Play/input loops; Release
+  and Dist contain no fault-injection surface.
+- Added an Editor and Hub **Collect Diagnostics** workflow that freezes a local sanitized ZIP before preview, displays
+  exact entry sizes and hashes, supports section opt-outs, rejects linked source/output paths, preserves an existing
+  archive on failure, and never uploads or recursively scans private user content.
+- Added the first-party Windows `KeireInstallWorker` as the Editor and Hub transaction authority. Product-bound JSON
+  receipts record a random installation identity and the exact size/SHA-256 inventory; verified installs remain
+  recoverable until NSIS finishes shortcuts and runs the real Editor/Hub hidden package verifier; verification does not
+  open projects, windows, or network.
+- Added managed serialization v3 reference graphs with a document-global root map/object table, immutable
+  generation-local stable-type registry, exact nested dictionaries for Behaviours and persistent
+  ScriptableObjects. Both Inspectors now offer registered concrete-type creation, compatible existing-object links,
+  cycle-safe focus navigation, duplicate-key validation, atomic graph undo, and strict 1 MiB UTF-8 string limits while
+  failed reloads retain last-good state.
+- Split managed scripting hosting, Shader Graph validation/codec/compilation/lowering/HLSL generation, VFX asset
+  encoding/graph migration/lowering/validation/backend compilation, animation assets/runtime evaluation, renderable
+  asset codecs/import, and Editor asset authoring/graph persistence into responsibility-owned implementation units
+  without changing their supported public facades, removing those legacy source-budget exceptions.
+- Kept `EditorWorkspaceLayer` as the owner-thread composition root while extracting document, package,
+  replay/profiling, managed-runtime, Play Mode, asset-operation, and build/cook coordinators with exact named-phase
+  update/teardown traces, generation-safe late callbacks, owner-checked mutable state, uniquely owned primary documents,
+  and idempotent failure-containing shutdown.
+
+### Fixed
+
+- Windows install, update, recovery, and uninstall now revalidate receipt-owned bytes and every no-follow path component
+  at each mutation boundary. Drift, registration/receipt mismatch, reparse substitution, and unknown neighbors fail
+  closed; uninstall preserves modified files and never recursively removes the selected installation root.
+- Prevented fresh Windows Hub installations from treating familiar directory names as owned payload. Non-empty
+  destinations now require an exact ownership marker, matching registration, a complete Hub payload, and a reparse-free
+  tree before any transaction begins; rejected `Config`, `Docs`, `Samples`, and unrelated content remain untouched.
+- Made Windows Editor installation and upgrade transactional at custom paths. Replacements are staged and validated
+  before activation, injected staging/activation/registration/verification failures restore the previous payload and
+  registration, reparse layouts fail closed, and uninstall preserves unrelated neighboring files and the selected root.
+- Composed all loaded runtime scenes and presentation trees into one deterministic render request per surface, so
+  additive scenes no longer collide with the single-surface submission guard or replace earlier runtime UI.
+
 ## 0.4.2 - 2026-08-25
 
 ### Added

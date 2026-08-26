@@ -164,6 +164,7 @@ Common options:
   --configuration <Debug|Release|Profile|Dist|DebugASan|DebugUBSan|DebugTSan|Coverage>
   --architecture <x86_64|ARM64> --toolset <default|gcc|clang>
   --compiler-cache <auto|off|sccache> (Ninja builds; auto uses sccache when installed)
+  --allow-dirty (package commands only; emits a local development artifact and is rejected in CI)
   --profile-build (build command only; writes timing data under Build/Reports)
   --smoke-ui (run command only; requires a graphics-capable environment)
   --smoke-project (run the sample project editor and exit after several frames)

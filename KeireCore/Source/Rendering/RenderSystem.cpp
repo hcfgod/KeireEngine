@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -30,6 +31,7 @@
 #include <limits>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
@@ -40,8 +42,40 @@ namespace Keire
 {
     using RenderBackend::LastSdlError;
     using RenderBackend::RenderSharedState;
+    using RenderBackend::RenderSurfaceEpochLease;
     using RenderBackend::RenderSurfaceState;
     using RenderBackend::ValidColor;
+
+    namespace
+    {
+        [[nodiscard]] std::string IncidentField(const std::string_view value)
+        {
+            constexpr std::size_t maximumFieldBytes = 160U;
+            std::string result(value.substr(0U, maximumFieldBytes));
+            std::ranges::replace_if(result, [](const unsigned char character) { return character < 0x20U; }, '?');
+            return result.empty() ? "unknown" : result;
+        }
+
+        [[nodiscard]] std::string IncidentMessage(const GpuDeviceLossDiagnostic& diagnostic)
+        {
+            std::ostringstream stream;
+            stream << "GPU incident [operation=" << IncidentField(diagnostic.Operation)
+                   << ", backend=" << IncidentField(diagnostic.Backend)
+                   << ", adapter=" << IncidentField(diagnostic.Adapter) << ", frame=" << diagnostic.Frame
+                   << ", deviceGeneration=" << diagnostic.DeviceGeneration
+                   << ", driver=" << IncidentField(diagnostic.DriverName)
+                   << ", driverVersion=" << IncidentField(diagnostic.DriverVersion)
+                   << ", recoveryAttempt=" << diagnostic.RecoveryAttempt << ']';
+            return stream.str();
+        }
+    } // namespace
+
+    GpuDeviceLostError::GpuDeviceLostError(GpuDeviceLossDiagnostic diagnostic)
+        : std::runtime_error(IncidentMessage(diagnostic)), m_Diagnostic(std::move(diagnostic))
+    {
+    }
+
+    const GpuDeviceLossDiagnostic& GpuDeviceLostError::Diagnostic() const noexcept { return m_Diagnostic; }
 
     class RenderSurface::Impl final
     {
@@ -50,7 +84,7 @@ namespace Keire
         ~Impl()
         {
             if (auto owner = State->Owner.lock())
-                owner->RetireSurface(*State);
+                owner->RequestSurfaceRetirement(State);
         }
         std::shared_ptr<RenderSurfaceState> State;
     };
@@ -62,16 +96,16 @@ namespace Keire
     std::uint32_t RenderSurface::Height() const noexcept { return m_Impl->State->Height; }
     RenderSampleCount RenderSurface::SampleCount() const noexcept { return m_Impl->State->ActualSamples; }
     Color RenderSurface::ClearColor() const noexcept { return m_Impl->State->Specification.ClearColor; }
-    std::uint64_t RenderSurface::Generation() const noexcept { return m_Impl->State->Generation; }
+    std::uint64_t RenderSurface::Generation() const noexcept { return m_Impl->State->Epoch; }
     bool RenderSurface::Available() const noexcept
     {
         const auto owner = m_Impl->State->Owner.lock();
-        return owner && owner->Open && m_Impl->State->Resources.SampledColor;
+        return owner && owner->Open && m_Impl->State->PublishedTexture.load(std::memory_order_acquire);
     }
     bool RenderSurface::SampledDepthAvailable() const noexcept
     {
         const auto owner = m_Impl->State->Owner.lock();
-        return owner && owner->Open && m_Impl->State->Resources.SampledDepth;
+        return owner && owner->Open && m_Impl->State->PublishedDepthAvailable.load(std::memory_order_acquire);
     }
     GpuOcclusionSurfaceDiagnostics RenderSurface::OcclusionDiagnostics() const noexcept
     {
@@ -92,13 +126,9 @@ namespace Keire
         if (const auto owner = m_Impl->State->Owner.lock())
         {
             owner->RequireOwner("RenderSurface::RequestSize");
-            m_Impl->State->RequestedWidth = width;
-            m_Impl->State->RequestedHeight = height;
-            if (m_Impl->State->FailedWidth != width || m_Impl->State->FailedHeight != height)
-            {
-                m_Impl->State->FailedWidth = 0;
-                m_Impl->State->FailedHeight = 0;
-            }
+            if (m_Impl->State->RequestedWidth == width && m_Impl->State->RequestedHeight == height)
+                return;
+            m_Impl->State = owner->CreateSurfaceEpoch(m_Impl->State, width, height);
         }
     }
 
@@ -189,8 +219,12 @@ namespace Keire
         state->RequestedWidth = state->Specification.Width;
         state->RequestedHeight = state->Specification.Height;
         state->FrameClearColor = state->Specification.ClearColor;
-        state->Id = m_Impl->State->NextSurfaceId++;
-        m_Impl->State->Surfaces.push_back(state);
+        {
+            std::scoped_lock lock(m_Impl->State->SurfaceMutex);
+            state->Id = m_Impl->State->NextSurfaceId++;
+            state->Lifetime = std::make_shared<RenderSurfaceEpochLease>(state->Id, state->Epoch);
+            m_Impl->State->Surfaces.push_back({state, true});
+        }
         return CreateRef<RenderSurface>(std::make_unique<RenderSurface::Impl>(std::move(state)));
     }
 
@@ -207,12 +241,8 @@ namespace Keire
         state.RequireOwner("SubmitRuntimeUi");
         if (!state.FrameActive)
             throw std::logic_error("Runtime UI submissions are accepted only during an active render frame.");
-        state.RuntimeUiCommands.clear();
         if (tree)
-        {
-            const auto commands = tree->DrawCommands();
-            state.RuntimeUiCommands.assign(commands.begin(), commands.end());
-        }
+            state.PendingRuntimeUiTrees.push_back(tree);
     }
     void RenderSystem::RequestGpuVfxPipelineWarmup()
     {
@@ -237,13 +267,48 @@ namespace Keire
     }
     RenderStatistics RenderSystem::Statistics() const noexcept
     {
-        auto result = m_Impl->State->Statistics;
+        RenderStatistics result;
+        {
+            std::scoped_lock lock(m_Impl->State->PublicationMutex);
+            result = m_Impl->State->PublishedStatistics;
+        }
         const auto warmup = m_Impl->State->VfxPipelineWarmupState.load(std::memory_order_acquire);
         result.VfxPipelineWarmupPending = warmup == RenderBackend::GpuVfxPipelineWarmupState::Compiling;
         result.VfxPipelinesReady = warmup == RenderBackend::GpuVfxPipelineWarmupState::Ready;
         result.VfxPipelineWarmupMilliseconds =
             static_cast<float>(m_Impl->State->VfxPipelineWarmupMicroseconds.load(std::memory_order_relaxed)) / 1000.0F;
+        result.OutstandingFrames = m_Impl->State->OutstandingFrames.load(std::memory_order_relaxed);
+        result.FramesInFlightHighWaterMark = m_Impl->State->OutstandingHighWaterMark.load(std::memory_order_relaxed);
+        result.AcceptedFrames = m_Impl->State->AcceptedFrameCount.load(std::memory_order_relaxed);
+        result.RetiredFrames = m_Impl->State->RetiredFrameCount.load(std::memory_order_relaxed);
+        result.CancelledFrames = m_Impl->State->CancelledFrameCount.load(std::memory_order_relaxed);
+        result.LastAcceptedFrame = m_Impl->State->LastAcceptedFrameId.load(std::memory_order_relaxed);
+        result.LastRetiredFrame = m_Impl->State->LastRetiredFrameId.load(std::memory_order_relaxed);
+        result.RendererQueueHighWaterMark = m_Impl->State->RenderQueueHighWaterMark.load(std::memory_order_relaxed);
         return result;
+    }
+
+    std::vector<RenderFrameTimeline> RenderSystem::RecentFrameTimelines() const
+    {
+        std::scoped_lock lock(m_Impl->State->PublicationMutex);
+        return {m_Impl->State->PublishedTimelines.begin(), m_Impl->State->PublishedTimelines.end()};
+    }
+
+    RenderDeviceIdentity RenderSystem::DeviceIdentity() const
+    {
+        std::scoped_lock lock(m_Impl->State->DeviceIdentityMutex);
+        return m_Impl->State->DeviceIdentitySnapshot;
+    }
+
+    RenderDeviceState RenderSystem::DeviceState() const noexcept
+    {
+        return m_Impl->State->DeviceLifecycle.load(std::memory_order_acquire);
+    }
+
+    std::optional<GpuDeviceLossDiagnostic> RenderSystem::LastDeviceLoss() const
+    {
+        std::scoped_lock lock(m_Impl->State->FailureMutex);
+        return m_Impl->State->LastDeviceLossDiagnostic;
     }
 
     FrameGraphSnapshot RenderSystem::CaptureFrameGraph() const
@@ -317,6 +382,7 @@ namespace Keire
         return snapshot;
     }
     bool RenderSystem::IsOpen() const noexcept { return m_Impl->State->Open; }
+    void RenderSystem::Flush() { m_Impl->State->Flush(); }
     void RenderSystem::Close() noexcept { m_Impl->State->Close(); }
 
     SDL_GPUDevice* RenderSystemInternalAccess::Device(RenderSystem& renderer) noexcept
@@ -336,7 +402,7 @@ namespace Keire
 
     SDL_GPUTexture* RenderSystemInternalAccess::Texture(const RenderSurface& surface) noexcept
     {
-        return surface.m_Impl->State->Resources.SampledColor;
+        return surface.m_Impl->State->PublishedTexture.load(std::memory_order_acquire);
     }
 
     std::vector<std::uint8_t> RenderSystemInternalAccess::ReadbackRGBA8(RenderSystem& renderer,
@@ -344,68 +410,75 @@ namespace Keire
     {
         auto& renderState = *renderer.m_Impl->State;
         renderState.RequireOwner("ReadbackRGBA8");
-        const auto& surfaceState = *surface.m_Impl->State;
-        const auto owner = surfaceState.Owner.lock();
-        if (owner.get() != &renderState)
-            throw std::invalid_argument("Render surface belongs to another renderer.");
-        if (!surfaceState.Resources.SampledColor || surfaceState.Width == 0 || surfaceState.Height == 0)
-            throw std::logic_error("Render surface is not available for readback.");
-
-        const std::uint64_t byteSize64 =
-            static_cast<std::uint64_t>(surfaceState.Width) * static_cast<std::uint64_t>(surfaceState.Height) * 4ULL;
-        if (byteSize64 > std::numeric_limits<std::uint32_t>::max())
-            throw std::overflow_error("Render surface is too large for an RGBA8 readback.");
-        const auto byteSize = static_cast<std::uint32_t>(byteSize64);
-
-        SDL_GPUTransferBufferCreateInfo transferInformation{};
-        transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
-        transferInformation.size = byteSize;
-        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(renderState.Device, &transferInformation);
-        if (!transfer)
-            throw std::runtime_error("SDL_CreateGPUTransferBuffer(readback) failed: " + LastSdlError());
-
-        SDL_GPUFence* fence = nullptr;
-        try
-        {
-            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(renderState.Device);
-            if (!commands)
-                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(readback) failed: " + LastSdlError());
-            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
-            if (!copy)
+        const auto token = renderState.CaptureSurfaceToken(surface.m_Impl->State);
+        std::vector<std::uint8_t> pixels;
+        renderState.DispatchRender(
+            [&]
             {
-                (void)SDL_CancelGPUCommandBuffer(commands);
-                throw std::runtime_error("SDL_BeginGPUCopyPass(readback) failed: " + LastSdlError());
-            }
+                renderState.RequireRenderThread("ReadbackRGBA8");
+                const auto resolved = renderState.ResolveSurface(token);
+                if (!resolved || !resolved->Resources.PublishedColor() || resolved->Width == 0 || resolved->Height == 0)
+                {
+                    throw std::logic_error("Render surface is not available for readback.");
+                }
 
-            const SDL_GPUTextureRegion source{
-                surfaceState.Resources.SampledColor, 0, 0, 0, 0, 0, surfaceState.Width, surfaceState.Height, 1};
-            const SDL_GPUTextureTransferInfo destination{transfer, 0, surfaceState.Width, surfaceState.Height};
-            SDL_DownloadFromGPUTexture(copy, &source, &destination);
-            SDL_EndGPUCopyPass(copy);
-            fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
-            if (!fence)
-                throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence(readback) failed: " +
-                                         LastSdlError());
-            if (!SDL_WaitForGPUFences(renderState.Device, true, &fence, 1))
-                throw std::runtime_error("SDL_WaitForGPUFences(readback) failed: " + LastSdlError());
+                const std::uint64_t byteSize64 =
+                    static_cast<std::uint64_t>(resolved->Width) * static_cast<std::uint64_t>(resolved->Height) * 4ULL;
+                if (byteSize64 > std::numeric_limits<std::uint32_t>::max())
+                    throw std::overflow_error("Render surface is too large for an RGBA8 readback.");
+                const auto byteSize = static_cast<std::uint32_t>(byteSize64);
 
-            const void* mapped = SDL_MapGPUTransferBuffer(renderState.Device, transfer, false);
-            if (!mapped)
-                throw std::runtime_error("SDL_MapGPUTransferBuffer(readback) failed: " + LastSdlError());
-            std::vector<std::uint8_t> pixels(byteSize);
-            std::memcpy(pixels.data(), mapped, byteSize);
-            SDL_UnmapGPUTransferBuffer(renderState.Device, transfer);
-            SDL_ReleaseGPUFence(renderState.Device, fence);
-            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
-            return pixels;
-        }
-        catch (...)
-        {
-            if (fence)
-                SDL_ReleaseGPUFence(renderState.Device, fence);
-            SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
-            throw;
-        }
+                SDL_GPUTransferBufferCreateInfo transferInformation{};
+                transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+                transferInformation.size = byteSize;
+                SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(renderState.Device, &transferInformation);
+                if (!transfer)
+                    throw std::runtime_error("SDL_CreateGPUTransferBuffer(readback) failed: " + LastSdlError());
+
+                SDL_GPUFence* fence = nullptr;
+                try
+                {
+                    SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(renderState.Device);
+                    if (!commands)
+                        throw std::runtime_error("SDL_AcquireGPUCommandBuffer(readback) failed: " + LastSdlError());
+                    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
+                    if (!copy)
+                    {
+                        (void)SDL_CancelGPUCommandBuffer(commands);
+                        throw std::runtime_error("SDL_BeginGPUCopyPass(readback) failed: " + LastSdlError());
+                    }
+
+                    const SDL_GPUTextureRegion source{
+                        resolved->Resources.PublishedColor(), 0, 0, 0, 0, 0, resolved->Width, resolved->Height, 1};
+                    const SDL_GPUTextureTransferInfo destination{transfer, 0, resolved->Width, resolved->Height};
+                    SDL_DownloadFromGPUTexture(copy, &source, &destination);
+                    SDL_EndGPUCopyPass(copy);
+                    fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+                    if (!fence)
+                        throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence(readback) failed: " +
+                                                 LastSdlError());
+                    if (!SDL_WaitForGPUFences(renderState.Device, true, &fence, 1))
+                        throw std::runtime_error("SDL_WaitForGPUFences(readback) failed: " + LastSdlError());
+
+                    const void* mapped = SDL_MapGPUTransferBuffer(renderState.Device, transfer, false);
+                    if (!mapped)
+                        throw std::runtime_error("SDL_MapGPUTransferBuffer(readback) failed: " + LastSdlError());
+                    pixels.resize(byteSize);
+                    std::memcpy(pixels.data(), mapped, byteSize);
+                    SDL_UnmapGPUTransferBuffer(renderState.Device, transfer);
+                    SDL_ReleaseGPUFence(renderState.Device, fence);
+                    SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+                }
+                catch (...)
+                {
+                    renderState.RethrowIfDeviceLost("render-surface readback");
+                    if (fence)
+                        SDL_ReleaseGPUFence(renderState.Device, fence);
+                    SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
+                    throw;
+                }
+            });
+        return pixels;
     }
 
     std::vector<float> RenderSystemInternalAccess::ReadbackDirectionalShadow(RenderSystem& renderer,
@@ -419,10 +492,11 @@ namespace Keire
         if (owner.get() != &renderState)
             throw std::invalid_argument("Render surface belongs to another renderer.");
         if (renderState.ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_D32_FLOAT ||
-            !surfaceState.Resources.DirectionalShadow || layer >= surfaceState.Resources.DirectionalShadowLayers)
+            !surfaceState.PublishedWorkset().DirectionalShadow ||
+            layer >= surfaceState.PublishedWorkset().DirectionalShadowLayers)
             throw std::logic_error("Directional shadow surface is not available for D32 readback.");
 
-        const auto resolution = surfaceState.Resources.DirectionalShadowResolution;
+        const auto resolution = surfaceState.PublishedWorkset().DirectionalShadowResolution;
         const std::uint64_t byteSize64 =
             static_cast<std::uint64_t>(resolution) * static_cast<std::uint64_t>(resolution) * sizeof(float);
         if (byteSize64 > std::numeric_limits<std::uint32_t>::max())
@@ -449,7 +523,7 @@ namespace Keire
                 throw std::runtime_error("SDL_BeginGPUCopyPass(shadow readback) failed: " + LastSdlError());
             }
             const SDL_GPUTextureRegion source{
-                surfaceState.Resources.DirectionalShadow, 0, layer, 0, 0, 0, resolution, resolution, 1};
+                surfaceState.PublishedWorkset().DirectionalShadow, 0, layer, 0, 0, 0, resolution, resolution, 1};
             const SDL_GPUTextureTransferInfo destination{transfer, 0, resolution, resolution};
             SDL_DownloadFromGPUTexture(copy, &source, &destination);
             SDL_EndGPUCopyPass(copy);
@@ -472,6 +546,7 @@ namespace Keire
         }
         catch (...)
         {
+            renderState.RethrowIfDeviceLost("directional-shadow readback");
             if (fence)
                 SDL_ReleaseGPUFence(renderState.Device, fence);
             SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
@@ -489,11 +564,11 @@ namespace Keire
         const auto owner = surfaceState.Owner.lock();
         if (owner.get() != &renderState)
             throw std::invalid_argument("Render surface belongs to another renderer.");
-        if (renderState.ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_D32_FLOAT || !surfaceState.Resources.LocalShadow ||
-            layer >= surfaceState.Resources.LocalShadowLayers)
+        if (renderState.ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_D32_FLOAT ||
+            !surfaceState.PublishedWorkset().LocalShadow || layer >= surfaceState.PublishedWorkset().LocalShadowLayers)
             throw std::logic_error("Local shadow surface is not available for D32 readback.");
 
-        const auto resolution = surfaceState.Resources.LocalShadowResolution;
+        const auto resolution = surfaceState.PublishedWorkset().LocalShadowResolution;
         const std::uint64_t byteSize64 =
             static_cast<std::uint64_t>(resolution) * static_cast<std::uint64_t>(resolution) * sizeof(float);
         if (byteSize64 > std::numeric_limits<std::uint32_t>::max())
@@ -521,7 +596,7 @@ namespace Keire
                 throw std::runtime_error("SDL_BeginGPUCopyPass(local shadow readback) failed: " + LastSdlError());
             }
             const SDL_GPUTextureRegion source{
-                surfaceState.Resources.LocalShadow, 0, layer, 0, 0, 0, resolution, resolution, 1};
+                surfaceState.PublishedWorkset().LocalShadow, 0, layer, 0, 0, 0, resolution, resolution, 1};
             const SDL_GPUTextureTransferInfo destination{transfer, 0, resolution, resolution};
             SDL_DownloadFromGPUTexture(copy, &source, &destination);
             SDL_EndGPUCopyPass(copy);
@@ -544,6 +619,7 @@ namespace Keire
         }
         catch (...)
         {
+            renderState.RethrowIfDeviceLost("local-shadow readback");
             if (fence)
                 SDL_ReleaseGPUFence(renderState.Device, fence);
             SDL_ReleaseGPUTransferBuffer(renderState.Device, transfer);
@@ -551,6 +627,7 @@ namespace Keire
         }
     }
 
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
     void RenderSystemInternalAccess::InjectDeviceLoss(RenderSystem& renderer)
     {
         auto& renderState = *renderer.m_Impl->State;
@@ -558,6 +635,60 @@ namespace Keire
         if (renderState.Specification.Mode != RenderMode::Rendered)
             throw std::logic_error("Device-loss injection requires a rendered backend.");
         renderState.InjectDeviceLossAtNextFrame.store(true, std::memory_order_release);
+    }
+
+    void RenderSystemInternalAccess::InjectDeviceLossAtRetirement(RenderSystem& renderer)
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.RequireOwner("InjectDeviceLossAtRetirement");
+        if (renderState.Specification.Mode != RenderMode::Rendered)
+            throw std::logic_error("Retirement device-loss injection requires a rendered backend.");
+        renderState.LostGenerationAbandonedHandleCount.store(0U, std::memory_order_release);
+        renderState.LostGenerationGpuCleanupCallCount.store(0U, std::memory_order_release);
+        renderState.InjectDeviceLossAtNextRetirement.store(true, std::memory_order_release);
+    }
+
+    void RenderSystemInternalAccess::InjectDeviceLossWithActiveResources(RenderSystem& renderer)
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.RequireOwner("InjectDeviceLossWithActiveResources");
+        if (renderState.Specification.Mode != RenderMode::Rendered)
+            throw std::logic_error("Active-resource device-loss injection requires a rendered backend.");
+        renderState.LostGenerationAbandonedHandleCount.store(0U, std::memory_order_release);
+        renderState.LostGenerationGpuCleanupCallCount.store(0U, std::memory_order_release);
+        renderState.InjectDeviceLossWithActiveResourcesAtNextFrame.store(true, std::memory_order_release);
+    }
+
+    void RenderSystemInternalAccess::InjectCaptureFailure(RenderSystem& renderer) noexcept
+    {
+        renderer.m_Impl->State->InjectCaptureFailureAtNextFrame.store(true, std::memory_order_release);
+    }
+
+    void RenderSystemInternalAccess::InjectRecoveryAtAdmissionBarrier(RenderSystem& renderer) noexcept
+    {
+        renderer.m_Impl->State->InjectRecoveryAtAdmissionBarrier.store(true, std::memory_order_release);
+    }
+
+    void RenderSystemInternalAccess::InjectPostSubmitFailure(RenderSystem& renderer) noexcept
+    {
+        renderer.m_Impl->State->InjectPostSubmitFailureAtNextFrame.store(true, std::memory_order_release);
+    }
+
+    void RenderSystemInternalAccess::InjectRecoveryCandidateFailure(RenderSystem& renderer,
+                                                                    const RenderRecoveryCandidateFault fault,
+                                                                    const std::uint32_t count)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("InjectRecoveryCandidateFailure");
+        if (state.Specification.Mode != RenderMode::Rendered)
+            throw std::logic_error("Recovery-candidate failure injection requires a rendered backend.");
+        if (count == 0U || count > 3U)
+            throw std::invalid_argument("Recovery-candidate failure injection count must be in the range 1..3.");
+        state.HealthyRecoveryCandidateCleanupCount.store(0U, std::memory_order_release);
+        state.InjectHealthyRecoveryCandidateFailures.store(
+            fault == RenderRecoveryCandidateFault::HealthyFailure ? count : 0U, std::memory_order_release);
+        state.InjectLostRecoveryCandidateFailures.store(fault == RenderRecoveryCandidateFault::DeviceLoss ? count : 0U,
+                                                        std::memory_order_release);
     }
 
     std::uint32_t RenderSystemInternalAccess::SaturateRendererQueue(RenderSystem& renderer)
@@ -606,7 +737,7 @@ namespace Keire
             std::unique_lock lock(renderState.RenderQueueMutex);
             saturated = renderState.RenderQueueReady.wait_for(lock, std::chrono::seconds(2),
                                                               [&] { return renderState.RenderQueue.size() == 2; });
-            highWaterMark = renderState.Statistics.RendererQueueHighWaterMark;
+            highWaterMark = renderState.RenderQueueHighWaterMark.load(std::memory_order_relaxed);
         }
         releaseWorker.set_value();
         first.join();
@@ -619,6 +750,214 @@ namespace Keire
         return highWaterMark;
     }
 
+    void RenderSystemInternalAccess::DelayNextAcceptedFrame(RenderSystem& renderer,
+                                                             const std::uint32_t milliseconds) noexcept
+    {
+        renderer.m_Impl->State->DelayNextAcceptedFrameMilliseconds.store(milliseconds, std::memory_order_release);
+    }
+
+    void RenderSystemInternalAccess::InjectTerminalFailureAtNextAcceptedFrame(RenderSystem& renderer) noexcept
+    {
+        renderer.m_Impl->State->InjectTerminalFailureAtNextAcceptedFrame.store(true, std::memory_order_release);
+    }
+
+    bool RenderSystemInternalAccess::StartThreadedHeadlessForTest(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("StartThreadedHeadlessForTest");
+        if (state.Specification.Mode != RenderMode::Headless)
+            throw std::logic_error("The threaded headless renderer harness requires headless mode.");
+        state.ThreadedHeadlessForTest = true;
+        state.StartRenderThread();
+        bool distinctThread = false;
+        state.DispatchRender([&state, &distinctThread]
+                             { distinctThread = std::this_thread::get_id() != state.OwnerThread; });
+        return distinctThread;
+    }
+
+    void RenderSystemInternalAccess::BlockNextAcceptedFrame(RenderSystem& renderer) noexcept
+    {
+        std::scoped_lock lock(renderer.m_Impl->State->RenderQueueMutex);
+        renderer.m_Impl->State->BlockNextAcceptedFrame = true;
+        renderer.m_Impl->State->ReleaseAcceptedFrame = false;
+    }
+
+    bool RenderSystemInternalAccess::WaitForAcceptedFrameBlock(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        std::unique_lock lock(state.RenderQueueMutex);
+        return state.FramesRetired.wait_for(lock, std::chrono::seconds(2),
+                                            [&state]
+                                            {
+                                                return state.AcceptedFrameBlocked ||
+                                                       state.DeviceLifecycle.load(std::memory_order_acquire) !=
+                                                           RenderDeviceState::Running;
+                                            }) &&
+               state.AcceptedFrameBlocked;
+    }
+
+    bool RenderSystemInternalAccess::WaitForFrameAdmissionWaiter(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        std::unique_lock lock(state.RenderQueueMutex);
+        return state.FramesRetired.wait_for(lock, std::chrono::seconds(2),
+                                            [&state]
+                                            {
+                                                return state.FrameAdmissionWaiters != 0U ||
+                                                       state.DeviceLifecycle.load(std::memory_order_acquire) !=
+                                                           RenderDeviceState::Running;
+                                            }) &&
+               state.FrameAdmissionWaiters != 0U;
+    }
+
+    void RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(RenderSystem& renderer) noexcept
+    {
+        {
+            std::scoped_lock lock(renderer.m_Impl->State->RenderQueueMutex);
+            renderer.m_Impl->State->ReleaseAcceptedFrame = true;
+        }
+        renderer.m_Impl->State->FramesRetired.notify_all();
+    }
+
+    std::uint64_t RenderSystemInternalAccess::SceneCaptureEnumerationCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->SceneCaptureEnumerationCount.load(std::memory_order_relaxed);
+    }
+
+    std::uint64_t RenderSystemInternalAccess::RuntimeUiCaptureEnumerationCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->RuntimeUiCaptureEnumerationCount.load(std::memory_order_relaxed);
+    }
+
+    std::uint64_t RenderSystemInternalAccess::LastCapturedDirectionalLightEntity(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->LastCapturedDirectionalLightEntity.load(std::memory_order_relaxed);
+    }
+
+    AdditiveSceneCaptureSummary RenderSystemInternalAccess::LastCapturedAdditiveScene(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("LastCapturedAdditiveScene");
+        std::scoped_lock lock(state.PublicationMutex);
+        return {.PrimaryScene = state.LastCapturedPrimaryScene,
+                .PrimaryBakedLighting = state.LastCapturedPrimaryBakedLighting,
+                .DrawContributionOrder = state.LastCapturedDrawContributionOrder,
+                .DrawEntities = state.LastCapturedDrawEntities,
+                .SpatialScenes = state.LastCapturedSpatialScenes,
+                .SpatialBakedLighting = state.LastCapturedSpatialBakedLighting,
+                .PreparedOpaqueContributionOrder = state.LastPreparedOpaqueContributionOrder,
+                .PreparedTransparentContributionOrder = state.LastPreparedTransparentContributionOrder,
+                .LocalLights = state.LastCapturedLocalLights,
+                .ReflectionProbes = state.LastCapturedReflectionProbes,
+                .LightProbeVolumes = state.LastCapturedLightProbeVolumes};
+    }
+
+    std::size_t RenderSystemInternalAccess::AvailableFrameSlotCount(const RenderSystem& renderer) noexcept
+    {
+        std::scoped_lock lock(renderer.m_Impl->State->RenderQueueMutex);
+        return renderer.m_Impl->State->AvailableFrameSlots.size();
+    }
+
+    std::uint64_t RenderSystemInternalAccess::LostGenerationAbandonedHandleCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->LostGenerationAbandonedHandleCount.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t RenderSystemInternalAccess::LostGenerationGpuCleanupCallCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->LostGenerationGpuCleanupCallCount.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t
+    RenderSystemInternalAccess::HealthyRecoveryCandidateCleanupCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->HealthyRecoveryCandidateCleanupCount.load(std::memory_order_acquire);
+    }
+
+    std::uint64_t RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->LastRetriedVfxSnapshotCount.load(std::memory_order_acquire);
+    }
+
+    std::uint32_t RenderSystemInternalAccess::RecoveryAttemptCountForTest(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("RecoveryAttemptCountForTest");
+        std::uint32_t result = 0;
+        state.DispatchRender([&state, &result] { result = state.RecoveryAttemptsUsed; });
+        return result;
+    }
+
+    float RenderSystemInternalAccess::LastRecoveryBackoffMillisecondsForTest(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("LastRecoveryBackoffMillisecondsForTest");
+        return state.LastRecoveryBackoffMillisecondsForTest.load(std::memory_order_acquire);
+    }
+
+    void RenderSystemInternalAccess::SatisfyRecoveryStabilityWindowForTest(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("SatisfyRecoveryStabilityWindowForTest");
+        state.DispatchRender(
+            [&state]
+            {
+                state.LastRecoveryCompletedAt = std::chrono::steady_clock::now() - std::chrono::seconds(60);
+                state.RetiredFramesSinceRecovery = 119U;
+            });
+    }
+
+    bool RenderSystemInternalAccess::CompleteFrameTwiceForTest(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("CompleteFrameTwiceForTest");
+        auto frame = std::make_shared<RenderBackend::RenderFramePacket>();
+        const auto timelineCount = [&state]
+        {
+            std::scoped_lock lock(state.PublicationMutex);
+            return state.PublishedTimelines.size();
+        }();
+        const auto retiredCount = state.RetiredFrameCount.load(std::memory_order_acquire);
+        const auto cancelledCount = state.CancelledFrameCount.load(std::memory_order_acquire);
+        std::size_t availableBefore = 0;
+        {
+            std::scoped_lock lock(state.RenderQueueMutex);
+            availableBefore = state.AvailableFrameSlots.size();
+            if (availableBefore == 0U)
+                return false;
+            frame->FrameSlot = state.AvailableFrameSlots.front();
+            state.AvailableFrameSlots.pop_front();
+        }
+        frame->Id = 0xFFFF'FFFFU;
+        frame->SubmittedAt = std::chrono::steady_clock::now();
+        frame->PresentedAt = frame->SubmittedAt;
+        state.OutstandingFrames.fetch_add(1U, std::memory_order_acq_rel);
+        state.CompleteFrame(frame, false);
+        state.CompleteFrame(frame, true);
+        std::size_t availableAfter = 0;
+        {
+            std::scoped_lock lock(state.RenderQueueMutex);
+            availableAfter = state.AvailableFrameSlots.size();
+        }
+        const auto timelineCountAfter = [&state]
+        {
+            std::scoped_lock lock(state.PublicationMutex);
+            return state.PublishedTimelines.size();
+        }();
+        return availableAfter == availableBefore && state.OutstandingFrames.load(std::memory_order_acquire) == 0U &&
+               state.RetiredFrameCount.load(std::memory_order_acquire) == retiredCount + 1U &&
+               state.CancelledFrameCount.load(std::memory_order_acquire) == cancelledCount &&
+               timelineCountAfter == timelineCount + 1U;
+    }
+
+    std::optional<GpuDeviceLossDiagnostic>
+    RenderSystemInternalAccess::ClassifyDeviceFailureForTest(const RenderSystem& renderer, std::string operation,
+                                                             std::string detail)
+    {
+        return renderer.m_Impl->State->ClassifyDeviceFailure(std::move(operation), std::move(detail));
+    }
+#endif
+
     void RenderSystemInternalAccess::RequestSurfaceSize(RenderSurface& surface, const std::uint32_t width,
                                                         const std::uint32_t height)
     {
@@ -627,10 +966,8 @@ namespace Keire
         if (const auto owner = surface.m_Impl->State->Owner.lock())
         {
             owner->RequireOwner("RequestSurfaceSize");
-            surface.m_Impl->State->RequestedWidth = width;
-            surface.m_Impl->State->RequestedHeight = height;
-            surface.m_Impl->State->FailedWidth = 0;
-            surface.m_Impl->State->FailedHeight = 0;
+            if (surface.m_Impl->State->RequestedWidth != width || surface.m_Impl->State->RequestedHeight != height)
+                surface.m_Impl->State = owner->CreateSurfaceEpoch(surface.m_Impl->State, width, height);
         }
     }
 
@@ -640,18 +977,57 @@ namespace Keire
         rendererState->RequireOwner("SetPresentationSurface");
         if (!surface)
         {
-            rendererState->PresentationSurface.reset();
+            rendererState->PresentationSurfaceId.reset();
             return;
         }
         const auto surfaceOwner = surface->m_Impl->State->Owner.lock();
         if (surfaceOwner != rendererState)
             throw std::invalid_argument("A presentation surface must belong to its renderer.");
-        rendererState->PresentationSurface = surface->m_Impl->State;
+        rendererState->PresentationSurfaceId = surface->m_Impl->State->Id;
     }
 
     std::size_t RenderSystemInternalAccess::RuntimeUiCommandCount(const RenderSystem& renderer) noexcept
     {
-        return renderer.m_Impl->State->RuntimeUiCommands.size();
+        std::size_t count = renderer.m_Impl->State->CaptureRuntimeUiCommands.size();
+        for (const auto& tree : renderer.m_Impl->State->PendingRuntimeUiTrees)
+            if (tree)
+                count += tree->DrawCommands().size();
+        return count;
+    }
+
+    std::size_t RenderSystemInternalAccess::SceneContributionCount(const RenderSystem& renderer,
+                                                                   const RenderSurface& surface) noexcept
+    {
+        const auto& requests = renderer.m_Impl->State->PendingSceneRequests;
+        const auto found = std::ranges::find_if(requests,
+                                                [&surface](const auto& request)
+                                                {
+                                                    return request.Surface.Id == surface.m_Impl->State->Id &&
+                                                           request.Surface.Epoch == surface.m_Impl->State->Epoch;
+                                                });
+        return found == requests.end() || !found->Request.DrawSceneContributions
+                   ? 0U
+                   : found->Request.AdditionalScenes.size() + 1U;
+    }
+
+    std::size_t RenderSystemInternalAccess::SceneDrawItemCount(const RenderSystem& renderer,
+                                                               const RenderSurface& surface) noexcept
+    {
+        const auto& requests = renderer.m_Impl->State->PendingSceneRequests;
+        const auto found = std::ranges::find_if(requests,
+                                                [&surface](const auto& request)
+                                                {
+                                                    return request.Surface.Id == surface.m_Impl->State->Id &&
+                                                           request.Surface.Epoch == surface.m_Impl->State->Epoch;
+                                                });
+        if (found == requests.end() || !found->Request.DrawSceneContributions)
+            return 0U;
+        const auto countScene = [](const Ref<Scene>& scene)
+        { return scene ? scene->Query<MeshRendererComponent>().size() : 0U; };
+        std::size_t count = countScene(found->Request.Scene);
+        for (const auto& contribution : found->Request.AdditionalScenes)
+            count += countScene(contribution.Scene);
+        return count;
     }
 
     void* RenderSystemInternalAccess::SurfaceState(RenderSurface& surface) noexcept
@@ -659,10 +1035,94 @@ namespace Keire
         return surface.m_Impl->State.get();
     }
 
+    std::shared_ptr<void> RenderSystemInternalAccess::SurfaceLease(const RenderSurface& surface) noexcept
+    {
+        return surface.m_Impl->State;
+    }
+
+    void RenderSystemInternalAccess::SetDeviceRecoveryCallbacks(
+        RenderSystem& renderer, std::function<void()> before,
+        std::function<void(SDL_GPUDevice*, SDL_GPUTextureFormat, SDL_GPUPresentMode)> after)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("SetDeviceRecoveryCallbacks");
+        std::scoped_lock lock(state.DeviceCallbackMutex);
+        state.BeforeDeviceRecovery = std::move(before);
+        state.AfterDeviceRecovery = std::move(after);
+    }
+
+    void RenderSystemInternalAccess::RunOnRenderThread(RenderSystem& renderer, std::function<void()> work)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("RunOnRenderThread");
+        state.DispatchRender(std::move(work));
+    }
+
+    bool RenderSystemInternalAccess::GpuLifecycleThreadAffinityValid(const RenderSystem& renderer) noexcept
+    {
+        const auto& state = *renderer.m_Impl->State;
+        if (state.Specification.Mode != RenderMode::Rendered)
+            return true;
+        return state.GpuCreationThread != std::thread::id{} && state.GpuCreationThread != state.OwnerThread &&
+               (state.GpuDestructionThread == std::thread::id{} ||
+                state.GpuDestructionThread == state.GpuCreationThread);
+    }
+
+    bool RenderSystemInternalAccess::WaitForDeviceRecovery(RenderSystem& renderer,
+                                                           std::function<bool()> pumpWindowEvents)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("WaitForDeviceRecovery");
+        return state.WaitForRecoveryAtOwnerBoundary(pumpWindowEvents);
+    }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    void RenderSystemInternalAccess::SetDeviceRecoveryStateForTest(RenderSystem& renderer,
+                                                                   const RenderDeviceState state) noexcept
+    {
+        auto& renderState = *renderer.m_Impl->State;
+        renderState.DeviceLifecycle.store(state, std::memory_order_release);
+        renderState.FramesRetired.notify_all();
+    }
+#endif
+
+    void RenderSystemInternalAccess::ReleaseUiTexture(RenderSystem& renderer, SDL_GPUTexture* texture) noexcept
+    {
+        if (!texture)
+            return;
+        auto& state = *renderer.m_Impl->State;
+        try
+        {
+            state.Flush();
+            if (state.DeviceLifecycle.load(std::memory_order_acquire) != RenderDeviceState::Running)
+                return;
+            state.DispatchRender(
+                [&state, texture]
+                {
+                    if (state.Device && !state.DeviceLost)
+                        SDL_ReleaseGPUTexture(state.Device, texture);
+                });
+        }
+        catch (...)
+        {
+        }
+    }
+
     void RenderSystemInternalAccess::WaitIdle(RenderSystem& renderer) noexcept
     {
-        if (renderer.m_Impl->State->Device)
-            (void)SDL_WaitForGPUIdle(renderer.m_Impl->State->Device);
+        try
+        {
+            renderer.m_Impl->State->Flush();
+        }
+        catch (...)
+        {
+        }
+    }
+
+    std::exception_ptr RenderSystemInternalAccess::TerminalFailure(const RenderSystem& renderer) noexcept
+    {
+        std::scoped_lock lock(renderer.m_Impl->State->FailureMutex);
+        return renderer.m_Impl->State->TerminalFailure;
     }
 
     std::uint64_t RenderSystemInternalAccess::MaterialBindingBuildCount(const RenderSystem& renderer) noexcept

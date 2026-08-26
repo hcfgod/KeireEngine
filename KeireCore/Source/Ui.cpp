@@ -5,29 +5,24 @@
 #include "KeireInternal/UiInputInternal.h"
 #include "KeireInternal/UiInternal.h"
 #include "KeireInternal/UiLayoutInternal.h"
+#include "KeireInternal/UiRenderBackendInternal.h"
 #include "KeireInternal/UiThemeInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include "Keire/Log.h"
 
-#include <SDL3/SDL_gpu.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_sdlgpu3.h>
 #include <imgui_internal.h>
 #include <imgui_stdlib.h>
 
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <bit>
 #include <cmath>
-#include <cstring>
 #include <filesystem>
-#include <mutex>
 #include <string>
 #include <thread>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -37,101 +32,10 @@
 static_assert(IMGUI_VERSION_NUM == 19280, "The Kéire UI runtime must use the dependency-lock ImGui version.");
 namespace Keire
 {
-    namespace
-    {
-        [[nodiscard]] SDL_GPUTexture* TextureFromId(const ImTextureID texture) noexcept
-        {
-            return std::bit_cast<SDL_GPUTexture*>(texture);
-        }
-
-        class UiImageOwner final
-        {
-          public:
-            [[nodiscard]] ImTextureData* Create(const std::uint32_t width, const std::uint32_t height,
-                                                const std::span<const std::byte> pixels)
-            {
-                std::scoped_lock lock(Mutex);
-                if (!Open || !Context)
-                    throw std::logic_error("UI image owner is closed.");
-                ImGui::SetCurrentContext(Context);
-                auto texture = std::make_unique<ImTextureData>();
-                texture->Create(ImTextureFormat_RGBA32, static_cast<int>(width), static_cast<int>(height));
-                std::memcpy(texture->GetPixels(), pixels.data(), pixels.size());
-                ImGui::RegisterUserTexture(texture.get());
-                ImTextureData* result = texture.release();
-                Active.insert(result);
-                return result;
-            }
-
-            void Retire(ImTextureData* texture) noexcept
-            {
-                std::scoped_lock lock(Mutex);
-                if (Open && texture && Active.contains(texture) && std::ranges::find(Retired, texture) == Retired.end())
-                    Retired.push_back(texture);
-            }
-            void ProcessRetired()
-            {
-                std::vector<ImTextureData*> retired;
-                {
-                    std::scoped_lock lock(Mutex);
-                    retired.swap(Retired);
-                }
-                if (retired.empty())
-                    return;
-                if (Device)
-                    (void)SDL_WaitForGPUIdle(Device);
-                ImGui::SetCurrentContext(Context);
-                for (auto* texture : retired)
-                {
-                    if (!Active.erase(texture))
-                        continue;
-                    ImGui::UnregisterUserTexture(texture);
-                    if (Device && texture->GetTexID() != ImTextureID_Invalid)
-                        SDL_ReleaseGPUTexture(Device, TextureFromId(texture->GetTexID()));
-                    delete texture;
-                }
-            }
-            void Close() noexcept
-            {
-                std::scoped_lock lock(Mutex);
-                if (!Open)
-                    return;
-                Open = false;
-                try
-                {
-                    if (Device)
-                        (void)SDL_WaitForGPUIdle(Device);
-                    ImGui::SetCurrentContext(Context);
-                    for (auto* texture : Active)
-                    {
-                        ImGui::UnregisterUserTexture(texture);
-                        if (Device && texture->GetTexID() != ImTextureID_Invalid)
-                            SDL_ReleaseGPUTexture(Device, TextureFromId(texture->GetTexID()));
-                        delete texture;
-                    }
-                }
-                catch (...)
-                {
-                }
-                Active.clear();
-                Retired.clear();
-                Context = nullptr;
-                Device = nullptr;
-            }
-
-            std::mutex Mutex;
-            ImGuiContext* Context = nullptr;
-            SDL_GPUDevice* Device = nullptr;
-            std::unordered_set<ImTextureData*> Active;
-            std::vector<ImTextureData*> Retired;
-            bool Open = true;
-        };
-    } // namespace
-
     class UiImage::Impl final
     {
       public:
-        Impl(const std::shared_ptr<UiImageOwner>& owner, ImTextureData* texture, const std::uint32_t width,
+        Impl(const std::shared_ptr<Detail::UiImageOwner>& owner, ImTextureData* texture, const std::uint32_t width,
              const std::uint32_t height)
             : Owner(owner), Texture(texture), Width(width), Height(height)
         {
@@ -143,7 +47,7 @@ namespace Keire
                 owner->Retire(Texture);
         }
 
-        std::weak_ptr<UiImageOwner> Owner;
+        std::weak_ptr<Detail::UiImageOwner> Owner;
         ImTextureData* Texture = nullptr;
         std::uint32_t Width = 0;
         std::uint32_t Height = 0;
@@ -308,7 +212,7 @@ namespace Keire
         std::vector<UiScope::Kind> Scopes;
         std::uint64_t Generation = 0;
         std::atomic<bool> Active{false};
-        std::shared_ptr<UiImageOwner> Images;
+        std::shared_ptr<Detail::UiImageOwner> Images;
     };
 
     UiFrame::UiFrame() : m_Impl(std::make_unique<Impl>()) {}
@@ -1314,8 +1218,8 @@ namespace Keire
 
             try
             {
-                Images = std::make_shared<UiImageOwner>();
-                Images->Context = Context;
+                Images = std::make_shared<Detail::UiImageOwner>();
+                Images->Bind(Context, nullptr, nullptr);
                 Frame->m_Impl->Images = Images;
                 ConfigureContext();
                 if (Specification.Workspace.Enabled)
@@ -1371,29 +1275,15 @@ namespace Keire
 
         void InitializeRenderer(WindowSystem& windows, RenderSystem& renderer)
         {
-            NativeWindow = RenderSystemInternalAccess::NativeWindow(renderer);
-            if (!NativeWindow)
+            auto* nativeWindow = RenderSystemInternalAccess::NativeWindow(renderer);
+            if (!nativeWindow)
                 throw UiError("ResolveNativeWindow", "the primary window is not available");
-            Device = RenderSystemInternalAccess::Device(renderer);
-            if (!Device)
-                throw UiError("ResolveGpuDevice", "the application renderer is not in rendered mode");
-            Images->Device = Device;
-            PresentMode = RenderSystemInternalAccess::PresentMode(renderer);
 
             ImGui::SetCurrentContext(Context);
-            if (!ImGui_ImplSDL3_InitForSDLGPU(NativeWindow))
+            if (!ImGui_ImplSDL3_InitForSDLGPU(nativeWindow))
                 throw UiError("ImGui_ImplSDL3_InitForSDLGPU", LastSdlError());
             PlatformInitialized = true;
-
-            ImGui_ImplSDLGPU3_InitInfo information{};
-            information.Device = Device;
-            information.ColorTargetFormat = SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow);
-            information.MSAASamples = SDL_GPU_SAMPLECOUNT_1;
-            information.SwapchainComposition = SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
-            information.PresentMode = PresentMode;
-            if (!ImGui_ImplSDLGPU3_Init(&information))
-                throw UiError("ImGui_ImplSDLGPU3_Init", LastSdlError());
-            RendererInitialized = true;
+            RenderBackend.Initialize(renderer, Context, Images);
 
             Windowing = &windows;
             EventSink = WindowSystemInternalAccess::AddEventSink(windows, this, ProcessEvent);
@@ -1419,7 +1309,7 @@ namespace Keire
                 Workspace->BeforeNewFrame();
             if (Specification.Mode == UiMode::Rendered)
             {
-                ImGui_ImplSDLGPU3_NewFrame();
+                RenderBackend.NewFrame();
                 ImGui_ImplSDL3_NewFrame();
             }
             else
@@ -1503,11 +1393,7 @@ namespace Keire
             }
             if (Renderer)
                 RenderSystemInternalAccess::WaitIdle(*Renderer);
-            if (RendererInitialized)
-            {
-                ImGui_ImplSDLGPU3_Shutdown();
-                RendererInitialized = false;
-            }
+            RenderBackend.Shutdown();
             if (Images)
                 Images->Close();
             if (PlatformInitialized)
@@ -1540,8 +1426,6 @@ namespace Keire
                 ImGui::DestroyContext(Context);
                 Context = nullptr;
             }
-            Device = nullptr;
-            NativeWindow = nullptr;
             Renderer = nullptr;
             Frame->m_Impl->Lifetime.reset();
             Frame->m_Impl->Images.reset();
@@ -1556,17 +1440,14 @@ namespace Keire
         ImGuiContext* PreviousContext = nullptr;
         ImGuiContext* Context = nullptr;
         WindowSystem* Windowing = nullptr;
-        SDL_Window* NativeWindow = nullptr;
-        SDL_GPUDevice* Device = nullptr;
-        SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
         RenderSystem* Renderer = nullptr;
+        Detail::UiRenderBackend RenderBackend;
         bool PlatformInitialized = false;
-        bool RendererInitialized = false;
         WindowSystemInternalAccess::EventSinkToken EventSink = 0;
         bool FrameActive = false;
         bool InitializationComplete = false;
         bool ShutdownComplete = false;
-        std::shared_ptr<UiImageOwner> Images;
+        std::shared_ptr<Detail::UiImageOwner> Images;
     };
     UiSystem::UiSystem(const UiSpecification& specification, WindowSystem& windows, Window& window,
                        RenderSystem& renderer)

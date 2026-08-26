@@ -162,6 +162,14 @@ namespace Keire::Detail
         Unlock();
     }
 
+    WindowChromeLayout WindowChromeHitTestCache::Snapshot() const noexcept
+    {
+        Lock();
+        const auto result = m_Layout;
+        Unlock();
+        return result;
+    }
+
     WindowChromeRole WindowChromeHitTestCache::RoleAt(const WindowPosition position) const noexcept
     {
         Lock();

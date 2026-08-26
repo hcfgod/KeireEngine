@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <vector>
 
 namespace Keire::Detail
 {
@@ -15,4 +16,9 @@ namespace Keire::Detail
                                                                    const AssetImportSettings& values);
     [[nodiscard]] TextureImportSettings ReadTextureSettings(const std::filesystem::path& metadataPath,
                                                             TextureImportSettings settings);
+    [[nodiscard]] std::vector<AssetImportOptionDescriptor> TextureImportOptionDescriptors();
+    [[nodiscard]] AssetImportSettings NormalizeTextureImportOptionValues(TextureImportSettings settings,
+                                                                         const AssetImportSettings& values);
+    [[nodiscard]] AssetImportSettings SuggestTextureImportOptionValues(const std::filesystem::path& path,
+                                                                       const AssetImportSettings& defaults);
 } // namespace Keire::Detail

@@ -1,10 +1,10 @@
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 
-#include "KeireClient/Editor/AssetBrowserPresentation.h"
-
 #include "KeireClient/Editor/AssetBrowserFolderCache.h"
+#include "KeireClient/Editor/AssetBrowserPresentation.h"
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
+#include "KeireClient/Editor/ManagedReferenceGraphInspector.h"
 #include "KeireClient/Editor/MaterialGraphCreationPicker.h"
 #include "KeireClient/Editor/NamedAssetCreation.h"
 #include "KeireClient/Editor/SceneDocument.h"
@@ -378,7 +378,7 @@ namespace KeireEditor
                 for (const auto& diagnostic : diagnostics)
                 {
                     (void)ui.MenuItem("Invalid: " + diagnostic.TypeName, false, false);
-                    ui.SetTooltip(diagnostic.Message, {.Delayed = true});
+                    ui.SetTooltip(FormatManagedAssetTypeDiagnostic(diagnostic), {.Delayed = true});
                 }
             }
         }

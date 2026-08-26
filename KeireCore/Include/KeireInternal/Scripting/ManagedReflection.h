@@ -18,13 +18,21 @@ namespace Keire::Detail
 {
     struct ManagedAssetMetadataResult final
     {
+        struct BehaviourGraph final
+        {
+            std::string FullName;
+            std::vector<ManagedReferenceGraphDescriptor> Fields;
+        };
+
         std::vector<ManagedAssetTypeDescriptor> Types;
+        std::vector<BehaviourGraph> Behaviours;
         std::vector<ManagedAssetTypeDiagnostic> Diagnostics;
     };
 
     struct ManagedInspectorAttributeTypes final
     {
         const Coral::Type* SerializeField = nullptr;
+        const Coral::Type* SerializeReference = nullptr;
         const Coral::Type* HideInInspector = nullptr;
         const Coral::Type* Serializable = nullptr;
         const Coral::Type* Range = nullptr;
@@ -39,6 +47,7 @@ namespace Keire::Detail
         const Coral::Type* Group = nullptr;
         const Coral::Type* StableComponentId = nullptr;
         const Coral::Type* StableAssetTypeId = nullptr;
+        const Coral::Type* StableSerializedTypeId = nullptr;
     };
 
     [[nodiscard]] std::string PathText(const std::filesystem::path& path);

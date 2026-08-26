@@ -33,6 +33,12 @@ namespace Keire::RenderBackend
             m_FrameStarted = false;
         }
 
+        void CancelFrame() noexcept
+        {
+            m_CurrentMilliseconds = 0.0F;
+            m_FrameStarted = false;
+        }
+
         void Accumulate(const float milliseconds) noexcept { m_CurrentMilliseconds += milliseconds; }
 
         [[nodiscard]] float CurrentMilliseconds() const noexcept { return m_CurrentMilliseconds; }

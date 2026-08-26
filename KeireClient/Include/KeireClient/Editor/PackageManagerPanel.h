@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace KeireEditor
@@ -29,6 +30,10 @@ namespace KeireEditor
         void Shutdown() noexcept;
         void Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
+        [[nodiscard]] std::span<const Keire::ProjectPackageLockEntry> InstalledPackages() const noexcept
+        {
+            return m_Lock.Packages;
+        }
 
       private:
         void Refresh();

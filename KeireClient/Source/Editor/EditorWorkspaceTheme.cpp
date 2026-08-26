@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/ConsolePanel.h"
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorDocumentWorkspaceCoordinator.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
@@ -350,6 +351,11 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_ArchitectureDashboard);
             if (ui.MenuItem("Viewport Performance Overlay", m_ShowPerformanceOverlay))
                 m_ShowPerformanceOverlay = !m_ShowPerformanceOverlay;
+        }
+        if (auto help = ui.BeginMenu("Help"); help)
+        {
+            if (ui.MenuItem("Collect Diagnostics..."))
+                OpenDiagnosticBundle();
         }
     }
 }
@@ -741,8 +747,7 @@ void EditorWorkspaceLayer::DrawDirtySceneDialog(Keire::UiFrame& ui)
         ui.SameLine();
         if (ui.Button("Cancel"))
         {
-            m_PendingSceneAction = PendingSceneAction::None;
-            m_PendingSceneAsset = {};
+            m_DocumentCoordinator->CancelPendingTransition();
             m_Dialog = Dialog::None;
             ui.CloseCurrentPopup();
         }
@@ -781,7 +786,7 @@ void EditorWorkspaceLayer::DrawDirtyShaderGraphDialog(Keire::UiFrame& ui)
         ui.SameLine();
         if (ui.Button("Cancel"))
         {
-            m_PendingSceneAction = PendingSceneAction::None;
+            m_DocumentCoordinator->CancelPendingTransition();
             m_Dialog = Dialog::None;
             ui.CloseCurrentPopup();
         }
@@ -821,7 +826,7 @@ void EditorWorkspaceLayer::DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui)
         ui.SameLine();
         if (ui.Button("Cancel"))
         {
-            m_PendingSceneAction = PendingSceneAction::None;
+            m_DocumentCoordinator->CancelPendingTransition();
             m_Dialog = Dialog::None;
             ui.CloseCurrentPopup();
         }

@@ -60,6 +60,18 @@ cp "$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler" "$stage/bin/"
 find "$ROOT/Build/Tools/ShaderCompiler" -maxdepth 1 -type f \( -name '*.so*' -o -name '*.dylib' \) -exec cp {} "$stage/bin/" \;
 cp "$ROOT/Config/Client.json" "$stage/Config/Client.json"
 copy_tracked_tree "$ROOT" "Samples/KeireSandbox" "$stage/samples/KeireSandbox"
+build_scenes_source="$ROOT/Samples/KeireSandbox/ProjectSettings/BuildScenes.keiresettings"
+build_scenes_destination="$stage/samples/KeireSandbox/ProjectSettings/BuildScenes.keiresettings"
+[[ -f "$build_scenes_source" ]] || {
+  printf 'Packaged additive runtime validation requires Samples/KeireSandbox/ProjectSettings/BuildScenes.keiresettings.\n' >&2
+  exit 1
+}
+mkdir -p "$(dirname "$build_scenes_destination")"
+cp "$build_scenes_source" "$build_scenes_destination"
+[[ -f "$build_scenes_destination" ]] || {
+  printf 'Packaged additive runtime validation scene list was omitted from the staged sample.\n' >&2
+  exit 1
+}
 cp -R "$ROOT/$CORE_DIRECTORY/Include/$PROJECT_NAMESPACE" "$stage/include/"
 cp "$ROOT/Vendor/spdlog/LICENSE" "$stage/third-party/licenses/spdlog-LICENSE.txt"
 cp "$ROOT/Vendor/spdlog/include/spdlog/fmt/bundled/fmt.license.rst" "$stage/third-party/licenses/fmt-LICENSE.rst"
@@ -130,6 +142,12 @@ grep -Fq "\"sdlShadercross\": \"$shadercross\"" "$stage/build-manifest.json" || 
 DOTNET_ROOT="$ROOT/Build/Dependencies/dotnet-sdk" PATH="$ROOT/Build/Dependencies/dotnet-sdk:$PATH" KEIRE_SHADER_COMPILER="$stage/bin/KeireShaderCompiler" "$stage/bin/$asset_tool" cook --project "$stage/samples/KeireSandbox" --output "$stage/content/KeireSandbox" --profile Dist --target "$os_name" | grep -Fq 'Cooked' || { printf 'Packaged sample project asset validation failed.\n' >&2; exit 1; }
 rm -rf "$stage/samples/KeireSandbox/Library" "$stage/samples/KeireSandbox/Logs" "$stage/samples/KeireSandbox/Build" "$stage/samples/KeireSandbox/Temp"
 [[ -f "$stage/content/KeireSandbox/catalog.json" && -f "$stage/content/KeireSandbox/runtime-manifest.json" ]] || { printf 'Packaged cooked runtime content is incomplete.\n' >&2; exit 1; }
+runtime_validation_directory="$ROOT/Build/Validation"
+runtime_validation_output="$runtime_validation_directory/packaged-additive-runtime-$CONFIGURATION-$architecture.json"
+runtime_validation_sentinel="$runtime_validation_directory/.packaged-additive-runtime-$CONFIGURATION-$architecture.started"
+mkdir -p "$runtime_validation_directory"
+rm -f "$runtime_validation_output" "$runtime_validation_sentinel"
+touch "$runtime_validation_sentinel"
 if [[ "$PLATFORM" == Linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
   command -v xvfb-run >/dev/null 2>&1 || {
     printf 'Xvfb is required for the packaged Linux runtime GPU smoke on a headless host.\n' >&2
@@ -139,9 +157,38 @@ if [[ "$PLATFORM" == Linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]];
     printf 'Packaged runtime smoke failed.\n' >&2
     exit 1
   }
+  xvfb-run -a "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 600 \
+    --validate-additive-runtime "$runtime_validation_output" || {
+    printf 'Packaged additive runtime validation failed.\n' >&2
+    exit 1
+  }
 else
   "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 12 || { printf 'Packaged runtime smoke failed.\n' >&2; exit 1; }
+  "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 600 \
+    --validate-additive-runtime "$runtime_validation_output" || {
+    printf 'Packaged additive runtime validation failed.\n' >&2
+    exit 1
+  }
 fi
+[[ -f "$runtime_validation_output" ]] || { printf 'Packaged additive runtime validation did not publish its result.\n' >&2; exit 1; }
+[[ "$runtime_validation_output" -nt "$runtime_validation_sentinel" ]] || {
+  printf 'Packaged additive runtime validation published a stale result.\n' >&2
+  exit 1
+}
+rm -f "$runtime_validation_sentinel"
+grep -Fq '"schemaVersion": 1' "$runtime_validation_output" &&
+  grep -Fq '"status": "passed"' "$runtime_validation_output" &&
+  grep -Fq "\"gitCommit\": \"$commit\"" "$runtime_validation_output" &&
+  grep -Fq "\"configuration\": \"$CONFIGURATION\"" "$runtime_validation_output" &&
+  grep -Fq '"twoSceneContributions": 2' "$runtime_validation_output" &&
+  grep -Fq '"threeSceneContributions": 3' "$runtime_validation_output" &&
+  grep -Fq '"noPresentationSession": true' "$runtime_validation_output" &&
+  grep -Fq '"unloadReloadOrder": true' "$runtime_validation_output" &&
+  grep -Fq '"inputHandledByActiveTopmostPresentation": true' "$runtime_validation_output" &&
+  grep -Fq '"failedLoadPreservedWorld": true' "$runtime_validation_output" || {
+  printf 'Packaged additive runtime validation published an incomplete result.\n' >&2
+  exit 1
+}
 version_output="$("$stage/bin/$CLIENT_TARGET" --version)"
 commit_prefix="${commit:0:12}"
 expected_identity="$commit_prefix"; [[ "$dirty" == true ]] && expected_identity="${commit_prefix}-dirty"

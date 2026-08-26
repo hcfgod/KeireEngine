@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/InspectorPropertyVisibility.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
+#include "KeireClient/Editor/ManagedReferenceGraphInspector.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
@@ -870,7 +871,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                         }
                                         catch (const std::exception& error)
                                         {
-                                            ui.TextColored(theme.Error, error.what());
+                                            ui.TextColored(theme.Error, FormatManagedInspectorError(error));
                                         }
                                     }
                                 }
@@ -930,7 +931,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     }
                 }
                 InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker, managedAssetTypes,
-                                                       resolveManagedType);
+                                                       resolveManagedType, &m_ManagedGraphFocus);
                 for (const auto& component : entity.GetComponents())
                 {
                     if (component != displayedComponent)
@@ -1371,7 +1372,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             }
                             catch (const std::exception& error)
                             {
-                                ui.TextColored(theme.Error, error.what());
+                                ui.TextColored(theme.Error, FormatManagedInspectorError(error));
                             }
                         }
                         if (registration->Type == Keire::AudioReverbZoneComponent::StaticType())

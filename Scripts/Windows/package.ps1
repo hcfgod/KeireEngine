@@ -16,8 +16,38 @@ $assetToolName = "$($Project.PROJECT_NAMESPACE)AssetTool"
 $assetWorkerName = "$($Project.PROJECT_NAMESPACE)AssetWorker"
 $runtimeName = "$($Project.PROJECT_NAMESPACE)Runtime"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build-info.ps1") } "Build metadata generation"
+$expectedHeadCommit = Get-GitHeadCommit $Root "unknown"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate } "Package test suite"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow } "Package editor smoke test"
+$editorPlayValidationDirectory = Join-Path $Root "Build\Validation"
+$editorPlayValidationOutput = Join-Path $editorPlayValidationDirectory "editor-additive-play-$Configuration-$outputArchitecture.json"
+New-Item -ItemType Directory -Force $editorPlayValidationDirectory | Out-Null
+Remove-Item -LiteralPath $editorPlayValidationOutput -Force -ErrorAction SilentlyContinue
+$editorPlayValidationStartedAt = [DateTime]::UtcNow
+Invoke-CheckedWindowsCommand {
+    & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration `
+        -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokePlay -SmokeOutput $editorPlayValidationOutput
+} "Rendered additive Editor Play smoke test"
+if (-not (Test-Path -LiteralPath $editorPlayValidationOutput -PathType Leaf)) {
+    throw "Rendered additive Editor Play smoke did not publish its result."
+}
+if ((Get-Item -LiteralPath $editorPlayValidationOutput).LastWriteTimeUtc -lt $editorPlayValidationStartedAt) {
+    throw "Rendered additive Editor Play smoke published a stale result."
+}
+$editorPlayValidation = Get-Content -LiteralPath $editorPlayValidationOutput -Raw | ConvertFrom-Json
+if ($editorPlayValidation.schemaVersion -ne 1 -or
+    $editorPlayValidation.status -ne "passed" -or
+    $editorPlayValidation.build.gitCommit -ne $expectedHeadCommit -or
+    $editorPlayValidation.build.configuration -ne $Configuration -or
+    -not $editorPlayValidation.renderedWindowLoop -or
+    $editorPlayValidation.twoSceneContributions -ne 2 -or
+    -not $editorPlayValidation.twoPresentationTrees -or
+    -not $editorPlayValidation.activeSessionRendered -or
+    -not $editorPlayValidation.topmostInputHandled -or
+    -not $editorPlayValidation.nativeWindowInputQueued -or
+    -not $editorPlayValidation.unloadReloadOrder) {
+    throw "Rendered additive Editor Play smoke published an incomplete result."
+}
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI } "AssetTool build"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetWorkerName -CI:$CI } "Asset worker build"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $runtimeName -CI:$CI } "Runtime build"
@@ -67,6 +97,16 @@ Copy-Item "$Root\Build\Dependencies\coral-patched\Build\$coralConfiguration\Cora
 Copy-Item "$Root\Build\Dependencies\coral-nethost\nethost.lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox"
+$buildScenesSource = Join-Path $Root "Samples\KeireSandbox\ProjectSettings\BuildScenes.keiresettings"
+$buildScenesDestination = Join-Path $stage "samples\KeireSandbox\ProjectSettings\BuildScenes.keiresettings"
+if (-not (Test-Path -LiteralPath $buildScenesSource -PathType Leaf)) {
+    throw "Packaged additive runtime validation requires Samples/KeireSandbox/ProjectSettings/BuildScenes.keiresettings."
+}
+New-Item -ItemType Directory -Force (Split-Path -Parent $buildScenesDestination) | Out-Null
+Copy-Item -LiteralPath $buildScenesSource -Destination $buildScenesDestination -Force
+if (-not (Test-Path -LiteralPath $buildScenesDestination -PathType Leaf)) {
+    throw "Packaged additive runtime validation scene list was omitted from the staged sample."
+}
 Copy-Item "$Root\$($Project.CORE_DIRECTORY)\Include\$($Project.PROJECT_NAMESPACE)" "$stage\include\" -Recurse
 Copy-Item "$Root\Vendor\spdlog\LICENSE" "$stage\third-party\licenses\spdlog-LICENSE.txt"
 Copy-Item "$Root\Vendor\spdlog\include\spdlog\fmt\bundled\fmt.license.rst" "$stage\third-party\licenses\fmt-LICENSE.rst"
@@ -192,6 +232,35 @@ if (-not (Test-Path (Join-Path $runtimeContent "catalog.json")) -or
 }
 & (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --frames 12
 if ($LASTEXITCODE -ne 0) { throw "Packaged runtime smoke failed with exit code $LASTEXITCODE." }
+$runtimeValidationDirectory = Join-Path $Root "Build\Validation"
+$runtimeValidationOutput = Join-Path $runtimeValidationDirectory "packaged-additive-runtime-$Configuration-$outputArchitecture.json"
+New-Item -ItemType Directory -Force $runtimeValidationDirectory | Out-Null
+Remove-Item -LiteralPath $runtimeValidationOutput -Force -ErrorAction SilentlyContinue
+$runtimeValidationStartedAt = [DateTime]::UtcNow
+& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --frames 600 `
+    --validate-additive-runtime $runtimeValidationOutput
+if ($LASTEXITCODE -ne 0) {
+    throw "Packaged additive runtime validation failed with exit code $LASTEXITCODE."
+}
+if (-not (Test-Path -LiteralPath $runtimeValidationOutput -PathType Leaf)) {
+    throw "Packaged additive runtime validation did not publish its result."
+}
+if ((Get-Item -LiteralPath $runtimeValidationOutput).LastWriteTimeUtc -lt $runtimeValidationStartedAt) {
+    throw "Packaged additive runtime validation published a stale result."
+}
+$runtimeValidation = Get-Content -LiteralPath $runtimeValidationOutput -Raw | ConvertFrom-Json
+if ($runtimeValidation.schemaVersion -ne 1 -or
+    $runtimeValidation.status -ne "passed" -or
+    $runtimeValidation.build.gitCommit -ne $commit -or
+    $runtimeValidation.build.configuration -ne $Configuration -or
+    $runtimeValidation.twoSceneContributions -ne 2 -or
+    $runtimeValidation.threeSceneContributions -ne 3 -or
+    -not $runtimeValidation.noPresentationSession -or
+    -not $runtimeValidation.unloadReloadOrder -or
+    -not $runtimeValidation.inputHandledByActiveTopmostPresentation -or
+    -not $runtimeValidation.failedLoadPreservedWorld) {
+    throw "Packaged additive runtime validation published an incomplete result."
+}
 $versionResult = Invoke-WindowsExecutableCapture `
     (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") @("--version")
 if ($versionResult.ExitCode -ne 0) {
@@ -232,7 +301,14 @@ if ((Test-Path $symbolStage) -and (Get-ChildItem $symbolStage -File -Recurse | S
     Compress-WindowsArchive "$symbolStage\*" $symbols
     (Get-FileHash $symbols -Algorithm SHA256).Hash.ToLowerInvariant() + "  $name-symbols.zip" | Set-Content "$symbols.sha256" -Encoding ASCII
 }
-$validationRoot = Join-Path $env:LOCALAPPDATA ("CodexSdkValidation\" + [guid]::NewGuid().ToString("N"))
+$temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
+$temporaryRootPrefix = $temporaryRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) +
+    [IO.Path]::DirectorySeparatorChar
+$validationName = "keire-sdk-validation-" + [guid]::NewGuid().ToString("N")
+$validationRoot = [IO.Path]::GetFullPath((Join-Path $temporaryRoot $validationName))
+if (-not $validationRoot.StartsWith($temporaryRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to extract SDK validation outside the process temporary root: $validationRoot"
+}
 $previousValidationPath = $env:PATH
 try {
     Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -244,6 +320,7 @@ try {
     $consumerSource = Join-Path $sdkRoot "examples\consumer\Source\Main.cpp"
     $consumerExe = Join-Path $validationRoot "consumer.exe"
     $consumerObject = Join-Path $validationRoot "consumer.obj"
+    $consumerPdb = Join-Path $validationRoot "consumer.pdb"
     Copy-Item (Join-Path $sdkRoot "bin\nethost.dll") $validationRoot
     $gameplayLibraries = @(
         (Join-Path $sdkRoot "lib\Jolt.lib"),
@@ -271,7 +348,7 @@ try {
             @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             @sdlMsvcLibraries `
-            "/Fo:$consumerObject" "/Fe:$consumerExe" @consumerLinkOptions
+            "/Fo:$consumerObject" "/Fe:$consumerExe" "/Fd:$consumerPdb" @consumerLinkOptions
     }
     else {
         $compilerCommand = if ($Toolset -eq "clang") { "clang++" } else { "g++" }
@@ -289,13 +366,14 @@ try {
     $managedSource = Join-Path $sdkRoot "examples\managed-consumer\Source\ClientApplication.cpp"
     $managedExe = Join-Path $validationRoot "managed-consumer.exe"
     $managedObject = Join-Path $validationRoot "managed-consumer.obj"
+    $managedPdb = Join-Path $validationRoot "managed-consumer.pdb"
     if ($Toolset -eq "msc") {
         & cl /nologo /std:c++20 /EHsc /MD /W4 /WX /utf-8 /permissive- /Zc:__cplusplus /DKEIRE_STATIC "/I$(Join-Path $sdkRoot 'include')" $managedSource `
             (Join-Path $sdkRoot "lib\$($Project.CORE_TARGET).lib") (Join-Path $sdkRoot "lib\$imguiLibraryName.lib") (Join-Path $sdkRoot "lib\$zstdLibraryName.lib") (Join-Path $sdkRoot "lib\assimp.lib") (Join-Path $sdkRoot "lib\zlibstatic.lib") `
             @gameplayLibraries `
             (Join-Path $sdkRoot "third-party\SDL3\lib\SDL3-static.lib") `
             @sdlMsvcLibraries `
-            "/Fo:$managedObject" "/Fe:$managedExe" @consumerLinkOptions
+            "/Fo:$managedObject" "/Fe:$managedExe" "/Fd:$managedPdb" @consumerLinkOptions
     }
     else {
         & $compilerCommand -std=c++20 -Wall -Wextra -Werror -DKEIRE_STATIC "-I$(Join-Path $sdkRoot 'include')" $managedSource `

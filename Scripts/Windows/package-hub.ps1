@@ -18,6 +18,7 @@ $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $hubWorkerTarget = "$($Project.PROJECT_NAMESPACE)HubWorker"
+$installWorkerTarget = "$($Project.PROJECT_NAMESPACE)InstallWorker"
 $worktreePolicy = Get-WindowsPackageWorktreePolicy -Root $Root -AllowDirty:$AllowDirty -CI:$CI
 
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build-info.ps1") } "Build metadata generation"
@@ -31,6 +32,11 @@ Invoke-CheckedWindowsCommand {
         -Architecture $Architecture -Toolset $Toolset -Target $hubWorkerTarget -CI:$CI `
         -Update:$Update -Generate:$Generate
 } "Hub package worker build"
+Invoke-CheckedWindowsCommand {
+    & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration Dist `
+        -Architecture $Architecture -Toolset $Toolset -Target $installWorkerTarget -CI:$CI `
+        -Update:$Update -Generate:$Generate
+} "Install transaction worker build"
 
 $source = Join-Path $Root "Build\Bin\Dist-windows-$outputArchitecture\$($Project.HUB_TARGET)"
 if (-not (Test-Path -LiteralPath (Join-Path $source "$($Project.HUB_TARGET).exe") -PathType Leaf)) {
@@ -40,6 +46,11 @@ $hubWorkerSource = Join-Path $Root `
     "Build\Bin\Dist-windows-$outputArchitecture\$hubWorkerTarget\$hubWorkerTarget.exe"
 if (-not (Test-Path -LiteralPath $hubWorkerSource -PathType Leaf)) {
     throw "The Hub package worker build output is missing: $hubWorkerSource"
+}
+$installWorkerSource = Join-Path $Root `
+    "Build\Bin\Dist-windows-$outputArchitecture\$installWorkerTarget\$installWorkerTarget.exe"
+if (-not (Test-Path -LiteralPath $installWorkerSource -PathType Leaf)) {
+    throw "The install transaction worker build output is missing: $installWorkerSource"
 }
 
 $name = "$($Project.ARTIFACT_PREFIX)-hub-windows-$Architecture-Dist"
@@ -64,6 +75,12 @@ New-Item -ItemType Directory -Force $distributionRoot, (Join-Path $Root "Artifac
     (Join-Path $stage "content"), (Join-Path $stage "third-party\licenses") | Out-Null
 Get-ChildItem -LiteralPath $source -Force | Copy-Item -Destination (Join-Path $stage "bin") -Recurse -Force
 Copy-Item -LiteralPath $hubWorkerSource -Destination (Join-Path $stage "bin")
+Copy-Item -LiteralPath $installWorkerSource -Destination (Join-Path $stage "bin")
+$installWorkerText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes(
+        (Join-Path $stage "bin\$installWorkerTarget.exe")))
+if ($installWorkerText.Contains("KEIRE_INSTALL_WORKER_INTERRUPT_AFTER")) {
+    throw "The Dist install worker contains test-only fault injection."
+}
 Get-ChildItem -LiteralPath (Join-Path $Root "KeireHubContent") -Force |
     Copy-Item -Destination (Join-Path $stage "content") -Recurse
 Copy-WindowsTrackedTree $Root "Docs" (Join-Path $stage "Docs")

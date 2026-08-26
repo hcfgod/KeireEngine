@@ -411,8 +411,29 @@ if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
 if ($LASTEXITCODE -ne 0) { throw "Sandbox template synchronization checks failed." }
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
-& (Join-Path $PSScriptRoot "test-editor-package-windows.ps1")
-& (Join-Path $PSScriptRoot "test-hub-package-windows.ps1")
+$installerTransactionGates = @(
+    "test-installer-windows.ps1",
+    "test-hub-installer-windows.ps1"
+)
+foreach ($gate in $installerTransactionGates) {
+    $gatePath = Join-Path $PSScriptRoot $gate
+    $gateSource = Get-Content -LiteralPath $gatePath -Raw
+    Assert-True ($gateSource.Contains('test-install-worker-runtime-windows.ps1') -and
+                 $gateSource.Contains('test-nsis-worker-runtime-windows.ps1')) `
+        "$gate runs the worker and actual-NSIS transaction matrices"
+    & $gatePath
+}
+$distributionPackageGates = @(
+    "test-editor-package-windows.ps1",
+    "test-hub-package-windows.ps1"
+)
+foreach ($gate in $distributionPackageGates) {
+    $gatePath = Join-Path $PSScriptRoot $gate
+    $gateSource = Get-Content -LiteralPath $gatePath -Raw
+    Assert-True ($gateSource.Contains('--verify-installation')) `
+        "$gate exercises the real Dist executable verification contract"
+    & $gatePath
+}
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-prepare-distribution-snapshot.py")
 if ($LASTEXITCODE -ne 0) { throw "Distribution snapshot preparation checks failed." }
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-website.py")
@@ -440,8 +461,6 @@ if ($LASTEXITCODE -ne 0) { throw "Marketplace package-fixture checks failed." }
 if ($LASTEXITCODE -ne 0) { throw "Ninja dependency-file and PCH-path checks failed." }
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-ninja-compiler-cache.py")
 if ($LASTEXITCODE -ne 0) { throw "Ninja compiler-cache checks failed." }
-& (Join-Path $PSScriptRoot "test-installer-windows.ps1")
-& (Join-Path $PSScriptRoot "test-hub-installer-windows.ps1")
 & (Join-Path $PSScriptRoot "test-distribution-service-package-windows.ps1")
 & (Join-Path $PSScriptRoot "test-rclone-distribution-backup-windows.ps1")
 $generateScript = Get-Content (Join-Path $Windows "generate.ps1") -Raw
@@ -681,6 +700,8 @@ $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
 Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('"package-hub"') -and
              $menuScript.Contains('$Configuration = "Dist"')) "Dist product package launcher commands"
+Assert-True ($menuScript.Contains('-AllowDirty (package commands only; emits a local development artifact and is rejected in CI)')) `
+    "Windows launcher documents the dirty-package development-only boundary"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
 $coverageScript = Get-Content (Join-Path $Windows "coverage.ps1") -Raw
 Assert-True ($testScript.Contains('-Target $Project.CLIENT_TARGET')) "Complete client compile test gate"
@@ -783,6 +804,12 @@ $python = Get-PythonInvocation
 if ($LASTEXITCODE -ne 0) { throw "Versioned text integrity validation failed." }
 & $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-source-budgets.py")
 if ($LASTEXITCODE -ne 0) { throw "Source-file budget validation failed." }
+& $python.Executable @($python.PrefixArguments) `
+    (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-render-test-boundary.py")
+if ($LASTEXITCODE -ne 0) { throw "Renderer production/test-hook boundary validation failed." }
+& $python.Executable @($python.PrefixArguments) `
+    (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-diagnostic-bundle-integration.py")
+if ($LASTEXITCODE -ne 0) { throw "Diagnostic-bundle product integration validation failed." }
 & $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\validate-workflows.py")
 if ($LASTEXITCODE -ne 0) { throw "GitHub Actions workflow parsing failed." }
 $emptyRepository = Join-Path ([IO.Path]::GetTempPath()) ("template-empty-git-" + [guid]::NewGuid().ToString("N"))
@@ -975,6 +1002,10 @@ Assert-True ($premakePolicy.Contains('filter "configurations:Profile"') -and
              $premakePolicy.Contains('"TRACY_ON_DEMAND"') -and
              $premakePolicy.Contains('"TRACY_ONLY_LOCALHOST"')) `
     "Profile builds enable local on-demand Tracy telemetry"
+$testHookPolicy = 'filter\s+"configurations:Debug or DebugASan"\s+defines\s+\{\s+"KEIRE_ENABLE_TEST_HOOKS"\s+\}'
+Assert-True ([regex]::IsMatch($premakePolicy, $testHookPolicy) -and
+             [regex]::Matches($premakePolicy, '"KEIRE_ENABLE_TEST_HOOKS"').Count -eq 1) `
+    "Premake exposes fault-injection hooks only in Debug and DebugASan"
 $unixDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\dependencies.sh") -Raw
 $windowsDependencies = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Windows\dependencies.ps1") -Raw
 Assert-True ($unixDependencies.Contains('CPP_RTTI_ENABLED=ON') -and
@@ -1084,10 +1115,64 @@ $windowsBuild = Get-Content (Join-Path $Windows "build.ps1") -Raw
 $windowsManagedBuild = Get-Content (Join-Path $Windows "build-managed.ps1") -Raw
 $windowsManagedHostStage = Get-Content (Join-Path $Windows "stage-managed-host.ps1") -Raw
 $windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw
+$windowsRenderBenchmark = Get-Content (Join-Path $Windows "render-benchmark.ps1") -Raw
+$windowsDeviceLoss = Get-Content (Join-Path $Windows "test-render-device-loss.ps1") -Raw
+Assert-True ($windowsRenderBenchmark.Contains('@("vsync", "immediate")') -and
+             $windowsRenderBenchmark.Contains('warmupFrames -ne 300') -and
+             $windowsRenderBenchmark.Contains('measuredFrames -ne 2000') -and
+              $windowsRenderBenchmark.Contains('timelines.Count -ne 2000') -and
+              $windowsRenderBenchmark.Contains('published non-monotonic frame IDs') -and
+              $windowsRenderBenchmark.Contains('build.gitCommit -ne $expectedCommit') -and
+              $windowsRenderBenchmark.Contains('[bool]$report.build.dirty -ne $expectedDirty') -and
+              $windowsRenderBenchmark.Contains('Assert-MetricSummary $report.summary.$metricName') -and
+              $windowsRenderBenchmark.Contains('Assert-RequiredProperties $timeline $timelineFields') -and
+              $windowsRenderBenchmark.Contains('framesInFlightHighWaterMark -gt') -and
+              $windowsRenderBenchmark.Contains('Remove-Item -LiteralPath $matrixPath -Force') -and
+              $windowsRenderBenchmark.Contains('Build\Benchmarks')) `
+    "Release render benchmark enforces the fixed VSync matrix and durable result contract"
+Assert-True ($windowsDeviceLoss.Contains('--validate-device-loss') -and
+             $windowsDeviceLoss.Contains('-SmokePlayDeviceLoss') -and
+             $windowsDeviceLoss.Contains('Copy-Item -Path (Join-Path $runtimeSource "*")') -and
+             $windowsDeviceLoss.Contains('assetTool cook --project $sampleProject') -and
+             $windowsDeviceLoss.Contains('LastWriteTimeUtc -lt $StartedAt') -and
+             $windowsDeviceLoss.Contains('build.gitCommit -ne $expectedCommit') -and
+             $windowsDeviceLoss.Contains('operation -ne "test frame injection"') -and
+             $windowsDeviceLoss.Contains('retryCount -ne 1') -and
+             $windowsDeviceLoss.Contains('lostGenerationGpuCleanupCalls -ne 0') -and
+             $windowsDeviceLoss.Contains('cookedRuntimeShutdownCompleted = $true') -and
+             $windowsDeviceLoss.Contains('editorShutdownCompleted = $true') -and
+             $windowsDeviceLoss.Contains('Build\Validation\DeviceLoss')) `
+    "Debug device-loss gate runs the real staged cooked runtime and rendered Editor window loop"
+Assert-True ($windowsRun.Contains('[switch]$SmokePlay') -and
+             $windowsRun.Contains('[switch]$SmokePlayDeviceLoss') -and
+             $windowsRun.Contains('$Configuration -notin @("Debug", "DebugASan")') -and
+             $windowsRun.Contains('"--project", $smokeProjectPath, "--smoke-play"') -and
+             $windowsRun.Contains('"--smoke-play-output", $SmokeOutput') -and
+             $windowsRun.Contains('"--smoke-play-device-loss"') -and
+             -not $windowsRun.Contains('SDL_VIDEODRIVER = "dummy"`r`n        & $ClientExe @smokeArguments')) `
+    "Rendered Editor Play smoke uses the real window/update/input loop"
 $windowsFfmpeg = Get-Content (Join-Path $Windows "ffmpeg.ps1") -Raw
 $windowsFfmpegContract = Get-Content (Join-Path $Windows "ffmpeg-runtime-contract.ps1") -Raw
 $windowsFfmpegStage = Get-Content (Join-Path $Windows "stage-ffmpeg-runtime.ps1") -Raw
 $windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
+Assert-True ($windowsPackage.Contains('--validate-additive-runtime $runtimeValidationOutput') -and
+              $windowsPackage.Contains('$runtimeValidation.build.gitCommit -ne $commit') -and
+              $windowsPackage.Contains('$editorPlayValidation.build.gitCommit -ne $expectedHeadCommit') -and
+              $windowsPackage.Contains('LastWriteTimeUtc -lt $runtimeValidationStartedAt') -and
+              $windowsPackage.Contains('LastWriteTimeUtc -lt $editorPlayValidationStartedAt') -and
+              $windowsPackage.Contains('$runtimeValidation.schemaVersion -ne 1') -and
+              $windowsPackage.Contains('$editorPlayValidation.schemaVersion -ne 1') -and
+              $windowsPackage.Contains('inputHandledByActiveTopmostPresentation') -and
+              $windowsPackage.Contains('failedLoadPreservedWorld') -and
+              $windowsPackage.Contains('$buildScenesSource = Join-Path $Root "Samples\KeireSandbox\ProjectSettings\BuildScenes.keiresettings"') -and
+              $windowsPackage.Contains('Copy-Item -LiteralPath $buildScenesSource -Destination $buildScenesDestination -Force') -and
+              $windowsPackage.Contains('Test-Path -LiteralPath $buildScenesDestination -PathType Leaf')) `
+    "Packaged cooked runtime exercises additive scenes, runtime UI, rollback, and exit"
+Assert-True ($windowsPackage.Contains('-SmokePlay -SmokeOutput $editorPlayValidationOutput') -and
+             $windowsPackage.Contains('twoPresentationTrees') -and
+             $windowsPackage.Contains('topmostInputHandled') -and
+             $windowsPackage.Contains('nativeWindowInputQueued')) `
+    "Package gate runs the rendered additive Editor Play window and input validation"
 Assert-True ($windowsBuild.Contains('$assetWorkerConsumers') -and
              $windowsBuild.Contains('"$($Project.PROJECT_NAMESPACE)EditorTests"') -and
              $windowsBuild.Contains('stage-ffmpeg-runtime.ps1') -and
@@ -1423,6 +1508,13 @@ Assert-True ($packageScript.Contains('entt-LICENSE.txt') -and $packageScript.Con
 Assert-True ($packageScript.Contains('KeireShaderCompiler.exe') -and $packageScript.Contains('SDL-shadercross-LICENSE.txt') -and $packageScript.Contains('$Lock.SDL_SHADERCROSS_COMMIT')) "Shader compiler package metadata and attribution"
 Assert-True ($packageScript.Contains('assimp-LICENSE.txt') -and $packageScript.Contains('stb-LICENSE.txt') -and $packageScript.Contains('$Lock.ASSIMP_COMMIT') -and $packageScript.Contains('$Lock.STB_COMMIT')) "Asset importer package metadata and attribution"
 Assert-True ($packageScript.Contains('$assetWorkerName') -and $packageScript.Contains('developmentArtifact') -and $packageScript.Contains('AllowDirty') -and $packageScript.Contains('manifest commit does not match')) "Asset worker and clean package policy"
+Assert-True ($packageScript.Contains('[IO.Path]::GetTempPath()') -and
+             $packageScript.Contains('Refusing to extract SDK validation outside the process temporary root') -and
+             -not $packageScript.Contains('$env:LOCALAPPDATA')) `
+    "SDK consumer extraction is confined to the process-scoped temporary root"
+Assert-True ($packageScript.Contains('"/Fd:$consumerPdb"') -and
+             $packageScript.Contains('"/Fd:$managedPdb"')) `
+    "Direct SDK consumer compiler databases stay inside the disposable validation root"
 Assert-True ($packageScript.Contains('ManagedApiConsumer.csproj') -and
     $packageScript.Contains('KeireManagedAssembly') -and $packageScript.Contains('Managed API SDK consumer compilation failed')) `
     "Packaged managed API consumer compilation"

@@ -222,9 +222,13 @@ Clearing the verified package cache is an asynchronous, exclusive maintenance op
 It refuses to start while package work is active, temporarily closes the idle package coordinator before deleting cache
 content, and recreates that coordinator after the terminal result so downloads cannot repopulate the cache mid-clear.
 
-Hub logs live beneath the per-user preference directory. **Copy diagnostics** creates a redacted report containing build,
-platform, configured roots, catalog state, task state, and recent failures. Proxy credentials, signing material, tokens,
-and sensitive user-path segments are excluded.
+Hub logs live beneath the per-user preference directory. **Help > Collect Diagnostics...** builds the same local-only
+diagnostic bundle as the Editor. Before saving, Hub shows the exact frozen ZIP inventory, including each filename,
+byte size, SHA-256 digest, redaction count, and omission reason; the saved archive is generated from those same
+sanitized bytes. Users may exclude logs, project metadata, package versions, or crash information. Project and package
+contents, configured roots, proxy credentials, signing material, tokens, environment data, native crash dumps, and
+unrelated personal files are excluded, and nothing is uploaded automatically. See
+[Diagnostic Bundles](DiagnosticBundles.md) for the complete collection and privacy contract.
 
 ## Accounts and identity
 

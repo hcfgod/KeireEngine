@@ -20,6 +20,22 @@ function Write-TestPeExecutable([string]$Path, [uint16]$Subsystem) {
     [IO.File]::WriteAllBytes($Path, $bytes)
 }
 
+$script:ExecutableVerificationCalls = @()
+$script:ExecutableVerificationExitCode = 0
+function Invoke-WindowsExecutableCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$Arguments = @()
+    )
+
+    $script:ExecutableVerificationCalls += [pscustomobject]@{ Path = $Path; Arguments = @($Arguments) }
+    return [pscustomobject]@{
+        ExitCode = $script:ExecutableVerificationExitCode
+        StandardOutput = ""
+        StandardError = if ($script:ExecutableVerificationExitCode -eq 0) { "" } else { "fixture verification failure" }
+    }
+}
+
 $launcher = Get-Content (Join-Path $PSScriptRoot "..\project.ps1") -Raw
 if (-not ($launcher.Contains('"package-editor"') -and $launcher.Contains('$Configuration = "Dist"'))) {
     throw "The Windows launcher does not expose the Dist editor package command."
@@ -100,6 +116,16 @@ try {
     }
 
     Assert-WindowsEditorPackageStage $stage Client Hub Core Core
+    if ($script:ExecutableVerificationCalls.Count -ne 1 -or
+        $script:ExecutableVerificationCalls[0].Path -ne (Join-Path $stage "bin\Client.exe") -or
+        @($script:ExecutableVerificationCalls[0].Arguments).Count -ne 1 -or
+        $script:ExecutableVerificationCalls[0].Arguments[0] -ne "--verify-installation") {
+        throw "Editor package validation did not invoke the real executable's hidden installation verifier."
+    }
+    $script:ExecutableVerificationExitCode = 23
+    Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
+        "Editor package executable verification failure"
+    $script:ExecutableVerificationExitCode = 0
     $unexpectedFfmpegRuntime = Join-Path $stage "bin\avfilter-12.dll"
     New-Item -ItemType File -Force $unexpectedFfmpegRuntime | Out-Null
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `

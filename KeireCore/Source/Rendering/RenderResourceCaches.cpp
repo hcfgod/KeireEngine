@@ -39,7 +39,9 @@ namespace Keire::RenderBackend
         }
     } // namespace
 
-    void RenderSharedState::CollectCompletedFrames()
+    void RenderSharedState::CollectCompletedFrames() { CollectCompletedFrames(false); }
+
+    void RenderSharedState::CollectCompletedFrames(const bool waitForAny)
     {
         if (!Device)
             return;
@@ -47,8 +49,7 @@ namespace Keire::RenderBackend
         const auto liveSurfaces = LiveSurfaces();
         const auto releaseFrontFrame = [this, &liveSurfaces]()
         {
-            auto frame = std::move(InFlight.front());
-            InFlight.pop_front();
+            auto& frame = InFlight.front();
             const auto completionLatency =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - frame.SubmittedAt).count();
             Statistics.GpuCompletionLatencyMilliseconds = completionLatency;
@@ -66,13 +67,16 @@ namespace Keire::RenderBackend
                 auto* mapped = SDL_MapGPUTransferBuffer(Device, pending.Transfer, false);
                 if (!mapped)
                 {
+                    const auto detail = LastSdlError();
+                    if (const auto diagnostic = ClassifyDeviceFailure("SDL_MapGPUTransferBuffer", detail))
+                        throw GpuDeviceLostError(*diagnostic);
                     (void)PublishGpuOcclusionReadbackValidationFailure(**surface, pending.RequestedMode);
                     (*surface)->GpuOcclusionAutomaticActive = false;
                     (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
                     (*surface)->GpuOcclusionAutomaticCooldownFrames = 60U;
                     (*surface)->GpuOcclusionValidationCooldown = true;
                     KEIRE_CORE_WARN("GPU occlusion status readback failed for surface '{}': {}",
-                                    (*surface)->Specification.Name, LastSdlError());
+                                    (*surface)->Specification.Name, detail);
                     continue;
                 }
                 GpuOcclusionStatus status{};
@@ -145,10 +149,64 @@ namespace Keire::RenderBackend
             }
             Statistics.FenceRetiredBytes -= std::min(Statistics.FenceRetiredBytes, frame.RetiredBytes);
             SDL_ReleaseGPUFence(Device, frame.Fence);
+            if (frame.ResolvedEditorUi)
+                frame.ResolvedEditorUi->ReleaseGpuTextures(Device, false);
+            CompleteFrame(frame.Frame, false);
+            InFlight.erase(InFlight.begin());
         };
-        while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
+        const auto frontFenceReady = [this]()
+        {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            if (InjectDeviceLossAtNextRetirement.exchange(false, std::memory_order_acq_rel))
+            {
+                throw GpuDeviceLostError(
+                    DeviceLossDiagnostic("test fence retirement injection", "Injected GPU device loss."));
+            }
+#endif
+            SDL_ClearError();
+            if (SDL_QueryGPUFence(Device, InFlight.front().Fence))
+                return true;
+            if (const char* error = SDL_GetError(); error && *error)
+                ThrowIfDeviceLost("SDL_QueryGPUFence", error);
+
+            const auto now = std::chrono::steady_clock::now();
+            const auto pendingFor = now - InFlight.front().SubmittedAt;
+            constexpr auto healthProbeDelay = std::chrono::milliseconds(500);
+            constexpr auto healthProbeInterval = std::chrono::milliseconds(250);
+            constexpr auto maximumFenceRetirement = std::chrono::seconds(10);
+            if (pendingFor >= maximumFenceRetirement)
+            {
+                throw GpuDeviceLostError(DeviceLossDiagnostic(
+                    "SDL_QueryGPUFence(timeout)",
+                    "GPU fence retirement timed out after 10 seconds; device responsiveness is unknown."));
+            }
+            if (pendingFor < healthProbeDelay || (LastFenceHealthProbeAt != std::chrono::steady_clock::time_point{} &&
+                                                  now - LastFenceHealthProbeAt < healthProbeInterval))
+            {
+                return false;
+            }
+
+            LastFenceHealthProbeAt = now;
+            SDL_ClearError();
+            auto* probe = SDL_AcquireGPUCommandBuffer(Device);
+            if (!probe)
+            {
+                const auto detail = LastSdlError();
+                ThrowIfDeviceLost("SDL_AcquireGPUCommandBuffer(retirement probe)", detail);
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(retirement probe) failed: " + detail);
+            }
+            SDL_ClearError();
+            if (!SDL_CancelGPUCommandBuffer(probe))
+            {
+                const auto detail = LastSdlError();
+                ThrowIfDeviceLost("SDL_CancelGPUCommandBuffer(retirement probe)", detail);
+                throw std::runtime_error("SDL_CancelGPUCommandBuffer(retirement probe) failed: " + detail);
+            }
+            return false;
+        };
+        while (!InFlight.empty() && frontFenceReady())
             releaseFrontFrame();
-        if (InFlight.size() < Specification.MaximumFramesInFlight)
+        if (InFlight.empty() || !waitForAny)
         {
             PublishGpuOcclusionReadbackStatistics();
             return;
@@ -164,7 +222,7 @@ namespace Keire::RenderBackend
         // A successful wait is the completion contract. Retire that frame directly instead of polling recursively:
         // some drivers publish the query result a moment later, and recursive polling can exhaust the CPU stack.
         releaseFrontFrame();
-        while (!InFlight.empty() && SDL_QueryGPUFence(Device, InFlight.front().Fence))
+        while (!InFlight.empty() && frontFenceReady())
             releaseFrontFrame();
         PublishGpuOcclusionReadbackStatistics();
     }
@@ -205,90 +263,63 @@ namespace Keire::RenderBackend
     void RenderSharedState::BeginFrame()
     {
         RequireOwner("BeginFrame");
+        RethrowTerminalFailure();
         if (FrameActive)
             throw std::logic_error("A render frame is already active.");
         FrameActive = true;
-        Requests.clear();
-        RuntimeUiCommands.clear();
-        CpuPreparation.BeginFrame();
-        ++Statistics.Frame;
-        Statistics.Passes = 0;
-        Statistics.Surfaces = 0;
-        Statistics.DrawCalls = 0;
-        Statistics.DepthDrawCalls = 0;
-        Statistics.ShadowDrawCalls = 0;
-        Statistics.Triangles = 0;
-        Statistics.VisibleSubmeshes = 0;
-        Statistics.CulledSubmeshes = 0;
-        Statistics.CulledShadowSubmeshes = 0;
-        Statistics.InstanceBatches = 0;
-        Statistics.CulledLocalLights = 0;
-        Statistics.VisibleLocalLights = 0;
-        Statistics.OverflowedLightTiles = 0;
-        Statistics.DirectionalShadowCascades = 0;
-        Statistics.VfxSpriteParticles = 0;
-        Statistics.VfxMeshParticles = 0;
-        Statistics.VfxRibbonParticles = 0;
-        Statistics.VfxVolumetricParticles = 0;
-        Statistics.CulledCpuVfxParticles = 0;
-        Statistics.DroppedVfxParticles = 0;
-        Statistics.VfxComputeThreadGroups = 0;
-        Statistics.VfxComputeDispatches = 0;
-        Statistics.VfxIndirectDraws = 0;
-        Statistics.CpuVfxDrawBatches = 0;
-        Statistics.VfxGpuWorlds = 0;
-        Statistics.VfxGpuParticleCapacity = 0;
-        Statistics.VfxGpuBufferBytes = 0;
-        Statistics.GpuFenceWaitMilliseconds = 0.0F;
-        Statistics.SampledResolvedDepthAvailable = false;
-        Statistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
-        Statistics.ExecutedFrameGraphPasses = 0;
-        Statistics.FrameGraphTransitions = 0;
-        Statistics.TransientResourceAllocations =
+        PendingSceneRequests.clear();
+        PendingRuntimeUiTrees.clear();
+        CaptureRequests.clear();
+        CaptureRuntimeUiCommands.clear();
+        CaptureFrameStartedAt = std::chrono::steady_clock::now();
+        CaptureFrameId = NextFrameId++;
+        CaptureStatistics = {};
+        CaptureStatistics.Frame = CaptureFrameId;
+        CaptureStatistics.AllowedFramesInFlight = Specification.MaximumFramesInFlight;
+        CaptureStatistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
+        CaptureStatistics.TransientResourceAllocations =
             static_cast<std::uint32_t>(SceneFrameGraph.Compiled.TransientAllocations.size());
-        Statistics.ForwardPlusBufferReallocations = 0;
-        Statistics.ForwardPlusUploadBytes = 0;
-        Statistics.DynamicUploadBufferReallocations = 0;
-        Statistics.DynamicUploadBytes = 0;
-        Statistics.DepthTriangles = 0;
-        Statistics.ShadowTriangles = 0;
-        Statistics.GpuOcclusionCandidates = 0;
-        Statistics.GpuOcclusionVisible = 0;
-        Statistics.GpuOcclusionCulled = 0;
-        Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
-        Statistics.GpuOcclusionCandidateTriangles = 0;
-        Statistics.GpuOcclusionCulledTriangles = 0;
-        Statistics.GpuOcclusionReadbackValid = false;
-        CollectCompletedFrames();
-        const auto vfxRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight) + 2U;
+    }
+
+    void RenderSharedState::PrepareFrameForExecution(const std::shared_ptr<RenderFramePacket>& frame)
+    {
+        Statistics = frame->CapturedStatistics;
+        Statistics.RendererQueueDelayMilliseconds = frame->Timeline.QueueDelayMilliseconds;
+        Statistics.FrameAdmissionWaitMilliseconds = frame->Timeline.AdmissionWaitMilliseconds;
+        CollectCompletedFrames(false);
+        CollectRetiredSurfaceEpochs();
+
+        const auto vfxRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight);
         for (auto iterator = GpuVfxWorlds.begin(); iterator != GpuVfxWorlds.end();)
         {
-            if (iterator->second.LastPreparedFrame != 0 && Statistics.Frame > iterator->second.LastPreparedFrame &&
+            if (iterator->second.LastPreparedFrame != 0U && Statistics.Frame > iterator->second.LastPreparedFrame &&
                 Statistics.Frame - iterator->second.LastPreparedFrame > vfxRetirementAge)
             {
                 ReleaseGpuVfxWorld(iterator->second);
                 iterator = GpuVfxWorlds.erase(iterator);
-                continue;
             }
-            ++iterator;
+            else
+            {
+                ++iterator;
+            }
         }
         Statistics.VfxGpuWorlds = static_cast<std::uint32_t>(GpuVfxWorlds.size());
-        const auto skinRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight) + 2U;
+
+        const auto skinRetirementAge = static_cast<std::uint64_t>(Specification.MaximumFramesInFlight);
         for (auto cacheIterator = SkinCache.begin(); cacheIterator != SkinCache.end();)
         {
             auto& entry = cacheIterator->second;
-            if (entry.LastRequestedFrame != 0 && Statistics.Frame > entry.LastRequestedFrame &&
+            if (entry.LastRequestedFrame != 0U && Statistics.Frame > entry.LastRequestedFrame &&
                 Statistics.Frame - entry.LastRequestedFrame > skinRetirementAge)
             {
                 Retire(std::move(entry.Resources));
                 cacheIterator = SkinCache.erase(cacheIterator);
                 continue;
             }
-
             for (auto instanceIterator = entry.Resources.Instances.begin();
                  instanceIterator != entry.Resources.Instances.end();)
             {
-                if (instanceIterator->second.LastPreparedFrame != 0 &&
+                if (instanceIterator->second.LastPreparedFrame != 0U &&
                     Statistics.Frame > instanceIterator->second.LastPreparedFrame &&
                     Statistics.Frame - instanceIterator->second.LastPreparedFrame > skinRetirementAge)
                 {
@@ -296,48 +327,135 @@ namespace Keire::RenderBackend
                     retired.Instances.emplace(instanceIterator->first, std::move(instanceIterator->second));
                     Retire(std::move(retired));
                     instanceIterator = entry.Resources.Instances.erase(instanceIterator);
-                    continue;
                 }
-                ++instanceIterator;
+                else
+                {
+                    ++instanceIterator;
+                }
             }
             ++cacheIterator;
         }
-        for (const auto& surface : LiveSurfaces())
+
+        for (const auto& token : frame->Surfaces)
         {
+            const auto surface = ResolveSurface(token);
+            if (!surface)
+                throw std::logic_error("A captured render-surface epoch expired before frame execution.");
+            surface->ActiveWorksetSlot = frame->FrameSlot;
             surface->Submitted = false;
             surface->FrameClearColor = surface->Specification.ClearColor;
             EnsureSurface(*surface);
         }
-        // EnsureSurface can invalidate a completed readback during resize or resource recovery. Keep the frame
-        // aggregate consistent with the per-surface state exposed to diagnostics during this frame.
+        for (const auto& request : frame->Requests)
+        {
+            const auto surfaceLease = ResolveSurface(request.Surface);
+            if (!surfaceLease)
+                throw std::logic_error("A requested render-surface epoch expired before frame execution.");
+            auto& surface = *surfaceLease;
+            if (surface.GpuOcclusionSubmittedMode != request.Packet.Environment.GpuOcclusion)
+            {
+                surface.GpuOcclusionSubmittedMode = request.Packet.Environment.GpuOcclusion;
+                surface.GpuOcclusionSubmissionEpoch =
+                    surface.GpuOcclusionSubmissionEpoch == std::numeric_limits<std::uint64_t>::max()
+                        ? 1U
+                        : surface.GpuOcclusionSubmissionEpoch + 1U;
+                surface.GpuOcclusionDiagnostics = {};
+                surface.GpuOcclusionDiagnostics.RequestedMode = request.Packet.Environment.GpuOcclusion;
+                surface.GpuOcclusionAutomaticActive = false;
+                surface.GpuOcclusionAutomaticQualifyingFrames = 0;
+                surface.GpuOcclusionAutomaticMinimumFrames = 0;
+                surface.GpuOcclusionAutomaticCooldownFrames = 0;
+                surface.GpuOcclusionValidationCooldown = false;
+                surface.GpuOcclusionValidationFallbackEventPending = false;
+                surface.GpuOcclusionLatestCandidateTriangles = 0;
+                surface.GpuOcclusionLatestVisibleTriangles = 0;
+            }
+            surface.Submitted = true;
+            surface.FrameClearColor = request.ClearColor;
+        }
         PublishGpuOcclusionReadbackStatistics();
     }
 
     void RenderSharedState::CancelFrame() noexcept
     {
         FrameActive = false;
-        Requests.clear();
-        RuntimeUiCommands.clear();
+        CpuPreparation.CancelFrame();
+        PendingSceneRequests.clear();
+        PendingRuntimeUiTrees.clear();
+        CaptureRequests.clear();
+        CaptureRuntimeUiCommands.clear();
     }
 
     void RenderSharedState::Submit(SceneRenderRequest request)
     {
-        const auto preparationStarted = std::chrono::steady_clock::now();
         RequireOwner("Submit");
         if (!FrameActive)
             throw std::logic_error("Scene render requests are accepted only during an active render frame.");
         if (!request.Scene || !request.View || !request.View->Surface())
             throw std::invalid_argument("SceneRenderRequest requires a scene, view, and render surface.");
-        if (!request.Scene->IsOpen())
-            throw std::logic_error("SceneRenderRequest cannot submit a closed scene.");
+        if (request.AdditionalScenes.size() >= SceneRenderRequest::MaximumContributions)
+            throw std::invalid_argument("SceneRenderRequest exceeds the 64-scene contribution bound.");
+        if (request.PrimaryContributionIndex > request.AdditionalScenes.size())
+            throw std::invalid_argument("SceneRenderRequest primary contribution index is out of range.");
 
-        auto& surface =
-            *static_cast<RenderSurfaceState*>(RenderSystemInternalAccess::SurfaceState(*request.View->Surface()));
+        auto surfaceLease = std::static_pointer_cast<RenderSurfaceState>(
+            RenderSystemInternalAccess::SurfaceLease(*request.View->Surface()));
+        auto& surface = *surfaceLease;
         const auto owner = surface.Owner.lock();
         if (owner.get() != this)
             throw std::invalid_argument("SceneRenderRequest surface belongs to another renderer.");
-        if (surface.Submitted)
+        const auto surfaceToken = CaptureSurfaceToken(surfaceLease);
+        if (std::ranges::any_of(
+                PendingSceneRequests, [&surfaceToken](const PendingSceneRequest& pending)
+                { return pending.Surface.Id == surfaceToken.Id && pending.Surface.Epoch == surfaceToken.Epoch; }))
             throw std::logic_error("A render surface may receive only one scene request per frame.");
+        PendingSceneRequests.push_back({std::move(request), surfaceToken});
+    }
+
+    void RenderSharedState::CapturePendingSceneRequest(PendingSceneRequest pending)
+    {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        SceneCaptureEnumerationCount.fetch_add(1U, std::memory_order_relaxed);
+#endif
+        const auto preparationStarted = std::chrono::steady_clock::now();
+        auto request = std::move(pending.Request);
+        const auto originalPrimary = request.PrimaryContributionIndex;
+        std::vector<std::pair<std::size_t, SceneRenderContribution>> liveContributions;
+        liveContributions.reserve(request.AdditionalScenes.size() + 1U);
+        if (request.Scene->IsOpen())
+            liveContributions.push_back({0U, {request.Scene, std::move(request.Vfx)}});
+        for (std::size_t index = 0; index < request.AdditionalScenes.size(); ++index)
+        {
+            if (request.AdditionalScenes[index].Scene && request.AdditionalScenes[index].Scene->IsOpen())
+                liveContributions.push_back({index + 1U, std::move(request.AdditionalScenes[index])});
+        }
+        if (liveContributions.empty())
+        {
+            request.DrawSceneContributions = false;
+            request.AdditionalScenes.clear();
+            request.PrimaryContributionIndex = 0U;
+            request.Vfx = {};
+        }
+        else
+        {
+            request.Scene = liveContributions.front().second.Scene;
+            request.Vfx = std::move(liveContributions.front().second.Vfx);
+            request.AdditionalScenes.clear();
+            request.AdditionalScenes.reserve(liveContributions.size() - 1U);
+            request.PrimaryContributionIndex = 0U;
+            for (std::size_t index = 0; index < liveContributions.size(); ++index)
+            {
+                if (liveContributions[index].first == originalPrimary)
+                    request.PrimaryContributionIndex = index;
+                if (index != 0U)
+                    request.AdditionalScenes.push_back(std::move(liveContributions[index].second));
+            }
+        }
+        const auto& surfaceToken = pending.Surface;
+        const auto surfaceLease = ResolveSurface(surfaceToken);
+        if (!surfaceLease)
+            throw std::logic_error("A render-surface epoch expired before immutable frame capture.");
+        const auto& surface = *surfaceLease;
         if (Specification.Mode == RenderMode::Rendered && (!surface.Specification.Depth || !DepthFormat))
             throw std::logic_error("Scene rendering requires a depth-enabled render surface.");
         const auto camera = request.View->Camera();
@@ -355,84 +473,211 @@ namespace Keire::RenderBackend
             if (name.empty() || name.size() > 128U || !ValidGlobalMaterialProperty(value))
                 throw std::invalid_argument("SceneRenderRequest contains an invalid global material property.");
         }
-        if (request.Vfx.Particles().size() > VfxRenderSnapshot::MaximumParticles)
-            throw std::invalid_argument("SceneRenderRequest exceeds the VFX particle packet bound.");
-        for (const auto& particle : request.Vfx.Particles())
-        {
-            if (!Math::IsFinite(particle.Position) || !Math::IsFinite(particle.PreviousPosition) ||
-                !Math::IsFinite(particle.Rotation) || !Math::IsFinite(particle.Tint) || !std::isfinite(particle.Size) ||
-                particle.Size < 0.0F || particle.Renderer > VfxRendererType::Volumetric)
-            {
-                throw std::invalid_argument("SceneRenderRequest contains an invalid VFX particle.");
-            }
-            if (particle.Renderer == VfxRendererType::Sprite)
-                ++Statistics.VfxSpriteParticles;
-            else if (particle.Renderer == VfxRendererType::Mesh)
-                ++Statistics.VfxMeshParticles;
-            else if (particle.Renderer == VfxRendererType::Ribbon)
-                ++Statistics.VfxRibbonParticles;
-            else
-                ++Statistics.VfxVolumetricParticles;
-        }
-        if (!request.Vfx.GpuEmitters().empty() &&
-            (request.Vfx.WorldId() == 0 || request.Vfx.ParticleCapacity() == 0 ||
-             request.Vfx.ParticleCapacity() > 10'000'000U || !std::isfinite(request.Vfx.DeltaSeconds()) ||
-             request.Vfx.DeltaSeconds() < 0.0F))
-        {
-            throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX snapshot.");
-        }
-        for (const auto& emitter : request.Vfx.GpuEmitters())
-        {
-            if (!emitter.Handle || emitter.Revision == 0 || !Math::IsFinite(emitter.Position) ||
-                !Math::IsFinite(emitter.Rotation) || !Math::IsFinite(emitter.ShapeExtent) ||
-                !Math::IsFinite(emitter.VelocityMinimum) || !Math::IsFinite(emitter.VelocityMaximum) ||
-                !Math::IsFinite(emitter.Acceleration) || !Math::IsFinite(emitter.ColorStart) ||
-                !Math::IsFinite(emitter.ColorEnd) || !std::isfinite(emitter.LifetimeMinimum) ||
-                !std::isfinite(emitter.LifetimeMaximum) || emitter.LifetimeMinimum <= 0.0F ||
-                emitter.LifetimeMaximum < emitter.LifetimeMinimum || !std::isfinite(emitter.SizeStart) ||
-                !std::isfinite(emitter.SizeEnd) || !std::isfinite(emitter.SimulationDeltaSeconds) ||
-                emitter.SimulationDeltaSeconds < 0.0F || emitter.SimulationDeltaSeconds > 80.0F ||
-                emitter.Renderer > VfxRendererType::Volumetric ||
-                emitter.DataType > VfxParticleDataType::ParticleStrip || emitter.ParticlesPerStrip == 0 ||
-                (emitter.Renderer == VfxRendererType::Ribbon &&
-                 emitter.DataType != VfxParticleDataType::ParticleStrip) ||
-                emitter.Capacity == 0 || emitter.Capacity > request.Vfx.ParticleCapacity() ||
-                (emitter.Renderer == VfxRendererType::Mesh && !emitter.Mesh))
-            {
-                throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX emitter.");
-            }
-        }
-        Statistics.DroppedVfxParticles += request.Vfx.DroppedParticles();
 
-        if (surface.GpuOcclusionSubmittedMode != request.Environment.GpuOcclusion)
+        std::size_t totalCpuVfxParticles = 0;
+        const auto validateContribution = [&](const Ref<Scene>& scene, const VfxRenderSnapshot& vfx)
         {
-            surface.GpuOcclusionSubmittedMode = request.Environment.GpuOcclusion;
-            surface.GpuOcclusionSubmissionEpoch =
-                surface.GpuOcclusionSubmissionEpoch == std::numeric_limits<std::uint64_t>::max()
-                    ? 1U
-                    : surface.GpuOcclusionSubmissionEpoch + 1U;
-            surface.GpuOcclusionDiagnostics = {};
-            surface.GpuOcclusionDiagnostics.RequestedMode = request.Environment.GpuOcclusion;
-            surface.GpuOcclusionAutomaticActive = false;
-            surface.GpuOcclusionAutomaticQualifyingFrames = 0;
-            surface.GpuOcclusionAutomaticMinimumFrames = 0;
-            surface.GpuOcclusionAutomaticCooldownFrames = 0;
-            surface.GpuOcclusionValidationCooldown = false;
-            surface.GpuOcclusionValidationFallbackEventPending = false;
-            surface.GpuOcclusionLatestCandidateTriangles = 0;
-            surface.GpuOcclusionLatestVisibleTriangles = 0;
+            if (!scene)
+                throw std::invalid_argument("SceneRenderRequest contains an empty scene contribution.");
+            if (!scene->IsOpen())
+                throw std::logic_error("SceneRenderRequest cannot submit a closed scene contribution.");
+            if (vfx.Particles().size() > VfxRenderSnapshot::MaximumParticles ||
+                totalCpuVfxParticles > VfxRenderSnapshot::MaximumParticles - vfx.Particles().size())
+            {
+                throw std::invalid_argument("SceneRenderRequest exceeds the aggregate VFX particle packet bound.");
+            }
+            totalCpuVfxParticles += vfx.Particles().size();
+            for (const auto& particle : vfx.Particles())
+            {
+                if (!Math::IsFinite(particle.Position) || !Math::IsFinite(particle.PreviousPosition) ||
+                    !Math::IsFinite(particle.Rotation) || !Math::IsFinite(particle.Tint) ||
+                    !std::isfinite(particle.Size) || particle.Size < 0.0F ||
+                    particle.Renderer > VfxRendererType::Volumetric)
+                {
+                    throw std::invalid_argument("SceneRenderRequest contains an invalid VFX particle.");
+                }
+            }
+            if (!vfx.GpuEmitters().empty() &&
+                (vfx.WorldId() == 0 || vfx.ParticleCapacity() == 0 || vfx.ParticleCapacity() > 10'000'000U ||
+                 !std::isfinite(vfx.DeltaSeconds()) || vfx.DeltaSeconds() < 0.0F))
+            {
+                throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX snapshot.");
+            }
+            for (const auto& emitter : vfx.GpuEmitters())
+            {
+                if (!emitter.Handle || emitter.Revision == 0 || !Math::IsFinite(emitter.Position) ||
+                    !Math::IsFinite(emitter.Rotation) || !Math::IsFinite(emitter.ShapeExtent) ||
+                    !Math::IsFinite(emitter.VelocityMinimum) || !Math::IsFinite(emitter.VelocityMaximum) ||
+                    !Math::IsFinite(emitter.Acceleration) || !Math::IsFinite(emitter.ColorStart) ||
+                    !Math::IsFinite(emitter.ColorEnd) || !std::isfinite(emitter.LifetimeMinimum) ||
+                    !std::isfinite(emitter.LifetimeMaximum) || emitter.LifetimeMinimum <= 0.0F ||
+                    emitter.LifetimeMaximum < emitter.LifetimeMinimum || !std::isfinite(emitter.SizeStart) ||
+                    !std::isfinite(emitter.SizeEnd) || !std::isfinite(emitter.SimulationDeltaSeconds) ||
+                    emitter.SimulationDeltaSeconds < 0.0F || emitter.SimulationDeltaSeconds > 80.0F ||
+                    emitter.Renderer > VfxRendererType::Volumetric ||
+                    emitter.DataType > VfxParticleDataType::ParticleStrip || emitter.ParticlesPerStrip == 0 ||
+                    (emitter.Renderer == VfxRendererType::Ribbon &&
+                     emitter.DataType != VfxParticleDataType::ParticleStrip) ||
+                    emitter.Capacity == 0 || emitter.Capacity > vfx.ParticleCapacity() ||
+                    (emitter.Renderer == VfxRendererType::Mesh && !emitter.Mesh))
+                {
+                    throw std::invalid_argument("SceneRenderRequest contains an invalid GPU VFX emitter.");
+                }
+            }
+        };
+        if (request.DrawSceneContributions)
+        {
+            validateContribution(request.Scene, request.Vfx);
+            for (const auto& contribution : request.AdditionalScenes)
+                validateContribution(contribution.Scene, contribution.Vfx);
         }
-        surface.Submitted = true;
-        surface.FrameClearColor = camera.ClearColor;
+
+        const auto& primaryContribution = request.PrimaryContributionIndex == 0
+                                              ? request.Scene
+                                              : request.AdditionalScenes[request.PrimaryContributionIndex - 1U].Scene;
         SceneRenderPacket packet;
-        packet.Scene = request.Scene->Asset();
+        packet.Scene = primaryContribution->Asset();
         packet.Camera = camera;
         packet.Environment = request.Environment;
         packet.GlobalMaterialProperties = std::move(request.GlobalMaterialProperties);
-        packet.Lighting = ResolveLighting(request.Scene);
-        packet.LocalLights = ResolveLocalLights(request.Scene);
+        if (request.DrawSceneContributions)
+        {
+            packet.Lighting = ResolveLighting(primaryContribution);
+            if (!packet.Lighting.Enabled)
+            {
+                packet.Lighting = ResolveLighting(request.Scene);
+                for (const auto& contribution : request.AdditionalScenes)
+                {
+                    if (packet.Lighting.Enabled)
+                        break;
+                    packet.Lighting = ResolveLighting(contribution.Scene);
+                }
+            }
+            packet.BakedLighting = primaryContribution->BakedLighting();
+        }
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        LastCapturedDirectionalLightEntity.store(packet.Lighting.Entity.Value().Low(), std::memory_order_relaxed);
+#endif
+        packet.DrawGrid = request.DrawGrid;
+        packet.MaterialTimeSeconds = request.MaterialTimeSeconds;
+        packet.MaterialDeltaSeconds = request.MaterialDeltaSeconds;
+        packet.FrameIndex = request.FrameIndex;
+        packet.VfxSnapshots.reserve(request.AdditionalScenes.size() + 1U);
+
+        const auto appendContribution = [&](const Ref<Scene>& scene, VfxRenderSnapshot vfx)
+        {
+            const auto contributionOrder = static_cast<std::uint32_t>(packet.VfxSnapshots.size());
+            auto localLights = ResolveLocalLights(scene);
+            for (auto& light : localLights)
+                light.ContributionOrder = contributionOrder;
+            packet.LocalLights.insert(packet.LocalLights.end(), std::make_move_iterator(localLights.begin()),
+                                      std::make_move_iterator(localLights.end()));
+            auto reflectionProbes = ResolveReflectionProbes(scene);
+            auto lightProbeVolumes = ResolveLightProbeVolumes(scene);
+            packet.SpatialContributions.push_back(
+                {scene->Asset(), scene->BakedLighting(), reflectionProbes, lightProbeVolumes});
+            packet.ReflectionProbes.insert(packet.ReflectionProbes.end(),
+                                           std::make_move_iterator(reflectionProbes.begin()),
+                                           std::make_move_iterator(reflectionProbes.end()));
+            packet.LightProbeVolumes.insert(packet.LightProbeVolumes.end(),
+                                            std::make_move_iterator(lightProbeVolumes.begin()),
+                                            std::make_move_iterator(lightProbeVolumes.end()));
+
+            const auto sceneAsset = scene->Asset();
+            const auto renderEntities = scene->Query<MeshRendererComponent>();
+            for (const auto& entity : renderEntities)
+            {
+                if (!entity.ActiveInHierarchy())
+                    continue;
+                const auto renderer = entity.GetComponent<MeshRendererComponent>();
+                const auto transform = entity.GetComponent<TransformComponent>();
+                if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
+                    continue;
+                std::vector<Matrix4> skinPalette;
+                AssetId skin;
+                AssetId skinSkeleton;
+                if (const auto animator = entity.GetComponent<AnimatorComponent>(); animator && animator->Enabled())
+                {
+                    skinPalette.assign(animator->SkinPalette().begin(), animator->SkinPalette().end());
+                    skin = animator->SkinnedMesh();
+                    skinSkeleton = animator->Skeleton();
+                }
+                packet.DrawItems.push_back({renderer->Mesh(),
+                                            {renderer->Materials().begin(), renderer->Materials().end()},
+                                            renderer->MaterialProperties(),
+                                            {},
+                                            transform->PresentationWorldMatrix(),
+                                            renderer->Tint(),
+                                            entity.Id(),
+                                            skin,
+                                            skinSkeleton,
+                                            std::move(skinPalette),
+                                            renderer->CastShadows(),
+                                            renderer->ReceiveShadows(),
+                                            renderer->AlwaysVisible()});
+                auto& item = packet.DrawItems.back();
+                item.MaterialInstanceProperties = renderer->AllMaterialInstanceProperties();
+                item.Scene = sceneAsset;
+                item.ContributionOrder = contributionOrder;
+            }
+            for (const auto& particle : vfx.Particles())
+            {
+                if (particle.Renderer == VfxRendererType::Sprite)
+                    ++CaptureStatistics.VfxSpriteParticles;
+                else if (particle.Renderer == VfxRendererType::Mesh)
+                    ++CaptureStatistics.VfxMeshParticles;
+                else if (particle.Renderer == VfxRendererType::Ribbon)
+                    ++CaptureStatistics.VfxRibbonParticles;
+                else
+                    ++CaptureStatistics.VfxVolumetricParticles;
+                if (auto item = VfxMeshDrawItem(particle))
+                {
+                    item->Scene = sceneAsset;
+                    item->ContributionOrder = contributionOrder;
+                    packet.DrawItems.push_back(std::move(*item));
+                }
+            }
+            CaptureStatistics.DroppedVfxParticles += vfx.DroppedParticles();
+            packet.VfxSnapshots.push_back(std::move(vfx));
+        };
+        if (request.DrawSceneContributions)
+        {
+            appendContribution(request.Scene, std::move(request.Vfx));
+            for (auto& contribution : request.AdditionalScenes)
+                appendContribution(contribution.Scene, std::move(contribution.Vfx));
+        }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        {
+            std::scoped_lock lock(PublicationMutex);
+            LastCapturedPrimaryScene = packet.Scene;
+            LastCapturedPrimaryBakedLighting = packet.BakedLighting;
+            LastCapturedDrawContributionOrder.clear();
+            LastCapturedDrawEntities.clear();
+            LastCapturedDrawContributionOrder.reserve(packet.DrawItems.size());
+            LastCapturedDrawEntities.reserve(packet.DrawItems.size());
+            for (const auto& item : packet.DrawItems)
+            {
+                LastCapturedDrawContributionOrder.push_back(item.ContributionOrder);
+                LastCapturedDrawEntities.push_back(item.Entity);
+            }
+            LastCapturedSpatialScenes.clear();
+            LastCapturedSpatialBakedLighting.clear();
+            LastCapturedSpatialScenes.reserve(packet.SpatialContributions.size());
+            LastCapturedSpatialBakedLighting.reserve(packet.SpatialContributions.size());
+            for (const auto& contribution : packet.SpatialContributions)
+            {
+                LastCapturedSpatialScenes.push_back(contribution.Scene);
+                LastCapturedSpatialBakedLighting.push_back(contribution.BakedLighting);
+            }
+            LastCapturedLocalLights = packet.LocalLights.size();
+            LastCapturedReflectionProbes = packet.ReflectionProbes.size();
+            LastCapturedLightProbeVolumes = packet.LightProbeVolumes.size();
+        }
+#endif
+
         const auto lightFrustum = GeometryDetail::BuildFrustumPlanes(Math::Multiply(camera.Projection, camera.View));
-        Statistics.CulledLocalLights += static_cast<std::uint32_t>(
+        CaptureStatistics.CulledLocalLights += static_cast<std::uint32_t>(
             std::erase_if(packet.LocalLights,
                           [&](const SceneLocalLight& light)
                           {
@@ -442,61 +687,7 @@ namespace Keire::RenderBackend
                                   {light.Position.X + radius, light.Position.Y + radius, light.Position.Z + radius}};
                               return !GeometryDetail::IntersectsFrustum(lightFrustum, bounds);
                           }));
-        packet.BakedLighting = request.Scene->BakedLighting();
-        packet.ReflectionProbes = ResolveReflectionProbes(request.Scene);
-        packet.LightProbeVolumes = ResolveLightProbeVolumes(request.Scene);
-        packet.DrawGrid = request.DrawGrid;
-        packet.Vfx = std::move(request.Vfx);
-        packet.MaterialTimeSeconds = request.MaterialTimeSeconds;
-        packet.MaterialDeltaSeconds = request.MaterialDeltaSeconds;
-        packet.FrameIndex = request.FrameIndex;
-        const auto renderEntities = request.Scene->Query<MeshRendererComponent>();
-        const auto meshParticleCount = std::ranges::count_if(packet.Vfx.Particles(),
-                                                             [](const auto& particle)
-                                                             {
-                                                                 return particle.Renderer == VfxRendererType::Mesh &&
-                                                                        static_cast<bool>(particle.Mesh) &&
-                                                                        particle.Size > 0.0F;
-                                                             });
-        packet.DrawItems.reserve(renderEntities.size() + static_cast<std::size_t>(meshParticleCount));
-        for (const auto& entity : renderEntities)
-        {
-            if (!entity.ActiveInHierarchy())
-                continue;
-            const auto renderer = entity.GetComponent<MeshRendererComponent>();
-            const auto transform = entity.GetComponent<TransformComponent>();
-            if (!renderer || !renderer->Enabled() || !renderer->Visible() || !transform)
-                continue;
-            std::vector<Matrix4> skinPalette;
-            AssetId skin;
-            AssetId skinSkeleton;
-            if (const auto animator = entity.GetComponent<AnimatorComponent>(); animator && animator->Enabled())
-            {
-                skinPalette.assign(animator->SkinPalette().begin(), animator->SkinPalette().end());
-                skin = animator->SkinnedMesh();
-                skinSkeleton = animator->Skeleton();
-            }
-            packet.DrawItems.push_back({renderer->Mesh(),
-                                        {renderer->Materials().begin(), renderer->Materials().end()},
-                                        renderer->MaterialProperties(),
-                                        {},
-                                        transform->PresentationWorldMatrix(),
-                                        renderer->Tint(),
-                                        entity.Id(),
-                                        skin,
-                                        skinSkeleton,
-                                        std::move(skinPalette),
-                                        renderer->CastShadows(),
-                                        renderer->ReceiveShadows(),
-                                        renderer->AlwaysVisible()});
-            packet.DrawItems.back().MaterialInstanceProperties = renderer->AllMaterialInstanceProperties();
-        }
-        for (const auto& particle : packet.Vfx.Particles())
-        {
-            if (auto item = VfxMeshDrawItem(particle))
-                packet.DrawItems.push_back(std::move(*item));
-        }
-        Requests.push_back({std::move(packet), &surface});
+        CaptureRequests.push_back({std::move(packet), surfaceToken, camera.ClearColor});
         CpuPreparation.Accumulate(
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - preparationStarted).count());
     }
@@ -544,6 +735,7 @@ namespace Keire::RenderBackend
                 }
                 catch (const std::exception& error)
                 {
+                    ThrowIfDeviceLost("mesh GPU rebuild", error.what());
                     KEIRE_CORE_ERROR("Mesh GPU rebuild failed for id={} revision={}: {}", id.ToString(), revision,
                                      error.what());
                 }
@@ -574,6 +766,7 @@ namespace Keire::RenderBackend
                 }
                 catch (const std::exception& error)
                 {
+                    ThrowIfDeviceLost("texture GPU rebuild", error.what());
                     KEIRE_CORE_ERROR("Texture GPU rebuild failed for id={} revision={}: {}", id.ToString(), revision,
                                      error.what());
                 }
@@ -683,6 +876,7 @@ namespace Keire::RenderBackend
                 }
                 catch (const std::exception& error)
                 {
+                    ThrowIfDeviceLost("baked-lighting GPU rebuild", error.what());
                     KEIRE_CORE_ERROR("Baked-lighting GPU rebuild failed for id={} revision={}: {}", id.ToString(),
                                      revision, error.what());
                 }
@@ -783,6 +977,7 @@ namespace Keire::RenderBackend
                 }
                 catch (const std::exception& error)
                 {
+                    ThrowIfDeviceLost("shader GPU rebuild", error.what());
                     KEIRE_CORE_ERROR("Shader GPU rebuild failed for id={} revision={}: {}", id.ToString(), revision,
                                      error.what());
                 }
@@ -808,6 +1003,7 @@ namespace Keire::RenderBackend
             }
             catch (const std::exception& error)
             {
+                ThrowIfDeviceLost("shader pipeline creation", error.what());
                 KEIRE_CORE_ERROR("Shader pipeline creation failed for id={}: {}", id.ToString(), error.what());
                 return nullptr;
             }
@@ -1014,6 +1210,7 @@ namespace Keire::RenderBackend
         }
         catch (const std::exception& error)
         {
+            ThrowIfDeviceLost("material GPU binding rebuild", error.what());
             KEIRE_CORE_ERROR("Material GPU binding rebuild failed for id={} revision={}: {}", id.ToString(),
                              cache.LoadedRevision, error.what());
         }

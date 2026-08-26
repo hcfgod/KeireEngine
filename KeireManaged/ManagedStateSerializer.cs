@@ -7,10 +7,15 @@ namespace Keire;
 
 internal static class ManagedStateSerializer
 {
+    private const int MaximumDocumentBytes = 16 * 1024 * 1024;
+    private const int MaximumFieldsPerType = 1_024;
+
     private sealed class StateDocument
     {
-        public int Version { get; set; } = 2;
+        public int Version { get; set; } = 3;
         public List<StateField> Fields { get; set; } = [];
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public JsonElement? ReferenceGraph { get; set; }
     }
 
     private sealed class StateField
@@ -19,6 +24,11 @@ internal static class ManagedStateSerializer
         public string Name { get; set; } = string.Empty;
         public string Type { get; set; } = string.Empty;
         public string[] Aliases { get; set; } = [];
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool ReferenceGraph { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReferenceGraphRoot { get; set; }
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         public JsonElement Value { get; set; }
     }
 
@@ -190,11 +200,12 @@ internal static class ManagedStateSerializer
         {
             IncludeFields = true,
             IgnoreReadOnlyProperties = true,
-            MaxDepth = 16,
+            MaxDepth = 32,
             PropertyNameCaseInsensitive = true,
             TypeInfoResolver = resolver,
             WriteIndented = false
         };
+        options.Converters.Add(new ManagedCanonicalDictionaryConverterFactory());
         options.Converters.Add(new EntityJsonConverter());
         options.Converters.Add(new ComponentJsonConverterFactory());
         options.Converters.Add(new AssetJsonConverterFactory());
@@ -206,7 +217,9 @@ internal static class ManagedStateSerializer
         ArgumentNullException.ThrowIfNull(behaviour);
         var document = Read(previousState);
         var retained = document.Fields.ToList();
+        MaterializeRetainedGraphRoots(document, retained);
         var allFields = SerializableFields(behaviour.GetType(), true).ToArray();
+        var graphRoots = new List<ManagedReferenceGraphCodec.CaptureRoot>();
         if (!includeReloadOnly)
         {
             foreach (var reloadOnly in allFields.Where(field =>
@@ -217,13 +230,44 @@ internal static class ManagedStateSerializer
         foreach (var field in allFields.Where(field => IsSerializable(field, includeReloadOnly)))
         {
             var descriptor = Describe(field);
-            descriptor.Value = JsonSerializer.SerializeToElement(field.GetValue(behaviour), field.FieldType, Options);
+            object? value = field.GetValue(behaviour);
+            string path = $"{field.DeclaringType?.FullName}.{field.Name}";
+            descriptor.ReferenceGraph = field.IsDefined(typeof(SerializeReferenceAttribute), true);
+            if (descriptor.ReferenceGraph)
+            {
+                string rootKey = GraphRootKey(field, descriptor);
+                descriptor.ReferenceGraphRoot = rootKey;
+                graphRoots.Add(new ManagedReferenceGraphCodec.CaptureRoot(
+                    rootKey, value, field.FieldType, path,
+                    behaviour.GetType().FullName ?? behaviour.GetType().Name, field.Name));
+            }
+            else
+            {
+                try
+                {
+                    ManagedObjectSerializer.ValidateSerializableValue(value, field.FieldType, path);
+                    descriptor.Value = JsonSerializer.SerializeToElement(value, field.FieldType, Options);
+                }
+                catch (ManagedSerializationException exception)
+                {
+                    throw exception.WithContext("capture", behaviour.GetType().FullName ?? behaviour.GetType().Name,
+                                                field.Name);
+                }
+            }
             RemoveCapturedFields(retained, descriptor);
             retained.Add(descriptor);
         }
+        document.Version = 3;
         document.Fields = retained.OrderBy(field => field.StableId, StringComparer.Ordinal)
             .ThenBy(field => field.Name, StringComparer.Ordinal).ToList();
-        return JsonSerializer.Serialize(document, Options);
+        document.ReferenceGraph = graphRoots.Count == 0
+            ? null
+            : ManagedReferenceGraphCodec.CaptureRoots(graphRoots, Options);
+        string result = JsonSerializer.Serialize(document, Options);
+        if (System.Text.Encoding.UTF8.GetByteCount(result) > MaximumDocumentBytes)
+            throw new InvalidOperationException(
+                $"Managed state documents cannot exceed {MaximumDocumentBytes} bytes.");
+        return result;
     }
 
     public static string Restore(Behaviour behaviour, string state, bool includeReloadOnly)
@@ -231,6 +275,8 @@ internal static class ManagedStateSerializer
         ArgumentNullException.ThrowIfNull(behaviour);
         var document = Read(state);
         var warnings = new List<string>();
+        var prepared = new List<(FieldInfo Field, object? Value, string Path, bool Fallback)>();
+        var matched = new List<(FieldInfo Field, StateField Source, string Path, bool Fallback)>();
         ulong previousWorld = s_restoreWorld;
         s_restoreWorld = behaviour.Entity?.World ?? 0;
         try
@@ -241,16 +287,90 @@ internal static class ManagedStateSerializer
                 var source = Find(document.Fields, descriptor, out var fallback);
                 if (source is null)
                     continue;
+                string path = $"{field.DeclaringType?.FullName}.{field.Name}";
+                matched.Add((field, source, path, fallback));
+            }
+
+            var shared = matched.Where(candidate => !string.IsNullOrWhiteSpace(candidate.Source.ReferenceGraphRoot))
+                .ToArray();
+            IReadOnlyDictionary<string, object?> sharedValues = new Dictionary<string, object?>();
+            if (shared.Length != 0)
+            {
+                if (document.ReferenceGraph is null)
+                {
+                    throw new ManagedSerializationException(
+                        "KEIRE-MANAGED-SERIALIZATION-0003", shared[0].Path, shared[0].Field.FieldType, null,
+                        "the shared reference graph object table is missing", phase: "validate",
+                        owner: behaviour.GetType().FullName ?? behaviour.GetType().Name,
+                        rootField: shared[0].Field.Name);
+                }
+                var roots = new List<ManagedReferenceGraphCodec.RestoreRoot>(shared.Length);
+                foreach (var candidate in shared)
+                {
+                    if (!candidate.Source.ReferenceGraph ||
+                        !candidate.Field.IsDefined(typeof(SerializeReferenceAttribute), true))
+                    {
+                        throw new ManagedSerializationException(
+                            "KEIRE-MANAGED-SERIALIZATION-0003", candidate.Path, candidate.Field.FieldType, null,
+                            "shared reference-graph data requires SerializeReference on the destination field",
+                            phase: "validate", owner: behaviour.GetType().FullName ?? behaviour.GetType().Name,
+                            rootField: candidate.Field.Name);
+                    }
+                    roots.Add(new ManagedReferenceGraphCodec.RestoreRoot(
+                        candidate.Source.ReferenceGraphRoot!, candidate.Field.FieldType, candidate.Path,
+                        behaviour.GetType().FullName ?? behaviour.GetType().Name, candidate.Field.Name));
+                }
+                sharedValues = ManagedReferenceGraphCodec.RestoreRoots(document.ReferenceGraph.Value, roots, Options);
+            }
+
+            foreach (var candidate in matched)
+            {
+                var field = candidate.Field;
+                var source = candidate.Source;
                 try
                 {
-                    field.SetValue(behaviour, source.Value.Deserialize(field.FieldType, Options));
-                    if (fallback)
-                        warnings.Add($"{field.DeclaringType?.FullName}.{field.Name} restored through a rename fallback.");
+                    bool expectsGraph = field.IsDefined(typeof(SerializeReferenceAttribute), true);
+                    if (source.ReferenceGraph && !expectsGraph)
+                    {
+                        throw new ManagedSerializationException(
+                            "KEIRE-MANAGED-SERIALIZATION-0003", candidate.Path, field.FieldType, null,
+                            "serialized reference-graph data requires SerializeReference on the destination field",
+                            phase: "validate", owner: behaviour.GetType().FullName ?? behaviour.GetType().Name,
+                            rootField: field.Name);
+                    }
+                    object? restored;
+                    if (!string.IsNullOrWhiteSpace(source.ReferenceGraphRoot))
+                    {
+                        restored = sharedValues[source.ReferenceGraphRoot!];
+                    }
+                    else
+                    {
+                        JsonElement value = source.Value.ValueKind == JsonValueKind.Undefined
+                            ? throw new ManagedSerializationException(
+                                "KEIRE-MANAGED-SERIALIZATION-0003", candidate.Path, field.FieldType, null,
+                                "the serialized field value is missing", phase: "validate",
+                                owner: behaviour.GetType().FullName ?? behaviour.GetType().Name,
+                                rootField: field.Name)
+                            : source.Value;
+                        restored = source.ReferenceGraph
+                            ? ManagedReferenceGraphCodec.Restore(value, field.FieldType, candidate.Path, Options)
+                            : value.Deserialize(field.FieldType, Options);
+                    }
+                    if (!expectsGraph)
+                        ManagedObjectSerializer.ValidateSerializableValue(restored, field.FieldType, candidate.Path);
+                    prepared.Add((field, restored, candidate.Path, candidate.Fallback));
                 }
-                catch (Exception exception) when (exception is JsonException or ArgumentException or InvalidOperationException)
+                catch (ManagedSerializationException exception)
+                {
+                    throw exception.WithContext(exception.Phase,
+                                                behaviour.GetType().FullName ?? behaviour.GetType().Name, field.Name);
+                }
+                catch (Exception exception) when (exception is JsonException or ArgumentException or
+                                                  InvalidOperationException or NotSupportedException)
                 {
                     throw new InvalidOperationException(
-                        $"Managed field '{field.DeclaringType?.FullName}.{field.Name}' could not migrate from '{source.Type}'.",
+                        $"Managed field '{field.DeclaringType?.FullName}.{field.Name}' could not migrate from " +
+                        $"'{source.Type}'.",
                         exception);
                 }
             }
@@ -259,6 +379,39 @@ internal static class ManagedStateSerializer
         {
             s_restoreWorld = previousWorld;
         }
+
+        var applied = new List<(FieldInfo Field, object? Previous)>(prepared.Count);
+        try
+        {
+            foreach (var candidate in prepared)
+            {
+                object? previous = candidate.Field.GetValue(behaviour);
+                candidate.Field.SetValue(behaviour, candidate.Value);
+                applied.Add((candidate.Field, previous));
+                if (candidate.Fallback)
+                    warnings.Add($"{candidate.Path} restored through a rename fallback.");
+            }
+        }
+        catch (Exception exception)
+        {
+            for (int index = applied.Count - 1; index >= 0; --index)
+            {
+                try
+                {
+                    applied[index].Field.SetValue(behaviour, applied[index].Previous);
+                }
+                catch
+                {
+                    // Preserve the original assignment failure.
+                }
+            }
+            throw new ManagedSerializationException(
+                "KEIRE-MANAGED-SERIALIZATION-0004", behaviour.GetType().FullName ?? behaviour.GetType().Name,
+                behaviour.GetType(), behaviour.GetType(),
+                "the transactional state commit failed and previous field values were restored", exception,
+                phase: "commit", owner: behaviour.GetType().FullName ?? behaviour.GetType().Name,
+                rootField: prepared.FirstOrDefault().Field?.Name ?? behaviour.GetType().Name);
+        }
         return string.Join(Environment.NewLine, warnings);
     }
 
@@ -266,12 +419,26 @@ internal static class ManagedStateSerializer
     {
         if (string.IsNullOrWhiteSpace(state))
             return new StateDocument();
-        return JsonSerializer.Deserialize<StateDocument>(state, Options) ??
-               throw new InvalidOperationException("Managed state document is empty.");
+        if (System.Text.Encoding.UTF8.GetByteCount(state) > MaximumDocumentBytes)
+            throw new InvalidOperationException(
+                $"Managed state documents cannot exceed {MaximumDocumentBytes} bytes.");
+        StateDocument result = JsonSerializer.Deserialize<StateDocument>(state, Options) ??
+                               throw new InvalidOperationException("Managed state document is empty.");
+        if (result.Version is < 1 or > 3)
+            throw new InvalidOperationException($"Managed state version {result.Version} is unsupported.");
+        foreach (StateField field in result.Fields)
+        {
+            if (string.IsNullOrWhiteSpace(field.ReferenceGraphRoot))
+                field.ReferenceGraphRoot = null;
+        }
+        return result;
     }
 
-    private static IEnumerable<FieldInfo> SerializableFields(Type type, bool includeReloadOnly)
+    internal static void ValidateFieldLimitForTests(Type type) => _ = SerializableFields(type, true);
+
+    private static FieldInfo[] SerializableFields(Type type, bool includeReloadOnly)
     {
+        var result = new List<FieldInfo>();
         for (var current = type; current is not null && current != typeof(Behaviour); current = current.BaseType)
         {
             foreach (var field in current.GetFields(BindingFlags.Instance | BindingFlags.Public |
@@ -280,13 +447,26 @@ internal static class ManagedStateSerializer
                 if (field.IsStatic || field.IsInitOnly || field.IsDefined(typeof(NonSerializedAttribute), false))
                     continue;
                 if (IsSerializable(field, includeReloadOnly))
-                    yield return field;
+                {
+                    if (result.Count >= MaximumFieldsPerType)
+                    {
+                        string owner = type.FullName ?? type.Name;
+                        throw new ManagedSerializationException(
+                            "KEIRE-MANAGED-SERIALIZATION-0001",
+                            $"{field.DeclaringType?.FullName ?? owner}.{field.Name}", field.FieldType, null,
+                            $"serialized types cannot exceed {MaximumFieldsPerType} serialized fields",
+                            phase: "validate", owner: owner, rootField: field.Name);
+                    }
+                    result.Add(field);
+                }
             }
         }
+        return result.ToArray();
     }
 
     private static bool IsSerializable(FieldInfo field, bool includeReloadOnly) =>
         field.IsPublic || field.IsDefined(typeof(SerializeFieldAttribute), true) ||
+        field.IsDefined(typeof(SerializeReferenceAttribute), true) ||
         (includeReloadOnly && field.IsDefined(typeof(HotReloadStateAttribute), true));
 
     private static StateField Describe(FieldInfo field) => new()
@@ -296,6 +476,25 @@ internal static class ManagedStateSerializer
         Type = field.FieldType.AssemblyQualifiedName ?? field.FieldType.FullName ?? field.FieldType.Name,
         Aliases = field.GetCustomAttributes<FormerlySerializedAsAttribute>().Select(attribute => attribute.Name).ToArray()
     };
+
+    private static string GraphRootKey(FieldInfo field, StateField descriptor) =>
+        !string.IsNullOrWhiteSpace(descriptor.StableId)
+            ? $"id:{descriptor.StableId.ToLowerInvariant()}"
+            : $"field:{field.DeclaringType?.FullName ?? field.DeclaringType?.Name}.{field.Name}";
+
+    private static void MaterializeRetainedGraphRoots(StateDocument document, List<StateField> retained)
+    {
+        if (document.ReferenceGraph is null)
+            return;
+        foreach (StateField field in retained.Where(field => field.ReferenceGraph &&
+                                                       !string.IsNullOrWhiteSpace(field.ReferenceGraphRoot)))
+        {
+            field.Value = ManagedReferenceGraphCodec.ExtractRoot(
+                document.ReferenceGraph.Value, field.ReferenceGraphRoot!, typeof(object), field.Name, Options);
+            field.ReferenceGraphRoot = null;
+        }
+        document.ReferenceGraph = null;
+    }
 
     private static void RemoveCapturedFields(List<StateField> fields, StateField target)
     {

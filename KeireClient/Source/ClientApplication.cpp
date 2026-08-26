@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireHubRuntimeInternal/InstallTransactionInternal.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireProjectModules/SourceModulePack.h"
 
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -25,6 +27,12 @@ namespace
         Keire::ApplicationCommandLineOption{"--smoke-ui", "Render several UI frames and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-project", "Open a project, render several frames, and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-play", "Open the startup scene, enter Play, and exit."},
+        Keire::ApplicationCommandLineOption{"--smoke-play-output <path>",
+                                            "Write the rendered Play Mode validation result as JSON."},
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        Keire::ApplicationCommandLineOption{"--smoke-play-device-loss",
+                                            "Inject device loss during rendered Play Mode validation."},
+#endif
     };
 
     [[nodiscard]] std::filesystem::path ResolveManagedApiAssembly(const std::filesystem::path& executable,
@@ -100,13 +108,41 @@ namespace
         std::filesystem::path ExecutablePath;
         std::filesystem::path ConfigurationPath = "Config/Client.json";
         std::filesystem::path ProjectPath;
+        std::filesystem::path SmokePlayOutput;
         bool ConfigurationExplicit = false;
         bool SmokeWindow = false;
         bool SmokeWorkspace = false;
         bool SmokeUi = false;
         bool SmokeProject = false;
         bool SmokePlay = false;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        bool SmokePlayDeviceLoss = false;
+#endif
     };
+
+    std::optional<int> HandleClientCommandWithoutApplication(const Keire::ApplicationCommandLineArguments& arguments)
+    {
+        constexpr std::string_view command = "--verify-installation";
+        if (arguments.Size() == 2 && arguments[1] == command)
+        {
+            const auto executable =
+                std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments.Executable())).lexically_normal();
+            const auto root = executable.parent_path().parent_path();
+            auto verified = KeireHub::Detail::ReadInstallerPackageManifest(root, KeireHub::InstallProduct::Editor);
+            if (!verified)
+            {
+                throw std::runtime_error("Editor installation verification failed: " + verified.Error().Message + " " +
+                                         verified.Error().AffectedItem + " " + verified.Error().TechnicalDetails);
+            }
+            return 0;
+        }
+        for (std::size_t index = 1; index < arguments.Size(); ++index)
+        {
+            if (arguments[index] == command)
+                throw Keire::CommandLineError("--verify-installation must be used alone.");
+        }
+        return std::nullopt;
+    }
 
     CommandLine ParseCommandLine(const Keire::ApplicationCommandLineArguments& arguments)
     {
@@ -135,6 +171,18 @@ namespace
             {
                 result.SmokePlay = true;
             }
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            else if (argument == "--smoke-play-device-loss")
+            {
+                result.SmokePlayDeviceLoss = true;
+            }
+#endif
+            else if (argument == "--smoke-play-output")
+            {
+                if (++index >= arguments.Size())
+                    throw Keire::CommandLineError("--smoke-play-output requires a path.");
+                result.SmokePlayOutput = Keire::Detail::PathFromUtf8(arguments[index]);
+            }
             else if (argument == "--config")
             {
                 if (++index >= arguments.Size())
@@ -159,6 +207,12 @@ namespace
                                 static_cast<unsigned>(result.SmokeProject) + static_cast<unsigned>(result.SmokePlay);
         if (smokeModes > 1)
             throw Keire::CommandLineError("Smoke modes are mutually exclusive.");
+        if (!result.SmokePlayOutput.empty() && !result.SmokePlay)
+            throw Keire::CommandLineError("--smoke-play-output requires --smoke-play.");
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        if (result.SmokePlayDeviceLoss && !result.SmokePlay)
+            throw Keire::CommandLineError("--smoke-play-device-loss requires --smoke-play.");
+#endif
         if (!result.SmokeWindow && !result.SmokeWorkspace && !result.SmokeUi && result.ProjectPath.empty())
             throw Keire::CommandLineError("KeireClient requires --project <path>; launch the Kéire Project Hub.");
         return result;
@@ -338,11 +392,20 @@ namespace
                           const bool smokeWorkspace, const bool smokeUi, const bool smokeProject, const bool smokePlay,
                           std::filesystem::path windowPlacementPath,
                           std::optional<KeireEditor::EditorWindowPlacement> windowPlacement,
-                          std::filesystem::path executablePath)
+                          std::filesystem::path executablePath, std::filesystem::path smokePlayOutput
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                          ,
+                          const bool smokePlayDeviceLoss
+#endif
+                          )
             : Application(std::move(specification)), m_SmokeWindow(smokeWindow), m_SmokeWorkspace(smokeWorkspace),
               m_SmokeUi(smokeUi), m_SmokeProject(smokeProject), m_SmokePlay(smokePlay),
               m_WindowPlacementPath(std::move(windowPlacementPath)), m_WindowPlacement(windowPlacement),
-              m_ExecutablePath(std::move(executablePath))
+              m_ExecutablePath(std::move(executablePath)), m_SmokePlayOutput(std::move(smokePlayOutput))
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+              ,
+              m_SmokePlayDeviceLoss(smokePlayDeviceLoss)
+#endif
         {
         }
 
@@ -362,7 +425,12 @@ namespace
                         std::make_unique<EditorWindowPlacementLayer>(m_WindowPlacementPath, m_WindowPlacement));
                 (void)Layers().PushOverlay(std::make_unique<EditorWorkspaceLayer>(
                     m_SmokeWorkspace || m_SmokeUi || m_SmokeProject || m_SmokePlay, m_SmokeProject || m_SmokePlay,
-                    m_SmokePlay, m_ExecutablePath));
+                    m_SmokePlay, m_ExecutablePath, m_SmokePlayOutput
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    ,
+                    m_SmokePlayDeviceLoss
+#endif
+                    ));
             }
         }
 
@@ -375,6 +443,10 @@ namespace
         std::filesystem::path m_WindowPlacementPath;
         std::optional<KeireEditor::EditorWindowPlacement> m_WindowPlacement;
         std::filesystem::path m_ExecutablePath;
+        std::filesystem::path m_SmokePlayOutput;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        bool m_SmokePlayDeviceLoss = false;
+#endif
     };
 } // namespace
 
@@ -384,7 +456,7 @@ namespace Keire
     {
         return {"--project <path> [--config <path>] [--smoke-window | --smoke-workspace | --smoke-ui | "
                 "--smoke-project | --smoke-play]",
-                ClientCommandLineOptions};
+                ClientCommandLineOptions, HandleClientCommandWithoutApplication};
     }
 
     std::unique_ptr<Application> CreateApplication(const ApplicationCommandLineArguments& arguments)
@@ -476,6 +548,11 @@ namespace Keire
         return std::make_unique<ClientApplication>(
             std::move(specification), commandLine.SmokeWindow, commandLine.SmokeWorkspace, commandLine.SmokeUi,
             commandLine.SmokeProject, commandLine.SmokePlay, std::move(windowPlacementPath), windowPlacement,
-            commandLine.ExecutablePath);
+            commandLine.ExecutablePath, commandLine.SmokePlayOutput
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            ,
+            commandLine.SmokePlayDeviceLoss
+#endif
+        );
     }
 } // namespace Keire

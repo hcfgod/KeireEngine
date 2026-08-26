@@ -22,11 +22,12 @@ material is labeled as roadmap material and does not redefine the supported API 
 | Build rendering content | [Asset Pipeline](AssetPipeline.md) | [Rendering](Rendering.md), [Shaders and Materials](ShadersAndMaterials.md), [VFX](Vfx.md) |
 | Package a game or SDK | [Desktop Player Builds](PlayerBuilds.md) | [Package Archives](PackageArchives.md), [Testing and Release](TestingAndRelease.md) |
 | Investigate a diagnostic | [Structured Diagnostics](Diagnostics/README.md) | The matching `KEIRE-*` remediation page |
+| Collect support evidence | [Diagnostic Bundles](DiagnosticBundles.md) | Preview the sanitized local archive before sharing it manually |
 | Assess release maturity | [Production Readiness Review](ProductionReadinessReview.md) | [Performance Gates](PerformanceGates.md), [Maintainability](Maintainability.md) |
 
 ## Complete Guide Library
 
-All 81 published guides are listed below in the same groups used by the documentation website.
+All 82 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -135,6 +136,7 @@ All 81 published guides are listed below in the same groups used by the document
 | [Testing and Release](TestingAndRelease.md) | Test matrix, sanitizers, smoke modes, regression scripts, packages, and final handoff checks. |
 | [Package Archives](PackageArchives.md) | Deterministic archives, manifest validation, extraction safety, package identities, and publisher workflows. |
 | [Asset Packages and Project Package Manager](AssetPackages.md) | Deterministic project-content packages, registry mounts, selective imports, executable-code consent, and recovery. |
+| [Diagnostic Bundles](DiagnosticBundles.md) | Local collection, exact frozen preview, privacy redaction, section opt-outs, and atomic archive publication. |
 | [Marketplace Launch Runbook](MarketplaceLaunch.md) | Staging state, feature flags, ordered public-launch gates, and required go/no-go evidence. |
 | [Production Readiness Review](ProductionReadinessReview.md) | Evidence-based subsystem grades, known gaps, release blockers, and closure criteria. |
 | [Maintainability Boundaries](Maintainability.md) | First-party source budgets, exclusions, decomposition seams, and enforcement. |

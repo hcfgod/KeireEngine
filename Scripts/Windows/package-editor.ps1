@@ -16,12 +16,18 @@ $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
+$installWorkerTarget = "$($Project.PROJECT_NAMESPACE)InstallWorker"
 
 Invoke-CheckedWindowsCommand {
     & (Join-Path $PSScriptRoot "package.ps1") -Generator $Generator -Configuration Dist `
         -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate `
         -AllowDirty:$AllowDirty -StageOnly
 } "Dist editor package gate"
+Invoke-CheckedWindowsCommand {
+    & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration Dist `
+        -Architecture $Architecture -Toolset $Toolset -Target $installWorkerTarget -CI:$CI `
+        -Update:$Update -Generate:$Generate
+} "Install transaction worker build"
 
 $sdkName = "$($Project.ARTIFACT_PREFIX)-windows-$Architecture-Dist"
 $sdkStage = Join-Path $Root "Artifacts\$sdkName"
@@ -46,6 +52,17 @@ foreach ($directory in @("bin", "samples", "Docs")) {
 }
 Remove-Item -LiteralPath (Join-Path $stage "bin\$($Project.HUB_TARGET).exe"), `
     (Join-Path $stage "bin\$($Project.PROJECT_NAMESPACE)HubWorker.exe") -Force -ErrorAction SilentlyContinue
+$installWorkerSource = Join-Path $Root `
+    "Build\Bin\Dist-windows-$outputArchitecture\$installWorkerTarget\$installWorkerTarget.exe"
+if (-not (Test-Path -LiteralPath $installWorkerSource -PathType Leaf)) {
+    throw "The install transaction worker build output is missing: $installWorkerSource"
+}
+Copy-Item -LiteralPath $installWorkerSource -Destination (Join-Path $stage "bin") -Force
+$installWorkerText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes(
+        (Join-Path $stage "bin\$installWorkerTarget.exe")))
+if ($installWorkerText.Contains("KEIRE_INSTALL_WORKER_INTERRUPT_AFTER")) {
+    throw "The Dist install worker contains test-only fault injection."
+}
 New-Item -ItemType Directory -Force (Join-Path $stage "Config\Marketplace"), `
     (Join-Path $stage "third-party") | Out-Null
 Copy-Item -LiteralPath (Join-Path $sdkStage "Config\Client.json") -Destination (Join-Path $stage "Config")

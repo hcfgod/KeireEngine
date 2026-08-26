@@ -69,7 +69,7 @@ verified preview release.
   download worker and update handoff. The download site presents the formats independently.
 - Catalog and artifact integrity are verified, but the current Windows Hub EXE is not Authenticode-signed and the RPM
   is not GPG-signed. Those facts are disclosed on the download surface and remain production-signing gaps.
-- The canonical documentation inventory contains 81 guides. Source validation checks inventory, authorities, local
+- The canonical documentation inventory contains 82 guides. Source validation checks inventory, authorities, local
   links/fragments, schema statements, release/platform claims, and the generated site.
 - The final Windows Debug source audit passed 738 Core tests/51,821 assertions, 199 Editor tests/2,696 assertions, 372
   Hub tests/3,808 assertions, the full Client compile gate, managed production API checks, 10 distribution-service
@@ -79,7 +79,7 @@ verified preview release.
   dynamic-buffer reallocations.
 - The website audit covers the unified Astro platform plus its static migration fallback. Navigation labels, heading
   hierarchy, social metadata, Windows/Linux roadmap status, automatic Marketplace publication language, readiness
-  dates, and all 81 fallback guide counts now agree with their authorities.
+  dates, and all 82 fallback guide counts now agree with their authorities.
 
 ## Executive Assessment
 

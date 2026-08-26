@@ -1,0 +1,462 @@
+#include "KeireRuntimeInternal/RuntimeAdditiveValidation.h"
+
+#include "Keire/Core.h"
+
+#include "KeireInternal/FileSystem.h"
+#include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/WindowInternal.h"
+
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_mouse.h>
+#include <SDL3/SDL_video.h>
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+
+namespace KeireRuntime
+{
+    void ParseRuntimeAdditiveValidationOption(const Keire::ApplicationCommandLineArguments& arguments,
+                                              std::size_t& index, std::filesystem::path& output)
+    {
+        if (++index >= arguments.Size())
+            throw Keire::CommandLineError("--validate-additive-runtime requires an output path.");
+        output = std::filesystem::absolute(Keire::Detail::PathFromUtf8(arguments[index])).lexically_normal();
+    }
+
+    std::vector<Keire::AssetId> ParseRuntimeValidationScenes(const nlohmann::json& manifest,
+                                                             const Keire::AssetId startupScene)
+    {
+        const auto scenes = manifest.find("buildScenes");
+        if (scenes == manifest.end())
+            return {startupScene};
+        if (!scenes->is_array() || scenes->empty() || scenes->size() > 1024U)
+            throw Keire::CommandLineError("Runtime manifest buildScenes must be a non-empty bounded array.");
+        std::vector<Keire::AssetId> result;
+        result.reserve(scenes->size());
+        for (const auto& encoded : *scenes)
+        {
+            const auto scene = Keire::AssetId::Parse(encoded.get<std::string>());
+            if (std::ranges::find(result, scene) != result.end())
+                throw Keire::CommandLineError("Runtime manifest buildScenes contains a duplicate scene.");
+            result.push_back(scene);
+        }
+        if (result.front() != startupScene)
+            throw Keire::CommandLineError("Runtime manifest startupScene must be the first enabled build scene.");
+        return result;
+    }
+
+    std::vector<Keire::AssetId> SelectRuntimeValidationScenes(const std::filesystem::path& output,
+                                                              const std::span<const Keire::AssetId> buildScenes)
+    {
+        if (output.empty())
+            return {};
+        if (buildScenes.size() < 3U)
+            throw Keire::CommandLineError("Additive runtime validation requires three enabled cooked build scenes.");
+        return {buildScenes.begin(), buildScenes.end()};
+    }
+
+    class RuntimeAdditiveValidation::Impl final
+    {
+      public:
+        enum class Phase : std::uint8_t
+        {
+            Disabled,
+            StartAdditiveLoad,
+            WaitForAdditiveLoad,
+            ObserveTwoScenes,
+            StartNoPresentationLoad,
+            WaitForNoPresentationLoad,
+            ObserveThreeScenes,
+            StartUnload,
+            WaitForUnload,
+            ObserveUnload,
+            StartReload,
+            WaitForReload,
+            WaitForActiveReload,
+            WaitForInput,
+            StartFailedLoad,
+            WaitForFailedLoad,
+            ObserveFinalFrame,
+            Complete
+        };
+
+        Impl(std::filesystem::path output, std::vector<Keire::AssetId> buildScenes
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+             ,
+             const bool validateDeviceLoss
+#endif
+             )
+            : Output(std::move(output)), BuildScenes(std::move(buildScenes)),
+              Current(Output.empty() ? Phase::Disabled : Phase::StartAdditiveLoad)
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+              ,
+              ValidateDeviceLoss(validateDeviceLoss)
+#endif
+        {
+            if (Current != Phase::Disabled && BuildScenes.size() < 3U)
+                throw std::invalid_argument("Additive runtime validation requires at least three cooked build scenes.");
+        }
+
+        [[nodiscard]] static Keire::EntityId AddValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session,
+                                                                 const std::string& name, const float width,
+                                                                 const float height)
+        {
+            if (!session || !session->RuntimeScene() || !session->Presentation())
+                throw std::runtime_error("Additive runtime validation requires a presentation-backed session.");
+            auto canvas = session->RuntimeScene()->CreateEntity(name + " Canvas");
+            const auto canvasComponent = canvas.AddComponent<Keire::CanvasComponent>();
+            if (!canvasComponent)
+                throw std::runtime_error("Additive runtime validation could not create its Canvas.");
+            canvasComponent->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
+            auto button = session->RuntimeScene()->CreateEntity(name + " Button", canvas);
+            const auto rect = button.AddComponent<Keire::RectTransformComponent>();
+            if (!rect || !button.AddComponent<Keire::UiButtonComponent>())
+                throw std::runtime_error("Additive runtime validation could not create its Button.");
+            rect->SetAnchorMinimum({});
+            rect->SetAnchorMaximum({});
+            rect->SetPivot({});
+            rect->SetAnchoredPosition({24.0F, 24.0F});
+            rect->SetSizeDelta({120.0F, 48.0F});
+            session->Presentation()->Synchronize(session->RuntimeScene(), width, height, true);
+            return button.Id();
+        }
+
+        [[nodiscard]] static std::size_t PresentationCount(const Keire::Ref<Keire::SceneRuntimeWorld>& world)
+        {
+            return static_cast<std::size_t>(std::ranges::count_if(world->Sessions(), [](const auto& session)
+                                                                  { return session && session->Presentation(); }));
+        }
+
+        static void RequireOrder(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                                 const std::vector<Keire::SceneHandle>& expected)
+        {
+            if (world->LoadedScenes() != expected)
+                throw std::runtime_error("Additive runtime validation observed a non-deterministic session order.");
+        }
+
+        void PushClick(Keire::Application& application, const float pixelX, const float pixelY)
+        {
+            const auto logical = application.MainWindow()->LogicalSize();
+            const auto pixels = application.MainWindow()->PixelSize();
+            const float scaleX = logical.Width == 0U ? 1.0F : static_cast<float>(pixels.Width) / logical.Width;
+            const float scaleY = logical.Height == 0U ? 1.0F : static_cast<float>(pixels.Height) / logical.Height;
+            const auto native =
+                Keire::WindowSystemInternalAccess::NativeWindow(*application.Windows(), application.MainWindow()->Id());
+            if (!native)
+                throw std::runtime_error("Additive runtime validation could not resolve the runtime window.");
+            const auto windowId = SDL_GetWindowID(native);
+            const auto x = pixelX / scaleX;
+            const auto y = pixelY / scaleY;
+            SDL_Event motion{};
+            motion.type = SDL_EVENT_MOUSE_MOTION;
+            motion.motion.windowID = windowId;
+            motion.motion.x = x;
+            motion.motion.y = y;
+            if (!SDL_PushEvent(&motion))
+                throw std::runtime_error("Additive runtime validation could not queue pointer motion.");
+
+            for (const auto type : {SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_EVENT_MOUSE_BUTTON_UP})
+            {
+                SDL_Event button{};
+                button.type = type;
+                button.button.windowID = windowId;
+                button.button.button = SDL_BUTTON_LEFT;
+                button.button.x = x;
+                button.button.y = y;
+                if (!SDL_PushEvent(&button))
+                    throw std::runtime_error("Additive runtime validation could not queue a pointer button event.");
+            }
+        }
+
+        void Update(Keire::Application& application, const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                    const float width, const float height)
+        {
+            if (Current == Phase::Disabled || Current == Phase::Complete)
+                return;
+            const auto sessions = world->Sessions();
+            switch (Current)
+            {
+            case Phase::StartAdditiveLoad:
+                if (sessions.size() != 1U)
+                    throw std::runtime_error("Additive runtime validation expected exactly one startup session.");
+                First = world->Active();
+                AddValidationButton(sessions.front(), "Validation startup", width, height);
+                AdditiveLoad = world->Load(BuildScenes[1], Keire::SceneLoadMode::Additive);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                if (ValidateDeviceLoss)
+                {
+                    Keire::RenderSystemInternalAccess::InjectDeviceLoss(*application.Renderer());
+                    DeviceLossInjectedDuringLoading = true;
+                }
+#endif
+                Current = Phase::WaitForAdditiveLoad;
+                break;
+            case Phase::WaitForAdditiveLoad:
+                if (AdditiveLoad->State() == Keire::SceneLoadState::Failed)
+                    throw std::runtime_error("Additive cooked-scene load failed: " +
+                                             AdditiveLoad->Diagnostic().Message);
+                if (AdditiveLoad->State() == Keire::SceneLoadState::Ready)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    if (ValidateDeviceLoss)
+                    {
+                        const auto diagnostic = application.Renderer()->LastDeviceLoss();
+                        if (!diagnostic || !diagnostic->RecoverySucceeded)
+                            return;
+                        RecoveredDeviceLoss = *diagnostic;
+                    }
+#endif
+                    Second = AdditiveLoad->Result();
+                    RequireOrder(world, {First, Second});
+                    SecondButton = AddValidationButton(world->Session(Second), "Validation additive", width, height);
+                    if (PresentationCount(world) != 2U)
+                        throw std::runtime_error("Additive runtime validation did not create two presentation trees.");
+                    Current = Phase::ObserveTwoScenes;
+                }
+                break;
+            case Phase::StartNoPresentationLoad:
+                NoPresentationLoad = application.Scenes()->Load(BuildScenes[2], Keire::SceneLoadMode::Additive);
+                Current = Phase::WaitForNoPresentationLoad;
+                break;
+            case Phase::WaitForNoPresentationLoad:
+                if (NoPresentationLoad->State() == Keire::SceneLoadState::Failed)
+                    throw std::runtime_error("No-presentation cooked-scene load failed: " +
+                                             NoPresentationLoad->Diagnostic().Message);
+                if (NoPresentationLoad->State() == Keire::SceneLoadState::Ready)
+                {
+                    NoPresentationSession = Keire::CreateRef<Keire::SceneRuntimeSession>(NoPresentationLoad->Result());
+                    NoPresentationSession->Play();
+                    if (NoPresentationSession->State() != Keire::ScenePlayState::Playing ||
+                        NoPresentationSession->Presentation())
+                    {
+                        throw std::runtime_error("No-presentation runtime session did not preserve its contract.");
+                    }
+                    Third = world->Adopt(NoPresentationSession);
+                    RequireOrder(world, {First, Second, Third});
+                    Current = Phase::ObserveThreeScenes;
+                }
+                break;
+            case Phase::StartUnload:
+                if (!world->Unload(Second))
+                    throw std::runtime_error("Additive runtime validation could not queue scene unload.");
+                Current = Phase::WaitForUnload;
+                break;
+            case Phase::WaitForUnload:
+                if (!world->IsLoaded(Second))
+                {
+                    RequireOrder(world, {First, Third});
+                    Current = Phase::ObserveUnload;
+                }
+                break;
+            case Phase::StartReload:
+                Reload = world->Load(BuildScenes[1], Keire::SceneLoadMode::Additive);
+                Current = Phase::WaitForReload;
+                break;
+            case Phase::WaitForReload:
+                if (Reload->State() == Keire::SceneLoadState::Failed)
+                    throw std::runtime_error("Additive cooked-scene reload failed: " + Reload->Diagnostic().Message);
+                if (Reload->State() == Keire::SceneLoadState::Ready)
+                {
+                    Second = Reload->Result();
+                    RequireOrder(world, {First, Third, Second});
+                    SecondButton = AddValidationButton(world->Session(Second), "Validation reloaded", width, height);
+                    if (!world->SetActive(Second))
+                        throw std::runtime_error("Additive runtime validation could not select the reloaded session.");
+                    Current = Phase::WaitForActiveReload;
+                }
+                break;
+            case Phase::WaitForActiveReload:
+                if (world->Active() == Second)
+                {
+                    PushClick(application, 40.0F, 40.0F);
+                    Current = Phase::WaitForInput;
+                }
+                break;
+            case Phase::WaitForInput:
+                if (world->Session(Second)->Presentation()->ConsumeClick(SecondButton))
+                {
+                    InputHandled = true;
+                    Current = Phase::StartFailedLoad;
+                }
+                break;
+            case Phase::StartFailedLoad:
+                BeforeFailedLoad = world->LoadedScenes();
+                FailedLoad = world->Load(Keire::AssetId::Parse("11111111-1111-4111-8111-111111111111"),
+                                         Keire::SceneLoadMode::Additive);
+                Current = Phase::WaitForFailedLoad;
+                break;
+            case Phase::WaitForFailedLoad:
+                if (FailedLoad->State() == Keire::SceneLoadState::Ready)
+                    throw std::runtime_error("Missing cooked scene unexpectedly loaded during rollback validation.");
+                if (FailedLoad->State() == Keire::SceneLoadState::Failed)
+                {
+                    FailedLoadPreserved = world->LoadedScenes() == BeforeFailedLoad;
+                    if (!FailedLoadPreserved)
+                        throw std::runtime_error("Failed additive load changed the previous valid runtime world.");
+                    Current = Phase::ObserveFinalFrame;
+                }
+                break;
+            case Phase::ObserveTwoScenes:
+            case Phase::ObserveThreeScenes:
+            case Phase::ObserveUnload:
+            case Phase::ObserveFinalFrame:
+            case Phase::Disabled:
+            case Phase::Complete:
+                break;
+            }
+        }
+
+        void ObserveSubmission(Keire::Application& application, const Keire::Ref<Keire::RenderSystem>& renderer,
+                               const Keire::Ref<Keire::RenderSurface>& surface)
+        {
+            if (!renderer || !surface)
+                throw std::runtime_error("Additive runtime validation cannot observe an unavailable renderer surface.");
+            const auto contributions = Keire::RenderSystemInternalAccess::SceneContributionCount(*renderer, *surface);
+            const auto uiCommands = Keire::RenderSystemInternalAccess::RuntimeUiCommandCount(*renderer);
+            const auto requireSubmission =
+                [&](const std::size_t expectedContributions, const std::size_t expectedPresentations)
+            {
+                if (contributions != expectedContributions || uiCommands < expectedPresentations)
+                    throw std::runtime_error("Additive runtime validation observed an incomplete render submission.");
+            };
+            switch (Current)
+            {
+            case Phase::ObserveTwoScenes:
+                requireSubmission(2U, 2U);
+                TwoSceneUiCommands = uiCommands;
+                Current = Phase::StartNoPresentationLoad;
+                break;
+            case Phase::ObserveThreeScenes:
+                requireSubmission(3U, 2U);
+                ThreeSceneUiCommands = uiCommands;
+                Current = Phase::StartUnload;
+                break;
+            case Phase::ObserveUnload:
+                requireSubmission(2U, 1U);
+                Current = Phase::StartReload;
+                break;
+            case Phase::ObserveFinalFrame:
+            {
+                requireSubmission(3U, 2U);
+                if (!InputHandled || !FailedLoadPreserved)
+                    throw std::runtime_error("Additive runtime validation did not complete input and rollback checks.");
+                const auto build = Keire::GetBuildInfo();
+                auto result = nlohmann::json{{"schemaVersion", 1},
+                                             {"status", "passed"},
+                                             {"build",
+                                              {{"gitCommit", std::string(build.GitCommit)},
+                                               {"configuration", std::string(build.Configuration)},
+                                               {"dirty", build.Dirty}}},
+                                             {"twoSceneContributions", 2},
+                                             {"threeSceneContributions", 3},
+                                             {"twoSceneUiCommands", TwoSceneUiCommands},
+                                             {"threeSceneUiCommands", ThreeSceneUiCommands},
+                                             {"noPresentationSession", true},
+                                             {"unloadReloadOrder", true},
+                                             {"inputHandledByActiveTopmostPresentation", true},
+                                             {"failedLoadPreservedWorld", true}};
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                if (ValidateDeviceLoss)
+                {
+                    const auto timelines = renderer->RecentFrameTimelines();
+                    const auto retries =
+                        std::ranges::count(timelines, true, &Keire::RenderFrameTimeline::RetriedAfterDeviceLoss);
+                    if (!DeviceLossInjectedDuringLoading || !RecoveredDeviceLoss || retries != 1U ||
+                        Keire::RenderSystemInternalAccess::LostGenerationGpuCleanupCallCount(*renderer) != 0U ||
+                        Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer) == 0U)
+                    {
+                        throw std::runtime_error(
+                            "Cooked runtime device-loss validation did not recover and retry exactly once.");
+                    }
+                    result["deviceLoss"] = {
+                        {"duringLoading", true},
+                        {"recoverySucceeded", RecoveredDeviceLoss->RecoverySucceeded},
+                        {"operation", RecoveredDeviceLoss->Operation},
+                        {"backend", RecoveredDeviceLoss->Backend},
+                        {"adapter", RecoveredDeviceLoss->Adapter},
+                        {"recoveryAttempt", RecoveredDeviceLoss->RecoveryAttempt},
+                        {"oldGeneration", RecoveredDeviceLoss->DeviceGeneration},
+                        {"newGeneration", RecoveredDeviceLoss->RecoveredDeviceGeneration},
+                        {"retryCount", retries},
+                        {"lostGenerationGpuCleanupCalls", 0},
+                        {"continuedAfterRecovery", InputHandled && FailedLoadPreserved},
+                        {"retainedVfxSnapshots",
+                         Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer)}};
+                }
+#endif
+                Keire::Detail::WriteTextFileAtomically(Output, result.dump(2) + '\n');
+                Current = Phase::Complete;
+                application.RequestExit();
+                break;
+            }
+            default:
+                break;
+            }
+        }
+
+        std::filesystem::path Output;
+        std::vector<Keire::AssetId> BuildScenes;
+        Phase Current = Phase::Disabled;
+        Keire::Ref<Keire::SceneRuntimeLoadOperation> AdditiveLoad;
+        Keire::Ref<Keire::SceneLoadOperation> NoPresentationLoad;
+        Keire::Ref<Keire::SceneRuntimeLoadOperation> Reload;
+        Keire::Ref<Keire::SceneRuntimeLoadOperation> FailedLoad;
+        Keire::Ref<Keire::SceneRuntimeSession> NoPresentationSession;
+        Keire::SceneHandle First;
+        Keire::SceneHandle Second;
+        Keire::SceneHandle Third;
+        Keire::EntityId SecondButton;
+        std::vector<Keire::SceneHandle> BeforeFailedLoad;
+        std::size_t TwoSceneUiCommands = 0;
+        std::size_t ThreeSceneUiCommands = 0;
+        bool InputHandled = false;
+        bool FailedLoadPreserved = false;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        bool ValidateDeviceLoss = false;
+        bool DeviceLossInjectedDuringLoading = false;
+        std::optional<Keire::GpuDeviceLossDiagnostic> RecoveredDeviceLoss;
+#endif
+    };
+
+    RuntimeAdditiveValidation::RuntimeAdditiveValidation(std::filesystem::path output,
+                                                         std::vector<Keire::AssetId> buildScenes
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                                                         ,
+                                                         const bool validateDeviceLoss
+#endif
+                                                         )
+        : m_Impl(std::make_unique<Impl>(std::move(output), std::move(buildScenes)
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                                                               ,
+                                        validateDeviceLoss
+#endif
+                                        ))
+    {
+    }
+
+    RuntimeAdditiveValidation::~RuntimeAdditiveValidation() = default;
+
+    bool RuntimeAdditiveValidation::Enabled() const noexcept { return m_Impl->Current != Impl::Phase::Disabled; }
+
+    void RuntimeAdditiveValidation::Update(Keire::Application& application,
+                                           const Keire::Ref<Keire::SceneRuntimeWorld>& world, const float width,
+                                           const float height)
+    {
+        if (!world)
+            throw std::invalid_argument("Additive runtime validation requires a runtime world.");
+        m_Impl->Update(application, world, width, height);
+    }
+
+    void RuntimeAdditiveValidation::ObserveSubmission(Keire::Application& application,
+                                                      const Keire::Ref<Keire::RenderSystem>& renderer,
+                                                      const Keire::Ref<Keire::RenderSurface>& surface)
+    {
+        m_Impl->ObserveSubmission(application, renderer, surface);
+    }
+} // namespace KeireRuntime

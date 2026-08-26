@@ -1,5 +1,8 @@
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 
+#include "KeireClient/Editor/ManagedDataDocument.h"
+#include "KeireClient/Editor/ManagedReferenceGraphInspector.h"
+
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
@@ -10,6 +13,7 @@
 #include <limits>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -41,9 +45,11 @@ namespace KeireEditor
         Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> assets,
         const Keire::Ref<Keire::AssetSystem>& assetSystem, const Keire::Ref<Keire::Scene>& scene,
         AssetPicker& assetPicker, const std::span<const Keire::ManagedAssetTypeDescriptor> managedAssetTypes,
-        std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> resolveManagedType)
+        std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> resolveManagedType,
+        std::unordered_map<std::string, std::uint32_t>* managedGraphFocus)
         : m_Ui(ui), m_Assets(assets), m_AssetSystem(assetSystem), m_Scene(scene), m_AssetPicker(assetPicker),
-          m_ManagedAssetTypes(managedAssetTypes), m_ResolveManagedType(std::move(resolveManagedType))
+          m_ManagedAssetTypes(managedAssetTypes), m_ResolveManagedType(std::move(resolveManagedType)),
+          m_ManagedGraphFocus(managedGraphFocus)
     {
     }
 
@@ -360,6 +366,263 @@ namespace KeireEditor
             }
         }
         return Track(changed);
+    }
+
+    bool InspectorPropertyEditor::EditManagedReferenceGraph(const std::string_view label, std::string& value,
+                                                            const Keire::ManagedReferenceGraphDescriptor& descriptor)
+    {
+        auto graph = Keire::DecodeManagedReferenceGraph(value);
+        std::uint32_t transientFocus = 0;
+        auto& focusedObject =
+            m_ManagedGraphFocus ? (*m_ManagedGraphFocus)[descriptor.Root.StableFieldId.ToString()] : transientFocus;
+        const auto* graphEdits = m_BoundManagedGraphEdits ? m_BoundManagedGraphEdits : &m_ManagedGraphEdits;
+        ManagedReferenceGraphInspector inspector(m_Ui, focusedObject, graphEdits);
+        if (!inspector.Draw(label, graph, descriptor))
+            return false;
+        value = Keire::EncodeManagedReferenceGraph(graph);
+        return Track(true);
+    }
+
+    void InspectorPropertyEditor::SetManagedReferenceGraphEditController(
+        const ManagedReferenceGraphEditController* controller) noexcept
+    {
+        m_BoundManagedGraphEdits = controller;
+    }
+
+    bool InspectorPropertyEditor::EditManagedValue(const std::string_view label, std::string& value,
+                                                   const Keire::ManagedAssetPropertyDescriptor& descriptor)
+    {
+        auto decoded = Keire::DecodeManagedAssetValue(value, descriptor);
+        if (!DrawManagedValue(decoded, descriptor, label))
+            return false;
+        value = Keire::EncodeManagedAssetValue(decoded, descriptor);
+        return Track(true);
+    }
+
+    bool InspectorPropertyEditor::DrawManagedValue(Keire::ManagedAssetValueNode& value,
+                                                   const Keire::ManagedAssetPropertyDescriptor& descriptor,
+                                                   const std::string_view path)
+    {
+        constexpr std::size_t maximumCollectionEntries = 16'384;
+        const auto label = descriptor.DisplayName.empty() ? descriptor.Name : descriptor.DisplayName;
+        const bool nullable = descriptor.Kind == Keire::ManagedAssetPropertyKind::Text ||
+                              descriptor.Kind == Keire::ManagedAssetPropertyKind::SerializableObject ||
+                              descriptor.Kind == Keire::ManagedAssetPropertyKind::Array ||
+                              descriptor.Kind == Keire::ManagedAssetPropertyKind::List ||
+                              descriptor.Kind == Keire::ManagedAssetPropertyKind::Dictionary;
+        if (nullable && std::holds_alternative<std::monostate>(value.Value))
+        {
+            m_Ui.Text(label + ": Null");
+            if (!m_Ui.Button("Create value"))
+                return false;
+            value = ManagedDataDocument::MaterializedDefaultValue(descriptor);
+            return true;
+        }
+
+        bool changed = false;
+        switch (descriptor.Kind)
+        {
+        case Keire::ManagedAssetPropertyKind::Boolean:
+            changed = m_Ui.Checkbox(label, std::get<bool>(value.Value));
+            break;
+        case Keire::ManagedAssetPropertyKind::Integer:
+            if (descriptor.ManagedTypeName == "System.Char")
+            {
+                auto candidate = std::get<std::string>(value.Value);
+                if (m_Ui.InputText(label, candidate))
+                {
+                    if (candidate.size() != 1)
+                        throw std::invalid_argument("Managed character field '" + std::string(path) +
+                                                    "' requires exactly one character.");
+                    value.Value = std::move(candidate);
+                    changed = true;
+                }
+                break;
+            }
+            [[fallthrough]];
+        case Keire::ManagedAssetPropertyKind::Enum:
+        {
+            auto& integer = std::get<std::int64_t>(value.Value);
+            const auto minimum = descriptor.Minimum
+                                     ? std::optional<std::int64_t>(InspectorIntegerBound(*descriptor.Minimum))
+                                     : std::nullopt;
+            const auto maximum = descriptor.Maximum
+                                     ? std::optional<std::int64_t>(InspectorIntegerBound(*descriptor.Maximum))
+                                     : std::nullopt;
+            changed = descriptor.Slider ? m_Ui.SliderInteger(label, integer, *minimum, *maximum)
+                                        : m_Ui.DragInteger(label, integer, descriptor.Step, minimum, maximum);
+            break;
+        }
+        case Keire::ManagedAssetPropertyKind::UnsignedInteger:
+        {
+            const auto bound = [](const std::optional<double> candidate, const std::uint64_t fallback)
+            {
+                if (!candidate)
+                    return fallback;
+                return static_cast<std::uint64_t>(
+                    std::clamp(static_cast<long double>(*candidate), 0.0L,
+                               static_cast<long double>(std::numeric_limits<std::uint64_t>::max())));
+            };
+            auto& integer = std::get<std::uint64_t>(value.Value);
+            const auto minimum = bound(descriptor.Minimum, 0);
+            const auto maximum = bound(descriptor.Maximum, std::numeric_limits<std::uint64_t>::max());
+            changed = descriptor.Slider ? m_Ui.SliderUnsignedInteger(label, integer, minimum, maximum)
+                                        : m_Ui.DragUnsignedInteger(label, integer, descriptor.Step, minimum, maximum);
+            break;
+        }
+        case Keire::ManagedAssetPropertyKind::Scalar:
+        {
+            auto& scalar = std::get<double>(value.Value);
+            changed = descriptor.Slider
+                          ? m_Ui.SliderScalar(label, scalar, *descriptor.Minimum, *descriptor.Maximum)
+                          : m_Ui.DragScalar(label, scalar, descriptor.Step, descriptor.Minimum, descriptor.Maximum);
+            break;
+        }
+        case Keire::ManagedAssetPropertyKind::Text:
+            changed = descriptor.TextLines > 1
+                          ? m_Ui.InputTextMultiline(label, std::get<std::string>(value.Value), descriptor.TextLines)
+                          : m_Ui.InputText(label, std::get<std::string>(value.Value));
+            break;
+        case Keire::ManagedAssetPropertyKind::Vector2:
+            changed = m_Ui.DragVector2(label, std::get<Keire::Vector2>(value.Value));
+            break;
+        case Keire::ManagedAssetPropertyKind::Vector3:
+            changed = m_Ui.DragVector3(label, std::get<Keire::Vector3>(value.Value));
+            break;
+        case Keire::ManagedAssetPropertyKind::Vector4:
+            changed = m_Ui.DragVector4(label, std::get<Keire::Vector4>(value.Value));
+            break;
+        case Keire::ManagedAssetPropertyKind::Quaternion:
+            changed = m_Ui.DragQuaternion(label, std::get<Keire::Quaternion>(value.Value));
+            break;
+        case Keire::ManagedAssetPropertyKind::Color:
+        {
+            auto& color = std::get<Keire::Color>(value.Value);
+            Keire::UiColor candidate{color.Red, color.Green, color.Blue, color.Alpha};
+            if (m_Ui.ColorEdit(label, candidate))
+            {
+                color = {candidate.Red, candidate.Green, candidate.Blue, candidate.Alpha};
+                changed = true;
+            }
+            break;
+        }
+        case Keire::ManagedAssetPropertyKind::AssetReference:
+            changed =
+                EditAsset(label, std::get<Keire::AssetId>(value.Value), descriptor.ExpectedAssetType,
+                          descriptor.ExpectedManagedType ? descriptor.ExpectedManagedType->ToString() : std::string{});
+            break;
+        case Keire::ManagedAssetPropertyKind::SerializableObject:
+        {
+            const auto tree = m_Ui.BeginTreeNode(label);
+            if (tree)
+            {
+                for (std::size_t index = 0; index < descriptor.Children.size(); ++index)
+                {
+                    if (index >= value.Children.size())
+                        throw std::invalid_argument("Managed object field '" + std::string(path) +
+                                                    "' does not match its descriptor.");
+                    const auto id = m_Ui.PushId(descriptor.Children[index].StableFieldId.ToString());
+                    changed = DrawManagedValue(value.Children[index], descriptor.Children[index],
+                                               std::string(path) + "." + descriptor.Children[index].Name) ||
+                              changed;
+                }
+            }
+            break;
+        }
+        case Keire::ManagedAssetPropertyKind::Array:
+        case Keire::ManagedAssetPropertyKind::List:
+        {
+            if (descriptor.Children.size() != 1)
+                throw std::invalid_argument("Managed collection field '" + std::string(path) +
+                                            "' requires one element descriptor.");
+            const auto tree = m_Ui.BeginTreeNode(label + " (" + std::to_string(value.Children.size()) + ')');
+            if (tree)
+            {
+                for (std::size_t index = 0; index < value.Children.size();)
+                {
+                    const auto id = m_Ui.PushId(std::to_string(index));
+                    changed = DrawManagedValue(value.Children[index], descriptor.Children.front(),
+                                               std::string(path) + "[" + std::to_string(index) + "]") ||
+                              changed;
+                    m_Ui.SameLine();
+                    if (m_Ui.Button("Remove"))
+                    {
+                        value.Children.erase(value.Children.begin() + static_cast<std::ptrdiff_t>(index));
+                        changed = true;
+                        continue;
+                    }
+                    ++index;
+                }
+                if (value.Children.size() < maximumCollectionEntries && m_Ui.Button("Add Element"))
+                {
+                    value.Children.push_back(
+                        ManagedDataDocument::MaterializedDefaultValue(descriptor.Children.front()));
+                    changed = true;
+                }
+            }
+            break;
+        }
+        case Keire::ManagedAssetPropertyKind::Dictionary:
+        {
+            if (descriptor.Children.size() != 2)
+                throw std::invalid_argument("Managed dictionary field '" + std::string(path) +
+                                            "' requires Key and Value descriptors.");
+            const auto tree = m_Ui.BeginTreeNode(label + " (" + std::to_string(value.Children.size()) + ')');
+            if (tree)
+            {
+                for (std::size_t index = 0; index < value.Children.size();)
+                {
+                    auto& entry = value.Children[index];
+                    if (entry.Children.size() != 2)
+                        throw std::invalid_argument("Managed dictionary field '" + std::string(path) +
+                                                    "' contains malformed entry " + std::to_string(index) + '.');
+                    const auto id = m_Ui.PushId(std::to_string(index));
+                    const auto entryTree = m_Ui.BeginTreeNode("Entry " + std::to_string(index));
+                    if (entryTree)
+                    {
+                        changed = DrawManagedValue(entry.Children[0], descriptor.Children[0],
+                                                   std::string(path) + "[" + std::to_string(index) + "].Key") ||
+                                  changed;
+                        changed = DrawManagedValue(entry.Children[1], descriptor.Children[1],
+                                                   std::string(path) + "[" + std::to_string(index) + "]") ||
+                                  changed;
+                    }
+                    m_Ui.SameLine();
+                    if (m_Ui.Button("Remove Entry"))
+                    {
+                        value.Children.erase(value.Children.begin() + static_cast<std::ptrdiff_t>(index));
+                        changed = true;
+                        continue;
+                    }
+                    ++index;
+                }
+                if (value.Children.size() < maximumCollectionEntries && m_Ui.Button("Add Entry"))
+                {
+                    Keire::ManagedAssetValueNode entry;
+                    entry.StableFieldId = descriptor.StableFieldId;
+                    entry.Kind = Keire::ManagedAssetPropertyKind::Dictionary;
+                    entry.Value = true;
+                    entry.Children.push_back(ManagedDataDocument::MaterializedDefaultValue(descriptor.Children[0]));
+                    entry.Children.push_back(ManagedDataDocument::MaterializedDefaultValue(descriptor.Children[1]));
+                    value.Children.push_back(std::move(entry));
+                    changed = true;
+                }
+            }
+            break;
+        }
+        }
+
+        if (nullable)
+        {
+            m_Ui.SameLine();
+            if (m_Ui.Button("Set null"))
+            {
+                value.Value = std::monostate{};
+                value.Children.clear();
+                changed = true;
+            }
+        }
+        return changed;
     }
 
     bool InspectorPropertyEditor::EditEvent(const std::string_view label, Keire::ComponentEventValue& value,

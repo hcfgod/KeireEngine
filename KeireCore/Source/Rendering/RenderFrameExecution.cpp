@@ -3,8 +3,10 @@
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <limits>
+#include <numeric>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -54,24 +56,213 @@ namespace Keire::RenderBackend
         if (!FrameActive)
             throw std::logic_error("No render frame is active.");
         FrameActive = false;
-        CpuPreparation.EndFrame();
-        Statistics.CpuPreparationMilliseconds = CpuPreparation.CompletedMilliseconds();
-        Statistics.CpuPreparationP95Milliseconds = CpuPreparation.P95Milliseconds();
-
-        if (Specification.Mode == RenderMode::Headless)
+        auto frame = std::make_shared<RenderFramePacket>();
+        frame->Id = CaptureFrameId;
+        frame->Timeline.OwnerUpdateMilliseconds =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - CaptureFrameStartedAt).count();
+        try
         {
-            Statistics.Surfaces = static_cast<std::uint32_t>(LiveSurfaces().size());
-            Statistics.Passes = Statistics.Surfaces;
-            return;
-        }
+            EnqueueFrame(
+                frame,
+                [this, frame, drawData]
+                {
+                    constexpr std::size_t maximumRuntimeUiDrawCommands = 131'072U;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    if (InjectCaptureFailureAtNextFrame.exchange(false, std::memory_order_acq_rel))
+                        throw std::runtime_error("Injected immutable frame capture failure.");
+#endif
+                    frame->CaptureStarted = std::chrono::steady_clock::now();
+                    CpuPreparation.BeginFrame();
+                    for (auto& pending : PendingSceneRequests)
+                        CapturePendingSceneRequest(std::move(pending));
+                    frame->Requests = std::move(CaptureRequests);
 
-        const auto started = std::chrono::steady_clock::now();
-        DispatchRender([this, drawData] { ExecuteFrame(drawData); });
-        Statistics.RendererLatencyMilliseconds =
-            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    for (const auto& tree : PendingRuntimeUiTrees)
+                    {
+                        if (!tree)
+                            continue;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                        RuntimeUiCaptureEnumerationCount.fetch_add(1U, std::memory_order_relaxed);
+#endif
+                        const auto commands = tree->DrawCommands();
+                        if (commands.size() > maximumRuntimeUiDrawCommands - CaptureRuntimeUiCommands.size())
+                            throw std::length_error("Runtime UI submissions exceed the per-frame draw-command bound.");
+                        CaptureRuntimeUiCommands.insert(CaptureRuntimeUiCommands.end(), commands.begin(),
+                                                        commands.end());
+                    }
+                    frame->RuntimeUiCommands = std::move(CaptureRuntimeUiCommands);
+                    frame->Surfaces = CaptureLiveSurfaceTokens();
+                    if (PresentationSurfaceId)
+                    {
+                        if (const auto presentation =
+                                std::ranges::find(frame->Surfaces, *PresentationSurfaceId, &RenderSurfaceToken::Id);
+                            presentation != frame->Surfaces.end())
+                        {
+                            frame->PresentationSurface = *presentation;
+                        }
+                    }
+                    std::vector<CapturedSurfaceTextureBinding> surfaceTextureBindings;
+                    surfaceTextureBindings.reserve(frame->Surfaces.size());
+                    for (const auto& token : frame->Surfaces)
+                    {
+                        const auto surface = ResolveSurface(token);
+                        if (!surface)
+                            throw std::logic_error("A render-surface epoch expired during frame capture.");
+                        surfaceTextureBindings.push_back(
+                            {token, reinterpret_cast<std::uintptr_t>(
+                                        surface->PublishedTexture.load(std::memory_order_acquire))});
+                    }
+                    frame->EditorUi = OwnedImGuiDrawData::Capture(drawData, surfaceTextureBindings);
+                    CpuPreparation.EndFrame();
+                    frame->CpuPreparationMilliseconds = CpuPreparation.CompletedMilliseconds();
+                    frame->CpuPreparationP95Milliseconds = CpuPreparation.P95Milliseconds();
+                    frame->CapturedAt = std::chrono::steady_clock::now();
+                    frame->Timeline.Frame = frame->Id;
+                    frame->Timeline.CaptureMilliseconds =
+                        std::chrono::duration<float, std::milli>(frame->CapturedAt - frame->CaptureStarted).count();
+                    frame->CapturedStatistics = CaptureStatistics;
+                    frame->CapturedStatistics.CpuPreparationMilliseconds = frame->CpuPreparationMilliseconds;
+                    frame->CapturedStatistics.CpuPreparationP95Milliseconds = frame->CpuPreparationP95Milliseconds;
+                    frame->CapturedStatistics.OwnerUpdateMilliseconds = frame->Timeline.OwnerUpdateMilliseconds;
+                    frame->CapturedStatistics.FrameCaptureMilliseconds = frame->Timeline.CaptureMilliseconds;
+                    frame->DeviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
+                });
+        }
+        catch (...)
+        {
+            CpuPreparation.CancelFrame();
+            PendingSceneRequests.clear();
+            PendingRuntimeUiTrees.clear();
+            CaptureRequests.clear();
+            CaptureRuntimeUiCommands.clear();
+            throw;
+        }
+        PendingSceneRequests.clear();
+        PendingRuntimeUiTrees.clear();
     }
 
-    void RenderSharedState::ExecuteFrame(ImDrawData* drawData)
+    void RenderSharedState::ExecuteAcceptedFrame(const std::shared_ptr<RenderFramePacket>& frame) noexcept
+    {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        if (const auto delay = DelayNextAcceptedFrameMilliseconds.exchange(0U, std::memory_order_acq_rel); delay != 0U)
+            std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+        {
+            std::unique_lock lock(RenderQueueMutex);
+            if (BlockNextAcceptedFrame)
+            {
+                BlockNextAcceptedFrame = false;
+                AcceptedFrameBlocked = true;
+                FramesRetired.notify_all();
+                (void)FramesRetired.wait_for(lock, std::chrono::seconds(2),
+                                             [this]
+                                             {
+                                                 return ReleaseAcceptedFrame ||
+                                                        DeviceLifecycle.load(std::memory_order_acquire) ==
+                                                            RenderDeviceState::Closing;
+                                             });
+                AcceptedFrameBlocked = false;
+                ReleaseAcceptedFrame = false;
+                FramesRetired.notify_all();
+            }
+        }
+#endif
+        for (;;)
+        {
+            try
+            {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                if (InjectTerminalFailureAtNextAcceptedFrame.exchange(false, std::memory_order_acq_rel))
+                    throw std::runtime_error("Injected accepted-frame terminal failure.");
+#endif
+                if (Specification.Mode != RenderMode::Rendered)
+                {
+                    Statistics = frame->CapturedStatistics;
+                    Statistics.Surfaces = static_cast<std::uint32_t>(frame->Surfaces.size());
+                    Statistics.Passes = Statistics.Surfaces;
+                    CompleteFrame(frame, false);
+                    return;
+                }
+                ExecuteFrame(frame);
+                return;
+            }
+            catch (const GpuDeviceLostError& error)
+            {
+                const auto failure = std::current_exception();
+                auto recovery = DeviceRecoveryResult::Failed;
+                try
+                {
+                    if (!frame->RetriedAfterDeviceLoss)
+                        recovery = RecoverDevice(frame, error.Diagnostic());
+                }
+                catch (...)
+                {
+                    RecordTerminalFailure(std::current_exception(), frame);
+                    return;
+                }
+                if (recovery == DeviceRecoveryResult::Recovered)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    LastRetriedVfxSnapshotCount.store(
+                        std::accumulate(frame->Requests.begin(), frame->Requests.end(), std::uint64_t{0},
+                                        [](const std::uint64_t count, const QueuedSceneRequest& request)
+                                        { return count + request.Packet.VfxSnapshots.size(); }),
+                        std::memory_order_release);
+#endif
+                    frame->RetriedAfterDeviceLoss = true;
+                    continue;
+                }
+                if (recovery == DeviceRecoveryResult::CancelledByShutdown)
+                {
+                    CompleteFrame(frame, true);
+                    return;
+                }
+                RecordTerminalFailure(failure, frame);
+                return;
+            }
+            catch (const std::exception& error)
+            {
+                const auto failure = std::current_exception();
+                const auto diagnostic = ClassifyDeviceFailure("SDL GPU frame execution", error.what());
+                auto recovery = DeviceRecoveryResult::Failed;
+                try
+                {
+                    if (diagnostic && !frame->RetriedAfterDeviceLoss)
+                        recovery = RecoverDevice(frame, *diagnostic);
+                }
+                catch (...)
+                {
+                    RecordTerminalFailure(std::current_exception(), frame);
+                    return;
+                }
+                if (recovery == DeviceRecoveryResult::Recovered)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    LastRetriedVfxSnapshotCount.store(
+                        std::accumulate(frame->Requests.begin(), frame->Requests.end(), std::uint64_t{0},
+                                        [](const std::uint64_t count, const QueuedSceneRequest& request)
+                                        { return count + request.Packet.VfxSnapshots.size(); }),
+                        std::memory_order_release);
+#endif
+                    frame->RetriedAfterDeviceLoss = true;
+                    continue;
+                }
+                if (recovery == DeviceRecoveryResult::CancelledByShutdown)
+                {
+                    CompleteFrame(frame, true);
+                    return;
+                }
+                RecordTerminalFailure(failure, frame);
+                return;
+            }
+            catch (...)
+            {
+                RecordTerminalFailure(std::current_exception(), frame);
+                return;
+            }
+        }
+    }
+
+    void RenderSharedState::ExecuteFrame(const std::shared_ptr<RenderFramePacket>& frame)
     {
         KEIRE_TELEMETRY_ZONE_SCOPED("Execute render frame");
         thread_local bool telemetryThreadNamed = false;
@@ -80,6 +271,11 @@ namespace Keire::RenderBackend
             Keire::Internal::TelemetrySetThreadName("Render owner");
             telemetryThreadNamed = true;
         }
+        ActiveFrame = frame;
+        frame->RenderStartedAt = std::chrono::steady_clock::now();
+        frame->Timeline.QueueDelayMilliseconds =
+            std::chrono::duration<float, std::milli>(frame->RenderStartedAt - frame->AcceptedAt).count();
+        PrepareFrameForExecution(frame);
         Statistics.CommandRecordingMilliseconds = 0.0F;
         Statistics.SkinningPreparationMilliseconds = 0.0F;
         Statistics.VfxPreparationMilliseconds = 0.0F;
@@ -113,31 +309,63 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionFallbackActive = false;
         Statistics.ForwardPlusCacheHits = 0;
         Statistics.FrameUploadSubmissions = 0;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
         if (InjectDeviceLossAtNextFrame.exchange(false, std::memory_order_acq_rel))
-            throw std::runtime_error("Injected GPU device loss.");
+            throw GpuDeviceLostError(DeviceLossDiagnostic("test frame injection", "Injected GPU device loss."));
+#endif
         if (FrameUploadCommands || FrameUploadPass || !FrameUploadTransfers.empty())
             throw std::logic_error("A previous frame left the GPU upload context active.");
 
         if (GpuSubmissionSerial == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("GPU submission serial exhausted.");
         SDL_GPUCommandBuffer* commands = nullptr;
+        SDL_GPUFence* submittedFence = nullptr;
         std::vector<SDL_GPUCommandBuffer*> surfaceCommands;
-        surfaceCommands.reserve(Requests.size());
+        surfaceCommands.reserve(frame->Requests.size());
+        std::vector<std::shared_ptr<RenderSurfaceState>> publicationSurfaces;
+        publicationSurfaces.reserve(frame->Requests.size());
+        std::shared_ptr<ResolvedImGuiDrawData> resolvedEditorUi;
         ActiveGpuSubmissionSerial = GpuSubmissionSerial + 1U;
         FrameExecutionActive = true;
         bool gpuWorkSubmitted = false;
 
         try
         {
-            const auto recordingStarted = std::chrono::steady_clock::now();
-            for (const auto& request : Requests)
+            const auto publicationWriterIndex = static_cast<std::size_t>(frame->FrameSlot) + 1U;
+            for (const auto& request : frame->Requests)
             {
+                auto surface = ResolveSurface(request.Surface);
+                if (!surface)
+                    throw std::logic_error("A requested render-surface epoch expired before recording.");
+                if (publicationWriterIndex >= surface->Resources.FinalOutputs.size())
+                    throw std::logic_error(
+                        "A captured render-surface epoch has no output for the accepted frame slot.");
+                publicationSurfaces.push_back(std::move(surface));
+            }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            if (InjectDeviceLossWithActiveResourcesAtNextFrame.exchange(false, std::memory_order_acq_rel))
+            {
+                const std::array<std::byte, 16> payload{};
+                FrameTransientBuffers.push_back(
+                    UploadBuffer(std::span<const std::byte>(payload), SDL_GPU_BUFFERUSAGE_VERTEX));
+                throw GpuDeviceLostError(
+                    DeviceLossDiagnostic("test active-resource frame injection", "Injected GPU device loss."));
+            }
+#endif
+
+            const auto recordingStarted = std::chrono::steady_clock::now();
+            for (const auto& request : frame->Requests)
+            {
+                const auto surface = ResolveSurface(request.Surface);
+                if (!surface)
+                    throw std::logic_error("A requested render-surface epoch expired before recording.");
                 auto* surfaceCommandBuffer = SDL_AcquireGPUCommandBuffer(Device);
                 if (!surfaceCommandBuffer)
                     throw std::runtime_error("SDL_AcquireGPUCommandBuffer(surface) failed: " + LastSdlError());
                 surfaceCommands.push_back(surfaceCommandBuffer);
-                RecordSurface(surfaceCommandBuffer, *request.Surface, surfaceCommands);
-                const auto& diagnostics = request.Surface->GpuOcclusionDiagnostics;
+                RecordSurface(surfaceCommandBuffer, *surface, surfaceCommands);
+                const auto& diagnostics = surface->GpuOcclusionDiagnostics;
                 if (diagnostics.State == GpuOcclusionSurfaceState::Active)
                 {
                     ++Statistics.GpuOcclusionActiveSurfaces;
@@ -152,8 +380,11 @@ namespace Keire::RenderBackend
             }
             // Surface diagnostics describe the most recently completed surface work. Invalidate a live surface after
             // its first completed frame without a scene request so editor overlays cannot report stale active work.
-            for (const auto& surface : LiveSurfaces())
+            for (const auto& token : frame->Surfaces)
             {
+                const auto surface = ResolveSurface(token);
+                if (!surface)
+                    throw std::logic_error("A captured render-surface epoch expired before idle publication.");
                 if (!surface->Submitted)
                     PublishIdleGpuOcclusionSurface(*surface);
             }
@@ -214,21 +445,41 @@ namespace Keire::RenderBackend
             commands = SDL_AcquireGPUCommandBuffer(Device);
             if (!commands)
                 throw std::runtime_error("SDL_AcquireGPUCommandBuffer(swapchain) failed: " + LastSdlError());
-            RecordSwapchain(commands, drawData);
+            if (frame->EditorUi)
+            {
+                resolvedEditorUi = frame->EditorUi->ResolveForRender(
+                    [this](const RenderSurfaceToken& token)
+                    {
+                        const auto surface = ResolveSurface(token);
+                        return reinterpret_cast<std::uintptr_t>(surface ? surface->Resources.PublishedColor()
+                                                                        : nullptr);
+                    });
+            }
+            RecordSwapchain(commands, resolvedEditorUi ? resolvedEditorUi->Data() : nullptr);
 
-            SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
+            submittedFence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
             commands = nullptr;
-            if (!fence)
+            if (!submittedFence)
                 throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
             gpuWorkSubmitted = true;
             Statistics.GpuSubmissionMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - submissionStarted).count();
-            InFlight.push_back({fence, std::move(PendingRetired), std::move(PendingRetiredMeshes),
-                                std::move(PendingRetiredSkins), std::move(PendingRetiredTextures),
-                                std::move(PendingRetiredPipelines), std::move(PendingRetiredForwardPlus),
-                                std::move(FrameTransientBuffers), std::move(FrameUploadTransfers),
-                                std::move(FrameGpuOcclusionReadbacks), submissionStarted, Statistics.VfxGpuWorlds != 0,
-                                PendingRetiredBytes});
+            frame->SubmittedAt = submissionStarted;
+            frame->Timeline.RenderCpuMilliseconds =
+                std::chrono::duration<float, std::milli>(frame->SubmittedAt - frame->RenderStartedAt).count();
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            if (InjectPostSubmitFailureAtNextFrame.exchange(false, std::memory_order_acq_rel))
+                throw std::runtime_error("Injected post-submit publication failure.");
+#endif
+            // InFlight is reserved to the admission bound before device creation. After a successful GPU submit this
+            // move therefore cannot allocate, and every submitted fence acquires exactly one retirement owner.
+            InFlight.push_back({submittedFence, frame, std::move(resolvedEditorUi), std::move(PendingRetired),
+                                std::move(PendingRetiredMeshes), std::move(PendingRetiredSkins),
+                                std::move(PendingRetiredTextures), std::move(PendingRetiredPipelines),
+                                std::move(PendingRetiredForwardPlus), std::move(FrameTransientBuffers),
+                                std::move(FrameUploadTransfers), std::move(FrameGpuOcclusionReadbacks),
+                                submissionStarted, Statistics.VfxGpuWorlds != 0, PendingRetiredBytes});
+            submittedFence = nullptr;
             PendingRetiredBytes = 0;
             PendingRetired.clear();
             PendingRetiredMeshes.clear();
@@ -242,43 +493,144 @@ namespace Keire::RenderBackend
             GpuSubmissionSerial = ActiveGpuSubmissionSerial;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
-            for (const auto& request : Requests)
+            for (const auto& surface : publicationSurfaces)
             {
-                auto* surface = request.Surface;
-                if (surface->HasOutput)
-                    std::swap(surface->Resources.SampledColor, surface->Resources.ExchangeColor);
-                else
-                    surface->HasOutput = true;
+                std::swap(surface->Resources.FinalOutputs.front(),
+                          surface->Resources.FinalOutputs[publicationWriterIndex]);
+                surface->HasOutput = true;
+                surface->PublishedWorksetSlot.store(frame->FrameSlot, std::memory_order_release);
+                surface->PublishedDepthAvailable.store(surface->SampledDepthValid, std::memory_order_release);
+                surface->PublishedTexture.store(surface->Resources.PublishedColor(), std::memory_order_release);
             }
+            frame->PresentedAt = std::chrono::steady_clock::now();
+            frame->Timeline.RenderCpuMilliseconds =
+                std::chrono::duration<float, std::milli>(frame->PresentedAt - frame->RenderStartedAt).count();
+            frame->Timeline.SubmitToPresentMilliseconds =
+                std::chrono::duration<float, std::milli>(frame->PresentedAt - frame->SubmittedAt).count();
+            Statistics.SubmitToPresentMilliseconds = frame->Timeline.SubmitToPresentMilliseconds;
+            PublishStatistics();
+            ActiveFrame.reset();
         }
         catch (...)
         {
-            if (FrameUploadPass)
+            try
             {
-                SDL_EndGPUCopyPass(FrameUploadPass);
+                throw;
+            }
+            catch (const GpuDeviceLostError&)
+            {
+                DeviceLost = true;
+            }
+            catch (const std::exception& error)
+            {
+                DeviceLost = ClassifyDeviceFailure("SDL GPU frame execution", error.what()).has_value();
+            }
+            catch (...)
+            {
+            }
+            if (DeviceLost)
+            {
+                // A lost generation is opaque and unusable. Sever every CPU reference without calling SDL on copy
+                // passes, command buffers, transfers, transient buffers, textures, fences, or the device itself.
+                const auto abandonedHandles = static_cast<std::uint64_t>(FrameUploadPass != nullptr) +
+                                              static_cast<std::uint64_t>(FrameUploadCommands != nullptr) +
+                                              static_cast<std::uint64_t>(commands != nullptr) +
+                                              static_cast<std::uint64_t>(submittedFence != nullptr) +
+                                              static_cast<std::uint64_t>(FrameUploadTransfers.size()) +
+                                              static_cast<std::uint64_t>(FrameTransientBuffers.size()) +
+                                              static_cast<std::uint64_t>(std::ranges::count_if(
+                                                  surfaceCommands, [](const auto* value) { return value != nullptr; }));
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                LostGenerationAbandonedHandleCount.fetch_add(abandonedHandles, std::memory_order_relaxed);
+#else
+                (void)abandonedHandles;
+#endif
                 FrameUploadPass = nullptr;
-            }
-            if (FrameUploadCommands)
-            {
-                (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
                 FrameUploadCommands = nullptr;
+                std::ranges::fill(surfaceCommands, nullptr);
+                commands = nullptr;
+                submittedFence = nullptr;
+                FrameUploadTransfers.clear();
+                FrameTransientBuffers.clear();
+                FrameGpuOcclusionReadbacks.clear();
+                if (resolvedEditorUi)
+                    resolvedEditorUi->ReleaseGpuTextures(nullptr, true);
             }
-            for (auto*& surfaceCommandBuffer : surfaceCommands)
+            else
             {
-                if (surfaceCommandBuffer)
-                    (void)SDL_CancelGPUCommandBuffer(std::exchange(surfaceCommandBuffer, nullptr));
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                const auto recordGpuCleanupCall = [this]
+                {
+                    if (DeviceLost)
+                        LostGenerationGpuCleanupCallCount.fetch_add(1U, std::memory_order_relaxed);
+                };
+#endif
+                if (FrameUploadPass)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    SDL_EndGPUCopyPass(FrameUploadPass);
+                    FrameUploadPass = nullptr;
+                }
+                if (FrameUploadCommands)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    (void)SDL_CancelGPUCommandBuffer(FrameUploadCommands);
+                    FrameUploadCommands = nullptr;
+                }
+                for (auto*& surfaceCommandBuffer : surfaceCommands)
+                    if (surfaceCommandBuffer)
+                    {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                        recordGpuCleanupCall();
+#endif
+                        (void)SDL_CancelGPUCommandBuffer(std::exchange(surfaceCommandBuffer, nullptr));
+                    }
+                if (gpuWorkSubmitted && Device)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    (void)SDL_WaitForGPUIdle(Device);
+                }
+                if (submittedFence)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    SDL_ReleaseGPUFence(Device, submittedFence);
+                    submittedFence = nullptr;
+                }
+                for (auto* transfer : FrameUploadTransfers)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    SDL_ReleaseGPUTransferBuffer(Device, transfer);
+                }
+                FrameUploadTransfers.clear();
+                if (commands)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    (void)SDL_CancelGPUCommandBuffer(commands);
+                }
+                for (auto* buffer : FrameTransientBuffers)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    SDL_ReleaseGPUBuffer(Device, buffer);
+                }
+                FrameTransientBuffers.clear();
+                FrameGpuOcclusionReadbacks.clear();
+                if (resolvedEditorUi)
+                    resolvedEditorUi->ReleaseGpuTextures(Device, false);
             }
-            if (gpuWorkSubmitted && Device)
-                (void)SDL_WaitForGPUIdle(Device);
-            for (auto* transfer : FrameUploadTransfers)
-                SDL_ReleaseGPUTransferBuffer(Device, transfer);
-            FrameUploadTransfers.clear();
-            if (commands)
-                (void)SDL_CancelGPUCommandBuffer(commands);
-            for (auto* buffer : FrameTransientBuffers)
-                SDL_ReleaseGPUBuffer(Device, buffer);
-            FrameTransientBuffers.clear();
-            FrameGpuOcclusionReadbacks.clear();
             // A canceled command buffer invalidates the emitter sequencing recorded for every world it touched.
             for (auto& [worldId, resources] : GpuVfxWorlds)
             {
@@ -287,11 +639,15 @@ namespace Keire::RenderBackend
                     continue;
                 resources.InvalidateSequencing();
             }
-            for (const auto& request : Requests)
-                request.Surface->SampledDepthValid = false;
+            for (const auto& request : frame->Requests)
+            {
+                if (const auto surface = ResolveSurface(request.Surface))
+                    surface->SampledDepthValid = false;
+            }
             FrameActive = false;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
+            ActiveFrame.reset();
             throw;
         }
     }
@@ -300,6 +656,12 @@ namespace Keire::RenderBackend
     {
         if (!Open)
             return;
+        DeviceLifecycle.store(RenderDeviceState::Closing, std::memory_order_release);
+        {
+            std::scoped_lock lock(RenderQueueMutex);
+            RecoveryOwnerBoundary = true;
+        }
+        FramesRetired.notify_all();
         Open = false;
         FrameActive = false;
         if (VfxPipelineWarmupJob)
@@ -313,213 +675,54 @@ namespace Keire::RenderBackend
             RenderJobs->Cancel();
             RenderJobs->Wait();
         }
+        bool cleanupCompleted = false;
+        try
+        {
+            DispatchRender(
+                [this]
+                {
+                    bool abandon = DeviceLost;
+                    {
+                        std::scoped_lock lock(FailureMutex);
+                        abandon = abandon || static_cast<bool>(TerminalFailure);
+                    }
+                    DestroyDeviceAndResources(abandon);
+                });
+            cleanupCompleted = true;
+        }
+        catch (...)
+        {
+            DeviceLost = true;
+            RecordTerminalFailure(std::current_exception());
+        }
         StopRenderThread();
         FrameExecutionActive = false;
         ActiveGpuSubmissionSerial = 0;
-        if (Device)
-            (void)SDL_WaitForGPUIdle(Device);
-        for (const auto& surface : LiveSurfaces())
+        if (!cleanupCompleted)
         {
-            ReleaseResources(surface->Resources);
-            ReleaseForwardPlusResources(surface->ForwardPlus);
-            ReleaseDynamicUploadResources(surface->DynamicUploads);
-            surface->Owner.reset();
-            surface->Width = 0;
-            surface->Height = 0;
-        }
-        for (auto& resources : PendingRetired)
-            ReleaseResources(resources);
-        PendingRetired.clear();
-        std::uint64_t pendingRetiredMeshBytes = 0;
-        for (auto& resources : PendingRetiredMeshes)
-        {
-            pendingRetiredMeshBytes += resources.EstimatedBytes;
-            ReleaseMeshResources(resources);
-        }
-        PendingRetiredMeshes.clear();
-        for (auto& resources : PendingRetiredSkins)
-            ReleaseGpuSkinResources(resources);
-        PendingRetiredSkins.clear();
-        std::uint64_t pendingRetiredTextureBytes = 0;
-        for (auto& resources : PendingRetiredTextures)
-        {
-            pendingRetiredTextureBytes += resources.EstimatedBytes;
-            ReleaseTextureResources(resources);
-        }
-        PendingRetiredTextures.clear();
-        if (Streaming)
-        {
-            Streaming->ReleaseRetired(StreamingClass::Mesh, 0, pendingRetiredMeshBytes);
-            Streaming->ReleaseRetired(StreamingClass::Texture, 0, pendingRetiredTextureBytes);
-        }
-        for (auto* pipeline : PendingRetiredPipelines)
-            SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
-        PendingRetiredPipelines.clear();
-        for (auto& resources : PendingRetiredForwardPlus)
-            ReleaseForwardPlusResources(resources);
-        PendingRetiredForwardPlus.clear();
-        PendingRetiredBytes = 0;
-        Statistics.FenceRetiredBytes = 0;
-        for (auto* buffer : FrameTransientBuffers)
-            SDL_ReleaseGPUBuffer(Device, buffer);
-        FrameTransientBuffers.clear();
-        for (auto* transfer : FrameUploadTransfers)
-            SDL_ReleaseGPUTransferBuffer(Device, transfer);
-        FrameUploadTransfers.clear();
-        FrameGpuOcclusionReadbacks.clear();
-        FrameUploadPass = nullptr;
-        FrameUploadCommands = nullptr;
-        for (auto& frame : InFlight)
-        {
-            std::uint64_t retiredMeshBytes = 0;
-            for (const auto& resources : frame.RetiredMeshes)
-                retiredMeshBytes += resources.EstimatedBytes;
-            std::uint64_t retiredTextureBytes = 0;
-            for (const auto& resources : frame.RetiredTextures)
-                retiredTextureBytes += resources.EstimatedBytes;
-            for (auto& resources : frame.Retired)
-                ReleaseResources(resources);
-            for (auto& resources : frame.RetiredMeshes)
-                ReleaseMeshResources(resources);
-            for (auto& resources : frame.RetiredSkins)
-                ReleaseGpuSkinResources(resources);
-            for (auto& resources : frame.RetiredTextures)
-                ReleaseTextureResources(resources);
-            for (auto* pipeline : frame.RetiredPipelines)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
-            for (auto& resources : frame.RetiredForwardPlus)
-                ReleaseForwardPlusResources(resources);
-            for (auto* buffer : frame.TransientBuffers)
-                SDL_ReleaseGPUBuffer(Device, buffer);
-            for (auto* transfer : frame.TransientTransferBuffers)
-                SDL_ReleaseGPUTransferBuffer(Device, transfer);
-            if (Streaming)
+            // Never call SDL GPU APIs from the owner thread. A failed render-thread cleanup intentionally abandons
+            // the lost or unreachable native handles and only severs CPU-side ownership.
+            AbandonLostDeviceResources();
+            for (const auto& surface : AllSurfaceEpochs())
             {
-                Streaming->ReleaseRetired(StreamingClass::Mesh, 0, retiredMeshBytes);
-                Streaming->ReleaseRetired(StreamingClass::Texture, 0, retiredTextureBytes);
+                surface->PublishedTexture.store(nullptr, std::memory_order_release);
+                surface->Owner.reset();
+                surface->Width = 0;
+                surface->Height = 0;
             }
-            if (Device && frame.Fence)
-                SDL_ReleaseGPUFence(Device, frame.Fence);
+            WindowClaimed = false;
+            Device = nullptr;
         }
-        InFlight.clear();
-        Requests.clear();
-        RuntimeUiCommands.clear();
-        for (auto& pipelines : Pipelines)
-        {
-            if (pipelines.GpuVfxMesh)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.GpuVfxMesh);
-            if (pipelines.GpuVfxRibbon)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.GpuVfxRibbon);
-            if (pipelines.GpuVfx)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.GpuVfx);
-            if (pipelines.Vfx)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Vfx);
-            if (pipelines.Sky)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Sky);
-            if (pipelines.Grid)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Grid);
-            if (pipelines.Cube)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.Cube);
-        }
-        Pipelines.clear();
-        for (auto& [id, entry] : MeshCache)
-        {
-            (void)id;
-            ReleaseMeshResources(entry.Resources);
-        }
-        MeshCache.clear();
-        for (auto& [id, entry] : SkinCache)
-        {
-            (void)id;
-            ReleaseGpuSkinResources(entry.Resources);
-        }
-        SkinCache.clear();
-        for (auto& [id, entry] : TextureCache)
-        {
-            (void)id;
-            ReleaseTextureResources(entry.Resources);
-        }
-        TextureCache.clear();
-        for (auto& [id, entry] : LightingTextureCache)
-        {
-            (void)id;
-            ReleaseTextureResources(entry.Resources);
-        }
-        LightingTextureCache.clear();
-        LightingSetCache.clear();
-        LightProbeVolumeCache.clear();
-        MaterialCache.clear();
-        VfxVolumeCache.clear();
-        for (auto& [id, entry] : ShaderCache)
-        {
-            (void)id;
-            for (const auto& pipeline : entry.Pipelines)
-                SDL_ReleaseGPUGraphicsPipeline(Device, pipeline.Handle);
-        }
-        ShaderCache.clear();
-        ReleaseTextureResources(CheckerboardTexture);
-        ReleaseTextureResources(DefaultSkyTexture);
-        ReleaseTextureResources(BrdfIntegrationLut);
-        ReleaseTextureResources(WhiteTexture);
-        ReleaseTextureResources(FlatNormalTexture);
-        ReleaseTextureResources(NeutralOrmTexture);
-        ReleaseTextureResources(BlackTexture);
-        ReleaseTextureResources(BlackDataTexture);
-        ReleaseTextureResources(WhiteDataTexture);
-        ReleaseTextureResources(DefaultLightingArray);
-        ReleaseTextureResources(DefaultLightingMaskArray);
-        ReleaseTextureResources(DefaultReflectionCubeArray);
-        ReleaseTextureResources(CookieAtlas);
-        for (const auto& [description, sampler] : SamplerCache)
-        {
-            (void)description;
-            SDL_ReleaseGPUSampler(Device, sampler);
-        }
-        SamplerCache.clear();
-        if (ShadowSampler)
-            SDL_ReleaseGPUSampler(Device, ShadowSampler);
-        ShadowSampler = nullptr;
-        if (ToneMapSampler)
-            SDL_ReleaseGPUSampler(Device, ToneMapSampler);
-        ToneMapSampler = nullptr;
-        if (EmptyShadowTexture)
-            SDL_ReleaseGPUTexture(Device, EmptyShadowTexture);
-        EmptyShadowTexture = nullptr;
-        if (ShadowPipeline)
-            SDL_ReleaseGPUGraphicsPipeline(Device, ShadowPipeline);
-        ShadowPipeline = nullptr;
-        if (SceneDepthPipeline)
-            SDL_ReleaseGPUGraphicsPipeline(Device, SceneDepthPipeline);
-        SceneDepthPipeline = nullptr;
-        if (SkinningPipeline)
-            SDL_ReleaseGPUComputePipeline(Device, SkinningPipeline);
-        SkinningPipeline = nullptr;
-        SkinningPipelineAttempted = false;
-        for (auto& [world, resources] : GpuVfxWorlds)
-        {
-            (void)world;
-            ReleaseGpuVfxWorld(resources);
-        }
-        GpuVfxWorlds.clear();
-        ReleaseGpuVfxPipelines();
-        ReleaseGpuOcclusionPipelines();
-        VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::NotStarted, std::memory_order_relaxed);
-        if (ToneMapPipeline)
-            SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
-        ToneMapPipeline = nullptr;
-        if (const auto pipeline = std::exchange(RuntimeUiPipeline, nullptr))
-            SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
-        ReleaseMeshResources(ErrorMesh);
-        ReleaseMeshResources(DefaultMesh);
-        if (WindowClaimed && Device && NativeWindow)
-            SDL_ReleaseWindowFromGPUDevice(Device, NativeWindow);
-        WindowClaimed = false;
-        if (Device)
-            SDL_DestroyGPUDevice(Device);
-        Device = nullptr;
+        PendingSceneRequests.clear();
+        PendingRuntimeUiTrees.clear();
+        CaptureRequests.clear();
+        CaptureRuntimeUiCommands.clear();
+        ActiveFrame.reset();
         NativeWindow = nullptr;
         Window.Reset();
         Windows.Reset();
         Assets.Reset();
+        DeviceLifecycle.store(RenderDeviceState::Closed, std::memory_order_release);
+        FramesRetired.notify_all();
     }
 } // namespace Keire::RenderBackend

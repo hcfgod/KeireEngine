@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -41,6 +42,8 @@ namespace Keire
     {
         std::string_view UsageSuffix;
         std::span<const ApplicationCommandLineOption> Options;
+        // Optional hidden/preflight commands run inside the real client executable before Application construction.
+        std::optional<int> (*HandleWithoutApplication)(const ApplicationCommandLineArguments&) = nullptr;
     };
 
     // Implemented once by a managed client executable. The description must refer

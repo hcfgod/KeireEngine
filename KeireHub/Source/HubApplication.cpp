@@ -4,6 +4,7 @@
 #include "KeireHub/HubApplicationFactory.h"
 #include "KeireHub/HubBuildSupportIntegration.h"
 #include "KeireHub/HubConfiguration.h"
+#include "KeireHub/HubDiagnosticBundleController.h"
 #include "KeireHub/HubDiagnostics.h"
 #include "KeireHub/HubDistributionWorkflow.h"
 #include "KeireHub/HubEditorDiscovery.h"
@@ -243,6 +244,7 @@ namespace
         }
         void OnDetach() noexcept override
         {
+            m_DiagnosticBundle.Shutdown();
             m_HubUpdateHandoff.Stop();
             m_Account.Stop();
             if (m_PackageTasks)
@@ -704,6 +706,7 @@ namespace
                         Refresh();
                 }
             }
+            m_DiagnosticBundle.Draw(ui, *Owner().Windows(), Owner().MainWindow()->Id());
         }
 
       private:
@@ -973,10 +976,9 @@ namespace
                     break;
                 }
                 case KeireHub::HubUiCommandType::CopyDiagnostics:
-                    Owner().Windows()->SetClipboardText(KeireHub::BuildHubDiagnosticReport(
-                        m_ProductSnapshot, Keire::GetBuildInfo(), Keire::GetPreferenceDirectory()));
-                    m_Notice = "Diagnostics copied to the clipboard.";
-                    m_NoticeError = false;
+                    m_DiagnosticBundle.Open(KeireHub::CreateHubDiagnosticBundleSummary(
+                                                m_ProductSnapshot, m_Controller.get(), !m_LastPersistedError.empty()),
+                                            Owner().Renderer(), Owner().Specification().Logging);
                     break;
                 case KeireHub::HubUiCommandType::OpenLogs:
                 {
@@ -1439,6 +1441,7 @@ namespace
         std::unique_ptr<KeireHub::HubBuildSupportIntegration> m_BuildSupport;
         Keire::Ref<Keire::SystemTray> m_Tray;
         Keire::Ref<Keire::FolderDialogOperation> m_FolderDialog;
+        KeireHub::HubDiagnosticBundleController m_DiagnosticBundle;
         KeireHub::HubProductUi m_ProductUi;
         KeireHub::HubProjectsUi m_ProjectsUi;
         KeireHub::HubProjectUpgradeUi m_ProjectUpgradeUi;
@@ -1485,7 +1488,6 @@ namespace
         bool m_ActiveCreationOpenAfter = true;
     };
 } // namespace
-
 namespace KeireHub::Detail
 {
     std::unique_ptr<Keire::Layer> CreateHubLayer(std::filesystem::path executable, const bool smoke,

@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 
+#include "Keire/Scripting/ManagedDataAsset.h"
+
 #include <stdexcept>
 #include <utility>
 
@@ -7,6 +9,25 @@ namespace KeireEditor
 {
     namespace
     {
+        class ScopedManagedGraphController final
+        {
+          public:
+            ScopedManagedGraphController(IPropertyEditor& editor,
+                                         const ManagedReferenceGraphEditController& controller) noexcept
+                : m_Editor(editor)
+            {
+                m_Editor.SetManagedReferenceGraphEditController(&controller);
+            }
+
+            ~ScopedManagedGraphController() { m_Editor.SetManagedReferenceGraphEditController(nullptr); }
+
+            ScopedManagedGraphController(const ScopedManagedGraphController&) = delete;
+            ScopedManagedGraphController& operator=(const ScopedManagedGraphController&) = delete;
+
+          private:
+            IPropertyEditor& m_Editor;
+        };
+
         template <typename T, typename Callback>
         [[nodiscard]] bool DrawValue(Keire::ComponentPropertyValue& value, Callback&& callback)
         {
@@ -166,6 +187,24 @@ namespace KeireEditor
                 return DrawValue<Keire::ColorGradient>(value, [&](Keire::ColorGradient& typed)
                                                        { return editor.EditGradient(property.DisplayName, typed); });
             });
+        Register(
+            Keire::ComponentPropertyKind::ManagedReferenceGraph,
+            [](IPropertyEditor& editor, const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value)
+            {
+                if (!property.ReferenceGraph)
+                    throw std::logic_error("Managed reference graph property metadata is incomplete.");
+                return DrawValue<std::string>(value,
+                                              [&](std::string& typed)
+                                              {
+                                                  if (property.ReferenceGraph->Root.ReferenceGraph)
+                                                  {
+                                                      return editor.EditManagedReferenceGraph(
+                                                          property.DisplayName, typed, *property.ReferenceGraph);
+                                                  }
+                                                  return editor.EditManagedValue(property.DisplayName, typed,
+                                                                                 property.ReferenceGraph->Root);
+                                              });
+            });
     }
 
     void PropertyDrawerRegistry::Register(const Keire::ComponentPropertyKind kind, Drawer drawer)
@@ -204,6 +243,12 @@ namespace KeireEditor
                                                Keire::Component& component, const Keire::ComponentProperty& property,
                                                const std::function<void()>& beforeCommit) const
     {
+        std::optional<ScopedManagedGraphController> graphController;
+        if (property.Kind == Keire::ComponentPropertyKind::ManagedReferenceGraph)
+        {
+            m_ManagedGraphEdits.AssertOwnerThread();
+            graphController.emplace(editor, m_ManagedGraphEdits);
+        }
         auto original = registration.Serialize(component);
         const auto found = original.find(property.Key);
         if (found == original.end())

@@ -2464,7 +2464,11 @@ Use these files as the final source of truth:
 | Area | Source |
 | --- | --- |
 | Public definitions, modules, graph schema, compiler, world, handles, snapshots | `KeireCore/Include/Keire/Vfx/VfxSystem.h` |
-| Validation, schema migration, graph lowering, Portable Custom HLSL, encoding, and dependencies | `KeireCore/Source/Vfx/VfxAssets.cpp` |
+| Deterministic schema encoding, decoding, import, canonical IR, and dependencies | `KeireCore/Source/Vfx/VfxAssets.cpp` |
+| Graph construction, schema migration, and stable layout upgrades | `KeireCore/Source/Vfx/VfxAssetGraph.cpp` |
+| Graph lowering and Portable Custom HLSL | `KeireCore/Source/Vfx/VfxAssetLowering.cpp` |
+| Authoring and publishable-effect validation | `KeireCore/Source/Vfx/VfxAssetValidation.cpp` |
+| CPU/GPU program compilation and resolved executable materialization | `KeireCore/Source/Vfx/VfxAssetCompilation.cpp` |
 | Compiler-owned node descriptors, canonical factories, value defaults, and type validation | `KeireCore/Source/Vfx/VfxNodeCatalog.cpp` |
 | SSA value lowering, folding, deterministic RNG, register allocation, and CPU evaluation | `KeireCore/Source/Vfx/VfxExpressions.cpp` |
 | Shared compiled-binding resolution and executable payload materialization | `KeireCore/Include/KeireInternal/Vfx/VfxExecutionInternal.h` |

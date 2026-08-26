@@ -530,7 +530,7 @@ internal static class ManagedAssetRuntimeSelfTests
     [SerializableType]
     private sealed class SelfTestDictionary
     {
-        public Dictionary<string, int> Values = [];
+        public Dictionary<string, List<int[]>> Values = [];
     }
 
     [SerializableType]
@@ -623,9 +623,17 @@ internal static class ManagedAssetRuntimeSelfTests
 
             nested.Next = nested;
             RequireFailure(() => ManagedObjectSerializer.CloneSerializableValueForTests(nested), "cyclic");
-            RequireFailure(
-                () => ManagedObjectSerializer.CloneSerializableValueForTests(new SelfTestDictionary()),
-                "dictionaries");
+            var dictionary = new SelfTestDictionary { Values = { ["nested"] = [[1, 2, 3]] } };
+            SelfTestDictionary dictionaryClone =
+                ManagedObjectSerializer.CloneSerializableValueForTests(dictionary);
+            if (ReferenceEquals(dictionary.Values, dictionaryClone.Values) ||
+                ReferenceEquals(dictionary.Values["nested"], dictionaryClone.Values["nested"]) ||
+                ReferenceEquals(dictionary.Values["nested"][0], dictionaryClone.Values["nested"][0]) ||
+                !dictionaryClone.Values["nested"][0].SequenceEqual([1, 2, 3]))
+            {
+                throw new InvalidOperationException(
+                    "Managed asset serialization clone did not deep-copy nested dictionaries.");
+            }
             RequireFailure(
                 () => ManagedObjectSerializer.CloneSerializableValueForTests(new SelfTestPolymorphic()),
                 "polymorphic");

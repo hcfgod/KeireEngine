@@ -361,7 +361,6 @@ namespace Keire
             m_Impl->LayerSystem->Activate();
             m_Impl->ModuleService->Start(*this);
             OnInitialize();
-            m_Impl->LayerSystem->ApplyPending();
             initialized = true;
 
             auto previousFrame = std::chrono::steady_clock::now();
@@ -373,24 +372,49 @@ namespace Keire
                 const bool suspended =
                     m_Impl->Specification.SuspendWhenMainWindowMinimized && m_Impl->PrimaryWindow->Minimized();
                 const auto rawDelta = TimeStep::FromChrono(frameStart - previousFrame);
+                const auto pumpRecoveryEvents = [this]
+                {
+                    while (const auto event = m_Impl->Windowing->PollEvent())
+                    {
+                        (void)DispatchWindowEvent(*event);
+                        if (ExitRequested())
+                            break;
+                    }
+                    return !ExitRequested();
+                };
+
+                bool recoveryPaused = false;
+                if (!ExitRequested() && m_Impl->Renderer)
+                {
+                    recoveryPaused =
+                        RenderSystemInternalAccess::WaitForDeviceRecovery(*m_Impl->Renderer, pumpRecoveryEvents);
+                }
+                if (recoveryPaused)
+                {
+                    // The recovery boundary is a window/exit-only frame. Do not charge the recovery wait to Time or
+                    // run layer attachment, managed, simulation, input, audio, rendering, or UI work with the stale
+                    // pre-wait delta. The next frame starts from a fresh wall-clock sample.
+                    previousFrame = std::chrono::steady_clock::now();
+                    continue;
+                }
                 previousFrame = frameStart;
+
+                // Preserve the healthy-frame contract: pending layer changes become visible before this frame's
+                // window events. Recovery is checked above so attach/detach callbacks never run while the GPU owner
+                // is waiting for its safe-boundary handshake.
+                m_Impl->LayerSystem->ApplyPending();
+                while (const auto event = m_Impl->Windowing->PollEvent())
+                {
+                    (void)DispatchWindowEvent(*event);
+                    if (ExitRequested())
+                        break;
+                }
 
                 m_Impl->Clock->AdvanceFrame(rawDelta, suspended);
                 if (m_Impl->ProfilerService)
                     m_Impl->ProfilerService->BeginFrame();
                 {
                     ProfileScope services(m_Impl->ProfilerService, ProfileCategory::Application, "Frame services");
-                    m_Impl->LayerSystem->ApplyPending();
-
-                    while (const auto event = m_Impl->Windowing->PollEvent())
-                    {
-                        (void)DispatchWindowEvent(*event);
-                        if (ExitRequested())
-                        {
-                            break;
-                        }
-                    }
-
                     if (!ExitRequested())
                     {
                         (void)m_Impl->EventSystem->DispatchQueued();
@@ -432,6 +456,7 @@ namespace Keire
                     renderFrame = true;
                 }
 
+                bool recoveryBoundaryRequired = false;
                 try
                 {
                     // Suspension is sampled before advancing Time. A minimize event can arrive later in this frame,
@@ -503,11 +528,25 @@ namespace Keire
                         renderFrame = false;
                     }
                 }
+                catch (const RenderRecoveryBoundaryRequired&)
+                {
+                    if (renderFrame)
+                        RenderSystemInternalAccess::CancelFrame(*m_Impl->Renderer);
+                    renderFrame = false;
+                    recoveryBoundaryRequired = true;
+                }
                 catch (...)
                 {
                     if (renderFrame)
                         RenderSystemInternalAccess::CancelFrame(*m_Impl->Renderer);
                     throw;
+                }
+
+                if (recoveryBoundaryRequired)
+                {
+                    (void)RenderSystemInternalAccess::WaitForDeviceRecovery(*m_Impl->Renderer, pumpRecoveryEvents);
+                    previousFrame = std::chrono::steady_clock::now();
+                    continue;
                 }
 
                 m_Impl->LayerSystem->ApplyPending();
@@ -839,8 +878,15 @@ namespace Keire
             failure = std::current_exception();
         }
 
+        // Renderer close joins its owner thread, so a failure racing an exit request may become observable only
+        // during shutdown. Keep the closed renderer alive long enough to preserve that first terminal failure while
+        // leaving an ordinary user-requested Close noexcept.
+        const auto rendererAtShutdown = m_Impl->Renderer;
         ShutdownRuntime(initialized);
         m_Impl->RuntimeState = Impl::State::Stopped;
+
+        if (!failure && rendererAtShutdown)
+            failure = RenderSystemInternalAccess::TerminalFailure(*rendererAtShutdown);
 
         if (failure)
         {

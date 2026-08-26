@@ -272,6 +272,9 @@ ConfigureCoreArchive(ProjectConfig.CORE_TARGET .. "Ui", "Source/Pch/KeireCoreUiP
                      },
                      { "Source/WindowChromeMac.mm" }, true)
 
+-- The VFX asset codec, graph, lowering, validation, and compilation stages share a private compiler contract and must
+-- remain in the same archive. Keep recursive discovery so adding a focused stage cannot leave the generated graph
+-- linked against only the public VfxAssets facade.
 ConfigureCoreArchive(ProjectConfig.CORE_TARGET .. "Vfx", "Source/Pch/KeireCoreVfxPch.cpp",
                      {
                          "Source/Vfx/**.c",

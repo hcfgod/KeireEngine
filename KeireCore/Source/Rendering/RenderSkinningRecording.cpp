@@ -120,6 +120,19 @@ namespace Keire::RenderBackend
                 result.BuiltinVertices = createBuffer(static_cast<std::uint32_t>(builtinBytes));
                 return result;
             }
+            catch (const GpuDeviceLostError&)
+            {
+                throw;
+            }
+            catch (const std::exception& error)
+            {
+                ThrowIfDeviceLost("skinning output-buffer creation", error.what());
+                if (result.BuiltinVertices)
+                    SDL_ReleaseGPUBuffer(Device, result.BuiltinVertices);
+                if (result.AssetVertices)
+                    SDL_ReleaseGPUBuffer(Device, result.AssetVertices);
+                throw;
+            }
             catch (...)
             {
                 if (result.BuiltinVertices)
@@ -227,8 +240,13 @@ namespace Keire::RenderBackend
                     cache.LoadedDependencyStamp = dependencyStamp;
                     ++SkinningStaticBuilds;
                 }
+                catch (const GpuDeviceLostError&)
+                {
+                    throw;
+                }
                 catch (const std::exception& error)
                 {
+                    ThrowIfDeviceLost("skin GPU cache rebuild", error.what());
                     KEIRE_CORE_ERROR("Skin GPU cache rebuild failed for id={} dependency={}: {}", item.Skin.ToString(),
                                      dependencyStamp, error.what());
                 }
@@ -305,7 +323,7 @@ namespace Keire::RenderBackend
                 UploadBuffer(commands, std::as_bytes(std::span(palette)), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
             FrameTransientBuffers.push_back(paletteBuffer);
 
-            const GpuSkinInstanceKey instanceKey{packet.Scene, item.Entity, surface};
+            const GpuSkinInstanceKey instanceKey{item.Scene ? item.Scene : packet.Scene, item.Entity, surface};
             auto [instanceIterator, instanceInserted] = cache.Resources.Instances.try_emplace(instanceKey);
             auto& instance = instanceIterator->second;
             if (instanceInserted)

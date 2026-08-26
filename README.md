@@ -279,6 +279,15 @@ Packaging is performed on the target operating system:
 - Linux produces native `.tar.gz` distributions, DEB Hub/editor installers on Debian/Ubuntu, and RPM Hub installers
   on Rocky/Fedora/openSUSE.
 
+Windows Editor and Hub installers use the shared first-party install worker for exact hash receipts, transactional
+rollback, reparse-safe destination checks, and drift-preserving uninstall. Fresh installs require an absent or empty
+ordinary directory; unknown and modified neighboring files are never recursively removed.
+
+For support investigations, use **Help > Collect Diagnostics...** in the Editor or Hub. Kéire builds a local,
+sanitized ZIP and shows the exact filenames, sizes, hashes, redactions, and omissions before saving it. Nothing is
+uploaded automatically, and project content, package contents, credentials, environment data, and native crash dumps
+are excluded. See [Diagnostic Bundles](Docs/DiagnosticBundles.md) for the collection and privacy contract.
+
 The distribution service uses offline Ed25519 catalog signing, immutable SHA-256 package addressing, transactional
 snapshot activation, ETags, conditional requests, and range requests. Catalog trust authenticates metadata and exact
 artifact bytes; it does not imply Authenticode, RPM GPG, or Apple notarization. A preview artifact without a native
@@ -333,9 +342,14 @@ service and its documentation generator likewise use `Source/`, never a lowercas
 Generated builds, packages, logs, restored tools, dependency caches, and website output are disposable and are not
 documentation authorities.
 
+Graphics-capable Windows contributors can run the real cooked-runtime and rendered Editor device-loss matrix with
+`./Scripts/Windows/test-render-device-loss.ps1`; fixed Release frame-latency characterization is available through
+`./Scripts/Windows/render-benchmark.ps1`. Both workflows write machine-readable results only under ignored `Build`
+output and reject stale or build-mismatched reports.
+
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 81 maintained guides grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 82 maintained guides grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.2 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
@@ -358,6 +372,7 @@ should begin with the [Kéire 0.4.2 User Manual](Docs/Manual/README.md):
   [Undo and Redo](Docs/UndoRedo.md)
 - [Asset Pipeline](Docs/AssetPipeline.md), [Asset Packages](Docs/AssetPackages.md), [Rendering](Docs/Rendering.md),
   [Shaders and Materials](Docs/ShadersAndMaterials.md), and [VFX](Docs/Vfx.md)
+- [Diagnostic Bundles](Docs/DiagnosticBundles.md)
 - [Marketplace Launch Runbook](Docs/MarketplaceLaunch.md)
 - [C# Scripting](Docs/Scripting/README.md), [Profiling](Docs/Profiling.md),
   [Performance Gates](Docs/PerformanceGates.md), and [Testing and Release](Docs/TestingAndRelease.md)

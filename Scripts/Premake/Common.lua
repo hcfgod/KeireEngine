@@ -354,9 +354,15 @@ function ApplyCommonProjectSettings(repositoryRoot)
         defines
         {
             "KEIRE_LOG_DEFAULT_TRACE",
-            "KEIRE_COMPILED_LOG_LEVEL=0"
-            , "KEIRE_ASSERTIONS_ENABLED"
+            "KEIRE_COMPILED_LOG_LEVEL=0",
+            "KEIRE_ASSERTIONS_ENABLED"
         }
+
+    -- Fault-injection and smoke-test entry points are development-only implementation details. Keep them in the two
+    -- configurations used by the focused fault suites so Coverage and the other sanitizer variants exercise the same
+    -- production surface as Release/Dist.
+    filter "configurations:Debug or DebugASan"
+        defines { "KEIRE_ENABLE_TEST_HOOKS" }
 
     filter "configurations:Release"
         runtime "Release"

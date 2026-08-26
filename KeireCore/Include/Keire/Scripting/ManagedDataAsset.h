@@ -11,6 +11,7 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -18,7 +19,7 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t ManagedDataSchemaVersion = 1;
+    inline constexpr std::uint32_t ManagedDataSchemaVersion = 3;
 
     class KEIRE_API ManagedTypeId final
     {
@@ -55,7 +56,8 @@ namespace Keire
         SerializableObject,
         Array,
         List,
-        AssetReference
+        AssetReference,
+        Dictionary
     };
 
     struct ManagedAssetPropertyDescriptor
@@ -78,8 +80,28 @@ namespace Keire
         double Step = 0.1;
         bool Slider = false;
         std::uint32_t TextLines = 1;
+        bool ReferenceGraph = false;
+        std::vector<ManagedTypeId> ReferenceTypeChoices;
 
         [[nodiscard]] bool operator==(const ManagedAssetPropertyDescriptor&) const = default;
+    };
+
+    struct ManagedAssetReferenceTypeDescriptor
+    {
+        ManagedTypeId StableTypeId;
+        std::string FullName;
+        std::string DisplayName;
+        std::vector<ManagedAssetPropertyDescriptor> Properties;
+
+        [[nodiscard]] bool operator==(const ManagedAssetReferenceTypeDescriptor&) const = default;
+    };
+
+    struct ManagedReferenceGraphDescriptor
+    {
+        ManagedAssetPropertyDescriptor Root;
+        std::vector<ManagedAssetReferenceTypeDescriptor> Types;
+
+        [[nodiscard]] bool operator==(const ManagedReferenceGraphDescriptor&) const = default;
     };
 
     struct ManagedAssetTypeDescriptor
@@ -91,6 +113,7 @@ namespace Keire
         std::string MenuPath;
         std::string DefaultFileName;
         std::vector<ManagedAssetPropertyDescriptor> Properties;
+        std::vector<ManagedAssetReferenceTypeDescriptor> ReferenceTypes;
 
         [[nodiscard]] bool operator==(const ManagedAssetTypeDescriptor&) const = default;
     };
@@ -108,10 +131,110 @@ namespace Keire
         [[nodiscard]] bool operator==(const ManagedAssetValueNode&) const = default;
     };
 
+    enum class ManagedReferenceGraphNodeKind : std::uint8_t
+    {
+        Object,
+        Array,
+        List,
+        Dictionary
+    };
+
+    struct ManagedReferenceGraphValue
+    {
+        std::uint32_t Reference = 0;
+        std::string Scalar = "null";
+
+        [[nodiscard]] bool operator==(const ManagedReferenceGraphValue&) const = default;
+    };
+
+    struct ManagedReferenceGraphField
+    {
+        AssetId StableFieldId;
+        std::string Name;
+        ManagedReferenceGraphValue Value;
+
+        [[nodiscard]] bool operator==(const ManagedReferenceGraphField&) const = default;
+    };
+
+    struct ManagedReferenceGraphEntry
+    {
+        ManagedReferenceGraphValue Key;
+        ManagedReferenceGraphValue Value;
+
+        [[nodiscard]] bool operator==(const ManagedReferenceGraphEntry&) const = default;
+    };
+
+    struct ManagedReferenceGraphNode
+    {
+        std::uint32_t Id = 0;
+        ManagedReferenceGraphNodeKind Kind = ManagedReferenceGraphNodeKind::Object;
+        ManagedTypeId RuntimeType;
+        std::vector<ManagedReferenceGraphField> Fields;
+        std::vector<ManagedReferenceGraphValue> Items;
+        std::vector<ManagedReferenceGraphEntry> Entries;
+
+        [[nodiscard]] bool operator==(const ManagedReferenceGraphNode&) const = default;
+    };
+
+    struct ManagedReferenceGraphRoot
+    {
+        std::string Key;
+        ManagedReferenceGraphValue Value;
+
+        [[nodiscard]] bool operator==(const ManagedReferenceGraphRoot&) const = default;
+    };
+
+    struct ManagedReferenceGraph
+    {
+        std::uint32_t Version = 1;
+        ManagedReferenceGraphValue Root;
+        std::vector<ManagedReferenceGraphRoot> Roots;
+        std::vector<ManagedReferenceGraphNode> Objects;
+
+        [[nodiscard]] bool operator==(const ManagedReferenceGraph&) const = default;
+    };
+
+    struct ManagedSerializationDiagnostic
+    {
+        std::string Code;
+        std::string Phase;
+        std::string Owner;
+        std::string RootField;
+        std::string FieldPath;
+        std::string DeclaredType;
+        std::string RuntimeType;
+        std::string SerializedTypeId;
+        std::optional<std::uint32_t> ObjectId;
+
+        [[nodiscard]] bool operator==(const ManagedSerializationDiagnostic&) const = default;
+    };
+
+    class KEIRE_API ManagedSerializationError final : public std::invalid_argument
+    {
+      public:
+        ManagedSerializationError(std::string message, ManagedSerializationDiagnostic diagnostic);
+
+        [[nodiscard]] const ManagedSerializationDiagnostic& Details() const noexcept { return m_Diagnostic; }
+
+      private:
+        ManagedSerializationDiagnostic m_Diagnostic;
+    };
+
     [[nodiscard]] KEIRE_API ManagedAssetValueNode
     DecodeManagedAssetValue(std::string_view value, const ManagedAssetPropertyDescriptor& property);
     [[nodiscard]] KEIRE_API std::string EncodeManagedAssetValue(const ManagedAssetValueNode& value,
                                                                 const ManagedAssetPropertyDescriptor& property);
+    [[nodiscard]] KEIRE_API ManagedReferenceGraph DecodeManagedReferenceGraph(std::string_view value);
+    [[nodiscard]] KEIRE_API std::string EncodeManagedReferenceGraph(const ManagedReferenceGraph& value);
+    [[nodiscard]] KEIRE_API ManagedReferenceGraph ExtractManagedReferenceGraphRoot(const ManagedReferenceGraph& value,
+                                                                                   std::string_view rootKey);
+    KEIRE_API void UpdateManagedReferenceGraphRoot(ManagedReferenceGraph& destination, std::string_view rootKey,
+                                                   const ManagedReferenceGraph& value);
+    KEIRE_API void RemoveManagedReferenceGraphRoot(ManagedReferenceGraph& destination, std::string_view rootKey);
+    KEIRE_API void ValidateManagedReferenceGraphDocument(const ManagedReferenceGraph& value);
+    KEIRE_API void ValidateManagedReferenceGraph(const ManagedReferenceGraph& value,
+                                                 const ManagedAssetPropertyDescriptor& property,
+                                                 std::span<const ManagedAssetReferenceTypeDescriptor> types);
 
     struct ManagedDataFieldState
     {
@@ -119,6 +242,8 @@ namespace Keire
         std::string Name;
         std::string ManagedTypeName;
         std::vector<std::string> FormerNames;
+        bool ReferenceGraph = false;
+        std::string ReferenceGraphRoot;
         std::string Value;
 
         [[nodiscard]] bool operator==(const ManagedDataFieldState&) const = default;
@@ -139,6 +264,7 @@ namespace Keire
         ManagedTypeId ManagedType;
         std::string ManagedTypeName;
         std::vector<ManagedDataFieldState> Fields;
+        std::string ReferenceGraph;
         std::vector<ManagedDataAssetDependency> Dependencies;
 
         [[nodiscard]] bool operator==(const ManagedDataDefinition&) const = default;

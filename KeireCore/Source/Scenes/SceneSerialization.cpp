@@ -101,6 +101,7 @@ namespace Keire::Detail
             case ComponentPropertyKind::Scalar:
                 return value.get<double>();
             case ComponentPropertyKind::Text:
+            case ComponentPropertyKind::ManagedReferenceGraph:
                 return value.get<std::string>();
             case ComponentPropertyKind::Vector2:
                 requireArray(2);

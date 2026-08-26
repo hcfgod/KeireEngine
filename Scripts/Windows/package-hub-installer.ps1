@@ -58,6 +58,7 @@ $arguments = @(
     "/DPRODUCT_ARCHITECTURE=$Architecture",
     "/DHUB_TARGET=$($Project.HUB_TARGET)",
     "/DSOURCE_DIRECTORY=$distribution",
+    "/DKEIRE_INSTALL_WORKER_AUTHORITY=1",
     "/DOUTPUT_PATH=$artifact",
     "/DLICENSE_PATH=$license",
     "/DSETUP_ICON_PATH=$icon",

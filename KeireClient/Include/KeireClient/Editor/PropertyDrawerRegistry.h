@@ -2,6 +2,7 @@
 
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
+#include "KeireClient/Editor/ManagedReferenceGraphInspector.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +12,11 @@
 #include <span>
 #include <string>
 #include <string_view>
+
+namespace Keire
+{
+    struct ManagedAssetPropertyDescriptor;
+}
 
 namespace KeireEditor
 {
@@ -78,6 +84,27 @@ namespace KeireEditor
         }
         [[nodiscard]] virtual bool EditEvent(std::string_view label, Keire::ComponentEventValue& value,
                                              std::size_t argumentCount) = 0;
+        [[nodiscard]] virtual bool EditManagedReferenceGraph(std::string_view label, std::string& value,
+                                                             const Keire::ManagedReferenceGraphDescriptor& descriptor)
+        {
+            (void)label;
+            (void)value;
+            (void)descriptor;
+            return false;
+        }
+        [[nodiscard]] virtual bool EditManagedValue(std::string_view label, std::string& value,
+                                                    const Keire::ManagedAssetPropertyDescriptor& descriptor)
+        {
+            (void)label;
+            (void)value;
+            (void)descriptor;
+            return false;
+        }
+        virtual void
+        SetManagedReferenceGraphEditController(const ManagedReferenceGraphEditController* controller) noexcept
+        {
+            (void)controller;
+        }
     };
 
     class PropertyDrawerRegistry final
@@ -101,5 +128,6 @@ namespace KeireEditor
 
         std::map<Keire::ComponentPropertyKind, Drawer> m_Drawers;
         std::map<std::string, Drawer, std::less<>> m_Overrides;
+        ManagedReferenceGraphEditController m_ManagedGraphEdits;
     };
 } // namespace KeireEditor

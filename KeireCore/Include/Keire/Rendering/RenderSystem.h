@@ -9,12 +9,16 @@
 #include "Keire/Vfx/VfxSystem.h"
 
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
 #include <map>
 #include <memory>
+#include <optional>
+#include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace Keire
 {
@@ -47,6 +51,70 @@ namespace Keire
         Two = 2,
         Four = 4,
         Eight = 8
+    };
+
+    enum class RenderDeviceState : std::uint8_t
+    {
+        Running,
+        RecoveryPending,
+        Recovering,
+        Failed,
+        Closing,
+        Closed
+    };
+
+    struct RenderDeviceIdentity
+    {
+        bool Available = false;
+        std::string Backend;
+        std::string Adapter;
+        std::string DriverName;
+        std::string DriverVersion;
+        std::string DriverInformation;
+        std::uint32_t DeviceGeneration = 0;
+    };
+
+    struct GpuDeviceLossDiagnostic
+    {
+        std::string Operation;
+        std::string Backend;
+        std::string Adapter;
+        std::string DriverName;
+        std::string DriverVersion;
+        std::string DriverInformation;
+        std::string DriverDetail;
+        std::uint64_t Frame = 0;
+        std::uint32_t DeviceGeneration = 0;
+        std::uint32_t RecoveryAttempt = 0;
+        std::uint32_t RecoveredDeviceGeneration = 0;
+        float RecoveryElapsedMilliseconds = 0.0F;
+        bool RecoverySucceeded = false;
+    };
+
+    class KEIRE_API GpuDeviceLostError final : public std::runtime_error
+    {
+      public:
+        explicit GpuDeviceLostError(GpuDeviceLossDiagnostic diagnostic);
+
+        [[nodiscard]] const GpuDeviceLossDiagnostic& Diagnostic() const noexcept;
+
+      private:
+        GpuDeviceLossDiagnostic m_Diagnostic;
+    };
+
+    struct RenderFrameTimeline
+    {
+        std::uint64_t Frame = 0;
+        float OwnerUpdateMilliseconds = 0.0F;
+        float CaptureMilliseconds = 0.0F;
+        float AdmissionWaitMilliseconds = 0.0F;
+        float QueueDelayMilliseconds = 0.0F;
+        float RenderCpuMilliseconds = 0.0F;
+        float GpuRetirementMilliseconds = 0.0F;
+        float SubmitToPresentMilliseconds = 0.0F;
+        std::uint32_t OutstandingAtAdmission = 0;
+        bool RetriedAfterDeviceLoss = false;
+        bool Cancelled = false;
     };
 
     enum class GpuOcclusionMode : std::uint8_t
@@ -112,7 +180,10 @@ namespace Keire
         RenderPresentMode PresentMode = RenderPresentMode::VSync;
         Color SwapchainClearColor{0.08F, 0.09F, 0.11F, 1.0F};
         RenderSampleCount PreferredSampleCount = RenderSampleCount::Four;
-        std::uint32_t MaximumFramesInFlight = 3;
+        /// Total accepted frames that have not yet GPU-retired. Valid values are 1..3.
+        std::uint32_t MaximumFramesInFlight = 2;
+        /// Device recreation attempts available during one stability epoch. Valid values are 0..3.
+        std::uint32_t DeviceLossRecoveryAttempts = 2;
         bool EnableGpuValidation = false;
     };
 
@@ -210,8 +281,16 @@ namespace Keire
         std::unique_ptr<Impl> m_Impl;
     };
 
+    struct SceneRenderContribution
+    {
+        Ref<Keire::Scene> Scene;
+        VfxRenderSnapshot Vfx;
+    };
+
     struct SceneRenderRequest
     {
+        static constexpr std::size_t MaximumContributions = 64U;
+
         Ref<Keire::Scene> Scene;
         Ref<RenderView> View;
         bool DrawGrid = false;
@@ -221,6 +300,12 @@ namespace Keire
         float MaterialTimeSeconds = 0.0F;
         float MaterialDeltaSeconds = 0.0F;
         std::uint64_t FrameIndex = 0;
+        /// Additional scenes rendered into the same surface in deterministic caller order.
+        std::vector<SceneRenderContribution> AdditionalScenes;
+        /// Selects the contribution that owns directional-light and primary-scene state without changing draw order.
+        std::size_t PrimaryContributionIndex = 0;
+        /// False records a clear-only scene pass. Runtime UI submitted for the frame remains visible.
+        bool DrawSceneContributions = true;
     };
 
     struct RenderCapabilities
@@ -269,6 +354,8 @@ namespace Keire
         std::uint32_t ForwardPlusCacheHits = 0;
         std::uint32_t FrameUploadSubmissions = 0;
         std::uint32_t AllowedFramesInFlight = 0;
+        std::uint32_t OutstandingFrames = 0;
+        std::uint32_t FramesInFlightHighWaterMark = 0;
         std::uint32_t GpuOcclusionCandidates = 0;
         std::uint32_t GpuOcclusionVisible = 0;
         std::uint32_t GpuOcclusionCulled = 0;
@@ -298,6 +385,11 @@ namespace Keire
         std::uint64_t GpuOcclusionCandidateTriangles = 0;
         std::uint64_t GpuOcclusionCulledTriangles = 0;
         std::uint64_t GpuOcclusionDepthTriangles = 0;
+        std::uint64_t AcceptedFrames = 0;
+        std::uint64_t RetiredFrames = 0;
+        std::uint64_t CancelledFrames = 0;
+        std::uint64_t LastAcceptedFrame = 0;
+        std::uint64_t LastRetiredFrame = 0;
         std::uint32_t VfxComputeDispatches = 0;
         std::uint32_t VfxIndirectDraws = 0;
         std::uint32_t VfxGpuWorlds = 0;
@@ -331,6 +423,13 @@ namespace Keire
         float GpuCompletionLatencyMilliseconds = 0.0F;
         float VfxGpuCompletionLatencyMilliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;
+        float OwnerUpdateMilliseconds = 0.0F;
+        float FrameCaptureMilliseconds = 0.0F;
+        float FrameAdmissionWaitMilliseconds = 0.0F;
+        float RendererQueueDelayMilliseconds = 0.0F;
+        float RenderCpuMilliseconds = 0.0F;
+        float GpuRetirementMilliseconds = 0.0F;
+        float SubmitToPresentMilliseconds = 0.0F;
         float VfxPipelineWarmupMilliseconds = 0.0F;
         /// CPU time spent recording the occlusion depth pass; SDL_GPU does not expose GPU timestamps.
         float GpuOcclusionDepthPassMilliseconds = 0.0F;
@@ -352,14 +451,22 @@ namespace Keire
         [[nodiscard]] Ref<RenderView> CreateView(const RenderSurfaceSpecification& specification = {});
         void Submit(const SceneRenderRequest& request);
         void Submit(SceneRenderRequest&& request);
+        /// Appends one presentation tree to this frame's runtime overlay. Later calls draw above earlier calls.
         void SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree);
         void RequestGpuVfxPipelineWarmup();
 
         [[nodiscard]] RenderMode Mode() const noexcept;
         [[nodiscard]] RenderCapabilities Capabilities() const noexcept;
         [[nodiscard]] RenderStatistics Statistics() const noexcept;
+        [[nodiscard]] std::vector<RenderFrameTimeline> RecentFrameTimelines() const;
+        [[nodiscard]] RenderDeviceIdentity DeviceIdentity() const;
+        [[nodiscard]] RenderDeviceState DeviceState() const noexcept;
+        [[nodiscard]] std::optional<GpuDeviceLossDiagnostic> LastDeviceLoss() const;
         [[nodiscard]] FrameGraphSnapshot CaptureFrameGraph() const;
         [[nodiscard]] bool IsOpen() const noexcept;
+        /// Owner-thread only. Waits until every accepted frame retires or rethrows the first terminal failure.
+        /// Recovery pending at entry is surfaced immediately so Application can service its window/exit boundary.
+        void Flush();
         void Close() noexcept;
 
       private:

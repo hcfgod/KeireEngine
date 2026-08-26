@@ -1224,6 +1224,8 @@ void EditorWorkspaceLayer::ApplyManagedCursorMode() noexcept
 
 void EditorWorkspaceLayer::SetGameViewportInputActive(const bool active) noexcept
 {
+    if (!active)
+        KeireEditor::CancelRuntimeUiPointer(m_PlayRuntimeWorld, m_GameRuntimeUiPointer);
     if (m_GameViewportInputActive == active)
         return;
     m_GameViewportInputActive = active;

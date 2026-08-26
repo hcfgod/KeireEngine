@@ -452,6 +452,7 @@ function Get-ProjectGenerationFingerprint {
         "KeireHubRuntime",
         "KeireHubTests",
         "KeireHubWorker",
+        "KeireInstallWorker",
         "KeireRenderTests",
         "KeireRuntime",
         "KeireManaged",
@@ -878,6 +879,7 @@ function Get-WindowsRequiredEditorPackagePaths {
         Where-Object { $_.StartsWith("third-party\licenses\", [StringComparison]::OrdinalIgnoreCase) }
     @(
         "bin\$ClientTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe",
+        "bin\$($Namespace)InstallWorker.exe",
         "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe",
         "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll",
         "bin\Managed\Coral.Managed.deps.json", "bin\Managed\Coral.Managed.runtimeconfig.json",
@@ -895,6 +897,23 @@ function Get-WindowsRequiredEditorPackagePaths {
     ) + @($licenses)
 }
 
+function Assert-WindowsRenderTestHooksAbsent {
+    param([string[]]$ExecutablePaths)
+
+    $markers = @(
+        "InjectDeviceLoss", "SaturateRendererQueue", "InjectDeviceLossAtNextFrame",
+        "SetDeviceRecoveryStateForTest", "Injected GPU device loss.", "test frame injection"
+    )
+    foreach ($executable in $ExecutablePaths) {
+        $contents = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($executable))
+        foreach ($marker in $markers) {
+            if ($contents.Contains($marker, [StringComparison]::Ordinal)) {
+                throw "Distribution executable '$executable' contains renderer test hook '$marker'."
+            }
+        }
+    }
+}
+
 function Assert-WindowsEditorPackageStage {
     param([string]$Stage, [string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
 
@@ -905,8 +924,16 @@ function Assert-WindowsEditorPackageStage {
     }
     Assert-WindowsFfmpegRuntimeClosure -Directory (Join-Path $Stage "bin") -Context "Editor package"
     $editorExecutable = Join-Path $Stage "bin\$ClientTarget.exe"
+    Assert-WindowsRenderTestHooksAbsent -ExecutablePaths @(
+        $editorExecutable, (Join-Path $Stage "bin\$($Namespace)Runtime.exe")
+    )
     if ((Get-WindowsExecutableSubsystem $editorExecutable) -ne 2) {
         throw "Editor package executable must use the Windows GUI subsystem: bin\$ClientTarget.exe"
+    }
+    $verification = Invoke-WindowsExecutableCapture -Path $editorExecutable -Arguments @("--verify-installation")
+    if ($verification.ExitCode -ne 0) {
+        throw "Editor package executable failed hidden installation verification (exit $($verification.ExitCode)). " +
+            "$($verification.StandardError)"
     }
     foreach ($hubPath in @(
             "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "content\Content", "content\Licenses",
@@ -957,7 +984,8 @@ function Get-WindowsRequiredHubPackagePaths {
     param([string]$HubTarget, [string]$Namespace)
 
     @(
-        "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "Config\Branding\Keire.png",
+        "bin\$HubTarget.exe", "bin\$($Namespace)HubWorker.exe", "bin\$($Namespace)InstallWorker.exe",
+        "Config\Branding\Keire.png",
         "Config\Marketplace\trusted-marketplace-key.json", "Config\Marketplace\trusted-marketplace-keys.json",
         "Config\SourceModules.premake.lua", "Config\Distribution.json", "Config\Supabase.json",
         "Docs\ProjectHub.md", "Samples\KeireSandbox\ProjectSettings\Project.keireproject", "README.md",
@@ -980,6 +1008,13 @@ function Assert-WindowsHubPackageStage {
     }
     if ((Get-WindowsExecutableSubsystem (Join-Path $Stage "bin\$HubTarget.exe")) -ne 2) {
         throw "Hub package executable must use the Windows GUI subsystem: bin\$HubTarget.exe"
+    }
+    $hubExecutable = Join-Path $Stage "bin\$HubTarget.exe"
+    Assert-WindowsRenderTestHooksAbsent -ExecutablePaths @($hubExecutable)
+    $verification = Invoke-WindowsExecutableCapture -Path $hubExecutable -Arguments @("--verify-installation")
+    if ($verification.ExitCode -ne 0) {
+        throw "Hub package executable failed hidden installation verification (exit $($verification.ExitCode)). " +
+            "$($verification.StandardError)"
     }
     if ((Get-WindowsExecutableSubsystem (Join-Path $Stage "bin\$($Namespace)HubWorker.exe")) -ne 3) {
         throw "Hub package worker must use the Windows console subsystem: bin\$($Namespace)HubWorker.exe"

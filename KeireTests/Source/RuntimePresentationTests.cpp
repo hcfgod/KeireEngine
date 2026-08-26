@@ -86,6 +86,47 @@ TEST_CASE("retained runtime UI lays out, draws, hit-tests, and emits clicks")
     CHECK(clicked);
 }
 
+TEST_CASE("retained runtime UI tracks and cancels pressed state independently per pointer button")
+{
+    auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();
+    const auto button = tree->Create(Keire::RuntimeUiElementType::Button);
+    Keire::RuntimeUiStyle style;
+    style.Position = Keire::RuntimeUiPositionMode::Absolute;
+    style.Width = 100.0F;
+    style.Height = 50.0F;
+    REQUIRE(tree->SetStyle(button, style));
+    REQUIRE(tree->SetInteractable(button, true));
+    tree->Layout(200.0F, 100.0F);
+
+    CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, true));
+    CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Secondary, true));
+    REQUIRE(tree->State(button));
+    CHECK(tree->State(button)->Pressed);
+
+    CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, false));
+    REQUIRE(tree->State(button));
+    CHECK(tree->State(button)->Pressed);
+    CHECK(tree->CancelPointerButton(Keire::RuntimeUiPointerButton::Secondary));
+    REQUIRE(tree->State(button));
+    CHECK_FALSE(tree->State(button)->Pressed);
+    CHECK_FALSE(tree->CancelPointerButton(Keire::RuntimeUiPointerButton::Secondary));
+
+    std::size_t primaryClicks = 0;
+    std::size_t secondaryClicks = 0;
+    Keire::RuntimeUiEvent event;
+    while (tree->PollEvent(event))
+    {
+        if (event.Type != Keire::RuntimeUiEventType::Click)
+            continue;
+        if (event.Button == Keire::RuntimeUiPointerButton::Primary)
+            ++primaryClicks;
+        if (event.Button == Keire::RuntimeUiPointerButton::Secondary)
+            ++secondaryClicks;
+    }
+    CHECK(primaryClicks == 1U);
+    CHECK(secondaryClicks == 0U);
+}
+
 TEST_CASE("retained runtime UI navigation honors explicit order and starts at the nearest endpoint")
 {
     auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();

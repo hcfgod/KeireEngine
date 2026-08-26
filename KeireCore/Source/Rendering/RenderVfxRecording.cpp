@@ -617,6 +617,7 @@ namespace Keire::RenderBackend
             }
             catch (...)
             {
+                RethrowIfDeviceLost("GPU VFX world resource creation");
                 ReleaseGpuVfxWorld(resources);
                 GpuVfxWorlds.erase(snapshot.WorldId());
                 throw;
@@ -1052,7 +1053,7 @@ namespace Keire::RenderBackend
                 };
                 SDL_BindGPUComputeStorageBuffers(pass, 0, readBindings.data(),
                                                  static_cast<std::uint32_t>(readBindings.size()));
-                const SDL_GPUTextureSamplerBinding depthBinding{surface.Resources.SampledDepth, ShadowSampler};
+                const SDL_GPUTextureSamplerBinding depthBinding{surface.ActiveWorkset().SampledDepth, ShadowSampler};
                 SDL_BindGPUComputeSamplers(pass, 0, &depthBinding, 1);
             }
             SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
@@ -1116,7 +1117,7 @@ namespace Keire::RenderBackend
             };
             SDL_BindGPUComputeStorageBuffers(pass, 0, readBindings.data(),
                                              static_cast<std::uint32_t>(readBindings.size()));
-            const SDL_GPUTextureSamplerBinding depthBinding{surface.Resources.SampledDepth, ShadowSampler};
+            const SDL_GPUTextureSamplerBinding depthBinding{surface.ActiveWorkset().SampledDepth, ShadowSampler};
             SDL_BindGPUComputeSamplers(pass, 0, &depthBinding, 1);
             SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
             SDL_DispatchGPUCompute(pass, groupCount, 1, 1);
