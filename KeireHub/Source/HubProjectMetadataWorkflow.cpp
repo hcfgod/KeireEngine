@@ -1,5 +1,7 @@
 #include "KeireHub/HubProjectMetadataWorkflow.h"
 
+#include "Keire/Log.h"
+
 #include <algorithm>
 #include <chrono>
 #include <ranges>
@@ -69,6 +71,15 @@ namespace KeireHub
             return HubResult<bool>::Failure(scanned.Error());
         }
         const auto& snapshot = *scanned.Value();
+        for (const auto& result : snapshot.Results)
+        {
+            if (!result.Error)
+                continue;
+            const auto& error = *result.Error;
+            KEIRE_CLIENT_ERROR("[Project Hub] Project metadata scan failed [{}] for {}: {}{}{}", ToString(error.Code),
+                               result.ProjectId, error.Message, error.TechnicalDetails.empty() ? "" : " ",
+                               error.TechnicalDetails);
+        }
         std::vector<HubProjectMetadataUpdate> metadataUpdates;
         metadataUpdates.reserve(snapshot.Results.size());
         for (const auto& result : snapshot.Results)

@@ -7,6 +7,9 @@ internal static unsafe class NativeInputFixture
     internal static int BeginRebindCalls;
     internal static int ResolveCalls;
     internal static int PersistenceCalls;
+    internal static int ActionSnapshotCalls;
+    internal static byte LastContextOperation;
+    internal static Keire.AssetId LastContextTarget;
     internal static Keire.InputRebindResolution Resolution;
     internal static float LowFrequency;
     internal static float HighFrequency;
@@ -19,6 +22,9 @@ internal static unsafe class NativeInputFixture
         BeginRebindCalls = 0;
         ResolveCalls = 0;
         PersistenceCalls = 0;
+        ActionSnapshotCalls = 0;
+        LastContextOperation = byte.MaxValue;
+        LastContextTarget = default;
         Resolution = default;
         LowFrequency = 0.0f;
         HighFrequency = 0.0f;
@@ -188,8 +194,12 @@ internal static unsafe class NativeInputFixture
     private static byte ReleaseContext(ulong context) => context == 101 ? (byte)1 : (byte)0;
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte OperateContext(ulong context, byte operation, ulong targetHigh, ulong targetLow) =>
-        context == 101 ? (byte)1 : (byte)0;
+    private static byte OperateContext(ulong context, byte operation, ulong targetHigh, ulong targetLow)
+    {
+        LastContextOperation = operation;
+        LastContextTarget = new Keire.AssetId(targetHigh, targetLow);
+        return context == 101 ? (byte)1 : (byte)0;
+    }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
     private static ulong BeginContextRebind(ulong context, ulong bindingHigh, ulong bindingLow, float threshold,
@@ -219,8 +229,9 @@ internal static unsafe class NativeInputFixture
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
     private static byte GetActionSnapshot(ulong context, ulong actionHigh, ulong actionLow,
-                                          Keire.NativeInputActionSnapshot* destination)
+                                           Keire.NativeInputActionSnapshot* destination)
     {
+        ++ActionSnapshotCalls;
         if (context != 101 || actionHigh != 47 || actionLow != 53 || destination == null)
             return 0;
         *destination = new Keire.NativeInputActionSnapshot
@@ -240,6 +251,7 @@ internal static unsafe class NativeInputFixture
     private static uint GetCurrentDevice(byte type) => type switch
     {
         (byte)Keire.InputDeviceType.Keyboard => 1,
+        (byte)Keire.InputDeviceType.Mouse => 2,
         (byte)Keire.InputDeviceType.Gamepad => 7,
         _ => 0
     };

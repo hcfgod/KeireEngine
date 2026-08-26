@@ -13,9 +13,9 @@ systems and cooked content selected by a project.
 Kéire is currently **version 0.4.2 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.2 release validation and signed catalog sequence 17 preparation are in progress. The immutable 0.4.1
-sequence-16 catalog remains the active Windows and Linux x86-64 download boundary until that activation completes;
-macOS downloads remain gated pending platform and signing validation.
+Version 0.4.2 passed its Windows and Linux release/package gates and is active through immutable signed catalog
+sequence 17. The catalog publishes Windows and Linux x86-64 Editors plus Windows, DEB, and RPM Hub installers;
+macOS downloads remain gated pending platform, signing, and notarization validation.
 
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·
@@ -254,6 +254,8 @@ Markdown, and its source validation checks these values against the correspondin
 Managed gameplay targets .NET 10 and C# 14. A project declares source roots through `.keireasm` assets; successful
 generations publish assemblies for editor discovery and player builds. Gameplay types inherit from `Keire.Behaviour`,
 use stable component and field identities, and access runtime systems through canonical entity, component, and asset objects.
+Scripts may live anywhere under `Assets`; script creation and generated Input Actions wrappers extend the selected
+runtime assembly's source roots when their folder is not already covered.
 Camera, Mesh Renderer, and typed light components expose live presentation state, while bounded material property blocks
 override Material/Shader Graph properties per renderer without mutating shared asset definitions.
 Native presentation assets are direct `Asset` objects. Scripts may pass those objects directly to Audio, VFX,

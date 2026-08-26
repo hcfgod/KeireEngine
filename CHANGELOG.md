@@ -5,6 +5,7 @@ versions.
 
 ## Unreleased
 
+<<<<<<< HEAD
 ### Changed
 
 - Bounded rendering now admits 1–3 immutable frames (default 2) before capture, publishes complete owner/render/GPU
@@ -48,6 +49,32 @@ versions.
   registration, reparse layouts fail closed, and uninstall preserves unrelated neighboring files and the selected root.
 - Composed all loaded runtime scenes and presentation trees into one deterministic render request per surface, so
   additive scenes no longer collide with the single-surface submission guard or replace earlier runtime UI.
+=======
+- Fixed Editor Play managed rendering, audio, physics, and UI services during primary-scene `Awake`/`OnEnable` by
+  resolving the pending Play session before it is adopted into the runtime world.
+
+### Fixed
+
+- Kept Project Hub metadata refreshes from marking valid projects invalid when disposable cache files disappear after
+  directory enumeration, and logged the exact project ID, path, and filesystem failure for genuine scan errors.
+- Made input map/action enablement idempotent, preserved enabled-map intent across hot reload, and made retained input
+  handles, subscriptions, and capture overrides inert after shutdown instead of exposing stale phase or edge state;
+  managed actions also stop native snapshot polling when their final callback is removed.
+- Resolved editor and packaged managed polling through the project's stable default map ID, and attached generated
+  Input Actions wrappers to the selected runtime assembly without restricting scripts to a fixed project folder.
+- Fixed Axis1D composite evaluation, composite-root behaviors, Value-action interactions, focus-loss release edges,
+  same-frame gamepad stick axes, opposing D-pad directions, disconnected pairing state, and invalid device-type bounds.
+- Added canonical mouse-wheel direction pulses and gamepad stick-click controls, and corrected the Sandbox numeric-key
+  bindings so sprint, weapon cycling, and weapon-slot showcase controls can fire.
+- Hardened C# wrapper generation against member collisions, trailing-dot namespaces, and control-character string
+  injection, and reject incomplete or duplicated input composite definitions before runtime context creation.
+- Preserved joint runtime IDs through scene cloning and managed reload, and applied Light Probe Volume bounds and
+  spacing atomically so valid sparse grids no longer fail against temporary default values during deserialization.
+- Bounded Play Mode Changes review content inside a scrollable viewport so large runtime physics diffs cannot push the
+  apply, discard, and cancel controls beyond the monitor.
+- Routed managed callback faults into the Editor Console once per runtime diagnostic, including generation, type,
+  callback, entity, and exception details without replaying retained faults every frame.
+>>>>>>> e3871d70f1ee7df3bf702b6cc5936ed2f139ba6e
 
 ## 0.4.2 - 2026-08-25
 
@@ -64,6 +91,9 @@ versions.
 
 ### Changed
 
+- Published Kéire 0.4.2 Windows and Linux x86-64 Editor and Hub packages through immutable signed snapshot
+  `release-0.4.2-sequence-17-e3eb5ac`, retaining the 0.4.1 records and distinct Linux DEB/RPM identities. Live
+  readiness, catalog, and package-identity checks passed; the disclosed unsigned Authenticode/RPM GPG boundaries remain.
 - Restricted GPU occlusion eligibility to explicitly safe opaque Shader Graph geometry and retained conservative
   direct drawing whenever a backend, shader, surface, frame resource, or diagnostic result is unavailable.
 
@@ -71,6 +101,8 @@ versions.
 
 - Retried the Windows distribution publisher's atomic staging-directory rename with bounded backoff when filesystem
   filters briefly lock newly written snapshot files, without retrying after the immutable destination appears.
+- Waited for the Windows website supervisor and owned Node process to stop before replacing the live web root, and
+  restored the previous site automatically when a pre-swap deployment failure leaves its payload intact.
 - Resolved cooked AudioClip impulse responses into convolution mixer registrations across headless and device DSP,
   unified graph/mixer effect processing, and replaced the Equalizer gain alias with backward-compatible three-band
   frequency shaping while preserving reverb tails across continuously blended Reverb Zone parameter updates and

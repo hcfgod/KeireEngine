@@ -457,8 +457,9 @@ OAuth provider secret, SMTP credential, or signing private key in host settings.
 For a verified website update, use `scripts/deploy-windows-web.ps1`. With an unchanged lockfile it verifies exact Node
 process ownership and swaps only `Web/dist`. When reviewed runtime dependencies change, pass `-AllowRuntimeUpdate`; the
 script performs a locked production-only install in sibling staging, swaps the complete `Web` root transactionally,
-retains a timestamped rollback, and requires the schema-2 ownership/readiness probe to pass. Never use the runtime-update
-switch for an unreviewed lockfile.
+waits for the scheduled supervisor and owned Node process to stop before swapping, retains a timestamped rollback, and
+requires the schema-2 ownership/readiness probe to pass. A pre-swap failure restarts the previous deployment. Never use
+the runtime-update switch for an unreviewed lockfile.
 
 Run `./scripts/install-web-runtime.ps1`, then validate the host with
 `./scripts/start-windows-host.ps1 -ValidateOnly`. The supervisor starts Kestrel, the loopback Astro Node service, and

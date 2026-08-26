@@ -1,5 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireClient/Editor/ManagedRuntimeSessionResolver.h"
+
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
@@ -551,7 +553,7 @@ Keire::Vector2 EditorWorkspaceLayer::ReadManagedInput(const std::string_view act
     {
         if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
             return {};
-        if (!m_GameplayInputMap || !m_GameplayInputContext->EnableMap(m_GameplayInputMap))
+        if (!m_GameplayInputMap || !m_GameplayInputContext->MapEnabled(m_GameplayInputMap))
             return {};
         if (!m_ManagedInputCaptureOverride)
             m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture(m_GameplayInputMap));
@@ -585,7 +587,7 @@ Keire::ManagedInputState EditorWorkspaceLayer::ReadManagedInputState(const std::
     {
         if (!m_GameplayInputContext || !m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
             return Keire::ManagedInputState::None;
-        if (!m_GameplayInputMap || !m_GameplayInputContext->EnableMap(m_GameplayInputMap))
+        if (!m_GameplayInputMap || !m_GameplayInputContext->MapEnabled(m_GameplayInputMap))
             return Keire::ManagedInputState::None;
         if (!m_ManagedInputCaptureOverride)
             m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture(m_GameplayInputMap));
@@ -1124,12 +1126,9 @@ bool EditorWorkspaceLayer::FocusManagedUi(const Keire::AssetId entity) noexcept
 Keire::Ref<Keire::SceneRuntimeSession>
 EditorWorkspaceLayer::ManagedRuntimeSession(const Keire::AssetId entity) const noexcept
 {
-    if (!m_PlayRuntimeWorld)
-        return {};
-    if (entity)
-        if (const auto session = m_PlayRuntimeWorld->SessionForEntity(Keire::EntityId(entity)))
-            return session;
-    return m_PlayRuntimeWorld->Session(m_PlayRuntimeWorld->Active());
+    return KeireEditor::ResolveManagedRuntimeSession(
+        m_PlayRuntimeWorld, m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{},
+        entity);
 }
 
 Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ManagedRuntimeScene(const Keire::AssetId entity) const noexcept

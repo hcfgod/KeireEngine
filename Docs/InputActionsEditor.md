@@ -73,8 +73,12 @@ actions each expose their own `Enable` and `Disable`. `ReadValue<bool>()`, `Read
 inert and invalid to call. `InputAction.BeginInteractiveRebind` starts rebinding against that same explicit context, so
 local-player contexts do not accidentally modify or listen through the project's shared context.
 
-The **C# Code Generation** section creates a deterministic wrapper in `Assets/Scripts/Generated`. Generated map and
-action properties use stable IDs instead of names and therefore survive authoring renames.
+The **C# Code Generation** section creates a deterministic wrapper in `Assets/Scripts/Generated`. The editor resolves
+the owning runtime `.keireasm` with the same folder-independent placement rules used by ordinary C# creation and adds
+that folder to its source roots when needed. Scripts remain valid anywhere under `Assets`; the generated folder is a
+convention, not a scripting boundary. Generated map and action properties use stable IDs instead of names and therefore
+survive authoring renames. Wrapper construction creates an independent disabled context: call the wrapper's `Enable()`
+for every map or a generated map property's `Enable()` for one map, and pair it with `Disable()`/`Dispose()`.
 
 ## Direct Polling
 
@@ -90,7 +94,8 @@ float throttle = Input.Gamepad.Current?.RightTrigger.ReadValue() ?? 0.0f;
 
 `ButtonControl` exposes `IsPressed`, `WasPressedThisFrame`/`WasPressed`, and
 `WasReleasedThisFrame`/`WasReleased`. Mouse relative delta and scroll reset at the start of each input frame. Direct
-polling respects the editor's active Play session and Game-view routing and is captured in fixed-tick replays.
+polling also exposes `WheelUp`/`WheelDown` one-frame pulses and gamepad `LeftStickButton`/`RightStickButton` controls.
+It respects the editor's active Play session and Game-view routing and is captured in fixed-tick replays.
 
 The older string-based `Input.Button`, `Input.Axis`, and `Input.Axis2D` helpers remain source-compatible but are
 obsolete. New gameplay should use an action asset/context or a direct control.

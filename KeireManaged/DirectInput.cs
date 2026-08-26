@@ -208,6 +208,8 @@ public sealed class Mouse
         MiddleButton = new ButtonControl(device, "<Mouse>/middleButton");
         BackButton = new ButtonControl(device, "<Mouse>/backButton");
         ForwardButton = new ButtonControl(device, "<Mouse>/forwardButton");
+        WheelUp = new ButtonControl(device, "<Mouse>/wheelUp");
+        WheelDown = new ButtonControl(device, "<Mouse>/wheelDown");
     }
 
     public uint DeviceId { get; }
@@ -227,6 +229,8 @@ public sealed class Mouse
     public ButtonControl MiddleButton { get; }
     public ButtonControl BackButton { get; }
     public ButtonControl ForwardButton { get; }
+    public ButtonControl WheelUp { get; }
+    public ButtonControl WheelDown { get; }
     public Vector2Control position => Position;
     public Vector2Control delta => Delta;
     public Vector2Control scroll => Scroll;
@@ -250,6 +254,8 @@ public sealed class Gamepad
         ButtonNorth = Button("buttonNorth");
         LeftShoulder = Button("leftShoulder");
         RightShoulder = Button("rightShoulder");
+        LeftStickButton = Button("leftStickPress");
+        RightStickButton = Button("rightStickPress");
         StartButton = Button("start");
         SelectButton = Button("select");
     }
@@ -270,6 +276,8 @@ public sealed class Gamepad
     public ButtonControl ButtonNorth { get; }
     public ButtonControl LeftShoulder { get; }
     public ButtonControl RightShoulder { get; }
+    public ButtonControl LeftStickButton { get; }
+    public ButtonControl RightStickButton { get; }
     public ButtonControl StartButton { get; }
     public ButtonControl SelectButton { get; }
     public Vector2Control leftStick => LeftStick;

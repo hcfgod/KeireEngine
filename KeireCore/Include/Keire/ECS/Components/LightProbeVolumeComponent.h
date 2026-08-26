@@ -20,6 +20,7 @@ namespace Keire
         [[nodiscard]] float NormalBias() const noexcept { return m_NormalBias; }
         [[nodiscard]] float ViewBias() const noexcept { return m_ViewBias; }
 
+        void ConfigureGrid(Vector3 boxExtents, Vector3 spacing);
         void SetBoxExtents(Vector3 value);
         void SetSpacing(Vector3 value);
         void SetPriority(std::int32_t value);

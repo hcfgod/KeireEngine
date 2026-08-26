@@ -27,10 +27,35 @@
 
 void EditorWorkspaceLayer::OnDetach() noexcept
 {
+<<<<<<< HEAD
     using Phase = KeireEditor::EditorWorkspaceShutdownPhase;
 
     m_LifecycleCoordinator->Shutdown(
         [&](const Phase phase)
+=======
+    m_ManagedRuntimeDiagnostics.Reset();
+    m_ManagedRuntimeDiagnosticSource.Reset();
+    PersistEditorSessionPreferences();
+    ShutdownPlayerBuild();
+    m_PackageManagerPanel->Shutdown();
+    if (m_AssetOperations)
+        m_AssetOperations->Shutdown();
+    try
+    {
+        if (const auto scripts = Owner().Scripts())
+            scripts->SetRuntimeServices(nullptr);
+    }
+    catch (...)
+    {
+    }
+    CommitMaterialDraft();
+    CancelMaterialCatalogRefresh();
+    const auto projectRoot = Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{};
+    m_SceneViewportPanel->Shutdown(projectRoot);
+    if (m_ProjectSettingsDocument && m_ProjectSettingsDocument->Dirty())
+    {
+        try
+>>>>>>> e3871d70f1ee7df3bf702b6cc5936ed2f139ba6e
         {
             switch (phase)
             {

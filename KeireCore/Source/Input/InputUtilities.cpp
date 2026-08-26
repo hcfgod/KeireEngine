@@ -163,6 +163,10 @@ namespace Keire::Detail
             return "<Gamepad>/leftShoulder";
         case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
             return "<Gamepad>/rightShoulder";
+        case SDL_GAMEPAD_BUTTON_LEFT_STICK:
+            return "<Gamepad>/leftStickPress";
+        case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
+            return "<Gamepad>/rightStickPress";
         case SDL_GAMEPAD_BUTTON_DPAD_UP:
             return "<Gamepad>/dpad/up";
         case SDL_GAMEPAD_BUTTON_DPAD_DOWN:

@@ -739,6 +739,8 @@ void EditorWorkspaceLayer::UpdateSmokePlayValidation()
 
 void EditorWorkspaceLayer::OnAttach()
 {
+    m_ManagedRuntimeDiagnostics.Reset();
+    m_ManagedRuntimeDiagnosticSource.Reset();
     auto& workspace = Owner().GetUiWorkspace();
     m_AssetBrowserPanel->SetJobSystem(Owner().Jobs());
     m_ShaderGraphDocument->SetJobSystem(Owner().Jobs());
@@ -984,12 +986,116 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
                     else if (m_FrameCount >= 8)
                         Owner().RequestExit();
                 }
+<<<<<<< HEAD
                 break;
             case Phase::PlayRuntime:
                 m_PlayModeCoordinator->UpdateRuntime(time.DeltaTime().Seconds(), time.InterpolationAlpha());
                 break;
             case Phase::EditModePreview:
                 if (m_SceneDocument->PlaySession())
+=======
+            }
+        }
+    }
+    CompleteSaveSceneAs();
+    CompleteAssetBrowserPackage();
+    {
+        Keire::ProfileScope managedBuild(Owner().GetProfiler(), Keire::ProfileCategory::Scripting, "Managed build");
+        UpdateManagedBuild(time);
+        ContinuePendingPlayMode();
+    }
+    CaptureManagedRuntimeDiagnostics();
+    UpdatePlayerBuild();
+    if (!m_AssetDatabase)
+        return;
+    Keire::ProfileScope assetWork(Owner().GetProfiler(), Keire::ProfileCategory::Assets, "Asset work");
+    UpdateAssetOperations();
+    if (!m_PendingAssetMutations.empty() && m_AssetOperations && !m_AssetOperations->Busy())
+    {
+        auto pending = std::move(m_PendingAssetMutations.front());
+        m_PendingAssetMutations.erase(m_PendingAssetMutations.begin());
+        try
+        {
+            QueueAssetMutation(std::move(pending.State), pending.Phase);
+        }
+        catch (const std::exception& error)
+        {
+            SetAssetError(std::string("Queued asset trash operation failed: ") + error.what());
+        }
+    }
+    if (!m_PendingPrefabCreations.empty() && m_AssetOperations && !m_AssetOperations->Busy())
+    {
+        auto pending = std::move(m_PendingPrefabCreations.front());
+        m_PendingPrefabCreations.erase(m_PendingPrefabCreations.begin());
+        try
+        {
+            CreatePrefabFromObject(pending.Object, pending.Folder);
+        }
+        catch (const std::exception& error)
+        {
+            SetAssetError(std::string("Queued prefab creation failed: ") + error.what());
+        }
+    }
+    if (m_MaterialDocument->Dirty() && m_SelectedAsset != m_MaterialDocument->Asset())
+        CommitMaterialDraft();
+    UpdateMaterialGraphAutosave(time);
+    m_ShaderGraphDocument->AdvanceCompilation(time.UnscaledDeltaTime().Seconds());
+    UpdateMaterialCatalogRefresh(time);
+    if (m_SceneDocument->LoadOperation() && m_SceneDocument->LoadOperation()->State() == Keire::SceneLoadState::Failed)
+    {
+        m_SceneDocument->SetStatus("Scene runtime load failed: " +
+                                   m_SceneDocument->LoadOperation()->Diagnostic().Message);
+        m_SceneDocument->SetLoadOperation({});
+    }
+    else if (m_SceneDocument->LoadOperation() &&
+             m_SceneDocument->LoadOperation()->State() == Keire::SceneLoadState::Ready)
+    {
+        m_SceneDocument->SetStatus("Scene loaded and activated.");
+        m_SceneDocument->SetLoadOperation({});
+    }
+    if (m_SceneDocument->EditingScene() && m_SceneDocument->EditingScene()->Dirty())
+    {
+        m_SceneDocument->AdvanceRecovery(time.UnscaledDeltaTime().Seconds());
+        if (m_SceneDocument->RecoverySeconds() >= 30.0)
+        {
+            m_SceneDocument->ResetRecoveryTimer();
+            try
+            {
+                WriteSceneRecovery();
+            }
+            catch (const std::exception& error)
+            {
+                m_SceneDocument->SetStatus(std::string("Scene recovery save failed: ") + error.what());
+                ReportError("Scene", m_SceneDocument->Status());
+            }
+        }
+    }
+    else
+        m_SceneDocument->ResetRecoveryTimer();
+    if ((m_ExternalAssetImport && m_ExternalAssetImport->Pending()) || (m_AssetOperations && m_AssetOperations->Busy()))
+        return;
+    m_AssetPollSeconds += time.UnscaledDeltaTime().Seconds();
+    if (m_AssetPollSeconds < 0.1)
+        return;
+    m_AssetPollSeconds = 0.0;
+    try
+    {
+        const auto changed = m_AssetDatabase->PollChangedAssets();
+        if (!changed.empty())
+        {
+            bool requiresFullAssetImport = false;
+            std::vector<Keire::AssetId> changedAssetSources;
+            for (const auto id : changed)
+            {
+                const auto record = m_AssetDatabase->Find(id);
+                const auto previous = std::ranges::find(m_AssetRecords, id, &Keire::AssetSourceRecord::Id);
+                const auto path = record                             ? record->RelativePath
+                                  : previous != m_AssetRecords.end() ? previous->RelativePath
+                                                                     : std::filesystem::path{};
+                KEIRE_CLIENT_INFO("[Asset Hot Reload] Change detected: asset={} path='{}' indexed={}.", id.ToString(),
+                                  Keire::Detail::PathToUtf8(path), record.has_value());
+                if (path.extension() == ".cs" || path.extension() == ".keireasm")
+>>>>>>> e3871d70f1ee7df3bf702b6cc5936ed2f139ba6e
                 {
                     StopEditModeVfxPreviews();
                 }

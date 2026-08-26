@@ -328,11 +328,26 @@ const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "dow
 for (const contract of [
     `Kéire ${projectVersion} is the current release target`,
     "Package links are populated exclusively from the active, signed distribution catalog",
-    "the separately active 0.4.1 catalog remains downloadable",
+    "Signed catalog sequence 17 is active for Windows and Linux x86-64",
     "Every link shown here has an active catalog record and verified artifact hash",
     "Use the active catalog-verified DEB on Ubuntu or Debian and the RPM on Rocky Linux, Fedora, or openSUSE",
+    "The EXE is not yet Authenticode-signed",
+    "Hub 0.4.1 cannot launch an unsigned 0.4.2 installer through in-app Update",
+    "existing 0.4.1 users must download and run 0.4.2 manually",
 ]) {
     assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
+}
+const windowsDownloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "windows", "index.astro"), "utf8");
+for (const contract of [
+    "The current EXE is not Authenticode-signed",
+    "unknown-publisher warning",
+    "Verify the displayed SHA-256",
+    "The 0.4.1 in-app updater requires an Authenticode signature",
+    "Download and run 0.4.2 manually",
+    "<dt>Native signing</dt><dd>Not Authenticode-signed</dd>",
+]) {
+    assert(windowsDownloadsPage.includes(contract),
+        `Windows downloads page is missing unsigned-installer guidance: ${contract}`);
 }
 const previewDownloadMetadata = JSON.parse(await readFile(path.join(repositoryRoot, "Services",
     "KeireDistributionService", "Website", "assets", "preview-downloads.json"), "utf8"));

@@ -149,13 +149,18 @@ namespace Keire
                 if ((value.Name == "Press" && (!only({"pressPoint"}) || parameter("pressPoint", 0.5) <= 0.0 ||
                                                parameter("pressPoint", 0.5) > 1.0)) ||
                     (value.Name == "Tap" && (!only({"duration", "pressPoint"}) || parameter("duration", 0.2) <= 0.0 ||
-                                             parameter("duration", 0.2) > 10.0)) ||
-                    (value.Name == "Hold" && (!only({"duration", "pressPoint"}) || parameter("duration", 0.4) <= 0.0 ||
-                                              parameter("duration", 0.4) > 60.0)) ||
+                                             parameter("duration", 0.2) > 10.0 || parameter("pressPoint", 0.5) <= 0.0 ||
+                                             parameter("pressPoint", 0.5) > 1.0)) ||
+                    (value.Name == "Hold" &&
+                     (!only({"duration", "pressPoint"}) || parameter("duration", 0.4) <= 0.0 ||
+                      parameter("duration", 0.4) > 60.0 || parameter("pressPoint", 0.5) <= 0.0 ||
+                      parameter("pressPoint", 0.5) > 1.0)) ||
                     (value.Name == "MultiTap" &&
                      (!only({"duration", "delay", "count", "pressPoint"}) || parameter("duration", 0.2) <= 0.0 ||
-                      parameter("delay", 0.75) <= 0.0 || parameter("count", 2.0) < 2.0 ||
-                      parameter("count", 2.0) > 16.0 ||
+                      parameter("duration", 0.2) > 10.0 || parameter("delay", 0.75) <= 0.0 ||
+                      parameter("delay", 0.75) > 10.0 || parameter("count", 2.0) < 2.0 ||
+                      parameter("count", 2.0) > 16.0 || parameter("pressPoint", 0.5) <= 0.0 ||
+                      parameter("pressPoint", 0.5) > 1.0 ||
                       std::floor(parameter("count", 2.0)) != parameter("count", 2.0))) ||
                     (value.Name == "Deadzone" && (!only({"minimum", "maximum"}) || parameter("minimum", 0.125) < 0.0 ||
                                                   parameter("minimum", 0.125) >= parameter("maximum", 0.925) ||
@@ -418,8 +423,9 @@ namespace Keire
             std::unordered_set<std::string> bindingNames;
             AssetId compositeAction;
             std::string compositeType;
-            for (const auto& binding : map.Bindings)
+            for (auto bindingIterator = map.Bindings.begin(); bindingIterator != map.Bindings.end(); ++bindingIterator)
             {
+                const auto& binding = *bindingIterator;
                 const bool compositeRoot = !binding.Composite.empty();
                 const auto action = std::ranges::find(map.Actions, binding.Action, &InputActionDefinition::Id);
                 if (!binding.Id || binding.Name.size() > 128 || binding.Path.size() > 512 ||
@@ -436,6 +442,20 @@ namespace Keire
                     if ((compositeType == "Axis1D" && action->ValueType != InputValueType::Axis1D) ||
                         (compositeType == "Vector2" && action->ValueType != InputValueType::Axis2D))
                         throw std::invalid_argument("Input composite type is incompatible with its action value.");
+                    std::unordered_set<std::string> parts;
+                    std::size_t partCount = 0;
+                    for (auto part = std::next(bindingIterator);
+                         part != map.Bindings.end() && !part->CompositePart.empty(); ++part)
+                    {
+                        ++partCount;
+                        parts.insert(part->CompositePart);
+                    }
+                    const bool completeAxis = compositeType == "Axis1D" && partCount == 2 &&
+                                              parts == std::unordered_set<std::string>{"Negative", "Positive"};
+                    const bool completeVector = compositeType == "Vector2" && partCount == 4 &&
+                                                parts == std::unordered_set<std::string>{"Up", "Down", "Left", "Right"};
+                    if (!completeAxis && !completeVector)
+                        throw std::invalid_argument("Input composite parts must be complete, contiguous, and unique.");
                 }
                 else if (!binding.CompositePart.empty())
                 {

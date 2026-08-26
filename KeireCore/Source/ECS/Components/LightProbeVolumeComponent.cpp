@@ -39,19 +39,17 @@ namespace Keire
 
     LightProbeVolumeComponent::LightProbeVolumeComponent() : Component(StaticType()) {}
 
-    void LightProbeVolumeComponent::SetBoxExtents(const Vector3 value)
+    void LightProbeVolumeComponent::ConfigureGrid(const Vector3 boxExtents, const Vector3 spacing)
     {
-        ValidateGrid(value, m_Spacing);
-        m_BoxExtents = value;
+        ValidateGrid(boxExtents, spacing);
+        m_BoxExtents = boxExtents;
+        m_Spacing = spacing;
         NotifyChanged();
     }
 
-    void LightProbeVolumeComponent::SetSpacing(const Vector3 value)
-    {
-        ValidateGrid(m_BoxExtents, value);
-        m_Spacing = value;
-        NotifyChanged();
-    }
+    void LightProbeVolumeComponent::SetBoxExtents(const Vector3 value) { ConfigureGrid(value, m_Spacing); }
+
+    void LightProbeVolumeComponent::SetSpacing(const Vector3 value) { ConfigureGrid(m_BoxExtents, value); }
 
     void LightProbeVolumeComponent::SetPriority(const std::int32_t value)
     {
@@ -115,8 +113,8 @@ namespace Keire
             if (version != 1)
                 throw std::invalid_argument("Unsupported Light Probe Volume component schema version.");
             auto& volume = dynamic_cast<LightProbeVolumeComponent&>(component);
-            volume.SetBoxExtents(Read(values, "boxExtents", Vector3{5.0F, 3.0F, 5.0F}));
-            volume.SetSpacing(Read(values, "spacing", Vector3{1.0F, 1.0F, 1.0F}));
+            volume.ConfigureGrid(Read(values, "boxExtents", Vector3{5.0F, 3.0F, 5.0F}),
+                                 Read(values, "spacing", Vector3{1.0F, 1.0F, 1.0F}));
             const auto priority = Read(values, "priority", std::int64_t{0});
             if (priority < -1000 || priority > 1000)
                 throw std::invalid_argument("Light Probe Volume priority is invalid.");

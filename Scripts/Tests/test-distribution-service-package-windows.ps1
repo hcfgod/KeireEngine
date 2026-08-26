@@ -295,6 +295,15 @@ try {
             'Stop-ExpectedWebProcess',
             'Stop-ConfiguredHost',
             'Start-ConfiguredHost',
+            'Start-AndVerifyConfiguredHost',
+            'WaitForExit(15000)',
+            'Exactly one scheduled host task must use',
+            '$script:hostRestartRequired = $true',
+            '$backupCreated = $true',
+            'Move-Item -LiteralPath $backupWeb -Destination $destinationRoot',
+            'Move-Item -LiteralPath $backupDist -Destination $destinationDist',
+            'previous web deployment could not be restored',
+            'previous web deployment could not be restarted',
             'Get-ScheduledTask',
             'The dependency lock changed',
             'AllowRuntimeUpdate',
@@ -306,6 +315,7 @@ try {
             throw "The Windows web deployment is missing '$deploymentContract'."
         }
     }
+    & (Join-Path $PSScriptRoot "test-windows-web-deployment-transaction.ps1")
 
     $invalidSettings = Get-Content -LiteralPath $settingsPath -Raw | ConvertFrom-Json
     $invalidSettings.host = "https://not-a-host.example"

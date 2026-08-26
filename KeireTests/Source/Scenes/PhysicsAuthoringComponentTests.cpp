@@ -1,9 +1,12 @@
 #include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
 #include "Keire/ECS/Components/JointComponents.h"
 #include "Keire/ECS/Components/RigidBodyComponent.h"
+#include "Keire/Scenes/Scene.h"
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -24,6 +27,10 @@ TEST_CASE("joint registrations expose stable versioned authoring contracts")
     CHECK(hinge.AllowMultiple);
     CHECK(distance.AllowMultiple);
     CHECK(spring.AllowMultiple);
+    const auto runtimeId = std::ranges::find(fixed.Properties, "runtimeId", &Keire::ComponentProperty::Key);
+    REQUIRE(runtimeId != fixed.Properties.end());
+    CHECK(runtimeId->Kind == Keire::ComponentPropertyKind::Asset);
+    CHECK(runtimeId->ReadOnly);
     REQUIRE(fixed.RequiredComponents.size() == 1);
     CHECK(fixed.RequiredComponents.front() == Keire::RigidBodyComponent::StaticType());
     CHECK(Keire::FixedJointComponent::StaticType() != Keire::HingeJointComponent::StaticType());
@@ -95,6 +102,46 @@ TEST_CASE("joint schema one migration supplies stable runtime and break settings
     const auto restored = registration.Factory();
     CHECK_NOTHROW(registration.Deserialize(*restored, migrated, registration.SchemaVersion));
     CHECK_THROWS_AS(registration.Migrate(legacy, 0), std::invalid_argument);
+}
+
+TEST_CASE("joint scene clones preserve runtime IDs across current and migrated schemas")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Joint clone"));
+    auto body = scene->CreateEntity("Body");
+    REQUIRE(body.AddComponent<Keire::ColliderComponent>());
+    REQUIRE(body.AddComponent<Keire::RigidBodyComponent>());
+    const auto joint = body.AddComponent<Keire::HingeJointComponent>();
+    REQUIRE(joint);
+    const auto runtimeId = Keire::AssetId::Parse("1e259016-17b0-4d92-a066-69756f0ed19f");
+    joint->SetRuntimeId(runtimeId);
+
+    const auto currentDefinition = scene->Snapshot();
+    const auto currentClone = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), currentDefinition);
+    const auto currentJoint = currentClone->FindEntity(body.Id()).GetComponent<Keire::HingeJointComponent>();
+    REQUIRE(currentJoint);
+    CHECK(currentJoint->RuntimeId() == runtimeId);
+
+    auto legacyDefinition = currentDefinition;
+    REQUIRE(legacyDefinition.Objects.size() == 1);
+    auto& components = legacyDefinition.Objects.front().Components;
+    const auto legacyJoint =
+        std::ranges::find(components, Keire::HingeJointComponent::StaticType(), &Keire::SceneComponentDefinition::Type);
+    REQUIRE(legacyJoint != components.end());
+    legacyJoint->SchemaVersion = 1;
+    legacyJoint->Data = R"({"connectedEntity":null,"localAnchor":[0,0,0],"connectedAnchor":[0,0,0],"axis":[0,1,0]})";
+
+    const auto migratedScene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), std::move(legacyDefinition));
+    const auto migratedJoint = migratedScene->FindEntity(body.Id()).GetComponent<Keire::HingeJointComponent>();
+    REQUIRE(migratedJoint);
+    const auto migratedRuntimeId = migratedJoint->RuntimeId();
+    REQUIRE(migratedRuntimeId);
+
+    const auto migratedDefinition = migratedScene->Snapshot();
+    const auto migratedClone = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), migratedDefinition);
+    const auto restoredJoint = migratedClone->FindEntity(body.Id()).GetComponent<Keire::HingeJointComponent>();
+    REQUIRE(restoredJoint);
+    CHECK(restoredJoint->RuntimeId() == migratedRuntimeId);
 }
 
 TEST_CASE("distance and spring joint registrations validate authored constraints")

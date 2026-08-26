@@ -3,6 +3,8 @@
 #include "Keire/Core.h"
 #include "KeireClient/Editor/ScenePlayChanges.h"
 
+#include <cstddef>
+
 namespace KeireEditor
 {
     enum class ScenePlayDecision : std::uint8_t
@@ -27,6 +29,7 @@ namespace KeireEditor
             m_OpenRequested = false;
         }
         [[nodiscard]] bool Pending() const noexcept { return m_ReviewPending; }
+        [[nodiscard]] static float ChangeListHeight(std::size_t changeCount) noexcept;
         [[nodiscard]] ScenePlayDecision Draw(Keire::UiFrame& ui, ScenePlayChangeSet& changes);
 
       private:

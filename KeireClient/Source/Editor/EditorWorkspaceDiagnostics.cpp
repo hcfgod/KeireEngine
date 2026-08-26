@@ -13,6 +13,45 @@ void EditorWorkspaceLayer::AddConsoleMessage(std::string category, std::string m
                                   m_Theme, level);
 }
 
+void EditorWorkspaceLayer::CaptureManagedRuntimeDiagnostics() noexcept
+{
+    try
+    {
+        const auto scripts = Owner().Scripts();
+        if (!scripts || !scripts->IsOpen())
+        {
+            m_ManagedRuntimeDiagnostics.Reset();
+            m_ManagedRuntimeDiagnosticSource.Reset();
+            return;
+        }
+        if (m_ManagedRuntimeDiagnosticSource.Lock() != scripts)
+        {
+            m_ManagedRuntimeDiagnostics.Reset();
+            m_ManagedRuntimeDiagnosticSource = scripts;
+        }
+        for (auto& entry : m_ManagedRuntimeDiagnostics.Collect(scripts->RuntimeDiagnostics()))
+        {
+            auto color = m_Theme.MutedText;
+            auto level = Keire::LogLevel::Info;
+            if (entry.Severity == Keire::ManagedDiagnosticSeverity::Warning)
+            {
+                color = m_Theme.Warning;
+                level = Keire::LogLevel::Warn;
+            }
+            else if (entry.Severity == Keire::ManagedDiagnosticSeverity::Error)
+            {
+                color = m_Theme.Error;
+                level = Keire::LogLevel::Error;
+            }
+            AddConsoleMessage("Managed Runtime", std::move(entry.Message), color, level);
+        }
+    }
+    catch (...)
+    {
+        // Diagnostics must never destabilize the editor frame or replace the managed exception they are reporting.
+    }
+}
+
 void EditorWorkspaceLayer::ReportError(std::string category, std::string message) noexcept
 {
     AddConsoleMessage(std::move(category), std::move(message), m_Theme.Error, Keire::LogLevel::Error);

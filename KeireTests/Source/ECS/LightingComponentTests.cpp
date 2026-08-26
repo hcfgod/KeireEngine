@@ -76,3 +76,25 @@ TEST_CASE("probe components reject invalid spatial grids and influence settings"
     CHECK_THROWS_AS(volume.SetSpacing({0.001F, 0.001F, 0.001F}), std::invalid_argument);
     CHECK_THROWS_AS(volume.SetNormalBias(-1.0F), std::invalid_argument);
 }
+
+TEST_CASE("light probe volume registration deserializes grid fields atomically")
+{
+    const auto registration = Keire::CreateLightProbeVolumeComponentRegistration();
+    const Keire::ComponentPropertyBag valid{{"boxExtents", Keire::Vector3{92.0F, 13.0F, 71.0F}},
+                                            {"spacing", Keire::Vector3{4.0F, 2.0F, 4.0F}}};
+    const auto restored = registration.Factory();
+    CHECK_NOTHROW(registration.Deserialize(*restored, valid, registration.SchemaVersion));
+    const auto volume = Keire::DynamicRefCast<Keire::LightProbeVolumeComponent>(restored);
+    REQUIRE(volume);
+    CHECK(volume->BoxExtents() == Keire::Vector3{92.0F, 13.0F, 71.0F});
+    CHECK(volume->Spacing() == Keire::Vector3{4.0F, 2.0F, 4.0F});
+
+    auto invalid = valid;
+    invalid.insert_or_assign("spacing", Keire::Vector3{0.001F, 0.001F, 0.001F});
+    const auto rejected = registration.Factory();
+    CHECK_THROWS_AS(registration.Deserialize(*rejected, invalid, registration.SchemaVersion), std::invalid_argument);
+    const auto unchanged = Keire::DynamicRefCast<Keire::LightProbeVolumeComponent>(rejected);
+    REQUIRE(unchanged);
+    CHECK(unchanged->BoxExtents() == Keire::Vector3{5.0F, 3.0F, 5.0F});
+    CHECK(unchanged->Spacing() == Keire::Vector3{1.0F, 1.0F, 1.0F});
+}

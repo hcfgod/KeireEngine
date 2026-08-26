@@ -606,9 +606,17 @@ namespace
         {
             try
             {
-                if (!m_InputContext || !m_InputContext->EnableMap("Player"))
+                if (!m_InputContext || !m_InputMapEnabled || !m_ActiveInputMap ||
+                    !m_InputContext->MapEnabled(m_ActiveInputMap))
                     return {};
-                const auto handle = m_InputContext->FindAction("Player", action);
+                const auto definition = m_InputContext->Definition();
+                const auto map =
+                    std::ranges::find(definition.ActionMaps, m_ActiveInputMap, &Keire::InputActionMapDefinition::Id);
+                if (map == definition.ActionMaps.end())
+                    return {};
+                const auto found = std::ranges::find(map->Actions, action, &Keire::InputActionDefinition::Name);
+                const auto handle =
+                    found == map->Actions.end() ? Keire::InputActionHandle{} : m_InputContext->FindAction(found->Id);
                 if (!handle)
                     return {};
                 const auto value = handle.Value().AsAxis2D();
@@ -624,9 +632,17 @@ namespace
         {
             try
             {
-                if (!m_InputContext || !m_InputContext->EnableMap("Player"))
+                if (!m_InputContext || !m_InputMapEnabled || !m_ActiveInputMap ||
+                    !m_InputContext->MapEnabled(m_ActiveInputMap))
                     return Keire::ManagedInputState::None;
-                const auto handle = m_InputContext->FindAction("Player", action);
+                const auto definition = m_InputContext->Definition();
+                const auto map =
+                    std::ranges::find(definition.ActionMaps, m_ActiveInputMap, &Keire::InputActionMapDefinition::Id);
+                if (map == definition.ActionMaps.end())
+                    return Keire::ManagedInputState::None;
+                const auto found = std::ranges::find(map->Actions, action, &Keire::InputActionDefinition::Name);
+                const auto handle =
+                    found == map->Actions.end() ? Keire::InputActionHandle{} : m_InputContext->FindAction(found->Id);
                 if (!handle)
                     return Keire::ManagedInputState::None;
                 auto state = Keire::ManagedInputState::None;
@@ -1006,12 +1022,18 @@ namespace
         {
             if (!m_InputContext)
                 return true;
-            if (m_DefaultInputMap)
-                return m_InputContext->EnableMap(m_DefaultInputMap);
-            if (m_InputContext->EnableMap("Player"))
-                return true;
             const auto definition = m_InputContext->Definition();
-            return !definition.ActionMaps.empty() && m_InputContext->EnableMap(definition.ActionMaps.front().Id);
+            auto selected =
+                std::ranges::find(definition.ActionMaps, m_DefaultInputMap, &Keire::InputActionMapDefinition::Id);
+            if (selected == definition.ActionMaps.end() && !m_DefaultInputMap)
+                selected = std::ranges::find(definition.ActionMaps, std::string_view("Player"),
+                                             &Keire::InputActionMapDefinition::Name);
+            if (selected == definition.ActionMaps.end() && !m_DefaultInputMap && !definition.ActionMaps.empty())
+                selected = definition.ActionMaps.begin();
+            if (selected == definition.ActionMaps.end() || !m_InputContext->EnableMap(selected->Id))
+                return false;
+            m_ActiveInputMap = selected->Id;
+            return true;
         }
 
         void ApplyManagedCursorMode(const bool restore = false) noexcept
@@ -1054,6 +1076,7 @@ namespace
         KeireRuntime::RuntimeUiPointerState m_UiPointer;
         Keire::InputUserId m_InputUser;
         Keire::Ref<Keire::InputActionContext> m_InputContext;
+        Keire::AssetId m_ActiveInputMap;
         bool m_InputMapEnabled = false;
         bool m_ManagedCursorVisible = true;
         bool m_ManagedCursorLocked = false;
