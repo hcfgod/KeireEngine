@@ -20,6 +20,9 @@ versions.
 
 ### Changed
 
+- Published Kéire 0.4.2 Windows and Linux x86-64 Editor and Hub packages through immutable signed snapshot
+  `release-0.4.2-sequence-17-e3eb5ac`, retaining the 0.4.1 records and distinct Linux DEB/RPM identities. Live
+  readiness, catalog, and package-identity checks passed; the disclosed unsigned Authenticode/RPM GPG boundaries remain.
 - Restricted GPU occlusion eligibility to explicitly safe opaque Shader Graph geometry and retained conservative
   direct drawing whenever a backend, shader, surface, frame resource, or diagnostic result is unavailable.
 
@@ -27,6 +30,8 @@ versions.
 
 - Retried the Windows distribution publisher's atomic staging-directory rename with bounded backoff when filesystem
   filters briefly lock newly written snapshot files, without retrying after the immutable destination appears.
+- Waited for the Windows website supervisor and owned Node process to stop before replacing the live web root, and
+  restored the previous site automatically when a pre-swap deployment failure leaves its payload intact.
 - Resolved cooked AudioClip impulse responses into convolution mixer registrations across headless and device DSP,
   unified graph/mixer effect processing, and replaced the Equalizer gain alias with backward-compatible three-band
   frequency shaping while preserving reverb tails across continuously blended Reverb Zone parameter updates and

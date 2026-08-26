@@ -90,10 +90,11 @@ $hostTasks = @(Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
         }
         return $false
     })
-if ($hostTasks.Count -gt 1) {
-    throw "More than one scheduled host task uses '$SettingsPath'; refusing an ambiguous deployment."
+if ($hostTasks.Count -ne 1) {
+    throw "Exactly one scheduled host task must use '$SettingsPath'; found $($hostTasks.Count)."
 }
-$hostTask = if ($hostTasks.Count -eq 1) { $hostTasks[0] } else { $null }
+$hostTask = $hostTasks[0]
+$script:hostRestartRequired = $false
 
 function Stop-ExpectedWebProcess {
     foreach ($connection in Get-NetTCPConnection -State Listen -LocalPort 4321 -ErrorAction SilentlyContinue) {
@@ -104,7 +105,16 @@ function Stop-ExpectedWebProcess {
             $process.CommandLine.IndexOf($destinationEntry, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
             throw 'Port 4321 is not owned by the configured live web deployment; refusing to stop it.'
         }
-        Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+        $ownedProcess = Get-Process -Id $process.ProcessId -ErrorAction Stop
+        try {
+            Stop-Process -InputObject $ownedProcess -Force -ErrorAction Stop
+            if (-not $ownedProcess.WaitForExit(15000)) {
+                throw "The configured web process $($process.ProcessId) did not exit before the deployment deadline."
+            }
+        }
+        finally {
+            $ownedProcess.Dispose()
+        }
     }
 }
 
@@ -126,16 +136,37 @@ function Wait-ForDeployment([int] $TimeoutSeconds) {
 }
 
 function Stop-ConfiguredHost {
-    if ($null -ne $hostTask) {
+    $script:hostRestartRequired = $true
+    $currentTask = Get-ScheduledTask -TaskName $hostTask.TaskName -TaskPath $hostTask.TaskPath -ErrorAction Stop
+    if ($currentTask.State -eq 'Running') {
         Stop-ScheduledTask -TaskName $hostTask.TaskName -TaskPath $hostTask.TaskPath -ErrorAction Stop
+        $deadline = [DateTime]::UtcNow.AddSeconds(15)
+        do {
+            $state = (Get-ScheduledTask -TaskName $hostTask.TaskName -TaskPath $hostTask.TaskPath `
+                    -ErrorAction Stop).State
+            if ($state -ne 'Running') {
+                break
+            }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if ($state -eq 'Running') {
+            throw 'The configured host task did not stop before the deployment deadline.'
+        }
     }
     Stop-ExpectedWebProcess
 }
 
 function Start-ConfiguredHost {
-    if ($null -ne $hostTask) {
+    $currentTask = Get-ScheduledTask -TaskName $hostTask.TaskName -TaskPath $hostTask.TaskPath -ErrorAction Stop
+    if ($currentTask.State -ne 'Running') {
         Start-ScheduledTask -TaskName $hostTask.TaskName -TaskPath $hostTask.TaskPath -ErrorAction Stop
     }
+}
+
+function Start-AndVerifyConfiguredHost {
+    Start-ConfiguredHost
+    Wait-ForDeployment 75
+    $script:hostRestartRequired = $false
 }
 
 if ($runtimeUpdate) {
@@ -143,6 +174,7 @@ if ($runtimeUpdate) {
     if (-not (Test-Path -LiteralPath $npmExecutable -PathType Leaf)) {
         throw "The configured Node.js installation has no npm.cmd: '$npmExecutable'."
     }
+    $backupCreated = $false
     try {
         [IO.Directory]::CreateDirectory($stagedWeb) | Out-Null
         Copy-Item -LiteralPath $sourcePackage, $sourceLock -Destination $stagedWeb
@@ -157,32 +189,51 @@ if ($runtimeUpdate) {
         }
         Stop-ConfiguredHost
         Move-Item -LiteralPath $destinationRoot -Destination $backupWeb
+        $backupCreated = $true
         Move-Item -LiteralPath $stagedWeb -Destination $destinationRoot
-        try {
-            Start-ConfiguredHost
-            Wait-ForDeployment 75
-        }
-        catch {
-            Stop-ConfiguredHost
-            $failedWeb = Join-Path $destinationParent ('.' + $destinationName + '.failed-' +
-                [Guid]::NewGuid().ToString('N'))
-            Move-Item -LiteralPath $destinationRoot -Destination $failedWeb
-            Move-Item -LiteralPath $backupWeb -Destination $destinationRoot
-            Start-ConfiguredHost
-            Wait-ForDeployment 75
-            throw
-        }
+        Start-AndVerifyConfiguredHost
         Write-Host "Windows locked web runtime deployment completed. Rollback retained at '$backupWeb'."
     }
     catch {
-        if (Test-Path -LiteralPath $stagedWeb) {
-            Remove-Item -LiteralPath $stagedWeb -Recurse -Force
+        $deploymentError = $_
+        if ($backupCreated -and (Test-Path -LiteralPath $backupWeb -PathType Container)) {
+            try {
+                Stop-ConfiguredHost
+                if (Test-Path -LiteralPath $destinationRoot) {
+                    $failedWeb = Join-Path $destinationParent ('.' + $destinationName + '.failed-' +
+                        [Guid]::NewGuid().ToString('N'))
+                    Move-Item -LiteralPath $destinationRoot -Destination $failedWeb
+                }
+                Move-Item -LiteralPath $backupWeb -Destination $destinationRoot
+                $backupCreated = $false
+            }
+            catch {
+                Write-Warning "The previous web deployment could not be restored after deployment failure: $($_.Exception.Message)"
+            }
         }
-        throw
+        if ($script:hostRestartRequired -and (Test-Path -LiteralPath $destinationEntry -PathType Leaf)) {
+            try {
+                Start-AndVerifyConfiguredHost
+            }
+            catch {
+                Write-Warning `
+                    "The previous web deployment could not be restarted after deployment failure: $($_.Exception.Message)"
+            }
+        }
+        if (Test-Path -LiteralPath $stagedWeb) {
+            try {
+                Remove-Item -LiteralPath $stagedWeb -Recurse -Force
+            }
+            catch {
+                Write-Warning "The failed staged web deployment could not be removed: $($_.Exception.Message)"
+            }
+        }
+        throw $deploymentError
     }
     exit 0
 }
 
+$backupCreated = $false
 try {
     Copy-Item -LiteralPath $sourceDist -Destination $stagedDist -Recurse
     & $nodeExecutable --check (Join-Path $stagedDist 'server\entry.mjs')
@@ -191,25 +242,43 @@ try {
     }
     Stop-ConfiguredHost
     Move-Item -LiteralPath $destinationDist -Destination $backupDist
+    $backupCreated = $true
     Move-Item -LiteralPath $stagedDist -Destination $destinationDist
-    try {
-        Start-ConfiguredHost
-        Wait-ForDeployment 75
-    }
-    catch {
-        Stop-ConfiguredHost
-        $failedDist = Join-Path $destinationRoot ('.dist.failed-' + [Guid]::NewGuid().ToString('N'))
-        Move-Item -LiteralPath $destinationDist -Destination $failedDist
-        Move-Item -LiteralPath $backupDist -Destination $destinationDist
-        Start-ConfiguredHost
-        Wait-ForDeployment 75
-        throw
-    }
+    Start-AndVerifyConfiguredHost
     Write-Host "Windows web deployment completed. Rollback retained at '$backupDist'."
 }
 catch {
-    if (Test-Path -LiteralPath $stagedDist) {
-        Remove-Item -LiteralPath $stagedDist -Recurse -Force
+    $deploymentError = $_
+    if ($backupCreated -and (Test-Path -LiteralPath $backupDist -PathType Container)) {
+        try {
+            Stop-ConfiguredHost
+            if (Test-Path -LiteralPath $destinationDist) {
+                $failedDist = Join-Path $destinationRoot ('.dist.failed-' + [Guid]::NewGuid().ToString('N'))
+                Move-Item -LiteralPath $destinationDist -Destination $failedDist
+            }
+            Move-Item -LiteralPath $backupDist -Destination $destinationDist
+            $backupCreated = $false
+        }
+        catch {
+            Write-Warning "The previous web deployment could not be restored after deployment failure: $($_.Exception.Message)"
+        }
     }
-    throw
+    if ($script:hostRestartRequired -and (Test-Path -LiteralPath $destinationEntry -PathType Leaf)) {
+        try {
+            Start-AndVerifyConfiguredHost
+        }
+        catch {
+            Write-Warning `
+                "The previous web deployment could not be restarted after deployment failure: $($_.Exception.Message)"
+        }
+    }
+    if (Test-Path -LiteralPath $stagedDist) {
+        try {
+            Remove-Item -LiteralPath $stagedDist -Recurse -Force
+        }
+        catch {
+            Write-Warning "The failed staged web deployment could not be removed: $($_.Exception.Message)"
+        }
+    }
+    throw $deploymentError
 }
