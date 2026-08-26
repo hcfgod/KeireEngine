@@ -333,6 +333,40 @@ TEST_CASE("Project metadata scanning enforces entry byte and candidate limits")
     CHECK(candidates.Error().Code == HubErrorCode::InvalidArgument);
 }
 
+TEST_CASE("Project metadata scanning tolerates cache entries removed after enumeration")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / "Project";
+    WriteProject(root);
+    for (std::size_t index = 0; index < 64; ++index)
+        KeireHubTests::WriteText(root / "Assets" / ("Stable" + std::to_string(index) + ".bin"), "payload");
+    const auto volatilePath = root / "Assets/zzzz-volatile-cache.bin";
+    KeireHubTests::WriteText(volatilePath, "volatile");
+    std::atomic_bool removed = false;
+
+    ProjectMetadataScanner scanner;
+    auto scanned = scanner
+                       .ScanAsync(Request(ProjectA, root),
+                                  {.ReportProgress =
+                                       [&](const ProjectMetadataScanProgress& progress)
+                                   {
+                                       if (progress.EntriesVisited < 64 || removed.load(std::memory_order_acquire))
+                                           return;
+                                       std::error_code error;
+                                       const bool erased = std::filesystem::remove(volatilePath, error);
+                                       removed.store(erased && !error, std::memory_order_release);
+                                   }})
+                       .get();
+    REQUIRE(scanned);
+    CHECK(removed.load(std::memory_order_acquire));
+    REQUIRE(scanned.Value()->Results.size() == 1);
+    const auto& result = scanned.Value()->Results.front();
+    CHECK(result.State == ProjectMetadataItemState::Ready);
+    CHECK(result.Metadata.Status == HubProjectStatus::Ready);
+    CHECK(result.Metadata.SizeBytes.has_value());
+    CHECK_FALSE(result.Error.has_value());
+}
+
 TEST_CASE("Project metadata scanning cancellation publishes only complete prior candidates")
 {
     KeireHubTests::TemporaryDirectory temporary;

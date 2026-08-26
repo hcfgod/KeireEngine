@@ -196,6 +196,13 @@ namespace KeireHub
             return error == std::errc::no_such_file_or_directory || error == std::errc::not_a_directory;
         }
 
+        [[nodiscard]] bool WasRemovedAfterEnumeration(const std::filesystem::path& path)
+        {
+            std::error_code error;
+            const auto status = std::filesystem::symlink_status(path, error);
+            return (error && IsMissingError(error)) || (!error && !std::filesystem::exists(status));
+        }
+
         [[nodiscard]] HubResult<std::filesystem::path> PrepareRoot(const std::filesystem::path& requested)
         {
             if (requested.empty() || !requested.is_absolute() || ContainsTraversal(requested) ||
@@ -377,12 +384,12 @@ namespace KeireHub
             const auto value = std::filesystem::last_write_time(path, error);
             if (error)
             {
-                details = error.message();
+                details = Detail::PathToUtf8(path) + ": " + error.message();
                 return std::nullopt;
             }
             auto seconds = ToUnixSeconds(value);
             if (!seconds)
-                details = "The file modification time predates the supported epoch.";
+                details = Detail::PathToUtf8(path) + ": The file modification time predates the supported epoch.";
             return seconds;
         }
 
@@ -711,7 +718,12 @@ namespace KeireHub
                     std::filesystem::directory_iterator iterator(directory.Path, error);
                     const std::filesystem::directory_iterator end;
                     if (error)
-                        return {.State = TraversalState::Invalid, .Details = error.message()};
+                    {
+                        if (IsMissingError(error))
+                            continue;
+                        return {.State = TraversalState::Invalid,
+                                .Details = Detail::PathToUtf8(directory.Path) + ": " + error.message()};
+                    }
 
                     std::vector<std::filesystem::path> children;
                     const auto remaining = m_Request.Limits.MaximumEntries - m_Snapshot.EntriesVisited;
@@ -725,7 +737,12 @@ namespace KeireHub
                         children.push_back(iterator->path());
                         iterator.increment(error);
                         if (error)
-                            return {.State = TraversalState::Invalid, .Details = error.message()};
+                        {
+                            if (IsMissingError(error))
+                                break;
+                            return {.State = TraversalState::Invalid,
+                                    .Details = Detail::PathToUtf8(directory.Path) + ": " + error.message()};
+                        }
                     }
                     std::ranges::sort(children, PathLess);
 
@@ -738,21 +755,31 @@ namespace KeireHub
                         const auto status = std::filesystem::symlink_status(path, error);
                         if (error)
                         {
-                            return {.State = TraversalState::Invalid, .Details = error.message()};
+                            if (IsMissingError(error))
+                                continue;
+                            return {.State = TraversalState::Invalid,
+                                    .Details = Detail::PathToUtf8(path) + ": " + error.message()};
                         }
                         if (std::filesystem::is_symlink(status))
                             continue;
                         auto canonical = std::filesystem::weakly_canonical(path, error);
                         if (error || !IsSameOrWithin(candidate.Root, canonical))
                         {
+                            if (error && IsMissingError(error))
+                                continue;
                             return {.State = TraversalState::Invalid,
-                                    .Details = error ? error.message() : "A project entry escapes the project root."};
+                                    .Details = Detail::PathToUtf8(path) + ": " +
+                                               (error ? error.message() : "A project entry escapes the project root.")};
                         }
 
                         std::string modifiedDetails;
                         auto modified = LastWriteSeconds(canonical, modifiedDetails);
                         if (!modified)
+                        {
+                            if (WasRemovedAfterEnumeration(canonical))
+                                continue;
                             return {.State = TraversalState::Invalid, .Details = std::move(modifiedDetails)};
+                        }
                         traversal.ModifiedUnixSeconds = std::max(*traversal.ModifiedUnixSeconds, *modified);
 
                         if (std::filesystem::is_directory(status))
@@ -768,7 +795,12 @@ namespace KeireHub
                         {
                             const auto size = std::filesystem::file_size(canonical, error);
                             if (error)
-                                return {.State = TraversalState::Invalid, .Details = error.message()};
+                            {
+                                if (IsMissingError(error))
+                                    continue;
+                                return {.State = TraversalState::Invalid,
+                                        .Details = Detail::PathToUtf8(canonical) + ": " + error.message()};
+                            }
                             if (size > m_Request.Limits.MaximumBytes - m_Snapshot.BytesVisited)
                             {
                                 return {.State = TraversalState::LimitReached,
@@ -780,7 +812,8 @@ namespace KeireHub
                         else
                         {
                             return {.State = TraversalState::Invalid,
-                                    .Details = "A project entry is not a regular file or directory."};
+                                    .Details = Detail::PathToUtf8(canonical) +
+                                               ": A project entry is not a regular file or directory."};
                         }
 
                         if (m_Snapshot.EntriesVisited % ProgressEntryInterval == 0)

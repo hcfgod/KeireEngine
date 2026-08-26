@@ -10,6 +10,8 @@ versions.
 
 ### Fixed
 
+- Kept Project Hub metadata refreshes from marking valid projects invalid when disposable cache files disappear after
+  directory enumeration, and logged the exact project ID, path, and filesystem failure for genuine scan errors.
 - Made input map/action enablement idempotent, preserved enabled-map intent across hot reload, and made retained input
   handles, subscriptions, and capture overrides inert after shutdown instead of exposing stale phase or edge state;
   managed actions also stop native snapshot polling when their final callback is removed.
