@@ -1389,13 +1389,10 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         const bool productionInputActive = KeireEditor::GameViewportOwnsRuntimeInput(
             playActive, mainWindow && mainWindow->Focused(), ui.WindowFocused(), m_ManagedCursorLocked,
             m_GameViewportCaptureSuspended);
-#if defined(KEIRE_ENABLE_TEST_HOOKS)
         // The window manager may refuse to focus a process launched by an unattended validation harness. Keep the
-        // production focus contract intact while allowing --smoke-play to exercise the real SDL/ImGui pointer path.
+        // production focus contract intact while allowing --smoke-play to exercise the real SDL/ImGui pointer path in
+        // packaged builds, where renderer fault-injection hooks remain disabled.
         SetGameViewportInputActive(productionInputActive || static_cast<bool>(m_SmokePlayValidation));
-#else
-        SetGameViewportInputActive(productionInputActive);
-#endif
         if (playActive)
         {
             if (m_PlayRuntimeWorld)

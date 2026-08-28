@@ -85,13 +85,20 @@ context.fixtureCandidates = validate(catalog([
     packageRecord("0.3.2"),
     packageRecord("0.4.0"),
     packageRecord("0.4.1"),
+    packageRecord("0.4.2"),
+    packageRecord("0.4.3"),
 ]));
-const currentCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.0')", context);
-assert.deepEqual(Array.from(currentCandidates, (candidate) => candidate.version.raw), ["0.4.0"]);
-const activeCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.3.2')", context);
-assert.deepEqual(Array.from(activeCandidates, (candidate) => candidate.version.raw), ["0.3.2"]);
-context.fixtureCandidates = validate(catalog([packageRecord("0.3.2")]));
-assert.equal(vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.0').length", context), 0);
+const currentCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.3')", context);
+assert.deepEqual(Array.from(currentCandidates, (candidate) => candidate.version.raw),
+    ["0.4.3", "0.4.2", "0.4.1", "0.4.0", "0.3.2"]);
+const activeCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.2')", context);
+assert.deepEqual(Array.from(activeCandidates, (candidate) => candidate.version.raw),
+    ["0.4.2", "0.4.1", "0.4.0", "0.3.2"]);
+context.fixtureCandidates = validate(catalog([packageRecord("0.4.2")]));
+assert.deepEqual(Array.from(vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.3')", context),
+    (candidate) => candidate.version.raw), ["0.4.2"]);
+context.fixtureCandidates = validate(catalog([packageRecord("0.4.3")]));
+assert.equal(vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.2').length", context), 0);
 assert.equal(vm.runInContext("releaseCandidates(fixtureCandidates, null).length", context), 0);
 
 const compact = packageRecord("2.1.0", {
@@ -374,6 +381,83 @@ assert.ok(preparingVariant);
 assert.equal(preparingVariant.className, "download-variant");
 assert.equal(preparingVariant.children[1].textContent, "Hub v0.3.0 · Verified by signed Kéire catalog");
 assert.match(preparingCards.get("windows").state.textContent, /Catalog-verified releases/);
+
+function linuxPackageRecord(version, packageFormat) {
+    const fileName = packageFormat === "deb" ? "keire-hub.deb" : "keire-hub.rpm";
+    return packageRecord(version, {
+        platform: "linux",
+        packageFormat,
+        files: [{ path: fileName, sizeBytes: 4096, sha256: digest, mode: 420 }],
+    });
+}
+
+const platformCards = new Map();
+for (const platform of ["windows", "macos", "linux"]) {
+    const card = new RenderElement("article");
+    card.state = new RenderElement("p");
+    card.variants = new RenderElement("div");
+    card.querySelector = (selector) => selector === "[data-download-state]" ? card.state : card.variants;
+    platformCards.set(platform, card);
+}
+const platformRelease = {
+    schemaVersion: 2,
+    releaseStatus: {
+        state: "active",
+        version: "0.4.3",
+        activeCatalogVersion: "0.4.3",
+        message: "Kéire 0.4.3 is active on Windows while Linux retains its validated 0.4.2 packages.",
+    },
+    packages: [],
+};
+const platformRenderContext = vm.createContext({
+    console,
+    Date,
+    HTMLElement: RenderElement,
+    navigator: { platform: "Win32", userAgent: "website-platform-download-test", clipboard: { writeText: async () => {} } },
+    document: {
+        createElement(name) {
+            return new RenderElement(name);
+        },
+        querySelector(selector) {
+            const match = /data-platform="([a-z]+)"/.exec(selector);
+            return match ? platformCards.get(match[1]) : null;
+        },
+        querySelectorAll() {
+            return [];
+        },
+    },
+    fetch: async (url) => {
+        if (url === "/assets/preview-downloads.json") {
+            return { ok: true, status: 200, json: async () => platformRelease };
+        }
+        if (url === "/v2/catalog/stable/windows/x86_64") {
+            return { ok: true, status: 200, json: async () => catalog([
+                packageRecord("0.4.2"), packageRecord("0.4.3"),
+            ]) };
+        }
+        if (url === "/v2/catalog/stable/linux/x86_64") {
+            return { ok: true, status: 200, json: async () => catalog([
+                linuxPackageRecord("0.4.1", "deb"),
+                linuxPackageRecord("0.4.2", "deb"),
+                linuxPackageRecord("0.4.2", "rpm"),
+            ], { platform: "linux" }) };
+        }
+        return { ok: false, status: 404 };
+    },
+    window: { setTimeout },
+});
+vm.runInContext(source, platformRenderContext, { filename: "downloads-platform-render.js" });
+for (let index = 0; index < 10 && platformCards.get("windows").variants.children.length === 0; ++index) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+}
+assert.equal(platformCards.get("windows").variants.children.length, 1);
+assert.equal(platformCards.get("windows").variants.children[0].children[1].textContent,
+    "Hub v0.4.3 · Verified by signed Kéire catalog");
+assert.equal(platformCards.get("linux").variants.children.length, 2);
+assert.deepEqual(platformCards.get("linux").variants.children.map((variant) => variant.children[1].textContent), [
+    "Hub v0.4.2 · Verified by signed Kéire catalog",
+    "Hub v0.4.2 · Verified by signed Kéire catalog",
+]);
 
 const historyTargets = new Map();
 const historyStates = new Map();

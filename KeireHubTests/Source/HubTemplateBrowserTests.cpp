@@ -1,5 +1,6 @@
 #include "KeireHub/HubProjectCreationUi.h"
 #include "KeireHub/HubTemplateBrowser.h"
+#include "KeireHubRuntime/TemplateManager.h"
 
 #include <KeireHubTests/TestSupport.h>
 
@@ -98,6 +99,25 @@ TEST_CASE("Template UI translation preserves manifest detail and confines artwor
     CHECK(record.RecommendedPackages ==
           std::vector<HubTemplatePackageUiRecord>{{.PackageId = "desktop.tools", .VersionConstraint = "*"}});
     CHECK(record.LicenseReferences == manifest.LicenseReferences);
+}
+
+TEST_CASE("Checked-in template catalog thumbnails decode into Hub artwork")
+{
+    const auto templatesRoot = std::filesystem::current_path() / "KeireHubContent" / "Templates";
+    TemplateManager manager(templatesRoot);
+    REQUIRE(manager.Load());
+
+    const auto templates = manager.Snapshot();
+    REQUIRE(templates->size() == 3);
+    for (const auto& item : *templates)
+    {
+        CAPTURE(item.Id);
+        const auto record = MakeHubTemplateUiRecord(item, templatesRoot);
+        CHECK(record.Thumbnail.Available);
+        CHECK(record.Thumbnail.Image.IsValid());
+        CHECK(record.Thumbnail.Image.Width == ProjectThumbnailImage::PixelWidth);
+        CHECK(record.Thumbnail.Image.Height == ProjectThumbnailImage::PixelHeight);
+    }
 }
 
 TEST_CASE("Template artwork resolution rejects files outside the template root")

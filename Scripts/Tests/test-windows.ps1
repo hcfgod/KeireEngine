@@ -415,12 +415,21 @@ $installerTransactionGates = @(
     "test-installer-windows.ps1",
     "test-hub-installer-windows.ps1"
 )
+$installerPrerequisite = Join-Path $PSScriptRoot "prepare-install-worker-runtime-windows.ps1"
+$installerPrerequisiteSource = Get-Content -LiteralPath $installerPrerequisite -Raw
+foreach ($contract in @('Scripts\Windows', 'build.ps1', '-Generator ninja', '-Configuration $configuration',
+        '-Architecture $architecture', '-Toolset msc', 'InstallWorker', 'InstallVerifyFixture',
+        'Test-Path -LiteralPath $executable -PathType Leaf')) {
+    Assert-True ($installerPrerequisiteSource.Contains($contract)) `
+        "Installer runtime prerequisite provisioning retains '$contract'"
+}
 foreach ($gate in $installerTransactionGates) {
     $gatePath = Join-Path $PSScriptRoot $gate
     $gateSource = Get-Content -LiteralPath $gatePath -Raw
-    Assert-True ($gateSource.Contains('test-install-worker-runtime-windows.ps1') -and
+    Assert-True ($gateSource.Contains('prepare-install-worker-runtime-windows.ps1') -and
+                 $gateSource.Contains('test-install-worker-runtime-windows.ps1') -and
                  $gateSource.Contains('test-nsis-worker-runtime-windows.ps1')) `
-        "$gate runs the worker and actual-NSIS transaction matrices"
+        "$gate provisions and runs the worker and actual-NSIS transaction matrices"
     & $gatePath
 }
 $distributionPackageGates = @(

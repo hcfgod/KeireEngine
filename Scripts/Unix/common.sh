@@ -899,6 +899,10 @@ validate_hub_package_stage() {
             return 1
         }
     done < <(hub_package_required_paths "$hub" "$namespace")
+    local repository_root
+    repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    python3 "$repository_root/Scripts/Packaging/validate-template-artwork.py" \
+      --templates-root "$stage/content/Templates" || return 1
     for path in "bin/$hub" "bin/${namespace}HubWorker" launch-hub.sh; do
         [[ -x "$stage/$path" ]] || {
             printf 'Hub package entry is not executable: %s\n' "$path" >&2

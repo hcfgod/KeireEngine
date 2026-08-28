@@ -175,6 +175,10 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUFence(Device, frame.Fence);
             if (frame.ResolvedEditorUi)
                 frame.ResolvedEditorUi->ReleaseGpuTextures(Device, false);
+            // Flush may observe CompleteFrame's outstanding-count transition immediately. Publish the completed
+            // readback tuple before that transition returns its slot so owner-visible diagnostics cannot name a
+            // workset that admission has already made reusable.
+            PublishGpuOcclusionReadbackStatistics();
             CompleteFrame(frame.Frame, false);
             InFlight.erase(InFlight.begin());
         };

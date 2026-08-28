@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+## 0.4.3 - 2026-08-28
+
 ### Changed
 
 - Bounded rendering now admits 1–3 immutable frames (default 2) before capture, publishes complete owner/render/GPU
@@ -73,6 +75,8 @@ versions.
 
 ### Fixed
 
+- Restored decodable built-in Hub template thumbnails and made source/catalog plus Windows and Unix package validation
+  reject missing or malformed declared artwork instead of silently shipping the runtime fallback.
 - Restricted Windows distribution signing keys before writing secret bytes without requiring a privileged owner
   rewrite, while retaining explicit owner/DACL validation and fail-closed behavior on filesystems that cannot enforce it.
 - Windows install, update, recovery, and uninstall now revalidate receipt-owned bytes and every no-follow path component

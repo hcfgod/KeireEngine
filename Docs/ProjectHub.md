@@ -374,6 +374,10 @@ carry Authenticode or RPM GPG signatures. Sequence 17 passed publisher validatio
 package-identity checks. Hub selects only the signed catalog above, so source labels alone never advance the catalog;
 ordinary future publication remains additive unless another documented retirement is approved.
 
+Kéire 0.4.3 is the current source and Windows publication target. Until a newer immutable snapshot is validated and
+activated, Hub continues to consume the signed 0.4.2 catalogs above; the target version alone never changes an
+installed or downloadable package identity.
+
 ## Launch and activation
 
 Opening a project launches the selected editor's typed entrypoint as:

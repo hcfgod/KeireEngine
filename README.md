@@ -10,12 +10,12 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.4.2 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.4.3 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.2 passed its Windows and Linux release/package gates and is active through immutable signed catalog
-sequence 17. The catalog publishes Windows and Linux x86-64 Editors plus Windows, DEB, and RPM Hub installers;
-macOS downloads remain gated pending platform, signing, and notarization validation.
+Version 0.4.3 is the current source and Windows publication target. Signed 0.4.2 Windows and Linux x86-64 packages
+remain active through immutable catalog sequence 17 while the new Windows packages complete validation and catalog
+activation; macOS downloads remain gated pending platform, signing, and notarization validation.
 
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·
@@ -352,7 +352,7 @@ output and reject stale or build-mismatched reports.
 ## Documentation
 
 The [documentation library](Docs/README.md) contains 84 maintained guides grouped around real tasks. Project authors
-should begin with the [Kéire 0.4.2 User Manual](Docs/Manual/README.md):
+should begin with the [Kéire 0.4.3 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
   [C# Scripting Fundamentals](Docs/Manual/ScriptingFundamentals.md), and

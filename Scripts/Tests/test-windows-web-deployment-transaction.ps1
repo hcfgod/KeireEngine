@@ -5,6 +5,7 @@ $Deployment = Join-Path $Root "Services\KeireDistributionService\scripts\deploy-
 $FixtureRoot = Join-Path ([IO.Path]::GetTempPath()) `
     ("keire-windows-web-deployment-test-" + [Guid]::NewGuid().ToString("N"))
 [IO.Directory]::CreateDirectory($FixtureRoot) | Out-Null
+$script:Utf8NoBomEncoding = [Text.UTF8Encoding]::new($false)
 
 $global:KeireWebDeploymentTestState = [pscustomobject]@{
     TaskAvailable = $true
@@ -16,6 +17,8 @@ $global:KeireWebDeploymentTestState = [pscustomobject]@{
     StopFailure = $false
     StartErrors = [Collections.Generic.Queue[string]]::new()
     StartCount = 0
+    ProbeErrors = [Collections.Generic.Queue[string]]::new()
+    ProbeCount = 0
     MoveFailureAt = 0
     MoveCount = 0
     ProcessListening = $false
@@ -32,6 +35,10 @@ function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) {
         throw $Message
     }
+}
+
+function Set-Utf8NoBomFile([string] $Path, [string] $Contents) {
+    [IO.File]::WriteAllText($Path, $Contents, $script:Utf8NoBomEncoding)
 }
 
 function Get-ScheduledTask {
@@ -149,6 +156,14 @@ function Stop-Process {
     $global:KeireWebDeploymentTestState.ProcessListening = $false
 }
 
+function Start-Sleep {
+    [CmdletBinding()]
+    param(
+        [int] $Seconds,
+        [int] $Milliseconds
+    )
+}
+
 function Move-Item {
     [CmdletBinding()]
     param(
@@ -180,12 +195,12 @@ function New-DeploymentFixture([string] $Name, [bool] $RuntimeUpdate) {
         [IO.Directory]::CreateDirectory($directory) | Out-Null
     }
 
-    Set-Content -LiteralPath (Join-Path $sourceServer "entry.mjs") -Value "source entry" -Encoding utf8NoBOM
-    Set-Content -LiteralPath (Join-Path $destinationServer "entry.mjs") -Value "previous entry" -Encoding utf8NoBOM
-    Set-Content -LiteralPath (Join-Path $sourceRoot "package.json") -Value '{"private":true}' -Encoding utf8NoBOM
-    Set-Content -LiteralPath (Join-Path $sourceRoot "package-lock.json") -Value "source lock" -Encoding utf8NoBOM
+    Set-Utf8NoBomFile (Join-Path $sourceServer "entry.mjs") "source entry"
+    Set-Utf8NoBomFile (Join-Path $destinationServer "entry.mjs") "previous entry"
+    Set-Utf8NoBomFile (Join-Path $sourceRoot "package.json") '{"private":true}'
+    Set-Utf8NoBomFile (Join-Path $sourceRoot "package-lock.json") "source lock"
     $destinationLock = if ($RuntimeUpdate) { "previous lock" } else { "source lock" }
-    Set-Content -LiteralPath (Join-Path $webRoot "package-lock.json") -Value $destinationLock -Encoding utf8NoBOM
+    Set-Utf8NoBomFile (Join-Path $webRoot "package-lock.json") $destinationLock
 
     $node = Join-Path $tools "node.cmd"
     $npm = Join-Path $tools "npm.cmd"
@@ -193,14 +208,20 @@ function New-DeploymentFixture([string] $Name, [bool] $RuntimeUpdate) {
     Set-Content -LiteralPath $npm -Value "@exit /b 0" -Encoding ascii
 
     $supervisor = Join-Path $scripts "start-windows-host.ps1"
-    Set-Content -LiteralPath $supervisor `
-        -Value '& "$env:SystemRoot\System32\cmd.exe" /c exit 0' -Encoding utf8NoBOM
+    $supervisorContents = @'
+$global:KeireWebDeploymentTestState.ProbeCount++
+if ($global:KeireWebDeploymentTestState.ProbeErrors.Count -ne 0) {
+    throw $global:KeireWebDeploymentTestState.ProbeErrors.Dequeue()
+}
+'@
+    Set-Utf8NoBomFile $supervisor $supervisorContents
     $settingsPath = Join-Path $hostRoot "host-settings.json"
-    [pscustomobject]@{
+    $settingsContents = [pscustomobject]@{
         schemaVersion = 2
         webRoot = $webRoot
         nodeExecutable = $node
-    } | ConvertTo-Json | Set-Content -LiteralPath $settingsPath -Encoding utf8NoBOM
+    } | ConvertTo-Json
+    Set-Utf8NoBomFile $settingsPath $settingsContents
 
     return [pscustomobject]@{
         SourceRoot = $sourceRoot
@@ -224,6 +245,8 @@ function Reset-Mocks([object] $Fixture) {
     $global:KeireWebDeploymentTestState.TaskPollCount = 0
     $global:KeireWebDeploymentTestState.StartErrors.Clear()
     $global:KeireWebDeploymentTestState.StartCount = 0
+    $global:KeireWebDeploymentTestState.ProbeErrors.Clear()
+    $global:KeireWebDeploymentTestState.ProbeCount = 0
     $global:KeireWebDeploymentTestState.MoveFailureAt = 0
     $global:KeireWebDeploymentTestState.MoveCount = 0
     $global:KeireWebDeploymentTestState.ProcessListening = $false
@@ -327,6 +350,20 @@ try {
         "A partial stop failure did not restart the previous host exactly once."
     Assert-True ($global:KeireWebDeploymentTestState.MoveCount -eq 0) `
         "A partial stop failure mutated the live payload."
+
+    $probeRetry = New-DeploymentFixture "probe-retry" $false
+    Reset-Mocks $probeRetry
+    $global:KeireWebDeploymentTestState.ProbeErrors.Enqueue("injected transient local probe failure")
+    & $Deployment -SourceWebRoot $probeRetry.SourceRoot -SettingsPath $probeRetry.SettingsPath
+    $deployedEntry = Get-Content -LiteralPath $probeRetry.DestinationEntry -Raw
+    Assert-True ($deployedEntry.Contains("source entry")) `
+        "A transient local readiness failure rolled back a healthy web deployment."
+    Assert-True ($global:KeireWebDeploymentTestState.ProbeCount -eq 2) `
+        "The web deployment did not retry its bounded local readiness probe."
+    Assert-True ($global:KeireWebDeploymentTestState.StartCount -eq 1) `
+        "The successful web deployment restarted the host task an unexpected number of times."
+    Assert-True ($global:KeireWebDeploymentTestState.TaskState -eq "Running") `
+        "The successful web deployment did not leave the host task running."
 
     $rollbackStart = New-DeploymentFixture "rollback-start" $false
     Reset-Mocks $rollbackStart

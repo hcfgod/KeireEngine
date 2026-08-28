@@ -324,13 +324,18 @@ for (const sourcePath of ["GettingStarted.md", "TestingAndRelease.md", "ProjectH
     assert(!/active (?:Windows )?0\.3\.1 stable (?:catalog|snapshot)/i.test(source),
         `Current release guide still describes the 0.3.1 distribution as active: Docs/${sourcePath}`);
 }
+const previewDownloadMetadata = JSON.parse(await readFile(path.join(repositoryRoot, "Services",
+    "KeireDistributionService", "Website", "assets", "preview-downloads.json"), "utf8"));
+const releaseStatus = previewDownloadMetadata?.releaseStatus;
+const activeCatalogVersion = releaseStatus?.activeCatalogVersion;
 const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "index.astro"), "utf8");
 for (const contract of [
-    `Kéire ${projectVersion} is the current release target`,
+    `Kéire ${projectVersion} is the current Windows release target`,
     "Package links are populated exclusively from the active, signed distribution catalog",
-    "Signed catalog sequence 17 is active for Windows and Linux x86-64",
+    `Signed ${activeCatalogVersion} Windows and Linux x86-64 packages remain active`,
+    "a Windows-only activation will retain Linux 0.4.2 instead of hiding it",
     "Every link shown here has an active catalog record and verified artifact hash",
-    "Use the active catalog-verified DEB on Ubuntu or Debian and the RPM on Rocky Linux, Fedora, or openSUSE",
+    "Use DEB on Ubuntu or Debian and RPM on Rocky Linux, Fedora, or openSUSE",
     "The EXE is not yet Authenticode-signed",
     "Hub 0.4.1 cannot launch an unsigned 0.4.2 installer through in-app Update",
     "existing 0.4.1 users must download and run 0.4.2 manually",
@@ -349,10 +354,6 @@ for (const contract of [
     assert(windowsDownloadsPage.includes(contract),
         `Windows downloads page is missing unsigned-installer guidance: ${contract}`);
 }
-const previewDownloadMetadata = JSON.parse(await readFile(path.join(repositoryRoot, "Services",
-    "KeireDistributionService", "Website", "assets", "preview-downloads.json"), "utf8"));
-const releaseStatus = previewDownloadMetadata?.releaseStatus;
-const activeCatalogVersion = releaseStatus?.activeCatalogVersion;
 assert(releaseStatus?.version === projectVersion && ["preparing", "active"].includes(releaseStatus.state),
     "Download fallback metadata must identify the current release and its publication state.");
 if (releaseStatus.state === "active") {
@@ -566,8 +567,8 @@ assert(roadmapPage.includes("Windows + Linux x86-64") &&
     !roadmapModel.includes("current Windows technology preview") && !roadmapModel.includes("offline signing"),
     "The roadmap contains stale platform or Marketplace publication labels.");
 assert(roadmapPage.includes(`${projectVersion} current`) &&
-    roadmapPage.includes(`Sequence 17 ${releaseStatus.state === "active" ? "active" : "preparing"}`) &&
-    roadmapModel.includes(`Kéire ${projectVersion} current release`) &&
+    roadmapPage.includes(`${activeCatalogVersion} sequence 17 active`) &&
+    roadmapModel.includes(`Kéire ${projectVersion} current source`) &&
     roadmapModel.includes("Catalog-verified Windows, DEB, and RPM packages"),
     "The roadmap must identify the current release and its active signed package boundary.");
 const marketplaceProgress = launchReadiness.split('id: "marketplace"', 2)[1]?.split('id: "operations"', 1)[0] ?? "";
@@ -589,14 +590,15 @@ assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('h
     platformFooter.includes('href="/community/"') && platformFooter.includes('href="/policies/"'),
     "Roadmap, changelog, Community, and policies must remain reachable from the global footer.");
 assert(platformFooter.includes(`Kéire ${projectVersion}`) &&
-    platformFooter.includes("current pre-1.0 release") &&
+    platformFooter.includes("current pre-1.0 source") &&
     platformFooter.includes(releaseStatus.state === "active"
-        ? "signed sequence-17 packages are active"
-        : "signed sequence-17 activation is in progress"),
+        ? `${projectVersion} packages are active`
+        : `${projectVersion} Windows validation is in progress`) &&
+    platformFooter.includes(`signed ${activeCatalogVersion} packages remain active`),
     "The global footer must identify the current release and catalog-controlled availability.");
 const platformHome = await readFile(path.join(siteRoot, "Source", "pages", "index.astro"), "utf8");
 assert(platformHome.includes(`softwareVersion: "${projectVersion}"`) &&
-    platformHome.includes(`Kéire ${projectVersion} current release`) &&
+    platformHome.includes(`Kéire ${projectVersion} current source`) &&
     platformHome.includes(`Check Hub ${projectVersion} availability`),
     "Home metadata and calls to action must identify the current release.");
 const changelogIndex = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "index.astro"), "utf8");
@@ -622,6 +624,16 @@ assert(!publisherPage.includes("offline signing") && publisherPage.includes("que
 assert(publisherPage.includes(`name="minimumEngineVersion" value="${projectVersion}"`) &&
     publisherPage.includes(`name="managedApiVersion" value="${projectVersion}"`),
     "Publisher release defaults must target the current source/API version without changing its wire protocol.");
+const marketplacePage = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "index.astro"), "utf8");
+const marketplacePolicy = await readFile(
+    path.join(siteRoot, "Source", "pages", "policies", "marketplace", "index.astro"), "utf8");
+const publisherPolicy = await readFile(
+    path.join(siteRoot, "Source", "pages", "policies", "publisher", "index.astro"), "utf8");
+assert(marketplacePage.includes(`Products remain free for Kéire ${projectVersion}`) &&
+    marketplacePolicy.includes(`Free products in Kéire ${projectVersion}`) &&
+    marketplacePolicy.includes(`zero minor-unit price for Kéire ${projectVersion}`) &&
+    publisherPolicy.includes(`Native plugins remain prohibited for Kéire ${projectVersion}`),
+    "Marketplace and publisher policy copy must identify the current product version without changing deployed services.");
 for (const contract of [
     'import { Upload } from "tus-js-client"',
     'import { sha256 } from "@noble/hashes/sha2.js"',

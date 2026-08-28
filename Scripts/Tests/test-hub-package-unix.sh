@@ -10,6 +10,7 @@ assert_false() { if "$@"; then printf 'Expected failure: %s\n' "$*" >&2; exit 1;
 grep -q 'package-hub' "$ROOT/Scripts/project.sh"
 grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-hub.sh"
 grep -q 'validate_hub_package_stage' "$ROOT/Scripts/Unix/package-hub.sh"
+grep -q 'validate-template-artwork.py' "$ROOT/Scripts/Unix/common.sh"
 grep -Fq 'validate_macos_macho_minimum "$stage" "$macos_deployment_target"' \
   "$ROOT/Scripts/Unix/package-hub.sh"
 grep -Fq '<key>LSMinimumSystemVersion</key>' "$ROOT/Scripts/Unix/package-hub.sh"
@@ -95,6 +96,11 @@ assert manifest["files"]
 PY
 
 assert_true validate_hub_package_stage "$stage" Hub Client Core Linux
+thumbnail="$stage/content/Templates/Thumbnails/empty.png"
+cp "$thumbnail" "$thumbnail.valid"
+printf 'invalid PNG\n' > "$thumbnail"
+assert_false validate_hub_package_stage "$stage" Hub Client Core Linux
+mv "$thumbnail.valid" "$thumbnail"
 tar -C "$stage" -czf "$archive" .
 assert_true assert_package_archive_generated_data_free "$archive"
 

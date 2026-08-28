@@ -14,6 +14,11 @@ another.
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
 
+## 0.4.3 Source Candidate
+
+Version 0.4.3 is the current source and Windows publication target. Its validation is tracked separately from this
+review's immutable 0.4.2 sequence-17 evidence; no 0.4.2 Windows or Linux artifact is relabeled as the new release.
+
 ## 0.4.2 Release Update
 
 Version 0.4.2 adds same-frame camera-local GPU occlusion culling, compacted indirect draws, deterministic direct

@@ -128,6 +128,7 @@ foreach ($contract in @('$installWorkerTarget', 'KEIRE_INSTALL_WORKER_INTERRUPT_
     }
 }
 
+& (Join-Path $PSScriptRoot "prepare-install-worker-runtime-windows.ps1")
 $workerRuntime = Join-Path $PSScriptRoot "test-install-worker-runtime-windows.ps1"
 & (Join-Path $PSHOME "pwsh.exe") -NoProfile -File $workerRuntime -Product hub
 if ($LASTEXITCODE -ne 0) {

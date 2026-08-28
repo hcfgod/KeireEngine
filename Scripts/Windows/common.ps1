@@ -1026,6 +1026,13 @@ function Assert-WindowsHubPackageStage {
             throw "Hub package is missing required content: $path"
         }
     }
+    $python = Get-PythonInvocation
+    $pythonPrefix = @($python.PrefixArguments)
+    $artworkValidator = Join-Path (Get-RepositoryRoot) "Scripts\Packaging\validate-template-artwork.py"
+    Invoke-CheckedWindowsCommand {
+        & $python.Executable @pythonPrefix $artworkValidator `
+            --templates-root (Join-Path $Stage "content\Templates")
+    } "Hub template artwork validation"
     if ((Get-WindowsExecutableSubsystem (Join-Path $Stage "bin\$HubTarget.exe")) -ne 2) {
         throw "Hub package executable must use the Windows GUI subsystem: bin\$HubTarget.exe"
     }

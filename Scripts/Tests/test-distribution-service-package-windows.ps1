@@ -256,7 +256,12 @@ try {
             '[switch] $ProbeOnly',
             'Test-PortOwnedByExecutable',
             'Test-PortOwnedByCommandLine',
+            'Test-CaddyPortOwnership',
+            'Wait-CaddyReady',
             'Assert-ConfiguredHostReady',
+            '$localCaddyReadyUri',
+            'Get-HttpProbeFailureDetail',
+            '[TimeSpan]::FromSeconds(5)',
             '$webEntry',
             'PUBLIC_SITE_URL'
         )) {
@@ -264,6 +269,8 @@ try {
             throw "The Windows host supervisor is missing ownership contract '$ownershipContract'."
         }
     }
+    & (Join-Path $PSScriptRoot 'test-windows-host-supervisor-probes.ps1')
+    & (Join-Path $PSScriptRoot 'test-distribution-publish-wrappers.ps1')
     $startupTask = Join-Path $Root `
         "Services\KeireDistributionService\scripts\install-windows-startup-task.ps1"
     Invoke-CheckedWindowsCommand {

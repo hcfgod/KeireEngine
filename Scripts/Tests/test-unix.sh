@@ -404,6 +404,7 @@ bash "$ROOT/Scripts/Tests/test-clean-unix.sh"
 bash "$ROOT/Scripts/Tests/test-editor-package-unix.sh"
 bash "$ROOT/Scripts/Tests/test-hub-package-unix.sh"
 python3 "$ROOT/Scripts/Tests/test-prepare-distribution-snapshot.py"
+bash "$ROOT/Scripts/Tests/test-distribution-publish-wrappers.sh"
 python3 "$ROOT/Scripts/Tests/test-website.py"
 if command -v node >/dev/null 2>&1; then
   node "$ROOT/Scripts/Tests/test-website-downloads.mjs"

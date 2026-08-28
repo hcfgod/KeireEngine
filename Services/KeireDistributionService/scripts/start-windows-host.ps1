@@ -10,6 +10,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Net.Http
 
+$script:FirstHttpProbeFailure = $null
+
 function Get-RequiredSetting([object] $Settings, [string] $Name) {
     $property = $Settings.PSObject.Properties[$Name]
     if ($null -eq $property -or $null -eq $property.Value) {
@@ -28,39 +30,122 @@ function Resolve-ConfiguredPath([string] $Value, [string] $BaseDirectory) {
     return [IO.Path]::GetFullPath((Join-Path $BaseDirectory $Value))
 }
 
-function Test-HttpEndpoint([Net.Http.HttpClient] $Client, [string] $Uri) {
+function Clear-HttpProbeFailure {
+    $script:FirstHttpProbeFailure = $null
+}
+
+function Record-HttpProbeException([string] $EndpointName, [Exception] $Exception) {
+    if ($null -ne $script:FirstHttpProbeFailure) {
+        return
+    }
+
+    $leaf = $Exception
+    while ($null -ne $leaf.InnerException) {
+        $leaf = $leaf.InnerException
+    }
+    $script:FirstHttpProbeFailure = [pscustomobject]@{
+        Endpoint = $EndpointName
+        Kind = 'exception'
+        Detail = $leaf.GetType().FullName
+        HResult = '0x{0:X8}' -f ($leaf.HResult -band 0xffffffffL)
+    }
+}
+
+function Record-HttpProbeStatus([string] $EndpointName, [int] $StatusCode) {
+    if ($null -eq $script:FirstHttpProbeFailure) {
+        $script:FirstHttpProbeFailure = [pscustomobject]@{
+            Endpoint = $EndpointName
+            Kind = 'status'
+            Detail = [string] $StatusCode
+            HResult = ''
+        }
+    }
+}
+
+function Get-HttpProbeFailureDetail {
+    if ($null -eq $script:FirstHttpProbeFailure) {
+        return ''
+    }
+    if ($script:FirstHttpProbeFailure.Kind -eq 'status') {
+        return " First failure: $($script:FirstHttpProbeFailure.Endpoint) returned HTTP " +
+            "$($script:FirstHttpProbeFailure.Detail)."
+    }
+    return " First failure: $($script:FirstHttpProbeFailure.Endpoint) failed with " +
+        "$($script:FirstHttpProbeFailure.Detail) ($($script:FirstHttpProbeFailure.HResult))."
+}
+
+function Test-HttpEndpoint(
+    [Net.Http.HttpClient] $Client,
+    [string] $Uri,
+    [string] $EndpointName
+) {
     try {
         $response = $Client.GetAsync($Uri).GetAwaiter().GetResult()
         try {
-            return [int] $response.StatusCode -ge 200 -and [int] $response.StatusCode -lt 300
+            $statusCode = [int] $response.StatusCode
+            if ($statusCode -ge 200 -and $statusCode -lt 300) {
+                return $true
+            }
+            Record-HttpProbeStatus $EndpointName $statusCode
+            return $false
         }
         finally {
             $response.Dispose()
         }
     }
     catch {
+        Record-HttpProbeException $EndpointName $_.Exception
         return $false
     }
+}
+
+function Test-HttpEndpointWithRetry(
+    [Net.Http.HttpClient] $Client,
+    [string] $Uri,
+    [string] $EndpointName,
+    [int] $AttemptCount = 3,
+    [int] $RetryDelayMilliseconds = 250
+) {
+    if ($AttemptCount -lt 1 -or $AttemptCount -gt 10 -or
+        $RetryDelayMilliseconds -lt 0 -or $RetryDelayMilliseconds -gt 5000) {
+        throw 'HTTP probe retry settings are outside their supported range.'
+    }
+
+    Clear-HttpProbeFailure
+    for ($attempt = 1; $attempt -le $AttemptCount; ++$attempt) {
+        if (Test-HttpEndpoint $Client $Uri $EndpointName) {
+            Clear-HttpProbeFailure
+            return $true
+        }
+        if ($attempt -lt $AttemptCount -and $RetryDelayMilliseconds -ne 0) {
+            Start-Sleep -Milliseconds $RetryDelayMilliseconds
+        }
+    }
+    return $false
 }
 
 function Wait-HttpEndpoint(
     [Net.Http.HttpClient] $Client,
     [string] $Uri,
+    [string] $EndpointName,
     [Diagnostics.Process] $Process,
     [int] $TimeoutSeconds
 ) {
+    Clear-HttpProbeFailure
     $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
     do {
         if ($Process.HasExited) {
-            throw "The process for '$Uri' exited with code $($Process.ExitCode)."
+            throw "The process for $EndpointName exited with code $($Process.ExitCode)."
         }
-        if (Test-HttpEndpoint $Client $Uri) {
+        if (Test-HttpEndpoint $Client $Uri $EndpointName) {
+            Clear-HttpProbeFailure
             return
         }
         Start-Sleep -Milliseconds 250
     } while ([DateTime]::UtcNow -lt $deadline)
 
-    throw "The process did not make '$Uri' healthy within $TimeoutSeconds seconds."
+    throw "The process did not make $EndpointName healthy within $TimeoutSeconds seconds." +
+        (Get-HttpProbeFailureDetail)
 }
 
 function Test-ListeningPort([int] $Port) {
@@ -70,21 +155,82 @@ function Test-ListeningPort([int] $Port) {
 
 function Test-PortOwnedByExecutable([int] $Port, [string] $ExecutablePath) {
     $resolvedExecutable = [IO.Path]::GetFullPath($ExecutablePath)
-    foreach ($connection in Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue) {
+    $connections = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
+    if ($connections.Count -eq 0) {
+        return $false
+    }
+    foreach ($connection in $connections) {
         try {
             $process = Get-Process -Id $connection.OwningProcess -ErrorAction Stop
-            if ([string]::Equals($process.Path, $resolvedExecutable, [StringComparison]::OrdinalIgnoreCase)) {
-                return $true
+            if (-not [string]::Equals($process.Path, $resolvedExecutable, [StringComparison]::OrdinalIgnoreCase)) {
+                return $false
             }
         }
         catch [System.ComponentModel.Win32Exception] {
-            continue
+            return $false
         }
         catch [Microsoft.PowerShell.Commands.ProcessCommandException] {
-            continue
+            return $false
         }
     }
-    return $false
+    return $true
+}
+
+function Test-CaddyPortOwnership(
+    [int] $HttpPort,
+    [int] $HttpsPort,
+    [int] $AdminPort,
+    [string] $CaddyExecutable
+) {
+    return (Test-PortOwnedByExecutable $HttpPort $CaddyExecutable) -and
+        (Test-PortOwnedByExecutable $HttpsPort $CaddyExecutable) -and
+        (Test-PortOwnedByExecutable $AdminPort $CaddyExecutable)
+}
+
+function Test-CaddyReady(
+    [Net.Http.HttpClient] $Client,
+    [string] $AdminUri,
+    [int] $HttpPort,
+    [int] $HttpsPort,
+    [int] $AdminPort,
+    [string] $CaddyExecutable,
+    [int] $AttemptCount = 3,
+    [int] $RetryDelayMilliseconds = 250
+) {
+    if (-not (Test-CaddyPortOwnership $HttpPort $HttpsPort $AdminPort $CaddyExecutable)) {
+        Clear-HttpProbeFailure
+        return $false
+    }
+    return (Test-HttpEndpointWithRetry $Client $AdminUri 'Caddy loopback admin endpoint' `
+            $AttemptCount $RetryDelayMilliseconds)
+}
+
+function Wait-CaddyReady(
+    [Net.Http.HttpClient] $Client,
+    [string] $AdminUri,
+    [int] $HttpPort,
+    [int] $HttpsPort,
+    [int] $AdminPort,
+    [string] $CaddyExecutable,
+    [Diagnostics.Process] $Process,
+    [int] $TimeoutSeconds
+) {
+    Clear-HttpProbeFailure
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        if ($Process.HasExited) {
+            throw "The Caddy process exited with code $($Process.ExitCode)."
+        }
+        if ((Test-CaddyPortOwnership $HttpPort $HttpsPort $AdminPort $CaddyExecutable) -and
+            (Test-HttpEndpoint $Client $AdminUri 'Caddy loopback admin endpoint')) {
+            Clear-HttpProbeFailure
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "Caddy did not own its configured listeners and healthy loopback admin endpoint within " +
+        "$TimeoutSeconds seconds." + (Get-HttpProbeFailureDetail)
 }
 
 function Test-PortOwnedByCommandLine([int] $Port, [string] $RequiredFragment) {
@@ -120,6 +266,7 @@ if ($hostName -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$' -or 
 }
 $httpPort = [int] (Get-RequiredSetting $settings 'httpPort')
 $httpsPort = [int] (Get-RequiredSetting $settings 'httpsPort')
+$caddyAdminPort = 2019
 foreach ($port in @($httpPort, $httpsPort)) {
     if ($port -lt 1 -or $port -gt 65535) {
         throw "The configured Caddy port '$port' is outside 1-65535."
@@ -127,6 +274,9 @@ foreach ($port in @($httpPort, $httpsPort)) {
 }
 if ($httpPort -eq $httpsPort) {
     throw 'The configured Caddy HTTP and HTTPS ports must be different.'
+}
+if ($caddyAdminPort -in @($httpPort, $httpsPort)) {
+    throw "The configured Caddy listener ports may not use the reserved loopback admin port '$caddyAdminPort'."
 }
 
 $storageRoot = Resolve-ConfiguredPath ([string] (Get-RequiredSetting $settings 'storageRoot')) $settingsDirectory
@@ -181,10 +331,10 @@ if ($ValidateOnly) {
 $handler = [Net.Http.HttpClientHandler]::new()
 $handler.UseProxy = $false
 $httpClient = [Net.Http.HttpClient]::new($handler)
-$httpClient.Timeout = [TimeSpan]::FromSeconds(2)
+$httpClient.Timeout = [TimeSpan]::FromSeconds(5)
 $localReadyUri = 'http://127.0.0.1:5088/health/ready'
 $localWebReadyUri = 'http://127.0.0.1:4321/health/'
-$publicReadyUri = if ($schemaVersion -ge 2) { "https://$hostName/health/" } else { "https://$hostName/health/ready" }
+$localCaddyReadyUri = "http://127.0.0.1:$caddyAdminPort/config/"
 $startupTimeoutSeconds = 45
 
 function Write-HostEvent([string] $Message) {
@@ -200,8 +350,10 @@ function Start-DistributionService {
         if (-not (Test-PortOwnedByExecutable 5088 $serviceExecutable)) {
             throw "Port 5088 is owned by a different distribution service executable."
         }
-        if (-not (Test-HttpEndpoint $httpClient $localReadyUri)) {
-            throw 'The configured distribution service owns port 5088 but is not ready.'
+        if (-not (Test-HttpEndpointWithRetry $httpClient $localReadyUri `
+                    'distribution service readiness endpoint')) {
+            throw 'The configured distribution service owns port 5088 but is not ready.' +
+                (Get-HttpProbeFailureDetail)
         }
         return
     }
@@ -213,7 +365,8 @@ function Start-DistributionService {
         -RedirectStandardOutput (Join-Path $logDirectory 'service-stdout.log') `
         -RedirectStandardError (Join-Path $logDirectory 'service-stderr.log')
     Write-HostEvent "Started the distribution service as process $($process.Id)."
-    Wait-HttpEndpoint $httpClient $localReadyUri $process $startupTimeoutSeconds
+    Wait-HttpEndpoint $httpClient $localReadyUri 'distribution service readiness endpoint' `
+        $process $startupTimeoutSeconds
 }
 
 function Start-WebPlatform {
@@ -224,8 +377,9 @@ function Start-WebPlatform {
         if (-not (Test-PortOwnedByCommandLine 4321 $webEntry)) {
             throw "Port 4321 is owned by a web renderer from a different deployment root."
         }
-        if (-not (Test-HttpEndpoint $httpClient $localWebReadyUri)) {
-            throw 'The configured web renderer owns port 4321 but is not healthy.'
+        if (-not (Test-HttpEndpointWithRetry $httpClient $localWebReadyUri 'web renderer readiness endpoint')) {
+            throw 'The configured web renderer owns port 4321 but is not healthy.' +
+                (Get-HttpProbeFailureDetail)
         }
         return
     }
@@ -243,27 +397,31 @@ function Start-WebPlatform {
         -RedirectStandardOutput (Join-Path $logDirectory 'web-stdout.log') `
         -RedirectStandardError (Join-Path $logDirectory 'web-stderr.log')
     Write-HostEvent "Started the web platform as process $($process.Id)."
-    Wait-HttpEndpoint $httpClient $localWebReadyUri $process $startupTimeoutSeconds
+    Wait-HttpEndpoint $httpClient $localWebReadyUri 'web renderer readiness endpoint' $process `
+        $startupTimeoutSeconds
 }
 
 function Start-CaddyProxy {
     $httpListening = Test-ListeningPort $httpPort
     $httpsListening = Test-ListeningPort $httpsPort
-    if ($httpListening -or $httpsListening) {
-        if (-not ($httpListening -and $httpsListening)) {
-            throw "Only one configured Caddy port is listening; refusing to accept a partial proxy deployment."
+    $adminListening = Test-ListeningPort $caddyAdminPort
+    if ($httpListening -or $httpsListening -or $adminListening) {
+        if (-not ($httpListening -and $httpsListening -and $adminListening)) {
+            throw 'Only part of the configured Caddy listener set is active; refusing a partial proxy deployment.'
         }
-        if (-not (Test-PortOwnedByExecutable $httpPort $caddyExecutable) -or
-            -not (Test-PortOwnedByExecutable $httpsPort $caddyExecutable)) {
-            throw "The configured Caddy executable does not own both public proxy ports."
+        if (-not (Test-CaddyPortOwnership $httpPort $httpsPort $caddyAdminPort $caddyExecutable)) {
+            throw 'The configured Caddy executable does not own its public and loopback admin ports.'
         }
-        if (-not (Test-HttpEndpoint $httpClient $publicReadyUri)) {
-            throw 'The configured Caddy proxy owns its ports but the public platform is not ready.'
+        if (-not (Test-CaddyReady $httpClient $localCaddyReadyUri $httpPort $httpsPort `
+                    $caddyAdminPort $caddyExecutable)) {
+            throw 'The configured Caddy proxy owns its ports but its loopback admin endpoint is not ready.' +
+                (Get-HttpProbeFailureDetail)
         }
         return
     }
 
     $env:KEIRE_DISTRIBUTION_HOST = $hostName
+    $env:KEIRE_CADDY_ADMIN = "127.0.0.1:$caddyAdminPort"
     $env:KEIRE_CADDY_HTTP_PORT = [string] $httpPort
     $env:KEIRE_CADDY_HTTPS_PORT = [string] $httpsPort
     $env:KEIRE_CADDY_LOG = Join-Path $logDirectory 'distribution-access.json'
@@ -273,23 +431,27 @@ function Start-CaddyProxy {
         -RedirectStandardOutput (Join-Path $logDirectory 'caddy-stdout.log') `
         -RedirectStandardError (Join-Path $logDirectory 'caddy-stderr.log')
     Write-HostEvent "Started Caddy as process $($process.Id)."
-    Wait-HttpEndpoint $httpClient $publicReadyUri $process $startupTimeoutSeconds
+    Wait-CaddyReady $httpClient $localCaddyReadyUri $httpPort $httpsPort $caddyAdminPort `
+        $caddyExecutable $process $startupTimeoutSeconds
 }
 
 function Assert-ConfiguredHostReady {
+    Clear-HttpProbeFailure
     if (-not (Test-PortOwnedByExecutable 5088 $serviceExecutable) -or
-        -not (Test-HttpEndpoint $httpClient $localReadyUri)) {
-        throw 'The configured distribution service is not the healthy owner of port 5088.'
+        -not (Test-HttpEndpointWithRetry $httpClient $localReadyUri 'distribution service readiness endpoint')) {
+        throw 'The configured distribution service is not the healthy owner of port 5088.' +
+            (Get-HttpProbeFailureDetail)
     }
     if ($schemaVersion -ge 2 -and
         (-not (Test-PortOwnedByCommandLine 4321 $webEntry) -or
-            -not (Test-HttpEndpoint $httpClient $localWebReadyUri))) {
-        throw 'The configured web deployment is not the healthy owner of port 4321.'
+            -not (Test-HttpEndpointWithRetry $httpClient $localWebReadyUri 'web renderer readiness endpoint'))) {
+        throw 'The configured web deployment is not the healthy owner of port 4321.' +
+            (Get-HttpProbeFailureDetail)
     }
-    if (-not (Test-PortOwnedByExecutable $httpPort $caddyExecutable) -or
-        -not (Test-PortOwnedByExecutable $httpsPort $caddyExecutable) -or
-        -not (Test-HttpEndpoint $httpClient $publicReadyUri)) {
-        throw 'The configured Caddy deployment does not exclusively own a healthy public proxy.'
+    if (-not (Test-CaddyReady $httpClient $localCaddyReadyUri $httpPort $httpsPort `
+                $caddyAdminPort $caddyExecutable)) {
+        throw 'The configured Caddy deployment does not own healthy public listeners and a loopback admin endpoint.' +
+            (Get-HttpProbeFailureDetail)
     }
 }
 

@@ -228,13 +228,21 @@ wrappers invoke the bundled publisher directly; source-tree wrappers use the pin
 ```powershell
 ./scripts/publish-snapshot.ps1 `
     -Source C:\release\prepared -DistributionRoot C:\srv\keire-distribution `
-    -SnapshotId 2026.08.0 -PublicKey C:\release\trusted-release-key.json -Activate
+    -SnapshotId 2026.08.0 -PublicKey C:\release\trusted-release-key.json `
+    -MinimumSequence 42 -MinimumValidityHours 24 -Activate
 ```
 
 ```bash
 KEIRE_DOTNET=dotnet ./scripts/publish-snapshot.sh \
-  /release/prepared /srv/keire-distribution 2026.08.0 /release/trusted-release-key.json --activate
+  /release/prepared /srv/keire-distribution 2026.08.0 /release/trusted-release-key.json \
+  --minimum-sequence 42 --minimum-validity-hours 24 --activate
 ```
+
+Both publish wrappers require an explicit positive minimum sequence whenever activation is requested. Before activating,
+read the highest trusted sequence already served by the live catalogs and pass the intended new sequence as that floor;
+this makes a stale or downgraded prepared snapshot fail before `current` can change. The wrappers validate and forward the
+minimum-sequence and minimum-validity policies to the publisher. A non-activating staged publish may omit the sequence
+floor and uses the publisher's 24-hour validity floor unless explicitly overridden.
 
 `package-service.ps1` produces self-contained `win-x64` and `linux-x64` service/publisher packages by default. The shell
 variant defaults to the current Linux architecture. Both refuse to overwrite an existing package directory and include
@@ -463,8 +471,12 @@ the runtime-update switch for an unreviewed lockfile.
 
 Run `./scripts/install-web-runtime.ps1`, then validate the host with
 `./scripts/start-windows-host.ps1 -ValidateOnly`. The supervisor starts Kestrel, the loopback Astro Node service, and
-Caddy in dependency order and checks each service independently. For an unattended host, open an elevated PowerShell
-session and install the repository-owned startup task:
+Caddy in dependency order and checks each service independently with bounded retries and a five-second timeout per HTTP
+request. Caddy is accepted only when the configured executable owns its HTTP, HTTPS, and loopback admin listeners and
+its `127.0.0.1:2019` admin endpoint responds. The supervisor never depends on a public HTTPS self-probe, so Windows
+Schannel credentials, router reachability, and public DNS cannot produce a false local startup failure. Keep the
+separate external availability monitor below for the public DNS, TLS, router, and origin contract. For an unattended
+host, open an elevated PowerShell session and install the repository-owned startup task:
 
 ```powershell
 ./scripts/install-windows-startup-task.ps1 -SettingsPath ./scripts/host-settings.json

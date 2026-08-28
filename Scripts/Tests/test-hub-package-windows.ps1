@@ -52,6 +52,10 @@ if (-not $packager.Contains('"--project-schema-maximum", "4"')) {
 if ($packager.Contains('package-editor.ps1') -or $packager.Contains('package.ps1')) {
     throw "The standalone Windows Hub package must not stage through the editor or SDK package."
 }
+$common = Get-Content (Join-Path $Windows "common.ps1") -Raw
+if (-not $common.Contains("validate-template-artwork.py")) {
+    throw "The Windows Hub package gate does not validate declared template artwork."
+}
 
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("keire-hub-package-test-" + [guid]::NewGuid().ToString("N"))
 $archive = "$stage.zip"
@@ -138,6 +142,18 @@ try {
         @($script:ExecutableVerificationCalls[0].Arguments).Count -ne 1 -or
         $script:ExecutableVerificationCalls[0].Arguments[0] -ne "--verify-installation") {
         throw "Hub package validation did not invoke the real executable's hidden installation verifier."
+    }
+    $thumbnailPath = Join-Path $stage "content\Templates\Thumbnails\empty.png"
+    [byte[]]$thumbnailBytes = [IO.File]::ReadAllBytes($thumbnailPath)
+    [byte[]]$invalidThumbnailBytes = $thumbnailBytes.Clone()
+    $invalidThumbnailBytes[4] = 0x0A
+    [IO.File]::WriteAllBytes($thumbnailPath, $invalidThumbnailBytes)
+    try {
+        Assert-Throws { Assert-WindowsHubPackageStage $stage Hub Client Core } `
+            "Undecodable mandatory template thumbnail rejection"
+    }
+    finally {
+        [IO.File]::WriteAllBytes($thumbnailPath, $thumbnailBytes)
     }
     $script:ExecutableVerificationExitCode = 23
     Assert-Throws { Assert-WindowsHubPackageStage $stage Hub Client Core } `

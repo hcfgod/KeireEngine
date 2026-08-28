@@ -110,6 +110,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
 ];
 
 const summaries: Readonly<Record<string, string>> = {
+    "0.4.3": "A pre-demo hardening update adding bounded rendering, device-loss recovery, additive scenes, transactional installers, managed serialization v3, diagnostic bundles, and conservative visibility consumers.",
     "0.4.2": "A GPU-occlusion and editor-diagnostics update adding same-frame camera-local culling, compacted indirect draws, deterministic fallbacks, and production stress/render verification.",
     "0.4.1": "A performance and portability update that dramatically reduces dense-scene rendering cost, eliminates steady-state upload churn, and validates the release pipeline across Windows, Linux, and macOS source builds.",
     "0.4.0": "A unified graph-authoring and Unity-shaped scripting milestone with schema-4 Shader/Material graphs, executable VFX subgraphs, and explicit catalog-publication boundaries.",
@@ -121,8 +122,9 @@ const summaries: Readonly<Record<string, string>> = {
 };
 
 const parsedReleases = parseChangelog(changelogSource) as ParsedChangelogRelease[];
-const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.4.2";
+const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.4.3";
 const publicationStatus = JSON.parse(publicationStatusSource)?.releaseStatus;
+export const activeCatalogVersion = publicationStatus?.activeCatalogVersion ?? "unknown";
 const currentReleasePublished = publicationStatus?.state === "active" &&
     publicationStatus.version === currentVersion && publicationStatus.activeCatalogVersion === currentVersion;
 
@@ -205,8 +207,8 @@ function buildReleaseNote(release: ParsedChangelogRelease): ReleaseNote {
         limitations: [
             `Kéire ${currentVersion} remains a pre-1.0 technology preview rather than a completed AAA production claim.`,
             currentReleasePublished
-                ? `Windows and Linux x86-64 ${currentVersion} packages are active through signed catalog sequence 17; macOS remains gated pending Metal, signing, and notarization validation.`
-                : `Windows and Linux x86-64 ${currentVersion} packages remain gated until signed catalog sequence 17 is activated; macOS also remains gated pending Metal, signing, and notarization validation.`,
+                ? `Windows x86-64 ${currentVersion} packages are active while Linux retains its independently validated 0.4.2 packages; macOS remains gated pending Metal, signing, and notarization validation.`
+                : `Signed Windows and Linux x86-64 ${activeCatalogVersion} packages remain active while the ${currentVersion} Windows packages complete validation; macOS also remains gated pending Metal, signing, and notarization validation.`,
             `Marketplace, publisher, community, and paid-checkout capabilities remain subject to their explicit feature flags and launch gates; paid checkout is disabled for ${currentVersion}.`,
         ],
     } as const;

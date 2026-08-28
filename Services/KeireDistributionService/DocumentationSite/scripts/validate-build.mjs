@@ -28,7 +28,7 @@ async function collectFiles(directory) {
 
 await access(path.join(outputRoot, "index.html"));
 await access(path.join(outputRoot, "changelog", "index.html"));
-for (const version of ["0.4.2", "0.4.1", "0.4.0", "0.3.2", "0.3.1", "0.3.0", "0.2.0", "0.1.0"]) {
+for (const version of ["0.4.3", "0.4.2", "0.4.1", "0.4.0", "0.3.2", "0.3.1", "0.3.0", "0.2.0", "0.1.0"]) {
     await access(path.join(outputRoot, "changelog", version, "index.html"));
 }
 const publicationStatus = JSON.parse(await readFile(
@@ -38,13 +38,15 @@ assert(changelogFeed.startsWith('<?xml version="1.0" encoding="UTF-8"?>') &&
     changelogFeed.includes("<title>Kéire Engine changelog</title>") &&
     (publicationStatus.state === "active"
         ? changelogFeed.includes(`/changelog/${publicationStatus.version}/`)
-        : !changelogFeed.includes(`/changelog/${publicationStatus.version}/`) && changelogFeed.includes("/changelog/0.4.1/")),
+        : !changelogFeed.includes(`/changelog/${publicationStatus.version}/`) &&
+            changelogFeed.includes(`/changelog/${publicationStatus.activeCatalogVersion}/`)),
     "Built changelog feed does not match the signed-catalog publication state.");
 const changelogIndex = await readFile(path.join(outputRoot, "changelog", "index.html"), "utf8");
 const currentChangelog = await readFile(path.join(outputRoot, "changelog", publicationStatus.version, "index.html"), "utf8");
 assert(publicationStatus.state === "active"
     ? changelogIndex.includes("Current preview") && currentChangelog.includes("Public package")
-    : changelogIndex.includes("Release candidate") && changelogIndex.includes("0.4.1 remains active") &&
+    : changelogIndex.includes("Release candidate") &&
+        changelogIndex.includes(`${publicationStatus.activeCatalogVersion} remains active`) &&
         currentChangelog.includes("Release candidate") && currentChangelog.includes("Source release candidate"),
 "Built current changelog does not match the signed-catalog publication state.");
 for (const sourcePath of allDocSources) {

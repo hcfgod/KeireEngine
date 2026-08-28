@@ -150,8 +150,9 @@ Stable Linux editor catalog packages are produced from a clean detached release 
 baseline container (glibc 2.34 and GCC Toolset 12). Headless release validation uses Xvfb with Mesa Vulkan for the
 packaged runtime GPU smoke. Do not relabel an artifact built against a newer glibc as a general Linux release.
 
-Kéire 0.4.2 is active through signed snapshot `release-0.4.2-sequence-17-e3eb5ac`, which was published, activated, and
-validated before the website state changed. The Windows catalog contains the
+Kéire 0.4.3 is the current Windows publication target. Kéire 0.4.2 remains active through signed snapshot
+`release-0.4.2-sequence-17-e3eb5ac`, which was published, activated, and validated before the website state changed.
+The Windows catalog contains the
 0.4.1 and 0.4.2 Editor and Hub records; the Linux catalog contains both Editor versions plus distinct DEB and RPM Hub
 records for each version. The 0.4.2 Windows Release/Dist suites, SDK consumers, rendered-output suites, package smokes,
 and installer checks passed. The 0.4.2 Rocky Linux 9 Editor/package gate and native RPM validation passed, as did the

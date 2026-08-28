@@ -242,10 +242,11 @@ function validatePreviewReleaseStatus(metadata) {
 }
 
 function releaseCandidates(candidates, version) {
-    if (!semanticVersion(version)) {
+    const targetVersion = semanticVersion(version);
+    if (!targetVersion) {
         return [];
     }
-    return candidates.filter((candidate) => candidate.version.raw === version);
+    return candidates.filter((candidate) => compareVersions(candidate.version, targetVersion) <= 0);
 }
 
 function bytes(value) {
