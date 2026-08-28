@@ -90,21 +90,30 @@ depth-tested, disables depth writes, bypasses opaque instancing, and participate
 shader schema-v1 blend flag remains a compatibility default. Failed material or shader revisions retain the complete
 last-good binding.
 
-The private frame graph executes resource upload, directional-shadow, Forward+ culling, opaque/mask, sky,
-transparency, ACES tone-map, overlay, readback, and presentation passes. Its compiler validates transient reads,
-derives deterministic hazard order, records resource lifetimes, aliases compatible non-overlapping transients, and
-emits every resource transition before invoking a backend pass. SDL_GPU consumes those transitions at copy, render,
-and presentation encoder boundaries and performs the native D3D12/Vulkan/Metal barriers. It is an internal backend
-contract, not a public render-graph API. Each surface materializes the compiled physical texture slots in a
-graph-owned transient heap; HDR scene color is resolved through that heap rather than through an independently
-allocated attachment.
+The private frame graph executes resource upload, directional shadows, VFX simulation and dynamic bounds, safe
+occluder depth, HZB construction, unified visibility classification, Forward+ light-list compaction, spatial-lighting
+selection, VFX expansion, opaque/mask, sky, transparency, ACES tone-map, overlay, readback, and presentation passes.
+Its compiler validates transient reads, derives deterministic hazard order, records resource lifetimes, aliases
+compatible non-overlapping transients, and emits every resource transition before invoking a backend pass. SDL_GPU
+consumes those transitions at copy, render, and presentation encoder boundaries and performs the native
+D3D12/Vulkan/Metal barriers. It is an internal backend contract, not a public render-graph API. Each surface materializes
+the compiled physical texture slots in a graph-owned transient heap; HDR scene color is resolved through that heap
+rather than through an independently allocated attachment.
 
 Point and spot lights are serializable registry components. Scene packets cap visible local lights at 4,096 and build
 deterministic 16x16 tile lists with 128 lights per tile and explicit overflow statistics. The renderer uploads the full
 light array, compact tile records, and packed light indices to graphics storage buffers. PBR and default-material
-fragments consume only the current tile's list; the first 62 lights retain the portable shadow-uniform ABI while later
-lights remain unshadowed rather than disappearing. The CPU builder is the deterministic fallback and reference for a
-future compute builder, not the fragment-lighting path.
+fragments consume only the current tile's list. When GPU occlusion is active, Forward+ may compact those lists from the
+same frame's local-light visibility mask; any frame, slot, surface-epoch, device-generation, count, buffer, or dispatch
+mismatch preserves the CPU-built all-eligible-light lists. The first 62 lights retain the portable shadow-uniform ABI
+while later lights remain unshadowed rather than disappearing. Directional lights remain outside the local-light mask.
+
+The VFX and spatial-volume mask consumers are capability-gated and are advertised only while rendered GPU occlusion is
+active and the device is running. Supported GPU sprites and meshes can compact visible instances, while ribbon renderers
+are masked only as whole ordered groups. CPU VFX, volumetric or unbounded effects, invalid/stale bounds, and unsupported
+deformation remain visible. Spatial-lighting ABI v3 can build a frame-owned per-draw record from visible reflection
+probes and light-probe volumes; ABI v2 and invalid v3 ownership keep the embedded CPU selection. Recovery, resize, and
+frame retirement invalidate these derived buffers by device generation and surface epoch before reuse.
 
 `RenderSystem.cpp` is the stable PImpl facade. Private compiled implementation units separate backend data types,
 device/frame and fence lifecycle, surface/pipeline management, renderer-owned asset caches, and scene recording behind
@@ -291,5 +300,6 @@ sampling behavior across supported GPU backends.
 
 This foundation renders asset-backed textured PBR meshes, global diffuse/specular image-based lighting, deterministic
 directional and local-light shadow maps, GPU-consumed Forward+ light lists, instanced compatible geometry, sky
-backgrounds, an RGBA16F/ACES pipeline, and the editor grid through a dedicated submission thread. Spatial reflection
-probes and custom raw GPU passes remain later milestones.
+backgrounds, an RGBA16F/ACES pipeline, and the editor grid through a dedicated submission thread. Runtime
+reflection-probe capture and custom raw GPU passes remain later milestones; imported reflection probes already
+participate in same-frame spatial visibility and per-draw selection.

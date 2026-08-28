@@ -1415,17 +1415,16 @@ namespace Keire::Detail
                 return false;
             }
             return true;
-            const std::vector<std::string> arguments =
-                directory ? std::vector<std::string>{utf8Path} : std::vector<std::string>{"/select," + utf8Path};
 #elif defined(__APPLE__)
             const std::filesystem::path executable = "/usr/bin/open";
             const std::vector<std::string> arguments =
                 directory ? std::vector<std::string>{utf8Path} : std::vector<std::string>{"-R", utf8Path};
+            return LaunchDetachedProcess(executable, arguments, workingDirectory, diagnostic);
 #else
             const std::filesystem::path executable = "/usr/bin/xdg-open";
             const std::vector<std::string> arguments{directory ? utf8Path : workingDirectory.generic_string()};
-#endif
             return LaunchDetachedProcess(executable, arguments, workingDirectory, diagnostic);
+#endif
         }
         catch (const std::exception& error)
         {

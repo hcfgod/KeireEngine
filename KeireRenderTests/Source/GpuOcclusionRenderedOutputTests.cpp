@@ -57,6 +57,32 @@ namespace
         return result;
     }
 
+    [[nodiscard]] Keire::AssetId CreateCompleteBoundsSkin(RenderAssetFixture& assets)
+    {
+        Keire::AssetImporterRegistration importer;
+        importer.Name = "KeireTests.SkinnedMesh";
+        importer.Type = Keire::SkinnedMeshAsset::StaticType();
+        importer.Extensions = {".keireskin"};
+        importer.Import = [](const std::span<const std::byte> bytes)
+        { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+
+        std::array<Keire::SkinVertexInfluence8, 3> influences;
+        for (auto& influence : influences)
+        {
+            influence.Bones[0] = 0;
+            influence.Weights[0] = 1.0F;
+            influence.Count = 1;
+        }
+        const std::array bounds{Keire::SkinInfluenceBounds{
+            .Submesh = 0U, .Bone = 0U, .Minimum = {-0.9F, -0.8F, 0.0F}, .Maximum = {0.9F, 0.9F, 0.0F}}};
+        const auto skin = assets.Database->CreateAsset(
+            "TriangleCompleteBounds.keireskin", importer,
+            Keire::SkinnedMeshAsset::Encode(assets.Mesh, assets.Skeleton, influences,
+                                            Keire::SkinningMethod::LinearBlend, 1U, bounds));
+        assets.Catalog = assets.Database->ImportAll(Keire::AssetImportPolicy::KeepLastGood).CatalogPath;
+        return skin;
+    }
+
     struct MultiSurfaceResults final
     {
         std::array<std::vector<std::uint8_t>, 3> Frames;
@@ -183,6 +209,7 @@ namespace
         DebugViews,
         LifecycleReset,
         SkinnedTarget,
+        FreshPoseSkinnedTarget,
         TerminalFallback,
         NoSubmitIdle,
         PartialFallback
@@ -259,7 +286,10 @@ namespace
                 const auto row = m_TargetCount == 1U ? 0 : static_cast<std::int32_t>(index / 11U) - 5;
                 targetTransform->SetLocalPosition(
                     {static_cast<float>(column) * 0.12F, static_cast<float>(row) * 0.12F, -1.5F});
-                const float scale = m_TargetCount == 1U ? 0.5F : 0.12F;
+                const float scale =
+                    m_TargetCount == 1U
+                        ? (m_Scenario == GpuOcclusionCaptureScenario::FreshPoseSkinnedTarget ? 1.0F : 0.5F)
+                        : 0.12F;
                 targetTransform->SetLocalScale({scale, scale, scale});
                 if (index == 0U)
                     m_TargetTransform = targetTransform;
@@ -454,6 +484,8 @@ namespace
                       diagnostics.Visible == diagnostics.Candidates) ||
                      (m_Scenario == GpuOcclusionCaptureScenario::SkinnedTarget && diagnostics.Candidates >= 2U &&
                       diagnostics.Visible == diagnostics.Candidates && diagnostics.Culled == 0U) ||
+                     (m_Scenario == GpuOcclusionCaptureScenario::FreshPoseSkinnedTarget &&
+                      diagnostics.FreshPoseSkinnedCandidates != 0U && diagnostics.FreshPoseSkinnedDepthDraws != 0U) ||
                      (m_Scenario == GpuOcclusionCaptureScenario::PartialFallback &&
                       diagnostics.State == Keire::GpuOcclusionSurfaceState::Active &&
                       diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::LegacyShaderAbi));
@@ -466,6 +498,7 @@ namespace
                     if (m_Scenario == GpuOcclusionCaptureScenario::HiddenTarget ||
                         m_Scenario == GpuOcclusionCaptureScenario::AlwaysVisibleTarget ||
                         m_Scenario == GpuOcclusionCaptureScenario::SkinnedTarget ||
+                        m_Scenario == GpuOcclusionCaptureScenario::FreshPoseSkinnedTarget ||
                         m_Scenario == GpuOcclusionCaptureScenario::PartialFallback)
                     {
                         Owner().RequestExit();
@@ -926,6 +959,17 @@ TEST_CASE("same-mode terminal GPU occlusion surfaces reject late active readback
     pending.SurfaceGeneration = surface.Generation;
     pending.SubmissionEpoch = surface.GpuOcclusionSubmissionEpoch;
     pending.RequestedMode = surface.GpuOcclusionSubmittedMode;
+    pending.SourceFrame = 17U;
+    pending.SourceFrameSlot = 0U;
+    pending.SourceSurfaceEpoch = surface.Epoch;
+    pending.SourceDeviceGeneration = 3U;
+    surface.Resources.Worksets.resize(1U);
+    auto& visibility = surface.Workset(0U).GpuOcclusion;
+    visibility.FrameId = pending.SourceFrame;
+    visibility.FrameSlot = pending.SourceFrameSlot;
+    visibility.SurfaceEpoch = pending.SourceSurfaceEpoch;
+    visibility.DeviceGeneration = pending.SourceDeviceGeneration;
+    visibility.OwnershipValid = true;
     CHECK(Keire::RenderBackend::CanPublishGpuOcclusionReadback(surface, pending));
 
     CHECK(Keire::RenderBackend::PublishGpuOcclusionReadbackValidationFailure(surface, Keire::GpuOcclusionMode::Forced));
@@ -1372,7 +1416,39 @@ TEST_CASE("skinned instances enter forced GPU occlusion as force-visible non-occ
     CHECK(occluded->Statistics.GpuOcclusionSkinnedMeshCandidates >= 1U);
     CHECK(occluded->Statistics.GpuOcclusionForcedVisibleCandidates >= 1U);
     CHECK(occluded->Statistics.GpuOcclusionSafeOccluders >= 1U);
+    CHECK(diagnostics.FreshPoseSkinnedCandidates == 0U);
+    CHECK(diagnostics.FreshPoseSkinnedDepthDraws == 0U);
     CHECK(MaximumPixelDifference(direct->Frames.front(), occluded->Frames.front()) <= ColorTolerance);
+}
+
+TEST_CASE("fresh current-pose skinned buffers participate in forced GPU occlusion depth")
+{
+    RenderAssetFixture assets(true);
+    const auto completeBoundsSkin = CreateCompleteBoundsSkin(assets);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.Mesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::FreshPoseSkinnedTarget, SurfaceSize, SurfaceSize, Keire::AssetId{}, 1U, 2.2F,
+            completeBoundsSkin, assets.Skeleton));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 1U);
+    REQUIRE(results->Diagnostics.size() == 1U);
+    const auto& diagnostics = results->Diagnostics.front();
+    CHECK(diagnostics.State == Keire::GpuOcclusionSurfaceState::Active);
+    CHECK(diagnostics.ReadbackValid);
+    CHECK(diagnostics.FreshPoseSkinnedCandidates == 1U);
+    CHECK(diagnostics.FreshPoseSkinnedDepthDraws == 1U);
+    CHECK(results->Statistics.GpuOcclusionSkinnedMeshCandidates >= 1U);
+    CHECK(results->Statistics.GpuOcclusionForcedVisibleCandidates == 0U);
+    CHECK(results->Statistics.GpuOcclusionSafeOccluders >= 2U);
 }
 
 TEST_CASE("procedural vertex displacement bypasses forced GPU occlusion without losing direct draws")

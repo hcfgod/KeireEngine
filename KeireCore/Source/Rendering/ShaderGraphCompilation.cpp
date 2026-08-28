@@ -147,7 +147,8 @@ namespace Keire
                 result.Variants.push_back({keywords, std::move(suffix), generatedSource, std::move(hlsl),
                                            Detail::BuildShaderGraphManifest(
                                                expanded, generatedSource, result.Properties, keywords,
-                                               compiler.UsesVertexMaterialParameters(), compiler.OcclusionSupport())});
+                                               compiler.UsesVertexMaterialParameters(), compiler.OcclusionSupport(),
+                                               compiler.MaximumWorldPositionDisplacementRadius())});
             }
             std::ranges::sort(result.Dependencies);
             result.Dependencies.erase(std::unique(result.Dependencies.begin(), result.Dependencies.end()),

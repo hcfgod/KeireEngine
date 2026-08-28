@@ -1136,6 +1136,9 @@ Assert-True ($windowsRenderBenchmark.Contains('@("vsync", "immediate")') -and
               $windowsRenderBenchmark.Contains('Assert-RequiredProperties $timeline $timelineFields') -and
               $windowsRenderBenchmark.Contains('framesInFlightHighWaterMark -gt') -and
               $windowsRenderBenchmark.Contains('Remove-Item -LiteralPath $matrixPath -Force') -and
+              $windowsRenderBenchmark.Contains('KEIRE_WORKSPACE_CACHE_ROOT') -and
+              $windowsRenderBenchmark.Contains('Get-KeireWorkspaceIdentity $Root') -and
+              -not $windowsRenderBenchmark.Contains('Join-Path $benchmarkRoot "Temp"') -and
               $windowsRenderBenchmark.Contains('Build\Benchmarks')) `
     "Release render benchmark enforces the fixed VSync matrix and durable result contract"
 Assert-True ($windowsDeviceLoss.Contains('--validate-device-loss') -and
@@ -1155,6 +1158,7 @@ Assert-True ($windowsDeviceLoss.Contains('--validate-device-loss') -and
               $windowsDeviceLoss.Contains('lostGenerationGpuCleanupCalls -ne 0') -and
               $windowsDeviceLoss.Contains('twoSceneUiCommands -lt 2') -and
               $windowsDeviceLoss.Contains('observedRenderedFrames -lt 2') -and
+              $windowsDeviceLoss.Contains('-SmokeTimeoutSeconds $EditorSmokeTimeoutSeconds') -and
               $windowsDeviceLoss.Contains('acceptedFrameBlockedBeforeClose') -and
               $windowsDeviceLoss.Contains('recoveryAttempt -ne 0') -and
               $windowsDeviceLoss.Contains('outstandingFrames -ne 0') -and
@@ -1166,6 +1170,12 @@ Assert-True ($windowsDeviceLoss.Contains('--validate-device-loss') -and
 Assert-True ($runtimeAdditiveValidation.Contains('Additive runtime validation timed out.') -and
               $runtimeAdditiveValidation.Contains('std::chrono::minutes(5)') -and
               $runtimeAdditiveValidation.Contains('renderer->Flush()') -and
+              $runtimeAdditiveValidation.Contains('SourceSurfaceEpoch == surface.Generation()') -and
+              $runtimeAdditiveValidation.Contains('LocalLightMaskConsumed') -and
+              $runtimeAdditiveValidation.Contains('FreshPoseSkinnedDepthDraws') -and
+              $runtimeAdditiveValidation.Contains('VfxMaskConsumed') -and
+              $runtimeAdditiveValidation.Contains('PrepareFreshPoseOcclusionFixture') -and
+              $runtimeAdditiveValidation.Contains('77c1e51e-6397-5983-b80b-e82587b2edaa') -and
               $runtimeAdditiveValidation.Contains('BlockNextAcceptedFrame(*renderer)') -and
               $runtimeAdditiveValidation.Contains('FinalizeDeviceLossShutdown') -and
               $runtimeCommandLine.Contains('--hidden-validation-window') -and
@@ -1173,30 +1183,67 @@ Assert-True ($runtimeAdditiveValidation.Contains('Additive runtime validation ti
               $runtimeApplication.Contains('specification.Render.Mode = RenderMode::Rendered') -and
               $runtimeApplication.Contains('!hiddenValidationWindow') -and
               $editorPlayValidation.Contains('RecoveryAttemptCountForTest(*renderer)') -and
+              $editorPlayValidation.Contains('ObserveOcclusionGameView') -and
+              $editorPlayValidation.Contains('SourceSurfaceEpoch == surfaceGeneration') -and
+              $editorPlayValidation.Contains('LocalLightMaskConsumed') -and
+              $editorPlayValidation.Contains('FreshPoseSkinnedDepthDraws') -and
+              $editorPlayValidation.Contains('VfxMaskConsumed') -and
+              $editorPlayValidation.Contains('PrepareFreshPoseOcclusionFixture') -and
+              $editorPlayValidation.Contains('77c1e51e-6397-5983-b80b-e82587b2edaa') -and
              -not $editorPlayValidation.Contains('RetriedAfterDeviceLoss')) `
     "Runtime and Editor end-to-end validation use stable timeout and recovery evidence"
 Assert-True ($windowsRun.Contains('[switch]$SmokePlay') -and
              $windowsRun.Contains('[switch]$SmokePlayDeviceLoss') -and
+             $windowsRun.Contains('[int]$SmokeTimeoutSeconds = 0') -and
              $windowsRun.Contains('$Configuration -notin @("Debug", "DebugASan")') -and
              $windowsRun.Contains('"--project", $smokeProjectPath, "--smoke-play"') -and
              $windowsRun.Contains('"--smoke-play-output", $SmokeOutput') -and
              $windowsRun.Contains('"--smoke-play-device-loss"') -and
              -not $windowsRun.Contains('SDL_VIDEODRIVER = "dummy"`r`n        & $ClientExe @smokeArguments')) `
     "Rendered Editor Play smoke uses the real window/update/input loop"
+Assert-True ($windowsCommon.Contains('[TimeSpan]$Timeout = [TimeSpan]::Zero') -and
+             $windowsCommon.Contains('$process.WaitForExit([int]$timeoutMilliseconds)') -and
+             $windowsCommon.Contains('$process.Kill($true)') -and
+             $windowsCommon.Contains('taskkill.exe')) `
+    "Captured Windows validation processes enforce a bounded process-tree watchdog"
 $windowsFfmpeg = Get-Content (Join-Path $Windows "ffmpeg.ps1") -Raw
 $windowsFfmpegContract = Get-Content (Join-Path $Windows "ffmpeg-runtime-contract.ps1") -Raw
 $windowsFfmpegStage = Get-Content (Join-Path $Windows "stage-ffmpeg-runtime.ps1") -Raw
 $windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
-Assert-True ($windowsPackage.Contains('--validate-additive-runtime $runtimeValidationOutput') -and
-              $windowsPackage.Contains('--content $runtimeContent --headless') -and
+Assert-True ($windowsPackage.Contains('"--validate-additive-runtime", $runtimeValidationOutput') -and
+              $windowsPackage.Contains('"--content", $runtimeContent, "--headless"') -and
               -not $windowsPackage.Contains('--frames 6000') -and
               $windowsPackage.Contains('$runtimeValidation.renderMode -ne "rendered"') -and
               $windowsPackage.Contains('$runtimeValidation.renderedWindowLoop') -and
               $windowsPackage.Contains('$runtimeValidation.nativeWindowCreated') -and
               $windowsPackage.Contains('$runtimeValidation.validationWindowHidden') -and
               $windowsPackage.Contains('$runtimeValidation.twoSceneUiCommands -lt 2') -and
-              $windowsPackage.Contains('$runtimeValidation.threeSceneUiCommands -lt 2') -and
-              $windowsPackage.Contains('$editorPlayValidation.observedRenderedFrames -lt 2') -and
+               $windowsPackage.Contains('$runtimeValidation.threeSceneUiCommands -lt 2') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.fourSceneContributions -ne 4') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.culled -lt 1') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.ownership.sourceSurfaceEpoch -ne') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.ownership.sourceFrameSlot -lt 0') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.ownership.sourceFrameSlot -ge') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.ownership.sourceDeviceGeneration -ne') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.localLightVisibility.maskConsumed') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.freshPoseSkinned.depthDraws -lt 1') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.vfxVisibility.maskEntries -lt 1') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1') -and
+               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.vfxVisibility.maskConsumed') -and
+               $windowsPackage.Contains('$editorPlayValidation.observedRenderedFrames -lt 2') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.threeSceneContributions -ne 3') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.culled -lt 1') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.ownership.sourceSurfaceEpoch -ne') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.ownership.sourceFrameSlot -lt 0') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.ownership.sourceFrameSlot -ge') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.ownership.sourceDeviceGeneration -ne') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.localLightVisibility.maskConsumed') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.freshPoseSkinned.depthDraws -lt 1') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.vfxVisibility.maskEntries -lt 1') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1') -and
+               $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.vfxVisibility.maskConsumed') -and
+               $windowsPackage.Contains('-Timeout ([TimeSpan]::FromMinutes(6))') -and
+               $windowsPackage.Contains('-SmokeTimeoutSeconds 300') -and
               $windowsPackage.Contains('$runtimeValidation.build.gitCommit -ne $commit') -and
               $windowsPackage.Contains('$editorPlayValidation.build.gitCommit -ne $expectedHeadCommit') -and
               $windowsPackage.Contains('LastWriteTimeUtc -lt $runtimeValidationStartedAt') -and
@@ -1311,7 +1358,8 @@ Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              -not $windowsBuild.Contains('"build-info.ps1"') -and
              $preparedContent.Contains('"build-info.ps1"') -and
              $preparedContent.Contains('"builtin-vfx.ps1"') -and
-             $preparedContent.Contains('"builtin-occlusion.ps1"')) `
+             $preparedContent.Contains('"builtin-occlusion.ps1"') -and
+             $preparedContent.Contains('"builtin-spatial-selection.ps1"')) `
     "One Core prebuild process owns generated identity and built-in content"
 Assert-True ($corePremake.Contains('pchheader "KeireInternal/KeireCorePch.h"') -and
              $corePremake.Contains('buildoptions { "/FIKeireInternal/KeireCorePch.h" }') -and
@@ -1385,9 +1433,12 @@ $generatedContentScript = Get-Content (Join-Path $Windows 'prepare-generated-con
 Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              $generatedContentScript.Contains('builtin-shaders.ps1') -and
              $generatedContentScript.Contains('builtin-occlusion.ps1') -and
+             $generatedContentScript.Contains('builtin-spatial-selection.ps1') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'Scripts\Windows\builtin-spatial-selection.ps1')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDepth.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugPyramid.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugBounds.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinSpatialSelection.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) `
     "First-party built-in shader generation"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
@@ -1445,7 +1496,10 @@ Assert-True (-not ($workspaceHeader.Contains('DrawSceneContent')) -and
              -not ($workspaceHeader.Contains('DrawHierarchyContent')) -and
              -not ($workspaceHeader.Contains('DrawInspectorContent'))) "Workspace exposes no whole-panel draw forwarding"
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Process.cpp') -Raw
-Assert-True ($processSource.Contains('"/select," + utf8Path') -and $processSource.Contains('std::filesystem::weakly_canonical')) "Absolute platform file-manager reveal routing"
+Assert-True ($processSource.Contains('std::filesystem::weakly_canonical') -and
+             $processSource.Contains('GetWindowsDirectoryW') -and
+             $processSource.Contains('L"/select,\"" + resolved.native()') -and
+             $processSource.Contains('ShellExecuteW')) "Absolute platform file-manager reveal routing"
 $hubSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApplication.cpp") -Raw
 Assert-True ($hubSource.Contains('CreateSystemTray') -and $hubSource.Contains('Show Hub') -and $hubSource.Contains('m_Tray->IsAvailable()')) "Project Hub tray backgrounding"
 $hubInstanceSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubInstance.cpp") -Raw

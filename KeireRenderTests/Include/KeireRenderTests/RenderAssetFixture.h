@@ -2,6 +2,7 @@
 
 #include "Keire/Application.h"
 #include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/LightingAssets.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
@@ -80,8 +81,8 @@ namespace KeireRenderTests::Detail
             Database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
                 .ProjectRoot = Root,
                 .Importers = std::vector<Keire::AssetImporterRegistration>{
-                    meshImporter, shaderImporter, materialImporter, materialGraphImporter, volumeImporter, skinImporter,
-                    textureImporter}});
+                    meshImporter, shaderImporter, materialImporter, materialGraphImporter, volumeImporter,
+                    Keire::CreateLightingSetAssetImporter(), skinImporter, textureImporter}});
             const std::array vertices{Keire::MeshVertex{{-0.9F, -0.8F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}},
                                       Keire::MeshVertex{{0.9F, -0.8F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}},
                                       Keire::MeshVertex{{0.0F, 0.9F, 0.0F}, {0.0F, 0.0F, 1.0F}, {}, {}}};
@@ -162,7 +163,9 @@ namespace KeireRenderTests::Detail
   "usesForwardPlus": true,
   "usesInstancing": true,
   "usesImageBasedLighting": true,
-  "spatialLightingAbiVersion": 2,
+  "spatialLightingAbiVersion": 3,
+  "occlusionSupport": 3,
+  "maximumWorldPositionDisplacementRadius": 0.0,
   "stages": {"vertex": "VSMain", "fragment": "PSMain"},
   "includeRoots": ["Assets/Shaders"],
   "renderState": {"topology": "TriangleList", "culling": "None", "depthTest": true, "depthWrite": true, "blend": false},
@@ -191,6 +194,7 @@ namespace KeireRenderTests::Detail
             Material =
                 Database->CreateAsset("Material.keirematerial", materialImporter,
                                       std::as_bytes(std::span(materialManifest.data(), materialManifest.size())));
+
             if (includeShaderGraph)
             {
                 auto graph = Keire::CreateDefaultShaderGraph();

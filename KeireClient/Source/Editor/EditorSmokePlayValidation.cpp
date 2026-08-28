@@ -39,6 +39,9 @@ namespace KeireEditor
             StartReload,
             WaitForReload,
             ObserveReloadedGameView,
+            StartOcclusionLoad,
+            WaitForOcclusionLoad,
+            ObserveOcclusionGameView,
             Complete
         };
 
@@ -68,6 +71,12 @@ namespace KeireEditor
                 return "wait-for-reload";
             case Phase::ObserveReloadedGameView:
                 return "observe-reloaded-game-view";
+            case Phase::StartOcclusionLoad:
+                return "start-occlusion-load";
+            case Phase::WaitForOcclusionLoad:
+                return "wait-for-occlusion-load";
+            case Phase::ObserveOcclusionGameView:
+                return "observe-occlusion-game-view";
             case Phase::Complete:
                 return "complete";
             }
@@ -108,6 +117,31 @@ namespace KeireEditor
                 return "relative-locked";
             }
             return "unknown";
+        }
+
+        [[nodiscard]] static bool
+        HasExactOcclusionEvidence(const Keire::RenderCapabilities& capabilities,
+                                  const Keire::RenderStatistics& statistics, const Keire::RenderDeviceIdentity& device,
+                                  const std::uint64_t surfaceGeneration,
+                                  const Keire::GpuOcclusionSurfaceDiagnostics& diagnostics) noexcept
+        {
+            const auto classifiedLocalLights = static_cast<std::uint64_t>(diagnostics.LocalLightVisible) +
+                                               static_cast<std::uint64_t>(diagnostics.LocalLightCulled);
+            return capabilities.GpuOcclusionCulling && capabilities.GpuOcclusionSkinnedMeshes &&
+                   capabilities.GpuOcclusionVfxVisibilityMasks && capabilities.GpuOcclusionLocalLightMasks &&
+                   statistics.GpuOcclusionEnabled && statistics.AllowedFramesInFlight != 0U &&
+                   diagnostics.SourceFrame != 0U && diagnostics.SourceFrame <= statistics.LastRetiredFrame &&
+                   diagnostics.SourceSurfaceEpoch == surfaceGeneration &&
+                   diagnostics.SourceFrameSlot < statistics.AllowedFramesInFlight && device.Available &&
+                   diagnostics.SourceDeviceGeneration == device.DeviceGeneration &&
+                   diagnostics.RequestedMode == Keire::GpuOcclusionMode::Automatic &&
+                   diagnostics.EffectiveMode == Keire::GpuOcclusionMode::Automatic &&
+                   diagnostics.State == Keire::GpuOcclusionSurfaceState::Active && diagnostics.PyramidValid &&
+                   diagnostics.ReadbackValid && diagnostics.Culled != 0U && diagnostics.SafeOccluders != 0U &&
+                   diagnostics.LocalLightCandidates != 0U &&
+                   classifiedLocalLights == diagnostics.LocalLightCandidates && diagnostics.LocalLightMaskConsumed &&
+                   diagnostics.FreshPoseSkinnedCandidates != 0U && diagnostics.FreshPoseSkinnedDepthDraws != 0U &&
+                   diagnostics.VfxMaskEntries != 0U && diagnostics.VfxMaskedDraws != 0U && diagnostics.VfxMaskConsumed;
         }
 
         explicit Impl(std::filesystem::path output
@@ -157,6 +191,42 @@ namespace KeireEditor
         {
             return static_cast<std::size_t>(std::ranges::count_if(world->Sessions(), [](const auto& session)
                                                                   { return session && session->Presentation(); }));
+        }
+
+        static void AddOccludedValidationLight(const Keire::Ref<Keire::SceneRuntimeSession>& session)
+        {
+            if (!session || !session->RuntimeScene())
+                throw std::runtime_error("Editor GPU occlusion validation requires a loaded runtime scene.");
+            auto entity = session->RuntimeScene()->CreateEntity("Validation occluded point light");
+            const auto transform = entity.GetComponent<Keire::TransformComponent>();
+            const auto light = entity.AddComponent<Keire::PointLightComponent>();
+            if (!transform || !light)
+                throw std::runtime_error("Editor GPU occlusion validation could not create its point light.");
+            transform->SetLocalPosition({0.0F, 0.0F, 4.0F});
+            light->SetIntensity(8.0F);
+            light->SetRange(0.75F);
+            light->SetShadows(Keire::ShadowQuality::Disabled);
+        }
+
+        static void PrepareFreshPoseOcclusionFixture(const Keire::Ref<Keire::SceneRuntimeSession>& session)
+        {
+            if (!session || !session->RuntimeScene())
+                throw std::runtime_error("Editor GPU occlusion validation requires the reloaded skinned scene.");
+            const auto compatibleMaterial = Keire::AssetId::Parse("77c1e51e-6397-5983-b80b-e82587b2edaa");
+            for (const auto& entity : session->RuntimeScene()->Query<Keire::AnimatorComponent>())
+            {
+                const auto animator = entity.GetComponent<Keire::AnimatorComponent>();
+                const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
+                const auto transform = entity.GetComponent<Keire::TransformComponent>();
+                if (!animator || !animator->SkinnedMesh() || !renderer || !transform)
+                    continue;
+                renderer->SetMaterial(compatibleMaterial);
+                renderer->SetAlwaysVisible(false);
+                transform->SetLocalScale({0.25F, 0.25F, 0.25F});
+                return;
+            }
+            throw std::runtime_error(
+                "Editor GPU occlusion validation could not find the SampleScene skinned renderer.");
         }
 
         void TransitionTo(const Phase phase) noexcept
@@ -285,6 +355,44 @@ namespace KeireEditor
                                                          {"recoveryAttempt", diagnostic->RecoveryAttempt}};
                 }
             }
+            if (HasOcclusionSnapshot)
+            {
+                const auto& diagnostic = LastOcclusionDiagnostics;
+                failure["gpuOcclusion"] = {
+                    {"exactEvidence",
+                     HasExactOcclusionEvidence(LastOcclusionCapabilities, LastOcclusionStatistics, LastOcclusionDevice,
+                                               LastOcclusionSurfaceGeneration, diagnostic)},
+                    {"capabilities",
+                     {{"enabled", LastOcclusionCapabilities.GpuOcclusionCulling},
+                      {"skinned", LastOcclusionCapabilities.GpuOcclusionSkinnedMeshes},
+                      {"vfxMasks", LastOcclusionCapabilities.GpuOcclusionVfxVisibilityMasks},
+                      {"localLightMasks", LastOcclusionCapabilities.GpuOcclusionLocalLightMasks}}},
+                    {"enabled", LastOcclusionStatistics.GpuOcclusionEnabled},
+                    {"sourceFrame", diagnostic.SourceFrame},
+                    {"lastRetiredFrame", LastOcclusionStatistics.LastRetiredFrame},
+                    {"sourceSurfaceEpoch", diagnostic.SourceSurfaceEpoch},
+                    {"surfaceGeneration", LastOcclusionSurfaceGeneration},
+                    {"sourceFrameSlot", diagnostic.SourceFrameSlot},
+                    {"allowedFramesInFlight", LastOcclusionStatistics.AllowedFramesInFlight},
+                    {"sourceDeviceGeneration", diagnostic.SourceDeviceGeneration},
+                    {"deviceGeneration", LastOcclusionDevice.DeviceGeneration},
+                    {"state", static_cast<std::uint32_t>(diagnostic.State)},
+                    {"pyramidValid", diagnostic.PyramidValid},
+                    {"readbackValid", diagnostic.ReadbackValid},
+                    {"candidates", diagnostic.Candidates},
+                    {"visible", diagnostic.Visible},
+                    {"culled", diagnostic.Culled},
+                    {"safeOccluders", diagnostic.SafeOccluders},
+                    {"localLightCandidates", diagnostic.LocalLightCandidates},
+                    {"localLightVisible", diagnostic.LocalLightVisible},
+                    {"localLightCulled", diagnostic.LocalLightCulled},
+                    {"localLightMaskConsumed", diagnostic.LocalLightMaskConsumed},
+                    {"freshPoseSkinnedCandidates", diagnostic.FreshPoseSkinnedCandidates},
+                    {"freshPoseSkinnedDepthDraws", diagnostic.FreshPoseSkinnedDepthDraws},
+                    {"vfxMaskEntries", diagnostic.VfxMaskEntries},
+                    {"vfxMaskedDraws", diagnostic.VfxMaskedDraws},
+                    {"vfxMaskConsumed", diagnostic.VfxMaskConsumed}};
+            }
             if (!Output.empty())
                 Keire::Detail::WriteTextFileAtomically(Output, failure.dump(2) + '\n');
 
@@ -326,7 +434,9 @@ namespace KeireEditor
                 Fail(application, world, "Editor Play additive validation exceeded its total deadline");
 
             const auto phaseDeadline = Current == Phase::WaitForPlay ? std::chrono::seconds(180)
-                                       : Current == Phase::WaitForAdditiveLoad || Current == Phase::WaitForReload
+                                       : Current == Phase::WaitForAdditiveLoad || Current == Phase::WaitForReload ||
+                                               Current == Phase::WaitForOcclusionLoad ||
+                                               Current == Phase::ObserveOcclusionGameView
                                            ? std::chrono::seconds(60)
                                            : std::chrono::seconds(15);
             if (now - PhaseStartedAt > phaseDeadline)
@@ -430,6 +540,13 @@ namespace KeireEditor
                                                               { return asset && asset != firstAsset; });
                 if (secondAsset == enabled.end())
                     throw std::runtime_error("Editor Play validation requires a second enabled build scene.");
+                if (enabled.size() < 4U || !enabled[3] || enabled[3] == firstAsset || enabled[3] == *secondAsset)
+                {
+                    throw std::runtime_error(
+                        "Editor Play validation requires the GPU occlusion stress scene as its fourth enabled build "
+                        "scene.");
+                }
+                OcclusionAsset = enabled[3];
                 First = world->Active();
                 FirstButton =
                     AddValidationButton(world->Session(First), "Editor validation startup", FirstButtonElement);
@@ -506,10 +623,33 @@ namespace KeireEditor
                     TransitionTo(Phase::ObserveReloadedGameView);
                 }
                 break;
+            case Phase::StartOcclusionLoad:
+                Load = world->Load(OcclusionAsset, Keire::SceneLoadMode::Additive);
+                TransitionTo(Phase::WaitForOcclusionLoad);
+                break;
+            case Phase::WaitForOcclusionLoad:
+                if (Load->State() == Keire::SceneLoadState::Failed)
+                    throw std::runtime_error("Editor GPU occlusion stress scene load failed: " +
+                                             Load->Diagnostic().Message);
+                if (Load->State() == Keire::SceneLoadState::Ready)
+                {
+                    Occlusion = Load->Result();
+                    RequireOrder(world, {First, Second, Occlusion});
+                    AddOccludedValidationLight(world->Session(Occlusion));
+                    PrepareFreshPoseOcclusionFixture(world->Session(Second));
+                    if (PresentationCount(world) != 3U || !world->SetActive(Occlusion))
+                    {
+                        throw std::runtime_error(
+                            "Editor GPU occlusion validation could not activate three presentation trees.");
+                    }
+                    TransitionTo(Phase::ObserveOcclusionGameView);
+                }
+                break;
             case Phase::ObserveInitialGameView:
             case Phase::WaitForPointerPress:
             case Phase::WaitForTopmostInput:
             case Phase::ObserveReloadedGameView:
+            case Phase::ObserveOcclusionGameView:
                 break;
             case Phase::Complete:
                 break;
@@ -617,6 +757,120 @@ namespace KeireEditor
                 TransitionTo(Phase::StartUnload);
                 return;
             }
+            if (Current == Phase::ObserveOcclusionGameView)
+            {
+                if (!surface || presentations.size() != 3U || LastContributionCount != 3U)
+                {
+                    throw std::runtime_error(
+                        "Editor GPU occlusion Game view did not submit all ordered runtime sessions.");
+                }
+                RequireOrder(world, {First, Second, Occlusion});
+                if (world->Active() != Occlusion)
+                    throw std::runtime_error("Editor GPU occlusion Game view did not render its active stress scene.");
+
+                const auto renderer = application.Renderer();
+                const auto capabilities = renderer->Capabilities();
+                const auto statistics = renderer->Statistics();
+                if (statistics.LastRetiredFrame == 0U || statistics.LastRetiredFrame == LastOcclusionRetiredFrame)
+                    return;
+                LastOcclusionRetiredFrame = statistics.LastRetiredFrame;
+                ++OcclusionObservationFrames;
+                const auto device = renderer->DeviceIdentity();
+                const auto diagnostics = surface->OcclusionDiagnostics();
+                LastOcclusionCapabilities = capabilities;
+                LastOcclusionStatistics = statistics;
+                LastOcclusionDevice = device;
+                LastOcclusionSurfaceGeneration = surface->Generation();
+                LastOcclusionDiagnostics = diagnostics;
+                HasOcclusionSnapshot = true;
+                const bool ready =
+                    HasExactOcclusionEvidence(capabilities, statistics, device, surface->Generation(), diagnostics);
+                if (!ready)
+                    return;
+
+                if (!Output.empty())
+                {
+                    const auto build = Keire::GetBuildInfo();
+                    auto result = nlohmann::json{{"schemaVersion", 1},
+                                                 {"status", "passed"},
+                                                 {"build",
+                                                  {{"gitCommit", std::string(build.GitCommit)},
+                                                   {"configuration", std::string(build.Configuration)},
+                                                   {"dirty", build.Dirty}}},
+                                                 {"renderedWindowLoop", true},
+                                                 {"twoSceneContributions", 2},
+                                                 {"twoPresentationTrees", true},
+                                                 {"activeSessionRendered", true},
+                                                 {"topmostInputHandled", true},
+                                                 {"nativeWindowInputQueued", true},
+                                                 {"unloadReloadOrder", true},
+                                                 {"observedRenderedFrames", ObservedRenderedFrames},
+                                                 {"gpuOcclusion",
+                                                  {{"automaticStressScene", true},
+                                                   {"threeSceneContributions", 3},
+                                                   {"observationFrames", OcclusionObservationFrames},
+                                                   {"surfaceState", "active"},
+                                                   {"readbackValid", diagnostics.ReadbackValid},
+                                                   {"pyramidValid", diagnostics.PyramidValid},
+                                                   {"candidates", diagnostics.Candidates},
+                                                   {"visible", diagnostics.Visible},
+                                                   {"culled", diagnostics.Culled},
+                                                   {"safeOccluders", diagnostics.SafeOccluders},
+                                                   {"ownership",
+                                                    {{"sourceFrame", diagnostics.SourceFrame},
+                                                     {"lastRetiredFrame", statistics.LastRetiredFrame},
+                                                     {"sourceSurfaceEpoch", diagnostics.SourceSurfaceEpoch},
+                                                     {"surfaceGeneration", surface->Generation()},
+                                                     {"sourceFrameSlot", diagnostics.SourceFrameSlot},
+                                                     {"allowedFramesInFlight", statistics.AllowedFramesInFlight},
+                                                     {"deviceAvailable", device.Available},
+                                                     {"sourceDeviceGeneration", diagnostics.SourceDeviceGeneration},
+                                                     {"deviceGeneration", device.DeviceGeneration}}},
+                                                   {"localLightVisibility",
+                                                    {{"candidates", diagnostics.LocalLightCandidates},
+                                                     {"visible", diagnostics.LocalLightVisible},
+                                                     {"culled", diagnostics.LocalLightCulled},
+                                                     {"maskConsumed", diagnostics.LocalLightMaskConsumed}}},
+                                                   {"freshPoseSkinned",
+                                                    {{"candidates", diagnostics.FreshPoseSkinnedCandidates},
+                                                     {"depthDraws", diagnostics.FreshPoseSkinnedDepthDraws}}},
+                                                   {"vfxVisibility",
+                                                    {{"maskEntries", diagnostics.VfxMaskEntries},
+                                                     {"maskedDraws", diagnostics.VfxMaskedDraws},
+                                                     {"maskConsumed", diagnostics.VfxMaskConsumed}}}}}};
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    if (ValidateDeviceLoss)
+                    {
+                        const auto retries = Keire::RenderSystemInternalAccess::RecoveryAttemptCountForTest(*renderer);
+                        if (!DeviceLossInjectedDuringPlay || !RecoveredDeviceLoss || retries != 1U ||
+                            Keire::RenderSystemInternalAccess::LostGenerationGpuCleanupCallCount(*renderer) != 0U ||
+                            Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer) == 0U)
+                        {
+                            throw std::runtime_error(
+                                "Editor Play device-loss validation did not recover and retry exactly once.");
+                        }
+                        result["deviceLoss"] = {
+                            {"duringPlay", true},
+                            {"recoverySucceeded", RecoveredDeviceLoss->RecoverySucceeded},
+                            {"operation", RecoveredDeviceLoss->Operation},
+                            {"backend", RecoveredDeviceLoss->Backend},
+                            {"adapter", RecoveredDeviceLoss->Adapter},
+                            {"recoveryAttempt", RecoveredDeviceLoss->RecoveryAttempt},
+                            {"oldGeneration", RecoveredDeviceLoss->DeviceGeneration},
+                            {"newGeneration", RecoveredDeviceLoss->RecoveredDeviceGeneration},
+                            {"retryCount", retries},
+                            {"lostGenerationGpuCleanupCalls", 0},
+                            {"continuedAfterRecovery", TopmostInputHandled && NativeWindowInputQueued},
+                            {"retainedVfxSnapshots",
+                             Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer)}};
+                    }
+#endif
+                    Keire::Detail::WriteTextFileAtomically(Output, result.dump(2) + '\n');
+                }
+                TransitionTo(Phase::Complete);
+                application.RequestExit();
+                return;
+            }
             if (Current != Phase::ObserveInitialGameView && Current != Phase::ObserveReloadedGameView)
                 return;
             if (!surface || presentations.size() != 2U || LastContributionCount != 2U)
@@ -643,55 +897,7 @@ namespace KeireEditor
             }
             if (!TopmostInputHandled || !NativeWindowInputQueued)
                 throw std::runtime_error("Editor Play validation completed without routed native-window input.");
-            if (!Output.empty())
-            {
-                const auto build = Keire::GetBuildInfo();
-                auto result = nlohmann::json{{"schemaVersion", 1},
-                                             {"status", "passed"},
-                                             {"build",
-                                              {{"gitCommit", std::string(build.GitCommit)},
-                                               {"configuration", std::string(build.Configuration)},
-                                               {"dirty", build.Dirty}}},
-                                             {"renderedWindowLoop", true},
-                                             {"twoSceneContributions", 2},
-                                             {"twoPresentationTrees", true},
-                                             {"activeSessionRendered", true},
-                                             {"topmostInputHandled", true},
-                                             {"nativeWindowInputQueued", true},
-                                             {"unloadReloadOrder", true},
-                                             {"observedRenderedFrames", ObservedRenderedFrames}};
-#if defined(KEIRE_ENABLE_TEST_HOOKS)
-                if (ValidateDeviceLoss)
-                {
-                    const auto renderer = application.Renderer();
-                    const auto retries = Keire::RenderSystemInternalAccess::RecoveryAttemptCountForTest(*renderer);
-                    if (!DeviceLossInjectedDuringPlay || !RecoveredDeviceLoss || retries != 1U ||
-                        Keire::RenderSystemInternalAccess::LostGenerationGpuCleanupCallCount(*renderer) != 0U ||
-                        Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer) == 0U)
-                    {
-                        throw std::runtime_error(
-                            "Editor Play device-loss validation did not recover and retry exactly once.");
-                    }
-                    result["deviceLoss"] = {
-                        {"duringPlay", true},
-                        {"recoverySucceeded", RecoveredDeviceLoss->RecoverySucceeded},
-                        {"operation", RecoveredDeviceLoss->Operation},
-                        {"backend", RecoveredDeviceLoss->Backend},
-                        {"adapter", RecoveredDeviceLoss->Adapter},
-                        {"recoveryAttempt", RecoveredDeviceLoss->RecoveryAttempt},
-                        {"oldGeneration", RecoveredDeviceLoss->DeviceGeneration},
-                        {"newGeneration", RecoveredDeviceLoss->RecoveredDeviceGeneration},
-                        {"retryCount", retries},
-                        {"lostGenerationGpuCleanupCalls", 0},
-                        {"continuedAfterRecovery", TopmostInputHandled && NativeWindowInputQueued},
-                        {"retainedVfxSnapshots",
-                         Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer)}};
-                }
-#endif
-                Keire::Detail::WriteTextFileAtomically(Output, result.dump(2) + '\n');
-            }
-            TransitionTo(Phase::Complete);
-            application.RequestExit();
+            TransitionTo(Phase::StartOcclusionLoad);
         }
 
         std::filesystem::path Output;
@@ -699,7 +905,9 @@ namespace KeireEditor
         Keire::Ref<Keire::SceneRuntimeLoadOperation> Load;
         Keire::SceneHandle First;
         Keire::SceneHandle Second;
+        Keire::SceneHandle Occlusion;
         Keire::AssetId SecondAsset;
+        Keire::AssetId OcclusionAsset;
         Keire::EntityId FirstButton;
         Keire::EntityId SecondButton;
         Keire::RuntimeUiElementId FirstButtonElement;
@@ -710,6 +918,14 @@ namespace KeireEditor
         std::uint64_t GameViewObservationCalls = 0;
         std::uint32_t PhaseTransitions = 0;
         std::uint32_t ObservedRenderedFrames = 0;
+        std::uint32_t OcclusionObservationFrames = 0;
+        std::uint64_t LastOcclusionRetiredFrame = 0;
+        Keire::RenderCapabilities LastOcclusionCapabilities;
+        Keire::RenderStatistics LastOcclusionStatistics;
+        Keire::RenderDeviceIdentity LastOcclusionDevice;
+        Keire::GpuOcclusionSurfaceDiagnostics LastOcclusionDiagnostics;
+        std::uint64_t LastOcclusionSurfaceGeneration = 0;
+        bool HasOcclusionSnapshot = false;
         std::size_t LastPresentationCount = 0;
         std::size_t LastContributionCount = 0;
         float LastViewportWidth = 0.0F;

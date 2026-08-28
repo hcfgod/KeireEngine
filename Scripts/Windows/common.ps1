@@ -803,15 +803,35 @@ function Get-WindowsExecutableSubsystem {
 function Invoke-WindowsExecutableCapture {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+        [TimeSpan]$Timeout = [TimeSpan]::Zero
     )
 
     $standardOutput = [IO.Path]::GetTempFileName()
     $standardError = [IO.Path]::GetTempFileName()
     $process = $null
     try {
-        $process = Start-Process -FilePath $Path -ArgumentList $Arguments -Wait -PassThru `
+        $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru `
             -RedirectStandardOutput $standardOutput -RedirectStandardError $standardError
+        if ($Timeout -gt [TimeSpan]::Zero) {
+            $timeoutMilliseconds = [Math]::Min([int]::MaxValue, [Math]::Ceiling($Timeout.TotalMilliseconds))
+            if (-not $process.WaitForExit([int]$timeoutMilliseconds)) {
+                try { $process.Kill($true) }
+                catch {
+                    & (Join-Path $env:SystemRoot "System32\taskkill.exe") /PID $process.Id /T /F 2>$null | Out-Null
+                }
+                if (-not $process.WaitForExit(5000)) {
+                    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+                    if (-not $process.WaitForExit(5000)) {
+                        throw "Executable timed out and could not be terminated: $Path"
+                    }
+                }
+                throw "Executable timed out after $([Math]::Ceiling($Timeout.TotalSeconds)) seconds: $Path"
+            }
+        }
+        else {
+            $process.WaitForExit()
+        }
         $exitCode = $process.ExitCode
         $process.Dispose()
         $process = $null

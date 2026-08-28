@@ -149,13 +149,17 @@ namespace Keire::RenderBackend
         FrameGraphResource GpuOcclusionPyramid;
         FrameGraphResource GpuOcclusionIndirectArguments;
         FrameGraphResource GpuVisibilityMasks;
+        FrameGraphResource SpatialSelectionRecords;
+        FrameGraphResource VfxDynamicCandidates;
         FrameGraphResource ForwardPlusLightTiles;
         FrameGraphPass ResourceUploads;
         FrameGraphPass DirectionalShadows;
         FrameGraphPass ForwardPlusCulling;
         FrameGraphPass GpuOcclusionDepthPass;
         FrameGraphPass GpuOcclusionPyramidPass;
+        FrameGraphPass VfxSimulation;
         FrameGraphPass GpuOcclusionCullingPass;
+        FrameGraphPass SpatialSelection;
         FrameGraphPass VfxPreparation;
         FrameGraphPass Opaque;
         FrameGraphPass ResolveDepth;

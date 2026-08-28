@@ -108,7 +108,7 @@ function parseUnsignedConstant(source, name) {
 
 const actual = await collectMarkdown(docsRoot);
 const expected = [...allDocSources].sort((left, right) => left.localeCompare(right));
-assert(allDocSources.length === 82, `Expected 82 documentation sources, found ${allDocSources.length}.`);
+assert(allDocSources.length === 84, `Expected 84 documentation sources, found ${allDocSources.length}.`);
 assert(new Set(allDocSources).size === allDocSources.length, "Documentation inventory contains duplicate source paths.");
 assert(JSON.stringify(actual) === JSON.stringify(expected), "Documentation inventory does not exactly cover Docs/**/*.md.");
 
@@ -151,7 +151,7 @@ assert(
 assert(fallbackLanding.includes(`<span data-doc-count>${allDocSources.length} documents</span>`),
     "Fallback documentation count is stale.");
 for (const [fragment, count] of [
-    ["user-manual", 18], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 11], ["assets-builds", 4],
+    ["user-manual", 18], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 13], ["assets-builds", 4],
     ["vfx", 4], ["csharp", 16], ["production", 8], ["diagnostics", 5],
 ]) {
     assert(new RegExp(`<a href="#${fragment}">[^<]*<span>[^<]+</span><b>${count}</b></a>`).test(fallbackLanding),
@@ -294,7 +294,7 @@ assert(productionReview.includes(`${vfxImplemented} implemented and ${vfxDisable
     "Production-readiness VFX counts do not match the parity manifest.");
 const visualInitiatives = await readMarkdown(path.join(docsRoot, "VisualAuthoringInitiatives.md"));
 assert(visualInitiatives.includes(`${vfxImplemented} enabled Kéire-equivalent rows, ${vfxDisabled} disabled rows`) &&
-    visualInitiatives.includes("Schema-v4 JSON") && visualInitiatives.includes("Twelve paired Sandbox"),
+    visualInitiatives.includes("Schema-v5 JSON") && visualInitiatives.includes("Twelve paired Sandbox"),
     "Visual-authoring baseline is stale.");
 
 const managedMatrix = await readMarkdown(path.join(docsRoot, "Scripting", "ManagedApiMatrix.md"));

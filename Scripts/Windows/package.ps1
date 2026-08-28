@@ -26,7 +26,8 @@ Remove-Item -LiteralPath $editorPlayValidationOutput -Force -ErrorAction Silentl
 $editorPlayValidationStartedAt = [DateTime]::UtcNow
 Invoke-CheckedWindowsCommand {
     & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration `
-        -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokePlay -SmokeOutput $editorPlayValidationOutput
+        -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokePlay -SmokeOutput $editorPlayValidationOutput `
+        -SmokeTimeoutSeconds 300
 } "Rendered additive Editor Play smoke test"
 if (-not (Test-Path -LiteralPath $editorPlayValidationOutput -PathType Leaf)) {
     throw "Rendered additive Editor Play smoke did not publish its result."
@@ -46,7 +47,37 @@ if ($editorPlayValidation.schemaVersion -ne 1 -or
     -not $editorPlayValidation.activeSessionRendered -or
     -not $editorPlayValidation.topmostInputHandled -or
     -not $editorPlayValidation.nativeWindowInputQueued -or
-    -not $editorPlayValidation.unloadReloadOrder) {
+    -not $editorPlayValidation.unloadReloadOrder -or
+    -not $editorPlayValidation.gpuOcclusion.automaticStressScene -or
+    $editorPlayValidation.gpuOcclusion.threeSceneContributions -ne 3 -or
+    $editorPlayValidation.gpuOcclusion.surfaceState -ne "active" -or
+    -not $editorPlayValidation.gpuOcclusion.readbackValid -or
+    -not $editorPlayValidation.gpuOcclusion.pyramidValid -or
+    $editorPlayValidation.gpuOcclusion.candidates -lt 128 -or
+    $editorPlayValidation.gpuOcclusion.safeOccluders -lt 1 -or
+    $editorPlayValidation.gpuOcclusion.culled -lt 1 -or
+    $editorPlayValidation.gpuOcclusion.ownership.sourceFrame -lt 1 -or
+    $editorPlayValidation.gpuOcclusion.ownership.sourceFrame -gt `
+        $editorPlayValidation.gpuOcclusion.ownership.lastRetiredFrame -or
+    $editorPlayValidation.gpuOcclusion.ownership.sourceSurfaceEpoch -ne `
+        $editorPlayValidation.gpuOcclusion.ownership.surfaceGeneration -or
+    $editorPlayValidation.gpuOcclusion.ownership.allowedFramesInFlight -lt 1 -or
+    $editorPlayValidation.gpuOcclusion.ownership.sourceFrameSlot -lt 0 -or
+    $editorPlayValidation.gpuOcclusion.ownership.sourceFrameSlot -ge `
+        $editorPlayValidation.gpuOcclusion.ownership.allowedFramesInFlight -or
+    -not $editorPlayValidation.gpuOcclusion.ownership.deviceAvailable -or
+    $editorPlayValidation.gpuOcclusion.ownership.sourceDeviceGeneration -ne `
+        $editorPlayValidation.gpuOcclusion.ownership.deviceGeneration -or
+    $editorPlayValidation.gpuOcclusion.localLightVisibility.candidates -lt 1 -or
+    ($editorPlayValidation.gpuOcclusion.localLightVisibility.visible + `
+        $editorPlayValidation.gpuOcclusion.localLightVisibility.culled) -ne `
+        $editorPlayValidation.gpuOcclusion.localLightVisibility.candidates -or
+    -not $editorPlayValidation.gpuOcclusion.localLightVisibility.maskConsumed -or
+    $editorPlayValidation.gpuOcclusion.freshPoseSkinned.candidates -lt 1 -or
+    $editorPlayValidation.gpuOcclusion.freshPoseSkinned.depthDraws -lt 1 -or
+    $editorPlayValidation.gpuOcclusion.vfxVisibility.maskEntries -lt 1 -or
+    $editorPlayValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1 -or
+    -not $editorPlayValidation.gpuOcclusion.vfxVisibility.maskConsumed) {
     throw "Rendered additive Editor Play smoke published an incomplete result."
 }
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI } "AssetTool build"
@@ -238,10 +269,13 @@ $runtimeValidationOutput = Join-Path $runtimeValidationDirectory "packaged-addit
 New-Item -ItemType Directory -Force $runtimeValidationDirectory | Out-Null
 Remove-Item -LiteralPath $runtimeValidationOutput -Force -ErrorAction SilentlyContinue
 $runtimeValidationStartedAt = [DateTime]::UtcNow
-& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --headless `
-    --validate-additive-runtime $runtimeValidationOutput
-if ($LASTEXITCODE -ne 0) {
-    throw "Packaged additive runtime validation failed with exit code $LASTEXITCODE."
+$runtimeValidationResult = Invoke-WindowsExecutableCapture -Path (Join-Path $stage "bin\$runtimeName.exe") `
+    -Arguments @("--content", $runtimeContent, "--headless", "--validate-additive-runtime", $runtimeValidationOutput) `
+    -Timeout ([TimeSpan]::FromMinutes(6))
+if ($runtimeValidationResult.StandardOutput) { [Console]::Out.Write($runtimeValidationResult.StandardOutput) }
+if ($runtimeValidationResult.StandardError) { [Console]::Error.Write($runtimeValidationResult.StandardError) }
+if ($runtimeValidationResult.ExitCode -ne 0) {
+    throw "Packaged additive runtime validation failed with exit code $($runtimeValidationResult.ExitCode)."
 }
 if (-not (Test-Path -LiteralPath $runtimeValidationOutput -PathType Leaf)) {
     throw "Packaged additive runtime validation did not publish its result."
@@ -265,7 +299,37 @@ if ($runtimeValidation.schemaVersion -ne 1 -or
     -not $runtimeValidation.noPresentationSession -or
     -not $runtimeValidation.unloadReloadOrder -or
     -not $runtimeValidation.inputHandledByActiveTopmostPresentation -or
-    -not $runtimeValidation.failedLoadPreservedWorld) {
+    -not $runtimeValidation.failedLoadPreservedWorld -or
+    -not $runtimeValidation.gpuOcclusion.automaticStressScene -or
+    $runtimeValidation.gpuOcclusion.fourSceneContributions -ne 4 -or
+    $runtimeValidation.gpuOcclusion.surfaceState -ne "active" -or
+    -not $runtimeValidation.gpuOcclusion.readbackValid -or
+    -not $runtimeValidation.gpuOcclusion.pyramidValid -or
+    $runtimeValidation.gpuOcclusion.candidates -lt 128 -or
+    $runtimeValidation.gpuOcclusion.safeOccluders -lt 1 -or
+    $runtimeValidation.gpuOcclusion.culled -lt 1 -or
+    $runtimeValidation.gpuOcclusion.ownership.sourceFrame -lt 1 -or
+    $runtimeValidation.gpuOcclusion.ownership.sourceFrame -gt `
+        $runtimeValidation.gpuOcclusion.ownership.lastRetiredFrame -or
+    $runtimeValidation.gpuOcclusion.ownership.sourceSurfaceEpoch -ne `
+        $runtimeValidation.gpuOcclusion.ownership.surfaceGeneration -or
+    $runtimeValidation.gpuOcclusion.ownership.allowedFramesInFlight -lt 1 -or
+    $runtimeValidation.gpuOcclusion.ownership.sourceFrameSlot -lt 0 -or
+    $runtimeValidation.gpuOcclusion.ownership.sourceFrameSlot -ge `
+        $runtimeValidation.gpuOcclusion.ownership.allowedFramesInFlight -or
+    -not $runtimeValidation.gpuOcclusion.ownership.deviceAvailable -or
+    $runtimeValidation.gpuOcclusion.ownership.sourceDeviceGeneration -ne `
+        $runtimeValidation.gpuOcclusion.ownership.deviceGeneration -or
+    $runtimeValidation.gpuOcclusion.localLightVisibility.candidates -lt 1 -or
+    ($runtimeValidation.gpuOcclusion.localLightVisibility.visible + `
+        $runtimeValidation.gpuOcclusion.localLightVisibility.culled) -ne `
+        $runtimeValidation.gpuOcclusion.localLightVisibility.candidates -or
+    -not $runtimeValidation.gpuOcclusion.localLightVisibility.maskConsumed -or
+    $runtimeValidation.gpuOcclusion.freshPoseSkinned.candidates -lt 1 -or
+    $runtimeValidation.gpuOcclusion.freshPoseSkinned.depthDraws -lt 1 -or
+    $runtimeValidation.gpuOcclusion.vfxVisibility.maskEntries -lt 1 -or
+    $runtimeValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1 -or
+    -not $runtimeValidation.gpuOcclusion.vfxVisibility.maskConsumed) {
     throw "Packaged additive runtime validation published an incomplete result."
 }
 $versionResult = Invoke-WindowsExecutableCapture `

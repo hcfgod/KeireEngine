@@ -95,6 +95,12 @@ namespace Keire::RenderBackend
                                          const std::function<void()>& capture)
     {
         const auto admissionStarted = std::chrono::steady_clock::now();
+        const auto rethrowFailureAfterClosingFramesSettle = [this](std::unique_lock<std::mutex>& lock)
+        {
+            FramesRetired.wait(lock, [this] { return OutstandingFrames.load(std::memory_order_acquire) == 0U; });
+            lock.unlock();
+            RethrowTerminalFailure();
+        };
         {
             std::unique_lock lock(RenderQueueMutex);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
@@ -120,7 +126,11 @@ namespace Keire::RenderBackend
                 --FrameAdmissionWaiters;
 #endif
             if (StopRenderQueue)
+            {
+                lock.unlock();
+                RethrowTerminalFailure();
                 throw std::logic_error("Renderer submission queue is closed.");
+            }
             const auto lifecycle = DeviceLifecycle.load(std::memory_order_acquire);
             if (lifecycle == RenderDeviceState::RecoveryPending || lifecycle == RenderDeviceState::Recovering)
                 throw RenderRecoveryBoundaryRequired();
@@ -131,7 +141,11 @@ namespace Keire::RenderBackend
                 throw std::runtime_error("Renderer failed without a terminal diagnostic.");
             }
             if (lifecycle != RenderDeviceState::Running)
+            {
+                if (lifecycle == RenderDeviceState::Closing)
+                    rethrowFailureAfterClosingFramesSettle(lock);
                 throw std::logic_error("Renderer is closing and cannot accept another frame.");
+            }
             frame->FrameSlot = AvailableFrameSlots.front();
             AvailableFrameSlots.pop_front();
             frame->Timeline.AdmissionWaitMilliseconds =
@@ -158,6 +172,8 @@ namespace Keire::RenderBackend
                     throw RenderRecoveryBoundaryRequired();
                 if (lifecycle == RenderDeviceState::Failed)
                     RethrowTerminalFailure();
+                if (lifecycle == RenderDeviceState::Closing)
+                    rethrowFailureAfterClosingFramesSettle(lock);
                 throw std::logic_error("Renderer is closing and cannot capture another frame.");
             }
         }
@@ -198,6 +214,8 @@ namespace Keire::RenderBackend
                     RethrowTerminalFailure();
                     throw std::runtime_error("Renderer failed without a terminal diagnostic.");
                 }
+                if (lifecycle == RenderDeviceState::Closing)
+                    rethrowFailureAfterClosingFramesSettle(lock);
                 throw std::logic_error("Renderer is closing and cannot accept another frame.");
             }
             frame->AcceptedAt = std::chrono::steady_clock::now();

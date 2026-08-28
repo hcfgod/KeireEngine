@@ -57,8 +57,12 @@ namespace KeireRuntime
     {
         if (output.empty())
             return {};
-        if (buildScenes.size() < 3U)
-            throw Keire::CommandLineError("Additive runtime validation requires three enabled cooked build scenes.");
+        if (buildScenes.size() < 4U)
+        {
+            throw Keire::CommandLineError(
+                "Additive runtime validation requires four enabled cooked build scenes, including the GPU occlusion "
+                "stress scene.");
+        }
         return {buildScenes.begin(), buildScenes.end()};
     }
 
@@ -83,6 +87,9 @@ namespace KeireRuntime
             WaitForInput,
             StartFailedLoad,
             WaitForFailedLoad,
+            StartOcclusionLoad,
+            WaitForOcclusionLoad,
+            ObserveOcclusionFrame,
             ObserveFinalFrame,
             AwaitShutdown,
             Complete
@@ -101,8 +108,37 @@ namespace KeireRuntime
               ValidateDeviceLoss(validateDeviceLoss)
 #endif
         {
-            if (Current != Phase::Disabled && BuildScenes.size() < 3U)
-                throw std::invalid_argument("Additive runtime validation requires at least three cooked build scenes.");
+            if (Current != Phase::Disabled && BuildScenes.size() < 4U)
+            {
+                throw std::invalid_argument(
+                    "Additive runtime validation requires at least four cooked build scenes, including the GPU "
+                    "occlusion stress scene.");
+            }
+        }
+
+        [[nodiscard]] static bool
+        HasExactOcclusionEvidence(const Keire::RenderCapabilities& capabilities,
+                                  const Keire::RenderStatistics& statistics, const Keire::RenderDeviceIdentity& device,
+                                  const Keire::RenderSurface& surface,
+                                  const Keire::GpuOcclusionSurfaceDiagnostics& diagnostics) noexcept
+        {
+            const auto classifiedLocalLights = static_cast<std::uint64_t>(diagnostics.LocalLightVisible) +
+                                               static_cast<std::uint64_t>(diagnostics.LocalLightCulled);
+            return capabilities.GpuOcclusionCulling && capabilities.GpuOcclusionSkinnedMeshes &&
+                   capabilities.GpuOcclusionVfxVisibilityMasks && capabilities.GpuOcclusionLocalLightMasks &&
+                   statistics.GpuOcclusionEnabled && statistics.AllowedFramesInFlight != 0U &&
+                   diagnostics.SourceFrame != 0U && diagnostics.SourceFrame <= statistics.LastRetiredFrame &&
+                   diagnostics.SourceSurfaceEpoch == surface.Generation() &&
+                   diagnostics.SourceFrameSlot < statistics.AllowedFramesInFlight && device.Available &&
+                   diagnostics.SourceDeviceGeneration == device.DeviceGeneration &&
+                   diagnostics.RequestedMode == Keire::GpuOcclusionMode::Automatic &&
+                   diagnostics.EffectiveMode == Keire::GpuOcclusionMode::Automatic &&
+                   diagnostics.State == Keire::GpuOcclusionSurfaceState::Active && diagnostics.PyramidValid &&
+                   diagnostics.ReadbackValid && diagnostics.Culled != 0U && diagnostics.SafeOccluders != 0U &&
+                   diagnostics.LocalLightCandidates != 0U &&
+                   classifiedLocalLights == diagnostics.LocalLightCandidates && diagnostics.LocalLightMaskConsumed &&
+                   diagnostics.FreshPoseSkinnedCandidates != 0U && diagnostics.FreshPoseSkinnedDepthDraws != 0U &&
+                   diagnostics.VfxMaskEntries != 0U && diagnostics.VfxMaskedDraws != 0U && diagnostics.VfxMaskConsumed;
         }
 
         [[nodiscard]] static Keire::EntityId AddValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session,
@@ -133,6 +169,39 @@ namespace KeireRuntime
         {
             return static_cast<std::size_t>(std::ranges::count_if(world->Sessions(), [](const auto& session)
                                                                   { return session && session->Presentation(); }));
+        }
+
+        static void AddOccludedValidationLight(const Keire::Ref<Keire::SceneRuntimeSession>& session)
+        {
+            if (!session || !session->RuntimeScene())
+                throw std::runtime_error("GPU occlusion validation requires a loaded runtime scene.");
+            auto entity = session->RuntimeScene()->CreateEntity("Validation occluded point light");
+            const auto transform = entity.GetComponent<Keire::TransformComponent>();
+            const auto light = entity.AddComponent<Keire::PointLightComponent>();
+            if (!transform || !light)
+                throw std::runtime_error("GPU occlusion validation could not create its point light.");
+            transform->SetLocalPosition({0.0F, 0.0F, 4.0F});
+            light->SetIntensity(8.0F);
+            light->SetRange(0.75F);
+            light->SetShadows(Keire::ShadowQuality::Disabled);
+        }
+
+        static void PrepareFreshPoseOcclusionFixture(const Keire::Ref<Keire::SceneRuntimeSession>& session)
+        {
+            if (!session || !session->RuntimeScene())
+                throw std::runtime_error("GPU occlusion validation requires the reloaded skinned runtime scene.");
+            const auto compatibleMaterial = Keire::AssetId::Parse("77c1e51e-6397-5983-b80b-e82587b2edaa");
+            for (const auto& entity : session->RuntimeScene()->Query<Keire::AnimatorComponent>())
+            {
+                const auto animator = entity.GetComponent<Keire::AnimatorComponent>();
+                const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
+                if (!animator || !animator->SkinnedMesh() || !renderer)
+                    continue;
+                renderer->SetMaterial(compatibleMaterial);
+                renderer->SetAlwaysVisible(false);
+                return;
+            }
+            throw std::runtime_error("GPU occlusion validation could not find the SampleScene skinned renderer.");
         }
 
         static void RequireOrder(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
@@ -303,12 +372,33 @@ namespace KeireRuntime
                     FailedLoadPreserved = world->LoadedScenes() == BeforeFailedLoad;
                     if (!FailedLoadPreserved)
                         throw std::runtime_error("Failed additive load changed the previous valid runtime world.");
-                    Current = Phase::ObserveFinalFrame;
+                    Current = Phase::StartOcclusionLoad;
+                }
+                break;
+            case Phase::StartOcclusionLoad:
+                OcclusionLoad = world->Load(BuildScenes[3], Keire::SceneLoadMode::Additive);
+                Current = Phase::WaitForOcclusionLoad;
+                break;
+            case Phase::WaitForOcclusionLoad:
+                if (OcclusionLoad->State() == Keire::SceneLoadState::Failed)
+                    throw std::runtime_error("GPU occlusion stress scene load failed: " +
+                                             OcclusionLoad->Diagnostic().Message);
+                if (OcclusionLoad->State() == Keire::SceneLoadState::Ready)
+                {
+                    Occlusion = OcclusionLoad->Result();
+                    RequireOrder(world, {First, Third, Second, Occlusion});
+                    AddOccludedValidationLight(world->Session(Occlusion));
+                    PrepareFreshPoseOcclusionFixture(world->Session(Second));
+                    (void)AddValidationButton(world->Session(Occlusion), "Validation occlusion", width, height);
+                    if (!world->SetActive(Occlusion))
+                        throw std::runtime_error("GPU occlusion validation could not activate its stress scene.");
+                    Current = Phase::ObserveOcclusionFrame;
                 }
                 break;
             case Phase::ObserveTwoScenes:
             case Phase::ObserveThreeScenes:
             case Phase::ObserveUnload:
+            case Phase::ObserveOcclusionFrame:
             case Phase::ObserveFinalFrame:
             case Phase::AwaitShutdown:
             case Phase::Disabled:
@@ -346,9 +436,30 @@ namespace KeireRuntime
                 requireSubmission(2U, 1U);
                 Current = Phase::StartReload;
                 break;
+            case Phase::ObserveOcclusionFrame:
+            {
+                requireSubmission(4U, 3U);
+                const auto capabilities = renderer->Capabilities();
+                const auto statistics = renderer->Statistics();
+                if (statistics.LastRetiredFrame == 0U || statistics.LastRetiredFrame == LastOcclusionRetiredFrame)
+                    break;
+                LastOcclusionRetiredFrame = statistics.LastRetiredFrame;
+                ++OcclusionObservationFrames;
+                const auto device = renderer->DeviceIdentity();
+                const auto diagnostics = surface->OcclusionDiagnostics();
+                const bool ready = HasExactOcclusionEvidence(capabilities, statistics, device, *surface, diagnostics);
+                if (!ready)
+                    break;
+                OcclusionStatistics = statistics;
+                OcclusionDevice = device;
+                OcclusionSurfaceGeneration = surface->Generation();
+                OcclusionDiagnostics = diagnostics;
+                Current = Phase::ObserveFinalFrame;
+                break;
+            }
             case Phase::ObserveFinalFrame:
             {
-                requireSubmission(3U, 2U);
+                requireSubmission(4U, 3U);
                 if (!InputHandled || !FailedLoadPreserved)
                     throw std::runtime_error("Additive runtime validation did not complete input and rollback checks.");
                 const auto nativeWindow = Keire::WindowSystemInternalAccess::NativeWindow(
@@ -373,6 +484,39 @@ namespace KeireRuntime
                                                {"unloadReloadOrder", true},
                                                {"inputHandledByActiveTopmostPresentation", true},
                                                {"failedLoadPreservedWorld", true}};
+                (*PendingResult)["gpuOcclusion"] = {
+                    {"automaticStressScene", true},
+                    {"fourSceneContributions", 4},
+                    {"observationFrames", OcclusionObservationFrames},
+                    {"surfaceState", "active"},
+                    {"readbackValid", OcclusionDiagnostics.ReadbackValid},
+                    {"pyramidValid", OcclusionDiagnostics.PyramidValid},
+                    {"candidates", OcclusionDiagnostics.Candidates},
+                    {"visible", OcclusionDiagnostics.Visible},
+                    {"culled", OcclusionDiagnostics.Culled},
+                    {"safeOccluders", OcclusionDiagnostics.SafeOccluders},
+                    {"ownership",
+                     {{"sourceFrame", OcclusionDiagnostics.SourceFrame},
+                      {"lastRetiredFrame", OcclusionStatistics.LastRetiredFrame},
+                      {"sourceSurfaceEpoch", OcclusionDiagnostics.SourceSurfaceEpoch},
+                      {"surfaceGeneration", OcclusionSurfaceGeneration},
+                      {"sourceFrameSlot", OcclusionDiagnostics.SourceFrameSlot},
+                      {"allowedFramesInFlight", OcclusionStatistics.AllowedFramesInFlight},
+                      {"deviceAvailable", OcclusionDevice.Available},
+                      {"sourceDeviceGeneration", OcclusionDiagnostics.SourceDeviceGeneration},
+                      {"deviceGeneration", OcclusionDevice.DeviceGeneration}}},
+                    {"localLightVisibility",
+                     {{"candidates", OcclusionDiagnostics.LocalLightCandidates},
+                      {"visible", OcclusionDiagnostics.LocalLightVisible},
+                      {"culled", OcclusionDiagnostics.LocalLightCulled},
+                      {"maskConsumed", OcclusionDiagnostics.LocalLightMaskConsumed}}},
+                    {"freshPoseSkinned",
+                     {{"candidates", OcclusionDiagnostics.FreshPoseSkinnedCandidates},
+                      {"depthDraws", OcclusionDiagnostics.FreshPoseSkinnedDepthDraws}}},
+                    {"vfxVisibility",
+                     {{"maskEntries", OcclusionDiagnostics.VfxMaskEntries},
+                      {"maskedDraws", OcclusionDiagnostics.VfxMaskedDraws},
+                      {"maskConsumed", OcclusionDiagnostics.VfxMaskConsumed}}}};
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                 if (ValidateDeviceLoss)
                 {
@@ -426,20 +570,28 @@ namespace KeireRuntime
         std::vector<Keire::AssetId> BuildScenes;
         Phase Current = Phase::Disabled;
         std::chrono::steady_clock::time_point ValidationStartedAt = std::chrono::steady_clock::now();
+        std::uint64_t LastOcclusionRetiredFrame = 0;
         Keire::Ref<Keire::SceneRuntimeLoadOperation> AdditiveLoad;
         Keire::Ref<Keire::SceneLoadOperation> NoPresentationLoad;
         Keire::Ref<Keire::SceneRuntimeLoadOperation> Reload;
         Keire::Ref<Keire::SceneRuntimeLoadOperation> FailedLoad;
+        Keire::Ref<Keire::SceneRuntimeLoadOperation> OcclusionLoad;
         Keire::Ref<Keire::SceneRuntimeSession> NoPresentationSession;
         Keire::SceneHandle First;
         Keire::SceneHandle Second;
         Keire::SceneHandle Third;
+        Keire::SceneHandle Occlusion;
         Keire::EntityId SecondButton;
         std::vector<Keire::SceneHandle> BeforeFailedLoad;
         std::size_t TwoSceneUiCommands = 0;
         std::size_t ThreeSceneUiCommands = 0;
         bool InputHandled = false;
         bool FailedLoadPreserved = false;
+        std::uint32_t OcclusionObservationFrames = 0;
+        Keire::RenderStatistics OcclusionStatistics;
+        Keire::RenderDeviceIdentity OcclusionDevice;
+        std::uint64_t OcclusionSurfaceGeneration = 0;
+        Keire::GpuOcclusionSurfaceDiagnostics OcclusionDiagnostics;
         std::optional<nlohmann::json> PendingResult;
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         bool ValidateDeviceLoss = false;

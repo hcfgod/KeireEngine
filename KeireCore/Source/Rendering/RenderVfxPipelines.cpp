@@ -26,6 +26,8 @@ namespace
         Finalize,
         ResetRender,
         FilterRender,
+        BuildVisibilityCandidates,
+        CompactVisibility,
         Vertex,
         RibbonVertex,
         Fragment,
@@ -83,6 +85,10 @@ namespace
             KEIRE_SELECT_VFX_SHADER(ResetRender);
         case BuiltinVfxShaderStage::FilterRender:
             KEIRE_SELECT_VFX_SHADER(FilterRender);
+        case BuiltinVfxShaderStage::BuildVisibilityCandidates:
+            KEIRE_SELECT_VFX_SHADER(BuildVisibilityCandidates);
+        case BuiltinVfxShaderStage::CompactVisibility:
+            KEIRE_SELECT_VFX_SHADER(CompactVisibility);
         case BuiltinVfxShaderStage::Vertex:
             KEIRE_SELECT_VFX_SHADER(Vertex);
         case BuiltinVfxShaderStage::RibbonVertex:
@@ -445,8 +451,8 @@ namespace Keire::RenderBackend
                              catch (const std::exception& error)
                              {
                                  detail = error.what();
-                                 deviceLost = state->ClassifyDeviceFailure("GPU VFX pipeline warmup", detail)
-                                                  .has_value();
+                                 deviceLost =
+                                     state->ClassifyDeviceFailure("GPU VFX pipeline warmup", detail).has_value();
                              }
                              catch (...)
                              {
@@ -454,8 +460,9 @@ namespace Keire::RenderBackend
                              if (deviceLost)
                              {
                                  state->HandleRenderThreadFailure(failure);
-                                 if (!retriedAfterDeviceLoss && state->DeviceLifecycle.load(std::memory_order_acquire) ==
-                                                                    RenderDeviceState::Running)
+                                 if (!retriedAfterDeviceLoss &&
+                                     state->DeviceLifecycle.load(std::memory_order_acquire) ==
+                                         RenderDeviceState::Running)
                                  {
                                      retriedAfterDeviceLoss = true;
                                      continue;
@@ -484,8 +491,8 @@ namespace Keire::RenderBackend
                  {}});
             const auto queueDepth = static_cast<std::uint32_t>(RenderQueue.size());
             auto highWater = RenderQueueHighWaterMark.load(std::memory_order_relaxed);
-            while (highWater < queueDepth && !RenderQueueHighWaterMark.compare_exchange_weak(
-                                                   highWater, queueDepth, std::memory_order_relaxed))
+            while (highWater < queueDepth &&
+                   !RenderQueueHighWaterMark.compare_exchange_weak(highWater, queueDepth, std::memory_order_relaxed))
             {
             }
         }
@@ -507,9 +514,10 @@ namespace Keire::RenderBackend
         if (format == SDL_GPU_SHADERFORMAT_INVALID)
             throw std::runtime_error("GPU VFX requires a DXIL, SPIR-V, or MSL compute-shader backend.");
 
-        const auto create = [this, format](const BuiltinVfxShaderStage stage, const char* entrypoint,
-                                           const std::uint32_t threads, const bool usesExecutionTables = false,
-                                           const std::uint32_t writeBufferCount = 5U)
+        const auto create =
+            [this, format](const BuiltinVfxShaderStage stage, const char* entrypoint, const std::uint32_t threads,
+                           const bool usesExecutionTables = false, const std::uint32_t writeBufferCount = 5U,
+                           const std::uint32_t uniformBufferCount = 1U, const std::uint32_t readBufferCount = 0U)
         {
             const auto shader = SelectVfxShader(stage, format);
             SDL_GPUComputePipelineCreateInfo information{};
@@ -517,10 +525,10 @@ namespace Keire::RenderBackend
             information.code_size = shader.Size;
             information.entrypoint = entrypoint;
             information.format = format;
-            information.num_readonly_storage_buffers = usesExecutionTables ? 8U : 0U;
+            information.num_readonly_storage_buffers = usesExecutionTables ? 8U : readBufferCount;
             information.num_readwrite_storage_buffers = writeBufferCount;
             information.num_samplers = usesExecutionTables ? 1U : 0U;
-            information.num_uniform_buffers = 1;
+            information.num_uniform_buffers = uniformBufferCount;
             information.threadcount_x = threads;
             information.threadcount_y = 1;
             information.threadcount_z = 1;
@@ -546,6 +554,10 @@ namespace Keire::RenderBackend
         VfxFinalizePipeline = create(BuiltinVfxShaderStage::Finalize, "CSFinalize", 1);
         VfxResetRenderPipeline = create(BuiltinVfxShaderStage::ResetRender, "CSResetRender", 1, false, 8);
         VfxFilterRenderPipeline = create(BuiltinVfxShaderStage::FilterRender, "CSFilterRender", 256, false, 8);
+        VfxBuildVisibilityPipeline = create(BuiltinVfxShaderStage::BuildVisibilityCandidates,
+                                            "CSBuildVisibilityCandidates", 256, false, 5, 1, 5);
+        VfxCompactVisibilityPipeline =
+            create(BuiltinVfxShaderStage::CompactVisibility, "CSCompactVisibility", 1, false, 5, 1, 5);
     }
 
     void RenderSharedState::ReleaseGpuVfxPipelines() noexcept
@@ -570,6 +582,8 @@ namespace Keire::RenderBackend
         release(VfxFinalizePipeline);
         release(VfxResetRenderPipeline);
         release(VfxFilterRenderPipeline);
+        release(VfxBuildVisibilityPipeline);
+        release(VfxCompactVisibilityPipeline);
     }
 
     bool RenderSharedState::EnsureGpuVfxPipelines(const bool requireStripPipelines)

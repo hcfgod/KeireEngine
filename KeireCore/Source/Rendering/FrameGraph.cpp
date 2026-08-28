@@ -255,6 +255,10 @@ namespace Keire::RenderBackend
             result.Graph.AddResource({"Occlusion indirect arguments", FrameGraphResourceKind::Buffer, true});
         result.GpuVisibilityMasks =
             result.Graph.AddResource({"Frame-owned visibility masks", FrameGraphResourceKind::Buffer, true});
+        result.SpatialSelectionRecords =
+            result.Graph.AddResource({"Frame-owned spatial selection records", FrameGraphResourceKind::Buffer, true});
+        result.VfxDynamicCandidates =
+            result.Graph.AddResource({"VFX dynamic visibility candidates", FrameGraphResourceKind::Buffer, true});
         result.HdrScene = result.Graph.AddResource({"HDR scene color", FrameGraphResourceKind::Texture, false, 4});
         result.SampledDepth = result.Graph.AddResource({"Sampled scene depth", FrameGraphResourceKind::Texture, true});
         const auto skyComplete = result.Graph.AddResource({"Sky complete", FrameGraphResourceKind::Buffer, true});
@@ -270,37 +274,49 @@ namespace Keire::RenderBackend
         result.ResourceUploads = result.Graph.AddPass({"Resource uploads", {}, {uploads}, FrameGraphPassKind::Upload});
         result.DirectionalShadows =
             result.Graph.AddPass({"Directional shadow maps", {uploads}, {shadows}, FrameGraphPassKind::Graphics});
-        result.GpuOcclusionDepthPass = result.Graph.AddPass(
-            {"Occlusion depth", {uploads}, {result.GpuOcclusionDepth}, FrameGraphPassKind::Graphics});
+        result.VfxSimulation = result.Graph.AddPass({"VFX simulation and dynamic bounds",
+                                                     {uploads},
+                                                     {result.VfxDynamicCandidates},
+                                                     FrameGraphPassKind::Compute});
+        result.GpuOcclusionDepthPass = result.Graph.AddPass({"Occlusion depth",
+                                                             {uploads, result.VfxDynamicCandidates},
+                                                             {result.GpuOcclusionDepth},
+                                                             FrameGraphPassKind::Graphics});
         result.GpuOcclusionPyramidPass = result.Graph.AddPass({"Occlusion depth pyramid",
                                                                {result.GpuOcclusionDepth},
                                                                {result.GpuOcclusionPyramid},
                                                                FrameGraphPassKind::Compute});
         result.GpuOcclusionCullingPass =
             result.Graph.AddPass({"GPU occlusion culling",
-                                  {uploads, result.GpuOcclusionPyramid},
+                                  {uploads, result.GpuOcclusionPyramid, result.VfxDynamicCandidates},
                                   {result.GpuOcclusionIndirectArguments, result.GpuVisibilityMasks},
                                   FrameGraphPassKind::Compute});
         result.ForwardPlusCulling = result.Graph.AddPass({"Forward+ light culling",
                                                           {uploads, result.GpuVisibilityMasks},
                                                           {result.ForwardPlusLightTiles},
                                                           FrameGraphPassKind::Compute});
+        result.SpatialSelection = result.Graph.AddPass({"Spatial lighting selection",
+                                                        {uploads, result.GpuVisibilityMasks},
+                                                        {result.SpatialSelectionRecords},
+                                                        FrameGraphPassKind::Compute});
         result.VfxPreparation =
             result.Graph.AddPass({"VFX expansion",
                                   {uploads, result.GpuVisibilityMasks, result.ForwardPlusLightTiles},
                                   {vfxPrepared},
                                   FrameGraphPassKind::Compute});
-        result.Opaque = result.Graph.AddPass(
-            {"Opaque and mask",
-             {uploads, shadows, result.ForwardPlusLightTiles, result.GpuOcclusionIndirectArguments},
-             {result.HdrScene}});
+        result.Opaque =
+            result.Graph.AddPass({"Opaque and mask",
+                                  {uploads, shadows, result.ForwardPlusLightTiles, result.GpuOcclusionIndirectArguments,
+                                   result.SpatialSelectionRecords, vfxPrepared},
+                                  {result.HdrScene}});
         result.ResolveDepth =
             result.Graph.AddPass({"Sampled scene depth", {uploads, result.HdrScene}, {result.SampledDepth}});
         result.Sky = result.Graph.AddPass({"Sky", {result.HdrScene}, {skyComplete}});
-        result.Transparency = result.Graph.AddPass(
-            {"Transparency",
-             {result.HdrScene, result.SampledDepth, skyComplete, result.ForwardPlusLightTiles, vfxPrepared},
-             {transparencyComplete}});
+        result.Transparency =
+            result.Graph.AddPass({"Transparency",
+                                  {result.HdrScene, result.SampledDepth, skyComplete, result.ForwardPlusLightTiles,
+                                   result.SpatialSelectionRecords, vfxPrepared},
+                                  {transparencyComplete}});
         result.ToneMap = result.Graph.AddPass({"ACES tone map", {result.HdrScene, transparencyComplete}, {toneMapped}});
         result.Overlays =
             result.Graph.AddPass({"Editor overlays",

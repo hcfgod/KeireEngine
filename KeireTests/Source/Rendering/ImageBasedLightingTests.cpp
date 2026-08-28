@@ -163,3 +163,38 @@ TEST_CASE("shader manifests opt into image-based and spatial-lighting ABI v2")
                          "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.",
                          std::invalid_argument);
 }
+
+TEST_CASE("spatial-lighting ABI v3 reserves a frame-owned selection buffer and retains v2 support")
+{
+    const std::string manifest = R"({
+        "schemaVersion": 1,
+        "source": "Assets/Test.hlsl",
+        "stages": {"vertex": "VSMain", "fragment": "PSMain"},
+        "vertexLayoutVersion": 3,
+        "usesForwardPlus": true,
+        "usesImageBasedLighting": true,
+        "spatialLightingAbiVersion": 3,
+        "properties": []
+    })";
+    std::vector<std::byte> bytes(manifest.size());
+    std::ranges::transform(manifest, bytes.begin(),
+                           [](const char value) { return std::byte(static_cast<unsigned char>(value)); });
+    auto definition = Keire::ShaderAsset::DecodeManifest(bytes);
+    CHECK(definition.UsesForwardPlus);
+    CHECK(definition.UsesImageBasedLighting);
+    CHECK(definition.SpatialLightingAbiVersion == 3U);
+    for (const auto format :
+         {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::Msl})
+        definition.Variants.push_back({format, {std::byte{1}, std::byte{2}}, {std::byte{3}, std::byte{4}}});
+    const auto decoded = Keire::ShaderAsset::Decode(Keire::ShaderAsset::Encode(definition));
+    CHECK(decoded->Definition().SpatialLightingAbiVersion == 3U);
+
+    auto withoutForwardPlus = definition;
+    withoutForwardPlus.UsesForwardPlus = false;
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(withoutForwardPlus), std::invalid_argument);
+
+    auto overBudget = definition;
+    overBudget.UserReadOnlyBuffers = 5U;
+    CHECK_THROWS_WITH_AS((void)Keire::ShaderAsset::Encode(overBudget),
+                         "Shader read-only buffers exceed the portable eight-buffer limit.", std::invalid_argument);
+}

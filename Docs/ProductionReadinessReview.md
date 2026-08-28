@@ -69,7 +69,7 @@ verified preview release.
   download worker and update handoff. The download site presents the formats independently.
 - Catalog and artifact integrity are verified, but the current Windows Hub EXE is not Authenticode-signed and the RPM
   is not GPG-signed. Those facts are disclosed on the download surface and remain production-signing gaps.
-- The canonical documentation inventory contains 82 guides. Source validation checks inventory, authorities, local
+- The canonical documentation inventory contains 84 guides. Source validation checks inventory, authorities, local
   links/fragments, schema statements, release/platform claims, and the generated site.
 - The final Windows Debug source audit passed 738 Core tests/51,821 assertions, 199 Editor tests/2,696 assertions, 372
   Hub tests/3,808 assertions, the full Client compile gate, managed production API checks, 10 distribution-service
@@ -79,7 +79,7 @@ verified preview release.
   dynamic-buffer reallocations.
 - The website audit covers the unified Astro platform plus its static migration fallback. Navigation labels, heading
   hierarchy, social metadata, Windows/Linux roadmap status, automatic Marketplace publication language, readiness
-  dates, and all 82 fallback guide counts now agree with their authorities.
+  dates, and all 84 fallback guide counts now agree with their authorities.
 
 ## Executive Assessment
 
@@ -186,8 +186,9 @@ Windows, DEB, and RPM records and states the native-signing limitations explicit
   a complete Unity parity claim.
 - The Unreal-inspired Material Ecosystem matrix contains 145 rows: 98 Complete, 8 Partial, and 39 Planned. The ledger
   distinguishes current source capability from immutable 0.3.2 package evidence; Planned rows remain unsupported.
-- Current content authorities are project schema 4, scene schema 6, mesh schema 5, VFX schema 5, material source
-  schema 4, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest schema 4.
+- Current content authorities are project schema 4, scene schema 6, mesh schema 5, Shader source schema 5, VFX schema 5,
+  Material source schema 4, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest
+  schema 4.
 
 ### Documentation and web platform
 
@@ -209,7 +210,7 @@ The current website grade is **A- (92/100)**. This is a source-and-build assessm
 launch. The unified Astro site has coherent navigation, responsive shared layouts, static-first public pages,
 server-rendered identity and Marketplace routes, canonical metadata, local search, a strict content-security policy,
 and explicit preview/launch labeling. The static migration fallback remains independently valid and now mirrors the
-81-guide inventory.
+84-guide inventory.
 
 | Website area | Grade | Score | Evidence and remaining risk |
 | --- | ---: | ---: | --- |

@@ -88,6 +88,7 @@ namespace
 TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity")
 {
     auto definition = Keire::CreateDefaultShaderGraph();
+    definition.MaximumWorldPositionDisplacementRadius = 1.25F;
     auto roughness = Parameter("Roughness", Keire::ShaderGraphValueType::Scalar, 0.42F);
     definition.Nodes.push_back(roughness);
     Connect(definition, definition.Nodes.back(), "Value", definition.Nodes.front(), "Roughness");
@@ -172,8 +173,8 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
-    CHECK(Keire::ShaderGraphSourceSchemaVersion == 4);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 5);
+    CHECK(Keire::ShaderGraphSourceSchemaVersion == 5);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 6);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -188,7 +189,8 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
     CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
     CHECK(manifest.at("occlusionSupport") == 3U);
-    CHECK(variant.Hlsl.find("Generator version 5, source schema 4") != std::string::npos);
+    CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
+    CHECK(variant.Hlsl.find("Generator version 6, source schema 5") != std::string::npos);
     CHECK(variant.Hlsl.find("cbuffer InstanceAddressingData : register(b2, space1)") != std::string::npos);
     CHECK(variant.Hlsl.find("uint4 InstanceParameters;") != std::string::npos);
     CHECK(variant.Hlsl.find("Instances[InstanceParameters.x + instanceId]") != std::string::npos);
@@ -196,10 +198,12 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     auto legacyManifest = manifest;
     legacyManifest.erase("instanceAddressingAbiVersion");
     legacyManifest.erase("occlusionSupport");
+    legacyManifest.erase("maximumWorldPositionDisplacementRadius");
     const auto legacyManifestText = legacyManifest.dump();
     const auto legacyShader = Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(legacyManifestText)));
     CHECK(legacyShader.InstanceAddressingAbiVersion == 0U);
     CHECK(legacyShader.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
+    CHECK_FALSE(legacyShader.MaximumWorldPositionDisplacementRadius);
 
     auto invalidManifest = manifest;
     invalidManifest["instanceAddressingAbiVersion"] = 1U;
@@ -207,10 +211,51 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK_THROWS_AS((void)Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(invalidManifestText))),
                     std::invalid_argument);
 
+    const auto currentSource = Keire::ShaderGraphAsset::EncodeSource(graph);
+    auto previousSource =
+        nlohmann::json::parse(std::string(reinterpret_cast<const char*>(currentSource.data()), currentSource.size()));
+    previousSource["schemaVersion"] = 4U;
+    previousSource.erase("maximumWorldPositionDisplacementRadius");
+    const auto previousSourceText = previousSource.dump();
+    const auto migrated = Keire::ShaderGraphAsset::DecodeSource(std::as_bytes(std::span(previousSourceText)));
+    CHECK(migrated.SchemaVersion == 5U);
+    CHECK(migrated.MaximumWorldPositionDisplacementRadius == doctest::Approx(0.0F));
+
     const auto future = nlohmann::json{{"schemaVersion", Keire::ShaderGraphSourceSchemaVersion + 1U}}.dump();
     const auto futureBytes = std::as_bytes(std::span(future));
     CHECK_THROWS_WITH_AS((void)Keire::ShaderGraphAsset::DecodeSource(futureBytes),
-                         "Shader Graph schema version 5 is newer than the supported version 4.", std::invalid_argument);
+                         "Shader Graph schema version 6 is newer than the supported version 5.", std::invalid_argument);
+}
+
+TEST_CASE("Shader Graph displacement bounds fail closed and never advertise depth-only geometry")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto offset = Parameter("VertexOffset", Keire::ShaderGraphValueType::Vector3, Keire::Vector3{0.0F, 1.0F, 0.0F});
+    graph.Nodes.push_back(offset);
+    Connect(graph, graph.Nodes.back(), "Value", graph.Nodes.front(), "WorldPositionOffset");
+
+    const auto unknown = Keire::CompileShaderGraph(graph);
+    REQUIRE(unknown.Succeeded());
+    const auto unknownManifest = nlohmann::json::parse(unknown.Variants.front().Manifest);
+    CHECK(unknownManifest.at("occlusionSupport") == 0U);
+    CHECK(unknownManifest.at("maximumWorldPositionDisplacementRadius").is_null());
+
+    graph.MaximumWorldPositionDisplacementRadius = 2.5F;
+    const auto bounded = Keire::CompileShaderGraph(graph);
+    REQUIRE(bounded.Succeeded());
+    const auto boundedManifest = nlohmann::json::parse(bounded.Variants.front().Manifest);
+    CHECK(boundedManifest.at("occlusionSupport") ==
+          static_cast<std::uint8_t>(Keire::ShaderOcclusionSupport::ConservativeBounds));
+    CHECK(boundedManifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(2.5F));
+    const auto decoded =
+        Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(bounded.Variants.front().Manifest)));
+    REQUIRE(decoded.MaximumWorldPositionDisplacementRadius);
+    CHECK(*decoded.MaximumWorldPositionDisplacementRadius == doctest::Approx(2.5F));
+    CHECK_FALSE(Keire::HasShaderOcclusionSupport(decoded.OcclusionSupport,
+                                                 Keire::ShaderOcclusionSupport::DepthOnlyGeometryMatch));
+
+    graph.MaximumWorldPositionDisplacementRadius = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
 }
 
 TEST_CASE("Shader Graph v3 lowers multi-output nodes and parameter authoring metadata")
@@ -372,7 +417,7 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
     { return ReadBytes(root / relative); };
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 3);
+    CHECK(importer.Version == 5);
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
@@ -381,6 +426,7 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
     CHECK(shader->Definition().InstanceAddressingAbiVersion == 2U);
     CHECK(shader->Definition().OcclusionSupport == Keire::ShaderOcclusionSupport::None);
+    CHECK_FALSE(shader->Definition().MaximumWorldPositionDisplacementRadius);
     CHECK(imported.Diagnostics.empty());
     CHECK(compilation.Variants.front().Hlsl.find("MaterialNoise") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("MaterialValueNoise") != std::string::npos);

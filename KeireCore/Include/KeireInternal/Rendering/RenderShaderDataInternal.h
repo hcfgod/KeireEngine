@@ -8,6 +8,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string_view>
 
 namespace Keire::RenderBackend
@@ -124,6 +125,7 @@ namespace Keire::RenderBackend
         std::uint32_t VisibleTriangleLow = 0;
         std::uint32_t VisibleTriangleHigh = 0;
         std::uint32_t ErrorFlags = 0;
+        std::array<std::uint32_t, 4> ConsumerVisible{};
     };
 
     struct alignas(16) GpuOcclusionDepthUniforms final
@@ -154,7 +156,7 @@ namespace Keire::RenderBackend
     static_assert(sizeof(GpuOcclusionCandidate) == 48);
     static_assert(sizeof(GpuOcclusionChunk) == 16);
     static_assert(sizeof(GpuOcclusionBatch) == 32);
-    static_assert(sizeof(GpuOcclusionStatus) == 16);
+    static_assert(sizeof(GpuOcclusionStatus) == 32);
     static_assert(sizeof(GpuOcclusionDepthUniforms) == 80);
     static_assert(sizeof(GpuOcclusionPyramidUniforms) == 16);
     static_assert(sizeof(GpuOcclusionClassifyUniforms) == 320);
@@ -260,6 +262,22 @@ namespace Keire::RenderBackend
         Vector4 Parameters;
     };
 
+    inline constexpr std::uint32_t InvalidAssetSpatialSelectionIndex = std::numeric_limits<std::uint32_t>::max();
+    inline constexpr std::uint32_t AssetSpatialSelectionHasLightProbe = 1U << 0U;
+    inline constexpr std::uint32_t AssetSpatialSelectionHasReflectionProbe0 = 1U << 1U;
+    inline constexpr std::uint32_t AssetSpatialSelectionHasReflectionProbe1 = 1U << 2U;
+    inline constexpr std::uint32_t AssetSpatialSelectionUsedFailVisible = 1U << 3U;
+
+    /// Frame-owned ABI-v3 result selected after same-frame spatial visibility classification.
+    struct alignas(16) AssetSpatialSelectionRecord final
+    {
+        std::array<Vector4, 9> ProbeIrradiance{};
+        std::array<AssetReflectionProbeUniform, 2> ReflectionProbes{};
+        /// Flags, reflection mask index 0, reflection mask index 1, and light-probe-volume mask index.
+        std::array<std::uint32_t, 4> Metadata{0U, InvalidAssetSpatialSelectionIndex, InvalidAssetSpatialSelectionIndex,
+                                              InvalidAssetSpatialSelectionIndex};
+    };
+
     struct AssetSpatialLightingUniforms final
     {
         Vector4 LightmapScaleOffset;
@@ -271,6 +289,8 @@ namespace Keire::RenderBackend
         std::array<Vector4, 2> CookieRotations;
         Vector4 DirectionalCookieAndContact;
         Matrix4 ViewProjection;
+        /// ABI v3 selection-record index followed by reserved zeros. UINT_MAX preserves the embedded v2 values.
+        std::array<std::uint32_t, 4> SpatialSelection{InvalidAssetSpatialSelectionIndex, 0U, 0U, 0U};
     };
 
     struct AssetEnvironmentSpatialUniforms final
@@ -287,8 +307,10 @@ namespace Keire::RenderBackend
     static_assert(sizeof(AssetShadowUniforms) <= 4096);
     static_assert(sizeof(AssetLocalLightUniforms) <= 4096);
     static_assert(sizeof(AssetEnvironmentUniforms) == sizeof(float) * 44);
-    static_assert(sizeof(AssetSpatialLightingUniforms) == sizeof(float) * 188);
-    static_assert(sizeof(AssetEnvironmentSpatialUniforms) == sizeof(float) * 232);
+    static_assert(sizeof(AssetSpatialSelectionRecord) == sizeof(float) * 120);
+    static_assert(alignof(AssetSpatialSelectionRecord) == 16);
+    static_assert(sizeof(AssetSpatialLightingUniforms) == sizeof(float) * 192);
+    static_assert(sizeof(AssetEnvironmentSpatialUniforms) == sizeof(float) * 236);
 
     struct SkyUniforms final
     {

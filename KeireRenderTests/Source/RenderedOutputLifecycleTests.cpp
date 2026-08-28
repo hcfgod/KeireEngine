@@ -565,6 +565,8 @@ namespace
         Keire::RenderStatistics Statistics;
         std::vector<Keire::RenderFrameTimeline> Timelines;
         std::size_t AvailableSlots = 0;
+        std::uint64_t AbandonedHandles = 0;
+        std::uint64_t LostGenerationGpuCleanupCalls = 0;
         bool Closed = false;
     };
 
@@ -655,6 +657,10 @@ namespace
                 m_Results.Statistics = renderer->Statistics();
                 m_Results.Timelines = renderer->RecentFrameTimelines();
                 m_Results.AvailableSlots = Keire::RenderSystemInternalAccess::AvailableFrameSlotCount(*renderer);
+                m_Results.AbandonedHandles =
+                    Keire::RenderSystemInternalAccess::LostGenerationAbandonedHandleCount(*renderer);
+                m_Results.LostGenerationGpuCleanupCalls =
+                    Keire::RenderSystemInternalAccess::LostGenerationGpuCleanupCallCount(*renderer);
                 m_Results.Closed = renderer->DeviceState() == Keire::RenderDeviceState::Closed;
             }
             catch (...)
@@ -1439,6 +1445,8 @@ TEST_CASE("post-submit failure retains the accepted slot until exactly-once shut
     CHECK(results.Statistics.CancelledFrames == 1U);
     CHECK(results.Statistics.OutstandingFrames == 0U);
     CHECK(results.AvailableSlots == 1U);
+    CHECK(results.AbandonedHandles >= 1U);
+    CHECK(results.LostGenerationGpuCleanupCalls == 0U);
     REQUIRE(results.Timelines.size() == 1U);
     CHECK(results.Timelines.front().Cancelled);
 }

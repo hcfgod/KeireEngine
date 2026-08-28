@@ -27,7 +27,7 @@ material is labeled as roadmap material and does not redefine the supported API 
 
 ## Complete Guide Library
 
-All 82 published guides are listed below in the same groups used by the documentation website.
+All 84 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -98,7 +98,9 @@ All 82 published guides are listed below in the same groups used by the document
 | [Asset Pipeline](AssetPipeline.md) | Metadata, identities, import cache, workers, mesh/texture import, cooking, validation, and CLI operations. |
 | [Built-In Meshes](BuiltinMeshes.md) | Primitive IDs, dimensions, orientation, UV/normal conventions, collision expectations, and usage. |
 | [Rendering](Rendering.md) | Render ownership, frame order, viewports, cameras, static submission, spatial lighting, and diagnostics. |
+| [GPU Occlusion Coverage Plan](GpuOcclusionCoveragePlan.md) | Conservative current-pose bounds, same-frame visibility masks, frame/device ownership, diagnostics, and validation. |
 | [Shaders and Materials](ShadersAndMaterials.md) | Shader manifests, compilation, reflection, material graphs, instances, fallback, and target cooking. |
+| [Material Graph Shader Integration Plan](MaterialGraphShaderIntegrationPlan.md) | Schema, compilation, migration, runtime binding, displacement bounds, and validation contracts. |
 | [Material Ecosystem Parity](MaterialParityMatrix.md) | Unreal-inspired capability matrix, delivered evidence, remaining priorities, and production acceptance gates. |
 | [VFX Authoring and Runtime](Vfx.md) | Graph mental model, effects, scene emitters, C++/C# control, CPU/GPU execution, diagnostics, and budgets. |
 | [VFX Beyond-Parity Roadmap](VfxBeyondParityRoadmap.md) | Explicit future VFX milestones and acceptance evidence; not a current capability contract. |

@@ -15,7 +15,7 @@ namespace
     }
 } // namespace
 
-TEST_CASE("Shader Graph schema three migrates without disturbing topology and schema four authoring")
+TEST_CASE("Shader Graph schema three migrates without disturbing topology and current authoring")
 {
     auto definition = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
     const auto nodeCount = definition.Nodes.size();
@@ -31,7 +31,8 @@ TEST_CASE("Shader Graph schema three migrates without disturbing topology and sc
     CHECK(migrated.Connections.size() == connectionCount);
     CHECK(migrated.Authoring == Keire::GraphAuthoringMetadata{});
     const auto saved = Parse(Keire::ShaderGraphAsset::EncodeSource(migrated));
-    CHECK(saved.at("schemaVersion") == 4);
+    CHECK(saved.at("schemaVersion") == 5);
+    CHECK(saved.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
     CHECK(saved.contains("authoring"));
 }
 

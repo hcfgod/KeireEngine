@@ -71,7 +71,7 @@ TEST_CASE("fresh linear-blend pose bounds opt skinned draws into conservative dy
     CHECK(HasGpuVisibilityFlag(explicitlyVisible, GpuVisibilityFlags::ForceVisible));
 }
 
-TEST_CASE("GPU visibility mask capabilities remain opt-in")
+TEST_CASE("GPU visibility capabilities advertise only complete rendered consumer contracts")
 {
     using namespace Keire::RenderBackend;
 
@@ -84,11 +84,20 @@ TEST_CASE("GPU visibility mask capabilities remain opt-in")
     CHECK(CanGpuReject(DefaultGpuVisibilityBoundsPolicy(GpuVisibilityClass::LightProbeVolume),
                        GpuVisibilityConsumer::SpatialVolumeMask));
 
-    const Keire::RenderCapabilities capabilities;
+    const auto unavailable = AdvertisedGpuVisibilityCapabilities(false);
+    CHECK_FALSE(unavailable.Culling);
+    CHECK_FALSE(unavailable.VfxVisibilityMasks);
+    CHECK_FALSE(unavailable.LocalLightMasks);
+    CHECK_FALSE(unavailable.SpatialVolumeMasks);
 
-    CHECK_FALSE(capabilities.GpuOcclusionVfxVisibilityMasks);
-    CHECK_FALSE(capabilities.GpuOcclusionLocalLightMasks);
-    CHECK_FALSE(capabilities.GpuOcclusionSpatialVolumeMasks);
+    const auto rendered = AdvertisedGpuVisibilityCapabilities(true);
+    CHECK(rendered.Culling);
+    CHECK(rendered.StaticMeshes);
+    CHECK(rendered.SkinnedMeshes);
+    CHECK(rendered.MeshVfx);
+    CHECK(rendered.VfxVisibilityMasks);
+    CHECK(rendered.LocalLightMasks);
+    CHECK(rendered.SpatialVolumeMasks);
 }
 
 TEST_CASE("local-light and spatial-volume visibility use complete conservative influence bounds")

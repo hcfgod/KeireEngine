@@ -143,7 +143,7 @@ namespace Keire
 
     struct ShaderAssetDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = 2;
         std::filesystem::path Source;
         std::string VertexEntry = "VSMain";
         std::string FragmentEntry = "PSMain";
@@ -169,6 +169,8 @@ namespace Keire
         std::uint8_t InstanceAddressingAbiVersion = 0;
         /// Missing metadata fails closed; only explicitly compatible shaders may enter GPU occlusion paths.
         ShaderOcclusionSupport OcclusionSupport = ShaderOcclusionSupport::None;
+        /// Maximum authored vertex displacement in world units. Missing legacy metadata is never occlusion-safe.
+        std::optional<float> MaximumWorldPositionDisplacementRadius = 0.0F;
     };
 
     class KEIRE_API ShaderAsset final : public Asset

@@ -28,20 +28,42 @@ namespace Keire::Detail
         constexpr auto OcclusionSupportMask = static_cast<std::uint8_t>(ShaderOcclusionSupport::ConservativeBounds |
                                                                         ShaderOcclusionSupport::DepthOnlyGeometryMatch);
         const auto occlusionSupport = static_cast<std::uint8_t>(definition.OcclusionSupport);
-        if (definition.SchemaVersion != 1 ||
+        if (definition.SchemaVersion != 2 ||
             (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > 3) ||
             definition.Topology > ShaderPrimitiveTopology::PointList || definition.Culling > ShaderCullMode::Back ||
-            (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U) ||
+            (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U &&
+             definition.SpatialLightingAbiVersion != 3U) ||
             (definition.InstanceAddressingAbiVersion != 0U && definition.InstanceAddressingAbiVersion != 2U) ||
             (definition.InstanceAddressingAbiVersion == 2U && !definition.UsesInstancing) ||
             (occlusionSupport & static_cast<std::uint8_t>(~OcclusionSupportMask)) != 0U ||
             definition.UserResourceSlots > 16U || definition.UserReadOnlyBuffers > 8U ||
-            (definition.SpatialLightingAbiVersion == 2U &&
+            (definition.SpatialLightingAbiVersion >= 2U &&
              (!definition.UsesImageBasedLighting || definition.VertexLayoutVersion != 3U)) ||
-            definition.Source.empty() || definition.Source.is_absolute() ||
+            (definition.SpatialLightingAbiVersion == 3U && !definition.UsesForwardPlus) || definition.Source.empty() ||
+            definition.Source.is_absolute() ||
             definition.Source.lexically_normal().generic_string().starts_with("..") ||
             !ValidShaderIdentifier(definition.VertexEntry) || !ValidShaderIdentifier(definition.FragmentEntry))
             throw std::invalid_argument("Shader definition contains an unsupported schema, path, or entry point.");
+        if (definition.MaximumWorldPositionDisplacementRadius &&
+            (!std::isfinite(*definition.MaximumWorldPositionDisplacementRadius) ||
+             *definition.MaximumWorldPositionDisplacementRadius < 0.0F))
+        {
+            throw std::invalid_argument(
+                "Shader maximum world-position displacement radius must be a finite nonnegative value.");
+        }
+        if (!definition.MaximumWorldPositionDisplacementRadius &&
+            definition.OcclusionSupport != ShaderOcclusionSupport::None)
+        {
+            throw std::invalid_argument(
+                "Shader occlusion support requires a known maximum world-position displacement radius.");
+        }
+        if (definition.MaximumWorldPositionDisplacementRadius &&
+            *definition.MaximumWorldPositionDisplacementRadius > 0.0F &&
+            HasShaderOcclusionSupport(definition.OcclusionSupport, ShaderOcclusionSupport::DepthOnlyGeometryMatch))
+        {
+            throw std::invalid_argument(
+                "Displaced shaders may use conservative bounds but cannot enter the depth-only occluder path.");
+        }
         if (definition.Properties.size() > MaximumShaderProperties ||
             definition.Dependencies.size() > MaximumShaderDependencies ||
             (!allowMissingVariants && definition.Variants.empty()) ||
@@ -83,11 +105,13 @@ namespace Keire::Detail
         constexpr std::size_t portableFragmentSamplerLimit = 16;
         const auto reservedSamplers = (definition.ReceivesShadows ? 2U : 0U) +
                                       (definition.UsesImageBasedLighting ? 2U : 0U) +
-                                      (definition.SpatialLightingAbiVersion == 2U ? 5U : 0U);
+                                      (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U);
         if (textureProperties + definition.UserResourceSlots + reservedSamplers > portableFragmentSamplerLimit)
             throw std::invalid_argument(
                 "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.");
-        if (definition.UserReadOnlyBuffers + (definition.UsesForwardPlus ? 3U : 0U) > 8U)
+        const auto reservedReadOnlyBuffers =
+            (definition.UsesForwardPlus ? 3U : 0U) + (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U);
+        if (definition.UserReadOnlyBuffers + reservedReadOnlyBuffers > 8U)
             throw std::invalid_argument("Shader read-only buffers exceed the portable eight-buffer limit.");
         std::set<ShaderBinaryFormat> formats;
         for (const auto& variant : definition.Variants)

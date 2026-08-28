@@ -51,15 +51,25 @@ versions.
   only when pose generation, immutable frame index, and the deformed vertex stream all match. Stale bounds,
   dual-quaternion skinning, morph targets, unbounded world-position displacement, and unknown deformation remain
   force-visible instead of risking incorrect rejection.
+- Advanced Shader Graph source schema from 4 to 5 and the generated shader contract from 5 to 6. Schema-1–4 graphs
+  migrate with a zero displacement radius; schema 5 persists an explicit conservative world-position-displacement
+  radius, and generated shader metadata carries the validated bound so displaced geometry fails visible unless it is
+  explicitly safe for occlusion. Canonical shader assets advance from schema 1 to 2; schema-1 assets remain readable
+  without manufacturing an occlusion-safe displacement bound.
 - Added frame-slot-, surface-epoch-, and device-generation-qualified geometry, VFX, local-light, and spatial-volume
   visibility buffers. Geometry consumes its same-frame mask for scan/scatter compaction and indexed indirect draws;
   Forward+ now consumes its same-frame local-light mask on the GPU only when both mask and tile-list ownership match,
   otherwise retaining the original all-eligible-light tile lists as a fail-visible fallback.
-- Added a deterministic, bounded VFX visibility-planning contract for supported GPU sprite, mesh, and whole-ribbon
-  groups. Runtime VFX mask consumption remains disabled, and unsafe, unsupported, invalid, or overflowing ranges remain
-  force-visible.
-- Kept spatial-volume mask consumption disabled pending a correctness-complete GPU per-draw selection pass that can
-  preserve reflection-probe and light-probe-volume fallback behavior without a GPU-to-CPU readback.
+- Added a deterministic, bounded VFX visibility path for supported GPU sprite, mesh, and whole-ribbon groups. Dynamic
+  bounds feed the unified classifier, and expansion can consume its same-frame mask into frame-owned output indices,
+  indirect arguments, and instances. Unsafe, unsupported, stale, invalid, or overflowing ranges remain force-visible;
+  the VFX-mask capability is advertised only while rendered GPU occlusion is active and the device is running.
+- Added spatial-lighting ABI v3 and a GPU per-draw selection pass that can consume the same-frame spatial-volume mask
+  while preserving deterministic reflection-probe and light-probe-volume ordering. ABI v2 remains supported, and
+  invalid or mismatched selection ownership uses the embedded CPU values without readback. The advertised
+  spatial-volume-mask capability is likewise limited to active rendered GPU occlusion on a running device.
+- Invalidated VFX and spatial-selection outputs together with their visibility masks on frame retirement, resize, and
+  device-generation changes so recovery retries cannot consume resources created by the lost device.
 
 ### Fixed
 

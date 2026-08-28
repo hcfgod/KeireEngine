@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string_view>
 #include <utility>
 
@@ -77,7 +78,8 @@ namespace Keire::Detail
                                          const std::span<const ShaderPropertyDefinition> properties,
                                          const std::span<const std::string> keywords,
                                          const bool usesVertexMaterialParameters,
-                                         const ShaderOcclusionSupport occlusionSupport)
+                                         const ShaderOcclusionSupport occlusionSupport,
+                                         const std::optional<float> maximumWorldPositionDisplacementRadius)
     {
         Json encodedProperties = Json::array();
         for (const auto& property : properties)
@@ -96,32 +98,35 @@ namespace Keire::Detail
             definition.Output == ShaderGraphOutput::Transparent || definition.Output == ShaderGraphOutput::Decal;
         const bool fullscreen = definition.Output == ShaderGraphOutput::Fullscreen;
         const bool lit = definition.Output != ShaderGraphOutput::Unlit && !fullscreen;
-        const Json manifest{{"schemaVersion", 1},
-                            {"materialGraphSourceSchemaVersion", definition.SchemaVersion},
-                            {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
-                            {"source", generatedSource.generic_string()},
-                            {"vertexLayoutVersion", ShaderGraphVertexLayoutVersion},
-                            {"receivesShadows", lit},
-                            {"usesForwardPlus", lit},
-                            {"usesInstancing", true},
-                            {"instanceAddressingAbiVersion", 2},
-                            {"occlusionSupport", static_cast<std::uint8_t>(occlusionSupport)},
-                            {"usesImageBasedLighting", lit},
-                            {"usesVertexMaterialParameters", usesVertexMaterialParameters},
-                            {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
-                            {"defines", std::move(defines)},
-                            {"includeRoots", std::move(roots)},
-                            {"resources", resourceContract.at("resources")},
-                            {"renderState",
-                             {{"topology", "TriangleList"},
-                              {"culling", fullscreen                                      ? "None"
-                                          : definition.Output == ShaderGraphOutput::Decal ? "Front"
-                                          : definition.Output == ShaderGraphOutput::Hair  ? "None"
-                                                                                          : "Back"},
-                              {"depthTest", !fullscreen},
-                              {"depthWrite", !transparent && !fullscreen},
-                              {"blend", transparent}}},
-                            {"properties", std::move(encodedProperties)}};
+        const Json manifest{
+            {"schemaVersion", 1},
+            {"materialGraphSourceSchemaVersion", definition.SchemaVersion},
+            {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
+            {"source", generatedSource.generic_string()},
+            {"vertexLayoutVersion", ShaderGraphVertexLayoutVersion},
+            {"receivesShadows", lit},
+            {"usesForwardPlus", lit},
+            {"usesInstancing", true},
+            {"instanceAddressingAbiVersion", 2},
+            {"occlusionSupport", static_cast<std::uint8_t>(occlusionSupport)},
+            {"maximumWorldPositionDisplacementRadius",
+             maximumWorldPositionDisplacementRadius ? Json(*maximumWorldPositionDisplacementRadius) : Json(nullptr)},
+            {"usesImageBasedLighting", lit},
+            {"usesVertexMaterialParameters", usesVertexMaterialParameters},
+            {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
+            {"defines", std::move(defines)},
+            {"includeRoots", std::move(roots)},
+            {"resources", resourceContract.at("resources")},
+            {"renderState",
+             {{"topology", "TriangleList"},
+              {"culling", fullscreen                                      ? "None"
+                          : definition.Output == ShaderGraphOutput::Decal ? "Front"
+                          : definition.Output == ShaderGraphOutput::Hair  ? "None"
+                                                                          : "Back"},
+              {"depthTest", !fullscreen},
+              {"depthWrite", !transparent && !fullscreen},
+              {"blend", transparent}}},
+            {"properties", std::move(encodedProperties)}};
         return manifest.dump(2) + '\n';
     }
 } // namespace Keire::Detail

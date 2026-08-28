@@ -24,6 +24,7 @@
 #include "KeireInternal/Rendering/RenderStatisticsInternal.h"
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
+#include "KeireInternal/Rendering/VfxVisibilityPlanInternal.h"
 
 #include <SDL3/SDL.h>
 
@@ -207,12 +208,55 @@ namespace Keire::RenderBackend
         std::uint64_t SurfaceGeneration = 0;
         std::uint64_t SubmissionEpoch = 0;
         std::uint64_t SourceFrame = 0;
+        std::uint64_t SourceSurfaceEpoch = 0;
+        std::uint32_t SourceFrameSlot = 0;
+        std::uint32_t SourceDeviceGeneration = 0;
         GpuOcclusionMode RequestedMode = GpuOcclusionMode::Automatic;
         std::uint32_t Candidates = 0;
         std::uint32_t SafeOccluders = 0;
         std::uint32_t PyramidMipCount = 0;
         std::uint64_t CandidateTriangles = 0;
+        std::uint32_t LocalLightCandidates = 0;
+        std::uint32_t FreshPoseSkinnedCandidates = 0;
+        std::uint32_t FreshPoseSkinnedDepthDraws = 0;
+        std::uint32_t VfxMaskEntries = 0;
+        std::uint32_t VfxMaskedDraws = 0;
+        std::uint32_t SpatialMaskEntries = 0;
+        std::uint32_t SpatialSelectionRecords = 0;
+        std::uint32_t SpatialSelectionDraws = 0;
+        bool LocalLightMaskConsumed = false;
+        bool VfxMaskConsumed = false;
+        bool SpatialMaskConsumed = false;
     };
+
+    inline void ClearGpuOcclusionFrameEvidence(GpuOcclusionSurfaceDiagnostics& diagnostics) noexcept
+    {
+        diagnostics.SourceFrame = 0;
+        diagnostics.ReadbackAge = std::numeric_limits<std::uint32_t>::max();
+        diagnostics.Candidates = 0;
+        diagnostics.Visible = 0;
+        diagnostics.Culled = 0;
+        diagnostics.SafeOccluders = 0;
+        diagnostics.PyramidMipCount = 0;
+        diagnostics.PyramidValid = false;
+        diagnostics.ReadbackValid = false;
+        diagnostics.SourceSurfaceEpoch = 0;
+        diagnostics.SourceFrameSlot = 0;
+        diagnostics.SourceDeviceGeneration = 0;
+        diagnostics.LocalLightCandidates = 0;
+        diagnostics.LocalLightVisible = 0;
+        diagnostics.LocalLightCulled = 0;
+        diagnostics.LocalLightMaskConsumed = false;
+        diagnostics.FreshPoseSkinnedCandidates = 0;
+        diagnostics.FreshPoseSkinnedDepthDraws = 0;
+        diagnostics.VfxMaskEntries = 0;
+        diagnostics.VfxMaskedDraws = 0;
+        diagnostics.VfxMaskConsumed = false;
+        diagnostics.SpatialMaskEntries = 0;
+        diagnostics.SpatialSelectionRecords = 0;
+        diagnostics.SpatialSelectionDraws = 0;
+        diagnostics.SpatialMaskConsumed = false;
+    }
 
     [[nodiscard]] inline bool PublishGpuOcclusionFallback(RenderSurfaceState& surface, const GpuOcclusionMode requested,
                                                           const GpuOcclusionFallbackReason reason) noexcept
@@ -237,15 +281,7 @@ namespace Keire::RenderBackend
                                 ? GpuOcclusionSurfaceState::Unsupported
                                 : GpuOcclusionSurfaceState::Fallback;
         diagnostics.FallbackReason = reason;
-        diagnostics.SourceFrame = 0;
-        diagnostics.ReadbackAge = std::numeric_limits<std::uint32_t>::max();
-        diagnostics.Candidates = 0;
-        diagnostics.Visible = 0;
-        diagnostics.Culled = 0;
-        diagnostics.SafeOccluders = 0;
-        diagnostics.PyramidMipCount = 0;
-        diagnostics.PyramidValid = false;
-        diagnostics.ReadbackValid = false;
+        ClearGpuOcclusionFrameEvidence(diagnostics);
         surface.GpuOcclusionLatestCandidateTriangles = 0;
         surface.GpuOcclusionLatestVisibleTriangles = 0;
         return transitioned;
@@ -275,7 +311,11 @@ namespace Keire::RenderBackend
         return surface.Generation == pending.SurfaceGeneration &&
                surface.GpuOcclusionSubmissionEpoch == pending.SubmissionEpoch &&
                surface.GpuOcclusionSubmittedMode == pending.RequestedMode &&
-               surface.GpuOcclusionDiagnostics.State == GpuOcclusionSurfaceState::Active;
+               surface.GpuOcclusionDiagnostics.State == GpuOcclusionSurfaceState::Active &&
+               pending.SourceFrameSlot < surface.Resources.Worksets.size() &&
+               surface.Workset(pending.SourceFrameSlot)
+                   .GpuOcclusion.OwnedBy(pending.SourceFrame, pending.SourceFrameSlot, pending.SourceSurfaceEpoch,
+                                         pending.SourceDeviceGeneration);
     }
 
     struct InFlightFrame final
@@ -348,6 +388,7 @@ namespace Keire::RenderBackend
         ShaderPrimitiveTopology Topology = ShaderPrimitiveTopology::TriangleList;
         ShaderCullMode Culling = ShaderCullMode::Back;
         ShaderOcclusionSupport OcclusionSupport = ShaderOcclusionSupport::None;
+        std::optional<float> MaximumWorldPositionDisplacementRadius;
         bool ReceivesShadows = false;
         bool DepthTest = true;
         bool DepthWrite = true;
@@ -356,6 +397,7 @@ namespace Keire::RenderBackend
         bool UsesImageBasedLighting = false;
         bool UsesSpatialLighting = false;
         bool UsesVertexMaterialParameters = false;
+        std::uint8_t SpatialLightingAbiVersion = 0;
         std::uint8_t InstanceAddressingAbiVersion = 0;
     };
 
@@ -624,6 +666,7 @@ namespace Keire::RenderBackend
         std::vector<VfxRenderSnapshot> VfxSnapshots;
         float MaterialTimeSeconds = 0.0F;
         float MaterialDeltaSeconds = 0.0F;
+        std::uint64_t AcceptedFrameId = 0;
         std::uint64_t FrameIndex = 0;
     };
 
@@ -1001,6 +1044,7 @@ namespace Keire::RenderBackend
         MaterialSurfaceState Surface;
         float Depth = 0.0F;
         std::uint32_t SubmeshIndex = 0;
+        std::uint32_t SpatialSelectionRecordIndex = InvalidAssetSpatialSelectionIndex;
     };
 
     struct PreparedSceneBatch final
@@ -1042,10 +1086,14 @@ namespace Keire::RenderBackend
     {
         GpuOcclusionFrameResources* Resources = nullptr;
         std::vector<PreparedGpuOccluderBatch> Occluders;
+        VfxVisibilityPlan VfxVisibility;
+        std::uint32_t VfxCandidateFirst = 0;
         std::uint32_t CandidateCount = 0;
         std::uint32_t ClassificationCandidateCount = 0;
         std::uint32_t BatchCount = 0;
         std::uint32_t ChunkCount = 0;
+        std::uint32_t FreshPoseSkinnedCandidates = 0;
+        std::uint32_t FreshPoseSkinnedDepthDraws = 0;
         std::uint64_t CandidateTriangles = 0;
         bool Enabled = false;
     };
@@ -1145,7 +1193,7 @@ namespace Keire::RenderBackend
         void BeginFrame();
         void CancelFrame() noexcept;
         void Submit(SceneRenderRequest request);
-        void CapturePendingSceneRequest(PendingSceneRequest request);
+        void CapturePendingSceneRequest(PendingSceneRequest request, std::uint64_t acceptedFrameId);
         [[nodiscard]] const GpuMeshResources& ResolveMesh(AssetId id);
         [[nodiscard]] const GpuTextureResources& ResolveTexture(AssetId id);
         [[nodiscard]] const GpuTextureResources& ResolveLightingTexture(AssetId id, bool cubeArray = false,
@@ -1161,6 +1209,8 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool EnsureSkinningPipeline();
         [[nodiscard]] bool EnsureGpuOcclusionPipelines();
         void ReleaseGpuOcclusionPipelines() noexcept;
+        [[nodiscard]] bool EnsureSpatialSelectionPipeline();
+        void ReleaseSpatialSelectionPipeline() noexcept;
         void StartGpuVfxPipelineWarmup();
         void CompileGpuVfxPipelines();
         void ReleaseGpuVfxPipelines() noexcept;
@@ -1168,7 +1218,12 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool EnsureGpuVfxPipelines(bool requireStripPipelines);
         void PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot,
                            const RenderSurfaceState& surface);
+        void RecordGpuVfxVisibilityCandidates(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                              const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
+        void RecordGpuVfxVisibilityExpansion(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                             const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         void ReleaseGpuVfxWorld(GpuVfxWorldResources& resources) noexcept;
+        void ReleaseGpuVfxFrameResources(GpuVfxFrameResources& resources) noexcept;
 
         [[nodiscard]] PreparedSceneDrawLists PrepareSceneDrawLists(SDL_GPUCommandBuffer* commands,
                                                                    RenderSurfaceState& surface,
@@ -1179,15 +1234,22 @@ namespace Keire::RenderBackend
                                                                PreparedSceneDrawLists& draws);
         void RecordGpuOcclusionDepth(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
                                      const SceneRenderPacket& packet, const PreparedSceneDrawLists& draws,
-                                     const PreparedGpuOcclusion& occlusion);
+                                     PreparedGpuOcclusion& occlusion);
         void RecordGpuOcclusionPyramid(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                        const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         void RecordGpuOcclusionCulling(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                        const SceneRenderPacket& packet, PreparedSceneDrawLists& draws,
                                        const PreparedGpuOcclusion& occlusion);
+        void FinalizeGpuOcclusionConsumerEvidence(const RenderSurfaceState& surface, const SceneRenderPacket& packet,
+                                                  const PreparedGpuOcclusion& occlusion);
         [[nodiscard]] bool RecordForwardPlusVisibilityMask(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                            const SceneRenderPacket& packet,
                                                            const PreparedGpuOcclusion& occlusion);
+        [[nodiscard]] bool PrepareSpatialSelection(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                   const SceneRenderPacket& packet, PreparedSceneDrawLists& draws,
+                                                   const PreparedGpuOcclusion& occlusion);
+        void RecordSpatialSelection(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                    const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         void RecordGpuOcclusionDebug(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                      const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         [[nodiscard]] PreparedCpuVfx PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -1233,7 +1295,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool
         ReleaseInjectedLostDeviceForTest(const std::shared_ptr<RenderFramePacket>& interrupted = {}) noexcept;
 #endif
-        void CreateDeviceAndMandatoryResources(bool recovering);
+        void CreateDeviceAndMandatoryResources(bool recovering, std::uint32_t resourceGeneration);
         void DestroyDeviceAndResources(bool abandon, bool preserveSurfaceEpochs = false) noexcept;
         void AbandonLostDeviceResources(const std::shared_ptr<RenderFramePacket>& interrupted = {}) noexcept;
         [[nodiscard]] GpuDeviceLossDiagnostic DeviceLossDiagnostic(std::string operation, std::string detail) const;
@@ -1243,13 +1305,14 @@ namespace Keire::RenderBackend
         void RethrowIfDeviceLost(std::string_view operation) const;
         void Close() noexcept;
 
-        void CreateGeometryResources();
+        void CreateGeometryResources(std::uint32_t resourceGeneration);
         void ReleaseMeshResources(GpuMeshResources& resources) noexcept;
         void ReleaseGpuSkinResources(GpuSkinResources& resources) noexcept;
         void ReleaseTextureResources(GpuTextureResources& resources) noexcept;
         void ReleaseForwardPlusResources(ForwardPlusGpuResources& resources) noexcept;
         void ReleaseDynamicUploadResources(SurfaceDynamicUploadResources& resources) noexcept;
         void ReleaseGpuOcclusionFrameResources(GpuOcclusionFrameResources& resources) noexcept;
+        void ReleaseSpatialSelectionFrameResources(GpuSpatialSelectionFrameResources& resources) noexcept;
         [[nodiscard]] SDL_GPUBuffer* UploadDynamicBuffer(SDL_GPUCommandBuffer* commands, DynamicGpuBuffer& buffer,
                                                          SDL_GPUTransferBuffer*& transfer,
                                                          std::span<const std::byte> bytes,
@@ -1312,12 +1375,15 @@ namespace Keire::RenderBackend
         SDL_GPUComputePipeline* GpuOcclusionScanBatchesPipeline = nullptr;
         SDL_GPUComputePipeline* GpuOcclusionScatterPipeline = nullptr;
         SDL_GPUComputePipeline* ForwardPlusVisibilityPipeline = nullptr;
+        SDL_GPUComputePipeline* SpatialSelectionPipeline = nullptr;
         SDL_GPUGraphicsPipeline* GpuOcclusionDebugPyramidPipeline = nullptr;
         SDL_GPUGraphicsPipeline* GpuOcclusionDebugBoundsPipeline = nullptr;
         SDL_GPUSampler* ShadowSampler = nullptr;
         SDL_GPUSampler* ToneMapSampler = nullptr;
         SDL_GPUSampler* GpuOcclusionSampler = nullptr;
         SDL_GPUTexture* EmptyShadowTexture = nullptr;
+        SDL_GPUBuffer* SpatialSelectionFallbackBuffer = nullptr;
+        std::uint32_t SpatialSelectionFallbackDeviceGeneration = 0;
         GpuMeshResources DefaultMesh;
         GpuMeshResources ErrorMesh;
         GpuTextureResources CheckerboardTexture;
@@ -1373,6 +1439,7 @@ namespace Keire::RenderBackend
         std::string GpuOcclusionPipelineFailure;
         std::atomic<bool> GpuOcclusionCapability{false};
         bool GpuOcclusionPipelinesAttempted = false;
+        bool SpatialSelectionPipelineAttempted = false;
         SDL_GPUComputePipeline* VfxInitializePipeline = nullptr;
         SDL_GPUComputePipeline* VfxResetPipeline = nullptr;
         SDL_GPUComputePipeline* VfxKillPipeline = nullptr;
@@ -1387,6 +1454,8 @@ namespace Keire::RenderBackend
         SDL_GPUComputePipeline* VfxFinalizePipeline = nullptr;
         SDL_GPUComputePipeline* VfxResetRenderPipeline = nullptr;
         SDL_GPUComputePipeline* VfxFilterRenderPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxBuildVisibilityPipeline = nullptr;
+        SDL_GPUComputePipeline* VfxCompactVisibilityPipeline = nullptr;
         Ref<JobSystem> Jobs;
         Ref<JobScope> RenderJobs;
         JobHandle VfxPipelineWarmupJob;

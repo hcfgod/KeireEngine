@@ -6,6 +6,7 @@ cache_helper="$ROOT/Scripts/Unix/generated-content-cache.sh"
 source "$cache_helper"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_file="$ROOT/KeireCore/Shaders/BuiltinVfx.hlsl"
+visibility_source_file="$ROOT/KeireCore/Shaders/BuiltinVfxVisibility.hlsl"
 generated_directory="$ROOT/Build/Generated/Keire"
 header="$generated_directory/BuiltinVfxShaders.h"
 stamp="$generated_directory/BuiltinVfxShaders.stamp"
@@ -16,8 +17,8 @@ lock="$ROOT/Build/Generated/.locks/builtin-vfx.lock"
   exit 1
 }
 
-fingerprint="$(generated_content_fingerprint builtin-vfx-v1 "${BASH_SOURCE[0]}" "$cache_helper" \
-  "$compiler" "$source_file")"
+fingerprint="$(generated_content_fingerprint builtin-vfx-v2 "${BASH_SOURCE[0]}" "$cache_helper" \
+  "$compiler" "$source_file" "$visibility_source_file")"
 generated_content_is_current "$header" "$stamp" "$fingerprint" && exit 0
 
 mkdir -p "$generated_directory"
@@ -46,6 +47,8 @@ stages=(
   "compute CSFinalize Finalize"
   "compute CSResetRender ResetRender"
   "compute CSFilterRender FilterRender"
+  "compute CSBuildVisibilityCandidates BuildVisibilityCandidates"
+  "compute CSCompactVisibility CompactVisibility"
   "vertex VSMain Vertex"
   "vertex VSRibbon RibbonVertex"
   "fragment PSMain Fragment"
@@ -58,9 +61,13 @@ variants=("DXIL Dxil dxil" "SPIRV Spirv spv" "MSL Msl msl")
 
 for stage_row in "${stages[@]}"; do
   read -r stage entry name <<< "$stage_row"
+  stage_source="$source_file"
+  if [[ "$name" == "BuildVisibilityCandidates" || "$name" == "CompactVisibility" ]]; then
+    stage_source="$visibility_source_file"
+  fi
   for variant_row in "${variants[@]}"; do
     read -r destination variant extension <<< "$variant_row"
-    "$compiler" "$source_file" --source HLSL --dest "$destination" --stage "$stage" --entrypoint "$entry" \
+    "$compiler" "$stage_source" --source HLSL --dest "$destination" --stage "$stage" --entrypoint "$entry" \
       --output "$temporary/$name-$variant.$extension"
   done
 done

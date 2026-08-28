@@ -30,15 +30,7 @@ namespace Keire::RenderBackend
             diagnostics.EffectiveMode = GpuOcclusionMode::Disabled;
             diagnostics.State = GpuOcclusionSurfaceState::Idle;
             diagnostics.FallbackReason = GpuOcclusionFallbackReason::None;
-            diagnostics.SourceFrame = 0;
-            diagnostics.ReadbackAge = std::numeric_limits<std::uint32_t>::max();
-            diagnostics.Candidates = 0;
-            diagnostics.Visible = 0;
-            diagnostics.Culled = 0;
-            diagnostics.SafeOccluders = 0;
-            diagnostics.PyramidMipCount = 0;
-            diagnostics.PyramidValid = false;
-            diagnostics.ReadbackValid = false;
+            ClearGpuOcclusionFrameEvidence(diagnostics);
             surface.GpuOcclusionLatestCandidateTriangles = 0;
             surface.GpuOcclusionLatestVisibleTriangles = 0;
             surface.GpuOcclusionAutomaticActive = false;
@@ -75,7 +67,7 @@ namespace Keire::RenderBackend
                     frame->CaptureStarted = std::chrono::steady_clock::now();
                     CpuPreparation.BeginFrame();
                     for (auto& pending : PendingSceneRequests)
-                        CapturePendingSceneRequest(std::move(pending));
+                        CapturePendingSceneRequest(std::move(pending), frame->Id);
                     frame->Requests = std::move(CaptureRequests);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                     RecordVfxSnapshotSignatureForTest(frame, false);
@@ -579,10 +571,18 @@ namespace Keire::RenderBackend
             catch (...)
             {
             }
-            if (DeviceLost)
+            // Once any command buffer has been submitted, failure cleanup cannot prove that the generation will
+            // become idle. Waiting for idle here would prevent the accepted frame from publishing its terminal
+            // completion and can block the owner in Flush forever. Treat that generation as abandoned even when the
+            // original exception is not itself classified as device loss; ExecuteAcceptedFrame still records and
+            // rethrows the original terminal failure.
+            const bool abandonGeneration = DeviceLost || gpuWorkSubmitted;
+            if (abandonGeneration)
             {
-                // A lost generation is opaque and unusable. Sever every CPU reference without calling SDL on copy
-                // passes, command buffers, transfers, transient buffers, textures, fences, or the device itself.
+                DeviceLost = true;
+                // A lost or indeterminate submitted generation is opaque and unusable. Sever every CPU reference
+                // without calling SDL on copy passes, command buffers, transfers, transient buffers, textures,
+                // fences, or the device itself.
                 const auto abandonedHandles = static_cast<std::uint64_t>(FrameUploadPass != nullptr) +
                                               static_cast<std::uint64_t>(FrameUploadCommands != nullptr) +
                                               static_cast<std::uint64_t>(commands != nullptr) +

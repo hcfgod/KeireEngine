@@ -2037,7 +2037,8 @@ TEST_CASE("renderer replaces the deterministic error mesh with an asset-backed i
     CHECK(results->Statistics.FrameGraphTransitions > 0);
     CHECK(results->Statistics.TransientResourceAllocations > 0);
     CHECK(results->Statistics.RendererQueueHighWaterMark > 0);
-    CHECK(results->Statistics.InstanceBatches == 1);
+    // ABI-v3 spatial selection is draw-owned, so identical draws remain separate until selections become per-instance.
+    CHECK(results->Statistics.InstanceBatches == 0);
     CHECK(results->Statistics.FrameUploadSubmissions == 0);
     CHECK(results->Statistics.AllowedFramesInFlight == 1);
     CHECK(results->Statistics.DrawPreparationMilliseconds > 0.0F);

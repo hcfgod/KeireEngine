@@ -47,7 +47,8 @@ foreach ($generatorName in @(
         "builtin-shaders.ps1",
         "builtin-skinning.ps1",
         "builtin-vfx.ps1",
-        "builtin-occlusion.ps1"
+        "builtin-occlusion.ps1",
+        "builtin-spatial-selection.ps1"
     )) {
     $generator = Get-Content -LiteralPath (Join-Path $windows $generatorName) -Raw
     Assert-True ($generator.Contains('Get-GeneratedContentFingerprint') -and

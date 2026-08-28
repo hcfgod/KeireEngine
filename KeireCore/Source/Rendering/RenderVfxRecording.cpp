@@ -601,8 +601,9 @@ namespace Keire::RenderBackend
             try
             {
                 resources.Particles =
-                    createBuffer(particleStride * capacity,
-                                 SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+                    createBuffer(particleStride * capacity, SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+                                                                SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                                                                SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
                 resources.FreeIndices =
                     createBuffer(sizeof(std::uint32_t) * capacity, SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE);
                 resources.AliveIndices =
@@ -975,13 +976,16 @@ namespace Keire::RenderBackend
             auto result = std::shared_ptr<GpuVfxRenderBuffers>(new GpuVfxRenderBuffers, release);
             result->Indices =
                 createBuffer(static_cast<std::uint64_t>(sizeof(std::uint32_t)) * capacity,
-                             SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+                             SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                                 SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
             result->IndirectArguments =
-                createBuffer(sizeof(SDL_GPUIndexedIndirectDrawCommand),
-                             SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_INDIRECT);
+                createBuffer(sizeof(SDL_GPUIndexedIndirectDrawCommand), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+                                                                            SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                                                                            SDL_GPU_BUFFERUSAGE_INDIRECT);
             result->Instances =
                 createBuffer(static_cast<std::uint64_t>(sizeof(GpuInstanceUniform)) * capacity,
-                             SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+                             SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                                 SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
             result->Capacity = capacity;
             result->ByteSize = static_cast<std::uint64_t>(sizeof(std::uint32_t)) * capacity +
                                sizeof(SDL_GPUIndexedIndirectDrawCommand) +

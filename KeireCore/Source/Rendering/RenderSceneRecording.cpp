@@ -1,4 +1,5 @@
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
+#include "KeireInternal/Rendering/DisplacementBoundsInternal.h"
 #include "KeireInternal/Rendering/ForwardPlusInternal.h"
 #include "KeireInternal/Rendering/InstanceBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
@@ -28,7 +29,6 @@ namespace
     // overhead of the former twelve-batch workaround.
     constexpr std::size_t MaximumSceneBatchesPerCommandBuffer = 32U;
 
-    using Keire::RenderBackend::GeometryDetail::BuildFrustumPlanes;
     using Keire::RenderBackend::GeometryDetail::IsFrustumVisible;
     using Keire::RenderBackend::GeometryDetail::ProjectedHeight;
 
@@ -120,8 +120,7 @@ namespace Keire::RenderBackend
             const bool forceConservativeVisibility =
                 item.AlwaysVisible || RequiresConservativeCpuVisibility(item.VisibilityClass, freshPoseBounds);
             const auto viewFromLocal = Math::Multiply(camera.View, item.World);
-            const auto clipFromLocal = Math::Multiply(camera.Projection, viewFromLocal);
-            const auto frustum = BuildFrustumPlanes(clipFromLocal);
+            const auto clipFromWorld = Math::Multiply(camera.Projection, camera.View);
             std::uint32_t firstSubmesh = 0;
             std::uint32_t submeshCount = static_cast<std::uint32_t>(mesh.Submeshes.size());
             const MeshBounds* selectedBounds =
@@ -140,7 +139,33 @@ namespace Keire::RenderBackend
                 selectedBounds =
                     !freshPoseBounds && mesh.LodBoundsEncloseSubmeshes[lodIndex] ? std::addressof(lod.Bounds) : nullptr;
             }
-            if (selectedBounds && !IsFrustumVisible(frustum, *selectedBounds, forceConservativeVisibility))
+            const auto materialIdForSubmesh = [&](const MeshSubmesh& submesh)
+            {
+                if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot])
+                    return item.Materials[submesh.MaterialSlot];
+                if (submesh.MaterialSlot < mesh.DefaultMaterials.size())
+                    return mesh.DefaultMaterials[submesh.MaterialSlot];
+                return AssetId{};
+            };
+            std::optional<float> aggregateDisplacementRadius = 0.0F;
+            for (std::uint32_t offset = 0; offset < submeshCount; ++offset)
+            {
+                const auto materialId = materialIdForSubmesh(mesh.Submeshes[firstSubmesh + offset]);
+                const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr;
+                if (!material || !DisplacementBounds::IsKnown(material->MaximumWorldPositionDisplacementRadius))
+                {
+                    aggregateDisplacementRadius.reset();
+                    break;
+                }
+                aggregateDisplacementRadius =
+                    std::max(*aggregateDisplacementRadius, *material->MaximumWorldPositionDisplacementRadius);
+            }
+            const auto selectedWorldBounds =
+                selectedBounds
+                    ? DisplacementBounds::WorldBounds(*selectedBounds, item.World, aggregateDisplacementRadius)
+                    : std::nullopt;
+            if (selectedWorldBounds &&
+                !IsFrustumVisible(clipFromWorld, *selectedWorldBounds, forceConservativeVisibility))
             {
                 Statistics.CulledSubmeshes += submeshCount;
                 continue;
@@ -151,18 +176,18 @@ namespace Keire::RenderBackend
                 auto submesh = mesh.Submeshes[submeshIndex];
                 if (freshPoseBounds)
                     submesh.Bounds = item.CurrentPoseSubmeshBounds[submeshIndex];
-                AssetId materialId;
-                if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot])
-                    materialId = item.Materials[submesh.MaterialSlot];
-                else if (submesh.MaterialSlot < mesh.DefaultMaterials.size())
-                    materialId = mesh.DefaultMaterials[submesh.MaterialSlot];
-                if (!IsFrustumVisible(frustum, submesh.Bounds, forceConservativeVisibility))
+                const auto materialId = materialIdForSubmesh(submesh);
+                const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr;
+                const auto worldBounds = DisplacementBounds::WorldBounds(
+                    submesh.Bounds, item.World,
+                    material ? material->MaximumWorldPositionDisplacementRadius : std::nullopt);
+                if (worldBounds && !IsFrustumVisible(clipFromWorld, *worldBounds, forceConservativeVisibility))
                 {
                     ++Statistics.CulledSubmeshes;
                     continue;
                 }
                 MaterialSurfaceState surfaceState;
-                if (const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr)
+                if (material)
                     surfaceState = material->Surface;
                 const Vector3 center{(submesh.Bounds.Minimum.X + submesh.Bounds.Maximum.X) * 0.5F,
                                      (submesh.Bounds.Minimum.Y + submesh.Bounds.Maximum.Y) * 0.5F,
@@ -239,6 +264,7 @@ namespace Keire::RenderBackend
                 instanceKeys.push_back({draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
                                         draw.Item->ReceiveShadows, draw.Item->CastShadows,
                                         material && material->UsesInstancing && !draw.Item->SkinnedAssetVertices &&
+                                            material->SpatialLightingAbiVersion != 3U &&
                                             draw.Item->MaterialProperties.empty() &&
                                             draw.Item->MaterialInstanceProperties.empty()});
             }
@@ -316,6 +342,9 @@ namespace Keire::RenderBackend
         std::array<SDL_GPUBuffer*, 3> forwardPlusBuffers{surface.ActiveWorkset().ForwardPlus.Lights,
                                                          surface.ActiveWorkset().ForwardPlus.Tiles,
                                                          surface.ActiveWorkset().ForwardPlus.LightIndices};
+        const auto deviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
+        const bool fallbackSpatialSelectionValid =
+            SpatialSelectionFallbackBuffer && SpatialSelectionFallbackDeviceGeneration == deviceGeneration;
         const auto& requestedEnvironment =
             packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
         const auto& environment = requestedEnvironment.HasDiffuseIrradiance ? requestedEnvironment : DefaultSkyTexture;
@@ -575,12 +604,40 @@ namespace Keire::RenderBackend
             SDL_BindGPUIndexBuffer(pass, &indexBinding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
             const auto instanceCount = batch.Count;
+            bool gpuSpatialSelectionValid = false;
             if (material)
             {
                 SDL_BindGPUGraphicsPipeline(pass, material->Pipeline);
-                if (material->UsesForwardPlus)
+                if (material->SpatialLightingAbiVersion == 3U)
+                {
+                    if (!fallbackSpatialSelectionValid)
+                    {
+                        throw std::logic_error(
+                            "The mandatory device-generation spatial-selection fallback buffer is unavailable.");
+                    }
+                    const auto& spatial = surface.ActiveWorkset().SpatialSelection;
+                    const auto& visibility = surface.ActiveWorkset().GpuOcclusion;
+                    gpuSpatialSelectionValid = batch.Count == 1U &&
+                                               draw.SpatialSelectionRecordIndex != InvalidAssetSpatialSelectionIndex &&
+                                               spatial.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot,
+                                                               surface.Epoch, deviceGeneration) &&
+                                               spatial.DispatchSucceeded && spatial.OutputRecords.Buffer &&
+                                               draw.SpatialSelectionRecordIndex < spatial.RecordCount &&
+                                               visibility.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot,
+                                                                  surface.Epoch, deviceGeneration) &&
+                                               visibility.SpatialVolumeVisibilityMask.Buffer &&
+                                               visibility.SpatialVolumeVisibilityCount == spatial.SpatialMaskCount;
+                    const std::array storageBuffers{forwardPlusBuffers[0], forwardPlusBuffers[1], forwardPlusBuffers[2],
+                                                    gpuSpatialSelectionValid ? spatial.OutputRecords.Buffer
+                                                                             : SpatialSelectionFallbackBuffer};
+                    SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBuffers.data(),
+                                                      static_cast<std::uint32_t>(storageBuffers.size()));
+                }
+                else if (material->UsesForwardPlus)
+                {
                     SDL_BindGPUFragmentStorageBuffers(pass, 0, forwardPlusBuffers.data(),
                                                       static_cast<std::uint32_t>(forwardPlusBuffers.size()));
+                }
                 const AssetObjectUniforms object{item.World, camera.View, camera.Projection,
                                                  Transpose(Math::Inverse(item.World))};
                 AssetSceneUniforms scene{};
@@ -648,7 +705,10 @@ namespace Keire::RenderBackend
                 }
                 if (material->UsesSpatialLighting)
                 {
-                    const AssetEnvironmentSpatialUniforms combined{environmentUniforms, spatialUniforms(item)};
+                    auto selectedSpatialUniforms = spatialUniforms(item);
+                    selectedSpatialUniforms.SpatialSelection[0] =
+                        gpuSpatialSelectionValid ? draw.SpatialSelectionRecordIndex : InvalidAssetSpatialSelectionIndex;
+                    const AssetEnvironmentSpatialUniforms combined{environmentUniforms, selectedSpatialUniforms};
                     SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
                 }
                 else if (material->UsesImageBasedLighting)
@@ -754,6 +814,8 @@ namespace Keire::RenderBackend
                 SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, instanceCount, draw.Submesh.FirstIndex, 0,
                                              batch.GpuFirstInstance);
             }
+            if (gpuSpatialSelectionValid)
+                ++surface.ActiveWorkset().SpatialSelection.ConsumedDraws;
             ++Statistics.DrawCalls;
             Statistics.Triangles += draw.Submesh.IndexCount / 3 * instanceCount;
             Statistics.InstanceBatches += instanceCount > 1 ? 1U : 0U;
@@ -787,6 +849,7 @@ namespace Keire::RenderBackend
             started = std::chrono::steady_clock::now();
             preparedDraws = PrepareSceneDrawLists(commands, surface, request->Packet);
             preparedOcclusion = PrepareGpuOcclusion(commands, surface, request->Packet, preparedDraws);
+            (void)PrepareSpatialSelection(commands, surface, request->Packet, preparedDraws, preparedOcclusion);
             Statistics.DrawPreparationMilliseconds +=
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
             gpuDepthCollisionRequired =
@@ -887,8 +950,8 @@ namespace Keire::RenderBackend
                     {
                         ++Statistics.ForwardPlusCacheHits;
                         auto& forwardPlus = surface.ActiveWorkset().ForwardPlus;
-                        forwardPlus.TakeOwnership(request->Packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch,
-                                                  DeviceGeneration.load(std::memory_order_acquire));
+                        forwardPlus.TakeOwnership(request->Packet.AcceptedFrameId, surface.ActiveWorksetSlot,
+                                                  surface.Epoch, DeviceGeneration.load(std::memory_order_acquire));
                         forwardPlus.VisibilityCompacted =
                             RecordForwardPlusVisibilityMask(commands, surface, request->Packet, preparedOcclusion);
                         Statistics.ForwardPlusCullingMilliseconds +=
@@ -1074,7 +1137,7 @@ namespace Keire::RenderBackend
                     surface.ActiveWorkset().ForwardPlusContentHash = contentHash;
                     surface.ActiveWorkset().ForwardPlusContentValid = true;
                     auto& forwardPlus = surface.ActiveWorkset().ForwardPlus;
-                    forwardPlus.TakeOwnership(request->Packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch,
+                    forwardPlus.TakeOwnership(request->Packet.AcceptedFrameId, surface.ActiveWorksetSlot, surface.Epoch,
                                               DeviceGeneration.load(std::memory_order_acquire));
                     forwardPlus.VisibilityCompacted = false;
                     forwardPlus.VisibilityCompacted =
@@ -1092,6 +1155,18 @@ namespace Keire::RenderBackend
                     }
                     return;
                 }
+                if (frameGraphPass == SceneFrameGraph.VfxSimulation)
+                {
+                    if (request == requests.end())
+                        return;
+                    const auto started = std::chrono::steady_clock::now();
+                    for (const auto& snapshot : request->Packet.VfxSnapshots)
+                        PrepareGpuVfx(commands, snapshot, surface);
+                    RecordGpuVfxVisibilityCandidates(commands, surface, request->Packet, preparedOcclusion);
+                    Statistics.VfxPreparationMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+                    return;
+                }
                 if (frameGraphPass == SceneFrameGraph.GpuOcclusionPyramidPass)
                 {
                     if (request != requests.end())
@@ -1106,13 +1181,18 @@ namespace Keire::RenderBackend
                     }
                     return;
                 }
+                if (frameGraphPass == SceneFrameGraph.SpatialSelection)
+                {
+                    if (request != requests.end())
+                        RecordSpatialSelection(commands, surface, request->Packet, preparedOcclusion);
+                    return;
+                }
                 if (frameGraphPass == SceneFrameGraph.VfxPreparation)
                 {
                     if (request == requests.end())
                         return;
                     const auto started = std::chrono::steady_clock::now();
-                    for (const auto& snapshot : request->Packet.VfxSnapshots)
-                        PrepareGpuVfx(commands, snapshot, surface);
+                    RecordGpuVfxVisibilityExpansion(commands, surface, request->Packet, preparedOcclusion);
                     preparedCpuVfx = PrepareCpuVfxDraws(commands, surface, request->Packet);
                     Statistics.VfxPreparationMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
@@ -1248,6 +1328,8 @@ namespace Keire::RenderBackend
                 }
             });
         SceneFrameGraph.Graph.Execute(SceneFrameGraph.Compiled, execution);
+        if (request != requests.end())
+            FinalizeGpuOcclusionConsumerEvidence(surface, request->Packet, preparedOcclusion);
         ++Statistics.Surfaces;
     }
 

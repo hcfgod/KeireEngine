@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -71,6 +72,10 @@ namespace Keire::Detail
         [[nodiscard]] std::string BuildHlsl();
         [[nodiscard]] bool UsesVertexMaterialParameters() const noexcept { return m_UsesVertexMaterialParameters; }
         [[nodiscard]] ShaderOcclusionSupport OcclusionSupport() const noexcept { return m_OcclusionSupport; }
+        [[nodiscard]] std::optional<float> MaximumWorldPositionDisplacementRadius() const noexcept
+        {
+            return m_MaximumWorldPositionDisplacementRadius;
+        }
 
       private:
         void RegisterProperty(const ShaderGraphNode& node);
@@ -94,5 +99,6 @@ namespace Keire::Detail
         ShaderGraphShaderStage m_CurrentStage = ShaderGraphShaderStage::Fragment;
         bool m_UsesVertexMaterialParameters = false;
         ShaderOcclusionSupport m_OcclusionSupport = ShaderOcclusionSupport::None;
+        std::optional<float> m_MaximumWorldPositionDisplacementRadius = 0.0F;
     };
 } // namespace Keire::Detail

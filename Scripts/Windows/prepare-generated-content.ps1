@@ -8,7 +8,8 @@ foreach ($script in @(
         "builtin-shaders.ps1",
         "builtin-skinning.ps1",
         "builtin-vfx.ps1",
-        "builtin-occlusion.ps1"
+        "builtin-occlusion.ps1",
+        "builtin-spatial-selection.ps1"
     )) {
     & (Join-Path $PSScriptRoot $script)
 }

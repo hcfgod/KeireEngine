@@ -39,6 +39,10 @@ namespace
     constexpr std::string_view SandboxProjectPath = "Samples/KeireSandbox/ProjectSettings/Project.keireproject";
     constexpr std::string_view SandboxRenderingSettingsPath =
         "Samples/KeireSandbox/ProjectSettings/Rendering.keiresettings";
+    constexpr std::string_view SandboxBuildScenesPath =
+        "Samples/KeireSandbox/ProjectSettings/BuildScenes.keiresettings";
+    constexpr std::string_view SandboxTemplateBuildScenesPath =
+        "KeireHubContent/Templates/Payloads/Sandbox/ProjectSettings/BuildScenes.keiresettings";
     constexpr std::string_view SandboxStartupSceneMetadataPath =
         "Samples/KeireSandbox/Assets/Scenes/SandboxShowcase.keirescene.keiremeta";
     constexpr std::string_view StudioPaintMaterialGraphPath =
@@ -445,6 +449,13 @@ TEST_CASE("Sandbox GPU occlusion stress scene uses distinct opaque occlusion-com
     const auto renderingSettings =
         nlohmann::json::parse(KeireTests::ReadFile(std::filesystem::current_path() / SandboxRenderingSettingsPath));
     CHECK(renderingSettings.at("gpuOcclusion") == "automatic");
+
+    const auto buildScenesSource = KeireTests::ReadFile(std::filesystem::current_path() / SandboxBuildScenesPath);
+    CHECK(buildScenesSource == KeireTests::ReadFile(std::filesystem::current_path() / SandboxTemplateBuildScenesPath));
+    const auto buildScenes = nlohmann::json::parse(buildScenesSource);
+    REQUIRE(buildScenes.at("scenes").size() == 4U);
+    CHECK(buildScenes.at("scenes").at(3).at("scene") == sceneMetadata.at("id"));
+    CHECK(buildScenes.at("scenes").at(3).at("enabled").get<bool>());
 
     for (const auto& presentation : PresentationMaterials)
     {

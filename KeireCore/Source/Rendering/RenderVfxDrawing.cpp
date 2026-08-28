@@ -210,10 +210,10 @@ namespace Keire::RenderBackend
 
         if (!spriteVertices.empty())
         {
-            result.SpriteBuffer = UploadDynamicBuffer(
-                commands, surface.ActiveWorkset().DynamicUploads.CpuVfxVertices,
-                surface.ActiveWorkset().DynamicUploads.CpuVfxTransfer,
-                std::as_bytes(std::span(spriteVertices)), SDL_GPU_BUFFERUSAGE_VERTEX, "CPU VFX vertices");
+            result.SpriteBuffer = UploadDynamicBuffer(commands, surface.ActiveWorkset().DynamicUploads.CpuVfxVertices,
+                                                      surface.ActiveWorkset().DynamicUploads.CpuVfxTransfer,
+                                                      std::as_bytes(std::span(spriteVertices)),
+                                                      SDL_GPU_BUFFERUSAGE_VERTEX, "CPU VFX vertices");
         }
         return result;
     }
@@ -343,12 +343,27 @@ namespace Keire::RenderBackend
                 const std::array forwardPlusBuffers{surface.ActiveWorkset().ForwardPlus.Lights,
                                                     surface.ActiveWorkset().ForwardPlus.Tiles,
                                                     surface.ActiveWorkset().ForwardPlus.LightIndices};
-                for (auto& [key, emitter] : world->second.Emitters)
+                const auto deviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
+                for (const auto& snapshotEmitter : snapshot.GpuEmitters())
                 {
-                    (void)key;
+                    const auto key = (static_cast<std::uint64_t>(snapshotEmitter.Handle.Index()) << 32U) |
+                                     snapshotEmitter.Handle.Generation();
+                    const auto emitterState = world->second.Emitters.find(key);
+                    if (emitterState == world->second.Emitters.end())
+                        continue;
+                    auto& emitter = emitterState->second;
                     if (!emitter.RenderBuffers)
                         continue;
-                    const std::array storage{world->second.Particles, emitter.RenderBuffers->Indices};
+                    const auto* maskedOutput = ResolveGpuVfxFrameOutput(
+                        surface.ActiveWorkset().GpuVfx, packet.AcceptedFrameId, surface.ActiveWorksetSlot,
+                        surface.Epoch, DeviceGeneration.load(std::memory_order_acquire), snapshot.WorldId(),
+                        snapshotEmitter.Handle.Index(), snapshotEmitter.Handle.Generation());
+                    auto* const renderIndices = maskedOutput ? maskedOutput->Indices : emitter.RenderBuffers->Indices;
+                    auto* const renderIndirect =
+                        maskedOutput ? maskedOutput->IndirectArguments : emitter.RenderBuffers->IndirectArguments;
+                    auto* const renderInstances =
+                        maskedOutput ? maskedOutput->Instances : emitter.RenderBuffers->Instances;
+                    const std::array storage{world->second.Particles, renderIndices};
                     SDL_BindGPUVertexStorageBuffers(pass, 0, storage.data(),
                                                     static_cast<std::uint32_t>(storage.size()));
                     if (emitter.Renderer == VfxRendererType::Mesh)
@@ -365,14 +380,28 @@ namespace Keire::RenderBackend
                         if (composed && composed->UsesInstancing)
                         {
                             SDL_BindGPUGraphicsPipeline(pass, composed->Pipeline);
-                            SDL_BindGPUVertexStorageBuffers(pass, 0, &emitter.RenderBuffers->Instances, 1);
+                            SDL_BindGPUVertexStorageBuffers(pass, 0, &renderInstances, 1);
                             if (composed->InstanceAddressingAbiVersion == 2U)
                             {
                                 constexpr std::array<std::uint32_t, 4> instanceParameters{};
                                 SDL_PushGPUVertexUniformData(commands, 2, instanceParameters.data(),
                                                              sizeof(instanceParameters));
                             }
-                            if (composed->UsesForwardPlus)
+                            if (composed->SpatialLightingAbiVersion == 3U)
+                            {
+                                if (!SpatialSelectionFallbackBuffer ||
+                                    SpatialSelectionFallbackDeviceGeneration != deviceGeneration)
+                                {
+                                    throw std::logic_error(
+                                        "The mandatory device-generation spatial-selection fallback buffer is "
+                                        "unavailable for ABI-v3 mesh VFX.");
+                                }
+                                const std::array storageBuffers{forwardPlusBuffers[0], forwardPlusBuffers[1],
+                                                                forwardPlusBuffers[2], SpatialSelectionFallbackBuffer};
+                                SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBuffers.data(),
+                                                                  static_cast<std::uint32_t>(storageBuffers.size()));
+                            }
+                            else if (composed->UsesForwardPlus)
                             {
                                 SDL_BindGPUFragmentStorageBuffers(
                                     pass, 0, forwardPlusBuffers.data(),
@@ -412,6 +441,7 @@ namespace Keire::RenderBackend
                                 SDL_PushGPUFragmentUniformData(commands, 2, &localLights, sizeof(localLights));
                             if (composed->UsesSpatialLighting)
                             {
+                                vfxSpatialUniforms.SpatialSelection[0] = InvalidAssetSpatialSelectionIndex;
                                 const AssetEnvironmentSpatialUniforms combined{environmentUniforms, vfxSpatialUniforms};
                                 SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
                             }
@@ -476,7 +506,7 @@ namespace Keire::RenderBackend
                             SDL_PushGPUVertexUniformData(commands, 0, &camera, sizeof(camera));
                             SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
                         }
-                        SDL_DrawGPUIndexedPrimitivesIndirect(pass, emitter.RenderBuffers->IndirectArguments, 0, 1);
+                        SDL_DrawGPUIndexedPrimitivesIndirect(pass, renderIndirect, 0, 1);
                     }
                     else
                     {
@@ -508,8 +538,10 @@ namespace Keire::RenderBackend
                             materialTexture ? composed->Textures.front()
                                             : SDL_GPUTextureSamplerBinding{texture.Texture, texture.Sampler};
                         SDL_BindGPUFragmentSamplers(pass, 0, &textureBinding, 1);
-                        SDL_DrawGPUPrimitivesIndirect(pass, emitter.RenderBuffers->IndirectArguments, 0, 1);
+                        SDL_DrawGPUPrimitivesIndirect(pass, renderIndirect, 0, 1);
                     }
+                    if (maskedOutput)
+                        ++surface.ActiveWorkset().GpuVfx.ConsumedDraws;
                     ++Statistics.DrawCalls;
                     ++Statistics.VfxIndirectDraws;
                 }

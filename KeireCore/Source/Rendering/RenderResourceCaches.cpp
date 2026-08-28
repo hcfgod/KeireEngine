@@ -82,7 +82,15 @@ namespace Keire::RenderBackend
                 GpuOcclusionStatus status{};
                 std::memcpy(&status, mapped, sizeof(status));
                 SDL_UnmapGPUTransferBuffer(Device, pending.Transfer);
-                if (status.ErrorFlags != 0U || status.Visible > pending.Candidates)
+                const auto localLightVisible =
+                    status.ConsumerVisible[static_cast<std::size_t>(GpuVisibilityConsumer::ForwardPlusLightMask)];
+                const auto vfxVisible =
+                    status.ConsumerVisible[static_cast<std::size_t>(GpuVisibilityConsumer::VfxVisibilityMask)];
+                const auto spatialVisible =
+                    status.ConsumerVisible[static_cast<std::size_t>(GpuVisibilityConsumer::SpatialVolumeMask)];
+                if (status.ErrorFlags != 0U || status.Visible > pending.Candidates ||
+                    localLightVisible > pending.LocalLightCandidates || vfxVisible > pending.VfxMaskEntries ||
+                    spatialVisible > pending.SpatialMaskEntries)
                 {
                     (void)PublishGpuOcclusionReadbackValidationFailure(**surface, pending.RequestedMode);
                     (*surface)->GpuOcclusionAutomaticActive = false;
@@ -97,6 +105,9 @@ namespace Keire::RenderBackend
                 }
 
                 diagnostics.SourceFrame = pending.SourceFrame;
+                diagnostics.SourceSurfaceEpoch = pending.SourceSurfaceEpoch;
+                diagnostics.SourceFrameSlot = pending.SourceFrameSlot;
+                diagnostics.SourceDeviceGeneration = pending.SourceDeviceGeneration;
                 const auto age = Statistics.Frame >= pending.SourceFrame ? Statistics.Frame - pending.SourceFrame : 0U;
                 diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
                                               ? std::numeric_limits<std::uint32_t>::max()
@@ -107,6 +118,19 @@ namespace Keire::RenderBackend
                 diagnostics.SafeOccluders = pending.SafeOccluders;
                 diagnostics.PyramidMipCount = pending.PyramidMipCount;
                 diagnostics.ReadbackValid = true;
+                diagnostics.LocalLightCandidates = pending.LocalLightCandidates;
+                diagnostics.LocalLightVisible = localLightVisible;
+                diagnostics.LocalLightCulled = pending.LocalLightCandidates - localLightVisible;
+                diagnostics.LocalLightMaskConsumed = pending.LocalLightMaskConsumed;
+                diagnostics.FreshPoseSkinnedCandidates = pending.FreshPoseSkinnedCandidates;
+                diagnostics.FreshPoseSkinnedDepthDraws = pending.FreshPoseSkinnedDepthDraws;
+                diagnostics.VfxMaskEntries = pending.VfxMaskEntries;
+                diagnostics.VfxMaskedDraws = pending.VfxMaskedDraws;
+                diagnostics.VfxMaskConsumed = pending.VfxMaskConsumed;
+                diagnostics.SpatialMaskEntries = pending.SpatialMaskEntries;
+                diagnostics.SpatialSelectionRecords = pending.SpatialSelectionRecords;
+                diagnostics.SpatialSelectionDraws = pending.SpatialSelectionDraws;
+                diagnostics.SpatialMaskConsumed = pending.SpatialMaskConsumed;
                 (*surface)->GpuOcclusionLatestCandidateTriangles = pending.CandidateTriangles;
                 (*surface)->GpuOcclusionLatestVisibleTriangles =
                     static_cast<std::uint64_t>(status.VisibleTriangleHigh) << 32U | status.VisibleTriangleLow;
@@ -428,7 +452,7 @@ namespace Keire::RenderBackend
         PendingSceneRequests.push_back({std::move(request), surfaceToken});
     }
 
-    void RenderSharedState::CapturePendingSceneRequest(PendingSceneRequest pending)
+    void RenderSharedState::CapturePendingSceneRequest(PendingSceneRequest pending, const std::uint64_t acceptedFrameId)
     {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         SceneCaptureEnumerationCount.fetch_add(1U, std::memory_order_relaxed);
@@ -577,6 +601,7 @@ namespace Keire::RenderBackend
         packet.DrawGrid = request.DrawGrid;
         packet.MaterialTimeSeconds = request.MaterialTimeSeconds;
         packet.MaterialDeltaSeconds = request.MaterialDeltaSeconds;
+        packet.AcceptedFrameId = acceptedFrameId;
         packet.FrameIndex = request.FrameIndex;
         packet.VfxSnapshots.reserve(request.AdditionalScenes.size() + 1U);
 
@@ -1167,14 +1192,16 @@ namespace Keire::RenderBackend
             result.Topology = definition.Topology;
             result.Culling = definition.Culling;
             result.OcclusionSupport = definition.OcclusionSupport;
+            result.MaximumWorldPositionDisplacementRadius = definition.MaximumWorldPositionDisplacementRadius;
             result.ReceivesShadows = definition.ReceivesShadows;
             result.DepthTest = definition.DepthTest;
             result.DepthWrite = definition.DepthWrite;
             result.UsesForwardPlus = definition.UsesForwardPlus;
             result.UsesInstancing = definition.UsesInstancing;
             result.UsesImageBasedLighting = definition.UsesImageBasedLighting;
-            result.UsesSpatialLighting = definition.SpatialLightingAbiVersion == 2U;
+            result.UsesSpatialLighting = definition.SpatialLightingAbiVersion >= 2U;
             result.UsesVertexMaterialParameters = definition.UsesVertexMaterialParameters;
+            result.SpatialLightingAbiVersion = definition.SpatialLightingAbiVersion;
             result.InstanceAddressingAbiVersion = definition.InstanceAddressingAbiVersion;
             for (const auto& property : shader->LastGood->Definition().Properties)
             {

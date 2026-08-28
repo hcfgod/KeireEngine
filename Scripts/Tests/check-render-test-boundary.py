@@ -77,6 +77,7 @@ PRODUCTION_FILES = (
     ROOT / "KeireCore/Source/Rendering/RenderPipelineLifecycle.cpp",
     ROOT / "KeireCore/Source/Rendering/RenderResourceCaches.cpp",
     ROOT / "KeireCore/Source/Rendering/RenderSystem.cpp",
+    ROOT / "KeireCore/Source/Rendering/RenderSystemInternalAccess.cpp",
     ROOT / "KeireRuntime/Include/KeireRuntimeInternal/RuntimeAdditiveValidation.h",
     ROOT / "KeireRuntime/Include/KeireRuntimeInternal/RuntimeCommandLine.h",
     ROOT / "KeireRuntime/Source/RuntimeAdditiveValidation.cpp",

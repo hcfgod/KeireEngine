@@ -192,8 +192,8 @@ namespace
                         probe.RuntimeUiEnumerationsWhileBlocked.store(
                             Keire::RenderSystemInternalAccess::RuntimeUiCaptureEnumerationCount(*renderer),
                             std::memory_order_release);
-                        Keire::RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(*renderer);
                         application->RequestExit();
+                        Keire::RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(*renderer);
                     });
                 ++m_Frame;
                 return;
@@ -747,6 +747,24 @@ TEST_CASE("Render device lifecycle transitions never overwrite concurrent closin
                                   : Keire::RenderDeviceState::Failed;
         CHECK(lifecycle.load() == expected);
     }
+}
+
+TEST_CASE("Recovery candidate resources use the next generation without publishing failed candidates")
+{
+    using Keire::RenderBackend::RecoveryCandidateDeviceGeneration;
+
+    const auto firstCandidate = RecoveryCandidateDeviceGeneration(1U);
+    REQUIRE(firstCandidate);
+    CHECK(*firstCandidate == 2U);
+
+    const auto retryCandidate = RecoveryCandidateDeviceGeneration(1U);
+    REQUIRE(retryCandidate);
+    CHECK(*retryCandidate == *firstCandidate);
+
+    const auto laterCandidate = RecoveryCandidateDeviceGeneration(*firstCandidate);
+    REQUIRE(laterCandidate);
+    CHECK(*laterCandidate == 3U);
+    CHECK_FALSE(RecoveryCandidateDeviceGeneration(std::numeric_limits<std::uint32_t>::max()));
 }
 
 TEST_CASE("GPU device-loss exceptions retain actionable bounded identity without raw driver detail")

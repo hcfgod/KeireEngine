@@ -6,6 +6,8 @@ param(
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "msc",
     [string]$CacheRoot = "",
+    [ValidateRange(60, 3600)]
+    [int]$EditorSmokeTimeoutSeconds = 600,
     [switch]$CI,
     [switch]$Update,
     [switch]$Generate
@@ -157,7 +159,7 @@ try {
     Invoke-CheckedWindowsCommand {
         & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $configuration `
             -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokePlay -SmokePlayDeviceLoss `
-            -SmokeOutput $editorReport -ProjectPath $sampleProject
+            -SmokeOutput $editorReport -SmokeTimeoutSeconds $EditorSmokeTimeoutSeconds -ProjectPath $sampleProject
     } "Rendered Editor Play device-loss validation"
     $editor = Read-FreshValidationReport $editorReport $editorStartedAt "Rendered Editor Play device-loss validation"
     Assert-RecoveryReport $editor "Rendered Editor Play device-loss validation" "duringPlay"

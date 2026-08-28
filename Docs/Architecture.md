@@ -240,14 +240,29 @@ or mismatched ownership, buffers, counts, pipeline support, or dispatch bounds l
 intact, so the path fails visible instead of accepting stale data or removing a light. Its capability flag is true only
 when GPU occlusion is available.
 
-VFX currently has only a deterministic, bounded visibility-planning contract. It reserves stable candidate ranges for
-supported GPU sprite, mesh, and whole-ribbon groups, while unsafe bounds, unsupported renderers, invalid ranges, and
-candidate-limit overflow remain force-visible; runtime VFX expansion and rendering do not yet consume
-`VfxVisibilityMask`. `SpatialVolumeVisibilityMask` likewise remains unconsumed until a correctness-complete GPU
-per-draw selection pass can replace the current CPU-selected probe and volume uniforms without losing a visible fallback.
-The VFX and spatial-volume capability flags therefore remain false. The readback ring and value-only
-`GpuOcclusionSurfaceDiagnostics` remain surface-owned. Aggregate statistics expose current recording work while
-visibility totals arrive asynchronously with their source frame and age.
+VFX begins with a deterministic, bounded visibility-planning contract. It reserves stable candidate ranges for
+supported GPU sprite, mesh, and whole-ribbon groups after simulation has produced that frame's dynamic bounds. Mesh
+bounds are transformed into world space, and ribbons are classified as whole renderer groups with bounds that cover
+both segment endpoints and their conservative widths. After unified classification, the VFX expansion pass can compact
+visible instances into output-index, indirect-argument, and instance buffers owned by the active frame workset. Drawing
+uses those buffers only when frame ID, slot, surface epoch, device generation, and expected range all match; otherwise it
+uses the persistent source buffers and remains visible. CPU VFX, volumetric or unbounded effects, stale/nonfinite bounds,
+unsupported renderers, invalid ranges, and candidate-limit overflow remain force-visible. The VFX mask capability is
+advertised only while rendered GPU occlusion is active and the device is running; ownership or recovery mismatches fail
+visible instead of consuming stale output.
+
+Spatial-lighting ABI v3 adds a frame-owned selection buffer after the fixed Forward+ fragment-buffer prefix. The
+post-classification selection pass writes one record per prepared ABI-v3 draw, retaining deterministic contribution and
+stable-asset ordering while choosing up to two visible reflection probes and one visible light-probe volume. A draw
+indexes that record only when its selection workset and visibility mask exactly match the captured frame, slot, surface
+epoch, device generation, and counts. `UINT_MAX` selects the embedded ABI-v2 values, so stale ownership, an unavailable
+pipeline, invalid descriptors, or an unsafe candidate fails visible without a GPU-to-CPU readback. ABI v2 remains
+supported, and ABI-v3 draws retain one selection index per prepared draw instead of merging instances that may require
+different spatial records. The spatial-volume capability is likewise advertised only while rendered GPU occlusion is
+active and the device is running; invalid selection ownership retains the embedded CPU values.
+
+The readback ring and value-only `GpuOcclusionSurfaceDiagnostics` remain surface-owned. Aggregate statistics expose
+current recording work while visibility totals arrive asynchronously with their source frame and age.
 Occlusion depth remains presentation-resolution because directly rasterizing occluders at a lower resolution can close
 pixel-sized gaps and produce false occlusion. The separate R32 hierarchy begins at half resolution; at 3840x2160, with
 a 32-bit depth format, it and the depth texture consume about 42 MiB per frame slot (about 127 MiB for three slots),
@@ -911,10 +926,11 @@ evaluates the validated built-in graph per shaded sample using the same coercion
 UV, procedural, shaping, surface, and neutral texture-semantic rules as generated shaders; unsupported custom functions
 retain a bounded node-default fallback. The shared stable canvas installs an RAII draw-list clip covering the exact
 canvas rectangle, so nodes and connection feedback cannot escape into adjacent preview or inspector regions. The graph
-schema-v4 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, legal shader
-stages, graph purpose, stable referenced-asset identities, and shared editor-only authoring metadata. Schema-v1/2/3
-data is upgraded in memory through deterministic derived pin IDs and an explicit Shader purpose; only publication
-writes schema 4, and future schemas fail before the document or last-good preview changes. This keeps migration from
+schema-v5 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, legal shader
+stages, graph purpose, stable referenced-asset identities, shared editor-only authoring metadata, and a conservative
+maximum world-position-displacement radius for occlusion safety. Schema-v1/2/3/4 data is upgraded in memory through
+deterministic derived pin IDs, an explicit Shader purpose, and a zero displacement radius; only publication writes
+schema 5, and future schemas fail before the document or last-good preview changes. This keeps migration from
 dirtying the same asset differently across machines. The compiler computes endpoint-aware reverse reachability from the single Master node
 before lowering vertex and fragment expressions; structured Material Attributes and BSDF values remain typed through
 validation and preview, then lower into private generated-shader structs rather than entering the renderer property ABI.
@@ -935,7 +951,8 @@ with source authoring metadata but never enter shader, material, or VFX runtime 
 persisted nested local-graph stacks are not part of the 0.4.0 contract; cable routing remains presentation geometry.
 See [Unified Graph Authoring](GraphAuthoring.md) for the interaction and migration contract.
 
-Shader/Material schema 4 also carries renderer-neutral portable sampler, Texture2D-array/cube/3D, and bounded
+Shader schema 5 retains the renderer-neutral resource declarations introduced by schema 4, while Material schema 4
+carries the same portable sampler, Texture2D-array/cube/3D, and bounded
 read-only structured/byte-address buffer declarations through encoding, reflection, dependency extraction, and typed
 material overrides. Generic backend GPU asset and binding realization for array/cube/3D textures and user buffers is
 deferred. Runtime import rejects those resources until the backend contract exists instead of manufacturing a fallback.

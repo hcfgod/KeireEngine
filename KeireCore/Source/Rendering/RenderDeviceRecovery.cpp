@@ -260,12 +260,15 @@ namespace Keire::RenderBackend
         GpuOcclusionScanBatchesPipeline = nullptr;
         GpuOcclusionScatterPipeline = nullptr;
         ForwardPlusVisibilityPipeline = nullptr;
+        SpatialSelectionPipeline = nullptr;
         GpuOcclusionDebugPyramidPipeline = nullptr;
         GpuOcclusionDebugBoundsPipeline = nullptr;
         ShadowSampler = nullptr;
         ToneMapSampler = nullptr;
         GpuOcclusionSampler = nullptr;
         EmptyShadowTexture = nullptr;
+        SpatialSelectionFallbackBuffer = nullptr;
+        SpatialSelectionFallbackDeviceGeneration = 0;
         DefaultMesh = {};
         ErrorMesh = {};
         CheckerboardTexture = {};
@@ -285,6 +288,7 @@ namespace Keire::RenderBackend
         SkinningPipelineAttempted = false;
         GpuOcclusionPipelineFailure.clear();
         GpuOcclusionPipelinesAttempted = false;
+        SpatialSelectionPipelineAttempted = false;
         VfxInitializePipeline = nullptr;
         VfxResetPipeline = nullptr;
         VfxKillPipeline = nullptr;
@@ -299,12 +303,15 @@ namespace Keire::RenderBackend
         VfxFinalizePipeline = nullptr;
         VfxResetRenderPipeline = nullptr;
         VfxFilterRenderPipeline = nullptr;
+        VfxBuildVisibilityPipeline = nullptr;
+        VfxCompactVisibilityPipeline = nullptr;
         VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::NotStarted, std::memory_order_release);
         VfxPipelineWarmupFailure.clear();
         Statistics.FenceRetiredBytes = 0;
     }
 
-    void RenderSharedState::CreateDeviceAndMandatoryResources(const bool recovering)
+    void RenderSharedState::CreateDeviceAndMandatoryResources(const bool recovering,
+                                                              const std::uint32_t resourceGeneration)
     {
         RequireRenderThread("CreateDeviceAndMandatoryResources");
         GpuCreationThread = std::this_thread::get_id();
@@ -332,8 +339,7 @@ namespace Keire::RenderBackend
                                       .DriverName = property(SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING),
                                       .DriverVersion = property(SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING),
                                       .DriverInformation = property(SDL_PROP_GPU_DEVICE_DRIVER_INFO_STRING),
-                                      .DeviceGeneration =
-                                          DeviceGeneration.load(std::memory_order_acquire) + (recovering ? 1U : 0U)};
+                                      .DeviceGeneration = resourceGeneration};
         if (identity.Adapter.empty())
             identity.Adapter = "unknown SDL GPU adapter";
         if (identity.DriverName.empty())
@@ -431,7 +437,7 @@ namespace Keire::RenderBackend
                 SDL_GPUTextureSupportsFormat(Device, SDL_GPU_TEXTUREFORMAT_R32_FLOAT, SDL_GPU_TEXTURETYPE_2D,
                                              SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE),
             std::memory_order_release);
-        CreateGeometryResources();
+        CreateGeometryResources(resourceGeneration);
         (void)PipelinesFor(SDL_GPU_SAMPLECOUNT_1);
         RuntimeUiPipeline = CreateRuntimeUiPipeline();
         KEIRE_CORE_INFO("Selected GPU attachment formats (output={}, scene={}, depth={}, shadowDepth={}).",
@@ -610,7 +616,11 @@ namespace Keire::RenderBackend
                 return DeviceRecoveryResult::Failed;
             try
             {
-                CreateDeviceAndMandatoryResources(true);
+                const auto activeGeneration = DeviceGeneration.load(std::memory_order_acquire);
+                const auto candidateGeneration = RecoveryCandidateDeviceGeneration(activeGeneration);
+                if (!candidateGeneration)
+                    throw std::overflow_error("GPU device generation is exhausted.");
+                CreateDeviceAndMandatoryResources(true, *candidateGeneration);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                 if (consumeInjectedFailure(InjectHealthyRecoveryCandidateFailures))
                     throw std::runtime_error("Injected healthy recovery-candidate failure.");
@@ -638,7 +648,8 @@ namespace Keire::RenderBackend
                     cleanupHealthyCandidate();
                     return DeviceRecoveryResult::Failed;
                 }
-                const auto recoveredGeneration = DeviceGeneration.fetch_add(1U, std::memory_order_acq_rel) + 1U;
+                DeviceGeneration.store(*candidateGeneration, std::memory_order_release);
+                const auto recoveredGeneration = *candidateGeneration;
                 if (interrupted)
                     interrupted->DeviceGeneration = recoveredGeneration;
                 if (!interrupted && !CompleteDeviceRecoveryAfterRetry())

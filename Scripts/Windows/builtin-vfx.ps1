@@ -3,6 +3,7 @@ $ErrorActionPreference = "Stop"
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 $Compiler = Join-Path $Root "Build/Tools/ShaderCompiler/KeireShaderCompiler.exe"
 $Source = Join-Path $Root "KeireCore/Shaders/BuiltinVfx.hlsl"
+$VisibilitySource = Join-Path $Root "KeireCore/Shaders/BuiltinVfxVisibility.hlsl"
 $GeneratedDirectory = Join-Path $Root "Build/Generated/Keire"
 $Header = Join-Path $GeneratedDirectory "BuiltinVfxShaders.h"
 $Stamp = Join-Path $GeneratedDirectory "BuiltinVfxShaders.stamp"
@@ -13,8 +14,8 @@ if (-not (Test-Path -LiteralPath $Compiler)) {
     throw "KeireShaderCompiler is required before generating the built-in VFX shaders."
 }
 
-$Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-vfx-v1" `
-    -Inputs @($PSCommandPath, $CacheHelper, $Compiler, $Source)
+$Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-vfx-v2" `
+    -Inputs @($PSCommandPath, $CacheHelper, $Compiler, $Source, $VisibilitySource)
 if (Test-GeneratedContentCurrent -Output $Header -Stamp $Stamp -Fingerprint $Fingerprint) {
     return
 }
@@ -29,7 +30,9 @@ try {
     $Temporary = Join-Path ([IO.Path]::GetTempPath()) ("KeireBuiltinVfx-" + [Guid]::NewGuid().ToString("N"))
     New-Item -ItemType Directory -Force -Path $Temporary | Out-Null
     $temporarySource = Join-Path $Temporary "BuiltinVfx.hlsl"
+    $temporaryVisibilitySource = Join-Path $Temporary "BuiltinVfxVisibility.hlsl"
     Copy-Item -LiteralPath $Source -Destination $temporarySource
+    Copy-Item -LiteralPath $VisibilitySource -Destination $temporaryVisibilitySource
     $stages = @(
         @{ Stage = "compute"; Entry = "CSInitialize"; Name = "Initialize" },
         @{ Stage = "compute"; Entry = "CSReset"; Name = "Reset" },
@@ -45,6 +48,8 @@ try {
         @{ Stage = "compute"; Entry = "CSFinalize"; Name = "Finalize" },
         @{ Stage = "compute"; Entry = "CSResetRender"; Name = "ResetRender" },
         @{ Stage = "compute"; Entry = "CSFilterRender"; Name = "FilterRender" },
+        @{ Stage = "compute"; Entry = "CSBuildVisibilityCandidates"; Name = "BuildVisibilityCandidates" },
+        @{ Stage = "compute"; Entry = "CSCompactVisibility"; Name = "CompactVisibility" },
         @{ Stage = "vertex"; Entry = "VSMain"; Name = "Vertex" },
         @{ Stage = "vertex"; Entry = "VSRibbon"; Name = "RibbonVertex" },
         @{ Stage = "fragment"; Entry = "PSMain"; Name = "Fragment" },
@@ -61,7 +66,12 @@ try {
     foreach ($stage in $stages) {
         foreach ($variant in $variants) {
             $output = Join-Path $Temporary ("$($stage.Name)-$($variant.Name).$($variant.Extension)")
-            & $Compiler $temporarySource --source HLSL --dest $variant.Destination --stage $stage.Stage `
+            $stageSource = if ($stage.Name -in @("BuildVisibilityCandidates", "CompactVisibility")) {
+                $temporaryVisibilitySource
+            } else {
+                $temporarySource
+            }
+            & $Compiler $stageSource --source HLSL --dest $variant.Destination --stage $stage.Stage `
                 --entrypoint $stage.Entry --output $output
             if ($LASTEXITCODE -ne 0) {
                 throw "Built-in VFX shader compilation failed for $($stage.Entry) / $($variant.Destination)."

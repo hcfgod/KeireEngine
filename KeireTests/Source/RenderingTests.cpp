@@ -6,6 +6,7 @@
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -411,16 +412,55 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decoded->Definition().Properties[3].TextureSemantic == Keire::ShaderTextureSemantic::Roughness);
     CHECK(decoded->Definition().ReceivesShadows);
     CHECK(decoded->Definition().Topology == Keire::ShaderPrimitiveTopology::PointList);
+    REQUIRE(decoded->Definition().MaximumWorldPositionDisplacementRadius);
+    CHECK(*decoded->Definition().MaximumWorldPositionDisplacementRadius == doctest::Approx(0.0F));
     CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
+
+    std::vector<std::uint8_t> canonicalBytes(encoded.size());
+    std::ranges::transform(encoded, canonicalBytes.begin(),
+                           [](const std::byte value) { return std::to_integer<std::uint8_t>(value); });
+    auto legacyCanonical = nlohmann::json::from_cbor(canonicalBytes);
+    legacyCanonical["schemaVersion"] = 1;
+    legacyCanonical.erase("maximumWorldPositionDisplacementRadius");
+    legacyCanonical["occlusionSupport"] = 3U;
+    const auto legacyUnsigned = nlohmann::json::to_cbor(legacyCanonical);
+    std::vector<std::byte> legacyBytes(legacyUnsigned.size());
+    std::ranges::transform(legacyUnsigned, legacyBytes.begin(),
+                           [](const std::uint8_t value) { return std::byte(value); });
+    const auto legacyDecoded = Keire::ShaderAsset::Decode(legacyBytes);
+    CHECK(legacyDecoded->Definition().SchemaVersion == 2U);
+    CHECK_FALSE(legacyDecoded->Definition().MaximumWorldPositionDisplacementRadius);
+    CHECK(legacyDecoded->Definition().OcclusionSupport == Keire::ShaderOcclusionSupport::None);
+    const auto migratedDecoded = Keire::ShaderAsset::Decode(Keire::ShaderAsset::Encode(legacyDecoded->Definition()));
+    CHECK_FALSE(migratedDecoded->Definition().MaximumWorldPositionDisplacementRadius);
+
+    auto unknownDisplacement = definition;
+    unknownDisplacement.MaximumWorldPositionDisplacementRadius.reset();
+    unknownDisplacement.OcclusionSupport = Keire::ShaderOcclusionSupport::ConservativeBounds;
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(unknownDisplacement), std::invalid_argument);
+    auto invalidDisplacement = definition;
+    invalidDisplacement.MaximumWorldPositionDisplacementRadius = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(invalidDisplacement), std::invalid_argument);
+    auto displacedOccluder = definition;
+    displacedOccluder.MaximumWorldPositionDisplacementRadius = 2.0F;
+    displacedOccluder.OcclusionSupport =
+        Keire::ShaderOcclusionSupport::ConservativeBounds | Keire::ShaderOcclusionSupport::DepthOnlyGeometryMatch;
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(displacedOccluder), std::invalid_argument);
+    displacedOccluder.OcclusionSupport = Keire::ShaderOcclusionSupport::ConservativeBounds;
+    CHECK_NOTHROW((void)Keire::ShaderAsset::Encode(displacedOccluder));
 
     constexpr std::string_view pointManifest =
         R"({"schemaVersion":1,"source":"Points.hlsl","stages":{"vertex":"VSMain","fragment":"PSMain"},"renderState":{"topology":"PointList"}})";
     std::vector<std::byte> pointManifestBytes(pointManifest.size());
     std::ranges::transform(pointManifest, pointManifestBytes.begin(),
                            [](const char value) { return std::byte(static_cast<unsigned char>(value)); });
-    CHECK(Keire::ShaderAsset::DecodeManifest(pointManifestBytes).Topology == Keire::ShaderPrimitiveTopology::PointList);
+    const auto decodedLegacyManifest = Keire::ShaderAsset::DecodeManifest(pointManifestBytes);
+    CHECK(decodedLegacyManifest.Topology == Keire::ShaderPrimitiveTopology::PointList);
+    CHECK_FALSE(decodedLegacyManifest.MaximumWorldPositionDisplacementRadius);
+    CHECK(decodedLegacyManifest.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
 
     const auto importer = Keire::CreateShaderAssetImporter();
+    CHECK(importer.Version == 5U);
     REQUIRE(importer.Cook);
     Keire::ShaderImporterSpecification missingReflection;
     missingReflection.Formats = {Keire::ShaderBinaryFormat::Dxil};
@@ -1575,6 +1615,7 @@ TEST_CASE("pinned shader compiler resolves from the executable while the project
     const auto shader = Keire::ShaderAsset::Decode(output.Bytes);
     REQUIRE(shader->Definition().Variants.size() == 3);
     CHECK(shader->Definition().ReceivesShadows);
+    CHECK(shader->Definition().SpatialLightingAbiVersion == 3U);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);

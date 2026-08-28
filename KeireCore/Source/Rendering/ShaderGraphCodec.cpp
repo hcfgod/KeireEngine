@@ -185,6 +185,7 @@ namespace Keire
                 {"connections", std::move(connections)},
                 {"keywords", std::move(keywords)},
                 {"includeRoots", std::move(roots)},
+                {"maximumWorldPositionDisplacementRadius", definition.MaximumWorldPositionDisplacementRadius},
                 {"resources", Json::parse(Text(EncodeShaderGraphResources(definition.Resources))).at("resources")},
                 {"authoring", Detail::EncodeGraphAuthoringMetadata(definition.Authoring)}};
             if (definition.GeneratedAssetOwner)
@@ -220,6 +221,8 @@ namespace Keire
                                        source.value("purpose", static_cast<std::uint8_t>(ShaderGraphPurpose::Shader)))
                                  : ShaderGraphPurpose::Shader;
             result.Output = static_cast<ShaderGraphOutput>(source.value("output", static_cast<std::uint8_t>(0)));
+            result.MaximumWorldPositionDisplacementRadius =
+                sourceSchemaVersion >= 5U ? source.at("maximumWorldPositionDisplacementRadius").get<float>() : 0.0F;
             if (source.contains("generatedAssetOwner"))
                 result.GeneratedAssetOwner = AssetId::Parse(source.at("generatedAssetOwner").get<std::string>());
             result.IncludeRoots.clear();

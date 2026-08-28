@@ -42,4 +42,7 @@ TEST_CASE("Rendered mode advertises GPU depth collision when sampled depth is av
     CHECK(probe.Capabilities.GpuVfxSimulation);
     CHECK(probe.Capabilities.SampledResolvedDepth);
     CHECK(probe.Capabilities.GpuDepthCollision);
+    CHECK(probe.Capabilities.GpuOcclusionVfxVisibilityMasks);
+    CHECK(probe.Capabilities.GpuOcclusionLocalLightMasks);
+    CHECK(probe.Capabilities.GpuOcclusionSpatialVolumeMasks);
 }

@@ -60,8 +60,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
 - SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
   Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
   Material Parameter Collections, tagged custom-shader materials, LODs, same-frame camera-local GPU occlusion with
-  compacted indirect draws and fail-visible Forward+ local-light masks, deterministic direct fallback, and per-surface
-  bounds/HZB diagnostics, spatial lighting data, animation,
+  compacted indirect draws and fail-visible Forward+ local-light masks, capability-gated VFX and spatial-volume mask
+  consumers, deterministic direct fallback, and per-surface bounds/HZB diagnostics, spatial lighting data, animation,
   importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot grounding, zero-clip procedural
   humanoid locomotion, presentation interpolation, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
@@ -239,7 +239,7 @@ Current authoring and runtime contracts include:
 | Project descriptor | 4 | Older descriptors are inspected and upgraded transactionally before mutation. |
 | Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
-| Shader Graph source | 4 | Schemas 1–3 migrate in memory; publication emits canonical schema 4. |
+| Shader Graph source | 5 | Schemas 1–4 migrate in memory; publication emits canonical schema 5. |
 | Material Graph source | 4 | Schemas 1–3 migrate in memory; publication emits canonical schema 4. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
@@ -351,7 +351,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 82 maintained guides grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 84 maintained guides grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.2 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),

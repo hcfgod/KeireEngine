@@ -220,7 +220,7 @@ namespace Keire::RenderBackend
                 createCompute(OcclusionShader::PyramidBase, "CSBuildBase", 8, 8, 1, 0, 1, 0);
             GpuOcclusionReducePipeline = createCompute(OcclusionShader::PyramidReduce, "CSReduce", 8, 8, 1, 0, 1, 0);
             GpuOcclusionClassifyPipeline = createCompute(OcclusionShader::Classify, "CSClassify", 256, 1,
-                                                         MaximumGpuOcclusionPyramidLevels, 2, 0, 4);
+                                                         MaximumGpuOcclusionPyramidLevels, 2, 0, 5);
             GpuOcclusionScanBlocksPipeline =
                 createCompute(OcclusionShader::ScanBlocks, "CSScanBlocks", 256, 1, 0, 2, 0, 2);
             GpuOcclusionScanBatchesPipeline =

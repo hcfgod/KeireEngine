@@ -4,6 +4,7 @@
 
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Assets/RenderingAssetValidation.h"
+#include "KeireInternal/Assets/ShaderAssetCodecInternal.h"
 #include "KeireInternal/Assets/ShaderCompilerJobs.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -312,138 +313,6 @@ namespace Keire
             return definition;
         }
 
-        [[nodiscard]] Json EncodeShaderJson(const ShaderAssetDefinition& definition)
-        {
-            Json properties = Json::array();
-            for (const auto& property : definition.Properties)
-            {
-                Json encoded{{"name", property.Name}, {"type", static_cast<std::uint8_t>(property.Type)}};
-                if (property.Id)
-                    encoded["id"] = property.Id.ToString();
-                if (!property.DisplayName.empty())
-                    encoded["displayName"] = property.DisplayName;
-                if (!property.Category.empty())
-                    encoded["category"] = property.Category;
-                if (property.Minimum)
-                    encoded["minimum"] = *property.Minimum;
-                if (property.Maximum)
-                    encoded["maximum"] = *property.Maximum;
-                if (property.Step)
-                    encoded["step"] = *property.Step;
-                if (property.Type == ShaderPropertyType::Texture2D)
-                {
-                    encoded["defaultTexture"] =
-                        property.DefaultTexture ? Json(property.DefaultTexture.ToString()) : Json(nullptr);
-                    encoded["textureSemantic"] = static_cast<std::uint8_t>(property.TextureSemantic);
-                }
-                else
-                    encoded["default"] = Vector(property.DefaultValue);
-                properties.push_back(std::move(encoded));
-            }
-            Json dependencies = Json::array();
-            for (const auto& dependency : definition.Dependencies)
-                dependencies.push_back(
-                    {{"path", dependency.RelativePath.generic_string()}, {"digest", dependency.Digest}});
-            Json variants = Json::array();
-            for (const auto& variant : definition.Variants)
-            {
-                variants.push_back({{"format", static_cast<std::uint8_t>(variant.Format)},
-                                    {"vertex", Json::binary(ToUnsigned(variant.Vertex))},
-                                    {"fragment", Json::binary(ToUnsigned(variant.Fragment))}});
-            }
-            return {{"schemaVersion", definition.SchemaVersion},
-                    {"source", definition.Source.generic_string()},
-                    {"vertexEntry", definition.VertexEntry},
-                    {"fragmentEntry", definition.FragmentEntry},
-                    {"vertexLayoutVersion", definition.VertexLayoutVersion},
-                    {"topology", static_cast<std::uint8_t>(definition.Topology)},
-                    {"culling", static_cast<std::uint8_t>(definition.Culling)},
-                    {"depthTest", definition.DepthTest},
-                    {"depthWrite", definition.DepthWrite},
-                    {"blend", definition.Blend},
-                    {"receivesShadows", definition.ReceivesShadows},
-                    {"usesForwardPlus", definition.UsesForwardPlus},
-                    {"usesInstancing", definition.UsesInstancing},
-                    {"usesImageBasedLighting", definition.UsesImageBasedLighting},
-                    {"spatialLightingAbiVersion", definition.SpatialLightingAbiVersion},
-                    {"usesVertexMaterialParameters", definition.UsesVertexMaterialParameters},
-                    {"instanceAddressingAbiVersion", definition.InstanceAddressingAbiVersion},
-                    {"occlusionSupport", static_cast<std::uint8_t>(definition.OcclusionSupport)},
-                    {"userResourceSlots", definition.UserResourceSlots},
-                    {"userReadOnlyBuffers", definition.UserReadOnlyBuffers},
-                    {"properties", std::move(properties)},
-                    {"dependencies", std::move(dependencies)},
-                    {"variants", std::move(variants)}};
-        }
-
-        [[nodiscard]] ShaderAssetDefinition DecodeShaderJson(const Json& source)
-        {
-            if (!source.is_object())
-                throw std::invalid_argument("Canonical shader data must be an object.");
-            ShaderAssetDefinition result;
-            result.SchemaVersion = source.at("schemaVersion").get<std::uint32_t>();
-            result.Source = source.at("source").get<std::string>();
-            result.VertexEntry = source.at("vertexEntry").get<std::string>();
-            result.FragmentEntry = source.at("fragmentEntry").get<std::string>();
-            result.VertexLayoutVersion = source.value("vertexLayoutVersion", static_cast<std::uint8_t>(1));
-            result.Topology = static_cast<ShaderPrimitiveTopology>(source.at("topology").get<std::uint8_t>());
-            result.Culling = static_cast<ShaderCullMode>(source.at("culling").get<std::uint8_t>());
-            result.DepthTest = source.at("depthTest").get<bool>();
-            result.DepthWrite = source.at("depthWrite").get<bool>();
-            result.Blend = source.at("blend").get<bool>();
-            result.ReceivesShadows = source.value("receivesShadows", false);
-            result.UsesForwardPlus = source.value("usesForwardPlus", false);
-            result.UsesInstancing = source.value("usesInstancing", false);
-            result.UsesImageBasedLighting = source.value("usesImageBasedLighting", false);
-            result.SpatialLightingAbiVersion = source.value("spatialLightingAbiVersion", static_cast<std::uint8_t>(0));
-            result.UsesVertexMaterialParameters = source.value("usesVertexMaterialParameters", false);
-            result.InstanceAddressingAbiVersion =
-                source.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
-            result.OcclusionSupport = static_cast<ShaderOcclusionSupport>(
-                source.value("occlusionSupport", static_cast<std::uint8_t>(ShaderOcclusionSupport::None)));
-            result.UserResourceSlots = source.value("userResourceSlots", static_cast<std::uint8_t>(0));
-            result.UserReadOnlyBuffers = source.value("userReadOnlyBuffers", static_cast<std::uint8_t>(0));
-            for (const auto& property : source.at("properties"))
-            {
-                ShaderPropertyDefinition decoded;
-                if (property.contains("id"))
-                    decoded.Id = AssetId::Parse(property.at("id").get<std::string>());
-                decoded.Name = property.at("name").get<std::string>();
-                decoded.Type = static_cast<ShaderPropertyType>(property.at("type").get<std::uint8_t>());
-                decoded.DisplayName = property.value("displayName", std::string{});
-                decoded.Category = property.value("category", std::string{});
-                if (property.contains("minimum"))
-                    decoded.Minimum = property.at("minimum").get<float>();
-                if (property.contains("maximum"))
-                    decoded.Maximum = property.at("maximum").get<float>();
-                if (property.contains("step"))
-                    decoded.Step = property.at("step").get<float>();
-                if (decoded.Type == ShaderPropertyType::Texture2D)
-                {
-                    decoded.DefaultTexture = property.at("defaultTexture").is_null()
-                                                 ? AssetId{}
-                                                 : AssetId::Parse(property.at("defaultTexture").get<std::string>());
-                    decoded.TextureSemantic = static_cast<ShaderTextureSemantic>(
-                        property.value("textureSemantic", static_cast<std::uint8_t>(ShaderTextureSemantic::Generic)));
-                }
-                else
-                    decoded.DefaultValue = ParseVector(property.at("default"));
-                result.Properties.push_back(std::move(decoded));
-            }
-            for (const auto& dependency : source.at("dependencies"))
-                result.Dependencies.push_back(
-                    {dependency.at("path").get<std::string>(), dependency.at("digest").get<std::string>()});
-            for (const auto& variant : source.at("variants"))
-            {
-                const auto& vertex = variant.at("vertex").get_binary();
-                const auto& fragment = variant.at("fragment").get_binary();
-                result.Variants.push_back({static_cast<ShaderBinaryFormat>(variant.at("format").get<std::uint8_t>()),
-                                           ToBytes(vertex), ToBytes(fragment)});
-            }
-            Detail::ValidateShaderDefinition(result, false);
-            return result;
-        }
-
         [[nodiscard]] std::filesystem::path ResolveCompiler(const ShaderImporterSpecification& specification)
         {
             if (!specification.Compiler.empty())
@@ -592,7 +461,7 @@ namespace Keire
             const auto textureCount = std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D,
                                                          &ShaderPropertyDefinition::Type);
             const auto fragmentUniformBuffers = fragment.value("uniform_buffers", 0U);
-            const bool spatialLighting = definition.SpatialLightingAbiVersion == 2U;
+            const bool spatialLighting = definition.SpatialLightingAbiVersion >= 2U;
             const auto expectedFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U : 3U;
             const auto minimumFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U
                                                        : definition.ReceivesShadows      ? 3U
@@ -600,8 +469,9 @@ namespace Keire
             const auto expectedSamplers = textureCount + definition.UserResourceSlots +
                                           (definition.ReceivesShadows ? 2U : 0U) +
                                           (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U);
-            const auto expectedFragmentStorageBuffers =
-                (definition.UsesForwardPlus ? 3U : 0U) + definition.UserReadOnlyBuffers;
+            const auto expectedFragmentStorageBuffers = (definition.UsesForwardPlus ? 3U : 0U) +
+                                                        (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
+                                                        definition.UserReadOnlyBuffers;
             const auto expectedVertexUniformBuffers = 1U + (definition.UsesVertexMaterialParameters ? 1U : 0U) +
                                                       (definition.InstanceAddressingAbiVersion == 2U ? 1U : 0U);
             if (!noStorageTextures(vertex) || !noStorageTextures(fragment) ||
@@ -861,6 +731,17 @@ namespace Keire
                 manifest.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
             result.OcclusionSupport = static_cast<ShaderOcclusionSupport>(
                 manifest.value("occlusionSupport", static_cast<std::uint8_t>(ShaderOcclusionSupport::None)));
+            if (manifest.contains("maximumWorldPositionDisplacementRadius") &&
+                !manifest.at("maximumWorldPositionDisplacementRadius").is_null())
+            {
+                result.MaximumWorldPositionDisplacementRadius =
+                    manifest.at("maximumWorldPositionDisplacementRadius").get<float>();
+            }
+            else
+            {
+                result.MaximumWorldPositionDisplacementRadius.reset();
+                result.OcclusionSupport = ShaderOcclusionSupport::None;
+            }
             const auto resourceDocument = Json{{"schemaVersion", ShaderGraphResourceContractSchemaVersion},
                                                {"resources", manifest.value("resources", Json::array())}}
                                               .dump();
@@ -869,13 +750,16 @@ namespace Keire
             result.UserResourceSlots =
                 static_cast<std::uint8_t>(std::max(resourceStatistics.TextureCount, resourceStatistics.SamplerCount));
             result.UserReadOnlyBuffers = static_cast<std::uint8_t>(resourceStatistics.ReadOnlyBufferCount);
-            if (result.SpatialLightingAbiVersion != 0U && result.SpatialLightingAbiVersion != 2U)
+            if (result.SpatialLightingAbiVersion != 0U && result.SpatialLightingAbiVersion != 2U &&
+                result.SpatialLightingAbiVersion != 3U)
                 throw std::invalid_argument("Shader spatial-lighting ABI version is unsupported.");
-            if (result.SpatialLightingAbiVersion == 2U &&
+            if (result.SpatialLightingAbiVersion >= 2U &&
                 (!result.UsesImageBasedLighting || result.VertexLayoutVersion != 3U))
             {
-                throw std::invalid_argument("Spatial-lighting ABI v2 requires image-based lighting and mesh UV1.");
+                throw std::invalid_argument("Spatial-lighting ABI v2/v3 requires image-based lighting and mesh UV1.");
             }
+            if (result.SpatialLightingAbiVersion == 3U && !result.UsesForwardPlus)
+                throw std::invalid_argument("Spatial-lighting ABI v3 requires the fixed Forward+ buffer prefix.");
 
             const auto& properties = manifest.value("properties", Json::array());
             if (!properties.is_array() || properties.size() > Detail::MaximumShaderProperties)
@@ -963,7 +847,7 @@ namespace Keire
     {
         try
         {
-            return CreateRef<ShaderAsset>(DecodeShaderJson(Json::from_cbor(ToUnsigned(bytes))));
+            return CreateRef<ShaderAsset>(Detail::DecodeCanonicalShaderAsset(bytes));
         }
         catch (const std::exception& error)
         {
@@ -974,7 +858,7 @@ namespace Keire
     std::vector<std::byte> ShaderAsset::Encode(const ShaderAssetDefinition& definition)
     {
         Detail::ValidateShaderDefinition(definition, true);
-        return ToBytes(Json::to_cbor(EncodeShaderJson(definition)));
+        return Detail::EncodeCanonicalShaderAsset(definition);
     }
 
     ShaderAssetDefinition ShaderAsset::DecodeManifest(const std::span<const std::byte> bytes)
@@ -1311,7 +1195,7 @@ namespace Keire
             throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 3;
+        result.Version = 5;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =
@@ -1403,7 +1287,7 @@ namespace Keire
                                Json::parse(Text(ReadFile(fragmentReflection, specification.MaximumOutputBytes))),
                                definition);
             Detail::ValidateShaderDefinition(definition, specification.Formats.size() == 3);
-            return {ToBytes(Json::to_cbor(EncodeShaderJson(definition))), definition.Dependencies};
+            return {Detail::EncodeCanonicalShaderAsset(definition), definition.Dependencies};
         };
         result.Cook = [](const std::span<const std::byte> bytes, const AssetTargetPlatform requested)
         {
@@ -1422,7 +1306,7 @@ namespace Keire
             const std::size_t expected = target == AssetTargetPlatform::Windows ? 2U : 1U;
             if (definition.Variants.size() != expected)
                 throw std::runtime_error("Shader asset does not contain the requested target variant.");
-            return ToBytes(Json::to_cbor(EncodeShaderJson(definition)));
+            return Detail::EncodeCanonicalShaderAsset(definition);
         };
         return result;
     }

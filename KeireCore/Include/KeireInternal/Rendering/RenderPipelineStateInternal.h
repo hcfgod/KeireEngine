@@ -12,6 +12,7 @@
 #include <deque>
 #include <exception>
 #include <functional>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -42,6 +43,14 @@ namespace Keire::RenderBackend
                !lifecycle.compare_exchange_weak(state, RenderDeviceState::Failed, std::memory_order_acq_rel))
         {
         }
+    }
+
+    [[nodiscard]] inline constexpr std::optional<std::uint32_t>
+    RecoveryCandidateDeviceGeneration(const std::uint32_t activeGeneration) noexcept
+    {
+        if (activeGeneration == std::numeric_limits<std::uint32_t>::max())
+            return std::nullopt;
+        return activeGeneration + 1U;
     }
 
     struct RenderQueueItem final

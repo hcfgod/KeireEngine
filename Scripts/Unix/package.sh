@@ -11,6 +11,7 @@ done
 GENERATOR=ninja; CONFIGURATION=Release; ARCHITECTURE="$(native_architecture)"; TOOLSET=default; TARGET=KeireClient; CI=0; UPDATE=0; FORCE=0; INSTALL_OPTIONAL=0; ALLOW_DIRTY=0
 parse_build_arguments "${filtered_arguments[@]}"; [[ "$CONFIGURATION" == Release || "$CONFIGURATION" == Dist ]] || { printf 'Package requires Release or Dist.\n' >&2; exit 1; }
 load_project_config "$ROOT"; TOOLSET="$(resolve_unix_toolset "$PLATFORM" "$TOOLSET")"; system=linux; os_name=linux; [[ "$PLATFORM" == Mac ]] && { system=macosx; os_name=macos; }
+command -v python3 >/dev/null 2>&1 || { printf 'Python 3 is required for package validation.\n' >&2; exit 1; }
 macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
 read -r dirty development_artifact < <(package_worktree_policy "$ROOT" "$ALLOW_DIRTY" "$CI")
 bash "$ROOT/Scripts/Unix/build-info.sh"
@@ -19,6 +20,8 @@ common=(--generator "$GENERATOR" --configuration "$CONFIGURATION" --architecture
 test_args=("${common[@]}"); [[ $UPDATE -eq 1 ]] && test_args+=(--update); [[ $FORCE -eq 1 ]] && test_args+=(--force)
 bash "$ROOT/Scripts/$PLATFORM/test.sh" "${test_args[@]}"
 [[ "$PLATFORM" == Linux ]] && activate_linux_toolchain "$ROOT" "$TOOLSET"
+# Unix launchers do not yet expose the Editor --smoke-play report contract. This package gate therefore owns the
+# staged cooked-runtime validation; rendered Editor Play package acceptance remains Windows-only.
 KEIRE_SMOKE_WINDOW=1 bash "$ROOT/Scripts/$PLATFORM/run.sh" "${common[@]}"
 asset_tool="${PROJECT_NAMESPACE}AssetTool"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_tool"
 asset_worker="${PROJECT_NAMESPACE}AssetWorker"; bash "$ROOT/Scripts/$PLATFORM/build.sh" "${common[@]}" --target "$asset_worker"
@@ -148,6 +151,40 @@ runtime_validation_sentinel="$runtime_validation_directory/.packaged-additive-ru
 mkdir -p "$runtime_validation_directory"
 rm -f "$runtime_validation_output" "$runtime_validation_sentinel"
 touch "$runtime_validation_sentinel"
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  python3 - "$timeout_seconds" "$@" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+timeout_seconds = float(sys.argv[1])
+command = sys.argv[2:]
+process = subprocess.Popen(command, start_new_session=True)
+
+def terminate_process_group():
+    if process.poll() is not None:
+        return
+    os.killpg(process.pid, signal.SIGTERM)
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+
+try:
+    raise SystemExit(process.wait(timeout=timeout_seconds))
+except subprocess.TimeoutExpired:
+    print(f"Validation process timed out after {timeout_seconds:g} seconds: {command[0]}", file=sys.stderr)
+    terminate_process_group()
+    raise SystemExit(124)
+except KeyboardInterrupt:
+    terminate_process_group()
+    raise SystemExit(130)
+PY
+}
 if [[ "$PLATFORM" == Linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]]; then
   command -v xvfb-run >/dev/null 2>&1 || {
     printf 'Xvfb is required for the packaged Linux runtime GPU smoke on a headless host.\n' >&2
@@ -157,14 +194,14 @@ if [[ "$PLATFORM" == Linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]];
     printf 'Packaged runtime smoke failed.\n' >&2
     exit 1
   }
-  xvfb-run -a "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --headless \
+  run_with_timeout 360 xvfb-run -a "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --headless \
     --validate-additive-runtime "$runtime_validation_output" || {
     printf 'Packaged additive runtime validation failed.\n' >&2
     exit 1
   }
 else
   "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 12 || { printf 'Packaged runtime smoke failed.\n' >&2; exit 1; }
-  "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --headless \
+  run_with_timeout 360 "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --headless \
     --validate-additive-runtime "$runtime_validation_output" || {
     printf 'Packaged additive runtime validation failed.\n' >&2
     exit 1
@@ -176,22 +213,78 @@ fi
   exit 1
 }
 rm -f "$runtime_validation_sentinel"
-grep -Fq '"schemaVersion": 1' "$runtime_validation_output" &&
-  grep -Fq '"status": "passed"' "$runtime_validation_output" &&
-  grep -Fq "\"gitCommit\": \"$commit\"" "$runtime_validation_output" &&
-  grep -Fq "\"configuration\": \"$CONFIGURATION\"" "$runtime_validation_output" &&
-  grep -Fq '"renderMode": "rendered"' "$runtime_validation_output" &&
-  grep -Fq '"renderedWindowLoop": true' "$runtime_validation_output" &&
-  grep -Fq '"nativeWindowCreated": true' "$runtime_validation_output" &&
-  grep -Fq '"validationWindowHidden": true' "$runtime_validation_output" &&
-  grep -Fq '"twoSceneContributions": 2' "$runtime_validation_output" &&
-  grep -Fq '"threeSceneContributions": 3' "$runtime_validation_output" &&
-  grep -Eq '"twoSceneUiCommands": [2-9][0-9]*' "$runtime_validation_output" &&
-  grep -Eq '"threeSceneUiCommands": [2-9][0-9]*' "$runtime_validation_output" &&
-  grep -Fq '"noPresentationSession": true' "$runtime_validation_output" &&
-  grep -Fq '"unloadReloadOrder": true' "$runtime_validation_output" &&
-  grep -Fq '"inputHandledByActiveTopmostPresentation": true' "$runtime_validation_output" &&
-  grep -Fq '"failedLoadPreservedWorld": true' "$runtime_validation_output" || {
+python3 - "$runtime_validation_output" "$commit" "$CONFIGURATION" <<'PY' || {
+import json
+import sys
+
+path, expected_commit, expected_configuration = sys.argv[1:]
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+def integer_at_least(value, minimum, name):
+    require(isinstance(value, int) and not isinstance(value, bool) and value >= minimum,
+            f"{name} must be an integer >= {minimum}")
+
+try:
+    with open(path, "r", encoding="utf-8") as stream:
+        report = json.load(stream)
+    build = report["build"]
+    gpu = report["gpuOcclusion"]
+    ownership = gpu["ownership"]
+    local_light = gpu["localLightVisibility"]
+    fresh_pose = gpu["freshPoseSkinned"]
+    vfx_visibility = gpu["vfxVisibility"]
+
+    require(report["schemaVersion"] == 1, "schemaVersion must be 1")
+    require(report["status"] == "passed", "status must be passed")
+    require(build["gitCommit"] == expected_commit, "build commit does not match")
+    require(build["configuration"] == expected_configuration, "build configuration does not match")
+    require(report["renderMode"] == "rendered", "renderMode must be rendered")
+    for name in ("renderedWindowLoop", "nativeWindowCreated", "validationWindowHidden",
+                 "noPresentationSession", "unloadReloadOrder", "inputHandledByActiveTopmostPresentation",
+                 "failedLoadPreservedWorld"):
+        require(report[name] is True, f"{name} must be true")
+    require(report["twoSceneContributions"] == 2, "twoSceneContributions must be 2")
+    require(report["threeSceneContributions"] == 3, "threeSceneContributions must be 3")
+    integer_at_least(report["twoSceneUiCommands"], 2, "twoSceneUiCommands")
+    integer_at_least(report["threeSceneUiCommands"], 2, "threeSceneUiCommands")
+
+    require(gpu["automaticStressScene"] is True, "automaticStressScene must be true")
+    require(gpu["fourSceneContributions"] == 4, "fourSceneContributions must be 4")
+    require(gpu["surfaceState"] == "active", "surfaceState must be active")
+    require(gpu["readbackValid"] is True, "readbackValid must be true")
+    require(gpu["pyramidValid"] is True, "pyramidValid must be true")
+    integer_at_least(gpu["candidates"], 128, "candidates")
+    integer_at_least(gpu["culled"], 1, "culled")
+    integer_at_least(gpu["safeOccluders"], 1, "safeOccluders")
+    integer_at_least(ownership["sourceFrame"], 1, "ownership sourceFrame")
+    integer_at_least(ownership["lastRetiredFrame"], ownership["sourceFrame"],
+                     "ownership lastRetiredFrame")
+    require(ownership["sourceSurfaceEpoch"] == ownership["surfaceGeneration"],
+            "occlusion surface epoch must match the rendered surface generation")
+    integer_at_least(ownership["allowedFramesInFlight"], 1, "ownership allowedFramesInFlight")
+    require(isinstance(ownership["sourceFrameSlot"], int) and
+            not isinstance(ownership["sourceFrameSlot"], bool) and
+            0 <= ownership["sourceFrameSlot"] < ownership["allowedFramesInFlight"],
+            "occlusion frame slot must be owned by the accepted-frame ring")
+    require(ownership["deviceAvailable"] is True, "renderer device must remain available")
+    require(ownership["sourceDeviceGeneration"] == ownership["deviceGeneration"],
+            "occlusion device generation must match the active renderer device")
+    integer_at_least(local_light["candidates"], 1, "local-light candidates")
+    require(local_light["visible"] + local_light["culled"] == local_light["candidates"],
+            "local-light visibility results must account for every candidate")
+    require(local_light["maskConsumed"] is True, "local-light visibility mask must be consumed")
+    integer_at_least(fresh_pose["candidates"], 1, "fresh-pose skinned candidates")
+    integer_at_least(fresh_pose["depthDraws"], 1, "fresh-pose skinned depth draws")
+    integer_at_least(vfx_visibility["maskEntries"], 1, "VFX visibility mask entries")
+    integer_at_least(vfx_visibility["maskedDraws"], 1, "VFX masked draws")
+    require(vfx_visibility["maskConsumed"] is True, "VFX visibility mask must be consumed")
+except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    print(f"Packaged additive runtime validation report is invalid: {error}", file=sys.stderr)
+    raise SystemExit(1)
+PY
   printf 'Packaged additive runtime validation published an incomplete result.\n' >&2
   exit 1
 }

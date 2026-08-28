@@ -140,7 +140,7 @@ namespace
 
 namespace Keire::RenderBackend
 {
-    void RenderSharedState::CreateGeometryResources()
+    void RenderSharedState::CreateGeometryResources(const std::uint32_t resourceGeneration)
     {
         ShadowPipeline = CreateDepthPipeline(true);
         SceneDepthPipeline = CreateDepthPipeline(false);
@@ -230,6 +230,10 @@ namespace Keire::RenderBackend
             LightingTextureTarget::Texture2DArray, {std::byte{255}, std::byte{255}, std::byte{255}, std::byte{255}}));
         DefaultReflectionCubeArray = CreateLightingTextureResources(*lightingTexture(
             LightingTextureTarget::CubeArray, {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}}));
+        const AssetSpatialSelectionRecord spatialFallback{};
+        SpatialSelectionFallbackBuffer = UploadBuffer(std::as_bytes(std::span(std::addressof(spatialFallback), 1U)),
+                                                      SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+        SpatialSelectionFallbackDeviceGeneration = resourceGeneration;
     }
 
     void RenderSharedState::ReleaseMeshResources(GpuMeshResources& resources) noexcept
@@ -295,6 +299,41 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUBuffer(Device, resources.CpuVfxVertices.Buffer);
             if (resources.CpuVfxTransfer)
                 SDL_ReleaseGPUTransferBuffer(Device, resources.CpuVfxTransfer);
+        }
+        resources = {};
+    }
+
+    void RenderSharedState::ReleaseSpatialSelectionFrameResources(GpuSpatialSelectionFrameResources& resources) noexcept
+    {
+        if (Device)
+        {
+            if (resources.OutputRecords.Buffer)
+                SDL_ReleaseGPUBuffer(Device, resources.OutputRecords.Buffer);
+            if (resources.LightProbeCandidates.Buffer)
+                SDL_ReleaseGPUBuffer(Device, resources.LightProbeCandidates.Buffer);
+            if (resources.ReflectionCandidates.Buffer)
+                SDL_ReleaseGPUBuffer(Device, resources.ReflectionCandidates.Buffer);
+            if (resources.Draws.Buffer)
+                SDL_ReleaseGPUBuffer(Device, resources.Draws.Buffer);
+            if (resources.Upload)
+                SDL_ReleaseGPUTransferBuffer(Device, resources.Upload);
+        }
+        resources = {};
+    }
+
+    void RenderSharedState::ReleaseGpuVfxFrameResources(GpuVfxFrameResources& resources) noexcept
+    {
+        if (Device)
+        {
+            for (auto& output : resources.Outputs)
+            {
+                if (output.Instances)
+                    SDL_ReleaseGPUBuffer(Device, output.Instances);
+                if (output.IndirectArguments)
+                    SDL_ReleaseGPUBuffer(Device, output.IndirectArguments);
+                if (output.Indices)
+                    SDL_ReleaseGPUBuffer(Device, output.Indices);
+            }
         }
         resources = {};
     }
@@ -1167,9 +1206,11 @@ namespace Keire::RenderBackend
                                           : textureCount + definition.UserResourceSlots +
                                                 (definition.ReceivesShadows ? 2U : 0U) +
                                                 (definition.UsesImageBasedLighting ? 2U : 0U) +
-                                                (definition.SpatialLightingAbiVersion == 2U ? 5U : 0U);
-        information.num_storage_buffers =
-            !vertex ? (definition.UsesForwardPlus ? 3U : 0U) + definition.UserReadOnlyBuffers : 0U;
+                                                (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U);
+        information.num_storage_buffers = !vertex ? (definition.UsesForwardPlus ? 3U : 0U) +
+                                                        (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
+                                                        definition.UserReadOnlyBuffers
+                                                  : 0U;
         if (vertex && definition.UsesInstancing)
             information.num_storage_buffers = 1U;
         information.num_uniform_buffers = vertex ? (definition.InstanceAddressingAbiVersion == 2U

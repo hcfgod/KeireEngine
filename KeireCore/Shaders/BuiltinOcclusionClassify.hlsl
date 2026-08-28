@@ -46,6 +46,7 @@ RWStructuredBuffer<uint> GeometryVisibility : register(u0, space1);
 RWStructuredBuffer<uint> VfxVisibilityMask : register(u1, space1);
 RWStructuredBuffer<uint> LocalLightVisibilityMask : register(u2, space1);
 RWStructuredBuffer<uint> SpatialVolumeVisibilityMask : register(u3, space1);
+RWByteAddressBuffer OcclusionStatus : register(u4, space1);
 
 cbuffer ClassifyDispatch : register(b0, space2)
 {
@@ -67,14 +68,26 @@ void StoreVisibility(OcclusionCandidate candidate, uint visible)
     switch (candidate.Metadata.w)
     {
     case VfxVisibilityConsumer:
+    {
         VfxVisibilityMask[outputIndex] = visible;
+        uint ignoredVfx;
+        OcclusionStatus.InterlockedAdd(20U, visible, ignoredVfx);
         break;
+    }
     case ForwardPlusLightConsumer:
+    {
         LocalLightVisibilityMask[outputIndex] = visible;
+        uint ignoredLocalLight;
+        OcclusionStatus.InterlockedAdd(24U, visible, ignoredLocalLight);
         break;
+    }
     case SpatialVolumeConsumer:
+    {
         SpatialVolumeVisibilityMask[outputIndex] = visible;
+        uint ignoredSpatial;
+        OcclusionStatus.InterlockedAdd(28U, visible, ignoredSpatial);
         break;
+    }
     case IndexedIndirectConsumer:
     default:
         GeometryVisibility[outputIndex] = visible;
@@ -135,12 +148,41 @@ float SampleHierarchy(uint level, float2 uv)
     float2 maximumPixel = 0.0F.xx;
     float nearestDepth = 1.0F;
     bool ambiguous = false;
+    const float displacementRadius = candidate.BoundsMinimum.w;
+    if (isnan(displacementRadius) || isinf(displacementRadius) || displacementRadius < 0.0F)
+    {
+        StoreVisibility(candidate, 1U);
+        return;
+    }
+    float3 worldCorners[8];
+    float3 worldMinimum = float3(3.402823466e+38F, 3.402823466e+38F, 3.402823466e+38F);
+    float3 worldMaximum = -worldMinimum;
     [unroll] for (uint corner = 0U; corner < 8U; ++corner)
     {
         const float3 local = float3((corner & 1U) != 0U ? candidate.BoundsMaximum.x : candidate.BoundsMinimum.x,
                                     (corner & 2U) != 0U ? candidate.BoundsMaximum.y : candidate.BoundsMinimum.y,
                                     (corner & 4U) != 0U ? candidate.BoundsMaximum.z : candidate.BoundsMinimum.z);
         const float4 world = mul(instance.Model, float4(local, 1.0F));
+        if (any(isnan(world)) || any(isinf(world)))
+        {
+            StoreVisibility(candidate, 1U);
+            return;
+        }
+        worldCorners[corner] = world.xyz;
+        worldMinimum = min(worldMinimum, world.xyz);
+        worldMaximum = max(worldMaximum, world.xyz);
+    }
+    worldMinimum -= displacementRadius.xxx;
+    worldMaximum += displacementRadius.xxx;
+    [unroll] for (uint corner = 0U; corner < 8U; ++corner)
+    {
+        const float3 worldPosition =
+            displacementRadius > 0.0F
+                ? float3((corner & 1U) != 0U ? worldMaximum.x : worldMinimum.x,
+                         (corner & 2U) != 0U ? worldMaximum.y : worldMinimum.y,
+                         (corner & 4U) != 0U ? worldMaximum.z : worldMinimum.z)
+                : worldCorners[corner];
+        const float4 world = float4(worldPosition, 1.0F);
         const float4 clip = mul(ViewProjection, world);
         if (clip.w <= 0.00001F || any(isnan(clip)) || any(isinf(clip)))
         {

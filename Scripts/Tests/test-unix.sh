@@ -898,10 +898,12 @@ assert_true grep -F -q "install_name_tool -add_rpath '@executable_path'" "$ROOT/
 assert_true grep -F -q 'cp -L "$runtime_library"' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_true grep -F -q '"$published_compiler" --help' "$ROOT/Scripts/Unix/shader-compiler.sh"
 assert_false grep -F -q 'for (index =' "$ROOT/Scripts/Unix/builtin-skinning.sh" \
-  "$ROOT/Scripts/Unix/builtin-vfx.sh" "$ROOT/Scripts/Unix/builtin-occlusion.sh"
+  "$ROOT/Scripts/Unix/builtin-vfx.sh" "$ROOT/Scripts/Unix/builtin-occlusion.sh" \
+  "$ROOT/Scripts/Unix/builtin-spatial-selection.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-skinning.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-vfx.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-occlusion.sh"
+assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-spatial-selection.sh"
 while IFS= read -r source_file; do
   if grep -E -q 'std::ranges::(all_of|any_of|none_of|find|find_if|sort|stable_sort|count|count_if|equal|transform|for_each|min_element|max_element|clamp)' "$source_file"; then
     assert_true grep -F -q '#include <algorithm>' "$source_file"
@@ -1046,9 +1048,13 @@ assert_true test -f "$ROOT/Scripts/Windows/touch-ninja-stamp.ps1"
 assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -R -q 'BuiltinUnlitShaders.h' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -F -q 'builtin-occlusion.sh' "$ROOT/KeireCore/premake5.lua"
+assert_true grep -F -q 'builtin-spatial-selection.sh' "$ROOT/KeireCore/premake5.lua"
+assert_true test -f "$ROOT/Scripts/Windows/builtin-spatial-selection.ps1"
+assert_true test -f "$ROOT/Scripts/Unix/builtin-spatial-selection.sh"
 assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinOcclusionDepth.hlsl"
 assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinOcclusionDebugPyramid.hlsl"
 assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinOcclusionDebugBounds.hlsl"
+assert_true test -f "$ROOT/KeireCore/Shaders/BuiltinSpatialSelection.hlsl"
 assert_true grep -R -q 'renderer->Tint()' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'ResolveLighting' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'DirectionalLightComponent' "$ROOT/KeireCore/Source/Rendering"
@@ -1393,18 +1399,58 @@ assert_false grep -Fq -- '--frames 6000' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'Additive runtime validation timed out.' \
   "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
 assert_true grep -Fq 'std::chrono::minutes(5)' "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'SourceSurfaceEpoch == surface.Generation()' \
+  "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'LocalLightMaskConsumed' "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'FreshPoseSkinnedDepthDraws' "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'VfxMaskConsumed' "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'PrepareFreshPoseOcclusionFixture' \
+  "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq '77c1e51e-6397-5983-b80b-e82587b2edaa' \
+  "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
 assert_true grep -Fq 'RecoveryAttemptCountForTest(*renderer)' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_true grep -Fq 'ObserveOcclusionGameView' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_true grep -Fq 'SourceSurfaceEpoch == surface.Generation()' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_true grep -Fq 'LocalLightMaskConsumed' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_true grep -Fq 'FreshPoseSkinnedDepthDraws' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_true grep -Fq 'VfxMaskConsumed' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_true grep -Fq 'PrepareFreshPoseOcclusionFixture' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_true grep -Fq '77c1e51e-6397-5983-b80b-e82587b2edaa' \
   "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
 assert_false grep -Fq 'RetriedAfterDeviceLoss' \
   "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
-assert_true grep -Fq '"inputHandledByActiveTopmostPresentation": true' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq '"renderMode": "rendered"' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq '"renderedWindowLoop": true' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq '"nativeWindowCreated": true' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq '"validationWindowHidden": true' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq '"twoSceneUiCommands": [2-9][0-9]*' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq '"threeSceneUiCommands": [2-9][0-9]*' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq '"gitCommit\": \"$commit\"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'python3 - "$runtime_validation_output" "$commit" "$CONFIGURATION"' \
+  "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'report["inputHandledByActiveTopmostPresentation"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'report["renderMode"] == "rendered"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'report["renderedWindowLoop"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'report["nativeWindowCreated"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'report["validationWindowHidden"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'integer_at_least(report["twoSceneUiCommands"], 2' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'integer_at_least(report["threeSceneUiCommands"], 2' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'gpu["fourSceneContributions"] == 4' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'integer_at_least(gpu["culled"], 1' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'ownership["sourceSurfaceEpoch"] == ownership["surfaceGeneration"]' \
+  "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'ownership["sourceFrameSlot"] < ownership["allowedFramesInFlight"]' \
+  "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'ownership["sourceDeviceGeneration"] == ownership["deviceGeneration"]' \
+  "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'local_light["maskConsumed"] is True' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'fresh_pose["depthDraws"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'vfx_visibility["maskConsumed"] is True' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'vfx_visibility["maskEntries"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'vfx_visibility["maskedDraws"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'build["gitCommit"] == expected_commit' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'run_with_timeout 360' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'start_new_session=True' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq '$runtimeValidation.build.gitCommit -ne $commit' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '[[ "$runtime_validation_output" -nt "$runtime_validation_sentinel" ]]' \
   "$ROOT/Scripts/Unix/package.sh"
@@ -1413,8 +1459,9 @@ assert_true grep -Fq 'build_scenes_source="$ROOT/Samples/KeireSandbox/ProjectSet
   "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'cp "$build_scenes_source" "$build_scenes_destination"' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq '[[ -f "$build_scenes_destination" ]]' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq -- '--validate-additive-runtime $runtimeValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
-assert_true grep -Fq -- '--content $runtimeContent --headless' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '"--validate-additive-runtime", $runtimeValidationOutput' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '"--content", $runtimeContent, "--headless"' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq 'inputHandledByActiveTopmostPresentation' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$runtimeValidation.renderMode -ne "rendered"' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$runtimeValidation.renderedWindowLoop' "$ROOT/Scripts/Windows/package.ps1"
@@ -1422,8 +1469,43 @@ assert_true grep -Fq '$runtimeValidation.nativeWindowCreated' "$ROOT/Scripts/Win
 assert_true grep -Fq '$runtimeValidation.validationWindowHidden' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$runtimeValidation.twoSceneUiCommands -lt 2' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$runtimeValidation.threeSceneUiCommands -lt 2' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.fourSceneContributions -ne 4' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.culled -lt 1' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.ownership.sourceSurfaceEpoch -ne' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.ownership.sourceFrameSlot -lt 0' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.localLightVisibility.maskConsumed' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.freshPoseSkinned.depthDraws -lt 1' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.vfxVisibility.maskEntries -lt 1' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.gpuOcclusion.vfxVisibility.maskConsumed' \
+  "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$editorPlayValidation.observedRenderedFrames -lt 2' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.threeSceneContributions -ne 3' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.culled -lt 1' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.ownership.sourceSurfaceEpoch -ne' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.ownership.sourceFrameSlot -lt 0' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.localLightVisibility.maskConsumed' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.freshPoseSkinned.depthDraws -lt 1' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.vfxVisibility.maskEntries -lt 1' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1' \
+  "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.vfxVisibility.maskConsumed' \
+  "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq -- '-SmokePlay -SmokeOutput $editorPlayValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '-SmokeTimeoutSeconds 300' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq -- '"--project", $smokeProjectPath, "--smoke-play"' "$ROOT/Scripts/Windows/run.ps1"
 assert_true grep -Fq -- '"--smoke-play-output", $SmokeOutput' "$ROOT/Scripts/Windows/run.ps1"
 assert_true grep -Fq '$Configuration -notin @("Debug", "DebugASan")' "$ROOT/Scripts/Windows/run.ps1"

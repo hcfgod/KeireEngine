@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
+#include "KeireInternal/Rendering/DisplacementBoundsInternal.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 
@@ -155,9 +156,10 @@ namespace
     }
 
     [[nodiscard]] std::uint32_t VisibilityMetadataFlags(const Keire::RenderBackend::SceneDrawItem& item,
-                                                        const std::uint64_t frameIndex) noexcept
+                                                        const std::uint64_t frameIndex,
+                                                        const std::size_t submeshCount) noexcept
     {
-        const bool freshDynamicBounds = item.HasFreshCurrentPoseBounds(frameIndex);
+        const bool freshDynamicBounds = item.HasFreshCurrentPoseBounds(frameIndex, submeshCount);
         return static_cast<std::uint32_t>(Keire::RenderBackend::GpuVisibilityFlagsForDraw(
             ResolvedVisibilityClass(item), item.AlwaysVisible, freshDynamicBounds));
     }
@@ -167,7 +169,7 @@ namespace
                                                   const Keire::RenderBackend::SceneRenderPacket& packet,
                                                   const std::uint32_t deviceGeneration) noexcept
     {
-        return resources.OwnedBy(packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration);
+        return resources.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration);
     }
 } // namespace
 
@@ -184,6 +186,7 @@ namespace Keire::RenderBackend
         for (const auto& item : packet.DrawItems)
         {
             const auto visibilityClass = ResolvedVisibilityClass(item);
+            const auto submeshCount = ResolveMesh(item.Mesh).Submeshes.size();
             if (visibilityClass == GpuVisibilityClass::MeshVfx)
                 ++Statistics.GpuOcclusionMeshVfxCandidates;
             else if (visibilityClass == GpuVisibilityClass::SkinnedMesh)
@@ -191,9 +194,10 @@ namespace Keire::RenderBackend
             else
                 ++Statistics.GpuOcclusionStaticMeshCandidates;
 
-            if (HasGpuVisibilityFlag(GpuVisibilityFlagsForDraw(visibilityClass, item.AlwaysVisible,
-                                                               item.HasFreshCurrentPoseBounds(packet.FrameIndex)),
-                                     GpuVisibilityFlags::ForceVisible))
+            if (HasGpuVisibilityFlag(
+                    GpuVisibilityFlagsForDraw(visibilityClass, item.AlwaysVisible,
+                                              item.HasFreshCurrentPoseBounds(packet.FrameIndex, submeshCount)),
+                    GpuVisibilityFlags::ForceVisible))
             {
                 ++Statistics.GpuOcclusionForcedVisibleCandidates;
             }
@@ -201,11 +205,7 @@ namespace Keire::RenderBackend
         const auto localLightCandidates = static_cast<std::uint32_t>(packet.LocalLights.size());
         const auto spatialVolumeCandidates =
             static_cast<std::uint32_t>(packet.ReflectionProbes.size() + packet.LightProbeVolumes.size());
-        std::uint64_t vfxVisibilityCandidateTotal = 0;
-        for (const auto& snapshot : packet.VfxSnapshots)
-            vfxVisibilityCandidateTotal += snapshot.Particles().size() + snapshot.GpuEmitters().size();
-        const auto vfxVisibilityCandidates = static_cast<std::uint32_t>(
-            std::min<std::uint64_t>(vfxVisibilityCandidateTotal, MaximumGpuOcclusionCandidates));
+        std::uint32_t vfxVisibilityCandidates = 0;
         Statistics.GpuOcclusionLocalLightCandidates += localLightCandidates;
         Statistics.GpuOcclusionSpatialVolumeCandidates += spatialVolumeCandidates;
         Statistics.GpuOcclusionForcedVisibleCandidates += localLightCandidates + spatialVolumeCandidates;
@@ -340,6 +340,9 @@ namespace Keire::RenderBackend
             {
                 continue;
             }
+            if (!DisplacementBounds::IsKnown(material->MaximumWorldPositionDisplacementRadius))
+                continue;
+            const auto displacementRadius = *material->MaximumWorldPositionDisplacementRadius;
             if (sceneBatch.Count > MaximumGpuOcclusionBatchInstances)
             {
                 oversizedBatch = true;
@@ -356,14 +359,20 @@ namespace Keire::RenderBackend
             {
                 const auto& instanceDraw = draws.Opaque.Draws[drawIndex + instance];
                 const auto outputIndex = static_cast<std::uint32_t>(candidates.size());
+                const auto submeshCount = ResolveMesh(instanceDraw.Item->Mesh).Submeshes.size();
                 candidates.push_back(
                     {{instanceDraw.Submesh.Bounds.Minimum.X, instanceDraw.Submesh.Bounds.Minimum.Y,
-                      instanceDraw.Submesh.Bounds.Minimum.Z, 0.0F},
+                      instanceDraw.Submesh.Bounds.Minimum.Z, displacementRadius},
                      {instanceDraw.Submesh.Bounds.Maximum.X, instanceDraw.Submesh.Bounds.Maximum.Y,
-                      instanceDraw.Submesh.Bounds.Maximum.Z, 0.0F},
-                     {VisibilityMetadataFlags(*instanceDraw.Item, packet.FrameIndex),
+                      instanceDraw.Submesh.Bounds.Maximum.Z, displacementRadius},
+                     {VisibilityMetadataFlags(*instanceDraw.Item, packet.FrameIndex, submeshCount),
                       static_cast<std::uint32_t>(ResolvedVisibilityClass(*instanceDraw.Item)), outputIndex,
                       static_cast<std::uint32_t>(GpuVisibilityConsumer::IndexedIndirect)}});
+                if (ResolvedVisibilityClass(*instanceDraw.Item) == GpuVisibilityClass::SkinnedMesh &&
+                    instanceDraw.Item->HasFreshCurrentPoseBounds(packet.FrameIndex, submeshCount))
+                {
+                    ++prepared.FreshPoseSkinnedCandidates;
+                }
                 inputInstances.push_back({instanceDraw.Item->World, Transpose(Math::Inverse(instanceDraw.Item->World)),
                                           instanceDraw.Item->Tint});
             }
@@ -402,8 +411,10 @@ namespace Keire::RenderBackend
             for (std::uint32_t instance = 0; instance < sceneBatch.Count; ++instance)
             {
                 const auto& instanceDraw = draws.Opaque.Draws[drawIndex + instance];
-                if (!CanGpuVisibilityClassOcclude(ResolvedVisibilityClass(*instanceDraw.Item),
-                                                  instanceDraw.Item->HasFreshCurrentPoseBounds(packet.FrameIndex)))
+                const auto submeshCount = ResolveMesh(instanceDraw.Item->Mesh).Submeshes.size();
+                if (!CanGpuVisibilityClassOcclude(
+                        ResolvedVisibilityClass(*instanceDraw.Item),
+                        instanceDraw.Item->HasFreshCurrentPoseBounds(packet.FrameIndex, submeshCount)))
                 {
                     flushRange();
                     continue;
@@ -476,6 +487,9 @@ namespace Keire::RenderBackend
             {
                 continue;
             }
+            if (!DisplacementBounds::IsKnown(material->MaximumWorldPositionDisplacementRadius))
+                continue;
+            const auto displacementRadius = *material->MaximumWorldPositionDisplacementRadius;
             if (candidates.size() >= MaximumGpuOcclusionCandidates)
             {
                 oversizedBatch = true;
@@ -483,12 +497,19 @@ namespace Keire::RenderBackend
             }
 
             const auto candidateFirst = static_cast<std::uint32_t>(candidates.size());
-            candidates.push_back(
-                {{draw.Submesh.Bounds.Minimum.X, draw.Submesh.Bounds.Minimum.Y, draw.Submesh.Bounds.Minimum.Z, 0.0F},
-                 {draw.Submesh.Bounds.Maximum.X, draw.Submesh.Bounds.Maximum.Y, draw.Submesh.Bounds.Maximum.Z, 0.0F},
-                 {VisibilityMetadataFlags(*draw.Item, packet.FrameIndex),
-                  static_cast<std::uint32_t>(ResolvedVisibilityClass(*draw.Item)), candidateFirst,
-                  static_cast<std::uint32_t>(GpuVisibilityConsumer::IndexedIndirect)}});
+            const auto submeshCount = ResolveMesh(draw.Item->Mesh).Submeshes.size();
+            candidates.push_back({{draw.Submesh.Bounds.Minimum.X, draw.Submesh.Bounds.Minimum.Y,
+                                   draw.Submesh.Bounds.Minimum.Z, displacementRadius},
+                                  {draw.Submesh.Bounds.Maximum.X, draw.Submesh.Bounds.Maximum.Y,
+                                   draw.Submesh.Bounds.Maximum.Z, displacementRadius},
+                                  {VisibilityMetadataFlags(*draw.Item, packet.FrameIndex, submeshCount),
+                                   static_cast<std::uint32_t>(ResolvedVisibilityClass(*draw.Item)), candidateFirst,
+                                   static_cast<std::uint32_t>(GpuVisibilityConsumer::IndexedIndirect)}});
+            if (ResolvedVisibilityClass(*draw.Item) == GpuVisibilityClass::SkinnedMesh &&
+                draw.Item->HasFreshCurrentPoseBounds(packet.FrameIndex, submeshCount))
+            {
+                ++prepared.FreshPoseSkinnedCandidates;
+            }
             inputInstances.push_back({draw.Item->World, Transpose(Math::Inverse(draw.Item->World)), draw.Item->Tint});
             const auto chunkFirst = static_cast<std::uint32_t>(chunks.size());
             chunks.push_back({candidateFirst, 1U, static_cast<std::uint32_t>(batches.size()), 0U});
@@ -563,6 +584,70 @@ namespace Keire::RenderBackend
                                 volume.LocalToWorld, GpuVisibilityClass::LightProbeVolume,
                                 GpuVisibilityConsumer::SpatialVolumeMask, spatialOutputIndex, cameraInside);
             ++spatialOutputIndex;
+        }
+
+        std::vector<std::vector<CpuVfxVisibilityInput>> cpuVfxVisibility(packet.VfxSnapshots.size());
+        std::vector<std::vector<GpuVfxVisibilityInput>> gpuVfxVisibility(packet.VfxSnapshots.size());
+        const auto hasConservativeBounds = [&](const VfxGpuEmitter& emitter)
+        {
+            if (emitter.Renderer == VfxRendererType::Sprite || emitter.Renderer == VfxRendererType::Ribbon)
+                return true;
+            if (emitter.Renderer != VfxRendererType::Mesh)
+                return false;
+            const auto& mesh = ResolveMesh(emitter.Mesh);
+            if (mesh.Empty() || !mesh.BoundsEncloseSubmeshes || !Math::IsFinite(mesh.Bounds.Minimum) ||
+                !Math::IsFinite(mesh.Bounds.Maximum))
+            {
+                return false;
+            }
+            const auto* material = emitter.Material ? ResolveAssetMaterial(emitter.Material, samples) : nullptr;
+            return material && DisplacementBounds::IsKnown(material->MaximumWorldPositionDisplacementRadius) &&
+                   HasShaderOcclusionSupport(material->OcclusionSupport, ShaderOcclusionSupport::ConservativeBounds);
+        };
+        for (std::size_t snapshotIndex = 0; snapshotIndex < packet.VfxSnapshots.size(); ++snapshotIndex)
+        {
+            const auto& snapshot = packet.VfxSnapshots[snapshotIndex];
+            auto& cpuInputs = cpuVfxVisibility[snapshotIndex];
+            cpuInputs.reserve(snapshot.Particles().size());
+            for (const auto& particle : snapshot.Particles())
+                cpuInputs.push_back({particle.Renderer});
+
+            auto& gpuInputs = gpuVfxVisibility[snapshotIndex];
+            gpuInputs.reserve(snapshot.GpuEmitters().size());
+            for (const auto& emitter : snapshot.GpuEmitters())
+            {
+                gpuInputs.push_back({{emitter.Handle.Index(), emitter.Handle.Generation()},
+                                     emitter.Renderer,
+                                     emitter.Capacity,
+                                     hasConservativeBounds(emitter)});
+            }
+        }
+        std::vector<VfxVisibilitySnapshotInput> vfxSnapshots;
+        vfxSnapshots.reserve(packet.VfxSnapshots.size());
+        for (std::size_t snapshotIndex = 0; snapshotIndex < packet.VfxSnapshots.size(); ++snapshotIndex)
+            vfxSnapshots.push_back({cpuVfxVisibility[snapshotIndex], gpuVfxVisibility[snapshotIndex]});
+
+        prepared.VfxCandidateFirst = static_cast<std::uint32_t>(candidates.size());
+        const auto remainingCandidateCapacity =
+            MaximumGpuOcclusionCandidates - static_cast<std::uint32_t>(candidates.size());
+        prepared.VfxVisibility = BuildVfxVisibilityPlan(vfxSnapshots, remainingCandidateCapacity);
+        vfxVisibilityCandidates = prepared.VfxVisibility.CandidateCount;
+        for (const auto& entry : prepared.VfxVisibility.Entries)
+        {
+            if (entry.Disposition != VfxVisibilityPlanDisposition::CandidateRange)
+                continue;
+            const auto visibilityClass = entry.Renderer == VfxRendererType::Ribbon ? GpuVisibilityClass::RibbonVfx
+                                         : entry.Renderer == VfxRendererType::Mesh ? GpuVisibilityClass::MeshVfx
+                                                                                   : GpuVisibilityClass::SpriteVfx;
+            for (std::uint32_t index = 0; index < entry.Count; ++index)
+            {
+                candidates.push_back(
+                    {{},
+                     {},
+                     {ForceVisibleFlag, static_cast<std::uint32_t>(visibilityClass), entry.First + index,
+                      static_cast<std::uint32_t>(GpuVisibilityConsumer::VfxVisibilityMask)}});
+                inputInstances.push_back({Matrix4{}, Matrix4{}, Color{}});
+            }
         }
         prepared.ClassificationCandidateCount = static_cast<std::uint32_t>(candidates.size());
         prepared.BatchCount = static_cast<std::uint32_t>(batches.size());
@@ -775,10 +860,12 @@ namespace Keire::RenderBackend
             const auto chunkUintBytes = static_cast<std::uint64_t>(chunks.size()) * sizeof(std::uint32_t);
             const auto indirectBytes = static_cast<std::uint64_t>(indirect.size()) * sizeof(indirect.front());
             ensureBuffer(resources.Candidates, candidateBytes,
-                         SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
+                         SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                             SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
                          "occlusion candidates");
             ensureBuffer(resources.InputInstances, instanceBytes,
-                         SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
+                         SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                             SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
                          "occlusion input instances");
             ensureBuffer(resources.GeometryVisibility, geometryUintBytes,
                          SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
@@ -849,8 +936,24 @@ namespace Keire::RenderBackend
             appendConservativeMask(vfxVisibilityCandidates, resources.VfxVisibilityMask.Buffer);
             appendConservativeMask(localLightCandidates, resources.LocalLightVisibilityMask.Buffer);
             appendConservativeMask(spatialVolumeCandidates, resources.SpatialVolumeVisibilityMask.Buffer);
-            const std::array zeroStatus{GpuOcclusionStatus{}};
-            append(zeroStatus, resources.Status.Buffer);
+            const auto classifiedConsumerCount = [&](const GpuVisibilityConsumer consumer)
+            {
+                return static_cast<std::uint32_t>(
+                    std::ranges::count_if(candidates, [consumer](const GpuOcclusionCandidate& candidate)
+                                          { return candidate.Metadata[3] == static_cast<std::uint32_t>(consumer); }));
+            };
+            GpuOcclusionStatus initialStatus{};
+            const auto vfxClassified = classifiedConsumerCount(GpuVisibilityConsumer::VfxVisibilityMask);
+            const auto localLightClassified = classifiedConsumerCount(GpuVisibilityConsumer::ForwardPlusLightMask);
+            const auto spatialClassified = classifiedConsumerCount(GpuVisibilityConsumer::SpatialVolumeMask);
+            initialStatus.ConsumerVisible[static_cast<std::size_t>(GpuVisibilityConsumer::VfxVisibilityMask)] =
+                vfxVisibilityCandidates - std::min(vfxVisibilityCandidates, vfxClassified);
+            initialStatus.ConsumerVisible[static_cast<std::size_t>(GpuVisibilityConsumer::ForwardPlusLightMask)] =
+                localLightCandidates - std::min(localLightCandidates, localLightClassified);
+            initialStatus.ConsumerVisible[static_cast<std::size_t>(GpuVisibilityConsumer::SpatialVolumeMask)] =
+                spatialVolumeCandidates - std::min(spatialVolumeCandidates, spatialClassified);
+            const std::array initialStatuses{initialStatus};
+            append(initialStatuses, resources.Status.Buffer);
 
             const auto uploadCapacity = GrowCapacity(upload.size());
             if (!resources.Upload || resources.UploadCapacityBytes < uploadCapacity)
@@ -902,7 +1005,7 @@ namespace Keire::RenderBackend
             draws.Opaque.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
             draws.Transparent.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
             draws.Transparent.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
-            resources.FrameId = packet.FrameIndex;
+            resources.FrameId = packet.AcceptedFrameId;
             resources.FrameSlot = frameSlot;
             resources.SurfaceEpoch = surface.Epoch;
             resources.DeviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
@@ -974,7 +1077,7 @@ namespace Keire::RenderBackend
     void RenderSharedState::RecordGpuOcclusionDepth(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet,
                                                     const PreparedSceneDrawLists& draws,
-                                                    const PreparedGpuOcclusion& occlusion)
+                                                    PreparedGpuOcclusion& occlusion)
     {
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion depth record");
         if (!occlusion.Enabled || !occlusion.Resources ||
@@ -1027,6 +1130,23 @@ namespace Keire::RenderBackend
             SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
             SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, occluder.InstanceCount, draw.Submesh.FirstIndex,
                                          0, 0);
+            if (occluder.InstanceFirst < batch.GpuOcclusionInstanceBase ||
+                occluder.InstanceFirst - batch.GpuOcclusionInstanceBase > batch.Count ||
+                occluder.InstanceCount > batch.Count - (occluder.InstanceFirst - batch.GpuOcclusionInstanceBase))
+            {
+                throw std::logic_error("GPU occlusion depth evidence range exceeds its prepared scene batch.");
+            }
+            const auto batchInstanceFirst = occluder.InstanceFirst - batch.GpuOcclusionInstanceBase;
+            for (std::uint32_t instance = 0; instance < occluder.InstanceCount; ++instance)
+            {
+                const auto& instanceDraw = draws.Opaque.Draws[batch.First + batchInstanceFirst + instance];
+                if (ResolvedVisibilityClass(*instanceDraw.Item) == GpuVisibilityClass::SkinnedMesh &&
+                    instanceDraw.Item->SkinnedAssetVertices == vertices &&
+                    instanceDraw.Item->HasFreshCurrentPoseBounds(packet.FrameIndex, mesh.Submeshes.size()))
+                {
+                    ++occlusion.FreshPoseSkinnedDepthDraws;
+                }
+            }
             ++Statistics.DepthDrawCalls;
             const auto triangles = static_cast<std::uint64_t>(draw.Submesh.IndexCount / 3U) * occluder.InstanceCount;
             Statistics.DepthTriangles += triangles;
@@ -1114,7 +1234,8 @@ namespace Keire::RenderBackend
                 SDL_GPUStorageBufferReadWriteBinding{resources.GeometryVisibility.Buffer, false},
                 SDL_GPUStorageBufferReadWriteBinding{resources.VfxVisibilityMask.Buffer, false},
                 SDL_GPUStorageBufferReadWriteBinding{resources.LocalLightVisibilityMask.Buffer, false},
-                SDL_GPUStorageBufferReadWriteBinding{resources.SpatialVolumeVisibilityMask.Buffer, false}};
+                SDL_GPUStorageBufferReadWriteBinding{resources.SpatialVolumeVisibilityMask.Buffer, false},
+                SDL_GPUStorageBufferReadWriteBinding{resources.Status.Buffer, false}};
             auto* pass =
                 SDL_BeginGPUComputePass(commands, nullptr, 0, writes.data(), static_cast<std::uint32_t>(writes.size()));
             if (!pass)
@@ -1229,10 +1350,26 @@ namespace Keire::RenderBackend
             SDL_DownloadFromGPUBuffer(copy, &source, &destination);
             SDL_EndGPUCopyPass(copy);
         }
-        FrameGpuOcclusionReadbacks.push_back(
-            {resources.Readback, surface.Id, surface.Generation, surface.GpuOcclusionSubmissionEpoch, Statistics.Frame,
-             packet.Environment.GpuOcclusion, occlusion.CandidateCount, surface.GpuOcclusionDiagnostics.SafeOccluders,
-             static_cast<std::uint32_t>(resources.Pyramid.size()), occlusion.CandidateTriangles});
+        GpuOcclusionPendingReadback pending;
+        pending.Transfer = resources.Readback;
+        pending.SurfaceId = surface.Id;
+        pending.SurfaceGeneration = surface.Generation;
+        pending.SubmissionEpoch = surface.GpuOcclusionSubmissionEpoch;
+        pending.SourceFrame = packet.AcceptedFrameId;
+        pending.SourceSurfaceEpoch = surface.Epoch;
+        pending.SourceFrameSlot = surface.ActiveWorksetSlot;
+        pending.SourceDeviceGeneration = resources.DeviceGeneration;
+        pending.RequestedMode = packet.Environment.GpuOcclusion;
+        pending.Candidates = occlusion.CandidateCount;
+        pending.SafeOccluders = surface.GpuOcclusionDiagnostics.SafeOccluders;
+        pending.PyramidMipCount = static_cast<std::uint32_t>(resources.Pyramid.size());
+        pending.CandidateTriangles = occlusion.CandidateTriangles;
+        pending.LocalLightCandidates = resources.LocalLightVisibilityCount;
+        pending.FreshPoseSkinnedCandidates = occlusion.FreshPoseSkinnedCandidates;
+        pending.FreshPoseSkinnedDepthDraws = occlusion.FreshPoseSkinnedDepthDraws;
+        pending.VfxMaskEntries = resources.VfxVisibilityCount;
+        pending.SpatialMaskEntries = resources.SpatialVolumeVisibilityCount;
+        FrameGpuOcclusionReadbacks.push_back(std::move(pending));
         draws.Opaque.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
         draws.Opaque.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
         draws.Transparent.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
@@ -1253,7 +1390,7 @@ namespace Keire::RenderBackend
         const auto& visibility = *occlusion.Resources;
         auto& forwardPlus = surface.ActiveWorkset().ForwardPlus;
         if (!VisibilityResourcesOwnedBy(visibility, surface, packet, deviceGeneration) ||
-            !forwardPlus.OwnedBy(packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration) ||
+            !forwardPlus.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration) ||
             !visibility.LocalLightVisibilityMask.Buffer ||
             visibility.LocalLightVisibilityCount != packet.LocalLights.size() || packet.LocalLights.empty() ||
             forwardPlus.Empty())

@@ -99,7 +99,7 @@ def _sandbox_manifest(catalog: dict[str, object]) -> dict[str, object]:
 def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
     payload_files = _payload_manifest(files)
     return {
-        "version": "1.3.0",
+        "version": "1.3.1",
         "compatibleEditors": ">=0.3.0 <2.0.0",
         "projectSchema": 4,
         "description": (

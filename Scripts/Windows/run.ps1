@@ -14,6 +14,8 @@ param(
     [switch]$SmokePlay,
     [switch]$SmokePlayDeviceLoss,
     [string]$SmokeOutput = "",
+    [ValidateRange(0, 3600)]
+    [int]$SmokeTimeoutSeconds = 0,
     [switch]$Editor,
     [string]$ProjectPath = "",
     [switch]$Update,
@@ -70,7 +72,16 @@ try {
         $smokeArguments = @("--project", $smokeProjectPath, "--smoke-play")
         if ($SmokeOutput) { $smokeArguments += @("--smoke-play-output", $SmokeOutput) }
         if ($SmokePlayDeviceLoss) { $smokeArguments += "--smoke-play-device-loss" }
-        & $ClientExe @smokeArguments
+        if ($SmokeTimeoutSeconds -gt 0) {
+            $smokeResult = Invoke-WindowsExecutableCapture -Path $ClientExe -Arguments $smokeArguments `
+                -Timeout ([TimeSpan]::FromSeconds($SmokeTimeoutSeconds))
+            if ($smokeResult.StandardOutput) { [Console]::Out.Write($smokeResult.StandardOutput) }
+            if ($smokeResult.StandardError) { [Console]::Error.Write($smokeResult.StandardError) }
+            $global:LASTEXITCODE = $smokeResult.ExitCode
+        }
+        else {
+            & $ClientExe @smokeArguments
+        }
     }
     elseif ($CI -or $SmokeWindow) {
         Write-Host "==> Running KeireClient window smoke $Configuration for $Architecture"

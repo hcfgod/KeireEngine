@@ -20,9 +20,9 @@
 namespace Keire
 {
     /// Latest canonical source schema emitted by ShaderGraphAsset::EncodeSource.
-    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 4;
+    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 5;
     /// Version of the deterministic HLSL generator contract embedded in every generated shader manifest.
-    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 5;
+    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 6;
     /// Renderer-facing vertex input and interpolator contract required by generated Shader Graph shaders.
     inline constexpr std::uint32_t ShaderGraphVertexLayoutVersion = 3;
 
@@ -320,6 +320,8 @@ namespace Keire
         std::vector<std::filesystem::path> IncludeRoots{"Assets"};
         /// Optional renderer-neutral resources. Runtime GPU publication requires backend support for the resource kind.
         std::vector<ShaderGraphResourceDefinition> Resources;
+        /// Conservative world-space radius for vertex-stage WorldPositionOffset. Zero disables displaced occlusion.
+        float MaximumWorldPositionDisplacementRadius = 0.0F;
         GraphAuthoringMetadata Authoring;
         /// Optional migration anchor used to retain generated shader subasset IDs after graph extraction.
         AssetId GeneratedAssetOwner;

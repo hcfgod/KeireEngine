@@ -582,7 +582,9 @@ namespace Keire
             definition.Output > ShaderGraphOutput::Fullscreen || definition.Nodes.empty() ||
             definition.Nodes.size() > MaximumGraphNodes || definition.Connections.size() > MaximumGraphConnections ||
             definition.Keywords.size() > MaximumGraphKeywords || definition.IncludeRoots.empty() ||
-            definition.IncludeRoots.size() > MaximumGraphIncludeRoots)
+            definition.IncludeRoots.size() > MaximumGraphIncludeRoots ||
+            !std::isfinite(definition.MaximumWorldPositionDisplacementRadius) ||
+            definition.MaximumWorldPositionDisplacementRadius < 0.0F)
             throw std::invalid_argument("Shader Graph has an unsupported schema or exceeds a bounded collection.");
 
         ValidateShaderGraphResources(definition.Resources);

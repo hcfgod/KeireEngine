@@ -152,6 +152,116 @@ namespace Keire::RenderBackend
         }
     };
 
+    struct GpuSpatialSelectionFrameResources final
+    {
+        DynamicGpuBuffer Draws;
+        DynamicGpuBuffer ReflectionCandidates;
+        DynamicGpuBuffer LightProbeCandidates;
+        DynamicGpuBuffer OutputRecords;
+        SDL_GPUTransferBuffer* Upload = nullptr;
+        std::uint32_t UploadCapacityBytes = 0;
+        std::uint32_t RecordCount = 0;
+        std::uint32_t SpatialMaskCount = 0;
+        std::uint32_t ConsumedDraws = 0;
+        std::uint64_t FrameId = 0;
+        std::uint64_t SurfaceEpoch = 0;
+        std::uint32_t DeviceGeneration = 0;
+        std::uint32_t FrameSlot = 0;
+        bool DispatchSucceeded = false;
+        bool OwnershipValid = false;
+
+        void TakeOwnership(const std::uint64_t frameId, const std::uint32_t frameSlot, const std::uint64_t surfaceEpoch,
+                           const std::uint32_t deviceGeneration) noexcept
+        {
+            FrameId = frameId;
+            FrameSlot = frameSlot;
+            SurfaceEpoch = surfaceEpoch;
+            DeviceGeneration = deviceGeneration;
+            OwnershipValid = true;
+            DispatchSucceeded = false;
+            ConsumedDraws = 0;
+        }
+
+        [[nodiscard]] bool OwnedBy(const std::uint64_t frameId, const std::uint32_t frameSlot,
+                                   const std::uint64_t surfaceEpoch,
+                                   const std::uint32_t deviceGeneration) const noexcept
+        {
+            return OwnershipValid && FrameId == frameId && FrameSlot == frameSlot && SurfaceEpoch == surfaceEpoch &&
+                   DeviceGeneration == deviceGeneration;
+        }
+
+        [[nodiscard]] bool Empty() const noexcept
+        {
+            return !Draws.Buffer && !ReflectionCandidates.Buffer && !LightProbeCandidates.Buffer &&
+                   !OutputRecords.Buffer && !Upload;
+        }
+    };
+
+    struct GpuVfxFrameOutput final
+    {
+        std::uint64_t WorldId = 0;
+        std::uint32_t HandleIndex = 0;
+        std::uint32_t HandleGeneration = 0;
+        std::uint32_t Renderer = 0;
+        SDL_GPUBuffer* Indices = nullptr;
+        SDL_GPUBuffer* IndirectArguments = nullptr;
+        SDL_GPUBuffer* Instances = nullptr;
+        std::uint32_t Capacity = 0;
+
+        [[nodiscard]] bool Empty() const noexcept { return !Indices && !IndirectArguments && !Instances; }
+    };
+
+    struct GpuVfxFrameResources final
+    {
+        std::vector<GpuVfxFrameOutput> Outputs;
+        std::uint64_t FrameId = 0;
+        std::uint64_t SurfaceEpoch = 0;
+        std::uint32_t DeviceGeneration = 0;
+        std::uint32_t FrameSlot = 0;
+        std::uint32_t ConsumedDraws = 0;
+        bool OwnershipValid = false;
+
+        void TakeOwnership(const std::uint64_t frameId, const std::uint32_t frameSlot, const std::uint64_t surfaceEpoch,
+                           const std::uint32_t deviceGeneration) noexcept
+        {
+            FrameId = frameId;
+            FrameSlot = frameSlot;
+            SurfaceEpoch = surfaceEpoch;
+            DeviceGeneration = deviceGeneration;
+            OwnershipValid = true;
+            ConsumedDraws = 0;
+        }
+
+        [[nodiscard]] bool OwnedBy(const std::uint64_t frameId, const std::uint32_t frameSlot,
+                                   const std::uint64_t surfaceEpoch,
+                                   const std::uint32_t deviceGeneration) const noexcept
+        {
+            return OwnershipValid && FrameId == frameId && FrameSlot == frameSlot && SurfaceEpoch == surfaceEpoch &&
+                   DeviceGeneration == deviceGeneration;
+        }
+
+        [[nodiscard]] bool Empty() const noexcept { return Outputs.empty(); }
+    };
+
+    [[nodiscard]] inline const GpuVfxFrameOutput*
+    ResolveGpuVfxFrameOutput(const GpuVfxFrameResources& resources, const std::uint64_t frameId,
+                             const std::uint32_t frameSlot, const std::uint64_t surfaceEpoch,
+                             const std::uint32_t deviceGeneration, const std::uint64_t worldId,
+                             const std::uint32_t handleIndex, const std::uint32_t handleGeneration) noexcept
+    {
+        if (!resources.OwnedBy(frameId, frameSlot, surfaceEpoch, deviceGeneration))
+            return nullptr;
+        for (const auto& output : resources.Outputs)
+        {
+            if (output.WorldId == worldId && output.HandleIndex == handleIndex &&
+                output.HandleGeneration == handleGeneration)
+            {
+                return std::addressof(output);
+            }
+        }
+        return nullptr;
+    }
+
     struct SurfaceFrameWorkset final
     {
         SDL_GPUTexture* HdrColor = nullptr;
@@ -167,6 +277,8 @@ namespace Keire::RenderBackend
         std::uint32_t LocalShadowResolution = 0;
         std::uint32_t LocalShadowLayers = 0;
         ForwardPlusGpuResources ForwardPlus;
+        GpuSpatialSelectionFrameResources SpatialSelection;
+        GpuVfxFrameResources GpuVfx;
         SurfaceDynamicUploadResources DynamicUploads;
         std::uint64_t ForwardPlusContentHash = 0;
         bool ForwardPlusContentValid = false;
@@ -174,7 +286,8 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool Empty() const noexcept
         {
             return !HdrColor && !MultisampleHdrColor && !Depth && !SampledDepth && !DirectionalShadow && !LocalShadow &&
-                   GpuOcclusion.Empty() && TransientTextures.empty() && ForwardPlus.Empty() && DynamicUploads.Empty();
+                   GpuOcclusion.Empty() && TransientTextures.empty() && ForwardPlus.Empty() &&
+                   SpatialSelection.Empty() && GpuVfx.Empty() && DynamicUploads.Empty();
         }
     };
 

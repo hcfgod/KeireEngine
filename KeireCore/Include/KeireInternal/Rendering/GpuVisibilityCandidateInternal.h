@@ -45,6 +45,29 @@ namespace Keire::RenderBackend
         StaleBounds = 1U << 2U
     };
 
+    struct GpuVisibilityCapabilityContract final
+    {
+        bool Culling = false;
+        bool StaticMeshes = false;
+        bool SkinnedMeshes = false;
+        bool MeshVfx = false;
+        bool VfxVisibilityMasks = false;
+        bool LocalLightMasks = false;
+        bool SpatialVolumeMasks = false;
+    };
+
+    [[nodiscard]] constexpr GpuVisibilityCapabilityContract
+    AdvertisedGpuVisibilityCapabilities(const bool gpuOcclusion) noexcept
+    {
+        return {.Culling = gpuOcclusion,
+                .StaticMeshes = gpuOcclusion,
+                .SkinnedMeshes = gpuOcclusion,
+                .MeshVfx = gpuOcclusion,
+                .VfxVisibilityMasks = gpuOcclusion,
+                .LocalLightMasks = gpuOcclusion,
+                .SpatialVolumeMasks = gpuOcclusion};
+    }
+
     [[nodiscard]] constexpr GpuVisibilityFlags operator|(const GpuVisibilityFlags left,
                                                          const GpuVisibilityFlags right) noexcept
     {

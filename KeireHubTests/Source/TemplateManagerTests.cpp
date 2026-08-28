@@ -285,7 +285,7 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
     CHECK(descriptor.at("defaultInputMap") == "a6b6db76-6436-4aa4-b96a-a72a0f987101");
     CHECK(descriptor.at("createdWithEngineVersion") == "0.3.0");
     CHECK(descriptor.at("minimumEngineVersion") == "0.3.0");
-    CHECK(descriptor.at("template").at("version") == "1.3.0");
+    CHECK(descriptor.at("template").at("version") == "1.3.1");
 }
 
 TEST_CASE("Sandbox requires the Material Ecosystem capable editor line")

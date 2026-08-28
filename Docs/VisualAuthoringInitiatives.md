@@ -40,7 +40,7 @@ runtime mappings, and enabled implementations that do not belong to a tested pro
 | ID | Capability | Status | Priority | Current evidence and remaining acceptance |
 | --- | --- | --- | --- | --- |
 | SG-001 | Create, rename, duplicate, move, and recover assets | Shipped | Complete | Project creation and generic stable-ID asset mutations cover `.keireshadergraph`; deletion uses recoverable project trash. |
-| SG-002 | Deterministic source, cooking, packaging, and transactional publication | Shipped | Complete | Schema-v4 JSON, bounded decoding, stable subassets, staged directory replacement, rollback, and target-specific shader cooking are tested. |
+| SG-002 | Deterministic source, cooking, packaging, and transactional publication | Shipped | Complete | Schema-v5 JSON, bounded decoding and migration, stable subassets, staged directory replacement, rollback, and target-specific shader cooking are tested. |
 | SG-003 | Assign generated shaders through ordinary materials | Shipped | Complete | Direct Materials and Material Graphs store tagged raw-Shader or Shader-Graph references and import to ordinary `MaterialAsset` data; Mesh Renderer assignment uses the normal renderer boundary. |
 | SG-004 | Searchable, organized node library | Shipped | Complete | The catalog exposes 120 stable type IDs grouped by authoring category and both graph editors filter names, categories, reusable functions, and layers. |
 | SG-005 | Right-click creation and keyboard-first palette navigation | Shipped | Complete | The top-bar chooser and canvas-positioned right-click menu share focused live search, wrapping keyboard selection, Enter-to-create, recent/common entries, category browsing, and click-position placement. |

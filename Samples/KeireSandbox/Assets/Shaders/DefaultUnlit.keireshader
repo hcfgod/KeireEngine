@@ -6,7 +6,8 @@
   "usesForwardPlus": true,
   "usesInstancing": true,
   "usesImageBasedLighting": true,
-  "spatialLightingAbiVersion": 2,
+  "spatialLightingAbiVersion": 3,
+  "maximumWorldPositionDisplacementRadius": 0.0,
   "stages": {
     "vertex": "VSMain",
     "fragment": "PSMain"

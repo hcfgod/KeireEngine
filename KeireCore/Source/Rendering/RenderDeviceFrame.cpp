@@ -291,7 +291,7 @@ namespace Keire::RenderBackend
             DispatchRender(
                 [this]
                 {
-                    CreateDeviceAndMandatoryResources(false);
+                    CreateDeviceAndMandatoryResources(false, DeviceGeneration.load(std::memory_order_acquire));
                     PublishedStatistics = Statistics;
                 });
         }
@@ -632,6 +632,8 @@ namespace Keire::RenderBackend
         {
             ReleaseGpuOcclusionFrameResources(workset.GpuOcclusion);
             ReleaseForwardPlusResources(workset.ForwardPlus);
+            ReleaseSpatialSelectionFrameResources(workset.SpatialSelection);
+            ReleaseGpuVfxFrameResources(workset.GpuVfx);
             ReleaseDynamicUploadResources(workset.DynamicUploads);
             if (workset.LocalShadow)
                 SDL_ReleaseGPUTexture(Device, workset.LocalShadow);

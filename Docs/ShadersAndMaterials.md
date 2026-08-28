@@ -83,6 +83,11 @@ defaults, malformed canonical pins, undeclared keywords, and resource or collect
 stable codes plus node, pin, and generated-line context where available. Failed edits retain the last-good preview and
 published runtime assets.
 
+Shader Graph schema 5 stores a finite, non-negative maximum world-position-displacement radius for conservative GPU
+occlusion. Schemas 1–4 migrate in memory with a zero radius, which keeps graphs that use vertex displacement fail-visible
+until the author supplies a positive bound. Generated shader contract 6 publishes the validated bound in shader
+metadata for renderer-side safety checks.
+
 Compilation reports active and total nodes, unused work, texture samples, estimated ALU instructions, and variant
 count. The editor previews the last-good result on a sphere, plane, cube, or selected mesh and provides exposure and
 environment controls. Parameter-only edits take a material fast path; shader-affecting edits compile on a

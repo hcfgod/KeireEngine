@@ -19,7 +19,13 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $configuration = "Release"
 $benchmarkRoot = Join-Path $Root "Build\Benchmarks"
-$temporaryRoot = Join-Path $benchmarkRoot "Temp"
+$workspaceCacheRoot = if ([string]::IsNullOrWhiteSpace($env:KEIRE_WORKSPACE_CACHE_ROOT)) {
+    [IO.Path]::GetTempPath()
+}
+else {
+    [IO.Path]::GetFullPath($env:KEIRE_WORKSPACE_CACHE_ROOT)
+}
+$temporaryRoot = Join-Path $workspaceCacheRoot ("render-benchmark-" + (Get-KeireWorkspaceIdentity $Root))
 $contentRoot = Join-Path $benchmarkRoot "Content\KeireSandbox"
 $sampleRoot = Join-Path $benchmarkRoot "Sample\KeireSandbox"
 $matrixPath = Join-Path $benchmarkRoot "render-matrix.json"

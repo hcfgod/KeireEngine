@@ -25,7 +25,8 @@ local function AddGeneratedContentCommands()
             "bash " .. unixScripts .. "/builtin-shaders.sh",
             "bash " .. unixScripts .. "/builtin-skinning.sh",
             "bash " .. unixScripts .. "/builtin-vfx.sh",
-            "bash " .. unixScripts .. "/builtin-occlusion.sh"
+            "bash " .. unixScripts .. "/builtin-occlusion.sh",
+            "bash " .. unixScripts .. "/builtin-spatial-selection.sh"
         }
 
     filter {}

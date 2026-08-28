@@ -254,6 +254,10 @@ namespace Keire::RenderBackend
             if (EmptyShadowTexture)
                 SDL_ReleaseGPUTexture(Device, EmptyShadowTexture);
             EmptyShadowTexture = nullptr;
+            if (SpatialSelectionFallbackBuffer)
+                SDL_ReleaseGPUBuffer(Device, SpatialSelectionFallbackBuffer);
+            SpatialSelectionFallbackBuffer = nullptr;
+            SpatialSelectionFallbackDeviceGeneration = 0;
             if (ShadowPipeline)
                 SDL_ReleaseGPUGraphicsPipeline(Device, ShadowPipeline);
             ShadowPipeline = nullptr;
@@ -272,6 +276,7 @@ namespace Keire::RenderBackend
             GpuVfxWorlds.clear();
             ReleaseGpuVfxPipelines();
             ReleaseGpuOcclusionPipelines();
+            ReleaseSpatialSelectionPipeline();
             VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::NotStarted, std::memory_order_relaxed);
             if (ToneMapPipeline)
                 SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);

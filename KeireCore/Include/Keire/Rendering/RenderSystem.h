@@ -172,6 +172,22 @@ namespace Keire
         std::uint32_t PyramidMipCount = 0;
         bool PyramidValid = false;
         bool ReadbackValid = false;
+        std::uint64_t SourceSurfaceEpoch = 0;
+        std::uint32_t SourceFrameSlot = 0;
+        std::uint32_t SourceDeviceGeneration = 0;
+        std::uint32_t LocalLightCandidates = 0;
+        std::uint32_t LocalLightVisible = 0;
+        std::uint32_t LocalLightCulled = 0;
+        bool LocalLightMaskConsumed = false;
+        std::uint32_t FreshPoseSkinnedCandidates = 0;
+        std::uint32_t FreshPoseSkinnedDepthDraws = 0;
+        std::uint32_t VfxMaskEntries = 0;
+        std::uint32_t VfxMaskedDraws = 0;
+        bool VfxMaskConsumed = false;
+        std::uint32_t SpatialMaskEntries = 0;
+        std::uint32_t SpatialSelectionRecords = 0;
+        std::uint32_t SpatialSelectionDraws = 0;
+        bool SpatialMaskConsumed = false;
 
         auto operator<=>(const GpuOcclusionSurfaceDiagnostics&) const noexcept = default;
     };

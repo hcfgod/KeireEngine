@@ -87,6 +87,18 @@ struct SpatialReflectionProbeData
     float4 Parameters;
 };
 
+static const uint InvalidSpatialSelectionIndex = 0xffffffffU;
+static const uint SpatialSelectionHasLightProbe = 1U << 0U;
+static const uint SpatialSelectionHasReflectionProbe0 = 1U << 1U;
+static const uint SpatialSelectionHasReflectionProbe1 = 1U << 2U;
+
+struct SpatialSelectionData
+{
+    float4 ProbeIrradiance[9];
+    SpatialReflectionProbeData ReflectionProbes[2];
+    uint4 Metadata;
+};
+
 cbuffer EnvironmentData : register(b3, space3)
 {
     float4 DiffuseIrradiance[9];
@@ -101,6 +113,7 @@ cbuffer EnvironmentData : register(b3, space3)
     float4 CookieRotations[2];
     float4 DirectionalCookieAndContact;
     float4x4 SpatialViewProjection;
+    uint4 SpatialSelection;
 };
 
 Texture2D MainTexture : register(t0, space2);
@@ -138,6 +151,7 @@ SamplerState LightCookieAtlasSampler : register(s15, space2);
 StructuredBuffer<LocalLightData> ForwardPlusLights : register(t16, space2);
 StructuredBuffer<uint4> ForwardPlusTiles : register(t17, space2);
 StructuredBuffer<uint4> ForwardPlusLightIndices : register(t18, space2);
+StructuredBuffer<SpatialSelectionData> SpatialSelections : register(t19, space2);
 
 uint ForwardPlusLightIndex(const uint index)
 {
@@ -464,18 +478,17 @@ float SampleBakedShadowMask(const float encodedChannel, const float2 uv1)
     return mask[channel & 3U];
 }
 
-float3 EvaluateProbeIrradiance(const float3 normal)
+float3 EvaluateProbeIrradiance(const float3 normal, const float4 coefficients[9])
 {
     const float x = normal.x;
     const float y = normal.y;
     const float z = normal.z;
-    return max(ProbeIrradiance[0].rgb * 0.282095F + ProbeIrradiance[1].rgb * (0.488603F * y) +
-                   ProbeIrradiance[2].rgb * (0.488603F * z) + ProbeIrradiance[3].rgb * (0.488603F * x) +
-                   ProbeIrradiance[4].rgb * (1.092548F * x * y) +
-                   ProbeIrradiance[5].rgb * (1.092548F * y * z) +
-                   ProbeIrradiance[6].rgb * (0.315392F * (3.0F * z * z - 1.0F)) +
-                   ProbeIrradiance[7].rgb * (1.092548F * x * z) +
-                   ProbeIrradiance[8].rgb * (0.546274F * (x * x - y * y)),
+    return max(coefficients[0].rgb * 0.282095F + coefficients[1].rgb * (0.488603F * y) +
+                   coefficients[2].rgb * (0.488603F * z) + coefficients[3].rgb * (0.488603F * x) +
+                   coefficients[4].rgb * (1.092548F * x * y) + coefficients[5].rgb * (1.092548F * y * z) +
+                   coefficients[6].rgb * (0.315392F * (3.0F * z * z - 1.0F)) +
+                   coefficients[7].rgb * (1.092548F * x * z) +
+                   coefficients[8].rgb * (0.546274F * (x * x - y * y)),
                0.0F.xxx);
 }
 
@@ -493,7 +506,25 @@ float3 EvaluateSpatialDiffuse(const float3 normal, const float2 uv1)
         return radiance * lerp(1.0F, saturate(dot(normal, dominantDirection)) * 2.0F,
                                saturate(directionality.w * 0.5F));
     }
-    return (flags & 2U) != 0U ? EvaluateProbeIrradiance(normal) : 0.0F.xxx;
+    if (SpatialSelection.x == InvalidSpatialSelectionIndex)
+        return (flags & 2U) != 0U ? EvaluateProbeIrradiance(normal, ProbeIrradiance) : 0.0F.xxx;
+    const SpatialSelectionData selection = SpatialSelections[SpatialSelection.x];
+    return (selection.Metadata.x & SpatialSelectionHasLightProbe) != 0U
+               ? EvaluateProbeIrradiance(normal, selection.ProbeIrradiance)
+               : 0.0F.xxx;
+}
+
+SpatialReflectionProbeData SelectedReflectionProbe(const uint probeIndex, out bool enabled)
+{
+    if (SpatialSelection.x == InvalidSpatialSelectionIndex)
+    {
+        enabled = ReflectionProbes[probeIndex].ExtentsWeight.w > 0.0F;
+        return ReflectionProbes[probeIndex];
+    }
+    const SpatialSelectionData selection = SpatialSelections[SpatialSelection.x];
+    const uint flag = probeIndex == 0U ? SpatialSelectionHasReflectionProbe0 : SpatialSelectionHasReflectionProbe1;
+    enabled = (selection.Metadata.x & flag) != 0U;
+    return selection.ReflectionProbes[probeIndex];
 }
 
 float3 BoxProjectedProbeDirection(const SpatialReflectionProbeData probe, const float3 worldPosition,
@@ -525,8 +556,9 @@ float3 SampleSpatialReflection(const float3 worldPosition, const float3 reflecti
     [unroll]
     for (uint probeIndex = 0U; probeIndex < 2U; ++probeIndex)
     {
-        const SpatialReflectionProbeData probe = ReflectionProbes[probeIndex];
-        if (probe.ExtentsWeight.w <= 0.0F)
+        bool enabled = false;
+        const SpatialReflectionProbeData probe = SelectedReflectionProbe(probeIndex, enabled);
+        if (!enabled || probe.ExtentsWeight.w <= 0.0F)
             continue;
         const float3 direction = BoxProjectedProbeDirection(probe, worldPosition, reflection);
         const float4 encoded = BakedReflectionTexture.SampleLevel(
