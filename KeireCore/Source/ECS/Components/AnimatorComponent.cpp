@@ -375,10 +375,20 @@ namespace Keire
         for (const auto& matrix : skinPalette)
             if (!Math::IsFinite(matrix))
                 throw std::invalid_argument("Animator runtime pose contains a non-finite matrix.");
+
+        if (skinPalette.size() > m_SkinPalette.capacity())
+        {
+            std::vector<Matrix4> nextPalette(skinPalette.begin(), skinPalette.end());
+            m_SkinPalette = std::move(nextPalette);
+        }
+        else
+        {
+            m_SkinPalette.assign(skinPalette.begin(), skinPalette.end());
+        }
         m_CurrentState = std::move(state);
         m_NormalizedTime = normalizedTime;
         m_RuntimePlaying = playing;
-        m_SkinPalette.assign(skinPalette.begin(), skinPalette.end());
+        AdvancePoseGeneration();
     }
 
     void AnimatorComponent::SetRuntimeDebugSnapshot(std::shared_ptr<const AnimatorDebugSnapshot> snapshot) noexcept
@@ -404,6 +414,14 @@ namespace Keire
         m_RuntimeFootGroundingWeight = 1.0F;
         m_ProceduralIntent = {};
         m_ProceduralState = {};
+        AdvancePoseGeneration();
+    }
+
+    void AnimatorComponent::AdvancePoseGeneration() noexcept
+    {
+        ++m_PoseGeneration;
+        if (m_PoseGeneration == 0)
+            ++m_PoseGeneration;
     }
 
     ComponentRegistration CreateAnimatorComponentRegistration()

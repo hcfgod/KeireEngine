@@ -154,10 +154,20 @@ namespace
             skinned, item.VisibilityClass == Keire::RenderBackend::GpuVisibilityClass::MeshVfx);
     }
 
-    [[nodiscard]] std::uint32_t VisibilityMetadataFlags(const Keire::RenderBackend::SceneDrawItem& item) noexcept
+    [[nodiscard]] std::uint32_t VisibilityMetadataFlags(const Keire::RenderBackend::SceneDrawItem& item,
+                                                        const std::uint64_t frameIndex) noexcept
     {
-        return static_cast<std::uint32_t>(
-            Keire::RenderBackend::GpuVisibilityFlagsForDraw(ResolvedVisibilityClass(item), item.AlwaysVisible));
+        const bool freshDynamicBounds = item.HasFreshCurrentPoseBounds(frameIndex);
+        return static_cast<std::uint32_t>(Keire::RenderBackend::GpuVisibilityFlagsForDraw(
+            ResolvedVisibilityClass(item), item.AlwaysVisible, freshDynamicBounds));
+    }
+
+    [[nodiscard]] bool VisibilityResourcesOwnedBy(const Keire::RenderBackend::GpuOcclusionFrameResources& resources,
+                                                  const Keire::RenderBackend::RenderSurfaceState& surface,
+                                                  const Keire::RenderBackend::SceneRenderPacket& packet,
+                                                  const std::uint32_t deviceGeneration) noexcept
+    {
+        return resources.OwnedBy(packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration);
     }
 } // namespace
 
@@ -181,7 +191,8 @@ namespace Keire::RenderBackend
             else
                 ++Statistics.GpuOcclusionStaticMeshCandidates;
 
-            if (HasGpuVisibilityFlag(GpuVisibilityFlagsForDraw(visibilityClass, item.AlwaysVisible),
+            if (HasGpuVisibilityFlag(GpuVisibilityFlagsForDraw(visibilityClass, item.AlwaysVisible,
+                                                               item.HasFreshCurrentPoseBounds(packet.FrameIndex)),
                                      GpuVisibilityFlags::ForceVisible))
             {
                 ++Statistics.GpuOcclusionForcedVisibleCandidates;
@@ -190,6 +201,11 @@ namespace Keire::RenderBackend
         const auto localLightCandidates = static_cast<std::uint32_t>(packet.LocalLights.size());
         const auto spatialVolumeCandidates =
             static_cast<std::uint32_t>(packet.ReflectionProbes.size() + packet.LightProbeVolumes.size());
+        std::uint64_t vfxVisibilityCandidateTotal = 0;
+        for (const auto& snapshot : packet.VfxSnapshots)
+            vfxVisibilityCandidateTotal += snapshot.Particles().size() + snapshot.GpuEmitters().size();
+        const auto vfxVisibilityCandidates = static_cast<std::uint32_t>(
+            std::min<std::uint64_t>(vfxVisibilityCandidateTotal, MaximumGpuOcclusionCandidates));
         Statistics.GpuOcclusionLocalLightCandidates += localLightCandidates;
         Statistics.GpuOcclusionSpatialVolumeCandidates += spatialVolumeCandidates;
         Statistics.GpuOcclusionForcedVisibleCandidates += localLightCandidates + spatialVolumeCandidates;
@@ -232,7 +248,10 @@ namespace Keire::RenderBackend
         }
         const auto resourceExtent = Policy::ResolveConservativeResourceExtent(surface.Width, surface.Height);
         const auto frameSlotCount = static_cast<std::size_t>(Specification.MaximumFramesInFlight);
-        const auto frameIndex = SkinningOutputSlot(ActiveGpuSubmissionSerial, frameSlotCount);
+        const auto frameSlot = surface.ActiveWorksetSlot;
+        const auto frameIndex = static_cast<std::size_t>(frameSlot);
+        if (frameIndex >= frameSlotCount)
+            throw std::logic_error("GPU occlusion frame slot exceeds the accepted frame bound.");
         const auto textureBytes = Policy::EstimateTextureMemoryBytes(resourceExtent, MaximumGpuOcclusionPyramidLevels,
                                                                      Specification.MaximumFramesInFlight);
         if (!textureBytes || !Policy::TextureMemoryWithinBudget(*textureBytes))
@@ -336,13 +355,15 @@ namespace Keire::RenderBackend
             for (std::uint32_t instance = 0; instance < sceneBatch.Count; ++instance)
             {
                 const auto& instanceDraw = draws.Opaque.Draws[drawIndex + instance];
+                const auto outputIndex = static_cast<std::uint32_t>(candidates.size());
                 candidates.push_back(
                     {{instanceDraw.Submesh.Bounds.Minimum.X, instanceDraw.Submesh.Bounds.Minimum.Y,
                       instanceDraw.Submesh.Bounds.Minimum.Z, 0.0F},
                      {instanceDraw.Submesh.Bounds.Maximum.X, instanceDraw.Submesh.Bounds.Maximum.Y,
                       instanceDraw.Submesh.Bounds.Maximum.Z, 0.0F},
-                     {VisibilityMetadataFlags(*instanceDraw.Item),
-                      static_cast<std::uint32_t>(ResolvedVisibilityClass(*instanceDraw.Item)), 0U, 0U}});
+                     {VisibilityMetadataFlags(*instanceDraw.Item, packet.FrameIndex),
+                      static_cast<std::uint32_t>(ResolvedVisibilityClass(*instanceDraw.Item)), outputIndex,
+                      static_cast<std::uint32_t>(GpuVisibilityConsumer::IndexedIndirect)}});
                 inputInstances.push_back({instanceDraw.Item->World, Transpose(Math::Inverse(instanceDraw.Item->World)),
                                           instanceDraw.Item->Tint});
             }
@@ -381,7 +402,8 @@ namespace Keire::RenderBackend
             for (std::uint32_t instance = 0; instance < sceneBatch.Count; ++instance)
             {
                 const auto& instanceDraw = draws.Opaque.Draws[drawIndex + instance];
-                if (!CanGpuVisibilityClassOcclude(ResolvedVisibilityClass(*instanceDraw.Item)))
+                if (!CanGpuVisibilityClassOcclude(ResolvedVisibilityClass(*instanceDraw.Item),
+                                                  instanceDraw.Item->HasFreshCurrentPoseBounds(packet.FrameIndex)))
                 {
                     flushRange();
                     continue;
@@ -464,8 +486,9 @@ namespace Keire::RenderBackend
             candidates.push_back(
                 {{draw.Submesh.Bounds.Minimum.X, draw.Submesh.Bounds.Minimum.Y, draw.Submesh.Bounds.Minimum.Z, 0.0F},
                  {draw.Submesh.Bounds.Maximum.X, draw.Submesh.Bounds.Maximum.Y, draw.Submesh.Bounds.Maximum.Z, 0.0F},
-                 {VisibilityMetadataFlags(*draw.Item), static_cast<std::uint32_t>(ResolvedVisibilityClass(*draw.Item)),
-                  0U, 0U}});
+                 {VisibilityMetadataFlags(*draw.Item, packet.FrameIndex),
+                  static_cast<std::uint32_t>(ResolvedVisibilityClass(*draw.Item)), candidateFirst,
+                  static_cast<std::uint32_t>(GpuVisibilityConsumer::IndexedIndirect)}});
             inputInstances.push_back({draw.Item->World, Transpose(Math::Inverse(draw.Item->World)), draw.Item->Tint});
             const auto chunkFirst = static_cast<std::uint32_t>(chunks.size());
             chunks.push_back({candidateFirst, 1U, static_cast<std::uint32_t>(batches.size()), 0U});
@@ -479,6 +502,69 @@ namespace Keire::RenderBackend
         }
 
         prepared.CandidateCount = static_cast<std::uint32_t>(candidates.size());
+
+        const auto cameraWorld = Math::TransformPoint(Math::Inverse(packet.Camera.View), {});
+        const auto cameraInsideSphere = [&](const Vector3 center, const float radius) noexcept
+        {
+            const auto delta = Vector3{cameraWorld.X - center.X, cameraWorld.Y - center.Y, cameraWorld.Z - center.Z};
+            return !Math::IsFinite(cameraWorld) ||
+                   delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z <= radius * radius;
+        };
+        const auto appendMaskCandidate =
+            [&](const MeshBounds bounds, const Matrix4& model, const GpuVisibilityClass visibilityClass,
+                const GpuVisibilityConsumer consumer, const std::uint32_t outputIndex, const bool forceVisible)
+        {
+            if (candidates.size() >= MaximumGpuOcclusionCandidates || !Math::IsFinite(bounds.Minimum) ||
+                !Math::IsFinite(bounds.Maximum) || !Math::IsFinite(model))
+            {
+                return;
+            }
+            const auto flags = GpuVisibilityFlagsForDraw(visibilityClass, forceVisible, true);
+            candidates.push_back({{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z, 0.0F},
+                                  {bounds.Maximum.X, bounds.Maximum.Y, bounds.Maximum.Z, 0.0F},
+                                  {static_cast<std::uint32_t>(flags), static_cast<std::uint32_t>(visibilityClass),
+                                   outputIndex, static_cast<std::uint32_t>(consumer)}});
+            inputInstances.push_back({model, Transpose(Math::Inverse(model)), Color{}});
+        };
+        for (std::uint32_t index = 0; index < localLightCandidates; ++index)
+        {
+            const auto& light = packet.LocalLights[index];
+            if (!std::isfinite(light.Range) || light.Range <= 0.0F || !Math::IsFinite(light.Position))
+                continue;
+            const Vector3 extent{light.Range, light.Range, light.Range};
+            appendMaskCandidate({{-extent.X, -extent.Y, -extent.Z}, extent},
+                                Math::ComposeTransform(light.Position, {}, {1.0F, 1.0F, 1.0F}),
+                                light.Type == SceneLocalLightType::Spot ? GpuVisibilityClass::SpotLight
+                                                                        : GpuVisibilityClass::PointLight,
+                                GpuVisibilityConsumer::ForwardPlusLightMask, index,
+                                cameraInsideSphere(light.Position, light.Range));
+        }
+        std::uint32_t spatialOutputIndex = 0;
+        for (const auto& probe : packet.ReflectionProbes)
+        {
+            const auto blend = std::max(probe.BlendDistance, 0.0F);
+            const Vector3 extent{probe.BoxExtents.X + blend, probe.BoxExtents.Y + blend, probe.BoxExtents.Z + blend};
+            const auto localCamera = Math::TransformPoint(probe.WorldToLocal, cameraWorld);
+            const bool cameraInside = !Math::IsFinite(localCamera) ||
+                                      (std::abs(localCamera.X) <= extent.X && std::abs(localCamera.Y) <= extent.Y &&
+                                       std::abs(localCamera.Z) <= extent.Z);
+            appendMaskCandidate({{-extent.X, -extent.Y, -extent.Z}, extent}, probe.LocalToWorld,
+                                GpuVisibilityClass::ReflectionProbe, GpuVisibilityConsumer::SpatialVolumeMask,
+                                spatialOutputIndex, cameraInside);
+            ++spatialOutputIndex;
+        }
+        for (const auto& volume : packet.LightProbeVolumes)
+        {
+            const auto localCamera = Math::TransformPoint(volume.WorldToLocal, cameraWorld);
+            const bool cameraInside = !Math::IsFinite(localCamera) || (std::abs(localCamera.X) <= volume.BoxExtents.X &&
+                                                                       std::abs(localCamera.Y) <= volume.BoxExtents.Y &&
+                                                                       std::abs(localCamera.Z) <= volume.BoxExtents.Z);
+            appendMaskCandidate({{-volume.BoxExtents.X, -volume.BoxExtents.Y, -volume.BoxExtents.Z}, volume.BoxExtents},
+                                volume.LocalToWorld, GpuVisibilityClass::LightProbeVolume,
+                                GpuVisibilityConsumer::SpatialVolumeMask, spatialOutputIndex, cameraInside);
+            ++spatialOutputIndex;
+        }
+        prepared.ClassificationCandidateCount = static_cast<std::uint32_t>(candidates.size());
         prepared.BatchCount = static_cast<std::uint32_t>(batches.size());
         prepared.ChunkCount = static_cast<std::uint32_t>(chunks.size());
         auto& diagnostics = surface.GpuOcclusionDiagnostics;
@@ -588,9 +674,8 @@ namespace Keire::RenderBackend
         {
             if (!commands || Specification.MaximumFramesInFlight == 0)
                 throw std::logic_error("GPU occlusion preparation requires an active rendered frame.");
-            auto& frames = surface.ActiveWorkset().GpuOcclusionFrames;
-            frames.resize(Specification.MaximumFramesInFlight);
-            auto& resources = frames[frameIndex];
+            auto& resources = surface.ActiveWorkset().GpuOcclusion;
+            resources.OwnershipValid = false;
 
             if (!resources.Depth || resources.Pyramid.empty() || resources.Width != resourceExtent.Width ||
                 resources.Height != resourceExtent.Height)
@@ -684,7 +769,7 @@ namespace Keire::RenderBackend
             const auto candidateBytes = static_cast<std::uint64_t>(candidates.size()) * sizeof(candidates.front());
             const auto instanceBytes =
                 static_cast<std::uint64_t>(inputInstances.size()) * sizeof(inputInstances.front());
-            const auto uintBytes = static_cast<std::uint64_t>(candidates.size()) * sizeof(std::uint32_t);
+            const auto geometryUintBytes = static_cast<std::uint64_t>(prepared.CandidateCount) * sizeof(std::uint32_t);
             const auto chunkBytes = static_cast<std::uint64_t>(chunks.size()) * sizeof(chunks.front());
             const auto batchBytes = static_cast<std::uint64_t>(batches.size()) * sizeof(batches.front());
             const auto chunkUintBytes = static_cast<std::uint64_t>(chunks.size()) * sizeof(std::uint32_t);
@@ -695,11 +780,24 @@ namespace Keire::RenderBackend
             ensureBuffer(resources.InputInstances, instanceBytes,
                          SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
                          "occlusion input instances");
-            ensureBuffer(resources.Visibility, uintBytes,
+            ensureBuffer(resources.GeometryVisibility, geometryUintBytes,
                          SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
                              SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
-                         "occlusion visibility");
-            ensureBuffer(resources.LocalOffsets, uintBytes,
+                         "geometry visibility");
+            const auto ensureConservativeMask =
+                [&](GpuOcclusionBuffer& buffer, const std::uint32_t count, const char* diagnostic)
+            {
+                ensureBuffer(buffer, static_cast<std::uint64_t>(std::max(count, 1U)) * sizeof(std::uint32_t),
+                             SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE |
+                                 SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ,
+                             diagnostic);
+            };
+            ensureConservativeMask(resources.VfxVisibilityMask, vfxVisibilityCandidates, "VFX visibility mask");
+            ensureConservativeMask(resources.LocalLightVisibilityMask, localLightCandidates,
+                                   "local-light visibility mask");
+            ensureConservativeMask(resources.SpatialVolumeVisibilityMask, spatialVolumeCandidates,
+                                   "spatial-volume visibility mask");
+            ensureBuffer(resources.LocalOffsets, geometryUintBytes,
                          SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE,
                          "occlusion local offsets");
             ensureBuffer(resources.Chunks, chunkBytes, SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ, "occlusion chunks");
@@ -741,6 +839,16 @@ namespace Keire::RenderBackend
             append(chunks, resources.Chunks.Buffer);
             append(batches, resources.Batches.Buffer);
             append(indirect, resources.IndirectArguments.Buffer);
+            const auto appendConservativeMask = [&](const std::uint32_t count, SDL_GPUBuffer* destination)
+            {
+                if (count == 0 || !destination)
+                    return;
+                std::vector<std::uint32_t> visible(count, 1U);
+                append(visible, destination);
+            };
+            appendConservativeMask(vfxVisibilityCandidates, resources.VfxVisibilityMask.Buffer);
+            appendConservativeMask(localLightCandidates, resources.LocalLightVisibilityMask.Buffer);
+            appendConservativeMask(spatialVolumeCandidates, resources.SpatialVolumeVisibilityMask.Buffer);
             const std::array zeroStatus{GpuOcclusionStatus{}};
             append(zeroStatus, resources.Status.Buffer);
 
@@ -794,6 +902,15 @@ namespace Keire::RenderBackend
             draws.Opaque.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
             draws.Transparent.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
             draws.Transparent.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
+            resources.FrameId = packet.FrameIndex;
+            resources.FrameSlot = frameSlot;
+            resources.SurfaceEpoch = surface.Epoch;
+            resources.DeviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
+            resources.GeometryVisibilityCount = prepared.CandidateCount;
+            resources.VfxVisibilityCount = vfxVisibilityCandidates;
+            resources.LocalLightVisibilityCount = localLightCandidates;
+            resources.SpatialVolumeVisibilityCount = spatialVolumeCandidates;
+            resources.OwnershipValid = true;
             prepared.Resources = std::addressof(resources);
             prepared.Enabled = true;
             const auto partialFallbackReason = oversizedBatch    ? GpuOcclusionFallbackReason::OversizedBatch
@@ -854,12 +971,15 @@ namespace Keire::RenderBackend
         }
     }
 
-    void RenderSharedState::RecordGpuOcclusionDepth(SDL_GPUCommandBuffer* commands, const SceneRenderPacket& packet,
+    void RenderSharedState::RecordGpuOcclusionDepth(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
+                                                    const SceneRenderPacket& packet,
                                                     const PreparedSceneDrawLists& draws,
                                                     const PreparedGpuOcclusion& occlusion)
     {
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion depth record");
-        if (!occlusion.Enabled || !occlusion.Resources)
+        if (!occlusion.Enabled || !occlusion.Resources ||
+            !VisibilityResourcesOwnedBy(*occlusion.Resources, surface, packet,
+                                        DeviceGeneration.load(std::memory_order_acquire)))
             return;
         const auto started = std::chrono::steady_clock::now();
         const ScopedGpuDebugGroup debugGroup(commands, "Occlusion depth");
@@ -889,11 +1009,12 @@ namespace Keire::RenderBackend
                 SDL_BindGPUGraphicsPipeline(pass, pipeline);
                 boundPipeline = pipeline;
             }
-            if (mesh.AssetVertices != boundVertices)
+            auto* vertices = draw.Item->SkinnedAssetVertices ? draw.Item->SkinnedAssetVertices : mesh.AssetVertices;
+            if (vertices != boundVertices)
             {
-                const SDL_GPUBufferBinding binding{mesh.AssetVertices, 0};
+                const SDL_GPUBufferBinding binding{vertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
-                boundVertices = mesh.AssetVertices;
+                boundVertices = vertices;
             }
             if (mesh.Indices != boundIndices)
             {
@@ -918,11 +1039,13 @@ namespace Keire::RenderBackend
     }
 
     void RenderSharedState::RecordGpuOcclusionPyramid(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                      const SceneRenderPacket& packet,
                                                       const PreparedGpuOcclusion& occlusion)
     {
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion HZB record");
-        (void)surface;
-        if (!occlusion.Enabled || !occlusion.Resources || occlusion.Resources->Pyramid.empty())
+        if (!occlusion.Enabled || !occlusion.Resources || occlusion.Resources->Pyramid.empty() ||
+            !VisibilityResourcesOwnedBy(*occlusion.Resources, surface, packet,
+                                        DeviceGeneration.load(std::memory_order_acquire)))
             return;
         const auto started = std::chrono::steady_clock::now();
         const ScopedGpuDebugGroup debugGroup(commands, "Occlusion depth pyramid");
@@ -962,8 +1085,23 @@ namespace Keire::RenderBackend
                                                       const PreparedGpuOcclusion& occlusion)
     {
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion classify scan scatter record");
-        if (!occlusion.Enabled || !occlusion.Resources)
+        if (!occlusion.Enabled || !occlusion.Resources ||
+            !VisibilityResourcesOwnedBy(*occlusion.Resources, surface, packet,
+                                        DeviceGeneration.load(std::memory_order_acquire)))
+        {
+            for (auto* drawList : {&draws.Opaque, &draws.Transparent})
+            {
+                for (auto& batch : drawList->Batches)
+                {
+                    batch.GpuOcclusion = false;
+                    batch.GpuOcclusionInstanceBase = 0;
+                    batch.GpuOcclusionIndirectOffset = 0;
+                }
+                drawList->GpuOcclusionVisibleInstances = nullptr;
+                drawList->GpuOcclusionIndirectArguments = nullptr;
+            }
             return;
+        }
         const auto started = std::chrono::steady_clock::now();
         auto& resources = *occlusion.Resources;
         const ScopedGpuDebugGroup debugGroup(commands, "GPU occlusion culling");
@@ -972,8 +1110,13 @@ namespace Keire::RenderBackend
         {
             KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion classify");
             const ScopedGpuDebugGroup stageDebugGroup(commands, "Occlusion classify");
-            const SDL_GPUStorageBufferReadWriteBinding write{resources.Visibility.Buffer, false};
-            auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, &write, 1);
+            const std::array writes{
+                SDL_GPUStorageBufferReadWriteBinding{resources.GeometryVisibility.Buffer, false},
+                SDL_GPUStorageBufferReadWriteBinding{resources.VfxVisibilityMask.Buffer, false},
+                SDL_GPUStorageBufferReadWriteBinding{resources.LocalLightVisibilityMask.Buffer, false},
+                SDL_GPUStorageBufferReadWriteBinding{resources.SpatialVolumeVisibilityMask.Buffer, false}};
+            auto* pass =
+                SDL_BeginGPUComputePass(commands, nullptr, 0, writes.data(), static_cast<std::uint32_t>(writes.size()));
             if (!pass)
                 throw std::runtime_error("SDL_BeginGPUComputePass(occlusion classify) failed: " + LastSdlError());
             SDL_BindGPUComputePipeline(pass, GpuOcclusionClassifyPipeline);
@@ -990,8 +1133,8 @@ namespace Keire::RenderBackend
             uniforms.ViewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
             uniforms.ViewportBiasLevels = {static_cast<float>(resources.Width), static_cast<float>(resources.Height),
                                            OcclusionDepthBias, static_cast<float>(resources.Pyramid.size())};
-            uniforms.DispatchCounts = {occlusion.CandidateCount, static_cast<std::uint32_t>(resources.Pyramid.size()),
-                                       0U, 0U};
+            uniforms.DispatchCounts = {occlusion.ClassificationCandidateCount,
+                                       static_cast<std::uint32_t>(resources.Pyramid.size()), 0U, 0U};
             std::uint32_t width = (resources.Width + 1U) / 2U;
             std::uint32_t height = (resources.Height + 1U) / 2U;
             for (std::size_t level = 0; level < resources.Pyramid.size(); ++level)
@@ -1001,7 +1144,7 @@ namespace Keire::RenderBackend
                 height = (height + 1U) / 2U;
             }
             SDL_PushGPUComputeUniformData(commands, 0, &uniforms, sizeof(uniforms));
-            SDL_DispatchGPUCompute(pass, (occlusion.CandidateCount + 255U) / 256U, 1, 1);
+            SDL_DispatchGPUCompute(pass, (occlusion.ClassificationCandidateCount + 255U) / 256U, 1, 1);
             ++recordedDispatches;
             SDL_EndGPUComputePass(pass);
         }
@@ -1015,7 +1158,7 @@ namespace Keire::RenderBackend
             if (!pass)
                 throw std::runtime_error("SDL_BeginGPUComputePass(occlusion block scan) failed: " + LastSdlError());
             SDL_BindGPUComputePipeline(pass, GpuOcclusionScanBlocksPipeline);
-            const std::array read{resources.Visibility.Buffer, resources.Chunks.Buffer};
+            const std::array read{resources.GeometryVisibility.Buffer, resources.Chunks.Buffer};
             SDL_BindGPUComputeStorageBuffers(pass, 0, read.data(), static_cast<std::uint32_t>(read.size()));
             for (std::uint32_t base = 0; base < occlusion.ChunkCount; base += MaximumGpuDispatchGroupsPerDimension)
             {
@@ -1058,9 +1201,9 @@ namespace Keire::RenderBackend
             if (!pass)
                 throw std::runtime_error("SDL_BeginGPUComputePass(occlusion scatter) failed: " + LastSdlError());
             SDL_BindGPUComputePipeline(pass, GpuOcclusionScatterPipeline);
-            const std::array read{resources.Visibility.Buffer, resources.LocalOffsets.Buffer,
-                                  resources.Chunks.Buffer,     resources.ChunkOffsets.Buffer,
-                                  resources.Batches.Buffer,    resources.InputInstances.Buffer};
+            const std::array read{
+                resources.GeometryVisibility.Buffer, resources.LocalOffsets.Buffer, resources.Chunks.Buffer,
+                resources.ChunkOffsets.Buffer,       resources.Batches.Buffer,      resources.InputInstances.Buffer};
             SDL_BindGPUComputeStorageBuffers(pass, 0, read.data(), static_cast<std::uint32_t>(read.size()));
             for (std::uint32_t base = 0; base < occlusion.ChunkCount; base += MaximumGpuDispatchGroupsPerDimension)
             {
@@ -1105,7 +1248,9 @@ namespace Keire::RenderBackend
     {
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion debug view record");
         const auto debugMode = surface.GpuOcclusionDebugMode.load(std::memory_order_acquire);
-        if (!commands || !occlusion.Enabled || !occlusion.Resources || debugMode == GpuOcclusionDebugView::None)
+        if (!commands || !occlusion.Enabled || !occlusion.Resources || debugMode == GpuOcclusionDebugView::None ||
+            !VisibilityResourcesOwnedBy(*occlusion.Resources, surface, packet,
+                                        DeviceGeneration.load(std::memory_order_acquire)))
         {
             return;
         }
@@ -1155,7 +1300,7 @@ namespace Keire::RenderBackend
         else
         {
             const std::array storage{resources.Candidates.Buffer, resources.InputInstances.Buffer,
-                                     resources.Visibility.Buffer};
+                                     resources.GeometryVisibility.Buffer};
             const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
             SDL_BindGPUGraphicsPipeline(pass, GpuOcclusionDebugBoundsPipeline);
             SDL_BindGPUVertexStorageBuffers(pass, 0, storage.data(), static_cast<std::uint32_t>(storage.size()));

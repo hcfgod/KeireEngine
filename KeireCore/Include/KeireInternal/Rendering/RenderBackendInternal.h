@@ -496,6 +496,22 @@ namespace Keire::RenderBackend
         AssetId Scene;
         std::uint32_t ContributionOrder = 0;
         GpuVisibilityClass VisibilityClass = GpuVisibilityClass::StaticMesh;
+        std::uint64_t PoseGeneration = 0;
+        std::vector<MeshBounds> CurrentPoseSubmeshBounds;
+        std::uint64_t BoundsPoseGeneration = 0;
+        std::uint64_t BoundsFrameIndex = 0;
+
+        [[nodiscard]] bool HasFreshCurrentPoseBounds(const std::uint64_t frameIndex,
+                                                     const std::size_t submeshCount) const noexcept
+        {
+            return HasFreshCurrentPoseBounds(frameIndex) && CurrentPoseSubmeshBounds.size() == submeshCount;
+        }
+
+        [[nodiscard]] bool HasFreshCurrentPoseBounds(const std::uint64_t frameIndex) const noexcept
+        {
+            return PoseGeneration != 0 && BoundsPoseGeneration == PoseGeneration && BoundsFrameIndex == frameIndex &&
+                   !CurrentPoseSubmeshBounds.empty() && SkinnedAssetVertices;
+        }
     };
 
     [[nodiscard]] inline std::optional<SceneDrawItem> VfxMeshDrawItem(const VfxRenderParticle& particle)
@@ -1027,6 +1043,7 @@ namespace Keire::RenderBackend
         GpuOcclusionFrameResources* Resources = nullptr;
         std::vector<PreparedGpuOccluderBatch> Occluders;
         std::uint32_t CandidateCount = 0;
+        std::uint32_t ClassificationCandidateCount = 0;
         std::uint32_t BatchCount = 0;
         std::uint32_t ChunkCount = 0;
         std::uint64_t CandidateTriangles = 0;
@@ -1160,10 +1177,11 @@ namespace Keire::RenderBackend
                                                                RenderSurfaceState& surface,
                                                                const SceneRenderPacket& packet,
                                                                PreparedSceneDrawLists& draws);
-        void RecordGpuOcclusionDepth(SDL_GPUCommandBuffer* commands, const SceneRenderPacket& packet,
-                                     const PreparedSceneDrawLists& draws, const PreparedGpuOcclusion& occlusion);
+        void RecordGpuOcclusionDepth(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
+                                     const SceneRenderPacket& packet, const PreparedSceneDrawLists& draws,
+                                     const PreparedGpuOcclusion& occlusion);
         void RecordGpuOcclusionPyramid(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
-                                       const PreparedGpuOcclusion& occlusion);
+                                       const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         void RecordGpuOcclusionCulling(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                        const SceneRenderPacket& packet, PreparedSceneDrawLists& draws,
                                        const PreparedGpuOcclusion& occlusion);

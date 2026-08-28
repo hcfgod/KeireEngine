@@ -33,6 +33,54 @@ TEST_CASE("Animator edit preview state can be cleared without changing authored 
     CHECK(animator.RuntimeDiagnostic().empty());
 }
 
+TEST_CASE("Animator runtime pose generation advances only for committed pose changes")
+{
+    Keire::AnimatorComponent animator;
+    CHECK(animator.PoseGeneration() == 0);
+
+    const std::array<Keire::Matrix4, 1> palette{Keire::Matrix4{}};
+    animator.SetRuntimePose("Idle", 0.25F, true, palette);
+    const auto firstGeneration = animator.PoseGeneration();
+    CHECK(firstGeneration != 0);
+
+    animator.SetRuntimePose("Run", 0.5F, true, palette);
+    const auto secondGeneration = animator.PoseGeneration();
+    CHECK(secondGeneration > firstGeneration);
+
+    auto invalidPalette = palette;
+    invalidPalette.front().Elements[0] = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(animator.SetRuntimePose("Invalid", 0.75F, true, invalidPalette), std::invalid_argument);
+    CHECK(animator.PoseGeneration() == secondGeneration);
+    CHECK(animator.CurrentState() == "Run");
+
+    animator.ClearRuntimePose();
+    const auto clearedGeneration = animator.PoseGeneration();
+    CHECK(clearedGeneration > secondGeneration);
+    CHECK(animator.SkinPalette().empty());
+
+    animator.ClearRuntimePose();
+    CHECK(animator.PoseGeneration() > clearedGeneration);
+}
+
+TEST_CASE("Animator runtime pose generation is excluded from serialized authored state")
+{
+    Keire::AnimatorComponent animator;
+    const std::array<Keire::Matrix4, 1> palette{Keire::Matrix4{}};
+    animator.SetRuntimePose("Idle", 0.25F, true, palette);
+    REQUIRE(animator.PoseGeneration() != 0);
+
+    const auto registration = Keire::CreateAnimatorComponentRegistration();
+    const auto values = registration.Serialize(animator);
+    CHECK_FALSE(values.contains("poseGeneration"));
+
+    auto restored = registration.Factory();
+    registration.Deserialize(*restored, values, registration.SchemaVersion);
+    const auto restoredAnimator = Keire::DynamicRefCast<Keire::AnimatorComponent>(restored);
+    REQUIRE(restoredAnimator);
+    CHECK(restoredAnimator->PoseGeneration() == 0);
+    CHECK(restoredAnimator->SkinPalette().empty());
+}
+
 TEST_CASE("Animator component queues ordered managed playback controls and preserves speed while paused")
 {
     Keire::AnimatorComponent animator;

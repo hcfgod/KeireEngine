@@ -884,7 +884,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 18);
+    CHECK(importer.Version == 19);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -909,6 +909,41 @@ TEST_CASE("model importer exposes explicit animation source routing")
     CHECK(motion->Group == "Animation");
     CHECK(std::get<std::string>(motion->DefaultValue) == "rootMotion");
     CHECK(motion->Choices == std::vector<std::string>{"rootMotion", "authored", "inPlaceHorizontal", "inPlace"});
+}
+
+TEST_CASE("model importer version nineteen publishes complete skinned influence bounds")
+{
+    TemporaryDirectory directory("SkinnedBoundsImportTests");
+    const auto sourcePath = directory.Path / "character.obj";
+    {
+        std::ofstream source(sourcePath);
+        source << "v -1 0 -1\nv 1 0 -1\nv -1 2 -1\nv 1 2 -1\n"
+                  "v -1 0 1\nv 1 0 1\nv -1 2 1\nv 1 2 1\n"
+                  "f 1 2 3\nf 2 4 3\nf 5 7 6\nf 6 7 8\n";
+    }
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = sourcePath;
+    context.RelativePath = sourcePath.filename();
+    context.ImportSettings["rigSource"] = std::string("generate");
+    std::unordered_map<std::string, Keire::AssetId> subAssetIds;
+    context.ResolveSubAssetId = [&subAssetIds](const std::string_view key)
+    { return subAssetIds.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    const auto output = Keire::CreateMeshAssetImporter().ContextualImport(context, ReadTestBytes(sourcePath));
+    const auto mesh = Keire::MeshAsset::Decode(output.Bytes);
+    const auto skinnedSubAsset = std::ranges::find(output.SubAssets, Keire::SkinnedMeshAsset::StaticType(),
+                                                   &Keire::AssetGeneratedSubAsset::Type);
+    REQUIRE(skinnedSubAsset != output.SubAssets.end());
+    const auto skinned = Keire::SkinnedMeshAsset::Decode(skinnedSubAsset->Bytes);
+    CHECK(skinned->HasCompleteInfluenceBounds());
+    CHECK(skinned->InfluenceBoundsSubmeshCount() == mesh->Submeshes().size());
+    CHECK_FALSE(skinned->InfluenceBounds().empty());
+    for (std::uint32_t submesh = 0; submesh < mesh->Submeshes().size(); ++submesh)
+        CHECK(std::ranges::any_of(skinned->InfluenceBounds(), [submesh](const Keire::SkinInfluenceBounds& bounds)
+                                  { return bounds.Submesh == submesh; }));
 }
 
 TEST_CASE("animation source import can bake semantic pelvis translation in place")

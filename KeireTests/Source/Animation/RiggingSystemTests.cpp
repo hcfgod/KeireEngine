@@ -1,6 +1,7 @@
 #include "Keire/Animation/RiggingSystem.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -95,9 +96,53 @@ TEST_CASE("Auto rig generation is deterministic and emits normalized four or eig
     CHECK(decoded->Skeleton() == skeletonId);
     CHECK(decoded->Method() == Keire::SkinningMethod::DualQuaternion);
     CHECK(decoded->MaximumInfluences() == 8);
+    CHECK_FALSE(decoded->HasCompleteInfluenceBounds());
+    CHECK(decoded->InfluenceBounds().empty());
     REQUIRE(decoded->Influences8().size() == first.Influences.size());
     for (std::size_t index = 0; index < first.Influences.size(); ++index)
         CHECK(decoded->Influences8()[index] == first.Influences[index]);
+
+    const auto v4WithoutBounds =
+        Keire::SkinnedMeshAsset::Encode(meshId, skeletonId, first.Influences, Keire::SkinningMethod::LinearBlend);
+    auto legacyDocument = nlohmann::json::from_cbor(
+        reinterpret_cast<const std::uint8_t*>(v4WithoutBounds.data()),
+        reinterpret_cast<const std::uint8_t*>(v4WithoutBounds.data() + v4WithoutBounds.size()));
+    legacyDocument["schemaVersion"] = 3;
+    legacyDocument.erase("influenceBoundsComplete");
+    legacyDocument.erase("influenceBoundsSubmeshCount");
+    legacyDocument.erase("influenceBoundsCount");
+    legacyDocument.erase("influenceBoundsStride");
+    legacyDocument.erase("influenceBounds");
+    const auto legacyCbor = nlohmann::json::to_cbor(legacyDocument);
+    const std::span legacyBytes{reinterpret_cast<const std::byte*>(legacyCbor.data()), legacyCbor.size()};
+    const auto legacy = Keire::SkinnedMeshAsset::Decode(legacyBytes);
+    CHECK_FALSE(legacy->HasCompleteInfluenceBounds());
+    CHECK(legacy->InfluenceBounds().empty());
+    CHECK(std::ranges::equal(legacy->Influences8(), decoded->Influences8()));
+
+    const auto bindBounds = Keire::CalculateBindSpaceSkinInfluenceBounds(mesh.Vertices(), mesh.Indices(),
+                                                                         mesh.Submeshes(), first.Influences);
+    const auto completeBytes =
+        Keire::SkinnedMeshAsset::Encode(meshId, skeletonId, first.Influences, Keire::SkinningMethod::LinearBlend,
+                                        static_cast<std::uint32_t>(mesh.Submeshes().size()), bindBounds);
+    const auto complete = Keire::SkinnedMeshAsset::Decode(completeBytes);
+    CHECK(complete->HasCompleteInfluenceBounds());
+    CHECK(complete->InfluenceBoundsSubmeshCount() == mesh.Submeshes().size());
+    CHECK(std::ranges::equal(complete->InfluenceBounds(), bindBounds));
+
+    auto malformedDocument =
+        nlohmann::json::from_cbor(reinterpret_cast<const std::uint8_t*>(completeBytes.data()),
+                                  reinterpret_cast<const std::uint8_t*>(completeBytes.data() + completeBytes.size()));
+    malformedDocument["influenceBoundsSubmeshCount"] = bindBounds.size() + 1U;
+    const auto malformedCbor = nlohmann::json::to_cbor(malformedDocument);
+    const std::span malformedBytes{reinterpret_cast<const std::byte*>(malformedCbor.data()), malformedCbor.size()};
+    CHECK_THROWS_AS((void)Keire::SkinnedMeshAsset::Decode(malformedBytes), std::invalid_argument);
+
+    auto incompleteBounds = bindBounds;
+    incompleteBounds.clear();
+    CHECK_THROWS_AS((void)Keire::SkinnedMeshAsset::Encode(meshId, skeletonId, first.Influences,
+                                                          Keire::SkinningMethod::LinearBlend, 1, incompleteBounds),
+                    std::invalid_argument);
 }
 
 TEST_CASE("Animator controller authoring permits an empty layer before its first state")

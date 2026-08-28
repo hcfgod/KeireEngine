@@ -47,8 +47,14 @@ versions.
   coverage plan.
 - Material Graph authoring now binds Shader Graph parameters without requiring duplicate surface shader logic; legacy
   surface expressions remain import-compatible.
-- GPU occlusion now reports class-level coverage, classifies mesh VFX and skinned draws, and explicitly forces unsafe
-  or currently unmaskable lights and spatial work visible instead of risking incorrect rejection.
+- GPU occlusion now derives conservative current-pose submesh bounds for imported linear-blend skins and accepts them
+  only when pose generation, immutable frame index, and the deformed vertex stream all match. Stale bounds,
+  dual-quaternion skinning, morph targets, unbounded world-position displacement, and unknown deformation remain
+  force-visible instead of risking incorrect rejection.
+- Added frame-slot-, surface-epoch-, and device-generation-qualified geometry, VFX, local-light, and spatial-volume
+  visibility buffers. Geometry consumes its same-frame mask for scan/scatter compaction and indexed indirect draws;
+  VFX, Forward+ local-light, and spatial-volume masks remain conservative infrastructure with their capability flags
+  disabled until those consumers are wired.
 
 ### Fixed
 

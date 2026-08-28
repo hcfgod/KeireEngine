@@ -42,7 +42,10 @@ SamplerState HierarchySampler12 : register(s12, space0);
 SamplerState HierarchySampler13 : register(s13, space0);
 StructuredBuffer<OcclusionCandidate> Candidates : register(t14, space0);
 StructuredBuffer<InstanceData> InputInstances : register(t15, space0);
-RWStructuredBuffer<uint> Visibility : register(u0, space1);
+RWStructuredBuffer<uint> GeometryVisibility : register(u0, space1);
+RWStructuredBuffer<uint> VfxVisibilityMask : register(u1, space1);
+RWStructuredBuffer<uint> LocalLightVisibilityMask : register(u2, space1);
+RWStructuredBuffer<uint> SpatialVolumeVisibilityMask : register(u3, space1);
 
 cbuffer ClassifyDispatch : register(b0, space2)
 {
@@ -53,6 +56,31 @@ cbuffer ClassifyDispatch : register(b0, space2)
 };
 
 static const uint ForceVisible = 1U;
+static const uint IndexedIndirectConsumer = 0U;
+static const uint VfxVisibilityConsumer = 1U;
+static const uint ForwardPlusLightConsumer = 2U;
+static const uint SpatialVolumeConsumer = 3U;
+
+void StoreVisibility(OcclusionCandidate candidate, uint visible)
+{
+    const uint outputIndex = candidate.Metadata.z;
+    switch (candidate.Metadata.w)
+    {
+    case VfxVisibilityConsumer:
+        VfxVisibilityMask[outputIndex] = visible;
+        break;
+    case ForwardPlusLightConsumer:
+        LocalLightVisibilityMask[outputIndex] = visible;
+        break;
+    case SpatialVolumeConsumer:
+        SpatialVolumeVisibilityMask[outputIndex] = visible;
+        break;
+    case IndexedIndirectConsumer:
+    default:
+        GeometryVisibility[outputIndex] = visible;
+        break;
+    }
+}
 
 float SampleHierarchy(uint level, float2 uv)
 {
@@ -98,7 +126,7 @@ float SampleHierarchy(uint level, float2 uv)
     const OcclusionCandidate candidate = Candidates[candidateIndex];
     if ((candidate.Metadata.x & ForceVisible) != 0U)
     {
-        Visibility[candidateIndex] = 1U;
+        StoreVisibility(candidate, 1U);
         return;
     }
 
@@ -133,7 +161,7 @@ float SampleHierarchy(uint level, float2 uv)
 
     if (ambiguous || any(maximumPixel < 0.0F.xx) || any(minimumPixel > ViewportBiasLevels.xy))
     {
-        Visibility[candidateIndex] = 1U;
+        StoreVisibility(candidate, 1U);
         return;
     }
 
@@ -167,5 +195,5 @@ float SampleHierarchy(uint level, float2 uv)
             farthestDepth = max(farthestDepth, SampleHierarchy(selectedLevel, uv));
         }
     }
-    Visibility[candidateIndex] = nearestDepth > farthestDepth + ViewportBiasLevels.z ? 0U : 1U;
+    StoreVisibility(candidate, nearestDepth > farthestDepth + ViewportBiasLevels.z ? 0U : 1U);
 }

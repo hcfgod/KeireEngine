@@ -316,7 +316,10 @@ namespace Keire::RenderBackend
             releaseBuffer(resources.ChunkCounts);
             releaseBuffer(resources.Chunks);
             releaseBuffer(resources.LocalOffsets);
-            releaseBuffer(resources.Visibility);
+            releaseBuffer(resources.SpatialVolumeVisibilityMask);
+            releaseBuffer(resources.LocalLightVisibilityMask);
+            releaseBuffer(resources.VfxVisibilityMask);
+            releaseBuffer(resources.GeometryVisibility);
             releaseBuffer(resources.InputInstances);
             releaseBuffer(resources.Candidates);
             if (resources.Readback)

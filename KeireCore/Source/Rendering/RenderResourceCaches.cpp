@@ -612,11 +612,13 @@ namespace Keire::RenderBackend
                 std::vector<Matrix4> skinPalette;
                 AssetId skin;
                 AssetId skinSkeleton;
+                std::uint64_t poseGeneration = 0;
                 if (const auto animator = entity.GetComponent<AnimatorComponent>(); animator && animator->Enabled())
                 {
                     skinPalette.assign(animator->SkinPalette().begin(), animator->SkinPalette().end());
                     skin = animator->SkinnedMesh();
                     skinSkeleton = animator->Skeleton();
+                    poseGeneration = animator->PoseGeneration();
                 }
                 packet.DrawItems.push_back({renderer->Mesh(),
                                             {renderer->Materials().begin(), renderer->Materials().end()},
@@ -636,6 +638,7 @@ namespace Keire::RenderBackend
                 item.Scene = sceneAsset;
                 item.ContributionOrder = contributionOrder;
                 item.VisibilityClass = GpuVisibilityClassForDraw(static_cast<bool>(item.Skin), false);
+                item.PoseGeneration = poseGeneration;
             }
             for (const auto& particle : vfx.Particles())
             {

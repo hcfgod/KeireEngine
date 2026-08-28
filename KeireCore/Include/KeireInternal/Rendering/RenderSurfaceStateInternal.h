@@ -29,7 +29,10 @@ namespace Keire::RenderBackend
         std::vector<SDL_GPUTexture*> Pyramid;
         GpuOcclusionBuffer Candidates;
         GpuOcclusionBuffer InputInstances;
-        GpuOcclusionBuffer Visibility;
+        GpuOcclusionBuffer GeometryVisibility;
+        GpuOcclusionBuffer VfxVisibilityMask;
+        GpuOcclusionBuffer LocalLightVisibilityMask;
+        GpuOcclusionBuffer SpatialVolumeVisibilityMask;
         GpuOcclusionBuffer LocalOffsets;
         GpuOcclusionBuffer Chunks;
         GpuOcclusionBuffer ChunkCounts;
@@ -43,13 +46,31 @@ namespace Keire::RenderBackend
         std::uint32_t UploadCapacityBytes = 0;
         std::uint32_t Width = 0;
         std::uint32_t Height = 0;
+        std::uint64_t FrameId = 0;
+        std::uint64_t SurfaceEpoch = 0;
+        std::uint32_t DeviceGeneration = 0;
+        std::uint32_t FrameSlot = 0;
+        std::uint32_t GeometryVisibilityCount = 0;
+        std::uint32_t VfxVisibilityCount = 0;
+        std::uint32_t LocalLightVisibilityCount = 0;
+        std::uint32_t SpatialVolumeVisibilityCount = 0;
+        bool OwnershipValid = false;
+
+        [[nodiscard]] bool OwnedBy(const std::uint64_t frameId, const std::uint32_t frameSlot,
+                                   const std::uint64_t surfaceEpoch,
+                                   const std::uint32_t deviceGeneration) const noexcept
+        {
+            return OwnershipValid && FrameId == frameId && FrameSlot == frameSlot && SurfaceEpoch == surfaceEpoch &&
+                   DeviceGeneration == deviceGeneration;
+        }
 
         [[nodiscard]] bool Empty() const noexcept
         {
-            return !Depth && Pyramid.empty() && !Candidates.Buffer && !InputInstances.Buffer && !Visibility.Buffer &&
-                   !LocalOffsets.Buffer && !Chunks.Buffer && !ChunkCounts.Buffer && !Batches.Buffer &&
-                   !ChunkOffsets.Buffer && !VisibleInstances.Buffer && !IndirectArguments.Buffer && !Status.Buffer &&
-                   !Upload && !Readback;
+            return !Depth && Pyramid.empty() && !Candidates.Buffer && !InputInstances.Buffer &&
+                   !GeometryVisibility.Buffer && !VfxVisibilityMask.Buffer && !LocalLightVisibilityMask.Buffer &&
+                   !SpatialVolumeVisibilityMask.Buffer && !LocalOffsets.Buffer && !Chunks.Buffer &&
+                   !ChunkCounts.Buffer && !Batches.Buffer && !ChunkOffsets.Buffer && !VisibleInstances.Buffer &&
+                   !IndirectArguments.Buffer && !Status.Buffer && !Upload && !Readback;
         }
     };
 
@@ -115,7 +136,7 @@ namespace Keire::RenderBackend
         SDL_GPUTexture* SampledDepth = nullptr;
         SDL_GPUTexture* DirectionalShadow = nullptr;
         SDL_GPUTexture* LocalShadow = nullptr;
-        std::vector<GpuOcclusionFrameResources> GpuOcclusionFrames;
+        GpuOcclusionFrameResources GpuOcclusion;
         std::vector<SDL_GPUTexture*> TransientTextures;
         std::uint32_t DirectionalShadowResolution = 0;
         std::uint32_t DirectionalShadowLayers = 0;
@@ -129,8 +150,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool Empty() const noexcept
         {
             return !HdrColor && !MultisampleHdrColor && !Depth && !SampledDepth && !DirectionalShadow && !LocalShadow &&
-                   GpuOcclusionFrames.empty() && TransientTextures.empty() && ForwardPlus.Empty() &&
-                   DynamicUploads.Empty();
+                   GpuOcclusion.Empty() && TransientTextures.empty() && ForwardPlus.Empty() && DynamicUploads.Empty();
         }
     };
 

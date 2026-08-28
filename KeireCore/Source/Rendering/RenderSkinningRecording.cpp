@@ -147,6 +147,9 @@ namespace Keire::RenderBackend
         {
             item.SkinnedAssetVertices = nullptr;
             item.SkinnedBuiltinVertices = nullptr;
+            item.CurrentPoseSubmeshBounds.clear();
+            item.BoundsPoseGeneration = 0;
+            item.BoundsFrameIndex = 0;
             if (!Assets || !item.Skin || item.SkinPalette.empty())
                 continue;
 
@@ -267,6 +270,31 @@ namespace Keire::RenderBackend
             if (mesh.Empty() || !mesh.AssetVertices)
                 continue;
 
+            std::vector<MeshBounds> currentPoseBounds;
+            if (item.Skinning == SkinningMethod::LinearBlend && item.PoseGeneration != 0 &&
+                cache.Skin->HasCompleteInfluenceBounds() &&
+                cache.Skin->InfluenceBoundsSubmeshCount() == mesh.Submeshes.size())
+            {
+                try
+                {
+                    currentPoseBounds = CalculateLinearBlendPoseBounds(
+                        cache.Skin->InfluenceBounds(), cache.Skin->InfluenceBoundsSubmeshCount(), item.SkinPalette);
+                }
+                catch (const std::invalid_argument& error)
+                {
+                    KEIRE_CORE_WARN("Current-pose bounds rejected for skin id={}: {}", item.Skin.ToString(),
+                                    error.what());
+                }
+            }
+            const auto commitCurrentPoseBounds = [&]
+            {
+                if (currentPoseBounds.size() != mesh.Submeshes.size())
+                    return;
+                item.CurrentPoseSubmeshBounds = std::move(currentPoseBounds);
+                item.BoundsPoseGeneration = item.PoseGeneration;
+                item.BoundsFrameIndex = packet.FrameIndex;
+            };
+
             const auto useCompute = cache.Resources.Influences && SkinningPipeline;
             if (!useCompute)
             {
@@ -304,6 +332,7 @@ namespace Keire::RenderBackend
                 item.SkinnedBuiltinVertices = UploadVertexBuffer(commands, builtinVertices);
                 FrameTransientBuffers.push_back(item.SkinnedAssetVertices);
                 FrameTransientBuffers.push_back(item.SkinnedBuiltinVertices);
+                commitCurrentPoseBounds();
                 continue;
             }
 
@@ -353,6 +382,7 @@ namespace Keire::RenderBackend
             SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
             SDL_DispatchGPUCompute(pass, (dispatch.VertexCount + 63U) / 64U, 1, 1);
             SDL_EndGPUComputePass(pass);
+            commitCurrentPoseBounds();
         }
     }
 

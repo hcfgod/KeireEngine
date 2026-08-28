@@ -630,8 +630,7 @@ namespace Keire::RenderBackend
         }
         for (auto& workset : resources.Worksets)
         {
-            for (auto& frame : workset.GpuOcclusionFrames)
-                ReleaseGpuOcclusionFrameResources(frame);
+            ReleaseGpuOcclusionFrameResources(workset.GpuOcclusion);
             ReleaseForwardPlusResources(workset.ForwardPlus);
             ReleaseDynamicUploadResources(workset.DynamicUploads);
             if (workset.LocalShadow)

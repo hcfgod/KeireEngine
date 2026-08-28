@@ -74,6 +74,17 @@ namespace Keire
         [[nodiscard]] bool operator==(const SkinVertexInfluence8&) const noexcept = default;
     };
 
+    /// Bind-space positions affected by one bone within one mesh submesh. Records are sorted by submesh then bone.
+    struct SkinInfluenceBounds
+    {
+        std::uint32_t Submesh = 0;
+        std::uint16_t Bone = 0;
+        Vector3 Minimum;
+        Vector3 Maximum;
+
+        [[nodiscard]] bool operator==(const SkinInfluenceBounds&) const noexcept = default;
+    };
+
     class KEIRE_API SkinnedMeshAsset final : public Asset
     {
       public:
@@ -92,11 +103,24 @@ namespace Keire
         [[nodiscard]] std::span<const SkinVertexInfluence8> Influences8() const noexcept { return m_Influences8; }
         [[nodiscard]] SkinningMethod Method() const noexcept { return m_Method; }
         [[nodiscard]] std::uint8_t MaximumInfluences() const noexcept { return m_MaximumInfluences; }
+        [[nodiscard]] bool HasCompleteInfluenceBounds() const noexcept { return m_InfluenceBoundsComplete; }
+        [[nodiscard]] std::uint32_t InfluenceBoundsSubmeshCount() const noexcept
+        {
+            return m_InfluenceBoundsSubmeshCount;
+        }
+        [[nodiscard]] std::span<const SkinInfluenceBounds> InfluenceBounds() const noexcept
+        {
+            return m_InfluenceBounds;
+        }
         [[nodiscard]] static Ref<SkinnedMeshAsset> Decode(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> Encode(AssetId mesh, AssetId skeleton,
                                                            std::span<const SkinVertexInfluence> influences);
         [[nodiscard]] static std::vector<std::byte>
         Encode(AssetId mesh, AssetId skeleton, std::span<const SkinVertexInfluence8> influences, SkinningMethod method);
+        [[nodiscard]] static std::vector<std::byte> Encode(AssetId mesh, AssetId skeleton,
+                                                           std::span<const SkinVertexInfluence8> influences,
+                                                           SkinningMethod method, std::uint32_t submeshCount,
+                                                           std::span<const SkinInfluenceBounds> influenceBounds);
 
       private:
         AssetId m_Mesh;
@@ -105,6 +129,9 @@ namespace Keire
         std::vector<SkinVertexInfluence8> m_Influences8;
         SkinningMethod m_Method = SkinningMethod::LinearBlend;
         std::uint8_t m_MaximumInfluences = 4;
+        bool m_InfluenceBoundsComplete = false;
+        std::uint32_t m_InfluenceBoundsSubmeshCount = 0;
+        std::vector<SkinInfluenceBounds> m_InfluenceBounds;
     };
 
     struct AnimationKeyframe

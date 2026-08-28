@@ -83,36 +83,49 @@ namespace Keire::RenderBackend
     }
 
     [[nodiscard]] constexpr GpuVisibilityBoundsPolicy
-    DefaultGpuVisibilityBoundsPolicy(const GpuVisibilityClass visibilityClass) noexcept
+    DefaultGpuVisibilityBoundsPolicy(const GpuVisibilityClass visibilityClass,
+                                     const bool freshDynamicBounds = false) noexcept
     {
         switch (visibilityClass)
         {
         case GpuVisibilityClass::StaticMesh:
         case GpuVisibilityClass::MeshVfx:
             return GpuVisibilityBoundsPolicy::ConservativeStatic;
+        case GpuVisibilityClass::SkinnedMesh:
+            return freshDynamicBounds ? GpuVisibilityBoundsPolicy::ConservativeDynamic
+                                      : GpuVisibilityBoundsPolicy::UnknownOrUnbounded;
+        case GpuVisibilityClass::PointLight:
+        case GpuVisibilityClass::SpotLight:
+        case GpuVisibilityClass::ReflectionProbe:
+        case GpuVisibilityClass::LightProbeVolume:
+            return GpuVisibilityBoundsPolicy::ConservativeDynamic;
         default:
             return GpuVisibilityBoundsPolicy::UnknownOrUnbounded;
         }
     }
 
     [[nodiscard]] constexpr GpuVisibilityFlags GpuVisibilityFlagsForDraw(const GpuVisibilityClass visibilityClass,
-                                                                         const bool alwaysVisible) noexcept
+                                                                         const bool alwaysVisible,
+                                                                         const bool freshDynamicBounds = false) noexcept
     {
         auto flags = alwaysVisible ? GpuVisibilityFlags::ForceVisible : GpuVisibilityFlags::None;
-        if (visibilityClass == GpuVisibilityClass::SkinnedMesh)
+        if (visibilityClass == GpuVisibilityClass::SkinnedMesh && !freshDynamicBounds)
             flags = flags | GpuVisibilityFlags::ForceVisible | GpuVisibilityFlags::StaleBounds;
         return flags;
     }
 
-    [[nodiscard]] constexpr bool RequiresConservativeCpuVisibility(const GpuVisibilityClass visibilityClass) noexcept
+    [[nodiscard]] constexpr bool RequiresConservativeCpuVisibility(const GpuVisibilityClass visibilityClass,
+                                                                   const bool freshDynamicBounds = false) noexcept
     {
-        return !CanGpuReject(DefaultGpuVisibilityBoundsPolicy(visibilityClass), GpuVisibilityConsumer::IndexedIndirect,
-                             GpuVisibilityFlagsForDraw(visibilityClass, false));
+        return !CanGpuReject(DefaultGpuVisibilityBoundsPolicy(visibilityClass, freshDynamicBounds),
+                             GpuVisibilityConsumer::IndexedIndirect,
+                             GpuVisibilityFlagsForDraw(visibilityClass, false, freshDynamicBounds));
     }
 
-    [[nodiscard]] constexpr bool CanGpuVisibilityClassOcclude(const GpuVisibilityClass visibilityClass) noexcept
+    [[nodiscard]] constexpr bool CanGpuVisibilityClassOcclude(const GpuVisibilityClass visibilityClass,
+                                                              const bool freshDynamicBounds = false) noexcept
     {
-        return CanContributeOccluder(DefaultGpuVisibilityBoundsPolicy(visibilityClass),
+        return CanContributeOccluder(DefaultGpuVisibilityBoundsPolicy(visibilityClass, freshDynamicBounds),
                                      GpuVisibilityConsumer::IndexedIndirect, GpuVisibilityFlags::SafeOccluder);
     }
 } // namespace Keire::RenderBackend

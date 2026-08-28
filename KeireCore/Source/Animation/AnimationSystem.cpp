@@ -23,6 +23,8 @@ namespace Keire
         using Json = nlohmann::json;
 
         constexpr std::size_t PackedSkinInfluenceStride = 1U + 8U * 2U + 8U * 4U;
+        constexpr std::size_t PackedSkinInfluenceBoundsStride = 4U + 2U + 6U * 4U;
+        constexpr std::size_t MaximumSkinInfluenceBounds = 16ULL * 1024ULL * 1024ULL;
 
         static_assert(sizeof(float) == sizeof(std::uint32_t));
 
@@ -413,7 +415,8 @@ namespace Keire
     std::size_t SkinnedMeshAsset::ResidentBytes() const noexcept
     {
         return sizeof(*this) + m_Influences.size() * sizeof(SkinVertexInfluence) +
-               m_Influences8.size() * sizeof(SkinVertexInfluence8);
+               m_Influences8.size() * sizeof(SkinVertexInfluence8) +
+               m_InfluenceBounds.size() * sizeof(SkinInfluenceBounds);
     }
 
     std::vector<std::byte> SkinnedMeshAsset::Encode(const AssetId mesh, const AssetId skeleton,
@@ -435,6 +438,14 @@ namespace Keire
     std::vector<std::byte> SkinnedMeshAsset::Encode(const AssetId mesh, const AssetId skeleton,
                                                     const std::span<const SkinVertexInfluence8> influences,
                                                     const SkinningMethod method)
+    {
+        return Encode(mesh, skeleton, influences, method, 0, {});
+    }
+
+    std::vector<std::byte> SkinnedMeshAsset::Encode(const AssetId mesh, const AssetId skeleton,
+                                                    const std::span<const SkinVertexInfluence8> influences,
+                                                    const SkinningMethod method, const std::uint32_t submeshCount,
+                                                    const std::span<const SkinInfluenceBounds> influenceBounds)
     {
         if (!mesh || !skeleton || influences.empty() || influences.size() > 64ULL * 1024ULL * 1024U)
             throw std::invalid_argument("Skinned mesh asset header is invalid.");
@@ -463,14 +474,52 @@ namespace Keire
                 AppendUnsigned32(
                     encoded, std::bit_cast<std::uint32_t>(index < influence.Count ? influence.Weights[index] : 0.0F));
         }
-        const auto cbor = Json::to_cbor(Json{{"schemaVersion", 3},
+
+        const bool boundsComplete = submeshCount != 0;
+        if (boundsComplete != !influenceBounds.empty() || influenceBounds.size() > MaximumSkinInfluenceBounds ||
+            (boundsComplete && submeshCount > influenceBounds.size()))
+            throw std::invalid_argument("Skinned mesh influence-bound completeness metadata is invalid.");
+        std::vector<std::uint8_t> encodedBounds;
+        encodedBounds.reserve(influenceBounds.size() * PackedSkinInfluenceBoundsStride);
+        std::set<std::uint16_t> referencedBones;
+        for (const auto& influence : influences)
+            for (std::size_t index = 0; index < influence.Count; ++index)
+                if (influence.Weights[index] > 0.0F)
+                    referencedBones.insert(influence.Bones[index]);
+        std::optional<std::pair<std::uint32_t, std::uint16_t>> previousBound;
+        std::vector<bool> coveredSubmeshes(submeshCount);
+        for (const auto& bounds : influenceBounds)
+        {
+            const auto key = std::pair{bounds.Submesh, bounds.Bone};
+            if ((previousBound && *previousBound >= key) || bounds.Submesh >= submeshCount ||
+                !referencedBones.contains(bounds.Bone) || !Math::IsFinite(bounds.Minimum) ||
+                !Math::IsFinite(bounds.Maximum) || bounds.Minimum.X > bounds.Maximum.X ||
+                bounds.Minimum.Y > bounds.Maximum.Y || bounds.Minimum.Z > bounds.Maximum.Z)
+                throw std::invalid_argument("Skinned mesh contains an invalid influence bound.");
+            previousBound = key;
+            coveredSubmeshes[bounds.Submesh] = true;
+            AppendUnsigned32(encodedBounds, bounds.Submesh);
+            AppendUnsigned16(encodedBounds, bounds.Bone);
+            for (const auto value : {bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z, bounds.Maximum.X,
+                                     bounds.Maximum.Y, bounds.Maximum.Z})
+                AppendUnsigned32(encodedBounds, std::bit_cast<std::uint32_t>(value));
+        }
+        if (boundsComplete && !std::ranges::all_of(coveredSubmeshes, [](const bool covered) { return covered; }))
+            throw std::invalid_argument("Skinned mesh influence bounds do not cover every submesh.");
+
+        const auto cbor = Json::to_cbor(Json{{"schemaVersion", 4},
                                              {"mesh", mesh.ToString()},
                                              {"skeleton", skeleton.ToString()},
                                              {"skinningMethod", static_cast<std::uint8_t>(method)},
                                              {"maximumInfluences", maximumInfluences},
                                              {"vertexCount", influences.size()},
                                              {"influenceStride", PackedSkinInfluenceStride},
-                                             {"influences", Json::binary(std::move(encoded))}});
+                                             {"influences", Json::binary(std::move(encoded))},
+                                             {"influenceBoundsComplete", boundsComplete},
+                                             {"influenceBoundsSubmeshCount", submeshCount},
+                                             {"influenceBoundsCount", influenceBounds.size()},
+                                             {"influenceBoundsStride", PackedSkinInfluenceBoundsStride},
+                                             {"influenceBounds", Json::binary(std::move(encodedBounds))}});
         return {reinterpret_cast<const std::byte*>(cbor.data()),
                 reinterpret_cast<const std::byte*>(cbor.data() + cbor.size())};
     }
@@ -480,7 +529,7 @@ namespace Keire
         const auto document = Json::from_cbor(reinterpret_cast<const std::uint8_t*>(bytes.data()),
                                               reinterpret_cast<const std::uint8_t*>(bytes.data() + bytes.size()));
         const auto schemaVersion = document.value("schemaVersion", 0);
-        if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3)
+        if (schemaVersion != 1 && schemaVersion != 2 && schemaVersion != 3 && schemaVersion != 4)
             throw std::invalid_argument("Skinned mesh asset schema is unsupported.");
         const auto mesh = AssetId::Parse(document.at("mesh").get<std::string>());
         const auto skeleton = AssetId::Parse(document.at("skeleton").get<std::string>());
@@ -489,7 +538,7 @@ namespace Keire
         if (method != SkinningMethod::LinearBlend && method != SkinningMethod::DualQuaternion)
             throw std::invalid_argument("Skinned mesh asset skinning method is invalid.");
         std::vector<SkinVertexInfluence8> influences;
-        if (schemaVersion == 3)
+        if (schemaVersion >= 3)
         {
             const auto vertexCount = document.value("vertexCount", std::size_t{0});
             const auto influenceStride = document.value("influenceStride", std::size_t{0});
@@ -551,11 +600,73 @@ namespace Keire
             if (std::abs(sum - 1.0F) > 0.001F)
                 throw std::invalid_argument("Skinned mesh influence weights must be normalized.");
         }
+
+        bool influenceBoundsComplete = false;
+        std::uint32_t influenceBoundsSubmeshCount = 0;
+        std::vector<SkinInfluenceBounds> influenceBounds;
+        if (schemaVersion == 4)
+        {
+            if (!document.at("influenceBoundsComplete").is_boolean())
+                throw std::invalid_argument("Packed skinned mesh influence-bound completeness is invalid.");
+            influenceBoundsComplete = document.at("influenceBoundsComplete").get<bool>();
+            influenceBoundsSubmeshCount = document.at("influenceBoundsSubmeshCount").get<std::uint32_t>();
+            const auto influenceBoundsCount = document.at("influenceBoundsCount").get<std::size_t>();
+            const auto influenceBoundsStride = document.at("influenceBoundsStride").get<std::size_t>();
+            const auto& encodedBounds = document.at("influenceBounds");
+            if (influenceBoundsCount > MaximumSkinInfluenceBounds ||
+                influenceBoundsStride != PackedSkinInfluenceBoundsStride || !encodedBounds.is_binary())
+                throw std::invalid_argument("Packed skinned mesh influence-bound header is invalid.");
+            const auto& packedBounds = encodedBounds.get_binary();
+            if (packedBounds.size() != influenceBoundsCount * PackedSkinInfluenceBoundsStride)
+                throw std::invalid_argument("Packed skinned mesh influence-bound data has an invalid size.");
+            if (influenceBoundsComplete != (influenceBoundsSubmeshCount != 0 && influenceBoundsCount != 0) ||
+                (!influenceBoundsComplete && (influenceBoundsSubmeshCount != 0 || influenceBoundsCount != 0)) ||
+                (influenceBoundsComplete && influenceBoundsSubmeshCount > influenceBoundsCount))
+                throw std::invalid_argument("Packed skinned mesh influence-bound completeness is inconsistent.");
+
+            std::set<std::uint16_t> referencedBones;
+            for (const auto& influence : influences)
+                for (std::size_t index = 0; index < influence.Count; ++index)
+                    if (influence.Weights[index] > 0.0F)
+                        referencedBones.insert(influence.Bones[index]);
+            std::vector<bool> coveredSubmeshes(influenceBoundsSubmeshCount);
+            std::optional<std::pair<std::uint32_t, std::uint16_t>> previousBound;
+            const std::span<const std::uint8_t> packedBoundsBytes{packedBounds.data(), packedBounds.size()};
+            std::size_t boundsCursor = 0;
+            influenceBounds.reserve(influenceBoundsCount);
+            for (std::size_t index = 0; index < influenceBoundsCount; ++index)
+            {
+                SkinInfluenceBounds bounds;
+                bounds.Submesh = ReadUnsigned32(packedBoundsBytes, boundsCursor);
+                bounds.Bone = ReadUnsigned16(packedBoundsBytes, boundsCursor);
+                bounds.Minimum = {ReadPackedFloat(packedBoundsBytes, boundsCursor),
+                                  ReadPackedFloat(packedBoundsBytes, boundsCursor),
+                                  ReadPackedFloat(packedBoundsBytes, boundsCursor)};
+                bounds.Maximum = {ReadPackedFloat(packedBoundsBytes, boundsCursor),
+                                  ReadPackedFloat(packedBoundsBytes, boundsCursor),
+                                  ReadPackedFloat(packedBoundsBytes, boundsCursor)};
+                const auto key = std::pair{bounds.Submesh, bounds.Bone};
+                if ((previousBound && *previousBound >= key) || bounds.Submesh >= influenceBoundsSubmeshCount ||
+                    !referencedBones.contains(bounds.Bone) || !Math::IsFinite(bounds.Minimum) ||
+                    !Math::IsFinite(bounds.Maximum) || bounds.Minimum.X > bounds.Maximum.X ||
+                    bounds.Minimum.Y > bounds.Maximum.Y || bounds.Minimum.Z > bounds.Maximum.Z)
+                    throw std::invalid_argument("Packed skinned mesh contains an invalid influence bound.");
+                previousBound = key;
+                coveredSubmeshes[bounds.Submesh] = true;
+                influenceBounds.push_back(bounds);
+            }
+            if (influenceBoundsComplete &&
+                !std::ranges::all_of(coveredSubmeshes, [](const bool covered) { return covered; }))
+                throw std::invalid_argument("Packed skinned mesh influence bounds do not cover every submesh.");
+        }
         auto result = CreateRef<SkinnedMeshAsset>();
         result->m_Mesh = mesh;
         result->m_Skeleton = skeleton;
         result->m_Method = method;
         result->m_Influences8 = std::move(influences);
+        result->m_InfluenceBoundsComplete = influenceBoundsComplete;
+        result->m_InfluenceBoundsSubmeshCount = influenceBoundsSubmeshCount;
+        result->m_InfluenceBounds = std::move(influenceBounds);
         result->m_MaximumInfluences = 0;
         result->m_Influences.reserve(result->m_Influences8.size());
         for (const auto& influence : result->m_Influences8)

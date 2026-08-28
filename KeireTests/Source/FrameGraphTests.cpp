@@ -1,5 +1,6 @@
 #include "Keire/Rendering/FrameGraphSnapshot.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
+#include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
 
 #include <doctest/doctest.h>
 
@@ -8,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -94,24 +96,36 @@ TEST_CASE("frame graph rejects reads before transient production and ambiguous f
 TEST_CASE("static scene frame graph declares the complete production pass sequence")
 {
     const auto scene = Keire::RenderBackend::BuildStaticSceneFrameGraph();
-    REQUIRE(scene.Compiled.Order.size() == 14);
-    REQUIRE(scene.Compiled.Diagnostics.size() == 14);
+    REQUIRE(scene.Compiled.Order.size() == 15);
+    REQUIRE(scene.Compiled.Diagnostics.size() == 15);
     CHECK(scene.Compiled.Diagnostics.front() == "0: Resource uploads");
     CHECK(scene.Compiled.Diagnostics[1] == "1: Directional shadow maps");
-    CHECK(scene.Compiled.Diagnostics[2] == "2: Forward+ light culling");
-    CHECK(scene.Compiled.Diagnostics[3] == "3: Occlusion depth");
-    CHECK(scene.Compiled.Diagnostics[4] == "4: Occlusion depth pyramid");
-    CHECK(scene.Compiled.Diagnostics[5] == "5: GPU occlusion culling");
-    CHECK(scene.Compiled.Diagnostics[6] == "6: Opaque and mask");
-    CHECK(scene.Compiled.Diagnostics[7] == "7: Sampled scene depth");
-    CHECK(scene.Compiled.Diagnostics[9] == "9: Transparency");
-    CHECK(scene.Compiled.Diagnostics[10] == "10: ACES tone map");
-    CHECK(scene.Compiled.Diagnostics.back() == "13: Presentation");
+    CHECK(scene.Compiled.Diagnostics[2] == "2: Occlusion depth");
+    CHECK(scene.Compiled.Diagnostics[3] == "3: Occlusion depth pyramid");
+    CHECK(scene.Compiled.Diagnostics[4] == "4: GPU occlusion culling");
+    CHECK(scene.Compiled.Diagnostics[5] == "5: Forward+ light culling");
+    CHECK(scene.Compiled.Diagnostics[6] == "6: VFX expansion");
+    CHECK(scene.Compiled.Diagnostics[7] == "7: Opaque and mask");
+    CHECK(scene.Compiled.Diagnostics[8] == "8: Sampled scene depth");
+    CHECK(scene.Compiled.Diagnostics[10] == "10: Transparency");
+    CHECK(scene.Compiled.Diagnostics[11] == "11: ACES tone map");
+    CHECK(scene.Compiled.Diagnostics.back() == "14: Presentation");
+    const auto passPosition = [&](const Keire::RenderBackend::FrameGraphPass pass)
+    {
+        const auto found = std::ranges::find(scene.Compiled.Order, pass);
+        REQUIRE(found != scene.Compiled.Order.end());
+        return std::ranges::distance(scene.Compiled.Order.begin(), found);
+    };
+    CHECK(passPosition(scene.GpuOcclusionDepthPass) < passPosition(scene.GpuOcclusionPyramidPass));
+    CHECK(passPosition(scene.GpuOcclusionPyramidPass) < passPosition(scene.GpuOcclusionCullingPass));
+    CHECK(passPosition(scene.GpuOcclusionCullingPass) < passPosition(scene.ForwardPlusCulling));
+    CHECK(passPosition(scene.ForwardPlusCulling) < passPosition(scene.Opaque));
     REQUIRE(scene.HdrScene);
     REQUIRE(scene.SampledDepth);
     REQUIRE(scene.GpuOcclusionDepth);
     REQUIRE(scene.GpuOcclusionPyramid);
     REQUIRE(scene.GpuOcclusionIndirectArguments);
+    REQUIRE(scene.GpuVisibilityMasks);
     REQUIRE(scene.ResolveDepth);
     REQUIRE(scene.Transparency);
     const auto& occlusionPyramidPass = scene.Graph.Passes()[scene.GpuOcclusionPyramidPass.Value];
@@ -122,6 +136,12 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
     CHECK(std::ranges::find(occlusionCullingPass.Reads, scene.GpuOcclusionPyramid) != occlusionCullingPass.Reads.end());
     CHECK(std::ranges::find(occlusionCullingPass.Writes, scene.GpuOcclusionIndirectArguments) !=
           occlusionCullingPass.Writes.end());
+    CHECK(std::ranges::find(occlusionCullingPass.Writes, scene.GpuVisibilityMasks) !=
+          occlusionCullingPass.Writes.end());
+    const auto& forwardPlusPass = scene.Graph.Passes()[scene.ForwardPlusCulling.Value];
+    CHECK(std::ranges::find(forwardPlusPass.Reads, scene.GpuVisibilityMasks) != forwardPlusPass.Reads.end());
+    const auto& vfxPreparationPass = scene.Graph.Passes()[scene.VfxPreparation.Value];
+    CHECK(std::ranges::find(vfxPreparationPass.Reads, scene.GpuVisibilityMasks) != vfxPreparationPass.Reads.end());
     const auto& opaquePass = scene.Graph.Passes()[scene.Opaque.Value];
     CHECK(std::ranges::find(opaquePass.Reads, scene.GpuOcclusionIndirectArguments) != opaquePass.Reads.end());
     const auto& depthPass = scene.Graph.Passes()[scene.ResolveDepth.Value];
@@ -137,6 +157,61 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
     CHECK(scene.Compiled.TransientAllocations[hdrAllocation].Kind ==
           Keire::RenderBackend::FrameGraphResourceKind::Texture);
     CHECK(scene.Compiled.TransientAllocations[hdrAllocation].CompatibilityKey == 4);
+}
+
+TEST_CASE("surface worksets own one generation-tagged GPU occlusion resource set")
+{
+    using namespace Keire::RenderBackend;
+
+    static_assert(std::is_same_v<decltype(SurfaceFrameWorkset{}.GpuOcclusion), GpuOcclusionFrameResources>);
+
+    GpuOcclusionFrameResources unowned;
+    CHECK_FALSE(unowned.OwnedBy(0U, 0U, 0U, 0U));
+
+    SurfaceResources resources;
+    resources.Worksets.resize(3);
+    for (std::uint32_t slot = 0; slot < static_cast<std::uint32_t>(resources.Worksets.size()); ++slot)
+    {
+        auto& frame = resources.Worksets[slot].GpuOcclusion;
+        frame.FrameId = 100U + slot;
+        frame.FrameSlot = slot;
+        frame.SurfaceEpoch = 17U;
+        frame.DeviceGeneration = 9U;
+        frame.GeometryVisibilityCount = 10U + slot;
+        frame.VfxVisibilityCount = 20U + slot;
+        frame.LocalLightVisibilityCount = 30U + slot;
+        frame.SpatialVolumeVisibilityCount = 40U + slot;
+        frame.OwnershipValid = true;
+
+        CHECK(&frame.GeometryVisibility != &frame.VfxVisibilityMask);
+        CHECK(&frame.VfxVisibilityMask != &frame.LocalLightVisibilityMask);
+        CHECK(&frame.LocalLightVisibilityMask != &frame.SpatialVolumeVisibilityMask);
+        CHECK(frame.OwnedBy(100U + slot, slot, 17U, 9U));
+        CHECK_FALSE(frame.OwnedBy(101U + slot, slot, 17U, 9U));
+        CHECK_FALSE(frame.OwnedBy(100U + slot, slot + 1U, 17U, 9U));
+        CHECK_FALSE(frame.OwnedBy(100U + slot, slot, 18U, 9U));
+        CHECK_FALSE(frame.OwnedBy(100U + slot, slot, 17U, 10U));
+    }
+
+    CHECK(&resources.Worksets[0].GpuOcclusion != &resources.Worksets[1].GpuOcclusion);
+    CHECK(&resources.Worksets[1].GpuOcclusion != &resources.Worksets[2].GpuOcclusion);
+    CHECK(resources.Worksets[0].GpuOcclusion.GeometryVisibilityCount == 10U);
+    CHECK(resources.Worksets[1].GpuOcclusion.VfxVisibilityCount == 21U);
+    CHECK(resources.Worksets[2].GpuOcclusion.LocalLightVisibilityCount == 32U);
+    CHECK(resources.Worksets[2].GpuOcclusion.SpatialVolumeVisibilityCount == 42U);
+
+    auto& invalidated = resources.Worksets[1].GpuOcclusion;
+    invalidated.FrameSlot = 2U;
+    CHECK_FALSE(invalidated.OwnedBy(101U, 1U, 17U, 9U));
+    invalidated.FrameSlot = 1U;
+    invalidated.SurfaceEpoch = 18U;
+    CHECK_FALSE(invalidated.OwnedBy(101U, 1U, 17U, 9U));
+    invalidated.SurfaceEpoch = 17U;
+    invalidated.DeviceGeneration = 10U;
+    CHECK_FALSE(invalidated.OwnedBy(101U, 1U, 17U, 9U));
+    invalidated.DeviceGeneration = 9U;
+    invalidated.OwnershipValid = false;
+    CHECK_FALSE(invalidated.OwnedBy(101U, 1U, 17U, 9U));
 }
 
 TEST_CASE("frame graph snapshot exports are deterministic and explicit")

@@ -216,11 +216,27 @@ geometry, legacy instance-addressing shaders, and materials without conservative
 draws; only opaque geometry with matching depth-only behavior may become an occluder. Generated Shader Graph materials
 publish the eligibility metadata only when their vertex and depth behavior satisfies that contract.
 
+Imported linear-blend skins retain conservative bind-space influence bounds for every contributing bone and submesh.
+Skinning preparation transforms each bound by the current palette, unions the transformed bounds per submesh, and
+publishes them only after the corresponding deformed vertex stream is ready. A skinned draw may be rejected by occlusion
+only when the bound's pose generation matches the captured Animator pose, its frame index matches the immutable frame
+packet, and the draw can bind that frame's `SkinnedAssetVertices` stream for occluder depth. A missing or stale bound,
+dual-quaternion skinning, morph targets, unbounded Shader Graph world-position displacement, and other unknown vertex
+displacement remain force-visible. These fallbacks are correctness contracts, not profitability choices, and Forced
+occlusion mode does not override them.
+
 `Disabled`, `Automatic`, and `Forced` are persisted in rendering settings. Forced mode bypasses profitability
 thresholds, never safety checks. Allocation, pipeline, backend, content-eligibility, resize, and unavailable-surface
-failures preserve complete direct rendering and publish a typed reason instead of dropping geometry. Every surface owns
-its pyramid, visibility buffers, indirect arguments, readback ring, and value-only `GpuOcclusionSurfaceDiagnostics`;
-resize, minimize, device loss, and close retire those resources through the existing fence lifecycle. Aggregate
+failures preserve complete direct rendering and publish a typed reason instead of dropping geometry. Each surface epoch
+owns one occlusion workset per in-flight frame slot. Its pyramid, indirect arguments, `GeometryVisibility`,
+`VfxVisibilityMask`, `LocalLightVisibilityMask`, and `SpatialVolumeVisibilityMask` resources are qualified by the frame
+slot, surface generation, and device generation. Resize, minimize, recovery, and close therefore cannot expose an
+old-epoch or old-device mask to a newer frame; device recovery releases the lost generation and rebuilds the interrupted
+frame's resources during retry. Geometry currently consumes `GeometryVisibility` through scan/scatter compaction and
+indexed indirect draws. The VFX, local-light, and spatial-volume buffers establish the bounded ownership and frame-graph
+ordering for later consumers, but are conservatively initialized visible and are not yet consumed by VFX expansion,
+Forward+ light culling, probes, or volumes. Capability reporting remains false for those three consumer paths until that
+wiring is complete. The readback ring and value-only `GpuOcclusionSurfaceDiagnostics` remain surface-owned. Aggregate
 statistics expose current recording work while visibility totals arrive asynchronously with their source frame and age.
 Occlusion depth remains presentation-resolution because directly rasterizing occluders at a lower resolution can close
 pixel-sized gaps and produce false occlusion. The separate R32 hierarchy begins at half resolution; at 3840x2160, with

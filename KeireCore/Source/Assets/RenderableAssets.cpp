@@ -1,5 +1,6 @@
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Animation/RiggingSystem.h"
+#include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/RenderingAssets.h"
 
 #include "KeireInternal/Assets/AssimpProjectIO.h"
@@ -268,7 +269,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 18;
+        result.Version = 19;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1244,12 +1245,15 @@ namespace Keire
             {
                 if (skinInfluences8.size() != vertices.size())
                     throw std::logic_error("Skinned mesh import did not produce one influence set per vertex.");
+                const auto influenceBounds =
+                    CalculateBindSpaceSkinInfluenceBounds(vertices, indices, submeshes, skinInfluences8);
                 output.SubAssets.push_back(
                     {skinnedMeshId,
                      SkinnedMeshAsset::StaticType(),
                      "skinned-mesh/default",
                      "Skinned Mesh",
-                     SkinnedMeshAsset::Encode(context.Asset, skeletonId, skinInfluences8, skinningMethod),
+                     SkinnedMeshAsset::Encode(context.Asset, skeletonId, skinInfluences8, skinningMethod,
+                                              static_cast<std::uint32_t>(submeshes.size()), influenceBounds),
                      {context.Asset, skeletonId}});
             }
             output.Metadata.LocalBounds = AssetBounds{{bounds.Minimum.X, bounds.Minimum.Y, bounds.Minimum.Z},

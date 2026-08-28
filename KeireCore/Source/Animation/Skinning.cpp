@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <optional>
 #include <stdexcept>
 
 namespace Keire
@@ -31,6 +33,22 @@ namespace Keire
             if (lengthSquared <= Epsilon)
                 return fallback;
             return Multiply(value, 1.0F / std::sqrt(lengthSquared));
+        }
+
+        void ExpandBounds(MeshBounds& bounds, const Vector3 point) noexcept
+        {
+            bounds.Minimum.X = std::min(bounds.Minimum.X, point.X);
+            bounds.Minimum.Y = std::min(bounds.Minimum.Y, point.Y);
+            bounds.Minimum.Z = std::min(bounds.Minimum.Z, point.Z);
+            bounds.Maximum.X = std::max(bounds.Maximum.X, point.X);
+            bounds.Maximum.Y = std::max(bounds.Maximum.Y, point.Y);
+            bounds.Maximum.Z = std::max(bounds.Maximum.Z, point.Z);
+        }
+
+        [[nodiscard]] bool ValidBounds(const Vector3 minimum, const Vector3 maximum) noexcept
+        {
+            return Math::IsFinite(minimum) && Math::IsFinite(maximum) && minimum.X <= maximum.X &&
+                   minimum.Y <= maximum.Y && minimum.Z <= maximum.Z;
         }
 
         [[nodiscard]] float Dot(const Quaternion left, const Quaternion right) noexcept
@@ -185,6 +203,117 @@ namespace Keire
             std::ranges::copy(influence.Bones, expanded.Bones.begin());
             std::ranges::copy(influence.Weights, expanded.Weights.begin());
             result.push_back(expanded);
+        }
+        return result;
+    }
+
+    std::vector<SkinInfluenceBounds> CalculateBindSpaceSkinInfluenceBounds(
+        const std::span<const MeshVertex> vertices, const std::span<const std::uint32_t> indices,
+        const std::span<const MeshSubmesh> submeshes, const std::span<const SkinVertexInfluence8> influences)
+    {
+        if (vertices.empty() || submeshes.empty() || influences.size() != vertices.size())
+            throw std::invalid_argument(
+                "Skin influence bounds require vertices, submeshes, and one influence set per vertex.");
+
+        std::vector<SkinInfluenceBounds> result;
+        for (std::size_t submeshIndex = 0; submeshIndex < submeshes.size(); ++submeshIndex)
+        {
+            const auto& submesh = submeshes[submeshIndex];
+            const auto firstIndex = static_cast<std::size_t>(submesh.FirstIndex);
+            const auto indexCount = static_cast<std::size_t>(submesh.IndexCount);
+            if (indexCount == 0 || firstIndex > indices.size() || indexCount > indices.size() - firstIndex)
+                throw std::invalid_argument("A submesh index range is invalid for skin influence bounds.");
+
+            std::map<std::uint16_t, MeshBounds> boneBounds;
+            for (const auto vertexIndex : indices.subspan(firstIndex, indexCount))
+            {
+                if (vertexIndex >= vertices.size())
+                    throw std::invalid_argument("A submesh references a vertex outside the skinned mesh.");
+                const auto& influence = influences[vertexIndex];
+                if (influence.Count == 0 || influence.Count > influence.Bones.size())
+                    throw std::invalid_argument("A skin influence count is invalid while calculating bounds.");
+                float totalWeight = 0.0F;
+                for (std::size_t influenceIndex = 0; influenceIndex < influence.Count; ++influenceIndex)
+                {
+                    const auto weight = influence.Weights[influenceIndex];
+                    if (!std::isfinite(weight) || weight < 0.0F || weight > 1.0F)
+                        throw std::invalid_argument("A skin influence weight is invalid while calculating bounds.");
+                    totalWeight += weight;
+                    if (weight <= 0.0F)
+                        continue;
+                    const auto position = vertices[vertexIndex].Position;
+                    if (!Math::IsFinite(position))
+                        throw std::invalid_argument("A skinned vertex position is non-finite.");
+                    const auto [entry, inserted] =
+                        boneBounds.try_emplace(influence.Bones[influenceIndex], MeshBounds{position, position});
+                    if (!inserted)
+                        ExpandBounds(entry->second, position);
+                }
+                if (std::abs(totalWeight - 1.0F) > 0.001F)
+                    throw std::invalid_argument("Skin influence weights must be normalized while calculating bounds.");
+            }
+            if (boneBounds.empty())
+                throw std::invalid_argument("A submesh has no positive skin influences.");
+            for (const auto& [bone, bounds] : boneBounds)
+                result.push_back({static_cast<std::uint32_t>(submeshIndex), bone, bounds.Minimum, bounds.Maximum});
+        }
+        return result;
+    }
+
+    std::vector<MeshBounds> CalculateLinearBlendPoseBounds(const std::span<const SkinInfluenceBounds> influenceBounds,
+                                                           const std::uint32_t submeshCount,
+                                                           const std::span<const Matrix4> palette)
+    {
+        if (submeshCount == 0 || influenceBounds.empty() || palette.empty())
+            throw std::invalid_argument("Current-pose skin bounds require complete bind bounds and a palette.");
+        std::vector<std::optional<MeshBounds>> accumulated(submeshCount);
+        std::optional<std::pair<std::uint32_t, std::uint16_t>> previous;
+        for (const auto& influence : influenceBounds)
+        {
+            const auto key = std::pair{influence.Submesh, influence.Bone};
+            if (previous && *previous >= key)
+                throw std::invalid_argument("Skin influence bounds must be sorted and unique.");
+            previous = key;
+            if (influence.Submesh >= submeshCount || influence.Bone >= palette.size() ||
+                !ValidBounds(influence.Minimum, influence.Maximum))
+                throw std::invalid_argument("A skin influence bound is invalid for the current palette.");
+            if (!std::ranges::all_of(palette[influence.Bone].Elements,
+                                     [](const float value) { return std::isfinite(value); }))
+                throw std::invalid_argument("A skin palette matrix contains a non-finite value.");
+
+            MeshBounds transformed;
+            bool firstPoint = true;
+            for (const auto x : {influence.Minimum.X, influence.Maximum.X})
+                for (const auto y : {influence.Minimum.Y, influence.Maximum.Y})
+                    for (const auto z : {influence.Minimum.Z, influence.Maximum.Z})
+                    {
+                        const auto point = Math::TransformPoint(palette[influence.Bone], {x, y, z});
+                        if (!Math::IsFinite(point))
+                            throw std::invalid_argument("A transformed skin influence bound is non-finite.");
+                        if (firstPoint)
+                        {
+                            transformed = {point, point};
+                            firstPoint = false;
+                        }
+                        else
+                            ExpandBounds(transformed, point);
+                    }
+            if (!accumulated[influence.Submesh])
+                accumulated[influence.Submesh] = transformed;
+            else
+            {
+                ExpandBounds(*accumulated[influence.Submesh], transformed.Minimum);
+                ExpandBounds(*accumulated[influence.Submesh], transformed.Maximum);
+            }
+        }
+
+        std::vector<MeshBounds> result;
+        result.reserve(submeshCount);
+        for (const auto& bounds : accumulated)
+        {
+            if (!bounds)
+                throw std::invalid_argument("Skin influence bounds do not cover every submesh.");
+            result.push_back(*bounds);
         }
         return result;
     }

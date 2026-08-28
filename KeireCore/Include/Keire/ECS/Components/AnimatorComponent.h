@@ -130,6 +130,7 @@ namespace Keire
         [[nodiscard]] std::string_view CurrentState() const noexcept { return m_CurrentState; }
         [[nodiscard]] float NormalizedTime() const noexcept { return m_NormalizedTime; }
         [[nodiscard]] std::span<const Matrix4> SkinPalette() const noexcept { return m_SkinPalette; }
+        [[nodiscard]] std::uint64_t PoseGeneration() const noexcept { return m_PoseGeneration; }
         [[nodiscard]] std::string_view RuntimeDiagnostic() const noexcept { return m_RuntimeDiagnostic; }
         [[nodiscard]] std::shared_ptr<const AnimatorDebugSnapshot> RuntimeDebugSnapshot() const noexcept
         {
@@ -184,6 +185,7 @@ namespace Keire
         void ClearRuntimePose() noexcept;
 
       private:
+        void AdvancePoseGeneration() noexcept;
         void QueueCommand(AnimatorCommand command);
 
         friend ComponentRegistration CreateAnimatorComponentRegistration();
@@ -201,6 +203,7 @@ namespace Keire
         std::string m_CurrentState;
         float m_NormalizedTime = 0.0F;
         std::vector<Matrix4> m_SkinPalette;
+        std::uint64_t m_PoseGeneration = 0;
         std::vector<AnimatorCommand> m_RuntimeCommands;
         std::vector<AnimatorIkGoal> m_IkGoals;
         AnimatorFootGroundingSettings m_FootGrounding;

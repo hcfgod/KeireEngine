@@ -355,6 +355,23 @@ namespace Keire
                             }
                         }
                     }
+                    if (skinned->HasCompleteInfluenceBounds())
+                    {
+                        if (skinned->InfluenceBoundsSubmeshCount() != mesh->Submeshes().size())
+                        {
+                            throw std::runtime_error(
+                                "Strict cooking rejected a skinned mesh whose influence bounds do not match its "
+                                "submeshes.");
+                        }
+                        for (const auto& bounds : skinned->InfluenceBounds())
+                        {
+                            if (bounds.Bone >= skeleton->Bones().size())
+                            {
+                                throw std::runtime_error(
+                                    "Strict cooking rejected a skinned mesh with an out-of-range influence bound.");
+                            }
+                        }
+                    }
                 }
                 validationAssets.push_back({asset.Id, asset.Type, managedType});
             }

@@ -116,14 +116,16 @@ namespace Keire::RenderBackend
             const auto& mesh = ResolveMesh(item.Mesh);
             if (mesh.Submeshes.empty())
                 continue;
+            const bool freshPoseBounds = item.HasFreshCurrentPoseBounds(packet.FrameIndex, mesh.Submeshes.size());
             const bool forceConservativeVisibility =
-                item.AlwaysVisible || RequiresConservativeCpuVisibility(item.VisibilityClass);
+                item.AlwaysVisible || RequiresConservativeCpuVisibility(item.VisibilityClass, freshPoseBounds);
             const auto viewFromLocal = Math::Multiply(camera.View, item.World);
             const auto clipFromLocal = Math::Multiply(camera.Projection, viewFromLocal);
             const auto frustum = BuildFrustumPlanes(clipFromLocal);
             std::uint32_t firstSubmesh = 0;
             std::uint32_t submeshCount = static_cast<std::uint32_t>(mesh.Submeshes.size());
-            const MeshBounds* selectedBounds = mesh.BoundsEncloseSubmeshes ? std::addressof(mesh.Bounds) : nullptr;
+            const MeshBounds* selectedBounds =
+                !freshPoseBounds && mesh.BoundsEncloseSubmeshes ? std::addressof(mesh.Bounds) : nullptr;
             if (!mesh.Lods.empty())
             {
                 const auto height = ProjectedHeight(viewFromLocal, camera.Projection, mesh.Lods.front().Bounds);
@@ -135,7 +137,8 @@ namespace Keire::RenderBackend
                 const auto& lod = mesh.Lods[lodIndex];
                 firstSubmesh = lod.FirstSubmesh;
                 submeshCount = lod.SubmeshCount;
-                selectedBounds = mesh.LodBoundsEncloseSubmeshes[lodIndex] ? std::addressof(lod.Bounds) : nullptr;
+                selectedBounds =
+                    !freshPoseBounds && mesh.LodBoundsEncloseSubmeshes[lodIndex] ? std::addressof(lod.Bounds) : nullptr;
             }
             if (selectedBounds && !IsFrustumVisible(frustum, *selectedBounds, forceConservativeVisibility))
             {
@@ -145,7 +148,9 @@ namespace Keire::RenderBackend
             for (std::uint32_t offset = 0; offset < submeshCount; ++offset)
             {
                 const auto submeshIndex = firstSubmesh + offset;
-                const auto& submesh = mesh.Submeshes[submeshIndex];
+                auto submesh = mesh.Submeshes[submeshIndex];
+                if (freshPoseBounds)
+                    submesh.Bounds = item.CurrentPoseSubmeshBounds[submeshIndex];
                 AssetId materialId;
                 if (submesh.MaterialSlot < item.Materials.size() && item.Materials[submesh.MaterialSlot])
                     materialId = item.Materials[submesh.MaterialSlot];
@@ -795,12 +800,6 @@ namespace Keire::RenderBackend
                     std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                 sampledDepthRecorded = surface.SampledDepthValid;
             }
-            started = std::chrono::steady_clock::now();
-            for (const auto& snapshot : request->Packet.VfxSnapshots)
-                PrepareGpuVfx(commands, snapshot, surface);
-            preparedCpuVfx = PrepareCpuVfxDraws(commands, surface, request->Packet);
-            Statistics.VfxPreparationMilliseconds +=
-                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
         }
         ShadowFrameData shadows;
         shadows.LocalLayers.fill(-1.0F);
@@ -1073,13 +1072,14 @@ namespace Keire::RenderBackend
                 {
                     if (request != requests.end())
                     {
-                        RecordGpuOcclusionDepth(commands, request->Packet, preparedDraws, preparedOcclusion);
+                        RecordGpuOcclusionDepth(commands, surface, request->Packet, preparedDraws, preparedOcclusion);
                     }
                     return;
                 }
                 if (frameGraphPass == SceneFrameGraph.GpuOcclusionPyramidPass)
                 {
-                    RecordGpuOcclusionPyramid(commands, surface, preparedOcclusion);
+                    if (request != requests.end())
+                        RecordGpuOcclusionPyramid(commands, surface, request->Packet, preparedOcclusion);
                     return;
                 }
                 if (frameGraphPass == SceneFrameGraph.GpuOcclusionCullingPass)
@@ -1088,6 +1088,18 @@ namespace Keire::RenderBackend
                     {
                         RecordGpuOcclusionCulling(commands, surface, request->Packet, preparedDraws, preparedOcclusion);
                     }
+                    return;
+                }
+                if (frameGraphPass == SceneFrameGraph.VfxPreparation)
+                {
+                    if (request == requests.end())
+                        return;
+                    const auto started = std::chrono::steady_clock::now();
+                    for (const auto& snapshot : request->Packet.VfxSnapshots)
+                        PrepareGpuVfx(commands, snapshot, surface);
+                    preparedCpuVfx = PrepareCpuVfxDraws(commands, surface, request->Packet);
+                    Statistics.VfxPreparationMilliseconds +=
+                        std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;
                 }
                 if (frameGraphPass == SceneFrameGraph.Opaque)
