@@ -268,7 +268,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 17;
+        result.Version = 18;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -328,8 +328,7 @@ namespace Keire
             importer.SetPropertyBool(AI_CONFIG_PP_PTV_KEEP_HIERARCHY, true);
             constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_GenSmoothNormals |
                                            aiProcess_CalcTangentSpace | aiProcess_SortByPType |
-                                           aiProcess_ValidateDataStructure | aiProcess_MakeLeftHanded |
-                                           aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
+                                           aiProcess_MakeLeftHanded | aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
             auto extension = context.SourcePath.extension().string();
             if (!extension.empty() && extension.front() == '.')
                 extension.erase(extension.begin());
@@ -519,6 +518,14 @@ namespace Keire
                         TextureImportSettings settings;
                         settings.Semantic = semantic;
                         settings.ColorSpace = colorSpace;
+                        auto textureName = Lowercase(std::string(path.C_Str()));
+                        if (embedded && embedded->mFilename.length != 0)
+                            textureName += "/" + Lowercase(std::string(embedded->mFilename.C_Str()));
+                        if (textureName.find("atlas") != std::string::npos ||
+                            textureName.find("palette") != std::string::npos)
+                        {
+                            Detail::ApplyAtlasSampling(settings);
+                        }
                         std::vector<TextureMipLevel> mips;
                         if (!embedded)
                         {
@@ -549,10 +556,12 @@ namespace Keire
                                 base.Pixels[pixel * 4U + 3U] = std::byte(embedded->pcData[pixel].a);
                             }
                             mips.push_back(std::move(base));
-                            while (mips.back().Width > 1 || mips.back().Height > 1)
-                                mips.push_back(Detail::DownsampleImportedTexture(mips.back(),
-                                                                                 semantic == TextureSemantic::Normal));
+                            if (settings.Mips == TextureMipPolicy::Generate)
+                                while (mips.back().Width > 1 || mips.back().Height > 1)
+                                    mips.push_back(Detail::DownsampleImportedTexture(
+                                        mips.back(), semantic == TextureSemantic::Normal));
                         }
+                        (void)Detail::ApplyAutomaticAtlasSampling(settings, mips);
                         const auto id = context.ResolveSubAssetId(key);
                         output.SubAssets.push_back({id, Texture2DAsset::StaticType(), key,
                                                     materialNames[materialIndex] + " " + std::string(property),

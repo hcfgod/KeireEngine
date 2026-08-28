@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fstream>
@@ -9,10 +10,75 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <variant>
 
 namespace Keire::Detail
 {
+    namespace
+    {
+        [[nodiscard]] bool IsLikelyPaletteAtlas(const TextureMipLevel& level)
+        {
+            const auto width = static_cast<std::size_t>(level.Width);
+            const auto height = static_cast<std::size_t>(level.Height);
+            if (width < 8U || height < 8U || height > std::numeric_limits<std::size_t>::max() / width)
+                return false;
+            const auto pixelCount = width * height;
+            if (pixelCount > std::numeric_limits<std::size_t>::max() / 4U || level.Pixels.size() != pixelCount * 4U)
+            {
+                return false;
+            }
+
+            constexpr std::size_t MaximumSamples = 65'536;
+            constexpr std::size_t MaximumQuantizedColors = 256;
+            const auto stride = std::max(pixelCount / MaximumSamples, std::size_t{1});
+            std::unordered_set<std::uint32_t> colors;
+            colors.reserve(MaximumQuantizedColors + 1U);
+            std::size_t sampled = 0;
+            for (std::size_t pixel = 0; pixel < pixelCount; pixel += stride)
+            {
+                const auto offset = pixel * 4U;
+                if (std::to_integer<std::uint8_t>(level.Pixels[offset + 3U]) == 0U)
+                    continue;
+                const auto red = std::to_integer<std::uint8_t>(level.Pixels[offset]) >> 3U;
+                const auto green = std::to_integer<std::uint8_t>(level.Pixels[offset + 1U]) >> 3U;
+                const auto blue = std::to_integer<std::uint8_t>(level.Pixels[offset + 2U]) >> 3U;
+                colors.insert((static_cast<std::uint32_t>(red) << 10U) | (static_cast<std::uint32_t>(green) << 5U) |
+                              blue);
+                ++sampled;
+                if (colors.size() > MaximumQuantizedColors)
+                    return false;
+            }
+            return sampled >= 256U && colors.size() >= 4U && colors.size() * 48U <= sampled;
+        }
+    } // namespace
+
+    void ApplyAtlasSampling(TextureImportSettings& settings) noexcept
+    {
+        settings.Mips = TextureMipPolicy::None;
+        settings.Sampler.Minimum = TextureFilter::Nearest;
+        settings.Sampler.Magnification = TextureFilter::Nearest;
+        settings.Sampler.Mip = TextureFilter::Nearest;
+        settings.Sampler.AddressU = TextureAddressMode::Clamp;
+        settings.Sampler.AddressV = TextureAddressMode::Clamp;
+    }
+
+    bool ApplyAutomaticAtlasSampling(TextureImportSettings& settings, std::vector<TextureMipLevel>& mips)
+    {
+        if (settings.Semantic != TextureSemantic::Color || settings.Mips != TextureMipPolicy::Generate ||
+            settings.Sampler.Minimum != TextureFilter::Linear ||
+            settings.Sampler.Magnification != TextureFilter::Linear ||
+            settings.Sampler.AddressU != TextureAddressMode::Repeat ||
+            settings.Sampler.AddressV != TextureAddressMode::Repeat || mips.empty() ||
+            !IsLikelyPaletteAtlas(mips.front()))
+        {
+            return false;
+        }
+        ApplyAtlasSampling(settings);
+        mips.resize(1);
+        return true;
+    }
+
     TextureImportSettings NormalizeTextureSettings(TextureImportSettings settings)
     {
         const auto validSemantic =

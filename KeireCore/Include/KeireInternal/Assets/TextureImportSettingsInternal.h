@@ -11,6 +11,8 @@ namespace Keire::Detail
 {
     inline constexpr std::size_t MaximumTextureDimension = std::size_t{16} * 1024U;
 
+    void ApplyAtlasSampling(TextureImportSettings& settings) noexcept;
+    [[nodiscard]] bool ApplyAutomaticAtlasSampling(TextureImportSettings& settings, std::vector<TextureMipLevel>& mips);
     [[nodiscard]] TextureImportSettings NormalizeTextureSettings(TextureImportSettings settings);
     [[nodiscard]] TextureImportSettings ApplyTextureImportSettings(TextureImportSettings settings,
                                                                    const AssetImportSettings& values);

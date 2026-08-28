@@ -142,6 +142,7 @@ void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& proj
     }
     m_RenderView.Reset();
     m_CameraPreviewView.Reset();
+    m_UiPresentation.Reset();
 }
 void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
 {
@@ -245,6 +246,39 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     }
     m_ViewportRect = imageRect;
     m_LastCamera = camera;
+    if (hasScene && assetSystem)
+    {
+        if (!m_UiPresentation)
+        {
+            m_UiPresentation =
+                Keire::CreateRef<Keire::ScenePresentationRuntime>(assetSystem, Keire::Ref<Keire::AudioSystem>{});
+        }
+        m_UiPresentation->Synchronize(activeScene, size.Width, size.Height, false);
+        if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Scene))
+            m_UiPresentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
+        const auto pointer = ui.PointerState();
+        const float localX = pointer.Position.X - imageRect.Minimum.X;
+        const float localY = pointer.Position.Y - imageRect.Minimum.Y;
+        m_UiPresentation->PointerMove(localX, localY);
+        if (imageState.Hovered)
+        {
+            const auto uiEntity = m_UiPresentation->HitTestUiEntity(localX, localY);
+            if (pointer.LeftPressed)
+            {
+                m_UiPresentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
+                if (uiEntity)
+                    m_Controller.SetSceneViewportSelection(std::span<const Keire::EntityId>(&uiEntity, 1), false);
+            }
+            if (uiEntity)
+                imageState.Hovered = false;
+        }
+        if (pointer.LeftReleased)
+            m_UiPresentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, false);
+    }
+    else if (m_UiPresentation)
+    {
+        m_UiPresentation->Clear();
+    }
     if (auto target = ui.BeginDragTarget(); target)
     {
         std::vector<std::byte> payload;

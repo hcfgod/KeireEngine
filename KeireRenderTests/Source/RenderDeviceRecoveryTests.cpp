@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -79,6 +80,7 @@ namespace
       protected:
         void OnAttach() override
         {
+            m_WarmupStartedAt = std::chrono::steady_clock::now();
             m_Scene = Keire::CreateRef<Keire::Scene>(
                 Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Rendered recovery restoration"),
                 Keire::ComponentRegistry::CreateDefault());
@@ -189,7 +191,7 @@ namespace
 
         void WarmAssets(Keire::RenderSystem& renderer)
         {
-            if (m_WarmFrames != 0U)
+            if (m_SubmittedWarmupFrame)
             {
                 renderer.Flush();
                 const auto counts = Keire::RenderSystemInternalAccess::RecoveryResourceCountsForTest(renderer);
@@ -208,10 +210,18 @@ namespace
                     return;
                 }
             }
-            if (m_WarmFrames >= 120U)
-                throw std::runtime_error("Recovery restoration assets did not become resident within 120 frames.");
+            if (std::chrono::steady_clock::now() - m_WarmupStartedAt >= std::chrono::seconds(10))
+            {
+                const auto counts = Keire::RenderSystemInternalAccess::RecoveryResourceCountsForTest(renderer);
+                throw std::runtime_error(
+                    "Recovery restoration assets did not become resident within 10 seconds (meshes=" +
+                    std::to_string(counts.Meshes) + ", textures=" + std::to_string(counts.Textures) +
+                    ", materials=" + std::to_string(counts.Materials) + ", shaders=" + std::to_string(counts.Shaders) +
+                    ", GPU VFX worlds=" + std::to_string(counts.GpuVfxWorlds) +
+                    ", rendered UI frames=" + std::to_string(counts.RenderedEditorUiFrames) + ").");
+            }
             Submit();
-            ++m_WarmFrames;
+            m_SubmittedWarmupFrame = true;
         }
 
         void Submit()
@@ -230,7 +240,8 @@ namespace
         Keire::Ref<Keire::VfxWorld> m_Vfx;
         Keire::VfxRenderSnapshot m_Snapshot;
         Phase m_Phase = Phase::WarmAssets;
-        std::uint32_t m_WarmFrames = 0U;
+        std::chrono::steady_clock::time_point m_WarmupStartedAt{};
+        bool m_SubmittedWarmupFrame = false;
     };
 
     enum class RecoveryScenario : std::uint8_t
@@ -565,6 +576,10 @@ TEST_CASE("rendered recovery restores asset caches surface pixels UI and determi
     auto specification = RecoverySpecification(1U);
     specification.Assets.Mode = Keire::AssetMode::Development;
     specification.Assets.DevelopmentCatalog = assets.Catalog;
+    // Vulkan does not publish a swapchain image for a hidden window. This test exercises actual Dear ImGui GPU
+    // recording across recovery, so it needs an available presentation target on every supported backend.
+    specification.MainWindow.Visible = true;
+    specification.TargetFrameRate = 240U;
     specification.Ui.Mode = Keire::UiMode::Rendered;
     Keire::Application application(specification);
     (void)application.PushLayer(std::make_unique<RecoveryRestorationLayer>(assets.Mesh, assets.Material, results));

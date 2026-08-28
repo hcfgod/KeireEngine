@@ -106,3 +106,22 @@ TEST_CASE("Editor keyboard routing selects only an active presentation with reta
     active.Session->EditScene()->Close();
     assets->Close();
 }
+
+TEST_CASE("Game runtime UI routes edit-mode pointers without granting keyboard ownership")
+{
+    const auto editMode = KeireEditor::ResolveRuntimeGameUiRouting(false, true, false);
+    CHECK(editMode.Pointer);
+    CHECK_FALSE(editMode.Keyboard);
+
+    const auto playMode = KeireEditor::ResolveRuntimeGameUiRouting(true, true, true);
+    CHECK(playMode.Pointer);
+    CHECK(playMode.Keyboard);
+
+    const auto unfocusedPlayMode = KeireEditor::ResolveRuntimeGameUiRouting(true, true, false);
+    CHECK(unfocusedPlayMode.Pointer);
+    CHECK_FALSE(unfocusedPlayMode.Keyboard);
+
+    const auto missingPresentation = KeireEditor::ResolveRuntimeGameUiRouting(true, false, true);
+    CHECK_FALSE(missingPresentation.Pointer);
+    CHECK_FALSE(missingPresentation.Keyboard);
+}

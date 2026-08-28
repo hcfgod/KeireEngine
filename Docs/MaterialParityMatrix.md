@@ -26,7 +26,7 @@ Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 | ME-AS-010 | Safe rename, duplicate, move, and trash | Complete | P0 | Generic stable-ID asset operations cover every new extension. |
 | ME-AS-011 | Deterministic source serialization | Complete | P0 | Canonical JSON and byte-equality tests for functions and collections. |
 | ME-AS-012 | Bounded source decoding | Complete | P0 | Explicit size, count, text, schema, identifier, and finite-value limits. |
-| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 3 and reusable schema 1 reject unsupported future data. |
+| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 4 and reusable schema 1 reject unsupported future data. |
 | ME-AS-014 | Import dependency extraction | Complete | P0 | Function calls publish sorted unique asset dependencies. |
 | ME-AS-015 | Dependent reimport after function change | Complete | P0 | Asset dependency graph invalidates Shader/Material Graph imports. |
 | ME-AS-016 | Transactional generated shader publication | Complete | P0 | Staged replacement and rollback retain last-good variants. |

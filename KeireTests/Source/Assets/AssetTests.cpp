@@ -1321,6 +1321,16 @@ TEST_CASE("Texture importer exposes UI-independent production import options")
     const auto baseColor = importer.SuggestImportSettings("cartoon_monster_diffuse.png", defaults);
     CHECK(std::get<std::string>(baseColor.at("semantic")) == "color");
     CHECK(std::get<std::string>(baseColor.at("colorSpace")) == "srgb");
+    for (const auto name : {"character_palette.png", "sprite-atlas.png"})
+    {
+        const auto atlas = importer.SuggestImportSettings(name, defaults);
+        CHECK(std::get<std::string>(atlas.at("mips")) == "none");
+        CHECK(std::get<std::string>(atlas.at("minFilter")) == "nearest");
+        CHECK(std::get<std::string>(atlas.at("magFilter")) == "nearest");
+        CHECK(std::get<std::string>(atlas.at("mipFilter")) == "nearest");
+        CHECK(std::get<std::string>(atlas.at("addressU")) == "clamp");
+        CHECK(std::get<std::string>(atlas.at("addressV")) == "clamp");
+    }
     CHECK(std::ranges::find(importer.Extensions, ".exr") != importer.Extensions.end());
     const auto exrBaseColor = importer.SuggestImportSettings("cartoon_monster_diffuse.exr", defaults);
     CHECK(std::get<std::string>(exrBaseColor.at("semantic")) == "color");

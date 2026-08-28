@@ -223,11 +223,24 @@ namespace
                 }
                 database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             }
+            bool progressWarningEmitted = false;
             const auto progress = [&](const Keire::AssetOperationProgress& value)
             {
                 if (std::filesystem::exists(commandLine.Cancel))
                     throw Keire::AssetOperationCancelled();
-                Keire::Detail::WriteAssetWorkerProgress(commandLine.Progress, value);
+                try
+                {
+                    Keire::Detail::WriteAssetWorkerProgress(commandLine.Progress, value);
+                }
+                catch (const std::exception& error)
+                {
+                    if (!progressWarningEmitted)
+                    {
+                        std::cerr << "[Assets] Progress publication is temporarily unavailable: " << error.what()
+                                  << '\n';
+                        progressWarningEmitted = true;
+                    }
+                }
             };
 
             switch (request.Kind)
@@ -331,13 +344,15 @@ namespace
             }
             case Keire::Detail::AssetWorkerOperationKind::ExtractMaterials:
                 result.MutatedAssets = database->ExtractMaterials(request.ExtractModel, request.ExtractDirectory);
-                result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                result.Import =
+                    database->ImportAssets(result.MutatedAssets, Keire::AssetImportPolicy::KeepLastGood, {}, progress);
                 break;
             case Keire::Detail::AssetWorkerOperationKind::Mutate:
             {
                 const auto& mutation = request.Mutation;
                 const bool requiresImport = mutation.Kind == Keire::Detail::AssetWorkerMutationKind::DuplicateAsset ||
-                                            mutation.Kind == Keire::Detail::AssetWorkerMutationKind::DuplicateFolder;
+                                            mutation.Kind == Keire::Detail::AssetWorkerMutationKind::DuplicateFolder ||
+                                            mutation.Kind == Keire::Detail::AssetWorkerMutationKind::RestoreTrash;
                 switch (mutation.Kind)
                 {
                 case Keire::Detail::AssetWorkerMutationKind::CreateFolder:
@@ -371,14 +386,24 @@ namespace
                     break;
                 }
                 case Keire::Detail::AssetWorkerMutationKind::RestoreTrash:
+                {
+                    const auto trashRecords = database->TrashRecords();
+                    const auto trash = std::ranges::find(trashRecords, mutation.Trash, &Keire::AssetTrashRecord::Id);
+                    if (trash == trashRecords.end())
+                        throw std::invalid_argument("The asset trash entry is no longer available.");
+                    result.MutatedAssets = trash->Assets;
                     database->RestoreTrash(mutation.Trash);
                     break;
+                }
                 case Keire::Detail::AssetWorkerMutationKind::PermanentlyDeleteTrash:
                     database->PermanentlyDeleteTrash(mutation.Trash);
                     break;
                 }
-                if (requiresImport)
-                    result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                if (requiresImport && !result.MutatedAssets.empty())
+                {
+                    result.Import = database->ImportAssets(result.MutatedAssets, Keire::AssetImportPolicy::KeepLastGood,
+                                                           {}, progress);
+                }
                 break;
             }
             case Keire::Detail::AssetWorkerOperationKind::Cook:
@@ -435,9 +460,7 @@ namespace
                     const auto phase = value.Phase == Keire::LightingBakePhase::Publishing
                                            ? Keire::AssetOperationPhase::Publishing
                                            : Keire::AssetOperationPhase::Importing;
-                    Keire::Detail::WriteAssetWorkerProgress(
-                        commandLine.Progress,
-                        {phase, value.Completed, value.Total, std::filesystem::path(value.Message)});
+                    progress({phase, value.Completed, value.Total, std::filesystem::path(value.Message)});
                 };
                 const auto baked = Keire::LightingBaker::Bake(bake);
                 auto updated = scene->Definition();

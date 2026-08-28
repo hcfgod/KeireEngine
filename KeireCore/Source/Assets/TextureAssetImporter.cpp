@@ -381,7 +381,9 @@ namespace Keire
                 effective.Sampler.AddressU = TextureAddressMode::Repeat;
                 effective.Sampler.AddressV = TextureAddressMode::Clamp;
             }
-            return Texture2DAsset::Encode(effective, Detail::ImportTexturePayload(bytes, effective, backend));
+            auto mips = Detail::ImportTexturePayload(bytes, effective, backend);
+            (void)Detail::ApplyAutomaticAtlasSampling(effective, mips);
+            return Texture2DAsset::Encode(effective, mips);
         };
         result.ContextualImport = [settings, backend](const AssetImportContext& context,
                                                       const std::span<const std::byte> bytes) -> AssetImportOutput
@@ -440,8 +442,9 @@ namespace Keire
                     throw std::invalid_argument(
                         "Environment texture must be 2:1 equirectangular, a 4x3/3x4 cross, or a 6x1/1x6 strip.");
             }
-            return {Texture2DAsset::Encode(
-                effective, Detail::ImportTexturePayload(bytes, effective, backend, std::move(decoded)))};
+            auto mips = Detail::ImportTexturePayload(bytes, effective, backend, std::move(decoded));
+            (void)Detail::ApplyAutomaticAtlasSampling(effective, mips);
+            return {Texture2DAsset::Encode(effective, mips)};
         };
         result.ImportOptions = Detail::TextureImportOptionDescriptors();
         result.NormalizeImportSettings = [settings](const AssetImportSettings& values)

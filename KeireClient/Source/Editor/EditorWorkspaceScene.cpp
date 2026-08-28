@@ -1428,10 +1428,12 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game))
             for (const auto& presentation : presentations)
                 presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
-        if (playActive && !presentations.empty())
+        const auto runtimeUiRouting =
+            KeireEditor::ResolveRuntimeGameUiRouting(playActive, !presentations.empty(), m_GameViewportInputActive);
+        if (runtimeUiRouting.Pointer)
         {
             KeireEditor::RouteRuntimeUiPointer(ui, presentations, imageRect, m_GameRuntimeUiPointer);
-            if (m_GameViewportInputActive)
+            if (runtimeUiRouting.Keyboard)
                 KeireEditor::RouteRuntimeUiKeyboard(ui,
                                                     KeireEditor::SelectRuntimeUiKeyboardPresentation(
                                                         Keire::Internal::ActiveRuntimePresentation(m_PlayRuntimeWorld)),

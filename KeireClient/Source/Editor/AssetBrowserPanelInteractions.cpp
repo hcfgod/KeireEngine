@@ -260,7 +260,7 @@ namespace KeireEditor
                 RequestDeleteAssets(editor);
             ui.Separator();
             if (ui.MenuItem("Reimport"))
-                editor.ImportAssetBrowserAssets();
+                editor.ImportAssetBrowserAssets(Selection);
             if (record.Type == Keire::MeshAsset::StaticType() && !record.SubAssets.empty() &&
                 ui.MenuItem("Extract Materials"))
                 editor.ExtractAssetBrowserMaterials(record.Id);
@@ -304,7 +304,24 @@ namespace KeireEditor
                 RequestDeleteFolders(FolderSelection);
             ui.Separator();
             if (ui.MenuItem("Reimport Recursively"))
-                editor.ImportAssetBrowserAssets();
+            {
+                std::vector<Keire::AssetId> assets;
+                for (const auto& asset : editor.AssetBrowserRecords())
+                {
+                    const bool selectedFolder =
+                        std::ranges::any_of(FolderSelection,
+                                            [&](const std::filesystem::path& selected)
+                                            {
+                                                if (selected.empty())
+                                                    return true;
+                                                const auto relative = asset.RelativePath.lexically_relative(selected);
+                                                return !relative.empty() && *relative.begin() != "..";
+                                            });
+                    if (selectedFolder)
+                        assets.push_back(asset.Id);
+                }
+                editor.ImportAssetBrowserAssets(assets);
+            }
             if (ui.MenuItem("Reveal in File Explorer"))
                 Detail::RevealAssetBrowserPath(editor, AssetRoot / folder);
             if (ui.MenuItem("Copy Relative Path"))

@@ -69,10 +69,10 @@ namespace Keire
             const auto standard = shaderRootRelative / "DefaultUnlit.keireshader";
             if (regularFile(standard))
                 candidates.push_back(standard);
-            for (std::filesystem::directory_iterator iterator(shaderRoot, error), end; !error && iterator != end;
-                 iterator.increment(error))
+            for (std::filesystem::recursive_directory_iterator iterator(shaderRoot, error), end;
+                 !error && iterator != end; iterator.increment(error))
             {
-                const auto relative = shaderRootRelative / iterator->path().filename();
+                const auto relative = shaderRootRelative / iterator->path().lexically_relative(shaderRoot);
                 if (relative.extension() == ".keireshader" && relative != standard && regularFile(relative))
                     candidates.push_back(relative);
             }

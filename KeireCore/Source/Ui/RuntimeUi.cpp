@@ -493,6 +493,15 @@ namespace Keire
                                  .VerticalAlignment = state.Style.VerticalAlignment});
         }
 
+        void ClearPointerOwnership(const RuntimeUiElementId element) noexcept
+        {
+            if (Hovered == element)
+                Hovered = {};
+            for (auto& pressed : Pressed)
+                if (pressed == element)
+                    pressed = {};
+        }
+
         std::size_t MaximumElements;
         std::size_t MaximumEvents;
         std::vector<Node> Nodes;
@@ -662,7 +671,14 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Visible = visible;
+        auto& state = m_Impl->Nodes[*index].State;
+        state.Visible = visible;
+        if (!visible)
+        {
+            state.Hovered = false;
+            state.Pressed = false;
+            m_Impl->ClearPointerOwnership(element);
+        }
         return true;
     }
 
@@ -671,7 +687,14 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Enabled = enabled;
+        auto& state = m_Impl->Nodes[*index].State;
+        state.Enabled = enabled;
+        if (!enabled)
+        {
+            state.Hovered = false;
+            state.Pressed = false;
+            m_Impl->ClearPointerOwnership(element);
+        }
         return true;
     }
 
@@ -680,7 +703,14 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Interactable = interactable;
+        auto& state = m_Impl->Nodes[*index].State;
+        state.Interactable = interactable;
+        if (!interactable)
+        {
+            state.Hovered = false;
+            state.Pressed = false;
+            m_Impl->ClearPointerOwnership(element);
+        }
         return true;
     }
 

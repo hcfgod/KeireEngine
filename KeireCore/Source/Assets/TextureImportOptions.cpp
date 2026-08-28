@@ -40,8 +40,7 @@ namespace Keire::Detail
             Choice("colorSpace", "Color Space", "Texture", "srgb", {"srgb", "linear"}),
             Choice("mips", "Mip Maps", "Texture", "generate", {"generate", "none"}),
             Choice("environmentLayout", "Environment Layout", "Environment", "auto",
-                   {"auto", "equirectangular", "horizontalCross", "verticalCross", "horizontalStrip",
-                    "verticalStrip"}),
+                   {"auto", "equirectangular", "horizontalCross", "verticalCross", "horizontalStrip", "verticalStrip"}),
             {"maximumSize", "Maximum Size", "Texture", AssetImportOptionKind::Integer,
              std::int64_t{MaximumTextureDimension}, 1.0, static_cast<double>(MaximumTextureDimension), 1.0},
             {"flipGreen", "Flip Green Channel", "Texture", AssetImportOptionKind::Boolean, false},
@@ -51,12 +50,11 @@ namespace Keire::Detail
             Choice("addressU", "Address U", "Sampler", "repeat", {"repeat", "clamp", "mirror"}),
             Choice("addressV", "Address V", "Sampler", "repeat", {"repeat", "clamp", "mirror"}),
             Choice("addressW", "Address W", "Sampler", "repeat", {"repeat", "clamp", "mirror"}),
-            {"anisotropy", "Anisotropy", "Sampler", AssetImportOptionKind::Integer, std::int64_t{1}, 1.0, 16.0,
-             1.0}};
+            {"anisotropy", "Anisotropy", "Sampler", AssetImportOptionKind::Integer, std::int64_t{1}, 1.0, 16.0, 1.0}};
     }
 
     AssetImportSettings NormalizeTextureImportOptionValues(TextureImportSettings settings,
-                                                            const AssetImportSettings& values)
+                                                           const AssetImportSettings& values)
     {
         const auto normalized = ApplyTextureImportSettings(std::move(settings), values);
         auto result = values;
@@ -66,7 +64,7 @@ namespace Keire::Detail
     }
 
     AssetImportSettings SuggestTextureImportOptionValues(const std::filesystem::path& path,
-                                                          const AssetImportSettings& defaults)
+                                                         const AssetImportSettings& defaults)
     {
         auto result = defaults;
         std::string stem = Lowercase(path.stem().string());
@@ -95,6 +93,15 @@ namespace Keire::Detail
                           containsToken("rough") || containsToken("occlusion") || containsToken("ao") ||
                           containsToken("orm") || containsToken("rma") || containsToken("mra") ||
                           containsToken("mask") || containsToken("pbr");
+        if (containsToken("atlas") || containsToken("palette"))
+        {
+            result["mips"] = std::string("none");
+            result["minFilter"] = std::string("nearest");
+            result["magFilter"] = std::string("nearest");
+            result["mipFilter"] = std::string("nearest");
+            result["addressU"] = std::string("clamp");
+            result["addressV"] = std::string("clamp");
+        }
         const auto extension = Lowercase(path.extension().string());
         if (extension == ".hdr")
         {

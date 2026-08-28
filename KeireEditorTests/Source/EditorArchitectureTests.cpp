@@ -203,9 +203,9 @@ namespace
 
 } // namespace
 
-TEST_CASE("runtime game UI is composited only into Game view")
+TEST_CASE("runtime UI is composited into Scene and Game views")
 {
-    CHECK_FALSE(KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Scene));
+    CHECK(KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Scene));
     CHECK(KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game));
 }
 

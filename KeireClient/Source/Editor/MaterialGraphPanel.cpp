@@ -576,7 +576,7 @@ namespace KeireEditor
     {
         const bool openFunctionExtractionPopup = std::exchange(m_OpenFunctionExtractionPopup, false);
         auto& document = m_Controller.MaterialGraphState();
-        auto model = document.BuildCanvasModel(m_ShowTemplateParameters);
+        auto model = document.BuildCanvasModel(true);
         if (m_FrameNode)
         {
             const auto identity =
@@ -593,26 +593,13 @@ namespace KeireEditor
         }
         ApplyNodeGraphAnnotations(document.Definition().Authoring, model.NodeIdentities, model.Nodes);
         auto comments = BuildNodeGraphCommentModel(document.Definition().Authoring, model.NodeIdentities);
-        if (auto combo = ui.BeginCombo("Add Expression", "Search node library..."); combo)
-            if (DrawExpressionCreationMenu(ui, std::nullopt))
-                return;
-        ui.SameLine();
-        if (ui.Checkbox("Template Defaults", m_ShowTemplateParameters))
-        {
-            model = document.BuildCanvasModel(m_ShowTemplateParameters);
-            m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
-        }
-        if (m_ShowTemplateParameters)
-        {
-            ui.SameLine();
-            if (auto combo = ui.BeginCombo("Add Override", "Choose template parameter..."); combo)
-                for (const auto& property : document.Definition().Properties)
-                    if (ui.Selectable(property.Name, false))
-                    {
-                        AddValueNode(property);
-                        return;
-                    }
-        }
+        if (auto combo = ui.BeginCombo("Add Override", "Choose Shader Graph parameter..."); combo)
+            for (const auto& property : document.Definition().Properties)
+                if (ui.Selectable(property.Name, false))
+                {
+                    AddValueNode(property);
+                    return;
+                }
         ui.SameLine();
         if (ui.Button("Frame All"))
             m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
@@ -939,17 +926,35 @@ namespace KeireEditor
                     }
                     if (!pin)
                     {
-                        const bool removable = node->Id != document.Definition().OutputNode &&
-                                               node->Kind != Keire::ShaderGraphNodeKind::Master;
+                        const auto& definition = document.Definition();
+                        const bool removable =
+                            node->Id != definition.OutputNode && node->Kind != Keire::ShaderGraphNodeKind::Master;
+                        std::vector<Keire::AssetId> removableNodes;
+                        for (const auto selected : m_SelectedNodes)
+                        {
+                            const auto expression =
+                                std::ranges::find(definition.SurfaceGraph.Nodes, selected, &Keire::ShaderGraphNode::Id);
+                            if (selected != definition.OutputNode &&
+                                (expression == definition.SurfaceGraph.Nodes.end() ||
+                                 expression->Kind != Keire::ShaderGraphNodeKind::Master))
+                            {
+                                removableNodes.push_back(selected);
+                            }
+                        }
+                        if (removableNodes.empty() && removable)
+                            removableNodes.push_back(node->Id);
                         ui.Separator();
                         if (ui.MenuItem("Create Comment from Selection"))
                             CreateComment(ui, document, model, m_GraphContext->GraphPosition, true);
                         DrawFunctionExtractionContextMenu(ui, document.Definition());
-                        if (ui.MenuItem("Delete Node", false, removable))
+                        if (ui.MenuItem(m_SelectedNodes.size() > 1 ? "Delete Nodes" : "Delete Node", false,
+                                        !removableNodes.empty()))
                             try
                             {
-                                (void)document.RemoveNode(node->Id);
+                                (void)document.RemoveNodes(removableNodes);
                                 m_SelectedNode.reset();
+                                m_SelectedNodes.clear();
+                                m_Canvas.Select(std::nullopt);
                             }
                             catch (const std::exception& error)
                             {

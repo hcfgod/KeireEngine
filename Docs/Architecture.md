@@ -89,7 +89,7 @@ managed-package registration path, preserving installation identity and refreshi
 
 `ProjectWorkflowManager` owns Hub-only project mutations while `Project` and the editor lock remain authoritative. A
 duplicate is copied into a same-parent staging directory with generated output omitted, bounded file and byte counts,
-portable case-collision checks, no symbolic links, a fresh schema-3 identity, and optional selected-editor validation;
+portable case-collision checks, no symbolic links, a fresh schema-4 identity, and optional selected-editor validation;
 only a fully re-inspected tree is atomically published and registered. Duplicate preparation captures an owner-thread
 plan, bounded recursive copy and validation run in one cancellable background operation, and owner-thread commit
 rechecks the catalog, source lock, staging identity, and destination immediately before publication. The coordinator
@@ -277,8 +277,8 @@ verification, and finalization faults transition the session to `Failed` and emi
 
 ## Project upgrades and source modules
 
-Project descriptors are schema 3 and include creation time, created-with and last-saved editor versions, optional
-template provenance, and a sorted required source-module catalog. Schema-1 and schema-2 projects inspect as
+Project descriptors are schema 4 and include creation time, created-with and last-saved editor versions, optional
+template provenance, and a sorted required source-module catalog. Schema-1, schema-2, and schema-3 projects inspect as
 `UpgradeAvailable`; they are not treated as corrupt, while version-neutral inspection can still dispatch a newer
 schema to a compatible installed editor. `ProjectUpgradeService` produces a pure ordered plan, applies under the
 project lock through path-confined staging and before-images, durably journals publication, validates each step and the
@@ -1566,7 +1566,7 @@ snapshots leave the newer persistent buffers and indirect arguments unchanged.
 `VfxEffectDocument` owns transactional systems, nodes, pins, connections, blackboard properties, module payload
 records, curves, and gradients without exposing ImGui. All graph edits preserve stable IDs; removing a node or pin
 removes its incident links in the same validated undo command. The panel projects those values into a context-colored
-node canvas and commits graph positions only when a drag finishes. New documents use schema-v3 Graph execution.
+node canvas and commits graph positions only when a drag finishes. New documents use schema-v5 Graph execution.
 Legacy documents display their compatibility execution source until the user invokes the undoable deterministic
 conversion. In Graph mode, `ParticleStream` topology supplies the module/custom schedule, Module nodes retain stable
 payload references, Parameter nodes retain stable Blackboard references, and Portable Custom HLSL lowers to bounded

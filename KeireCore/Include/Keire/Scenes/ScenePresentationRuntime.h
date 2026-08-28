@@ -109,6 +109,7 @@ namespace Keire
         [[nodiscard]] bool KeyInput(RuntimeUiKey key);
         [[nodiscard]] bool TextInputFocused() const noexcept;
         [[nodiscard]] EntityId FocusedUiEntity() const noexcept;
+        [[nodiscard]] EntityId HitTestUiEntity(float x, float y) const noexcept;
         void Navigate(RuntimeUiNavigation navigation);
         [[nodiscard]] bool PollUiEvent(RuntimeUiEvent& event);
         [[nodiscard]] ScenePresentationCheckpoint CaptureCheckpoint() const;

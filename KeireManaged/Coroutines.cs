@@ -201,6 +201,7 @@ internal sealed class CoroutineScheduler
             null => false,
             YieldInstruction instruction =>
                 instruction.ShouldKeepWaiting(phase, deltaTime, unscaledDeltaTime),
+            Coroutine coroutine => coroutine.IsRunning,
             Task task when !task.IsCompleted => true,
             Task task when task.IsCanceled => throw new TaskCanceledException(task),
             Task task when task.IsFaulted =>

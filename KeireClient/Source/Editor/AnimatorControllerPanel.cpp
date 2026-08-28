@@ -789,7 +789,18 @@ namespace KeireEditor
                     markChanged("Delete Animator Transition");
                 }
             }
-            if (graphResult.DeleteNodeRequested)
+            if (!graphResult.DeleteNodesRequested.empty())
+            {
+                std::vector<std::string> statesToDelete;
+                statesToDelete.reserve(graphResult.DeleteNodesRequested.size());
+                for (const auto node : graphResult.DeleteNodesRequested)
+                    if (const auto* state = findStateByCanvasId(node))
+                        statesToDelete.push_back(state->Id);
+
+                for (const auto& stateId : statesToDelete)
+                    removeState(stateId);
+            }
+            else if (graphResult.DeleteNodeRequested)
             {
                 if (const auto* state = findStateByCanvasId(*graphResult.DeleteNodeRequested); state)
                     removeState(state->Id);

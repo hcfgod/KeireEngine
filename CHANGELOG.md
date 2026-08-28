@@ -34,6 +34,21 @@ versions.
   replay/profiling, managed-runtime, Play Mode, asset-operation, and build/cook coordinators with exact named-phase
   update/teardown traces, generation-safe late callbacks, owner-checked mutable state, uniquely owned primary documents,
   and idempotent failure-containing shutdown.
+- Made Project asset reimports ID-scoped, removed duplicate catalog/browser refreshes and unrelated loaded-asset
+  reloads, and kept transient asset-worker progress-file locks from failing the underlying operation.
+- Added content-based atlas-safe texture defaults, tolerated duplicate Assimp bone names, recursively resolved project
+  material shaders, and replaced full imports after material extraction, duplication, and trash restoration.
+- Composited and hit-tested runtime UI in Scene view, routed Edit-mode pointer states, cleared disabled/hidden control
+  interaction state, and deferred Hierarchy selection until mouse release so entity drags preserve the Inspector.
+- Scheduled managed discovery after script creation, supported yielding nested `Coroutine` handles, synchronized scene
+  names after asset renames, corrected Windows Explorer reveal arguments, and retained compatible Build Support
+  component selections when changing editor versions.
+- Documented the Material Graph/Shader Graph single-authority migration and conservative per-system GPU occlusion
+  coverage plan.
+- Material Graph authoring now binds Shader Graph parameters without requiring duplicate surface shader logic; legacy
+  surface expressions remain import-compatible.
+- GPU occlusion now reports class-level coverage, classifies mesh VFX and skinned draws, and explicitly forces unsafe
+  or currently unmaskable lights and spatial work visible instead of risking incorrect rejection.
 
 ### Fixed
 

@@ -36,7 +36,7 @@ namespace KeireEditor
         virtual void ClearAssetBrowserSceneSelection() noexcept = 0;
         virtual void SetAssetBrowserStatus(std::string status) noexcept = 0;
         virtual void ReportAssetBrowserError(std::string message) noexcept = 0;
-        virtual void ImportAssetBrowserAssets() = 0;
+        virtual void ImportAssetBrowserAssets(std::span<const Keire::AssetId> assets = {}) = 0;
         virtual bool CreateAssetBrowserScene(std::string_view name) = 0;
         virtual bool CreateAssetBrowserMaterial(std::string_view name) = 0;
         virtual bool CreateAssetBrowserAnimationGraph(std::string_view name) = 0;

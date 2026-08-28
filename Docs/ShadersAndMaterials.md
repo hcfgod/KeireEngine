@@ -130,7 +130,7 @@ published material usable.
 Shader Graph parameters publish stable property IDs. Compatibility bindings resolve those IDs before display names,
 so a template rename retains its value. Unknown properties, type changes, output-contract mismatches, duplicate
 symbols, cycles, invalid static parameters, and colliding identities produce `MAT` or underlying graph diagnostics
-instead of silently changing the material. Schema-1/2 sources upgrade in memory to schema 3 with a deterministic
+instead of silently changing the material. Schema-1/2/3 sources upgrade in memory to schema 4 with a deterministic
 surface graph while retaining their former values and connections. Surface graphs use the shader compiler's portable
 limits of 1,024 nodes, 4,096 connections, 16 keywords, and 64 generated variants; source and cooked payloads remain
 capped at 4 MiB.

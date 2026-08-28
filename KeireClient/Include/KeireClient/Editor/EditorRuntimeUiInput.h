@@ -31,6 +31,19 @@ namespace KeireEditor
         }
     };
 
+    struct RuntimeGameUiRoutingPlan final
+    {
+        bool Pointer = false;
+        bool Keyboard = false;
+    };
+
+    [[nodiscard]] constexpr RuntimeGameUiRoutingPlan
+    ResolveRuntimeGameUiRouting(const bool playActive, const bool hasPresentation,
+                                const bool viewportInputActive) noexcept
+    {
+        return {.Pointer = hasPresentation, .Keyboard = playActive && hasPresentation && viewportInputActive};
+    }
+
     void RouteRuntimeUiPointer(Keire::UiFrame& ui,
                                std::span<const Keire::Ref<Keire::ScenePresentationRuntime>> presentations,
                                const Keire::UiItemRect& viewport, RuntimeUiPointerRoutingState& state);

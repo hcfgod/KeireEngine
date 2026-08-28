@@ -11,6 +11,7 @@
 #include <array>
 #include <bit>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -115,6 +116,51 @@ namespace
             0xdd, 0xfd, 0x99, 0xe5, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82};
         std::vector<std::byte> result(source.size());
         std::ranges::transform(source, result.begin(), [](const unsigned char value) { return std::byte(value); });
+        return result;
+    }
+
+    [[nodiscard]] std::vector<std::byte> TestBitmap(const bool palette)
+    {
+        constexpr std::uint32_t Width = 16;
+        constexpr std::uint32_t Height = 16;
+        constexpr std::uint32_t HeaderSize = 54;
+        constexpr std::uint32_t PixelBytes = Width * Height * 4U;
+        std::vector<std::byte> result;
+        result.reserve(HeaderSize + PixelBytes);
+        result.push_back(std::byte{0x42});
+        result.push_back(std::byte{0x4d});
+        AppendLittleEndian(result, HeaderSize + PixelBytes);
+        AppendLittleEndian(result, std::uint32_t{0});
+        AppendLittleEndian(result, HeaderSize);
+        AppendLittleEndian(result, std::uint32_t{40});
+        AppendLittleEndian(result, Width);
+        AppendLittleEndian(result, Height);
+        AppendLittleEndian(result, std::uint16_t{1});
+        AppendLittleEndian(result, std::uint16_t{32});
+        AppendLittleEndian(result, std::uint32_t{0});
+        AppendLittleEndian(result, PixelBytes);
+        AppendLittleEndian(result, std::uint32_t{2835});
+        AppendLittleEndian(result, std::uint32_t{2835});
+        AppendLittleEndian(result, std::uint32_t{0});
+        AppendLittleEndian(result, std::uint32_t{0});
+
+        constexpr std::array paletteColors{
+            std::array<std::uint8_t, 3>{16, 32, 48}, std::array<std::uint8_t, 3>{80, 96, 112},
+            std::array<std::uint8_t, 3>{144, 160, 176}, std::array<std::uint8_t, 3>{208, 224, 240}};
+        for (std::uint32_t y = 0; y < Height; ++y)
+        {
+            for (std::uint32_t x = 0; x < Width; ++x)
+            {
+                const auto color = palette ? paletteColors[(x / 4U + y / 4U) % paletteColors.size()]
+                                           : std::array<std::uint8_t, 3>{static_cast<std::uint8_t>(x * 16U),
+                                                                         static_cast<std::uint8_t>(y * 16U),
+                                                                         static_cast<std::uint8_t>((x + y) * 8U)};
+                result.push_back(std::byte(color[2]));
+                result.push_back(std::byte(color[1]));
+                result.push_back(std::byte(color[0]));
+                result.push_back(std::byte{255});
+            }
+        }
         return result;
     }
 
@@ -838,7 +884,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 17);
+    CHECK(importer.Version == 18);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -1007,7 +1053,7 @@ TEST_CASE("OBJ import resolves MTL and texture sidecars through project IO")
     const auto sourceRoot = directory.Path / "Assets";
     const auto modelPath = sourceRoot / "Models/painted.obj";
     const auto materialPath = sourceRoot / "Models/Materials/Painted.mtl";
-    const auto texturePath = sourceRoot / "Models/Textures/albedo.png";
+    const auto texturePath = sourceRoot / "Models/Textures/albedo_palette.png";
     std::filesystem::create_directories(materialPath.parent_path());
     std::filesystem::create_directories(texturePath.parent_path());
     const auto shaderId = Keire::AssetId::Parse("02134567-89ab-4cde-8f01-23456789abcd");
@@ -1028,7 +1074,7 @@ TEST_CASE("OBJ import resolves MTL and texture sidecars through project IO")
         std::ofstream model(modelPath);
         model << obj;
         std::ofstream material(materialPath);
-        material << "newmtl Painted\nKd 0.2 0.4 0.6\nmap_Kd ../Textures/albedo.png\n";
+        material << "newmtl Painted\nKd 0.2 0.4 0.6\nmap_Kd ../Textures/albedo_palette.png\n";
     }
     const auto png = TestPng();
     WriteTestBytes(texturePath, png);
@@ -1064,10 +1110,16 @@ TEST_CASE("OBJ import resolves MTL and texture sidecars through project IO")
     const auto texture = std::get<Keire::AssetId>(material->Definition().Properties.at("MainTexture"));
     const auto textureOutput = std::ranges::find(output.SubAssets, texture, &Keire::AssetGeneratedSubAsset::Id);
     REQUIRE(textureOutput != output.SubAssets.end());
-    CHECK(Keire::Texture2DAsset::Decode(textureOutput->Bytes)->Settings().ColorSpace == Keire::TextureColorSpace::Srgb);
+    const auto textureAsset = Keire::Texture2DAsset::Decode(textureOutput->Bytes);
+    CHECK(textureAsset->Settings().ColorSpace == Keire::TextureColorSpace::Srgb);
+    CHECK(textureAsset->Settings().Mips == Keire::TextureMipPolicy::None);
+    CHECK(textureAsset->Settings().Sampler.Minimum == Keire::TextureFilter::Nearest);
+    CHECK(textureAsset->Settings().Sampler.Magnification == Keire::TextureFilter::Nearest);
+    CHECK(textureAsset->Settings().Sampler.AddressU == Keire::TextureAddressMode::Clamp);
+    CHECK(textureAsset->Settings().Sampler.AddressV == Keire::TextureAddressMode::Clamp);
 
     const std::array expectedDependencies{std::filesystem::path("Assets/Models/Materials/Painted.mtl"),
-                                          std::filesystem::path("Assets/Models/Textures/albedo.png")};
+                                          std::filesystem::path("Assets/Models/Textures/albedo_palette.png")};
     CHECK(output.SourceDependencies.size() == expectedDependencies.size());
     for (const auto& expected : expectedDependencies)
     {
@@ -1327,6 +1379,34 @@ TEST_CASE("texture importer emits validated RGBA8 mip chains")
     CHECK(texture->Mips().back().Width == 1);
     CHECK(texture->Mips().back().Height == 1);
     CHECK(Keire::Texture2DAsset::Encode(texture->Settings(), texture->Mips()) == importer.Import(source));
+
+    const auto paletteAtlas = Keire::Texture2DAsset::Decode(importer.Import(TestBitmap(true)));
+    REQUIRE(paletteAtlas->Mips().size() == 1);
+    CHECK(paletteAtlas->Settings().Mips == Keire::TextureMipPolicy::None);
+    CHECK(paletteAtlas->Settings().Sampler.Minimum == Keire::TextureFilter::Nearest);
+    CHECK(paletteAtlas->Settings().Sampler.Magnification == Keire::TextureFilter::Nearest);
+    CHECK(paletteAtlas->Settings().Sampler.Mip == Keire::TextureFilter::Nearest);
+    CHECK(paletteAtlas->Settings().Sampler.AddressU == Keire::TextureAddressMode::Clamp);
+    CHECK(paletteAtlas->Settings().Sampler.AddressV == Keire::TextureAddressMode::Clamp);
+
+    Keire::AssetImportContext automaticContext;
+    automaticContext.SourcePath = "neutral.bmp";
+    const auto contextualPalette =
+        Keire::Texture2DAsset::Decode(importer.ContextualImport(automaticContext, TestBitmap(true)).Bytes);
+    CHECK(contextualPalette->Settings() == paletteAtlas->Settings());
+    CHECK(contextualPalette->Mips().size() == 1);
+
+    const auto detailedTexture = Keire::Texture2DAsset::Decode(importer.Import(TestBitmap(false)));
+    CHECK(detailedTexture->Settings().Mips == Keire::TextureMipPolicy::Generate);
+    CHECK(detailedTexture->Mips().size() > 1);
+
+    auto explicitContext = automaticContext;
+    explicitContext.ImportSettings["addressU"] = std::string("mirror");
+    const auto explicitlyConfigured =
+        Keire::Texture2DAsset::Decode(importer.ContextualImport(explicitContext, TestBitmap(true)).Bytes);
+    CHECK(explicitlyConfigured->Settings().Sampler.AddressU == Keire::TextureAddressMode::Mirror);
+    CHECK(explicitlyConfigured->Settings().Mips == Keire::TextureMipPolicy::Generate);
+    CHECK(explicitlyConfigured->Mips().size() > 1);
 
     const std::string hdrHeader = "#?RADIANCE\nFORMAT=32-bit_rle_rgbe\n\n-Y 1 +X 1\n";
     std::vector<std::byte> hdr;

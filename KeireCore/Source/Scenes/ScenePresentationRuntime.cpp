@@ -1359,6 +1359,22 @@ namespace Keire
         }
     }
 
+    EntityId ScenePresentationRuntime::HitTestUiEntity(const float x, const float y) const noexcept
+    {
+        try
+        {
+            const auto hit = m_Impl->UiTree->HitTest(x, y);
+            if (!hit)
+                return {};
+            const auto entity = m_Impl->UiEntity(*hit);
+            return entity ? entity.Id() : EntityId{};
+        }
+        catch (...)
+        {
+            return {};
+        }
+    }
+
     void ScenePresentationRuntime::Navigate(const RuntimeUiNavigation navigation)
     {
         m_Impl->UiTree->Navigate(navigation);

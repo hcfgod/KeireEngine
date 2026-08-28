@@ -128,6 +128,35 @@ TEST_CASE("retained runtime UI tracks and cancels pressed state independently pe
     }
     CHECK(primaryClicks == 1U);
     CHECK(secondaryClicks == 0U);
+
+    const auto pressWithBothButtons = [&]
+    {
+        CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, true));
+        CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Secondary, true));
+        REQUIRE(tree->State(button));
+        CHECK(tree->State(button)->Pressed);
+    };
+    const auto checkPointerOwnershipCleared = [&]
+    {
+        REQUIRE(tree->State(button));
+        CHECK_FALSE(tree->State(button)->Pressed);
+        CHECK_FALSE(tree->CancelPointerButton(Keire::RuntimeUiPointerButton::Primary));
+        CHECK_FALSE(tree->CancelPointerButton(Keire::RuntimeUiPointerButton::Secondary));
+    };
+
+    pressWithBothButtons();
+    REQUIRE(tree->SetEnabled(button, false));
+    checkPointerOwnershipCleared();
+    REQUIRE(tree->SetEnabled(button, true));
+
+    pressWithBothButtons();
+    REQUIRE(tree->SetVisible(button, false));
+    checkPointerOwnershipCleared();
+    REQUIRE(tree->SetVisible(button, true));
+
+    pressWithBothButtons();
+    REQUIRE(tree->SetInteractable(button, false));
+    checkPointerOwnershipCleared();
 }
 
 TEST_CASE("retained runtime UI hit-tests transparent interactable controls independently of draw commands")
