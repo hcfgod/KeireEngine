@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace KeireHub;
@@ -24,6 +25,7 @@ namespace
     {
         std::optional<InstallRegistration> Value;
         bool AllowLegacy = false;
+        bool FailNextWrite = false;
         std::optional<InstallLegacyCandidate> LegacyCandidate;
 
         [[nodiscard]] InstallRegistrationStore Interface()
@@ -33,6 +35,12 @@ namespace
                     .Write =
                         [this](const InstallRegistration& registration)
                     {
+                        if (std::exchange(FailNextWrite, false))
+                        {
+                            Value = registration;
+                            return HubStatus::Failure(
+                                {.Code = HubErrorCode::IoWrite, .Message = "The injected registration write failed."});
+                        }
                         Value = registration;
                         return HubStatus::Success();
                     },
@@ -268,6 +276,35 @@ TEST_CASE("install worker updates exact owned inventory and refuses drift or unk
     CHECK_FALSE(InstallPackageTransaction(Request(InstallProduct::Editor, first, destination, registration)));
     CHECK(KeireHubTests::ReadText(destination / "Config" / "default.txt") == "locally-modified");
     CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "new");
+}
+
+TEST_CASE("install worker restores the previous installation when registration publication fails")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto first = CreatePackage(temporary.Path(), InstallProduct::Editor, "1.0.0", "registered-old");
+    const auto second = CreatePackage(temporary.Path(), InstallProduct::Editor, "2.0.0", "unregistered-new");
+    const auto destination = temporary.Path() / "editor-registration-failure";
+    TestRegistrationStore registration;
+    auto request = Request(InstallProduct::Editor, first, destination, registration);
+    REQUIRE(InstallPackageTransaction(request));
+    REQUIRE(registration.Value);
+    const auto oldRegistration = *registration.Value;
+    const auto oldReceipt = KeireHubTests::ReadText(destination / InstallReceiptFileName);
+    KeireHubTests::WriteText(destination / "Docs" / "private.txt", "preserve-me");
+
+    registration.FailNextWrite = true;
+    request.SourceRoot = second;
+    const auto updated = InstallPackageTransaction(request);
+    REQUIRE_FALSE(updated);
+    CHECK(updated.Error().Code == HubErrorCode::IoWrite);
+    REQUIRE(registration.Value);
+    CHECK(registration.Value->InstallationId == oldRegistration.InstallationId);
+    CHECK(registration.Value->ReceiptSha256 == oldRegistration.ReceiptSha256);
+    CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "registered-old");
+    CHECK(KeireHubTests::ReadText(destination / InstallReceiptFileName) == oldReceipt);
+    CHECK(KeireHubTests::ReadText(destination / "Docs" / "private.txt") == "preserve-me");
+    CHECK(VerifyInstalledPackage(request));
+    CHECK_FALSE(std::filesystem::exists(TransactionLocatorPath(destination)));
 }
 
 TEST_CASE("install worker migrates only exact manifest-backed legacy installations")

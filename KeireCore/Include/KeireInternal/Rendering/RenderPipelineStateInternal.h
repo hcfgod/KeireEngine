@@ -80,7 +80,7 @@ namespace Keire::RenderBackend
         bool StopRenderQueue = false;
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         std::atomic<bool> InjectDeviceLossAtNextFrame{false};
-        std::atomic<bool> InjectDeviceLossAtNextRetirement{false};
+        std::atomic<std::uint32_t> InjectDeviceLossAtRetirementMinimumInFlight{0};
         std::atomic<bool> InjectDeviceLossWithActiveResourcesAtNextFrame{false};
         std::atomic<bool> InjectCaptureFailureAtNextFrame{false};
         std::atomic<bool> InjectRecoveryAtAdmissionBarrier{false};
@@ -92,17 +92,23 @@ namespace Keire::RenderBackend
         bool AcceptedFrameBlocked = false;
         bool ReleaseAcceptedFrame = false;
         std::uint32_t FrameAdmissionWaiters = 0;
+        std::uint32_t RenderDispatchAdmissionWaiters = 0;
         std::atomic<std::uint64_t> SceneCaptureEnumerationCount{0};
         std::atomic<std::uint64_t> RuntimeUiCaptureEnumerationCount{0};
         std::atomic<std::uint64_t> LastCapturedDirectionalLightEntity{0};
         AssetId LastCapturedPrimaryScene;
         AssetId LastCapturedPrimaryBakedLighting;
+        RenderCamera LastCapturedCamera;
+        RenderEnvironmentSettings LastCapturedEnvironment;
+        Color LastCapturedClearColor;
         std::vector<std::uint32_t> LastCapturedDrawContributionOrder;
         std::vector<EntityId> LastCapturedDrawEntities;
         std::vector<AssetId> LastCapturedSpatialScenes;
         std::vector<AssetId> LastCapturedSpatialBakedLighting;
         std::vector<std::uint32_t> LastPreparedOpaqueContributionOrder;
+        std::vector<EntityId> LastPreparedOpaqueEntities;
         std::vector<std::uint32_t> LastPreparedTransparentContributionOrder;
+        std::vector<EntityId> LastPreparedTransparentEntities;
         std::size_t LastCapturedLocalLights = 0;
         std::size_t LastCapturedReflectionProbes = 0;
         std::size_t LastCapturedLightProbeVolumes = 0;
@@ -110,17 +116,24 @@ namespace Keire::RenderBackend
         std::atomic<std::uint64_t> LostGenerationGpuCleanupCallCount{0};
         std::atomic<std::uint64_t> HealthyRecoveryCandidateCleanupCount{0};
         std::atomic<std::uint64_t> LastRetriedVfxSnapshotCount{0};
+        std::atomic<std::uint64_t> LastCapturedVfxSnapshotSignature{0};
+        std::atomic<std::uint64_t> LastRetriedVfxSnapshotSignature{0};
+        std::atomic<std::uint64_t> RenderedEditorUiFrameCount{0};
         std::atomic<std::uint32_t> InjectHealthyRecoveryCandidateFailures{0};
         std::atomic<std::uint32_t> InjectLostRecoveryCandidateFailures{0};
         std::atomic<float> LastRecoveryBackoffMillisecondsForTest{0.0F};
+        bool InjectedDeviceLossForTest = false;
+        std::atomic<std::uint64_t> ReleasedInjectedLostDeviceCountForTest{0};
 #endif
         std::atomic<RenderDeviceState> DeviceLifecycle{RenderDeviceState::Running};
         std::atomic<std::uint32_t> OutstandingFrames{0};
         std::atomic<std::uint32_t> OutstandingHighWaterMark{0};
         std::atomic<std::uint64_t> AcceptedFrameCount{0};
+        std::atomic<std::uint64_t> PresentedFrameCount{0};
         std::atomic<std::uint64_t> RetiredFrameCount{0};
         std::atomic<std::uint64_t> CancelledFrameCount{0};
         std::atomic<std::uint64_t> LastAcceptedFrameId{0};
+        std::atomic<std::uint64_t> LastPresentedFrameId{0};
         std::atomic<std::uint64_t> LastRetiredFrameId{0};
         std::atomic<std::uint32_t> RenderQueueHighWaterMark{0};
         std::chrono::steady_clock::time_point LastFenceHealthProbeAt{};
@@ -131,8 +144,9 @@ namespace Keire::RenderBackend
         mutable std::mutex DeviceIdentityMutex;
         RenderDeviceIdentity DeviceIdentitySnapshot;
         std::atomic<std::uint32_t> DeviceGeneration{1};
-        std::uint32_t RecoveryAttemptsUsed = 0;
+        std::atomic<std::uint32_t> RecoveryAttemptsUsed{0};
         std::uint64_t RetiredFramesSinceRecovery = 0;
+        std::chrono::steady_clock::time_point RecoveryStartedAt{};
         std::chrono::steady_clock::time_point LastRecoveryCompletedAt{};
         std::function<void()> BeforeDeviceRecovery;
         std::function<void(SDL_GPUDevice*, SDL_GPUTextureFormat, SDL_GPUPresentMode)> AfterDeviceRecovery;

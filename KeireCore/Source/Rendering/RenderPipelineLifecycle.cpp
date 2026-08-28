@@ -252,6 +252,9 @@ namespace Keire::RenderBackend
                            });
         const auto lifecycle = DeviceLifecycle.load(std::memory_order_acquire);
         lock.unlock();
+        {
+            std::scoped_lock publicationLock(PublicationMutex);
+        }
         if (lifecycle == RenderDeviceState::RecoveryPending || lifecycle == RenderDeviceState::Recovering)
             throw RenderRecoveryBoundaryRequired();
         RethrowTerminalFailure();
@@ -334,6 +337,7 @@ namespace Keire::RenderBackend
         frame->RetiredAt = std::chrono::steady_clock::now();
         frame->Timeline.Cancelled = cancelled;
         frame->Timeline.RetriedAfterDeviceLoss = frame->RetriedAfterDeviceLoss;
+        frame->Timeline.Presented = frame->PresentedAt != std::chrono::steady_clock::time_point{};
         if (frame->SubmittedAt != std::chrono::steady_clock::time_point{})
         {
             frame->Timeline.GpuRetirementMilliseconds =
@@ -351,14 +355,35 @@ namespace Keire::RenderBackend
             RetiredFrameCount.fetch_add(1, std::memory_order_relaxed);
             LastRetiredFrameId.store(frame->Id, std::memory_order_relaxed);
             ++RetiredFramesSinceRecovery;
-            if (RecoveryAttemptsUsed != 0U && LastRecoveryCompletedAt != std::chrono::steady_clock::time_point{} &&
+            if (RecoveryAttemptsUsed.load(std::memory_order_acquire) != 0U &&
+                LastRecoveryCompletedAt != std::chrono::steady_clock::time_point{} &&
                 RetiredFramesSinceRecovery >= 120U &&
                 frame->RetiredAt - LastRecoveryCompletedAt >= std::chrono::seconds(60))
             {
-                RecoveryAttemptsUsed = 0;
+                RecoveryAttemptsUsed.store(0U, std::memory_order_release);
                 RetiredFramesSinceRecovery = 0;
                 LastRecoveryCompletedAt = {};
             }
+        }
+        {
+            std::scoped_lock publicationLock(PublicationMutex);
+            try
+            {
+                PublishedTimelines.push_back(frame->Timeline);
+                constexpr std::size_t maximumPublishedTimelines = 256U;
+                while (PublishedTimelines.size() > maximumPublishedTimelines)
+                    PublishedTimelines.pop_front();
+            }
+            catch (...)
+            {
+            }
+            auto previous = OutstandingFrames.load(std::memory_order_acquire);
+            while (previous != 0U && !OutstandingFrames.compare_exchange_weak(
+                                         previous, previous - 1U, std::memory_order_acq_rel, std::memory_order_acquire))
+            {
+            }
+            RefreshStatisticsCounters();
+            PublishedStatistics = Statistics;
         }
         if (frame->FrameSlot != (std::numeric_limits<std::uint32_t>::max)())
         {
@@ -366,46 +391,29 @@ namespace Keire::RenderBackend
             AvailableFrameSlots.push_back(frame->FrameSlot);
             frame->FrameSlot = (std::numeric_limits<std::uint32_t>::max)();
         }
-        auto previous = OutstandingFrames.load(std::memory_order_acquire);
-        while (previous != 0U && !OutstandingFrames.compare_exchange_weak(
-                                     previous, previous - 1U, std::memory_order_acq_rel, std::memory_order_acquire))
-        {
-        }
-        PublishTimeline(frame, cancelled);
-        PublishStatistics();
         FramesRetired.notify_all();
         RenderQueueSpace.notify_all();
     }
 
-    void RenderSharedState::PublishStatistics() noexcept
+    void RenderSharedState::RefreshStatisticsCounters() noexcept
     {
         Statistics.OutstandingFrames = OutstandingFrames.load(std::memory_order_relaxed);
         Statistics.FramesInFlightHighWaterMark = OutstandingHighWaterMark.load(std::memory_order_relaxed);
         Statistics.AcceptedFrames = AcceptedFrameCount.load(std::memory_order_relaxed);
+        Statistics.PresentedFrames = PresentedFrameCount.load(std::memory_order_relaxed);
         Statistics.RetiredFrames = RetiredFrameCount.load(std::memory_order_relaxed);
         Statistics.CancelledFrames = CancelledFrameCount.load(std::memory_order_relaxed);
         Statistics.LastAcceptedFrame = LastAcceptedFrameId.load(std::memory_order_relaxed);
+        Statistics.LastPresentedFrame = LastPresentedFrameId.load(std::memory_order_relaxed);
         Statistics.LastRetiredFrame = LastRetiredFrameId.load(std::memory_order_relaxed);
         Statistics.RendererQueueHighWaterMark = RenderQueueHighWaterMark.load(std::memory_order_relaxed);
-        std::scoped_lock lock(PublicationMutex);
-        PublishedStatistics = Statistics;
     }
 
-    void RenderSharedState::PublishTimeline(const std::shared_ptr<RenderFramePacket>& frame,
-                                            const bool cancelled) noexcept
+    void RenderSharedState::PublishStatistics() noexcept
     {
-        constexpr std::size_t maximumPublishedTimelines = 256U;
-        frame->Timeline.Cancelled = cancelled;
-        try
-        {
-            std::scoped_lock lock(PublicationMutex);
-            PublishedTimelines.push_back(frame->Timeline);
-            while (PublishedTimelines.size() > maximumPublishedTimelines)
-                PublishedTimelines.pop_front();
-        }
-        catch (...)
-        {
-        }
+        RefreshStatisticsCounters();
+        std::scoped_lock lock(PublicationMutex);
+        PublishedStatistics = Statistics;
     }
 
     GpuDeviceLossDiagnostic RenderSharedState::DeviceLossDiagnostic(std::string operation, std::string detail) const
@@ -424,6 +432,6 @@ namespace Keire::RenderBackend
                 .DriverDetail = std::move(detail),
                 .Frame = ActiveFrame ? ActiveFrame->Id : CaptureFrameId,
                 .DeviceGeneration = DeviceGeneration.load(std::memory_order_acquire),
-                .RecoveryAttempt = RecoveryAttemptsUsed};
+                .RecoveryAttempt = RecoveryAttemptsUsed.load(std::memory_order_acquire)};
     }
 } // namespace Keire::RenderBackend

@@ -124,6 +124,7 @@ namespace Keire
                 throw std::invalid_argument("Runtime UI capacity is invalid.");
             Nodes.reserve(std::min<std::size_t>(maximumElements, 1024));
             Draws.reserve(std::min<std::size_t>(maximumElements * 2, 8192));
+            HitElements.reserve(std::min<std::size_t>(maximumElements, 4096));
         }
 
         [[nodiscard]] RuntimeUiElementId MakeId(const std::size_t index) const noexcept
@@ -226,6 +227,7 @@ namespace Keire
             if (state.Interactable && state.Enabled)
                 ++InteractableElements;
 
+            HitElements.push_back(MakeId(index));
             EmitDraw(index);
 
             RuntimeUiRect content{
@@ -496,6 +498,7 @@ namespace Keire
         std::vector<Node> Nodes;
         std::vector<std::size_t> Free;
         std::vector<RuntimeUiDrawCommand> Draws;
+        std::vector<RuntimeUiElementId> HitElements;
         std::deque<RuntimeUiEvent> Events;
         RuntimeUiElementId Hovered;
         std::array<RuntimeUiElementId, 3> Pressed;
@@ -596,6 +599,7 @@ namespace Keire
         for (std::size_t index = 0; index < m_Impl->Nodes.size(); ++index)
             m_Impl->Free.push_back(index);
         m_Impl->Draws.clear();
+        m_Impl->HitElements.clear();
         m_Impl->Events.clear();
         m_Impl->Focused = {};
         m_Impl->Hovered = {};
@@ -724,6 +728,7 @@ namespace Keire
         scale *= settings.AccessibilityScale;
         m_Impl->LastScale = scale;
         m_Impl->Draws.clear();
+        m_Impl->HitElements.clear();
         m_Impl->VisibleElements = 0;
         m_Impl->InteractableElements = 0;
         m_Impl->ClippedElements = 0;
@@ -751,15 +756,15 @@ namespace Keire
 
     std::optional<RuntimeUiElementId> RuntimeUiTree::HitTest(const float x, const float y) const noexcept
     {
-        for (auto iterator = m_Impl->Draws.rbegin(); iterator != m_Impl->Draws.rend(); ++iterator)
+        for (auto iterator = m_Impl->HitElements.rbegin(); iterator != m_Impl->HitElements.rend(); ++iterator)
         {
-            const auto index = m_Impl->Index(iterator->Element);
+            const auto index = m_Impl->Index(*iterator);
             if (!index)
                 continue;
             const auto& state = m_Impl->Nodes[*index].State;
             if (state.Visible && state.Enabled && state.Interactable && state.Rect.Contains(x, y) &&
                 state.ClipRect.Contains(x, y))
-                return iterator->Element;
+                return *iterator;
         }
         return std::nullopt;
     }

@@ -45,10 +45,14 @@ namespace KeireRuntime
         RuntimeAdditiveValidation& operator=(const RuntimeAdditiveValidation&) = delete;
 
         [[nodiscard]] bool Enabled() const noexcept;
+        [[nodiscard]] bool Complete() const noexcept;
         void Update(Keire::Application& application, const Keire::Ref<Keire::SceneRuntimeWorld>& world, float width,
                     float height);
         void ObserveSubmission(Keire::Application& application, const Keire::Ref<Keire::RenderSystem>& renderer,
                                const Keire::Ref<Keire::RenderSurface>& surface);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        void FinalizeDeviceLossShutdown(Keire::RenderSystem& renderer) noexcept;
+#endif
 
       private:
         class Impl;

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KeireInternal/UiContextAccessInternal.h"
+
 #include <SDL3/SDL_gpu.h>
 #include <imgui.h>
 
@@ -32,12 +34,13 @@ namespace Keire
             void ProcessRetired();
             void Close() noexcept;
 
-            void Bind(ImGuiContext* context, RenderSystem* renderer, SDL_GPUDevice* device) noexcept;
+            void Bind(const std::shared_ptr<UiContextAccess>& contextAccess, RenderSystem* renderer,
+                      SDL_GPUDevice* device) noexcept;
             void SetDevice(SDL_GPUDevice* device) noexcept;
 
           private:
             std::mutex m_Mutex;
-            ImGuiContext* m_Context = nullptr;
+            std::shared_ptr<UiContextAccess> m_ContextAccess;
             SDL_GPUDevice* m_Device = nullptr;
             RenderSystem* m_Renderer = nullptr;
             std::unordered_set<ImTextureData*> m_Active;
@@ -54,7 +57,7 @@ namespace Keire
             UiRenderBackend(const UiRenderBackend&) = delete;
             UiRenderBackend& operator=(const UiRenderBackend&) = delete;
 
-            void Initialize(RenderSystem& renderer, ImGuiContext* context,
+            void Initialize(RenderSystem& renderer, const std::shared_ptr<UiContextAccess>& contextAccess,
                             const std::shared_ptr<UiImageOwner>& images);
             void NewFrame();
             void Shutdown() noexcept;
@@ -64,7 +67,7 @@ namespace Keire
             void AfterDeviceRecovery(SDL_GPUDevice* device, SDL_GPUTextureFormat colorFormat,
                                      SDL_GPUPresentMode presentMode);
 
-            ImGuiContext* m_Context = nullptr;
+            std::shared_ptr<UiContextAccess> m_ContextAccess;
             SDL_Window* m_NativeWindow = nullptr;
             SDL_GPUDevice* m_Device = nullptr;
             SDL_GPUPresentMode m_PresentMode = SDL_GPU_PRESENTMODE_VSYNC;

@@ -108,7 +108,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25047694,
+      "estimatedSizeBytes": 25048007,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -840,6 +840,11 @@
           "path": "ProjectSettings/Authoring.keiresettings",
           "sizeBytes": 1164,
           "sha256": "33c5b454d07e6f34deb3c04f3bd81e2be2c9c550f24a9010b7702803baf7e3ce"
+        },
+        {
+          "path": "ProjectSettings/BuildScenes.keiresettings",
+          "sizeBytes": 313,
+          "sha256": "d0e8d966c55e3e9a10e7fba242098ad27232551d81d2569029e568465548d9c4"
         },
         {
           "path": "ProjectSettings/Rendering.keiresettings",

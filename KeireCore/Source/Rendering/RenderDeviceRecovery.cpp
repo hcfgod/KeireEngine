@@ -5,15 +5,68 @@
 #include <SDL3/SDL_gpu.h>
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <chrono>
-#include <numeric>
 #include <string>
 #include <thread>
 #include <utility>
 
 namespace Keire::RenderBackend
 {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    void RenderSharedState::RecordVfxSnapshotSignatureForTest(const std::shared_ptr<RenderFramePacket>& frame,
+                                                              const bool retried) noexcept
+    {
+        constexpr std::uint64_t offsetBasis = 1469598103934665603ULL;
+        std::uint64_t signature = offsetBasis;
+        std::uint64_t count = 0;
+        const auto mix = [&signature](const std::uint64_t value) noexcept
+        {
+            signature ^= value;
+            signature *= 1099511628211ULL;
+        };
+        if (frame)
+        {
+            for (const auto& request : frame->Requests)
+            {
+                for (const auto& snapshot : request.Packet.VfxSnapshots)
+                {
+                    ++count;
+                    mix(snapshot.WorldId());
+                    mix(snapshot.Revision());
+                    mix(snapshot.ResetRevision());
+                    mix(snapshot.SimulationStepRevision());
+                    mix(snapshot.ParticleCapacity());
+                    mix(snapshot.Particles().size());
+                    mix(snapshot.GpuEmitters().size());
+                    for (const auto& emitter : snapshot.GpuEmitters())
+                    {
+                        mix(emitter.System.High());
+                        mix(emitter.System.Low());
+                        mix(emitter.Revision);
+                        mix(emitter.SpawnSequence);
+                        mix(emitter.Seed);
+                        mix(emitter.Capacity);
+                        mix(emitter.SimulationRevision);
+                        mix(emitter.SimulationStep);
+                        mix(std::bit_cast<std::uint32_t>(emitter.EffectTime));
+                    }
+                }
+            }
+        }
+        if (retried)
+        {
+            LastRetriedVfxSnapshotCount.store(count, std::memory_order_release);
+            LastRetriedVfxSnapshotSignature.store(signature, std::memory_order_release);
+        }
+        else
+        {
+            LastCapturedVfxSnapshotSignature.store(signature, std::memory_order_release);
+        }
+    }
+#endif
+
     std::optional<GpuDeviceLossDiagnostic> RenderSharedState::ClassifyDeviceFailure(std::string operation,
                                                                                     std::string detail) const
     {
@@ -117,11 +170,7 @@ namespace Keire::RenderBackend
             if (interrupted)
             {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
-                LastRetriedVfxSnapshotCount.store(
-                    std::accumulate(interrupted->Requests.begin(), interrupted->Requests.end(), std::uint64_t{0},
-                                    [](const std::uint64_t count, const QueuedSceneRequest& request)
-                                    { return count + request.Packet.VfxSnapshots.size(); }),
-                    std::memory_order_release);
+                RecordVfxSnapshotSignatureForTest(interrupted, true);
 #endif
                 interrupted->RetriedAfterDeviceLoss = true;
                 ExecuteAcceptedFrame(interrupted);
@@ -157,6 +206,7 @@ namespace Keire::RenderBackend
         for (const auto& surface : AllSurfaceEpochs())
         {
             surface->Resources = {};
+            surface->ResourcesAvailable.store(false, std::memory_order_release);
             surface->PublishedTexture.store(nullptr, std::memory_order_release);
             surface->PublishedDepthAvailable.store(false, std::memory_order_release);
             surface->Width = 0;
@@ -166,6 +216,7 @@ namespace Keire::RenderBackend
             surface->HasOutput = false;
             surface->SampledDepthValid = false;
             ++surface->Generation;
+            surface->PublishSurfacePropertiesSnapshot();
         }
 
         PendingRetired.clear();
@@ -374,10 +425,11 @@ namespace Keire::RenderBackend
         const auto shaderFormats = SDL_GetGPUShaderFormats(Device);
         const bool occlusionShaderFormat =
             (shaderFormats & (SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_MSL)) != 0;
-        GpuOcclusionCapability =
+        GpuOcclusionCapability.store(
             occlusionShaderFormat &&
-            SDL_GPUTextureSupportsFormat(Device, SDL_GPU_TEXTUREFORMAT_R32_FLOAT, SDL_GPU_TEXTURETYPE_2D,
-                                         SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE);
+                SDL_GPUTextureSupportsFormat(Device, SDL_GPU_TEXTUREFORMAT_R32_FLOAT, SDL_GPU_TEXTURETYPE_2D,
+                                             SDL_GPU_TEXTUREUSAGE_SAMPLER | SDL_GPU_TEXTUREUSAGE_COMPUTE_STORAGE_WRITE),
+            std::memory_order_release);
         CreateGeometryResources();
         (void)PipelinesFor(SDL_GPU_SAMPLECOUNT_1);
         RuntimeUiPipeline = CreateRuntimeUiPipeline();
@@ -406,6 +458,7 @@ namespace Keire::RenderBackend
                                                           const GpuDeviceLossDiagnostic& diagnostic)
     {
         const auto recoveryStarted = std::chrono::steady_clock::now();
+        RecoveryStartedAt = recoveryStarted;
         const auto cleanupHealthyCandidate = [this]() noexcept
         {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
@@ -460,7 +513,10 @@ namespace Keire::RenderBackend
             // accepted packet exactly once.
             DeviceLost = true;
             publishIncident(0U, false);
-            AbandonLostDeviceResources();
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            if (!ReleaseInjectedLostDeviceForTest())
+#endif
+                AbandonLostDeviceResources();
             WindowClaimed = false;
             Device = nullptr;
             FramesRetired.notify_all();
@@ -505,17 +561,20 @@ namespace Keire::RenderBackend
         }
         catch (...)
         {
-            publishIncident(RecoveryAttemptsUsed, false);
+            publishIncident(RecoveryAttemptsUsed.load(std::memory_order_acquire), false);
             return DeviceRecoveryResult::Failed;
         }
 
-        AbandonLostDeviceResources(interrupted);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        if (!ReleaseInjectedLostDeviceForTest(interrupted))
+#endif
+            AbandonLostDeviceResources(interrupted);
         WindowClaimed = false;
         // Never release claims or destroy the lost generation. SDL GPU handles are unusable after loss; recovery
         // intentionally abandons them and creates an independent generation.
         Device = nullptr;
 
-        while (RecoveryAttemptsUsed < Specification.DeviceLossRecoveryAttempts)
+        while (RecoveryAttemptsUsed.load(std::memory_order_acquire) < Specification.DeviceLossRecoveryAttempts)
         {
             auto lifecycle = DeviceLifecycle.load(std::memory_order_acquire);
             while (lifecycle == RenderDeviceState::RecoveryPending || lifecycle == RenderDeviceState::Recovering)
@@ -528,14 +587,14 @@ namespace Keire::RenderBackend
             }
             if (lifecycle != RenderDeviceState::RecoveryPending && lifecycle != RenderDeviceState::Recovering)
                 return DeviceRecoveryResult::Failed;
-            const auto attempt = ++RecoveryAttemptsUsed;
+            const auto attempt = RecoveryAttemptsUsed.fetch_add(1U, std::memory_order_acq_rel) + 1U;
             if (attempt > 1U)
             {
                 std::unique_lock lock(RenderQueueMutex);
                 const auto backoffStarted = std::chrono::steady_clock::now();
                 const bool closing = FramesRetired.wait_for(
-                    lock, std::chrono::milliseconds(250), [this]
-                    { return DeviceLifecycle.load(std::memory_order_acquire) == RenderDeviceState::Closing; });
+                    lock, std::chrono::milliseconds(250),
+                    [this] { return DeviceLifecycle.load(std::memory_order_acquire) == RenderDeviceState::Closing; });
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                 LastRecoveryBackoffMillisecondsForTest.store(
                     std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - backoffStarted).count(),
@@ -556,6 +615,7 @@ namespace Keire::RenderBackend
                     throw std::runtime_error("Injected healthy recovery-candidate failure.");
                 if (consumeInjectedFailure(InjectLostRecoveryCandidateFailures))
                 {
+                    MarkInjectedDeviceLossForTest();
                     throw GpuDeviceLostError(
                         DeviceLossDiagnostic("test recovery candidate", "Injected candidate device lost."));
                 }
@@ -580,29 +640,11 @@ namespace Keire::RenderBackend
                 const auto recoveredGeneration = DeviceGeneration.fetch_add(1U, std::memory_order_acq_rel) + 1U;
                 if (interrupted)
                     interrupted->DeviceGeneration = recoveredGeneration;
-                auto expected = RenderDeviceState::Recovering;
-                if (!DeviceLifecycle.compare_exchange_strong(expected, RenderDeviceState::Running,
-                                                             std::memory_order_acq_rel))
+                if (!interrupted && !CompleteDeviceRecoveryAfterRetry())
                 {
-                    if (expected == RenderDeviceState::Closing)
-                    {
-                        cleanupHealthyCandidate();
-                        return DeviceRecoveryResult::Failed;
-                    }
-                    throw std::logic_error("GPU recovery lifecycle changed before publication.");
+                    cleanupHealthyCandidate();
+                    return DeviceRecoveryResult::CancelledByShutdown;
                 }
-                DeviceLost = false;
-                LastRecoveryCompletedAt = std::chrono::steady_clock::now();
-                RetiredFramesSinceRecovery = 0;
-                const auto recoveryElapsed = publishIncident(attempt, true);
-                FramesRetired.notify_all();
-                KEIRE_CORE_WARN(
-                    "Recovered SDL GPU device generation {} -> {} after loss in '{}' on backend '{}' adapter '{}' "
-                    "(attempt {}, {:.2f} ms).",
-                    diagnostic.DeviceGeneration, recoveredGeneration,
-                    std::string_view(diagnostic.Operation).substr(0U, 160U),
-                    std::string_view(diagnostic.Backend).substr(0U, 160U),
-                    std::string_view(diagnostic.Adapter).substr(0U, 160U), attempt, recoveryElapsed);
                 return DeviceRecoveryResult::Recovered;
             }
             catch (const GpuDeviceLostError& error)
@@ -612,7 +654,10 @@ namespace Keire::RenderBackend
                     ClassifyDeviceFailure(error.Diagnostic().Operation, error.Diagnostic().DriverDetail).has_value();
                 if (candidateLost)
                 {
-                    AbandonLostDeviceResources(interrupted);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    if (!ReleaseInjectedLostDeviceForTest(interrupted))
+#endif
+                        AbandonLostDeviceResources(interrupted);
                     WindowClaimed = false;
                     Device = nullptr;
                 }
@@ -643,11 +688,12 @@ namespace Keire::RenderBackend
                 Device = nullptr;
             }
         }
-        publishIncident(RecoveryAttemptsUsed, false);
+        const auto recoveryAttempts = RecoveryAttemptsUsed.load(std::memory_order_acquire);
+        publishIncident(recoveryAttempts, false);
         KEIRE_CORE_ERROR(
             "GPU recovery exhausted after {} attempt(s): operation='{}', backend='{}', adapter='{}', frame={}, "
             "deviceGeneration={}, driver='{}', driverVersion='{}'.",
-            RecoveryAttemptsUsed, std::string_view(diagnostic.Operation).substr(0U, 160U),
+            recoveryAttempts, std::string_view(diagnostic.Operation).substr(0U, 160U),
             std::string_view(diagnostic.Backend).substr(0U, 160U),
             std::string_view(diagnostic.Adapter).substr(0U, 160U), diagnostic.Frame, diagnostic.DeviceGeneration,
             std::string_view(diagnostic.DriverName).substr(0U, 160U),
@@ -655,5 +701,62 @@ namespace Keire::RenderBackend
         PublishTerminalDeviceFailure(DeviceLifecycle);
         FramesRetired.notify_all();
         return DeviceRecoveryResult::Failed;
+    }
+
+    bool RenderSharedState::CompleteDeviceRecoveryAfterRetry() noexcept
+    {
+        try
+        {
+            std::unique_lock queueLock(RenderQueueMutex);
+            if (DeviceLifecycle.load(std::memory_order_acquire) != RenderDeviceState::Recovering)
+                return false;
+
+            const auto completedAt = std::chrono::steady_clock::now();
+            const auto elapsed = std::chrono::duration<float, std::milli>(completedAt - RecoveryStartedAt).count();
+            std::uint32_t previousGeneration = 0U;
+            std::uint32_t recoveredGeneration = DeviceGeneration.load(std::memory_order_acquire);
+            std::uint32_t attempt = RecoveryAttemptsUsed.load(std::memory_order_acquire);
+            std::string_view operation = "unknown";
+            std::string_view backend = "unknown";
+            std::string_view adapter = "unknown";
+            {
+                std::scoped_lock failureLock(FailureMutex);
+                if (LastDeviceLossDiagnostic)
+                {
+                    LastDeviceLossDiagnostic->RecoveryAttempt = attempt;
+                    LastDeviceLossDiagnostic->RecoveredDeviceGeneration = recoveredGeneration;
+                    LastDeviceLossDiagnostic->RecoveryElapsedMilliseconds = elapsed;
+                    LastDeviceLossDiagnostic->RecoverySucceeded = true;
+                    previousGeneration = LastDeviceLossDiagnostic->DeviceGeneration;
+                    operation = LastDeviceLossDiagnostic->Operation;
+                    backend = LastDeviceLossDiagnostic->Backend;
+                    adapter = LastDeviceLossDiagnostic->Adapter;
+                }
+            }
+            DeviceLost = false;
+            LastRecoveryCompletedAt = completedAt;
+            RetiredFramesSinceRecovery = 0;
+            try
+            {
+                KEIRE_CORE_WARN(
+                    "Recovered SDL GPU device generation {} -> {} after loss in '{}' on backend '{}' adapter '{}' "
+                    "(attempt {}, {:.2f} ms).",
+                    previousGeneration, recoveredGeneration, operation.substr(0U, 160U), backend.substr(0U, 160U),
+                    adapter.substr(0U, 160U), attempt, elapsed);
+            }
+            catch (...)
+            {
+            }
+            // Publish Running last. The owner boundary may resume immediately after this store, so every recovery
+            // diagnostic and retained-generation field must already describe the successfully resubmitted frame.
+            DeviceLifecycle.store(RenderDeviceState::Running, std::memory_order_release);
+            queueLock.unlock();
+            FramesRetired.notify_all();
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 } // namespace Keire::RenderBackend

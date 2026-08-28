@@ -167,6 +167,7 @@ TEST_CASE("runtime UI keyboard and text input target only the focused active pre
     REQUIRE(lowerHandle);
     REQUIRE(upperHandle);
     REQUIRE(world->SetActive(lowerHandle));
+    world->Process();
     REQUIRE(lower.Session->Presentation()->SetFocus(lower.Input));
     REQUIRE(upper.Session->Presentation()->SetFocus(upper.Input));
 
@@ -193,6 +194,7 @@ TEST_CASE("runtime UI keyboard and text input target only the focused active pre
     CHECK(upperInput->Text().empty());
 
     REQUIRE(world->SetActive(upperHandle));
+    world->Process();
     REQUIRE(upper.Session->Presentation()->Ui()->SetFocus({}));
     text.text.text = "ignored";
     CHECK_FALSE(KeireRuntime::ProcessRuntimeUiEventStack(world, {}, text, 1.0F, 1.0F, pointer));

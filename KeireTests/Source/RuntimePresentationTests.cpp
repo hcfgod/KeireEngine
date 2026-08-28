@@ -94,9 +94,12 @@ TEST_CASE("retained runtime UI tracks and cancels pressed state independently pe
     style.Position = Keire::RuntimeUiPositionMode::Absolute;
     style.Width = 100.0F;
     style.Height = 50.0F;
+    style.Background = {0.25F, 0.25F, 0.25F, 1.0F};
     REQUIRE(tree->SetStyle(button, style));
     REQUIRE(tree->SetInteractable(button, true));
-    tree->Layout(200.0F, 100.0F);
+    Keire::RuntimeUiCanvasSettings settings;
+    settings.ScaleMode = Keire::RuntimeUiScaleMode::ConstantPixels;
+    tree->Layout(200.0F, 100.0F, {}, settings);
 
     CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, true));
     CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Secondary, true));
@@ -125,6 +128,25 @@ TEST_CASE("retained runtime UI tracks and cancels pressed state independently pe
     }
     CHECK(primaryClicks == 1U);
     CHECK(secondaryClicks == 0U);
+}
+
+TEST_CASE("retained runtime UI hit-tests transparent interactable controls independently of draw commands")
+{
+    auto tree = Keire::CreateRef<Keire::RuntimeUiTree>();
+    const auto button = tree->Create(Keire::RuntimeUiElementType::Button);
+    Keire::RuntimeUiStyle style;
+    style.Position = Keire::RuntimeUiPositionMode::Absolute;
+    style.Width = 100.0F;
+    style.Height = 50.0F;
+    REQUIRE(tree->SetStyle(button, style));
+    REQUIRE(tree->SetInteractable(button, true));
+    Keire::RuntimeUiCanvasSettings settings;
+    settings.ScaleMode = Keire::RuntimeUiScaleMode::ConstantPixels;
+    tree->Layout(200.0F, 100.0F, {}, settings);
+
+    CHECK(tree->DrawCommands().empty());
+    CHECK(tree->HitTest(25.0F, 25.0F) == button);
+    CHECK(tree->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, true));
 }
 
 TEST_CASE("retained runtime UI navigation honors explicit order and starts at the nearest endpoint")

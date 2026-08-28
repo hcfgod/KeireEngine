@@ -92,15 +92,20 @@ namespace Keire
     RenderSurface::RenderSurface(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
     RenderSurface::~RenderSurface() = default;
     std::string RenderSurface::Name() const { return m_Impl->State->Specification.Name; }
-    std::uint32_t RenderSurface::Width() const noexcept { return m_Impl->State->Width; }
-    std::uint32_t RenderSurface::Height() const noexcept { return m_Impl->State->Height; }
-    RenderSampleCount RenderSurface::SampleCount() const noexcept { return m_Impl->State->ActualSamples; }
+    std::uint32_t RenderSurface::Width() const noexcept { return m_Impl->State->SurfacePropertiesSnapshot().Width; }
+    std::uint32_t RenderSurface::Height() const noexcept { return m_Impl->State->SurfacePropertiesSnapshot().Height; }
+    RenderSampleCount RenderSurface::SampleCount() const noexcept
+    {
+        return m_Impl->State->SurfacePropertiesSnapshot().SampleCount;
+    }
     Color RenderSurface::ClearColor() const noexcept { return m_Impl->State->Specification.ClearColor; }
     std::uint64_t RenderSurface::Generation() const noexcept { return m_Impl->State->Epoch; }
     bool RenderSurface::Available() const noexcept
     {
         const auto owner = m_Impl->State->Owner.lock();
-        return owner && owner->Open && m_Impl->State->PublishedTexture.load(std::memory_order_acquire);
+        return owner && owner->Open &&
+               owner->DeviceLifecycle.load(std::memory_order_acquire) == RenderDeviceState::Running &&
+               m_Impl->State->ResourcesAvailable.load(std::memory_order_acquire);
     }
     bool RenderSurface::SampledDepthAvailable() const noexcept
     {
@@ -109,15 +114,18 @@ namespace Keire
     }
     GpuOcclusionSurfaceDiagnostics RenderSurface::OcclusionDiagnostics() const noexcept
     {
-        return m_Impl->State->GpuOcclusionDiagnostics;
+        return m_Impl->State->GpuOcclusionDiagnosticsSnapshot();
     }
 
     GpuOcclusionDebugView RenderSurface::OcclusionDebugView() const noexcept
     {
-        return m_Impl->State->GpuOcclusionDebugMode;
+        return m_Impl->State->GpuOcclusionDebugMode.load(std::memory_order_acquire);
     }
 
-    std::uint32_t RenderSurface::OcclusionDebugMip() const noexcept { return m_Impl->State->GpuOcclusionDebugMipLevel; }
+    std::uint32_t RenderSurface::OcclusionDebugMip() const noexcept
+    {
+        return m_Impl->State->GpuOcclusionDebugMipLevel.load(std::memory_order_acquire);
+    }
 
     void RenderSurface::RequestSize(const std::uint32_t width, const std::uint32_t height)
     {
@@ -151,10 +159,11 @@ namespace Keire
         if (!owner)
             return;
         owner->RequireOwner("RenderSurface::SetOcclusionDebugView");
-        m_Impl->State->GpuOcclusionDebugMode = view;
-        const auto mipCount = m_Impl->State->GpuOcclusionDiagnostics.PyramidMipCount;
-        m_Impl->State->GpuOcclusionDebugMipLevel =
+        const auto mipCount = m_Impl->State->GpuOcclusionDiagnosticsSnapshot().PyramidMipCount;
+        const auto selectedMip =
             view == GpuOcclusionDebugView::HierarchicalDepth && mipCount != 0U ? std::min(mip, mipCount - 1U) : 0U;
+        m_Impl->State->GpuOcclusionDebugMipLevel.store(selectedMip, std::memory_order_release);
+        m_Impl->State->GpuOcclusionDebugMode.store(view, std::memory_order_release);
     }
 
     class RenderView::Impl final
@@ -253,17 +262,25 @@ namespace Keire
     RenderMode RenderSystem::Mode() const noexcept { return m_Impl->State->Specification.Mode; }
     RenderCapabilities RenderSystem::Capabilities() const noexcept
     {
-        const bool rendered = m_Impl->State->Specification.Mode == RenderMode::Rendered && m_Impl->State->Device;
-        const bool sampledResolvedDepth = rendered && m_Impl->State->ShadowDepthFormat != SDL_GPU_TEXTUREFORMAT_INVALID;
+        const bool rendered =
+            m_Impl->State->Specification.Mode == RenderMode::Rendered &&
+            m_Impl->State->DeviceLifecycle.load(std::memory_order_acquire) == RenderDeviceState::Running;
+        const bool gpuOcclusion = rendered && m_Impl->State->GpuOcclusionCapability.load(std::memory_order_acquire);
         return {.CpuVfxSimulation = true,
                 .GpuVfxSimulation = rendered,
                 .TransparentPass = rendered,
                 .DynamicSpritePackets = rendered,
                 .TexturedSpritePackets = false,
                 .DynamicMeshPackets = rendered,
-                .SampledResolvedDepth = sampledResolvedDepth,
-                .GpuDepthCollision = sampledResolvedDepth,
-                .GpuOcclusionCulling = rendered && m_Impl->State->GpuOcclusionCapability};
+                .SampledResolvedDepth = rendered,
+                .GpuDepthCollision = rendered,
+                .GpuOcclusionCulling = gpuOcclusion,
+                .GpuOcclusionStaticMeshes = gpuOcclusion,
+                .GpuOcclusionSkinnedMeshes = gpuOcclusion,
+                .GpuOcclusionMeshVfx = gpuOcclusion,
+                .GpuOcclusionVfxVisibilityMasks = false,
+                .GpuOcclusionLocalLightMasks = false,
+                .GpuOcclusionSpatialVolumeMasks = false};
     }
     RenderStatistics RenderSystem::Statistics() const noexcept
     {
@@ -280,9 +297,11 @@ namespace Keire
         result.OutstandingFrames = m_Impl->State->OutstandingFrames.load(std::memory_order_relaxed);
         result.FramesInFlightHighWaterMark = m_Impl->State->OutstandingHighWaterMark.load(std::memory_order_relaxed);
         result.AcceptedFrames = m_Impl->State->AcceptedFrameCount.load(std::memory_order_relaxed);
+        result.PresentedFrames = m_Impl->State->PresentedFrameCount.load(std::memory_order_relaxed);
         result.RetiredFrames = m_Impl->State->RetiredFrameCount.load(std::memory_order_relaxed);
         result.CancelledFrames = m_Impl->State->CancelledFrameCount.load(std::memory_order_relaxed);
         result.LastAcceptedFrame = m_Impl->State->LastAcceptedFrameId.load(std::memory_order_relaxed);
+        result.LastPresentedFrame = m_Impl->State->LastPresentedFrameId.load(std::memory_order_relaxed);
         result.LastRetiredFrame = m_Impl->State->LastRetiredFrameId.load(std::memory_order_relaxed);
         result.RendererQueueHighWaterMark = m_Impl->State->RenderQueueHighWaterMark.load(std::memory_order_relaxed);
         return result;
@@ -400,9 +419,10 @@ namespace Keire
         return renderer.m_Impl->State->PresentMode;
     }
 
-    SDL_GPUTexture* RenderSystemInternalAccess::Texture(const RenderSurface& surface) noexcept
+    SDL_GPUTexture* RenderSystemInternalAccess::CaptureUiSurfaceTexture(const RenderSurface& surface)
     {
-        return surface.m_Impl->State->PublishedTexture.load(std::memory_order_acquire);
+        const auto owner = surface.m_Impl->State->Owner.lock();
+        return owner ? owner->CaptureUiSurfaceTexture(surface.m_Impl->State) : nullptr;
     }
 
     std::vector<std::uint8_t> RenderSystemInternalAccess::ReadbackRGBA8(RenderSystem& renderer,
@@ -637,15 +657,18 @@ namespace Keire
         renderState.InjectDeviceLossAtNextFrame.store(true, std::memory_order_release);
     }
 
-    void RenderSystemInternalAccess::InjectDeviceLossAtRetirement(RenderSystem& renderer)
+    void RenderSystemInternalAccess::InjectDeviceLossAtRetirement(RenderSystem& renderer,
+                                                                  const std::uint32_t minimumInFlight)
     {
         auto& renderState = *renderer.m_Impl->State;
         renderState.RequireOwner("InjectDeviceLossAtRetirement");
         if (renderState.Specification.Mode != RenderMode::Rendered)
             throw std::logic_error("Retirement device-loss injection requires a rendered backend.");
+        if (minimumInFlight == 0U || minimumInFlight > renderState.Specification.MaximumFramesInFlight)
+            throw std::invalid_argument("Retirement device-loss injection requires a reachable in-flight depth.");
         renderState.LostGenerationAbandonedHandleCount.store(0U, std::memory_order_release);
         renderState.LostGenerationGpuCleanupCallCount.store(0U, std::memory_order_release);
-        renderState.InjectDeviceLossAtNextRetirement.store(true, std::memory_order_release);
+        renderState.InjectDeviceLossAtRetirementMinimumInFlight.store(minimumInFlight, std::memory_order_release);
     }
 
     void RenderSystemInternalAccess::InjectDeviceLossWithActiveResources(RenderSystem& renderer)
@@ -697,8 +720,12 @@ namespace Keire
         renderState.RequireOwner("SaturateRendererQueue");
         if (!renderState.RenderThread.joinable())
             throw std::logic_error("Queue saturation requires an active renderer thread.");
+        const auto capacity = static_cast<std::size_t>(renderState.Specification.MaximumFramesInFlight);
+        if (capacity == 0U)
+            throw std::logic_error("Queue saturation requires a non-zero configured capacity.");
 
         std::promise<void> workerStarted;
+        auto workerStartedFuture = workerStarted.get_future();
         std::promise<void> releaseWorker;
         auto release = releaseWorker.get_future().share();
         std::exception_ptr producerFailure;
@@ -717,41 +744,85 @@ namespace Keire
             }
         };
 
-        std::jthread first(
-            [&]
-            {
-                produce(
-                    [&]
-                    {
-                        workerStarted.set_value();
-                        release.wait();
-                    });
-            });
-        workerStarted.get_future().wait();
-        std::jthread second([&] { produce([] {}); });
-        std::jthread third([&] { produce([] {}); });
-
-        bool saturated = false;
-        std::uint32_t highWaterMark = 0;
+        std::jthread first;
+        std::vector<std::jthread> producers;
+        producers.reserve(capacity + 1U);
+        bool workerReleased = false;
+        const auto releaseWorkerOnce = [&]() noexcept
         {
-            std::unique_lock lock(renderState.RenderQueueMutex);
-            saturated = renderState.RenderQueueReady.wait_for(lock, std::chrono::seconds(2),
-                                                              [&] { return renderState.RenderQueue.size() == 2; });
-            highWaterMark = renderState.RenderQueueHighWaterMark.load(std::memory_order_relaxed);
+            if (std::exchange(workerReleased, true))
+                return;
+            try
+            {
+                releaseWorker.set_value();
+            }
+            catch (...)
+            {
+            }
+        };
+        const auto joinWorkers = [&]
+        {
+            if (first.joinable())
+                first.join();
+            for (auto& producer : producers)
+                if (producer.joinable())
+                    producer.join();
+        };
+
+        std::uint32_t highWaterMark = 0;
+        try
+        {
+            first = std::jthread(
+                [&]
+                {
+                    produce(
+                        [&]
+                        {
+                            workerStarted.set_value();
+                            release.wait();
+                        });
+                });
+            if (workerStartedFuture.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+                throw std::runtime_error("The renderer worker did not reach the queue-saturation barrier.");
+
+            for (std::size_t index = 0; index < capacity; ++index)
+                producers.emplace_back([&] { produce([] {}); });
+            {
+                std::unique_lock lock(renderState.RenderQueueMutex);
+                const bool saturated = renderState.RenderQueueReady.wait_for(
+                    lock, std::chrono::seconds(2), [&] { return renderState.RenderQueue.size() == capacity; });
+                if (!saturated)
+                    throw std::runtime_error("Renderer queue did not reach its configured capacity.");
+            }
+
+            producers.emplace_back([&] { produce([] {}); });
+            {
+                std::unique_lock lock(renderState.RenderQueueMutex);
+                const bool overflowBlocked = renderState.RenderQueueReady.wait_for(
+                    lock, std::chrono::seconds(2), [&] { return renderState.RenderDispatchAdmissionWaiters != 0U; });
+                if (!overflowBlocked)
+                    throw std::runtime_error("Renderer queue overflow producer did not block at admission.");
+                highWaterMark = renderState.RenderQueueHighWaterMark.load(std::memory_order_relaxed);
+            }
         }
-        releaseWorker.set_value();
-        first.join();
-        second.join();
-        third.join();
+        catch (...)
+        {
+            const auto failure = std::current_exception();
+            releaseWorkerOnce();
+            joinWorkers();
+            if (producerFailure)
+                std::rethrow_exception(producerFailure);
+            std::rethrow_exception(failure);
+        }
+        releaseWorkerOnce();
+        joinWorkers();
         if (producerFailure)
             std::rethrow_exception(producerFailure);
-        if (!saturated)
-            throw std::runtime_error("Renderer queue did not reach its bounded capacity.");
         return highWaterMark;
     }
 
     void RenderSystemInternalAccess::DelayNextAcceptedFrame(RenderSystem& renderer,
-                                                             const std::uint32_t milliseconds) noexcept
+                                                            const std::uint32_t milliseconds) noexcept
     {
         renderer.m_Impl->State->DelayNextAcceptedFrameMilliseconds.store(milliseconds, std::memory_order_release);
     }
@@ -841,12 +912,17 @@ namespace Keire
         std::scoped_lock lock(state.PublicationMutex);
         return {.PrimaryScene = state.LastCapturedPrimaryScene,
                 .PrimaryBakedLighting = state.LastCapturedPrimaryBakedLighting,
+                .Camera = state.LastCapturedCamera,
+                .Environment = state.LastCapturedEnvironment,
+                .ClearColor = state.LastCapturedClearColor,
                 .DrawContributionOrder = state.LastCapturedDrawContributionOrder,
                 .DrawEntities = state.LastCapturedDrawEntities,
                 .SpatialScenes = state.LastCapturedSpatialScenes,
                 .SpatialBakedLighting = state.LastCapturedSpatialBakedLighting,
                 .PreparedOpaqueContributionOrder = state.LastPreparedOpaqueContributionOrder,
+                .PreparedOpaqueEntities = state.LastPreparedOpaqueEntities,
                 .PreparedTransparentContributionOrder = state.LastPreparedTransparentContributionOrder,
+                .PreparedTransparentEntities = state.LastPreparedTransparentEntities,
                 .LocalLights = state.LastCapturedLocalLights,
                 .ReflectionProbes = state.LastCapturedReflectionProbes,
                 .LightProbeVolumes = state.LastCapturedLightProbeVolumes};
@@ -874,18 +950,61 @@ namespace Keire
         return renderer.m_Impl->State->HealthyRecoveryCandidateCleanupCount.load(std::memory_order_acquire);
     }
 
+    std::uint64_t
+    RenderSystemInternalAccess::ReleasedInjectedLostDeviceCountForTest(const RenderSystem& renderer) noexcept
+    {
+        return renderer.m_Impl->State->ReleasedInjectedLostDeviceCountForTest.load(std::memory_order_acquire);
+    }
+
     std::uint64_t RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(const RenderSystem& renderer) noexcept
     {
         return renderer.m_Impl->State->LastRetriedVfxSnapshotCount.load(std::memory_order_acquire);
     }
 
+    std::array<std::uint64_t, 2>
+    RenderSystemInternalAccess::LastVfxRetrySignaturesForTest(const RenderSystem& renderer) noexcept
+    {
+        return {renderer.m_Impl->State->LastCapturedVfxSnapshotSignature.load(std::memory_order_acquire),
+                renderer.m_Impl->State->LastRetriedVfxSnapshotSignature.load(std::memory_order_acquire)};
+    }
+
+    RenderRecoveryResourceCounts RenderSystemInternalAccess::RecoveryResourceCountsForTest(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("RecoveryResourceCountsForTest");
+        RenderRecoveryResourceCounts result;
+        state.DispatchRender(
+            [&state, &result]
+            {
+                result.Meshes = state.MeshCache.size();
+                result.Textures = state.TextureCache.size();
+                result.Materials = state.MaterialCache.size();
+                result.Shaders = state.ShaderCache.size();
+                result.GpuVfxWorlds = state.GpuVfxWorlds.size();
+                result.RenderedEditorUiFrames = state.RenderedEditorUiFrameCount.load(std::memory_order_acquire);
+            });
+        return result;
+    }
+
+    std::uint64_t RenderSystemInternalAccess::SurfaceResourceGenerationForTest(const RenderSurface& surface)
+    {
+        const auto surfaceState = surface.m_Impl->State;
+        const auto owner = surfaceState->Owner.lock();
+        if (!owner)
+            return 0U;
+        owner->RequireOwner("SurfaceResourceGenerationForTest");
+        std::uint64_t result = 0U;
+        owner->DispatchRender([&result, surfaceState] { result = surfaceState->Generation; });
+        return result;
+    }
+
     std::uint32_t RenderSystemInternalAccess::RecoveryAttemptCountForTest(RenderSystem& renderer)
     {
         auto& state = *renderer.m_Impl->State;
-        state.RequireOwner("RecoveryAttemptCountForTest");
-        std::uint32_t result = 0;
-        state.DispatchRender([&state, &result] { result = state.RecoveryAttemptsUsed; });
-        return result;
+        if (std::this_thread::get_id() != state.OwnerThread)
+            throw std::logic_error(
+                "RenderSystem::RecoveryAttemptCountForTest must be called on the application owner thread.");
+        return state.RecoveryAttemptsUsed.load(std::memory_order_acquire);
     }
 
     float RenderSystemInternalAccess::LastRecoveryBackoffMillisecondsForTest(RenderSystem& renderer)
@@ -1051,6 +1170,14 @@ namespace Keire
         state.AfterDeviceRecovery = std::move(after);
     }
 
+    void RenderSystemInternalAccess::SetUiContextAccess(RenderSystem& renderer,
+                                                        std::shared_ptr<Detail::UiContextAccess> contextAccess)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("SetUiContextAccess");
+        state.EditorUiContextAccess.store(std::move(contextAccess), std::memory_order_release);
+    }
+
     void RenderSystemInternalAccess::RunOnRenderThread(RenderSystem& renderer, std::function<void()> work)
     {
         auto& state = *renderer.m_Impl->State;
@@ -1085,28 +1212,6 @@ namespace Keire
         renderState.FramesRetired.notify_all();
     }
 #endif
-
-    void RenderSystemInternalAccess::ReleaseUiTexture(RenderSystem& renderer, SDL_GPUTexture* texture) noexcept
-    {
-        if (!texture)
-            return;
-        auto& state = *renderer.m_Impl->State;
-        try
-        {
-            state.Flush();
-            if (state.DeviceLifecycle.load(std::memory_order_acquire) != RenderDeviceState::Running)
-                return;
-            state.DispatchRender(
-                [&state, texture]
-                {
-                    if (state.Device && !state.DeviceLost)
-                        SDL_ReleaseGPUTexture(state.Device, texture);
-                });
-        }
-        catch (...)
-        {
-        }
-    }
 
     void RenderSystemInternalAccess::WaitIdle(RenderSystem& renderer) noexcept
     {

@@ -93,6 +93,7 @@ TEST_CASE("CPU mesh VFX particles enter material-aware scene rendering")
     CHECK(item->Tint == particle.Tint);
     CHECK_FALSE(item->CastShadows);
     CHECK(item->ReceiveShadows);
+    CHECK(item->VisibilityClass == Keire::RenderBackend::GpuVisibilityClass::MeshVfx);
     Keire::Vector3 position;
     Keire::Quaternion rotation;
     Keire::Vector3 scale;

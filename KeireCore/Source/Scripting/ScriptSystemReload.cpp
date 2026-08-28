@@ -428,8 +428,16 @@ namespace Keire
             Detail::PopulateManagedBehaviourReferenceCompatibility(candidateTypes, managedRuntimeTypesByName);
             if (!managedAssetMetadataType)
                 throw std::runtime_error("Managed asset discovery requires Keire.Managed metadata.");
-            const Coral::ScopedString managedAssetMetadata(
-                managedAssetMetadataType->InvokeStaticMethod<Coral::String>("Export"));
+            const auto exportedManagedAssetMetadata =
+                managedAssetMetadataType->InvokeStaticMethod<Coral::String>("Export");
+            if (!exportedManagedAssetMetadata.Data())
+            {
+                throw std::runtime_error(
+                    "Managed asset metadata export returned no document. A managed metadata exception occurred; "
+                    "review the managed reload diagnostics and validate the exact Behaviour or ScriptableObject "
+                    "field contract.");
+            }
+            const Coral::ScopedString managedAssetMetadata(exportedManagedAssetMetadata);
             auto discoveredManagedAssets = ParseManagedAssetMetadata(static_cast<std::string>(managedAssetMetadata));
             for (const auto& diagnostic : discoveredManagedAssets.Diagnostics)
             {

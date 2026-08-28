@@ -16,6 +16,17 @@ namespace Keire::RenderBackend
     {
         constexpr std::size_t MaximumImGuiTextureSnapshotBytes = 64U * 1024U * 1024U;
 
+        struct PendingTextureAcknowledgement final
+        {
+            ImTextureData* Texture = nullptr;
+            ImTextureStatus Request = ImTextureStatus_OK;
+        };
+
+        [[nodiscard]] ImTextureID LogicalTextureId(const ImTextureData& texture) noexcept
+        {
+            return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(&texture));
+        }
+
         [[nodiscard]] std::size_t CheckedTextureByteCount(const ImTextureData& texture)
         {
             if (texture.Width <= 0 || texture.Height <= 0 || texture.BytesPerPixel <= 0)
@@ -142,8 +153,9 @@ namespace Keire::RenderBackend
         implementation->Data.FramebufferScale = drawData->FramebufferScale;
         implementation->Data.OwnerViewport = nullptr;
         std::unordered_map<const ImTextureData*, ImTextureData*> textureCopies;
+        std::vector<PendingTextureAcknowledgement> pendingTextureAcknowledgements;
         std::size_t copiedTextureBytes = 0;
-        const auto copyTexture = [&](const ImTextureData* source) -> ImTextureData*
+        const auto copyTexture = [&](ImTextureData* source) -> ImTextureData*
         {
             if (!source)
                 throw std::invalid_argument("Dear ImGui draw data contains a null texture-data entry.");
@@ -166,19 +178,25 @@ namespace Keire::RenderBackend
             std::memcpy(copy->Pixels, source->Pixels, byteCount);
             copy->UniqueID = source->UniqueID;
             copy->UseColors = source->UseColors;
+            copy->UsedRect = source->UsedRect;
+            copy->UpdateRect = source->UpdateRect;
+            copy->Updates = source->Updates;
             copy->SetTexID(ImTextureID_Invalid);
             copy->SetStatus(ImTextureStatus_WantCreate);
             auto* result = copy.get();
             implementation->OwnedTextures.push_back(std::move(copy));
             textureCopies.emplace(source, result);
             implementation->Textures.push_back(result);
+            if (source->Status == ImTextureStatus_WantCreate || source->Status == ImTextureStatus_WantUpdates ||
+                source->Status == ImTextureStatus_WantDestroy)
+                pendingTextureAcknowledgements.push_back({source, source->Status});
             return result;
         };
         if (drawData->Textures)
         {
             implementation->Textures.reserve(drawData->Textures->Size);
             implementation->OwnedTextures.reserve(static_cast<std::size_t>(drawData->Textures->Size));
-            for (const auto* texture : *drawData->Textures)
+            for (auto* texture : *drawData->Textures)
                 (void)copyTexture(texture);
         }
         implementation->Data.Textures = implementation->Textures.empty() ? nullptr : &implementation->Textures;
@@ -242,7 +260,27 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("Dear ImGui finalized draw-data totals do not match its output buffers.");
         }
 
-        return std::shared_ptr<OwnedImGuiDrawData>(new OwnedImGuiDrawData(std::move(implementation)));
+        auto captured = std::shared_ptr<OwnedImGuiDrawData>(new OwnedImGuiDrawData(std::move(implementation)));
+        for (const auto& acknowledgement : pendingTextureAcknowledgements)
+        {
+            // Capture is owner-thread-affine, so a changed request here would indicate an unsupported concurrent
+            // producer. Do not overwrite a newer request if that contract is violated.
+            if (acknowledgement.Texture->Status != acknowledgement.Request)
+                continue;
+            if (acknowledgement.Request == ImTextureStatus_WantDestroy)
+            {
+                // Every accepted packet owns a complete CPU texture snapshot and its eventual GPU clone. No packet
+                // retains the live record, so its destruction can be acknowledged as soon as capture commits.
+                acknowledgement.Texture->WantDestroyNextFrame = true;
+                acknowledgement.Texture->BackendUserData = nullptr;
+                acknowledgement.Texture->SetTexID(ImTextureID_Invalid);
+                acknowledgement.Texture->SetStatus(ImTextureStatus_Destroyed);
+                continue;
+            }
+            acknowledgement.Texture->SetTexID(LogicalTextureId(*acknowledgement.Texture));
+            acknowledgement.Texture->SetStatus(ImTextureStatus_OK);
+        }
+        return captured;
     }
 
     std::shared_ptr<ResolvedImGuiDrawData> OwnedImGuiDrawData::ResolveForRender(
@@ -271,6 +309,9 @@ namespace Keire::RenderBackend
             std::memcpy(copy->Pixels, source->Pixels, byteCount);
             copy->UniqueID = source->UniqueID;
             copy->UseColors = source->UseColors;
+            copy->UsedRect = source->UsedRect;
+            copy->UpdateRect = source->UpdateRect;
+            copy->Updates = source->Updates;
             copy->SetTexID(ImTextureID_Invalid);
             copy->SetStatus(ImTextureStatus_WantCreate);
             auto* copiedTexture = copy.get();

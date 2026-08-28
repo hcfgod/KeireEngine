@@ -1,7 +1,7 @@
 #include "KeireInternal/Diagnostics/DiagnosticBundleInternal.h"
 
-#include "DiagnosticBundleSupport.h"
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/Diagnostics/DiagnosticBundleSupport.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <nlohmann/json.hpp>

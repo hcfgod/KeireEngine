@@ -1117,6 +1117,14 @@ $windowsManagedHostStage = Get-Content (Join-Path $Windows "stage-managed-host.p
 $windowsRun = Get-Content (Join-Path $Windows "run.ps1") -Raw
 $windowsRenderBenchmark = Get-Content (Join-Path $Windows "render-benchmark.ps1") -Raw
 $windowsDeviceLoss = Get-Content (Join-Path $Windows "test-render-device-loss.ps1") -Raw
+$runtimeAdditiveValidation = Get-Content `
+    (Join-Path (Get-RepositoryRoot) "KeireRuntime\Source\RuntimeAdditiveValidation.cpp") -Raw
+$runtimeCommandLine = Get-Content `
+    (Join-Path (Get-RepositoryRoot) "KeireRuntime\Source\RuntimeCommandLine.cpp") -Raw
+$runtimeApplication = Get-Content `
+    (Join-Path (Get-RepositoryRoot) "KeireRuntime\Source\RuntimeApplication.cpp") -Raw
+$editorPlayValidation = Get-Content `
+    (Join-Path (Get-RepositoryRoot) "KeireClient\Source\Editor\EditorSmokePlayValidation.cpp") -Raw
 Assert-True ($windowsRenderBenchmark.Contains('@("vsync", "immediate")') -and
              $windowsRenderBenchmark.Contains('warmupFrames -ne 300') -and
              $windowsRenderBenchmark.Contains('measuredFrames -ne 2000') -and
@@ -1131,18 +1139,42 @@ Assert-True ($windowsRenderBenchmark.Contains('@("vsync", "immediate")') -and
               $windowsRenderBenchmark.Contains('Build\Benchmarks')) `
     "Release render benchmark enforces the fixed VSync matrix and durable result contract"
 Assert-True ($windowsDeviceLoss.Contains('--validate-device-loss') -and
+             $windowsDeviceLoss.Contains('[string]$CacheRoot = ""') -and
+             $windowsDeviceLoss.Contains('Join-Path $Root "Build\Cache\DeviceLoss"') -and
+             -not $windowsDeviceLoss.Contains('KeireEngine-pre-demo-hardening-cache') -and
+              $windowsDeviceLoss.Contains('--hidden-validation-window') -and
+              -not $windowsDeviceLoss.Contains('--content $contentStage --headless') -and
+             -not $windowsDeviceLoss.Contains('--frames 6000') -and
              $windowsDeviceLoss.Contains('-SmokePlayDeviceLoss') -and
              $windowsDeviceLoss.Contains('Copy-Item -Path (Join-Path $runtimeSource "*")') -and
              $windowsDeviceLoss.Contains('assetTool cook --project $sampleProject') -and
              $windowsDeviceLoss.Contains('LastWriteTimeUtc -lt $StartedAt') -and
              $windowsDeviceLoss.Contains('build.gitCommit -ne $expectedCommit') -and
              $windowsDeviceLoss.Contains('operation -ne "test frame injection"') -and
-             $windowsDeviceLoss.Contains('retryCount -ne 1') -and
-             $windowsDeviceLoss.Contains('lostGenerationGpuCleanupCalls -ne 0') -and
-             $windowsDeviceLoss.Contains('cookedRuntimeShutdownCompleted = $true') -and
+              $windowsDeviceLoss.Contains('retryCount -ne 1') -and
+              $windowsDeviceLoss.Contains('lostGenerationGpuCleanupCalls -ne 0') -and
+              $windowsDeviceLoss.Contains('twoSceneUiCommands -lt 2') -and
+              $windowsDeviceLoss.Contains('observedRenderedFrames -lt 2') -and
+              $windowsDeviceLoss.Contains('acceptedFrameBlockedBeforeClose') -and
+              $windowsDeviceLoss.Contains('recoveryAttempt -ne 0') -and
+              $windowsDeviceLoss.Contains('outstandingFrames -ne 0') -and
+              $windowsDeviceLoss.Contains('cookedRuntimeShutdownCompleted = $true') -and
+              $windowsDeviceLoss.Contains('cookedRuntimeShutdownDeviceLoss = $true') -and
              $windowsDeviceLoss.Contains('editorShutdownCompleted = $true') -and
              $windowsDeviceLoss.Contains('Build\Validation\DeviceLoss')) `
-    "Debug device-loss gate runs the real staged cooked runtime and rendered Editor window loop"
+    "Debug device-loss gate runs rendered runtime/Editor loops and proves shutdown loss containment"
+Assert-True ($runtimeAdditiveValidation.Contains('Additive runtime validation timed out.') -and
+              $runtimeAdditiveValidation.Contains('std::chrono::minutes(5)') -and
+              $runtimeAdditiveValidation.Contains('renderer->Flush()') -and
+              $runtimeAdditiveValidation.Contains('BlockNextAcceptedFrame(*renderer)') -and
+              $runtimeAdditiveValidation.Contains('FinalizeDeviceLossShutdown') -and
+              $runtimeCommandLine.Contains('--hidden-validation-window') -and
+              $runtimeCommandLine.Contains('--validate-device-loss does not support --headless') -and
+              $runtimeApplication.Contains('specification.Render.Mode = RenderMode::Rendered') -and
+              $runtimeApplication.Contains('!hiddenValidationWindow') -and
+              $editorPlayValidation.Contains('RecoveryAttemptCountForTest(*renderer)') -and
+             -not $editorPlayValidation.Contains('RetriedAfterDeviceLoss')) `
+    "Runtime and Editor end-to-end validation use stable timeout and recovery evidence"
 Assert-True ($windowsRun.Contains('[switch]$SmokePlay') -and
              $windowsRun.Contains('[switch]$SmokePlayDeviceLoss') -and
              $windowsRun.Contains('$Configuration -notin @("Debug", "DebugASan")') -and
@@ -1156,6 +1188,15 @@ $windowsFfmpegContract = Get-Content (Join-Path $Windows "ffmpeg-runtime-contrac
 $windowsFfmpegStage = Get-Content (Join-Path $Windows "stage-ffmpeg-runtime.ps1") -Raw
 $windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
 Assert-True ($windowsPackage.Contains('--validate-additive-runtime $runtimeValidationOutput') -and
+              $windowsPackage.Contains('--content $runtimeContent --headless') -and
+              -not $windowsPackage.Contains('--frames 6000') -and
+              $windowsPackage.Contains('$runtimeValidation.renderMode -ne "rendered"') -and
+              $windowsPackage.Contains('$runtimeValidation.renderedWindowLoop') -and
+              $windowsPackage.Contains('$runtimeValidation.nativeWindowCreated') -and
+              $windowsPackage.Contains('$runtimeValidation.validationWindowHidden') -and
+              $windowsPackage.Contains('$runtimeValidation.twoSceneUiCommands -lt 2') -and
+              $windowsPackage.Contains('$runtimeValidation.threeSceneUiCommands -lt 2') -and
+              $windowsPackage.Contains('$editorPlayValidation.observedRenderedFrames -lt 2') -and
               $windowsPackage.Contains('$runtimeValidation.build.gitCommit -ne $commit') -and
               $windowsPackage.Contains('$editorPlayValidation.build.gitCommit -ne $expectedHeadCommit') -and
               $windowsPackage.Contains('LastWriteTimeUtc -lt $runtimeValidationStartedAt') -and
@@ -1295,7 +1336,7 @@ foreach ($coreArchive in @("Assets", "Build", "World", "Rendering", "Scenes", "S
 }
 $editorDevPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\EditorDev.lua") -Raw
 Assert-True ($editorDevPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "EditorDev"') -and
-             $editorDevPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, RuntimeTarget }') -and
+             $editorDevPremake.Contains('dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, AssetWorkerTarget, RuntimeTarget }') -and
              $windowsRun.Contains('$editorDevTarget')) "Complete editor development aggregate"
 Assert-True ($windowsBuild.Contains('Resolve-CompilerCache') -and
              $windowsBuild.Contains('ProfileBuild') -and

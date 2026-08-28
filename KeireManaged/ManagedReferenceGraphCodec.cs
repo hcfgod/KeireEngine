@@ -918,7 +918,7 @@ internal static class ManagedReferenceGraphCodec
         object? defaultComparer = typeof(EqualityComparer<>).MakeGenericType(keyType)
             .GetProperty("Default", BindingFlags.Static | BindingFlags.Public)?.GetValue(null);
         if (!ReferenceEquals(comparer, defaultComparer))
-            throw Invalid(dictionaryType, path, dictionaryType, "custom dictionary comparers are not supported");
+            throw Invalid(dictionaryType, path, dictionaryType, "custom comparers are not supported for dictionaries");
     }
 
     private static string FormatKey(object key) => key is string text ? $"\"{text}\"" :

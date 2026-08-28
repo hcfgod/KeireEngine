@@ -49,6 +49,13 @@ namespace Keire::Internal
                                               const VfxExpressionEvaluationContext& context,
                                               std::span<VfxParameterValue> registers) noexcept;
 
+    /// Evaluates an expression that has no frame, particle, or resource-query dependency. The graph compiler uses
+    /// this same implementation for constant folding so authored and runtime expression semantics cannot diverge.
+    [[nodiscard]] std::optional<VfxParameterValue>
+    EvaluateVfxPureExpression(VfxValueOpcode opcode, std::span<const VfxParameterValue* const> inputs,
+                              VfxValueType outputType, bool clampRemap, VfxComparisonCondition comparison,
+                              std::uint32_t outputIndex = 0) noexcept;
+
     [[nodiscard]] const VfxParameterValue* ResolveVfxValueSource(const VfxCompiledValueSource& source,
                                                                  std::span<const VfxParameterValue> parameters,
                                                                  std::span<const VfxParameterValue> registers) noexcept;

@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cmath>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <utility>
@@ -69,17 +70,6 @@ namespace Keire
             const auto valid = [](const float component)
             { return std::isfinite(component) && component >= 0.0F && component <= 1.0F; };
             return valid(color.Red) && valid(color.Green) && valid(color.Blue) && valid(color.Alpha);
-        }
-        [[nodiscard]] ImU32 ToImGuiColor(const UiColor color)
-        {
-            if (!ValidColor(color))
-                throw std::invalid_argument("UI drawing colors must contain finite values in 0..1.");
-            return ImGui::ColorConvertFloat4ToU32({color.Red, color.Green, color.Blue, color.Alpha});
-        }
-        void ValidateDrawing(const float thickness, const float rounding = 0.0F)
-        {
-            if (!std::isfinite(thickness) || thickness <= 0.0F || !std::isfinite(rounding) || rounding < 0.0F)
-                throw std::invalid_argument("UI drawing dimensions must be finite and positive.");
         }
         [[nodiscard]] ImGuiWindowFlags ToImGuiWindowFlags(const UiWindowOptions options) noexcept
         {
@@ -947,7 +937,7 @@ namespace Keire
         if (size.Height <= 0.0F)
             size.Height = static_cast<float>(std::max(surface->Height(), 1U));
 
-        if (auto* texture = RenderSystemInternalAccess::Texture(*surface))
+        if (auto* texture = RenderSystemInternalAccess::CaptureUiSurfaceTexture(*surface))
         {
             ImGui::Image(ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture))),
                          {size.Width, size.Height});
@@ -972,7 +962,7 @@ namespace Keire
         m_Impl->RequireActive("DrawImage(RenderSurface)");
         if (!surface || rectangle.Maximum.X <= rectangle.Minimum.X || rectangle.Maximum.Y <= rectangle.Minimum.Y)
             throw std::invalid_argument("UiFrame::DrawImage requires a valid surface and rectangle.");
-        if (auto* texture = RenderSystemInternalAccess::Texture(*surface))
+        if (auto* texture = RenderSystemInternalAccess::CaptureUiSurfaceTexture(*surface))
         {
             ImGui::GetWindowDrawList()->AddImage(
                 ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture))),
@@ -991,91 +981,6 @@ namespace Keire
             size.Height = static_cast<float>(image->Height());
         const std::string safeId(id);
         return ImGui::ImageButton(safeId.c_str(), image->m_Impl->Texture->GetTexRef(), {size.Width, size.Height});
-    }
-
-    void UiFrame::DrawLine(const UiPosition start, const UiPosition end, const UiColor color, const float thickness)
-    {
-        m_Impl->RequireActive("DrawLine");
-        ValidateDrawing(thickness);
-        ImGui::GetWindowDrawList()->AddLine({start.X, start.Y}, {end.X, end.Y}, ToImGuiColor(color), thickness);
-    }
-
-    void UiFrame::DrawCircle(const UiPosition center, const float radius, const UiColor color, const float thickness)
-    {
-        m_Impl->RequireActive("DrawCircle");
-        ValidateDrawing(thickness);
-        if (!std::isfinite(radius) || radius <= 0.0F)
-            throw std::invalid_argument("UI circle radius must be finite and positive.");
-        ImGui::GetWindowDrawList()->AddCircle({center.X, center.Y}, radius, ToImGuiColor(color), 0, thickness);
-    }
-
-    void UiFrame::DrawFilledCircle(const UiPosition center, const float radius, const UiColor color)
-    {
-        m_Impl->RequireActive("DrawFilledCircle");
-        if (!std::isfinite(radius) || radius <= 0.0F)
-            throw std::invalid_argument("UI circle radius must be finite and positive.");
-        ImGui::GetWindowDrawList()->AddCircleFilled({center.X, center.Y}, radius, ToImGuiColor(color));
-    }
-
-    void UiFrame::DrawRectangle(const UiItemRect rectangle, const UiColor color, const float thickness,
-                                const float rounding)
-    {
-        m_Impl->RequireActive("DrawRectangle");
-        ValidateDrawing(thickness, rounding);
-        ImGui::GetWindowDrawList()->AddRect({rectangle.Minimum.X, rectangle.Minimum.Y},
-                                            {rectangle.Maximum.X, rectangle.Maximum.Y}, ToImGuiColor(color), rounding,
-                                            ImDrawFlags_None, thickness);
-    }
-
-    void UiFrame::DrawFilledRectangle(const UiItemRect rectangle, const UiColor color, const float rounding)
-    {
-        m_Impl->RequireActive("DrawFilledRectangle");
-        ValidateDrawing(1.0F, rounding);
-        ImGui::GetWindowDrawList()->AddRectFilled({rectangle.Minimum.X, rectangle.Minimum.Y},
-                                                  {rectangle.Maximum.X, rectangle.Maximum.Y}, ToImGuiColor(color),
-                                                  rounding);
-    }
-
-    void UiFrame::DrawTriangle(const UiPosition first, const UiPosition second, const UiPosition third,
-                               const UiColor color, const float thickness)
-    {
-        m_Impl->RequireActive("DrawTriangle");
-        ValidateDrawing(thickness);
-        ImGui::GetWindowDrawList()->AddTriangle({first.X, first.Y}, {second.X, second.Y}, {third.X, third.Y},
-                                                ToImGuiColor(color), thickness);
-    }
-
-    void UiFrame::DrawFilledTriangle(const UiPosition first, const UiPosition second, const UiPosition third,
-                                     const UiColor color)
-    {
-        m_Impl->RequireActive("DrawFilledTriangle");
-        ImGui::GetWindowDrawList()->AddTriangleFilled({first.X, first.Y}, {second.X, second.Y}, {third.X, third.Y},
-                                                      ToImGuiColor(color));
-    }
-
-    UiSize UiFrame::MeasureText(const std::string_view text, const float fontSize) const
-    {
-        m_Impl->RequireActive("MeasureText");
-        const auto size = fontSize > 0.0F ? fontSize : ImGui::GetFontSize();
-        const auto measured = ImGui::GetFont()->CalcTextSizeA(size, std::numeric_limits<float>::max(), 0.0F,
-                                                              text.data(), text.data() + text.size());
-        return {measured.x, measured.y};
-    }
-
-    void UiFrame::DrawOverlayText(const UiPosition position, const UiColor color, const std::string_view text,
-                                  const float fontSize, const std::optional<UiItemRect> clip)
-    {
-        m_Impl->RequireActive("DrawOverlayText");
-        const auto size = fontSize > 0.0F ? fontSize : ImGui::GetFontSize();
-        ImVec4 clipRectangle;
-        const ImVec4* clipPointer = nullptr;
-        if (clip)
-        {
-            clipRectangle = {clip->Minimum.X, clip->Minimum.Y, clip->Maximum.X, clip->Maximum.Y};
-            clipPointer = &clipRectangle;
-        }
-        ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), size, {position.X, position.Y}, ToImGuiColor(color),
-                                            text.data(), text.data() + text.size(), 0.0F, clipPointer);
     }
 
     UiSize UiFrame::ContentAvailable() const
@@ -1215,18 +1120,21 @@ namespace Keire
             Context = ImGui::CreateContext();
             if (!Context)
                 throw UiError("ImGui::CreateContext", "Dear ImGui did not create a context");
-
             try
             {
+                ContextAccess = std::make_shared<Detail::UiContextAccess>(Context);
                 Images = std::make_shared<Detail::UiImageOwner>();
-                Images->Bind(Context, nullptr, nullptr);
+                Images->Bind(ContextAccess, nullptr, nullptr);
                 Frame->m_Impl->Images = Images;
                 ConfigureContext();
                 if (Specification.Workspace.Enabled)
                     Workspace = std::unique_ptr<UiWorkspace>(new UiWorkspace(Specification.Workspace, windows, window,
                                                                              Specification.Mode == UiMode::Rendered));
                 else
+                {
+                    const auto contextLock = ContextAccess->Acquire();
                     Detail::LoadUiLayout(Specification.LayoutPath);
+                }
                 if (Specification.Mode == UiMode::Rendered)
                     InitializeRenderer(windows, renderer);
                 InitializationComplete = true;
@@ -1242,7 +1150,7 @@ namespace Keire
 
         void ConfigureContext()
         {
-            ImGui::SetCurrentContext(Context);
+            const auto contextLock = ContextAccess->Acquire();
             auto& io = ImGui::GetIO();
             io.IniFilename = nullptr;
             if (Specification.EnableKeyboardNavigation)
@@ -1268,34 +1176,58 @@ namespace Keire
         {
             if (std::this_thread::get_id() != OwnerThread)
                 throw std::logic_error("UI theme changes must run on the application owner thread.");
-            ImGui::SetCurrentContext(Context);
+            const auto contextLock = ContextAccess->Acquire();
             Detail::ApplyUiTheme(theme);
             Specification.Theme = theme;
         }
 
         void InitializeRenderer(WindowSystem& windows, RenderSystem& renderer)
         {
-            auto* nativeWindow = RenderSystemInternalAccess::NativeWindow(renderer);
-            if (!nativeWindow)
-                throw UiError("ResolveNativeWindow", "the primary window is not available");
-
-            ImGui::SetCurrentContext(Context);
-            if (!ImGui_ImplSDL3_InitForSDLGPU(nativeWindow))
-                throw UiError("ImGui_ImplSDL3_InitForSDLGPU", LastSdlError());
-            PlatformInitialized = true;
-            RenderBackend.Initialize(renderer, Context, Images);
+            {
+                const auto contextLock = ContextAccess->Acquire();
+                SynchronizePlatformWindow();
+            }
+            RenderBackend.Initialize(renderer, ContextAccess, Images);
 
             Windowing = &windows;
             EventSink = WindowSystemInternalAccess::AddEventSink(windows, this, ProcessEvent);
         }
 
+        void SynchronizePlatformWindow()
+        {
+            auto* nativeWindow = Renderer ? RenderSystemInternalAccess::NativeWindow(*Renderer) : nullptr;
+            if (!nativeWindow)
+                throw UiError("ResolveNativeWindow", "the primary window is not available");
+            if (PlatformInitialized && PlatformNativeWindow == nativeWindow)
+                return;
+
+            if (PlatformInitialized)
+            {
+                // Recovery may replace an SDL window whose lost-device claim cannot be reused. The old main-window
+                // viewport is non-owning, so shutting down the platform backend only detaches its stale handle.
+                ImGui_ImplSDL3_Shutdown();
+                PlatformInitialized = false;
+                PlatformNativeWindow = nullptr;
+            }
+            if (!ImGui_ImplSDL3_InitForSDLGPU(nativeWindow))
+                throw UiError("ImGui_ImplSDL3_InitForSDLGPU(recovery)", LastSdlError());
+            PlatformNativeWindow = nativeWindow;
+            PlatformInitialized = true;
+        }
+
         static void ProcessEvent(void* context, const SDL_Event& event) noexcept
         {
             auto& self = *static_cast<Impl*>(context);
-            if (!self.Context || !self.PlatformInitialized)
+            if (!self.ContextAccess || !self.PlatformInitialized)
                 return;
-            ImGui::SetCurrentContext(self.Context);
-            (void)ImGui_ImplSDL3_ProcessEvent(&event);
+            try
+            {
+                const auto contextLock = self.ContextAccess->Acquire();
+                (void)ImGui_ImplSDL3_ProcessEvent(&event);
+            }
+            catch (...)
+            {
+            }
         }
 
         void BeginFrame(const TimeStep deltaTime, const LogicalExtent displaySize)
@@ -1303,45 +1235,64 @@ namespace Keire
             if (FrameActive)
                 throw std::logic_error("A Kéire UI frame is already active.");
 
-            ImGui::SetCurrentContext(Context);
-            Images->ProcessRetired();
-            if (Workspace)
-                Workspace->BeforeNewFrame();
-            if (Specification.Mode == UiMode::Rendered)
+            FrameContextLock = ContextAccess->Acquire();
+            try
             {
-                RenderBackend.NewFrame();
-                ImGui_ImplSDL3_NewFrame();
+                Images->ProcessRetired();
+                if (Workspace)
+                    Workspace->BeforeNewFrame();
+                if (Specification.Mode == UiMode::Rendered)
+                {
+                    SynchronizePlatformWindow();
+                    RenderBackend.NewFrame();
+                    ImGui_ImplSDL3_NewFrame();
+                    auto& io = ImGui::GetIO();
+                    if (!std::isfinite(io.DisplaySize.x) || !std::isfinite(io.DisplaySize.y) ||
+                        io.DisplaySize.x < 0.0F || io.DisplaySize.y < 0.0F)
+                    {
+                        // SDL can transiently reject a size query while the replacement window is becoming current.
+                        // Keep the owner-provided logical extent authoritative until the next platform frame.
+                        io.DisplaySize = {static_cast<float>(std::max(displaySize.Width, 1U)),
+                                          static_cast<float>(std::max(displaySize.Height, 1U))};
+                        io.DisplayFramebufferScale = {1.0F, 1.0F};
+                    }
+                }
+                else
+                {
+                    auto& io = ImGui::GetIO();
+                    io.DisplaySize = {static_cast<float>(std::max(displaySize.Width, 1U)),
+                                      static_cast<float>(std::max(displaySize.Height, 1U))};
+                    io.DeltaTime = std::max(static_cast<float>(deltaTime.Seconds()), 1.0F / 1000.0F);
+                }
+                ImGui::NewFrame();
+                if (Workspace)
+                    Workspace->AfterNewFrame({static_cast<float>(std::max(displaySize.Width, 1U)),
+                                              static_cast<float>(std::max(displaySize.Height, 1U))});
+                if (Specification.EnableDocking)
+                {
+                    // Reserve the main-menu row before allocating viewport sidebars. The client appends its menu
+                    // items later in the frame; without this first reservation, the toolbar occupies the same top
+                    // strip and its centered play controls are hidden behind the menu bar.
+                    if (ImGui::BeginMainMenuBar())
+                        ImGui::EndMainMenuBar();
+                    constexpr ImGuiWindowFlags chromeFlags =
+                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
+                    (void)ImGui::BeginViewportSideBar("##KeireMainToolbar", ImGui::GetMainViewport(), ImGuiDir_Up,
+                                                      34.0F, chromeFlags);
+                    ImGui::End();
+                    (void)ImGui::BeginViewportSideBar("##KeireMainStatusBar", ImGui::GetMainViewport(), ImGuiDir_Down,
+                                                      24.0F, chromeFlags);
+                    ImGui::End();
+                    (void)ImGui::DockSpaceOverViewport(Workspace ? Workspace->DockspaceId() : 0);
+                }
+                Frame->m_Impl->Activate(OwnerThread);
+                FrameActive = true;
             }
-            else
+            catch (...)
             {
-                auto& io = ImGui::GetIO();
-                io.DisplaySize = {static_cast<float>(std::max(displaySize.Width, 1U)),
-                                  static_cast<float>(std::max(displaySize.Height, 1U))};
-                io.DeltaTime = std::max(static_cast<float>(deltaTime.Seconds()), 1.0F / 1000.0F);
+                FrameContextLock = {};
+                throw;
             }
-            ImGui::NewFrame();
-            if (Workspace)
-                Workspace->AfterNewFrame({static_cast<float>(std::max(displaySize.Width, 1U)),
-                                          static_cast<float>(std::max(displaySize.Height, 1U))});
-            if (Specification.EnableDocking)
-            {
-                // Reserve the main-menu row before allocating viewport sidebars. The client appends its menu items
-                // later in the frame; without this first reservation, the toolbar occupies the same top strip and
-                // its centered play controls are hidden behind the menu bar.
-                if (ImGui::BeginMainMenuBar())
-                    ImGui::EndMainMenuBar();
-                constexpr ImGuiWindowFlags chromeFlags =
-                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking;
-                (void)ImGui::BeginViewportSideBar("##KeireMainToolbar", ImGui::GetMainViewport(), ImGuiDir_Up, 34.0F,
-                                                  chromeFlags);
-                ImGui::End();
-                (void)ImGui::BeginViewportSideBar("##KeireMainStatusBar", ImGui::GetMainViewport(), ImGuiDir_Down,
-                                                  24.0F, chromeFlags);
-                ImGui::End();
-                (void)ImGui::DockSpaceOverViewport(Workspace ? Workspace->DockspaceId() : 0);
-            }
-            Frame->m_Impl->Activate(OwnerThread);
-            FrameActive = true;
         }
 
         void EndFrame()
@@ -1352,7 +1303,6 @@ namespace Keire
                 throw std::logic_error("A UI scope escaped Layer::OnUi or was destroyed out of nesting order.");
 
             Frame->m_Impl->Deactivate();
-            ImGui::SetCurrentContext(Context);
             ImGui::Render();
             const auto& io = ImGui::GetIO();
             CaptureState = {io.WantCaptureMouse, io.WantCaptureKeyboard, io.WantTextInput};
@@ -1361,9 +1311,12 @@ namespace Keire
             if (Workspace)
                 Workspace->AfterFrame();
 
+            ImDrawData* drawData = Specification.Mode == UiMode::Rendered ? ImGui::GetDrawData() : nullptr;
+            // Queue admission may need the render thread to retire an older frame. Release the authoring guard before
+            // admission; the admitted packet capture reacquires it before reading this finalized draw data.
+            FrameContextLock = {};
             if (Renderer)
-                RenderSystemInternalAccess::EndFrame(
-                    *Renderer, Specification.Mode == UiMode::Rendered ? ImGui::GetDrawData() : nullptr);
+                RenderSystemInternalAccess::EndFrame(*Renderer, drawData);
         }
 
         void Shutdown() noexcept
@@ -1372,14 +1325,30 @@ namespace Keire
                 return;
             ShutdownComplete = true;
 
-            if (Context)
-                ImGui::SetCurrentContext(Context);
-            if (FrameActive)
             {
-                Frame->m_Impl->Deactivate();
-                ImGui::EndFrame();
-                FrameActive = false;
+                std::unique_lock<std::recursive_mutex> contextLock;
+                if (ContextAccess)
+                {
+                    try
+                    {
+                        contextLock = ContextAccess->Acquire();
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+                else if (Context)
+                {
+                    ImGui::SetCurrentContext(Context);
+                }
+                if (FrameActive)
+                {
+                    Frame->m_Impl->Deactivate();
+                    ImGui::EndFrame();
+                    FrameActive = false;
+                }
             }
+            FrameContextLock = {};
             if (EventSink && Windowing)
             {
                 try
@@ -1394,43 +1363,65 @@ namespace Keire
             if (Renderer)
                 RenderSystemInternalAccess::WaitIdle(*Renderer);
             RenderBackend.Shutdown();
-            if (Images)
-                Images->Close();
-            if (PlatformInitialized)
             {
-                ImGui_ImplSDL3_Shutdown();
-                PlatformInitialized = false;
-            }
-            if (Context)
-            {
-                if (Workspace)
-                {
-                    Workspace->Shutdown();
-                    Workspace.reset();
-                }
-                try
-                {
-                    if (InitializationComplete && !Specification.Workspace.Enabled)
-                        Detail::SaveUiLayout(Specification.LayoutPath);
-                }
-                catch (const std::exception& error)
+                std::unique_lock<std::recursive_mutex> contextLock;
+                if (ContextAccess)
                 {
                     try
                     {
-                        KEIRE_CORE_WARN("Unable to persist UI layout: {}", error.what());
+                        contextLock = ContextAccess->Acquire();
                     }
                     catch (...)
                     {
                     }
                 }
-                ImGui::DestroyContext(Context);
-                Context = nullptr;
+                else if (Context)
+                {
+                    ImGui::SetCurrentContext(Context);
+                }
+                if (Images)
+                    Images->Close();
+                if (PlatformInitialized)
+                {
+                    ImGui_ImplSDL3_Shutdown();
+                    PlatformInitialized = false;
+                    PlatformNativeWindow = nullptr;
+                }
+                if (Context)
+                {
+                    if (Workspace)
+                    {
+                        Workspace->Shutdown();
+                        Workspace.reset();
+                    }
+                    try
+                    {
+                        if (InitializationComplete && !Specification.Workspace.Enabled)
+                            Detail::SaveUiLayout(Specification.LayoutPath);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        try
+                        {
+                            KEIRE_CORE_WARN("Unable to persist UI layout: {}", error.what());
+                        }
+                        catch (...)
+                        {
+                        }
+                    }
+                    ImGui::DestroyContext(Context);
+                    Context = nullptr;
+                    if (ContextAccess)
+                        ContextAccess->Invalidate(PreviousContext);
+                    else
+                        ImGui::SetCurrentContext(PreviousContext);
+                }
             }
             Renderer = nullptr;
             Frame->m_Impl->Lifetime.reset();
             Frame->m_Impl->Images.reset();
             Images.reset();
-            ImGui::SetCurrentContext(PreviousContext);
+            ContextAccess.reset();
         }
         UiSpecification Specification;
         std::thread::id OwnerThread;
@@ -1439,9 +1430,12 @@ namespace Keire
         std::unique_ptr<UiWorkspace> Workspace;
         ImGuiContext* PreviousContext = nullptr;
         ImGuiContext* Context = nullptr;
+        std::shared_ptr<Detail::UiContextAccess> ContextAccess;
+        std::unique_lock<std::recursive_mutex> FrameContextLock;
         WindowSystem* Windowing = nullptr;
         RenderSystem* Renderer = nullptr;
         Detail::UiRenderBackend RenderBackend;
+        SDL_Window* PlatformNativeWindow = nullptr;
         bool PlatformInitialized = false;
         WindowSystemInternalAccess::EventSinkToken EventSink = 0;
         bool FrameActive = false;

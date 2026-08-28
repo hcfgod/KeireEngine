@@ -11,8 +11,10 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <limits>
 #include <memory>
 #include <ranges>
@@ -869,9 +871,14 @@ TEST_CASE("lost-device UI abandonment preserves CPU textures without releasing i
                        ImGuiBackendFlags_RendererHasViewports;
 
     auto texture = std::make_unique<ImTextureData>();
-    texture->Create(ImTextureFormat_RGBA32, 1, 1);
-    texture->SetTexID(static_cast<ImTextureID>(0xDEADBEEF));
-    texture->SetStatus(ImTextureStatus_OK);
+    texture->Create(ImTextureFormat_RGBA32, 2, 2);
+    std::ranges::fill(std::span(texture->Pixels, 16), static_cast<unsigned char>(0xA5));
+    texture->UpdateRect = {1U, 0U, 1U, 2U};
+    texture->Updates.push_back(texture->UpdateRect);
+    const ImTextureID logicalId = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture.get()));
+    texture->SetTexID(logicalId);
+    texture->BackendUserData = reinterpret_cast<void*>(static_cast<std::uintptr_t>(0xFEEDBEEF));
+    texture->SetStatus(ImTextureStatus_WantUpdates);
     ImGui::RegisterUserTexture(texture.get());
     ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
     platform.Textures.push_back(texture.get());
@@ -886,8 +893,15 @@ TEST_CASE("lost-device UI abandonment preserves CPU textures without releasing i
     CHECK(io.BackendRendererName == nullptr);
     CHECK((io.BackendFlags & (ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures |
                               ImGuiBackendFlags_RendererHasViewports)) == 0);
-    CHECK(texture->GetTexID() == ImTextureID_Invalid);
-    CHECK(texture->Status == ImTextureStatus_WantCreate);
+    CHECK(texture->GetTexID() == logicalId);
+    CHECK(texture->BackendUserData == reinterpret_cast<void*>(static_cast<std::uintptr_t>(0xFEEDBEEF)));
+    CHECK(texture->Status == ImTextureStatus_WantUpdates);
+    CHECK(texture->UpdateRect.x == 1U);
+    CHECK(texture->UpdateRect.y == 0U);
+    CHECK(texture->UpdateRect.w == 1U);
+    CHECK(texture->UpdateRect.h == 2U);
+    REQUIRE(texture->Updates.Size == 1);
+    CHECK(std::ranges::all_of(std::span(texture->Pixels, 16), [](const unsigned char value) { return value == 0xA5; }));
     CHECK(mainViewport->RendererUserData == nullptr);
     CHECK(platform.Renderer_CreateWindow == nullptr);
 
@@ -895,4 +909,85 @@ TEST_CASE("lost-device UI abandonment preserves CPU textures without releasing i
     ImGui::UnregisterUserTexture(texture.get());
     texture.reset();
     ImGui::DestroyContext(context);
+}
+
+TEST_CASE("UI context access is recursive for the owner and excludes backend work on another thread")
+{
+    ImGuiContext* previous = ImGui::GetCurrentContext();
+    ImGuiContext* context = ImGui::CreateContext();
+    auto access = std::make_shared<Keire::Detail::UiContextAccess>(context);
+
+    auto ownerLock = access->Acquire();
+    auto nestedOwnerLock = access->Acquire();
+    CHECK(ImGui::GetCurrentContext() == context);
+
+    std::promise<void> workerStarted;
+    std::promise<void> workerAcquired;
+    auto workerStartedFuture = workerStarted.get_future();
+    auto workerAcquiredFuture = workerAcquired.get_future();
+    std::jthread worker(
+        [&]
+        {
+            workerStarted.set_value();
+            const auto workerLock = access->Acquire();
+            workerAcquired.set_value();
+        });
+
+    workerStartedFuture.wait();
+    CHECK(workerAcquiredFuture.wait_for(std::chrono::milliseconds(25)) == std::future_status::timeout);
+    nestedOwnerLock = {};
+    ownerLock = {};
+    CHECK(workerAcquiredFuture.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+    worker.join();
+
+    const auto cleanupLock = access->Acquire();
+    ImGui::DestroyContext(context);
+    access->Invalidate(previous);
+}
+
+TEST_CASE("UI backend context access fails closed when its live binding is absent")
+{
+    const std::shared_ptr<Keire::Detail::UiContextAccess> missing;
+    CHECK_THROWS_WITH_AS((void)Keire::Detail::AcquireRequiredUiContext(missing, "missing live UI context"),
+                         "missing live UI context", std::logic_error);
+}
+
+TEST_CASE("distinct UI context access instances serialize the process-global Dear ImGui context")
+{
+    ImGuiContext* previous = ImGui::GetCurrentContext();
+    ImGuiContext* first = ImGui::CreateContext();
+    auto firstAccess = std::make_shared<Keire::Detail::UiContextAccess>(first);
+    ImGuiContext* second = ImGui::CreateContext();
+    auto secondAccess = std::make_shared<Keire::Detail::UiContextAccess>(second);
+
+    auto firstLock = firstAccess->Acquire();
+    std::promise<void> workerStarted;
+    std::promise<bool> workerAcquiredSecond;
+    auto workerStartedFuture = workerStarted.get_future();
+    auto workerAcquiredSecondFuture = workerAcquiredSecond.get_future();
+    std::jthread worker(
+        [&]
+        {
+            workerStarted.set_value();
+            const auto secondLock = secondAccess->Acquire();
+            workerAcquiredSecond.set_value(ImGui::GetCurrentContext() == second);
+        });
+
+    workerStartedFuture.wait();
+    CHECK(workerAcquiredSecondFuture.wait_for(std::chrono::milliseconds(25)) == std::future_status::timeout);
+    firstLock = {};
+    REQUIRE(workerAcquiredSecondFuture.wait_for(std::chrono::seconds(2)) == std::future_status::ready);
+    CHECK(workerAcquiredSecondFuture.get());
+    worker.join();
+
+    {
+        const auto cleanupLock = firstAccess->Acquire();
+        ImGui::DestroyContext(first);
+        firstAccess->Invalidate(previous);
+    }
+    {
+        const auto cleanupLock = secondAccess->Acquire();
+        ImGui::DestroyContext(second);
+        secondAccess->Invalidate(previous);
+    }
 }

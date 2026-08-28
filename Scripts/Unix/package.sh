@@ -157,14 +157,14 @@ if [[ "$PLATFORM" == Linux && -z "${DISPLAY:-}" && -z "${WAYLAND_DISPLAY:-}" ]];
     printf 'Packaged runtime smoke failed.\n' >&2
     exit 1
   }
-  xvfb-run -a "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 600 \
+  xvfb-run -a "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --headless \
     --validate-additive-runtime "$runtime_validation_output" || {
     printf 'Packaged additive runtime validation failed.\n' >&2
     exit 1
   }
 else
   "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 12 || { printf 'Packaged runtime smoke failed.\n' >&2; exit 1; }
-  "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --frames 600 \
+  "$stage/bin/$runtime" --content "$stage/content/KeireSandbox" --headless \
     --validate-additive-runtime "$runtime_validation_output" || {
     printf 'Packaged additive runtime validation failed.\n' >&2
     exit 1
@@ -180,8 +180,14 @@ grep -Fq '"schemaVersion": 1' "$runtime_validation_output" &&
   grep -Fq '"status": "passed"' "$runtime_validation_output" &&
   grep -Fq "\"gitCommit\": \"$commit\"" "$runtime_validation_output" &&
   grep -Fq "\"configuration\": \"$CONFIGURATION\"" "$runtime_validation_output" &&
+  grep -Fq '"renderMode": "rendered"' "$runtime_validation_output" &&
+  grep -Fq '"renderedWindowLoop": true' "$runtime_validation_output" &&
+  grep -Fq '"nativeWindowCreated": true' "$runtime_validation_output" &&
+  grep -Fq '"validationWindowHidden": true' "$runtime_validation_output" &&
   grep -Fq '"twoSceneContributions": 2' "$runtime_validation_output" &&
   grep -Fq '"threeSceneContributions": 3' "$runtime_validation_output" &&
+  grep -Eq '"twoSceneUiCommands": [2-9][0-9]*' "$runtime_validation_output" &&
+  grep -Eq '"threeSceneUiCommands": [2-9][0-9]*' "$runtime_validation_output" &&
   grep -Fq '"noPresentationSession": true' "$runtime_validation_output" &&
   grep -Fq '"unloadReloadOrder": true' "$runtime_validation_output" &&
   grep -Fq '"inputHandledByActiveTopmostPresentation": true' "$runtime_validation_output" &&

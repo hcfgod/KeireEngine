@@ -544,6 +544,11 @@ namespace Keire
 
                 if (recoveryBoundaryRequired)
                 {
+                    // This owner frame is intentionally abandoned before the recovery wait, but its profiler frame
+                    // still needs a deterministic terminal boundary. Otherwise the resumed application attempts to
+                    // begin a second recording over the interrupted one.
+                    if (m_Impl->ProfilerService)
+                        m_Impl->ProfilerService->EndFrame();
                     (void)RenderSystemInternalAccess::WaitForDeviceRecovery(*m_Impl->Renderer, pumpRecoveryEvents);
                     previousFrame = std::chrono::steady_clock::now();
                     continue;

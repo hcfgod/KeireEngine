@@ -18,6 +18,7 @@
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
+#include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
 #include "KeireInternal/Rendering/RenderPipelineStateInternal.h"
 #include "KeireInternal/Rendering/RenderShaderDataInternal.h"
 #include "KeireInternal/Rendering/RenderStatisticsInternal.h"
@@ -51,6 +52,11 @@
 #include <vector>
 
 struct ImDrawData;
+
+namespace Keire::Detail
+{
+    class UiContextAccess;
+}
 
 namespace Keire::RenderBackend
 {
@@ -489,27 +495,30 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* SkinnedBuiltinVertices = nullptr;
         AssetId Scene;
         std::uint32_t ContributionOrder = 0;
+        GpuVisibilityClass VisibilityClass = GpuVisibilityClass::StaticMesh;
     };
 
     [[nodiscard]] inline std::optional<SceneDrawItem> VfxMeshDrawItem(const VfxRenderParticle& particle)
     {
         if (particle.Renderer != VfxRendererType::Mesh || !particle.Mesh || particle.Size <= 0.0F)
             return std::nullopt;
-        return SceneDrawItem{particle.Mesh,
-                             particle.Material ? std::vector<AssetId>{particle.Material} : std::vector<AssetId>{},
-                             {},
-                             {},
-                             Math::ComposeTransform(particle.Position,
-                                                    Math::EulerDegreesToQuaternion(particle.Rotation),
-                                                    {particle.Size, particle.Size, particle.Size}),
-                             particle.Tint,
-                             {},
-                             {},
-                             {},
-                             {},
-                             false,
-                             true,
-                             false};
+        auto result =
+            SceneDrawItem{particle.Mesh,
+                          particle.Material ? std::vector<AssetId>{particle.Material} : std::vector<AssetId>{},
+                          {},
+                          {},
+                          Math::ComposeTransform(particle.Position, Math::EulerDegreesToQuaternion(particle.Rotation),
+                                                 {particle.Size, particle.Size, particle.Size}),
+                          particle.Tint,
+                          {},
+                          {},
+                          {},
+                          {},
+                          false,
+                          true,
+                          false};
+        result.VisibilityClass = GpuVisibilityClassForDraw(false, true);
+        return result;
     }
 
     [[nodiscard]] inline bool RequiresGpuDepthCollision(const std::span<const VfxGpuEmitter> emitters) noexcept
@@ -1083,6 +1092,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] std::vector<std::shared_ptr<RenderSurfaceState>> AllSurfaceEpochs();
         [[nodiscard]] std::vector<RenderSurfaceToken> CaptureLiveSurfaceTokens();
         [[nodiscard]] RenderSurfaceToken CaptureSurfaceToken(const std::shared_ptr<RenderSurfaceState>& surface);
+        [[nodiscard]] SDL_GPUTexture* CaptureUiSurfaceTexture(const std::shared_ptr<RenderSurfaceState>& surface);
         [[nodiscard]] std::shared_ptr<RenderSurfaceState> ResolveSurface(const RenderSurfaceToken& token);
         [[nodiscard]] std::shared_ptr<RenderSurfaceState>
         CreateSurfaceEpoch(const std::shared_ptr<RenderSurfaceState>& previous, std::uint32_t width,
@@ -1190,11 +1200,18 @@ namespace Keire::RenderBackend
                                    const std::shared_ptr<RenderFramePacket>& activeFrame = {}) noexcept;
         void CancelQueuedFrames() noexcept;
         void CompleteFrame(const std::shared_ptr<RenderFramePacket>& frame, bool cancelled) noexcept;
+        void RefreshStatisticsCounters() noexcept;
         void PublishStatistics() noexcept;
-        void PublishTimeline(const std::shared_ptr<RenderFramePacket>& frame, bool cancelled) noexcept;
         [[nodiscard]] DeviceRecoveryResult RecoverDevice(const std::shared_ptr<RenderFramePacket>& interrupted,
                                                          const GpuDeviceLossDiagnostic& diagnostic);
+        [[nodiscard]] bool CompleteDeviceRecoveryAfterRetry() noexcept;
         void HandleRenderThreadFailure(std::exception_ptr failure) noexcept;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        void RecordVfxSnapshotSignatureForTest(const std::shared_ptr<RenderFramePacket>& frame, bool retried) noexcept;
+        void MarkInjectedDeviceLossForTest() noexcept;
+        [[nodiscard]] bool
+        ReleaseInjectedLostDeviceForTest(const std::shared_ptr<RenderFramePacket>& interrupted = {}) noexcept;
+#endif
         void CreateDeviceAndMandatoryResources(bool recovering);
         void DestroyDeviceAndResources(bool abandon, bool preserveSurfaceEpochs = false) noexcept;
         void AbandonLostDeviceResources(const std::shared_ptr<RenderFramePacket>& interrupted = {}) noexcept;
@@ -1254,6 +1271,7 @@ namespace Keire::RenderBackend
         std::thread::id OwnerThread;
         std::thread::id GpuCreationThread;
         std::thread::id GpuDestructionThread;
+        std::atomic<std::shared_ptr<Keire::Detail::UiContextAccess>> EditorUiContextAccess;
         SDL_Window* NativeWindow = nullptr;
         SDL_GPUDevice* Device = nullptr;
         SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
@@ -1312,6 +1330,7 @@ namespace Keire::RenderBackend
         std::optional<std::uint64_t> PresentationSurfaceId;
         std::vector<Ref<RuntimeUiTree>> PendingRuntimeUiTrees;
         std::vector<PendingSceneRequest> PendingSceneRequests;
+        std::vector<CapturedSurfaceTextureBinding> PendingUiSurfaceTextureBindings;
         std::vector<RuntimeUiDrawCommand> CaptureRuntimeUiCommands;
         std::vector<QueuedSceneRequest> CaptureRequests;
         std::shared_ptr<RenderFramePacket> ActiveFrame;
@@ -1330,7 +1349,7 @@ namespace Keire::RenderBackend
         SDL_GPUComputePipeline* SkinningPipeline = nullptr;
         bool SkinningPipelineAttempted = false;
         std::string GpuOcclusionPipelineFailure;
-        bool GpuOcclusionCapability = false;
+        std::atomic<bool> GpuOcclusionCapability{false};
         bool GpuOcclusionPipelinesAttempted = false;
         SDL_GPUComputePipeline* VfxInitializePipeline = nullptr;
         SDL_GPUComputePipeline* VfxResetPipeline = nullptr;

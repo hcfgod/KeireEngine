@@ -609,10 +609,12 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::RetireSurface(RenderSurfaceState& surface) noexcept
     {
+        surface.ResourcesAvailable.store(false, std::memory_order_release);
         Retire(std::exchange(surface.Resources, {}));
         surface.Owner.reset();
         surface.Width = 0;
         surface.Height = 0;
+        surface.PublishSurfacePropertiesSnapshot();
     }
 
     SDL_GPUSampleCount RenderSharedState::ResolveSamples(const RenderSampleCount requested) const noexcept
@@ -732,7 +734,8 @@ namespace Keire::RenderBackend
     {
         if (surface.RequestedWidth == 0 || surface.RequestedHeight == 0)
         {
-            if (surface.Width != 0 || surface.Height != 0 || !surface.Resources.Empty())
+            surface.ResourcesAvailable.store(false, std::memory_order_release);
+            if (surface.Generation == 0U || surface.Width != 0 || surface.Height != 0 || !surface.Resources.Empty())
             {
                 Retire(std::exchange(surface.Resources, {}));
                 surface.Width = 0;
@@ -746,10 +749,12 @@ namespace Keire::RenderBackend
                 ++surface.Generation;
                 ResetGpuOcclusionSurfaceState(surface);
             }
+            surface.PublishSurfacePropertiesSnapshot();
             return;
         }
         if (Specification.Mode == RenderMode::Headless)
         {
+            surface.ResourcesAvailable.store(false, std::memory_order_release);
             if (surface.Width != surface.RequestedWidth || surface.Height != surface.RequestedHeight)
             {
                 surface.Width = surface.RequestedWidth;
@@ -757,14 +762,23 @@ namespace Keire::RenderBackend
                 ++surface.Generation;
                 ResetGpuOcclusionSurfaceState(surface);
             }
+            surface.PublishSurfacePropertiesSnapshot();
             return;
         }
         if (surface.Width == surface.RequestedWidth && surface.Height == surface.RequestedHeight &&
             surface.Resources.PublishedColor() &&
             surface.Resources.Worksets.size() == Specification.MaximumFramesInFlight)
+        {
+            surface.PublishSurfacePropertiesSnapshot();
+            surface.ResourcesAvailable.store(true, std::memory_order_release);
             return;
+        }
+        surface.ResourcesAvailable.store(false, std::memory_order_release);
         if (surface.FailedWidth == surface.RequestedWidth && surface.FailedHeight == surface.RequestedHeight)
+        {
+            surface.PublishSurfacePropertiesSnapshot();
             return;
+        }
 
         const auto samples = ResolveSamples(surface.Specification.SampleCount);
         try
@@ -781,16 +795,21 @@ namespace Keire::RenderBackend
             surface.SampledDepthValid = false;
             surface.PublishedDepthAvailable.store(false, std::memory_order_release);
             ResetGpuOcclusionSurfaceState(surface);
+            surface.PublishSurfacePropertiesSnapshot();
+            surface.ResourcesAvailable.store(true, std::memory_order_release);
         }
         catch (const GpuDeviceLostError&)
         {
+            surface.PublishSurfacePropertiesSnapshot();
             throw;
         }
         catch (const std::exception& error)
         {
             ThrowIfDeviceLost("render surface resize", error.what());
+            surface.ResourcesAvailable.store(false, std::memory_order_release);
             surface.FailedWidth = surface.RequestedWidth;
             surface.FailedHeight = surface.RequestedHeight;
+            surface.PublishSurfacePropertiesSnapshot();
             KEIRE_CORE_ERROR("Could not resize render surface '{}': {}", surface.Specification.Name, error.what());
         }
     }

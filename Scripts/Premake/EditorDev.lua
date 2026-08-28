@@ -7,6 +7,6 @@ project(EditorDevTarget)
     ApplyCommonProjectSettings("../..")
 
     files { "Source/EditorDevAnchor.cpp" }
-    dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, RuntimeTarget }
+    dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, AssetWorkerTarget, RuntimeTarget }
 
     targetname(ProjectConfig.PROJECT_NAMESPACE .. "EditorDevProxy")

@@ -26,7 +26,11 @@ namespace KeireEditor
                     const Keire::PlayerBuildScenes& buildScenes);
         void ObserveGameView(Keire::Application& application, const Keire::Ref<Keire::SceneRuntimeWorld>& world,
                              const Keire::Ref<Keire::RenderSurface>& surface, Keire::UiItemRect viewport,
-                             std::span<const Keire::Ref<Keire::ScenePresentationRuntime>> presentations);
+                             std::span<const Keire::Ref<Keire::ScenePresentationRuntime>> presentations,
+                             Keire::UiPointerState pointer,
+                             const Keire::Ref<Keire::ScenePresentationRuntime>& hoveredPresentation,
+                             const Keire::Ref<Keire::ScenePresentationRuntime>& primaryPointerCapture,
+                             bool gameViewportInputActive, bool gamePanelFocused);
 
       private:
         class Impl;

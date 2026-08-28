@@ -14,6 +14,9 @@ namespace
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         Keire::ApplicationCommandLineOption{"--validate-device-loss",
                                             "Inject device loss during the cooked additive-scene validation."},
+        Keire::ApplicationCommandLineOption{
+            "--hidden-validation-window",
+            "Keep the rendered validation window hidden without selecting the --headless runtime option."},
 #endif
         Keire::ApplicationCommandLineOption{"--render-benchmark <path>",
                                             "Run 300 warm-up and 2,000 measured rendered frames."},

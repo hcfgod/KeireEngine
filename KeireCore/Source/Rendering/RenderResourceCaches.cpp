@@ -157,8 +157,13 @@ namespace Keire::RenderBackend
         const auto frontFenceReady = [this]()
         {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
-            if (InjectDeviceLossAtNextRetirement.exchange(false, std::memory_order_acq_rel))
+            const auto injectionDepth = InjectDeviceLossAtRetirementMinimumInFlight.load(std::memory_order_acquire);
+            if (injectionDepth != 0U && InFlight.size() < injectionDepth)
+                return false;
+            if (injectionDepth != 0U &&
+                InjectDeviceLossAtRetirementMinimumInFlight.exchange(0U, std::memory_order_acq_rel) != 0U)
             {
+                MarkInjectedDeviceLossForTest();
                 throw GpuDeviceLostError(
                     DeviceLossDiagnostic("test fence retirement injection", "Injected GPU device loss."));
             }
@@ -239,22 +244,25 @@ namespace Keire::RenderBackend
         for (const auto& surface : LiveSurfaces())
         {
             auto& diagnostics = surface->GpuOcclusionDiagnostics;
-            if (diagnostics.State != GpuOcclusionSurfaceState::Active || !diagnostics.ReadbackValid)
-                continue;
-            const auto age =
-                Statistics.Frame >= diagnostics.SourceFrame ? Statistics.Frame - diagnostics.SourceFrame : 0U;
-            diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
-                                          ? std::numeric_limits<std::uint32_t>::max()
-                                          : static_cast<std::uint32_t>(age);
-            Statistics.GpuOcclusionCandidates += diagnostics.Candidates;
-            Statistics.GpuOcclusionVisible += diagnostics.Visible;
-            Statistics.GpuOcclusionCulled += diagnostics.Culled;
-            Statistics.GpuOcclusionCandidateTriangles += surface->GpuOcclusionLatestCandidateTriangles;
-            Statistics.GpuOcclusionCulledTriangles +=
-                surface->GpuOcclusionLatestCandidateTriangles -
-                std::min(surface->GpuOcclusionLatestCandidateTriangles, surface->GpuOcclusionLatestVisibleTriangles);
-            Statistics.GpuOcclusionReadbackAge = std::max(Statistics.GpuOcclusionReadbackAge, diagnostics.ReadbackAge);
-            Statistics.GpuOcclusionReadbackValid = true;
+            if (diagnostics.State == GpuOcclusionSurfaceState::Active && diagnostics.ReadbackValid)
+            {
+                const auto age =
+                    Statistics.Frame >= diagnostics.SourceFrame ? Statistics.Frame - diagnostics.SourceFrame : 0U;
+                diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
+                                              ? std::numeric_limits<std::uint32_t>::max()
+                                              : static_cast<std::uint32_t>(age);
+                Statistics.GpuOcclusionCandidates += diagnostics.Candidates;
+                Statistics.GpuOcclusionVisible += diagnostics.Visible;
+                Statistics.GpuOcclusionCulled += diagnostics.Culled;
+                Statistics.GpuOcclusionCandidateTriangles += surface->GpuOcclusionLatestCandidateTriangles;
+                Statistics.GpuOcclusionCulledTriangles += surface->GpuOcclusionLatestCandidateTriangles -
+                                                          std::min(surface->GpuOcclusionLatestCandidateTriangles,
+                                                                   surface->GpuOcclusionLatestVisibleTriangles);
+                Statistics.GpuOcclusionReadbackAge =
+                    std::max(Statistics.GpuOcclusionReadbackAge, diagnostics.ReadbackAge);
+                Statistics.GpuOcclusionReadbackValid = true;
+            }
+            surface->PublishGpuOcclusionDiagnosticsSnapshot();
         }
         if (!Statistics.GpuOcclusionReadbackValid)
             Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
@@ -269,6 +277,7 @@ namespace Keire::RenderBackend
         FrameActive = true;
         PendingSceneRequests.clear();
         PendingRuntimeUiTrees.clear();
+        PendingUiSurfaceTextureBindings.clear();
         CaptureRequests.clear();
         CaptureRuntimeUiCommands.clear();
         CaptureFrameStartedAt = std::chrono::steady_clock::now();
@@ -382,6 +391,7 @@ namespace Keire::RenderBackend
         CpuPreparation.CancelFrame();
         PendingSceneRequests.clear();
         PendingRuntimeUiTrees.clear();
+        PendingUiSurfaceTextureBindings.clear();
         CaptureRequests.clear();
         CaptureRuntimeUiCommands.clear();
     }
@@ -397,6 +407,12 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("SceneRenderRequest exceeds the 64-scene contribution bound.");
         if (request.PrimaryContributionIndex > request.AdditionalScenes.size())
             throw std::invalid_argument("SceneRenderRequest primary contribution index is out of range.");
+        ValidateRenderEnvironmentSettings(request.Environment);
+        if (std::ranges::any_of(request.AdditionalScenes,
+                                [](const SceneRenderContribution& contribution) { return !contribution.Scene; }))
+        {
+            throw std::invalid_argument("SceneRenderRequest contains an empty scene contribution.");
+        }
 
         auto surfaceLease = std::static_pointer_cast<RenderSurfaceState>(
             RenderSystemInternalAccess::SurfaceLease(*request.View->Surface()));
@@ -619,6 +635,7 @@ namespace Keire::RenderBackend
                 item.MaterialInstanceProperties = renderer->AllMaterialInstanceProperties();
                 item.Scene = sceneAsset;
                 item.ContributionOrder = contributionOrder;
+                item.VisibilityClass = GpuVisibilityClassForDraw(static_cast<bool>(item.Skin), false);
             }
             for (const auto& particle : vfx.Particles())
             {
@@ -652,6 +669,9 @@ namespace Keire::RenderBackend
             std::scoped_lock lock(PublicationMutex);
             LastCapturedPrimaryScene = packet.Scene;
             LastCapturedPrimaryBakedLighting = packet.BakedLighting;
+            LastCapturedCamera = packet.Camera;
+            LastCapturedEnvironment = packet.Environment;
+            LastCapturedClearColor = camera.ClearColor;
             LastCapturedDrawContributionOrder.clear();
             LastCapturedDrawEntities.clear();
             LastCapturedDrawContributionOrder.reserve(packet.DrawItems.size());

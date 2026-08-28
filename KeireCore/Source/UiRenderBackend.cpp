@@ -8,7 +8,6 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
-#include <bit>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -20,16 +19,29 @@ namespace Keire
     {
         namespace
         {
-            [[nodiscard]] SDL_GPUTexture* TextureFromId(const ImTextureID texture) noexcept
-            {
-                return std::bit_cast<SDL_GPUTexture*>(texture);
-            }
-
             [[nodiscard]] std::string LastSdlError()
             {
                 const char* error = SDL_GetError();
                 return error && *error ? std::string(error) : std::string("SDL did not provide a diagnostic");
             }
+
+            class ScopedTextureRequestDetachment final
+            {
+              public:
+                ScopedTextureRequestDetachment() : m_Platform(ImGui::GetPlatformIO())
+                {
+                    m_SavedTextures.swap(m_Platform.Textures);
+                }
+
+                ~ScopedTextureRequestDetachment() { m_SavedTextures.swap(m_Platform.Textures); }
+
+                ScopedTextureRequestDetachment(const ScopedTextureRequestDetachment&) = delete;
+                ScopedTextureRequestDetachment& operator=(const ScopedTextureRequestDetachment&) = delete;
+
+              private:
+                ImGuiPlatformIO& m_Platform;
+                ImVector<ImTextureData*> m_SavedTextures;
+            };
 
             void InitializeGpuBackend(SDL_GPUDevice* device, const SDL_GPUTextureFormat colorFormat,
                                       const SDL_GPUPresentMode presentMode, const char* operation)
@@ -45,7 +57,10 @@ namespace Keire
 
                 // Device recovery retries the interrupted immutable packet before the owner can begin another UI
                 // frame. Build the backend's samplers, pipeline, and shaders on the render thread now so that retry
-                // never observes the freshly initialized backend's null lazy resources.
+                // never observes the freshly initialized backend's null lazy resources. The SDL backend begins by
+                // invalidating PlatformIO::Textures; those are owner-thread producer records in Kéire's staged
+                // renderer, so keep them detached while the new, empty backend initializes its device objects.
+                const ScopedTextureRequestDetachment detachedTextureRequests;
                 ImGui_ImplSDLGPU3_CreateDeviceObjects();
             }
         } // namespace
@@ -63,14 +78,8 @@ namespace Keire
 
             ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
             platform.Renderer_RenderState = nullptr;
-            for (ImTextureData* texture : platform.Textures)
-            {
-                if (!texture)
-                    continue;
-                texture->BackendUserData = nullptr;
-                texture->SetTexID(ImTextureID_Invalid);
-                texture->SetStatus(ImTextureStatus_Destroyed);
-            }
+            // PlatformIO::Textures contains owner-thread producer records. Packet-local copies own every SDL texture,
+            // so device loss must not alter the live records' logical IDs, status, pixels, or dirty rectangles.
             for (ImGuiViewport* viewport : platform.Viewports)
             {
                 if (viewport)
@@ -92,10 +101,17 @@ namespace Keire
         ImTextureData* UiImageOwner::Create(const std::uint32_t width, const std::uint32_t height,
                                             const std::span<const std::byte> pixels)
         {
-            std::scoped_lock lock(m_Mutex);
-            if (!m_Open || !m_Context)
+            std::shared_ptr<UiContextAccess> contextAccess;
+            {
+                std::scoped_lock lock(m_Mutex);
+                contextAccess = m_ContextAccess;
+            }
+            if (!contextAccess)
                 throw std::logic_error("UI image owner is closed.");
-            ImGui::SetCurrentContext(m_Context);
+            const auto contextLock = contextAccess->Acquire();
+            std::scoped_lock lock(m_Mutex);
+            if (!m_Open || m_ContextAccess != contextAccess)
+                throw std::logic_error("UI image owner is closed.");
             auto texture = std::make_unique<ImTextureData>();
             texture->Create(ImTextureFormat_RGBA32, static_cast<int>(width), static_cast<int>(height));
             std::memcpy(texture->GetPixels(), pixels.data(), pixels.size());
@@ -115,56 +131,76 @@ namespace Keire
 
         void UiImageOwner::ProcessRetired()
         {
+            std::shared_ptr<UiContextAccess> contextAccess;
+            {
+                std::scoped_lock lock(m_Mutex);
+                contextAccess = m_ContextAccess;
+            }
+            if (!contextAccess)
+                return;
+            const auto contextLock = contextAccess->Acquire();
             std::vector<ImTextureData*> retired;
             {
                 std::scoped_lock lock(m_Mutex);
+                if (!m_Open || m_ContextAccess != contextAccess)
+                    return;
                 retired.swap(m_Retired);
             }
             if (retired.empty())
                 return;
-            ImGui::SetCurrentContext(m_Context);
             for (auto* texture : retired)
             {
-                if (!m_Active.erase(texture))
-                    continue;
+                {
+                    std::scoped_lock lock(m_Mutex);
+                    if (!m_Active.erase(texture))
+                        continue;
+                }
                 ImGui::UnregisterUserTexture(texture);
-                if (m_Renderer && texture->GetTexID() != ImTextureID_Invalid)
-                    RenderSystemInternalAccess::ReleaseUiTexture(*m_Renderer, TextureFromId(texture->GetTexID()));
                 delete texture;
             }
         }
 
         void UiImageOwner::Close() noexcept
         {
-            std::scoped_lock lock(m_Mutex);
-            if (!m_Open)
+            std::shared_ptr<UiContextAccess> contextAccess;
+            {
+                std::scoped_lock lock(m_Mutex);
+                if (!m_Open)
+                    return;
+                contextAccess = m_ContextAccess;
+            }
+            if (!contextAccess)
                 return;
-            m_Open = false;
             try
             {
-                ImGui::SetCurrentContext(m_Context);
+                const auto contextLock = contextAccess->Acquire();
+                std::scoped_lock lock(m_Mutex);
+                if (!m_Open || m_ContextAccess != contextAccess)
+                    return;
+                m_Open = false;
                 for (auto* texture : m_Active)
                 {
                     ImGui::UnregisterUserTexture(texture);
-                    if (m_Renderer && texture->GetTexID() != ImTextureID_Invalid)
-                        RenderSystemInternalAccess::ReleaseUiTexture(*m_Renderer, TextureFromId(texture->GetTexID()));
                     delete texture;
                 }
             }
             catch (...)
             {
             }
+            std::scoped_lock lock(m_Mutex);
+            m_Open = false;
             m_Active.clear();
             m_Retired.clear();
-            m_Context = nullptr;
+            m_ContextAccess.reset();
             m_Device = nullptr;
             m_Renderer = nullptr;
         }
 
-        void UiImageOwner::Bind(ImGuiContext* context, RenderSystem* renderer, SDL_GPUDevice* device) noexcept
+        void UiImageOwner::Bind(const std::shared_ptr<UiContextAccess>& contextAccess, RenderSystem* renderer,
+                                SDL_GPUDevice* device) noexcept
         {
             std::scoped_lock lock(m_Mutex);
-            m_Context = context;
+            m_ContextAccess = contextAccess;
             m_Renderer = renderer;
             m_Device = device;
         }
@@ -177,10 +213,12 @@ namespace Keire
 
         UiRenderBackend::~UiRenderBackend() { Shutdown(); }
 
-        void UiRenderBackend::Initialize(RenderSystem& renderer, ImGuiContext* context,
+        void UiRenderBackend::Initialize(RenderSystem& renderer, const std::shared_ptr<UiContextAccess>& contextAccess,
                                          const std::shared_ptr<UiImageOwner>& images)
         {
-            m_Context = context;
+            if (!contextAccess)
+                throw std::invalid_argument("The rendered UI backend requires shared context access.");
+            m_ContextAccess = contextAccess;
             m_Renderer = &renderer;
             m_Images = images;
             m_NativeWindow = RenderSystemInternalAccess::NativeWindow(renderer);
@@ -190,17 +228,26 @@ namespace Keire
             if (!m_Device)
                 throw UiError("ResolveGpuDevice", "the application renderer is not in rendered mode");
             m_PresentMode = RenderSystemInternalAccess::PresentMode(renderer);
-            m_Images->Bind(context, &renderer, m_Device);
+            m_Images->Bind(contextAccess, &renderer, m_Device);
+            RenderSystemInternalAccess::SetUiContextAccess(renderer, contextAccess);
 
-            RenderSystemInternalAccess::RunOnRenderThread(
-                renderer,
-                [this]
-                {
-                    ImGui::SetCurrentContext(m_Context);
-                    InitializeGpuBackend(m_Device, SDL_GetGPUSwapchainTextureFormat(m_Device, m_NativeWindow),
-                                         m_PresentMode, "ImGui_ImplSDLGPU3_Init");
-                    m_Initialized = true;
-                });
+            try
+            {
+                RenderSystemInternalAccess::RunOnRenderThread(
+                    renderer,
+                    [this]
+                    {
+                        const auto contextLock = m_ContextAccess->Acquire();
+                        InitializeGpuBackend(m_Device, SDL_GetGPUSwapchainTextureFormat(m_Device, m_NativeWindow),
+                                             m_PresentMode, "ImGui_ImplSDLGPU3_Init");
+                        m_Initialized = true;
+                    });
+            }
+            catch (...)
+            {
+                RenderSystemInternalAccess::SetUiContextAccess(renderer, {});
+                throw;
+            }
 
             RenderSystemInternalAccess::SetDeviceRecoveryCallbacks(
                 renderer, [this] { BeforeDeviceRecovery(); },
@@ -211,6 +258,7 @@ namespace Keire
 
         void UiRenderBackend::NewFrame()
         {
+            const auto contextLock = m_ContextAccess->Acquire();
             if (!m_Initialized)
                 throw std::logic_error("The rendered UI backend is not initialized.");
             ImGui_ImplSDLGPU3_NewFrame();
@@ -235,12 +283,14 @@ namespace Keire
                 {
                     if (m_Renderer && m_Renderer->IsOpen() && m_Renderer->DeviceState() == RenderDeviceState::Running)
                     {
-                        RenderSystemInternalAccess::RunOnRenderThread(*m_Renderer,
-                                                                      [this]
-                                                                      {
-                                                                          ImGui::SetCurrentContext(m_Context);
-                                                                          ImGui_ImplSDLGPU3_Shutdown();
-                                                                      });
+                        RenderSystemInternalAccess::RunOnRenderThread(
+                            *m_Renderer,
+                            [this]
+                            {
+                                const auto contextLock = m_ContextAccess->Acquire();
+                                const ScopedTextureRequestDetachment detachedTextureRequests;
+                                ImGui_ImplSDLGPU3_Shutdown();
+                            });
                         shutdownOnRenderThread = true;
                     }
                 }
@@ -252,25 +302,42 @@ namespace Keire
                     // The renderer may already have closed, or the current generation may be lost. Its GPU handles
                     // can no longer be released safely, but the ImGui context still requires its backend registration
                     // to be detached before destruction.
-                    AbandonLostGpuBackend(m_Context);
+                    try
+                    {
+                        const auto contextLock = m_ContextAccess->Acquire();
+                        AbandonLostGpuBackend(ImGui::GetCurrentContext());
+                    }
+                    catch (...)
+                    {
+                    }
                 }
                 m_Initialized = false;
             }
             if (m_Images)
                 m_Images->SetDevice(nullptr);
-            m_Context = nullptr;
+            if (m_Renderer)
+            {
+                try
+                {
+                    RenderSystemInternalAccess::SetUiContextAccess(*m_Renderer, {});
+                }
+                catch (...)
+                {
+                }
+            }
             m_NativeWindow = nullptr;
             m_Device = nullptr;
             m_Renderer = nullptr;
             m_Images.reset();
+            m_ContextAccess.reset();
         }
 
         void UiRenderBackend::BeforeDeviceRecovery()
         {
-            ImGui::SetCurrentContext(m_Context);
+            const auto contextLock = m_ContextAccess->Acquire();
             if (m_Initialized)
             {
-                AbandonLostGpuBackend(m_Context);
+                AbandonLostGpuBackend(ImGui::GetCurrentContext());
                 m_Initialized = false;
             }
             m_Device = nullptr;
@@ -280,7 +347,7 @@ namespace Keire
         void UiRenderBackend::AfterDeviceRecovery(SDL_GPUDevice* device, const SDL_GPUTextureFormat colorFormat,
                                                   const SDL_GPUPresentMode presentMode)
         {
-            ImGui::SetCurrentContext(m_Context);
+            const auto contextLock = m_ContextAccess->Acquire();
             InitializeGpuBackend(device, colorFormat, presentMode, "ImGui_ImplSDLGPU3_Init(recovery)");
             ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
             for (int index = 1; index < platform.Viewports.Size; ++index)

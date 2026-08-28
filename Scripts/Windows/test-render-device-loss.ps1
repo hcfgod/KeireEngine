@@ -5,6 +5,7 @@ param(
     [string]$Architecture = "",
     [ValidateSet("default", "msc", "gcc", "clang")]
     [string]$Toolset = "msc",
+    [string]$CacheRoot = "",
     [switch]$CI,
     [switch]$Update,
     [switch]$Generate
@@ -20,7 +21,11 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $configuration = "Debug"
 $expectedCommit = Get-GitHeadCommit $Root "unknown"
-$cacheRoot = Join-Path (Split-Path $Root -Parent) "KeireEngine-pre-demo-hardening-cache"
+$cacheRoot = if ($CacheRoot) {
+    [IO.Path]::GetFullPath($CacheRoot)
+} else {
+    Join-Path $Root "Build\Cache\DeviceLoss"
+}
 $temporaryRoot = Join-Path $cacheRoot "temp"
 $validationRoot = Join-Path $Root "Build\Validation\DeviceLoss"
 $packageRoot = Join-Path $validationRoot "Package"
@@ -61,6 +66,22 @@ function Assert-RecoveryReport {
         $Report.deviceLoss.retryCount -ne 1 -or $Report.deviceLoss.lostGenerationGpuCleanupCalls -ne 0 -or
         $Report.deviceLoss.retainedVfxSnapshots -lt 1 -or -not $Report.deviceLoss.continuedAfterRecovery) {
         throw "$Description published an incomplete or mismatched recovery result."
+    }
+}
+
+function Assert-ShutdownLossReport {
+    param($Report, [string]$Description)
+    $shutdown = $Report.deviceLoss.shutdown
+    if (-not $Report.renderedWindowLoop -or $Report.renderMode -ne "rendered" -or
+        -not $Report.nativeWindowCreated -or -not $Report.validationWindowHidden -or
+        -not $shutdown.duringShutdown -or -not $shutdown.acceptedFrameBlockedBeforeClose -or
+        $shutdown.operation -ne "test frame injection" -or $shutdown.recoverySucceeded -or
+        $shutdown.recoveryAttempt -ne 0 -or $shutdown.newGeneration -ne 0 -or
+        $shutdown.oldGeneration -ne $Report.deviceLoss.newGeneration -or
+        $shutdown.recoveryAttemptCount -ne 1 -or -not $shutdown.rendererClosed -or
+        $shutdown.outstandingFrames -ne 0 -or $shutdown.lostGenerationGpuCleanupCalls -ne 0 -or
+        $shutdown.healthyCandidateCleanupCalls -ne 0) {
+        throw "$Description did not prove device loss was contained after shutdown began."
     }
 }
 
@@ -118,12 +139,14 @@ try {
 
     Remove-Item -LiteralPath $runtimeReport -Force -ErrorAction SilentlyContinue
     $runtimeStartedAt = [DateTime]::UtcNow
-    & (Join-Path $runtimeStage "$runtimeName.exe") --content $contentStage --frames 600 `
-        --validate-additive-runtime $runtimeReport --validate-device-loss
+    & (Join-Path $runtimeStage "$runtimeName.exe") --content $contentStage `
+        --validate-additive-runtime $runtimeReport --validate-device-loss --hidden-validation-window
     if ($LASTEXITCODE -ne 0) { throw "Cooked runtime device-loss validation exited with $LASTEXITCODE." }
     $runtime = Read-FreshValidationReport $runtimeReport $runtimeStartedAt "Cooked runtime device-loss validation"
     Assert-RecoveryReport $runtime "Cooked runtime device-loss validation" "duringLoading"
+    Assert-ShutdownLossReport $runtime "Cooked runtime shutdown device-loss validation"
     if ($runtime.twoSceneContributions -ne 2 -or $runtime.threeSceneContributions -ne 3 -or
+        $runtime.twoSceneUiCommands -lt 2 -or $runtime.threeSceneUiCommands -lt 2 -or
         -not $runtime.noPresentationSession -or -not $runtime.unloadReloadOrder -or
         -not $runtime.inputHandledByActiveTopmostPresentation -or -not $runtime.failedLoadPreservedWorld) {
         throw "Cooked runtime device-loss validation skipped an additive-scene scenario."
@@ -139,6 +162,7 @@ try {
     $editor = Read-FreshValidationReport $editorReport $editorStartedAt "Rendered Editor Play device-loss validation"
     Assert-RecoveryReport $editor "Rendered Editor Play device-loss validation" "duringPlay"
     if (-not $editor.renderedWindowLoop -or $editor.twoSceneContributions -ne 2 -or
+        $editor.observedRenderedFrames -lt 2 -or
         -not $editor.twoPresentationTrees -or -not $editor.activeSessionRendered -or
         -not $editor.topmostInputHandled -or -not $editor.nativeWindowInputQueued -or
         -not $editor.unloadReloadOrder) {
@@ -152,6 +176,7 @@ try {
         cookedRuntimeReport = $runtimeReport
         editorPlayReport = $editorReport
         cookedRuntimeShutdownCompleted = $true
+        cookedRuntimeShutdownDeviceLoss = $true
         editorShutdownCompleted = $true
     } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $matrixReport -Encoding utf8NoBOM
     Write-Host "==> Real cooked-runtime and Editor Play device-loss validation passed: $matrixReport"

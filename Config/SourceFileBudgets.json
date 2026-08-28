@@ -25,14 +25,5 @@
   "defaultMaximumLines": 1500,
   "testMaximumLines": 2500,
   "testRoots": ["KeireEditorTests", "KeireHubTests", "KeireManaged.Tests", "KeireRenderTests", "KeireTests"],
-  "exceptions": {
-    "KeireClient/Source/Editor/AnimatorControllerPanel.cpp": 1970,
-    "KeireClient/Source/Editor/AssetBrowserPanel.cpp": 1786,
-    "KeireClient/Source/Editor/ShaderGraphPreview.cpp": 1937,
-    "KeireClient/Source/Editor/VfxEffectPanel.cpp": 2688,
-    "KeireCore/Include/KeireInternal/Scenes/SceneRuntimeSessionImpl.h": 1990,
-    "KeireCore/Source/Input/InputSystem.cpp": 1964,
-    "KeireCore/Source/Vfx/VfxExpressions.cpp": 2000,
-    "KeireCore/Source/Vfx/VfxSystem.cpp": 2489
-  }
+  "exceptions": {}
 }

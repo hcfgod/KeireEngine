@@ -116,6 +116,8 @@ namespace Keire::RenderBackend
             const auto& mesh = ResolveMesh(item.Mesh);
             if (mesh.Submeshes.empty())
                 continue;
+            const bool forceConservativeVisibility =
+                item.AlwaysVisible || RequiresConservativeCpuVisibility(item.VisibilityClass);
             const auto viewFromLocal = Math::Multiply(camera.View, item.World);
             const auto clipFromLocal = Math::Multiply(camera.Projection, viewFromLocal);
             const auto frustum = BuildFrustumPlanes(clipFromLocal);
@@ -135,7 +137,7 @@ namespace Keire::RenderBackend
                 submeshCount = lod.SubmeshCount;
                 selectedBounds = mesh.LodBoundsEncloseSubmeshes[lodIndex] ? std::addressof(lod.Bounds) : nullptr;
             }
-            if (selectedBounds && !IsFrustumVisible(frustum, *selectedBounds, item.AlwaysVisible))
+            if (selectedBounds && !IsFrustumVisible(frustum, *selectedBounds, forceConservativeVisibility))
             {
                 Statistics.CulledSubmeshes += submeshCount;
                 continue;
@@ -149,7 +151,7 @@ namespace Keire::RenderBackend
                     materialId = item.Materials[submesh.MaterialSlot];
                 else if (submesh.MaterialSlot < mesh.DefaultMaterials.size())
                     materialId = mesh.DefaultMaterials[submesh.MaterialSlot];
-                if (!IsFrustumVisible(frustum, submesh.Bounds, item.AlwaysVisible))
+                if (!IsFrustumVisible(frustum, submesh.Bounds, forceConservativeVisibility))
                 {
                     ++Statistics.CulledSubmeshes;
                     continue;
@@ -196,6 +198,29 @@ namespace Keire::RenderBackend
         };
         sortDraws(result.Opaque.Draws);
         sortDraws(result.Transparent.Draws);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        {
+            std::scoped_lock lock(PublicationMutex);
+            LastPreparedOpaqueContributionOrder.clear();
+            LastPreparedOpaqueEntities.clear();
+            LastPreparedOpaqueContributionOrder.reserve(result.Opaque.Draws.size());
+            LastPreparedOpaqueEntities.reserve(result.Opaque.Draws.size());
+            for (const auto& draw : result.Opaque.Draws)
+            {
+                LastPreparedOpaqueContributionOrder.push_back(draw.Item->ContributionOrder);
+                LastPreparedOpaqueEntities.push_back(draw.Item->Entity);
+            }
+            LastPreparedTransparentContributionOrder.clear();
+            LastPreparedTransparentEntities.clear();
+            LastPreparedTransparentContributionOrder.reserve(result.Transparent.Draws.size());
+            LastPreparedTransparentEntities.reserve(result.Transparent.Draws.size());
+            for (const auto& draw : result.Transparent.Draws)
+            {
+                LastPreparedTransparentContributionOrder.push_back(draw.Item->ContributionOrder);
+                LastPreparedTransparentEntities.push_back(draw.Item->Entity);
+            }
+        }
+#endif
 
         std::vector<GpuInstanceUniform> instanceData;
         instanceData.reserve(result.Opaque.Draws.size() + result.Transparent.Draws.size());
@@ -655,8 +680,9 @@ namespace Keire::RenderBackend
                                                         ? surface.ActiveWorkset().DirectionalShadow
                                                         : EmptyShadowTexture,
                                                     ShadowSampler};
-                        bindings[bindingCount++] = {surface.ActiveWorkset().LocalShadow ? surface.ActiveWorkset().LocalShadow
-                                                                                  : EmptyShadowTexture,
+                        bindings[bindingCount++] = {surface.ActiveWorkset().LocalShadow
+                                                        ? surface.ActiveWorkset().LocalShadow
+                                                        : EmptyShadowTexture,
                                                     ShadowSampler};
                     }
                     if (material->UsesImageBasedLighting)
@@ -695,13 +721,13 @@ namespace Keire::RenderBackend
                                        lighting, packet.Environment, item.ReceiveShadows);
                 const auto& builtInShadows = item.ReceiveShadows ? shadowUniforms : disabledShadowUniforms;
                 const std::array shadowBindings{
+                    SDL_GPUTextureSamplerBinding{surface.ActiveWorkset().DirectionalShadow
+                                                     ? surface.ActiveWorkset().DirectionalShadow
+                                                     : EmptyShadowTexture,
+                                                 ShadowSampler},
                     SDL_GPUTextureSamplerBinding{
-                        surface.ActiveWorkset().DirectionalShadow ? surface.ActiveWorkset().DirectionalShadow
-                                                                  : EmptyShadowTexture,
-                        ShadowSampler},
-                    SDL_GPUTextureSamplerBinding{surface.ActiveWorkset().LocalShadow ? surface.ActiveWorkset().LocalShadow
-                                                                               : EmptyShadowTexture,
-                                                 ShadowSampler}};
+                        surface.ActiveWorkset().LocalShadow ? surface.ActiveWorkset().LocalShadow : EmptyShadowTexture,
+                        ShadowSampler}};
                 SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
                 SDL_PushGPUFragmentUniformData(commands, 0, &builtInShadows, sizeof(builtInShadows));
                 SDL_PushGPUFragmentUniformData(commands, 1, &localLights, sizeof(localLights));
@@ -1144,11 +1170,10 @@ namespace Keire::RenderBackend
                         color.load_op = SDL_GPU_LOADOP_LOAD;
                         color.store_op = surface.ActiveWorkset().MultisampleHdrColor && finalChunk
                                              ? SDL_GPU_STOREOP_RESOLVE
-                                                                                             : SDL_GPU_STOREOP_STORE;
-                        color.resolve_texture =
-                            surface.ActiveWorkset().MultisampleHdrColor && finalChunk
-                                ? surface.ActiveWorkset().HdrColor
-                                : nullptr;
+                                             : SDL_GPU_STOREOP_STORE;
+                        color.resolve_texture = surface.ActiveWorkset().MultisampleHdrColor && finalChunk
+                                                    ? surface.ActiveWorkset().HdrColor
+                                                    : nullptr;
                         SDL_GPUDepthStencilTargetInfo depth{};
                         SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
                         if (surface.ActiveWorkset().Depth)

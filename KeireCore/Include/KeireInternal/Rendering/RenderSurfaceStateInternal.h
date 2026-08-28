@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 namespace Keire::RenderBackend
@@ -140,6 +141,15 @@ namespace Keire::RenderBackend
 
     struct RenderSharedState;
 
+    struct RenderSurfacePropertySnapshot final
+    {
+        std::uint32_t Width = 0;
+        std::uint32_t Height = 0;
+        RenderSampleCount SampleCount = RenderSampleCount::One;
+
+        bool operator==(const RenderSurfacePropertySnapshot&) const noexcept = default;
+    };
+
     struct RenderSurfaceState final
     {
         std::weak_ptr<RenderSharedState> Owner;
@@ -154,8 +164,11 @@ namespace Keire::RenderBackend
         std::uint32_t FailedWidth = 0;
         std::uint32_t FailedHeight = 0;
         RenderSampleCount ActualSamples = RenderSampleCount::One;
+        RenderSurfacePropertySnapshot PublishedProperties;
+        mutable std::mutex SurfacePropertyPublicationMutex;
         Color FrameClearColor;
         SurfaceResources Resources;
+        std::atomic<bool> ResourcesAvailable{false};
         std::atomic<SDL_GPUTexture*> PublishedTexture{nullptr};
         std::atomic<std::uint32_t> PublishedWorksetSlot{0};
         std::atomic<bool> PublishedDepthAvailable{false};
@@ -165,11 +178,13 @@ namespace Keire::RenderBackend
         Matrix4 SampledDepthInverseViewProjection;
         bool SampledDepthValid = false;
         GpuOcclusionSurfaceDiagnostics GpuOcclusionDiagnostics;
+        GpuOcclusionSurfaceDiagnostics PublishedGpuOcclusionDiagnostics;
+        mutable std::mutex GpuOcclusionPublicationMutex;
         GpuOcclusionPolicy::AllocationRetryState GpuOcclusionAllocationRetry;
         GpuOcclusionMode GpuOcclusionSubmittedMode = GpuOcclusionMode::Automatic;
         std::uint64_t GpuOcclusionSubmissionEpoch = 1;
-        GpuOcclusionDebugView GpuOcclusionDebugMode = GpuOcclusionDebugView::None;
-        std::uint32_t GpuOcclusionDebugMipLevel = 0;
+        std::atomic<GpuOcclusionDebugView> GpuOcclusionDebugMode{GpuOcclusionDebugView::None};
+        std::atomic<std::uint32_t> GpuOcclusionDebugMipLevel{0};
         std::uint32_t GpuOcclusionAutomaticQualifyingFrames = 0;
         std::uint32_t GpuOcclusionAutomaticMinimumFrames = 0;
         std::uint32_t GpuOcclusionAutomaticCooldownFrames = 0;
@@ -198,6 +213,30 @@ namespace Keire::RenderBackend
         [[nodiscard]] const SurfaceFrameWorkset& PublishedWorkset() const
         {
             return Workset(PublishedWorksetSlot.load(std::memory_order_acquire));
+        }
+
+        void PublishSurfacePropertiesSnapshot() noexcept
+        {
+            std::scoped_lock lock(SurfacePropertyPublicationMutex);
+            PublishedProperties = {Width, Height, ActualSamples};
+        }
+
+        [[nodiscard]] RenderSurfacePropertySnapshot SurfacePropertiesSnapshot() const noexcept
+        {
+            std::scoped_lock lock(SurfacePropertyPublicationMutex);
+            return PublishedProperties;
+        }
+
+        void PublishGpuOcclusionDiagnosticsSnapshot() noexcept
+        {
+            std::scoped_lock lock(GpuOcclusionPublicationMutex);
+            PublishedGpuOcclusionDiagnostics = GpuOcclusionDiagnostics;
+        }
+
+        [[nodiscard]] GpuOcclusionSurfaceDiagnostics GpuOcclusionDiagnosticsSnapshot() const noexcept
+        {
+            std::scoped_lock lock(GpuOcclusionPublicationMutex);
+            return PublishedGpuOcclusionDiagnostics;
         }
     };
 } // namespace Keire::RenderBackend

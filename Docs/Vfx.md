@@ -2470,9 +2470,13 @@ Use these files as the final source of truth:
 | Authoring and publishable-effect validation | `KeireCore/Source/Vfx/VfxAssetValidation.cpp` |
 | CPU/GPU program compilation and resolved executable materialization | `KeireCore/Source/Vfx/VfxAssetCompilation.cpp` |
 | Compiler-owned node descriptors, canonical factories, value defaults, and type validation | `KeireCore/Source/Vfx/VfxNodeCatalog.cpp` |
-| SSA value lowering, folding, deterministic RNG, register allocation, and CPU evaluation | `KeireCore/Source/Vfx/VfxExpressions.cpp` |
+| SSA value lowering, folding, register allocation, and GPU value packing | `KeireCore/Source/Vfx/VfxExpressions.cpp` |
+| Pure expression operations, deterministic RNG, and CPU evaluation | `KeireCore/Source/Vfx/VfxExpressionEvaluation.cpp` |
 | Shared compiled-binding resolution and executable payload materialization | `KeireCore/Include/KeireInternal/Vfx/VfxExecutionInternal.h` |
-| CPU execution, parameter resolution, pooling, reload, statistics, and snapshots | `KeireCore/Source/Vfx/VfxSystem.cpp` |
+| VFX world lifecycle, activation, reload, and update orchestration | `KeireCore/Source/Vfx/VfxSystem.cpp` |
+| Parameter/program resolution and immutable GPU payload construction | `KeireCore/Source/Vfx/VfxWorldProgram.cpp` |
+| CPU/GPU simulation, pooling, emission, and particle updates | `KeireCore/Source/Vfx/VfxWorldSimulation.cpp` |
+| Render/debug snapshots and transactional checkpoints | `KeireCore/Source/Vfx/VfxWorldSnapshots.cpp` |
 | GPU portable-instruction implementation | `KeireCore/Shaders/BuiltinVfx.hlsl` |
 | GPU payload validation, operation schedule upload, and per-emitter dispatch | `KeireCore/Source/Rendering/RenderVfxRecording.cpp` |
 | GPU pipeline creation and asynchronous warmup | `KeireCore/Source/Rendering/RenderVfxPipelines.cpp` |
@@ -2484,7 +2488,9 @@ Use these files as the final source of truth:
 | Play Mode emitter synchronization and C++ control | `KeireCore/Source/Scenes/SceneRuntimeVfx.cpp` |
 | Transactional editor document | `KeireClient/Include/KeireClient/Editor/VfxEffectDocument.h` |
 | Ranked context/type/backend-aware palette search | `KeireClient/Include/KeireClient/Editor/VfxNodeCatalog.h`, `KeireClient/Source/Editor/VfxNodeCatalog.cpp` |
-| Graph, module, blackboard, settings, and preview UI | `KeireClient/Source/Editor/VfxEffectPanel.cpp` |
+| VFX panel shell, module/blackboard authoring, settings, and preview UI | `KeireClient/Source/Editor/VfxEffectPanel.cpp` |
+| VFX graph canvas interaction and commands | `KeireClient/Source/Editor/VfxEffectGraphCanvas.cpp` |
+| VFX graph value/property editing and Inspector UI | `KeireClient/Source/Editor/VfxEffectGraphInspector.cpp` |
 | Typed scene-emitter Blackboard override Inspector | `KeireClient/Include/KeireClient/Editor/VfxEmitterInspector.h`, `KeireClient/Source/Editor/VfxEmitterInspector.cpp` |
 | Edit-mode emitter eligibility | `KeireClient/Include/KeireClient/Editor/EditModeVfxPreview.h` |
 | Editor asset and scene preview ownership | `KeireClient/Source/Editor/EditorWorkspaceAssets.cpp` |

@@ -1,6 +1,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "KeireInternal/Diagnostics/TelemetryInternal.h"
+#include "KeireInternal/UiContextAccessInternal.h"
 
 #include <algorithm>
 #include <array>
@@ -76,6 +77,9 @@ namespace Keire::RenderBackend
                     for (auto& pending : PendingSceneRequests)
                         CapturePendingSceneRequest(std::move(pending));
                     frame->Requests = std::move(CaptureRequests);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    RecordVfxSnapshotSignatureForTest(frame, false);
+#endif
 
                     for (const auto& tree : PendingRuntimeUiTrees)
                     {
@@ -102,17 +106,39 @@ namespace Keire::RenderBackend
                         }
                     }
                     std::vector<CapturedSurfaceTextureBinding> surfaceTextureBindings;
-                    surfaceTextureBindings.reserve(frame->Surfaces.size());
+                    surfaceTextureBindings = std::move(PendingUiSurfaceTextureBindings);
+                    surfaceTextureBindings.reserve(surfaceTextureBindings.size() + frame->Surfaces.size());
                     for (const auto& token : frame->Surfaces)
                     {
                         const auto surface = ResolveSurface(token);
                         if (!surface)
                             throw std::logic_error("A render-surface epoch expired during frame capture.");
-                        surfaceTextureBindings.push_back(
-                            {token, reinterpret_cast<std::uintptr_t>(
-                                        surface->PublishedTexture.load(std::memory_order_acquire))});
+                        const auto textureIdentity =
+                            reinterpret_cast<std::uintptr_t>(surface->PublishedTexture.load(std::memory_order_acquire));
+                        if (textureIdentity != 0U &&
+                            std::ranges::none_of(surfaceTextureBindings,
+                                                 [&token, textureIdentity](const auto& binding)
+                                                 {
+                                                     return binding.Surface.Id == token.Id &&
+                                                            binding.Surface.Epoch == token.Epoch &&
+                                                            binding.TextureIdentity == textureIdentity;
+                                                 }))
+                        {
+                            surfaceTextureBindings.push_back({token, textureIdentity});
+                        }
                     }
-                    frame->EditorUi = OwnedImGuiDrawData::Capture(drawData, surfaceTextureBindings);
+                    if (!drawData)
+                    {
+                        frame->EditorUi.reset();
+                    }
+                    else
+                    {
+                        const auto contextAccess = EditorUiContextAccess.load(std::memory_order_acquire);
+                        const auto contextLock = Keire::Detail::AcquireRequiredUiContext(
+                            contextAccess,
+                            "Dear ImGui packet capture requires the renderer's live UI context binding.");
+                        frame->EditorUi = OwnedImGuiDrawData::Capture(drawData, surfaceTextureBindings);
+                    }
                     CpuPreparation.EndFrame();
                     frame->CpuPreparationMilliseconds = CpuPreparation.CompletedMilliseconds();
                     frame->CpuPreparationP95Milliseconds = CpuPreparation.P95Milliseconds();
@@ -133,12 +159,14 @@ namespace Keire::RenderBackend
             CpuPreparation.CancelFrame();
             PendingSceneRequests.clear();
             PendingRuntimeUiTrees.clear();
+            PendingUiSurfaceTextureBindings.clear();
             CaptureRequests.clear();
             CaptureRuntimeUiCommands.clear();
             throw;
         }
         PendingSceneRequests.clear();
         PendingRuntimeUiTrees.clear();
+        PendingUiSurfaceTextureBindings.clear();
     }
 
     void RenderSharedState::ExecuteAcceptedFrame(const std::shared_ptr<RenderFramePacket>& frame) noexcept
@@ -183,6 +211,18 @@ namespace Keire::RenderBackend
                     return;
                 }
                 ExecuteFrame(frame);
+                if (frame->RetriedAfterDeviceLoss &&
+                    DeviceLifecycle.load(std::memory_order_acquire) == RenderDeviceState::Recovering &&
+                    !CompleteDeviceRecoveryAfterRetry())
+                {
+                    const auto lifecycle = DeviceLifecycle.load(std::memory_order_acquire);
+                    if (lifecycle != RenderDeviceState::Closing && lifecycle != RenderDeviceState::Closed)
+                    {
+                        RecordTerminalFailure(std::make_exception_ptr(std::runtime_error(
+                                                  "GPU recovery could not publish the successfully retried frame.")),
+                                              frame);
+                    }
+                }
                 return;
             }
             catch (const GpuDeviceLostError& error)
@@ -202,11 +242,7 @@ namespace Keire::RenderBackend
                 if (recovery == DeviceRecoveryResult::Recovered)
                 {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
-                    LastRetriedVfxSnapshotCount.store(
-                        std::accumulate(frame->Requests.begin(), frame->Requests.end(), std::uint64_t{0},
-                                        [](const std::uint64_t count, const QueuedSceneRequest& request)
-                                        { return count + request.Packet.VfxSnapshots.size(); }),
-                        std::memory_order_release);
+                    RecordVfxSnapshotSignatureForTest(frame, true);
 #endif
                     frame->RetriedAfterDeviceLoss = true;
                     continue;
@@ -237,11 +273,7 @@ namespace Keire::RenderBackend
                 if (recovery == DeviceRecoveryResult::Recovered)
                 {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
-                    LastRetriedVfxSnapshotCount.store(
-                        std::accumulate(frame->Requests.begin(), frame->Requests.end(), std::uint64_t{0},
-                                        [](const std::uint64_t count, const QueuedSceneRequest& request)
-                                        { return count + request.Packet.VfxSnapshots.size(); }),
-                        std::memory_order_release);
+                    RecordVfxSnapshotSignatureForTest(frame, true);
 #endif
                     frame->RetriedAfterDeviceLoss = true;
                     continue;
@@ -296,6 +328,12 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionCullingRecordingMilliseconds = 0.0F;
         // Editor UI is built after BeginFrame but before execution. Retain the finalized previous-frame workload until
         // this point so diagnostics never mistake a reset aggregate for the frame that actually reached the GPU.
+        Statistics.GpuOcclusionStaticMeshCandidates = 0;
+        Statistics.GpuOcclusionSkinnedMeshCandidates = 0;
+        Statistics.GpuOcclusionMeshVfxCandidates = 0;
+        Statistics.GpuOcclusionLocalLightCandidates = 0;
+        Statistics.GpuOcclusionSpatialVolumeCandidates = 0;
+        Statistics.GpuOcclusionForcedVisibleCandidates = 0;
         Statistics.GpuOcclusionSafeOccluders = 0;
         Statistics.GpuOcclusionIndirectDraws = 0;
         Statistics.GpuOcclusionPyramidMipCount = 0;
@@ -311,7 +349,10 @@ namespace Keire::RenderBackend
         Statistics.FrameUploadSubmissions = 0;
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         if (InjectDeviceLossAtNextFrame.exchange(false, std::memory_order_acq_rel))
+        {
+            MarkInjectedDeviceLossForTest();
             throw GpuDeviceLostError(DeviceLossDiagnostic("test frame injection", "Injected GPU device loss."));
+        }
 #endif
         if (FrameUploadCommands || FrameUploadPass || !FrameUploadTransfers.empty())
             throw std::logic_error("A previous frame left the GPU upload context active.");
@@ -349,6 +390,7 @@ namespace Keire::RenderBackend
                 const std::array<std::byte, 16> payload{};
                 FrameTransientBuffers.push_back(
                     UploadBuffer(std::span<const std::byte>(payload), SDL_GPU_BUFFERUSAGE_VERTEX));
+                MarkInjectedDeviceLossForTest();
                 throw GpuDeviceLostError(
                     DeviceLossDiagnostic("test active-resource frame injection", "Injected GPU device loss."));
             }
@@ -502,7 +544,16 @@ namespace Keire::RenderBackend
                 surface->PublishedDepthAvailable.store(surface->SampledDepthValid, std::memory_order_release);
                 surface->PublishedTexture.store(surface->Resources.PublishedColor(), std::memory_order_release);
             }
+            const auto firstPresentation = frame->PresentedAt == std::chrono::steady_clock::time_point{};
             frame->PresentedAt = std::chrono::steady_clock::now();
+            if (firstPresentation)
+                PresentedFrameCount.fetch_add(1U, std::memory_order_relaxed);
+            auto lastPresentedFrame = LastPresentedFrameId.load(std::memory_order_relaxed);
+            while (lastPresentedFrame < frame->Id &&
+                   !LastPresentedFrameId.compare_exchange_weak(lastPresentedFrame, frame->Id, std::memory_order_release,
+                                                               std::memory_order_relaxed))
+            {
+            }
             frame->Timeline.RenderCpuMilliseconds =
                 std::chrono::duration<float, std::milli>(frame->PresentedAt - frame->RenderStartedAt).count();
             frame->Timeline.SubmitToPresentMilliseconds =
@@ -656,9 +707,9 @@ namespace Keire::RenderBackend
     {
         if (!Open)
             return;
-        DeviceLifecycle.store(RenderDeviceState::Closing, std::memory_order_release);
         {
             std::scoped_lock lock(RenderQueueMutex);
+            DeviceLifecycle.store(RenderDeviceState::Closing, std::memory_order_release);
             RecoveryOwnerBoundary = true;
         }
         FramesRetired.notify_all();
@@ -705,16 +756,19 @@ namespace Keire::RenderBackend
             AbandonLostDeviceResources();
             for (const auto& surface : AllSurfaceEpochs())
             {
+                surface->ResourcesAvailable.store(false, std::memory_order_release);
                 surface->PublishedTexture.store(nullptr, std::memory_order_release);
                 surface->Owner.reset();
                 surface->Width = 0;
                 surface->Height = 0;
+                surface->PublishSurfacePropertiesSnapshot();
             }
             WindowClaimed = false;
             Device = nullptr;
         }
         PendingSceneRequests.clear();
         PendingRuntimeUiTrees.clear();
+        PendingUiSurfaceTextureBindings.clear();
         CaptureRequests.clear();
         CaptureRuntimeUiCommands.clear();
         ActiveFrame.reset();

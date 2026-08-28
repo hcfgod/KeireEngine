@@ -179,6 +179,7 @@ internal static class SigningTests
         try
         {
             KeyFixture key = CreateKey(root, "source");
+            AssertPrivateKeyIsRestricted(key.PrivateKeyPath);
             string derivedPath = Path.Combine(root, "derived-public.json");
             DistributionPublicKeyDocument derived = DistributionSigning.DerivePublicKey(
                 SigningKeySource.FromFile(key.PrivateKeyPath),
@@ -218,6 +219,9 @@ internal static class SigningTests
 
             MakePrivateKeyInsecure(key.PrivateKeyPath);
             TestAssert.Throws<InvalidDataException>(
+                () => PrivateKeyPermissions.Validate(key.PrivateKeyPath),
+                "The private-key permission validator accepted an untrusted identity.");
+            TestAssert.Throws<InvalidDataException>(
                 () => DistributionSigning.DerivePublicKey(
                     SigningKeySource.FromFile(key.PrivateKeyPath),
                     Path.Combine(root, "unsafe-public.json")),
@@ -228,6 +232,54 @@ internal static class SigningTests
         {
             TestDistribution.DeleteTemporaryRoot(root);
         }
+    }
+
+    private static void AssertPrivateKeyIsRestricted(string path)
+    {
+        PrivateKeyPermissions.Validate(path);
+        if (!OperatingSystem.IsWindows())
+        {
+            UnixFileMode mode = File.GetUnixFileMode(path);
+            TestAssert.True(
+                mode is UnixFileMode.UserRead or (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                "The generated private key did not use owner-only Unix permissions.");
+            return;
+        }
+
+        AssertPrivateKeyIsRestrictedWindows(path);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void AssertPrivateKeyIsRestrictedWindows(string path)
+    {
+        using WindowsIdentity identity = WindowsIdentity.GetCurrent(TokenAccessLevels.Query);
+        SecurityIdentifier currentUser = identity.User ??
+            throw new InvalidDataException("The current Windows user has no security identifier.");
+        HashSet<SecurityIdentifier> allowed =
+        [
+            currentUser,
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+        ];
+
+        FileSecurity security = new FileInfo(path).GetAccessControl(
+            AccessControlSections.Owner | AccessControlSections.Access);
+        TestAssert.True(security.AreAccessRulesProtected, "The generated private key retained inherited access rules.");
+        TestAssert.True(
+            security.GetOwner(typeof(SecurityIdentifier)) is SecurityIdentifier owner && allowed.Contains(owner),
+            "The generated private key has an untrusted owner.");
+
+        AuthorizationRuleCollection rules = security.GetAccessRules(
+            includeExplicit: true,
+            includeInherited: true,
+            targetType: typeof(SecurityIdentifier));
+        TestAssert.True(
+            rules.Cast<FileSystemAccessRule>().All(rule =>
+                !rule.IsInherited &&
+                rule.AccessControlType == AccessControlType.Allow &&
+                rule.IdentityReference is SecurityIdentifier sid &&
+                allowed.Contains(sid)),
+            "The generated private key retained an inherited, denied, or untrusted ACL entry.");
     }
 
     private static KeyFixture CreateKey(string root, string name)

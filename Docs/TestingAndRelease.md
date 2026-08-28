@@ -21,10 +21,21 @@ packaging cooks the Sandbox dependency graph and runs `KeireRuntime` against the
 
 Renderer lifecycle acceptance uses real rendered paths in addition to focused contracts. On a graphics-capable Windows
 host, `Scripts/Windows/test-render-device-loss.ps1` stages the Debug runtime as an isolated package, cooks all Sandbox
-build scenes, injects loss while the second scene loads, then runs the real Editor `--smoke-play` window/update/input
-loop through recovery. Both JSON reports are removed before execution and must match schema, build commit,
-configuration, recovery generation, exactly-one retry, and no-touch-lost-generation assertions. Release and Dist never
-contain these injection options. `Scripts/Windows/render-benchmark.ps1` runs the Release runtime with VSync on and off,
+build scenes, and keeps a real SDL/GPU rendered window hidden through the test-only `--hidden-validation-window`
+switch; it does not select the runtime's `--headless` path. The gate injects loss while the second scene loads, proves
+the session continues after exactly one recovery, then blocks one final accepted packet, requests exit, and lets
+renderer `Closing` release that packet so a second loss is classified during shutdown. The shutdown report is written
+only after `Close()` returns and must prove zero new recovery attempts, a closed renderer, no outstanding frames, and
+no lost-generation GPU cleanup calls. The gate then runs the real Editor `--smoke-play` window/update/input loop
+through recovery. Both JSON reports are removed before execution and must match schema, build commit, configuration,
+recovery generation, retry, no-touch-lost-generation, rendered-window, UI-command, and pre/post-reload Game-view
+assertions. The Release/Dist package gate independently runs the staged cooked runtime and rejects reports that do not
+prove a rendered native window loop; Release and Dist never contain the injection options.
+Its five-minute wall-clock watchdog leaves room for cold post-loss pipeline reconstruction; the Editor uses a
+three-minute watchdog. Fast frame loops therefore cannot expire either gate while asynchronous scene or managed work is
+still progressing. The device-loss launcher keeps writable tool state under the clone's ignored `Build/Cache/DeviceLoss`
+directory by default and accepts `-CacheRoot` when a CI worker provides a separate same-drive cache.
+`Scripts/Windows/render-benchmark.ps1` runs the Release runtime with VSync on and off,
 using 300 warm-up and 2,000 measured frames; it rejects stale/missing artifacts, wrong identity or presentation mode,
 and non-monotonic frame IDs before publishing median/p95/p99 results beneath ignored `Build/Benchmarks` output.
 

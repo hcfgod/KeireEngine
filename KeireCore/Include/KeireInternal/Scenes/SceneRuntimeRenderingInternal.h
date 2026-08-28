@@ -23,6 +23,7 @@ namespace Keire::Internal
 
     struct RuntimeRenderSessionSelection final
     {
+        // The active session remains the primary contribution even when Camera belongs to a fallback session.
         Ref<SceneRuntimeSession> Session;
         std::optional<RuntimeSceneCamera> Camera;
         std::size_t ContributionIndex = std::numeric_limits<std::size_t>::max();
@@ -73,6 +74,14 @@ namespace Keire::Internal
         {
             if (auto camera = SelectRuntimeSceneCamera(active->RuntimeScene()))
                 return {active, std::move(camera), *activeIndex};
+            for (const auto& session : sessions)
+            {
+                if (!session || !session->RuntimeScene())
+                    continue;
+                if (auto camera = SelectRuntimeSceneCamera(session->RuntimeScene()))
+                    return {active, std::move(camera), *activeIndex};
+            }
+            return {active, std::nullopt, *activeIndex};
         }
         for (std::size_t index = 0; index < sessions.size(); ++index)
         {
@@ -82,8 +91,6 @@ namespace Keire::Internal
             if (auto camera = SelectRuntimeSceneCamera(session->RuntimeScene()))
                 return {session, std::move(camera), index};
         }
-        if (activeIndex && active && active->RuntimeScene())
-            return {active, std::nullopt, *activeIndex};
         for (std::size_t index = 0; index < sessions.size(); ++index)
             if (sessions[index] && sessions[index]->RuntimeScene())
                 return {sessions[index], std::nullopt, index};

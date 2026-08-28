@@ -339,13 +339,20 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
+            const auto renderer = Owner().Renderer();
+            if (m_Probe.Submitted)
+            {
+                renderer->Flush();
+                m_Probe.Statistics = renderer->Statistics();
+                m_Probe.Capabilities = renderer->Capabilities();
+                Owner().RequestExit();
+                return;
+            }
+
             Keire::SceneRenderRequest request{m_Scene, m_View};
             request.Vfx = m_Snapshot;
-            Owner().Renderer()->Submit(std::move(request));
-            m_Probe.Statistics = Owner().Renderer()->Statistics();
-            m_Probe.Capabilities = Owner().Renderer()->Capabilities();
+            renderer->Submit(std::move(request));
             m_Probe.Submitted = true;
-            Owner().RequestExit();
         }
 
         void OnDetach() noexcept override

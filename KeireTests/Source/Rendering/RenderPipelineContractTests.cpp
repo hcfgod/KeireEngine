@@ -14,6 +14,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
@@ -789,6 +790,131 @@ TEST_CASE("ImGui packet capture rejects overflowing texture dimensions before co
                          "Dear ImGui texture snapshots exceed the 64 MiB frame-packet bound.", std::length_error);
 }
 
+TEST_CASE("ImGui packet capture acknowledges texture requests transactionally and preserves their snapshot")
+{
+    ImGuiContextScope contextScope;
+    ImGui::SetCurrentContext(contextScope.Context);
+
+    SUBCASE("successful update")
+    {
+        ImTextureData texture;
+        texture.Create(ImTextureFormat_RGBA32, 2, 2);
+        const std::array<unsigned char, 16> pixels = {1U, 2U,  3U,  4U,  5U,  6U,  7U,  8U,
+                                                      9U, 10U, 11U, 12U, 13U, 14U, 15U, 16U};
+        std::memcpy(texture.Pixels, pixels.data(), pixels.size());
+        texture.UpdateRect = {1U, 0U, 1U, 2U};
+        texture.Updates.push_back(texture.UpdateRect);
+        texture.SetStatus(ImTextureStatus_WantUpdates);
+
+        ImVector<ImTextureData*> textures;
+        textures.push_back(&texture);
+        ImDrawData drawData;
+        drawData.Valid = true;
+        drawData.Textures = &textures;
+
+        const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {});
+        REQUIRE(captured);
+        CHECK(texture.Status == ImTextureStatus_OK);
+        const ImTextureID logicalId = texture.GetTexID();
+        CHECK(logicalId != ImTextureID_Invalid);
+        CHECK(texture.UpdateRect.x == 1U);
+        CHECK(texture.UpdateRect.y == 0U);
+        CHECK(texture.UpdateRect.w == 1U);
+        CHECK(texture.UpdateRect.h == 2U);
+        REQUIRE(texture.Updates.Size == 1);
+
+        const auto resolved = captured->ResolveForRender({});
+        REQUIRE(resolved);
+        REQUIRE(resolved->Data()->Textures);
+        REQUIRE(resolved->Data()->Textures->Size == 1);
+        const ImTextureData* snapshot = (*resolved->Data()->Textures)[0];
+        REQUIRE(snapshot);
+        CHECK(snapshot->Status == ImTextureStatus_WantCreate);
+        CHECK(snapshot->UpdateRect.x == 1U);
+        CHECK(snapshot->UpdateRect.y == 0U);
+        CHECK(snapshot->UpdateRect.w == 1U);
+        CHECK(snapshot->UpdateRect.h == 2U);
+        REQUIRE(snapshot->Updates.Size == 1);
+        CHECK(std::memcmp(snapshot->Pixels, pixels.data(), pixels.size()) == 0);
+        CHECK(texture.GetTexID() == logicalId);
+    }
+
+    SUBCASE("failed capture")
+    {
+        ImTextureData valid;
+        valid.Create(ImTextureFormat_RGBA32, 1, 1);
+        REQUIRE(valid.Status == ImTextureStatus_WantCreate);
+
+        ImTextureData invalid;
+        invalid.Format = ImTextureFormat_RGBA32;
+        invalid.Width = 1;
+        invalid.Height = 1;
+        invalid.BytesPerPixel = 4;
+        invalid.Pixels = nullptr;
+        invalid.SetStatus(ImTextureStatus_WantCreate);
+
+        ImVector<ImTextureData*> textures;
+        textures.push_back(&valid);
+        textures.push_back(&invalid);
+        ImDrawData drawData;
+        drawData.Valid = true;
+        drawData.Textures = &textures;
+
+        CHECK_THROWS_AS((void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}), std::invalid_argument);
+        CHECK(valid.Status == ImTextureStatus_WantCreate);
+        CHECK(valid.GetTexID() == ImTextureID_Invalid);
+    }
+
+    SUBCASE("committed destroy")
+    {
+        ImTextureData texture;
+        texture.Create(ImTextureFormat_RGBA32, 1, 1);
+        ImVector<ImTextureData*> textures;
+        textures.push_back(&texture);
+        ImDrawData drawData;
+        drawData.Valid = true;
+        drawData.Textures = &textures;
+
+        REQUIRE(Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}));
+        REQUIRE(texture.Status == ImTextureStatus_OK);
+        REQUIRE(texture.GetTexID() != ImTextureID_Invalid);
+        texture.SetStatus(ImTextureStatus_WantDestroy);
+
+        REQUIRE(Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}));
+        CHECK(texture.Status == ImTextureStatus_Destroyed);
+        CHECK(texture.GetTexID() == ImTextureID_Invalid);
+        CHECK(texture.WantDestroyNextFrame);
+    }
+}
+
+TEST_CASE("ImGui live atlas acknowledgement remains valid through the next owner frame")
+{
+    ImGuiContextScope contextScope;
+    BeginImGuiPacketFrame(contextScope);
+    ImGui::GetForegroundDrawList()->AddRectFilled({4.0F, 4.0F}, {28.0F, 28.0F}, IM_COL32_WHITE);
+    ImGui::Render();
+
+    ImDrawData* firstFrame = ImGui::GetDrawData();
+    REQUIRE(firstFrame);
+    REQUIRE(firstFrame->Textures);
+    REQUIRE(firstFrame->Textures->Size > 0);
+    ImTextureData* liveAtlas = (*firstFrame->Textures)[0];
+    REQUIRE(liveAtlas);
+    REQUIRE(liveAtlas->Status == ImTextureStatus_WantCreate);
+    const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(firstFrame, {});
+    REQUIRE(captured);
+    CHECK(liveAtlas->Status == ImTextureStatus_OK);
+    const ImTextureID logicalId = liveAtlas->GetTexID();
+    REQUIRE(logicalId != ImTextureID_Invalid);
+
+    BeginImGuiPacketFrame(contextScope);
+    ImGui::GetForegroundDrawList()->AddRectFilled({8.0F, 8.0F}, {24.0F, 24.0F}, IM_COL32_WHITE);
+    ImGui::Render();
+
+    CHECK(liveAtlas->Status == ImTextureStatus_OK);
+    CHECK(liveAtlas->GetTexID() == logicalId);
+}
+
 TEST_CASE("ImGui frame packets preserve finalized non-empty draw output")
 {
     ImGuiContextScope contextScope;
@@ -830,7 +956,7 @@ TEST_CASE("ImGui frame packets reject raw GPU textures borrowed pixels and arbit
         ImGuiContextScope contextScope;
         BeginImGuiPacketFrame(contextScope);
         ImGui::GetForegroundDrawList()->AddImage(ImTextureRef(static_cast<ImTextureID>(0x1234U)), {4.0F, 4.0F},
-                                                {28.0F, 28.0F});
+                                                 {28.0F, 28.0F});
         ImGui::Render();
 
         CHECK_THROWS_WITH_AS((void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), {}),

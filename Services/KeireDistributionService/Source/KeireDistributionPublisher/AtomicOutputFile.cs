@@ -23,14 +23,7 @@ internal static class AtomicOutputFile
         string temporaryPath = Path.Combine(parent, $".{Path.GetFileName(fullPath)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            CreateEmpty(temporaryPath, privateKey);
-            using (FileStream stream = new(
-                temporaryPath,
-                FileMode.Open,
-                FileAccess.Write,
-                FileShare.None,
-                16 * 1024,
-                FileOptions.WriteThrough))
+            using (FileStream stream = CreateEmpty(temporaryPath, privateKey))
             {
                 stream.Write(bytes);
                 stream.Flush(flushToDisk: true);
@@ -74,7 +67,7 @@ internal static class AtomicOutputFile
         }
     }
 
-    private static void CreateEmpty(string path, bool privateKey)
+    private static FileStream CreateEmpty(string path, bool privateKey)
     {
         if (privateKey && !OperatingSystem.IsWindows())
         {
@@ -86,17 +79,29 @@ internal static class AtomicOutputFile
                 Options = FileOptions.WriteThrough,
                 UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite,
             };
-            using FileStream ignored = new(path, options);
-            return;
+            return new FileStream(path, options);
         }
 
-        using (FileStream ignored = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        FileStream stream = new(
+            path,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            16 * 1024,
+            FileOptions.WriteThrough);
+        try
         {
-        }
+            if (privateKey)
+            {
+                PrivateKeyPermissions.Apply(stream);
+            }
 
-        if (privateKey)
+            return stream;
+        }
+        catch
         {
-            PrivateKeyPermissions.Apply(path);
+            stream.Dispose();
+            throw;
         }
     }
 }

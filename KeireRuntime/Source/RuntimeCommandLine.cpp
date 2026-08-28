@@ -68,6 +68,8 @@ namespace KeireRuntime
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
             else if (option == "--validate-device-loss")
                 result.ValidateDeviceLoss = true;
+            else if (option == "--hidden-validation-window")
+                result.HiddenValidationWindow = true;
 #endif
             else if (option == "--render-benchmark")
             {
@@ -141,6 +143,15 @@ namespace KeireRuntime
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         if (result.ValidateDeviceLoss && result.AdditiveValidationOutput.empty())
             throw Keire::CommandLineError("--validate-device-loss requires --validate-additive-runtime.");
+        if (result.ValidateDeviceLoss && result.Headless)
+        {
+            throw Keire::CommandLineError(
+                "--validate-device-loss does not support --headless; use --hidden-validation-window instead.");
+        }
+        if (result.HiddenValidationWindow && result.AdditiveValidationOutput.empty())
+            throw Keire::CommandLineError("--hidden-validation-window requires --validate-additive-runtime.");
+        if (result.HiddenValidationWindow && result.Headless)
+            throw Keire::CommandLineError("--hidden-validation-window and --headless are mutually exclusive.");
 #endif
         if (!result.RenderBenchmarkOutput.empty() && (result.Frames != 0U || result.Headless))
             throw Keire::CommandLineError("--render-benchmark requires a visible runtime and controls frame count.");

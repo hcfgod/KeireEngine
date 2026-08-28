@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -22,6 +23,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -198,6 +200,8 @@ namespace
         Keire::ProfileFrame ProfilerFrame;
         Keire::FrameGraphSnapshot FrameGraph;
         std::uint64_t ReforcedFrameFloor = 0;
+        bool RestoredResourcesAvailableBeforeSubmission = false;
+        bool RestoredOutputPublishedBeforeSubmission = false;
         bool SawBelowAutomaticThreshold = false;
         bool TimedOut = false;
     };
@@ -317,6 +321,11 @@ namespace
                 else if (m_LifecycleStage == 2U && surface->Available() && surface->Width() == ResetWidth &&
                          surface->Height() == ResetHeight)
                 {
+                    m_Results->RestoredResourcesAvailableBeforeSubmission = true;
+                    const auto state = std::static_pointer_cast<Keire::RenderBackend::RenderSurfaceState>(
+                        Keire::RenderSystemInternalAccess::SurfaceLease(*surface));
+                    m_Results->RestoredOutputPublishedBeforeSubmission =
+                        state && state->PublishedTexture.load(std::memory_order_acquire);
                     recordDiagnostics(diagnostics);
                     auto camera = m_View->Camera();
                     camera.Projection =
@@ -376,8 +385,11 @@ namespace
                 const auto materialBindingBuilds =
                     Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer());
                 const auto expectedMaterialBindings = m_TargetMaterial == m_Material ? 1U : 2U;
-                const bool skinReady = !m_TargetSkin || Keire::RenderSystemInternalAccess::SkinningStaticBuildCount(
-                                                            *Owner().Renderer()) > 0U;
+                const auto skinningStaticBuilds =
+                    Keire::RenderSystemInternalAccess::SkinningStaticBuildCount(*Owner().Renderer());
+                const bool requiresSkinningResources =
+                    m_TargetSkin && m_Scenario != GpuOcclusionCaptureScenario::SkinnedTarget;
+                const bool skinReady = !requiresSkinningResources || skinningStaticBuilds > 0U;
                 const bool resourcesReady = materialBindingBuilds >= expectedMaterialBindings && skinReady;
                 m_ResourceReadyFrames = resourcesReady ? m_ResourceReadyFrames + 1U : 0U;
                 if (diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::BelowAutomaticThreshold)
@@ -440,8 +452,8 @@ namespace
                     (diagnostics.Culled > 0U ||
                      (m_Scenario == GpuOcclusionCaptureScenario::AlwaysVisibleTarget && diagnostics.Candidates >= 2U &&
                       diagnostics.Visible == diagnostics.Candidates) ||
-                     (m_Scenario == GpuOcclusionCaptureScenario::SkinnedTarget && diagnostics.Candidates == 1U &&
-                      diagnostics.Visible == diagnostics.Candidates) ||
+                     (m_Scenario == GpuOcclusionCaptureScenario::SkinnedTarget && diagnostics.Candidates >= 2U &&
+                      diagnostics.Visible == diagnostics.Candidates && diagnostics.Culled == 0U) ||
                      (m_Scenario == GpuOcclusionCaptureScenario::PartialFallback &&
                       diagnostics.State == Keire::GpuOcclusionSurfaceState::Active &&
                       diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::LegacyShaderAbi));
@@ -1326,7 +1338,7 @@ TEST_CASE("always-visible instances remain in forced GPU occlusion indirect draw
     CHECK(diagnostics.Culled == 0U);
 }
 
-TEST_CASE("skinned instances bypass forced GPU occlusion even before deformation output is ready")
+TEST_CASE("skinned instances enter forced GPU occlusion as force-visible non-occluders before deformation is ready")
 {
     RenderAssetFixture assets(true);
     const auto run = [&](const Keire::GpuOcclusionMode mode)
@@ -1353,9 +1365,13 @@ TEST_CASE("skinned instances bypass forced GPU occlusion even before deformation
     const auto& diagnostics = occluded->Diagnostics.front();
     CHECK(diagnostics.State == Keire::GpuOcclusionSurfaceState::Active);
     CHECK(diagnostics.ReadbackValid);
-    CHECK(diagnostics.Candidates == 1U);
-    CHECK(diagnostics.Visible == 1U);
+    CHECK(diagnostics.Candidates >= 2U);
+    CHECK(diagnostics.Visible == diagnostics.Candidates);
     CHECK(diagnostics.Culled == 0U);
+    CHECK(occluded->Statistics.GpuOcclusionStaticMeshCandidates >= 1U);
+    CHECK(occluded->Statistics.GpuOcclusionSkinnedMeshCandidates >= 1U);
+    CHECK(occluded->Statistics.GpuOcclusionForcedVisibleCandidates >= 1U);
+    CHECK(occluded->Statistics.GpuOcclusionSafeOccluders >= 1U);
     CHECK(MaximumPixelDifference(direct->Frames.front(), occluded->Frames.front()) <= ColorTolerance);
 }
 
@@ -1513,6 +1529,8 @@ TEST_CASE("active GPU occlusion survives minimize restore and Forced Disabled Fo
     REQUIRE(results->Diagnostics.size() == 5);
     REQUIRE(results->DebugViews.size() == 5);
     REQUIRE(results->DebugMips.size() == 5);
+    CHECK(results->RestoredResourcesAvailableBeforeSubmission);
+    CHECK_FALSE(results->RestoredOutputPublishedBeforeSubmission);
     const auto& initial = results->Diagnostics[0];
     const auto& minimized = results->Diagnostics[1];
     const auto& restored = results->Diagnostics[2];
@@ -1546,4 +1564,54 @@ TEST_CASE("active GPU occlusion survives minimize restore and Forced Disabled Fo
     CHECK(std::ranges::all_of(
         results->ObservedAfterReforce, [&](const auto& diagnostics)
         { return !diagnostics.ReadbackValid || diagnostics.SourceFrame >= results->ReforcedFrameFloor; }));
+}
+
+TEST_CASE("GPU occlusion diagnostics snapshots remain coherent during publication")
+{
+    Keire::RenderBackend::RenderSurfaceState surface;
+    Keire::GpuOcclusionSurfaceDiagnostics active;
+    active.RequestedMode = Keire::GpuOcclusionMode::Forced;
+    active.EffectiveMode = Keire::GpuOcclusionMode::Forced;
+    active.State = Keire::GpuOcclusionSurfaceState::Active;
+    active.SourceFrame = 23U;
+    active.ReadbackAge = 1U;
+    active.Candidates = 100U;
+    active.Visible = 25U;
+    active.Culled = 75U;
+    active.SafeOccluders = 3U;
+    active.PyramidMipCount = 7U;
+    active.PyramidValid = true;
+    active.ReadbackValid = true;
+
+    Keire::GpuOcclusionSurfaceDiagnostics disabled;
+    disabled.RequestedMode = Keire::GpuOcclusionMode::Disabled;
+    disabled.State = Keire::GpuOcclusionSurfaceState::Disabled;
+    disabled.FallbackReason = Keire::GpuOcclusionFallbackReason::DisabledBySetting;
+
+    surface.GpuOcclusionDiagnostics = active;
+    surface.PublishGpuOcclusionDiagnosticsSnapshot();
+    std::atomic<bool> complete{false};
+    std::thread publisher(
+        [&]
+        {
+            for (std::uint32_t iteration = 0; iteration < 20'000U; ++iteration)
+            {
+                surface.GpuOcclusionDiagnostics = (iteration & 1U) == 0U ? disabled : active;
+                surface.PublishGpuOcclusionDiagnosticsSnapshot();
+            }
+            complete.store(true, std::memory_order_release);
+        });
+
+    bool coherent = true;
+    std::uint32_t observations = 0;
+    do
+    {
+        const auto diagnostics = surface.GpuOcclusionDiagnosticsSnapshot();
+        coherent = coherent && (diagnostics == active || diagnostics == disabled);
+        ++observations;
+    } while (!complete.load(std::memory_order_acquire));
+    publisher.join();
+
+    CHECK(coherent);
+    CHECK(observations > 0U);
 }

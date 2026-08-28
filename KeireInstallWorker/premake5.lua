@@ -12,6 +12,12 @@ project(InstallWorkerTarget)
         "Source/**.cpp"
     }
 
+    removefiles
+    {
+        "Source/Fixtures/**.cpp",
+        "Source/Tests/**.cpp"
+    }
+
     includedirs
     {
         "Include",
@@ -60,7 +66,7 @@ project(InstallVerificationFixtureTarget)
 
     files
     {
-        "Fixtures/VerifyInstallationFixture.cpp"
+        "Source/Fixtures/VerifyInstallationFixture.cpp"
     }
 
     filter "system:not windows"
@@ -76,7 +82,7 @@ project(InstallWorkerTestsTarget)
 
     files
     {
-        "Tests/**.cpp",
+        "Source/Tests/**.cpp",
         "../KeireHubTests/Source/InstallTransactionTests.cpp"
     }
 

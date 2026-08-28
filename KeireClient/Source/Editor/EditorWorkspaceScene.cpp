@@ -1386,9 +1386,16 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         if (playActive && m_GameViewportCaptureSuspended && imageState.Hovered && ui.PointerState().LeftPressed)
             m_GameViewportCaptureSuspended = false;
         const auto mainWindow = Owner().MainWindow();
-        SetGameViewportInputActive(KeireEditor::GameViewportOwnsRuntimeInput(
+        const bool productionInputActive = KeireEditor::GameViewportOwnsRuntimeInput(
             playActive, mainWindow && mainWindow->Focused(), ui.WindowFocused(), m_ManagedCursorLocked,
-            m_GameViewportCaptureSuspended));
+            m_GameViewportCaptureSuspended);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        // The window manager may refuse to focus a process launched by an unattended validation harness. Keep the
+        // production focus contract intact while allowing --smoke-play to exercise the real SDL/ImGui pointer path.
+        SetGameViewportInputActive(productionInputActive || static_cast<bool>(m_SmokePlayValidation));
+#else
+        SetGameViewportInputActive(productionInputActive);
+#endif
         if (playActive)
         {
             if (m_PlayRuntimeWorld)
@@ -1433,8 +1440,10 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         else if (playActive)
             KeireEditor::CancelRuntimeUiPointer(m_PlayRuntimeWorld, m_GameRuntimeUiPointer);
         if (m_SmokePlayValidation)
-            m_SmokePlayValidation->ObserveGameView(Owner(), m_PlayRuntimeWorld, m_GameRenderView->Surface(), imageRect,
-                                                   presentations);
+            m_SmokePlayValidation->ObserveGameView(
+                Owner(), m_PlayRuntimeWorld, m_GameRenderView->Surface(), imageRect, presentations, ui.PointerState(),
+                m_GameRuntimeUiPointer.HoveredPresentation, m_GameRuntimeUiPointer.PointerCaptures.front(),
+                m_GameViewportInputActive, ui.WindowFocused());
         const auto occlusion = m_GameRenderView && m_GameRenderView->Surface()
                                    ? std::optional(m_GameRenderView->Surface()->OcclusionDiagnostics())
                                    : std::nullopt;

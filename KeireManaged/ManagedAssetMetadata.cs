@@ -184,6 +184,20 @@ internal static class ManagedAssetMetadata
                     Message = exception.Message,
                 });
             }
+            catch (Exception exception)
+            {
+                document.Diagnostics.Add(new DiagnosticDocument
+                {
+                    Code = "KEIRE-MANAGED-SERIALIZATION-0001",
+                    Phase = "metadata",
+                    Owner = candidate.FullName ?? candidate.Name,
+                    RootField = candidate.Name,
+                    TypeName = candidate.FullName ?? candidate.Name,
+                    FieldPath = candidate.FullName ?? candidate.Name,
+                    DeclaredType = candidate.FullName ?? candidate.Name,
+                    Message = exception.Message,
+                });
+            }
         }
 
         document.Types.Sort((left, right) => string.CompareOrdinal(left.FullName, right.FullName));
@@ -284,6 +298,7 @@ internal static class ManagedAssetMetadata
             bool serializable = valueType.IsDefined(typeof(SerializableAttribute), false) ||
                                 valueType.IsDefined(typeof(SerializableTypeAttribute), false);
             if (!serializable || valueType == typeof(string) || typeof(EngineObject).IsAssignableFrom(valueType) ||
+                typeof(KeireEventBase).IsAssignableFrom(valueType) ||
                 !active.Add(valueType))
             {
                 continue;

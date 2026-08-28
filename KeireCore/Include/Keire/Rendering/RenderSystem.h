@@ -114,6 +114,8 @@ namespace Keire
         float SubmitToPresentMilliseconds = 0.0F;
         std::uint32_t OutstandingAtAdmission = 0;
         bool RetriedAfterDeviceLoss = false;
+        /// True only after this frame's swapchain submission and logical surface publication completed.
+        bool Presented = false;
         bool Cancelled = false;
     };
 
@@ -320,6 +322,14 @@ namespace Keire
         // GPU particle simulation can collide with sampled scene depth.
         bool GpuDepthCollision = false;
         bool GpuOcclusionCulling = false;
+        // These flags describe visibility-contract participation. A class can participate while being forced visible
+        // when its bounds or downstream consumer are not safe for rejection.
+        bool GpuOcclusionStaticMeshes = false;
+        bool GpuOcclusionSkinnedMeshes = false;
+        bool GpuOcclusionMeshVfx = false;
+        bool GpuOcclusionVfxVisibilityMasks = false;
+        bool GpuOcclusionLocalLightMasks = false;
+        bool GpuOcclusionSpatialVolumeMasks = false;
     };
 
     struct RenderStatistics
@@ -359,6 +369,12 @@ namespace Keire
         std::uint32_t GpuOcclusionCandidates = 0;
         std::uint32_t GpuOcclusionVisible = 0;
         std::uint32_t GpuOcclusionCulled = 0;
+        std::uint32_t GpuOcclusionStaticMeshCandidates = 0;
+        std::uint32_t GpuOcclusionSkinnedMeshCandidates = 0;
+        std::uint32_t GpuOcclusionMeshVfxCandidates = 0;
+        std::uint32_t GpuOcclusionLocalLightCandidates = 0;
+        std::uint32_t GpuOcclusionSpatialVolumeCandidates = 0;
+        std::uint32_t GpuOcclusionForcedVisibleCandidates = 0;
         std::uint32_t GpuOcclusionSafeOccluders = 0;
         std::uint32_t GpuOcclusionIndirectDraws = 0;
         std::uint32_t GpuOcclusionPyramidMipCount = 0;
@@ -386,9 +402,13 @@ namespace Keire
         std::uint64_t GpuOcclusionCulledTriangles = 0;
         std::uint64_t GpuOcclusionDepthTriangles = 0;
         std::uint64_t AcceptedFrames = 0;
+        /// Successful logical presentations. Device-loss attempts count only after publication succeeds.
+        std::uint64_t PresentedFrames = 0;
         std::uint64_t RetiredFrames = 0;
         std::uint64_t CancelledFrames = 0;
         std::uint64_t LastAcceptedFrame = 0;
+        /// Most recent successfully published presentation; frame IDs never decrease.
+        std::uint64_t LastPresentedFrame = 0;
         std::uint64_t LastRetiredFrame = 0;
         std::uint32_t VfxComputeDispatches = 0;
         std::uint32_t VfxIndirectDraws = 0;

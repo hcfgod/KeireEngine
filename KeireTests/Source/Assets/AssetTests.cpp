@@ -459,32 +459,32 @@ TEST_CASE("Indexed asset operations reject a source parent replaced by a symboli
     std::filesystem::copy_file(indexed / "Existing.confined.keiremeta", outside / "Existing.confined.keiremeta");
     Keire::Detail::RenamePathWithRetry(indexed, parked);
 
-    std::error_code linkError;
-    std::filesystem::create_directory_symlink(outside, indexed, linkError);
-    if (linkError)
-    {
-        Keire::Detail::RenamePathWithRetry(parked, indexed);
-        std::filesystem::remove_all(outside);
-        MESSAGE("Symbolic-link creation is unavailable in this environment: " << linkError.message());
-        if (KeireTests::RunningInCi())
-            FAIL_CHECK("CI must provide symbolic-link capability for indexed asset confinement tests.");
-        return;
-    }
-
     struct LinkSwapCleanup final
     {
         ~LinkSwapCleanup()
         {
+            Database.Reset();
             std::error_code ignored;
             std::filesystem::remove(Link, ignored);
             (void)Keire::Detail::TryRenamePathWithRetry(Original, Link, ignored);
             std::filesystem::remove_all(Outside, ignored);
         }
 
+        Keire::Ref<Keire::AssetDatabase>& Database;
         std::filesystem::path Link;
         std::filesystem::path Original;
         std::filesystem::path Outside;
-    } cleanup{indexed, parked, outside};
+    } cleanup{database, indexed, parked, outside};
+
+    std::error_code linkError;
+    std::filesystem::create_directory_symlink(outside, indexed, linkError);
+    if (linkError)
+    {
+        MESSAGE("Symbolic-link creation is unavailable in this environment: " << linkError.message());
+        if (KeireTests::RunningInCi())
+            FAIL_CHECK("CI must provide symbolic-link capability for indexed asset confinement tests.");
+        return;
+    }
 
     const auto externalSource = ReadAll(outside / "Existing.confined");
     const auto externalMetadata = ReadAll(outside / "Existing.confined.keiremeta");

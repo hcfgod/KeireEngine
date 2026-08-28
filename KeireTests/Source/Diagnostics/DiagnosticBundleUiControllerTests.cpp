@@ -65,7 +65,9 @@ TEST_CASE("diagnostic product snapshots expose only the allowlisted metadata con
     snapshot.RendererStatistics.OutstandingFrames = 1U;
     snapshot.RendererStatistics.FramesInFlightHighWaterMark = 2U;
     snapshot.RendererStatistics.AcceptedFrames = 9U;
+    snapshot.RendererStatistics.PresentedFrames = 9U;
     snapshot.RendererStatistics.RetiredFrames = 8U;
+    snapshot.RendererStatistics.LastPresentedFrame = 9U;
     snapshot.RendererStatistics.FrameCaptureMilliseconds = 0.25F;
     snapshot.RendererStatistics.FrameAdmissionWaitMilliseconds = 0.5F;
     snapshot.RendererStatistics.RendererQueueDelayMilliseconds = 0.75F;
@@ -79,7 +81,8 @@ TEST_CASE("diagnostic product snapshots expose only the allowlisted metadata con
                                           .RenderCpuMilliseconds = 1.0F,
                                           .GpuRetirementMilliseconds = 1.25F,
                                           .SubmitToPresentMilliseconds = 1.5F,
-                                          .OutstandingAtAdmission = 2U});
+                                          .OutstandingAtAdmission = 2U,
+                                          .Presented = true});
     snapshot.Project = {.Kind = "active-editor-project",
                         .SchemaVersion = 4U,
                         .AssetCount = 17U,
@@ -129,8 +132,11 @@ TEST_CASE("diagnostic product snapshots expose only the allowlisted metadata con
     CHECK(statistics.at("submitToPresentMilliseconds").get<double>() == doctest::Approx(1.5));
     CHECK(statistics.at("outstandingFrames") == 1U);
     CHECK(statistics.at("framesInFlightHighWaterMark") == 2U);
+    CHECK(statistics.at("presentedFrames") == 9U);
+    CHECK(statistics.at("lastPresentedFrame") == 9U);
     REQUIRE(statistics.at("recentTimelines").size() == 1U);
     CHECK(statistics.at("recentTimelines").front().at("frame") == 42U);
+    CHECK(statistics.at("recentTimelines").front().at("presented") == true);
     const auto failures = nlohmann::json::parse(findText("failures/recent.json"));
     CHECK(failures.at("maximumRecords") == 64U);
     CHECK(failures.at("records").size() == 64U);

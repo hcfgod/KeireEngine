@@ -1035,7 +1035,7 @@ done
 assert_true grep -F -q 'pchheader "KeireClient/ClientPch.h"' "$ROOT/KeireClient/premake5.lua"
 assert_true grep -F -q 'buildoptions { "-include KeireClient/ClientPch.h" }' "$ROOT/KeireClient/premake5.lua"
 assert_false grep -F -q 'dependson { AssetWorkerTarget, AssetToolTarget, RuntimeTarget }' "$ROOT/KeireClient/premake5.lua"
-assert_true grep -F -q 'dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, RuntimeTarget }' \
+assert_true grep -F -q 'dependson { ProjectConfig.CLIENT_TARGET, AssetToolTarget, AssetWorkerTarget, RuntimeTarget }' \
   "$ROOT/Scripts/Premake/EditorDev.lua"
 assert_true grep -q 'Source/ECS/Components/CameraComponent.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_true grep -q 'Source/ECS/Components/MeshRendererComponent.cpp' "$ROOT/KeireCore/premake5.lua"
@@ -1388,7 +1388,22 @@ assert_true grep -q 'Build/Distributions' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
 assert_true grep -Fq 'xvfb-run -a "$stage/bin/$runtime"' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq -- '--validate-additive-runtime "$runtime_validation_output"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq -- '--content "$stage/content/KeireSandbox" --headless' "$ROOT/Scripts/Unix/package.sh"
+assert_false grep -Fq -- '--frames 6000' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq 'Additive runtime validation timed out.' \
+  "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'std::chrono::minutes(5)' "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'RecoveryAttemptCountForTest(*renderer)' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
+assert_false grep -Fq 'RetriedAfterDeviceLoss' \
+  "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
 assert_true grep -Fq '"inputHandledByActiveTopmostPresentation": true' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"renderMode": "rendered"' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"renderedWindowLoop": true' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"nativeWindowCreated": true' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"validationWindowHidden": true' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"twoSceneUiCommands": [2-9][0-9]*' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"threeSceneUiCommands": [2-9][0-9]*' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq '"gitCommit\": \"$commit\"' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq '$runtimeValidation.build.gitCommit -ne $commit' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '[[ "$runtime_validation_output" -nt "$runtime_validation_sentinel" ]]' \
@@ -1399,12 +1414,28 @@ assert_true grep -Fq 'build_scenes_source="$ROOT/Samples/KeireSandbox/ProjectSet
 assert_true grep -Fq 'cp "$build_scenes_source" "$build_scenes_destination"' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq '[[ -f "$build_scenes_destination" ]]' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq -- '--validate-additive-runtime $runtimeValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '--content $runtimeContent --headless' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq 'inputHandledByActiveTopmostPresentation' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.renderMode -ne "rendered"' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.renderedWindowLoop' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.nativeWindowCreated' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.validationWindowHidden' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.twoSceneUiCommands -lt 2' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$runtimeValidation.threeSceneUiCommands -lt 2' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq '$editorPlayValidation.observedRenderedFrames -lt 2' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq -- '-SmokePlay -SmokeOutput $editorPlayValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq -- '"--project", $smokeProjectPath, "--smoke-play"' "$ROOT/Scripts/Windows/run.ps1"
 assert_true grep -Fq -- '"--smoke-play-output", $SmokeOutput' "$ROOT/Scripts/Windows/run.ps1"
 assert_true grep -Fq '$Configuration -notin @("Debug", "DebugASan")' "$ROOT/Scripts/Windows/run.ps1"
 assert_true grep -Fq -- '--validate-device-loss' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq '[string]$CacheRoot = ""' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'Join-Path $Root "Build\Cache\DeviceLoss"' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_false grep -Fq 'KeireEngine-pre-demo-hardening-cache' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq -- '--hidden-validation-window' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_false grep -Fq -- '--content $contentStage --headless' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_false grep -Fq -- '--frames 6000' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
 assert_true grep -Fq -- '-SmokePlayDeviceLoss' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
 assert_true grep -Fq 'Copy-Item -Path (Join-Path $runtimeSource "*")' \
   "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
@@ -1415,8 +1446,26 @@ assert_true grep -Fq 'build.gitCommit -ne $expectedCommit' \
 assert_true grep -Fq 'operation -ne "test frame injection"' \
   "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
 assert_true grep -Fq 'retryCount -ne 1' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'twoSceneUiCommands -lt 2' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'observedRenderedFrames -lt 2' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'acceptedFrameBlockedBeforeClose' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'recoveryAttempt -ne 0' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'outstandingFrames -ne 0' "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
 assert_true grep -Fq 'cookedRuntimeShutdownCompleted = $true' \
   "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'cookedRuntimeShutdownDeviceLoss = $true' \
+  "$ROOT/Scripts/Windows/test-render-device-loss.ps1"
+assert_true grep -Fq 'BlockNextAcceptedFrame(*renderer)' \
+  "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'renderer->Flush()' "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq 'FinalizeDeviceLossShutdown' \
+  "$ROOT/KeireRuntime/Source/RuntimeAdditiveValidation.cpp"
+assert_true grep -Fq -- '--hidden-validation-window' "$ROOT/KeireRuntime/Source/RuntimeCommandLine.cpp"
+assert_true grep -Fq -- '--validate-device-loss does not support --headless' \
+  "$ROOT/KeireRuntime/Source/RuntimeCommandLine.cpp"
+assert_true grep -Fq 'specification.Render.Mode = RenderMode::Rendered' \
+  "$ROOT/KeireRuntime/Source/RuntimeApplication.cpp"
+assert_true grep -Fq '!hiddenValidationWindow' "$ROOT/KeireRuntime/Source/RuntimeApplication.cpp"
 assert_true grep -Fq '@("vsync", "immediate")' "$ROOT/Scripts/Windows/render-benchmark.ps1"
 assert_true grep -Fq 'warmupFrames -ne 300' "$ROOT/Scripts/Windows/render-benchmark.ps1"
 assert_true grep -Fq 'measuredFrames -ne 2000' "$ROOT/Scripts/Windows/render-benchmark.ps1"

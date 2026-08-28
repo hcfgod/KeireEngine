@@ -260,6 +260,11 @@ static void ScriptableObjectAuthoringContract()
                behaviourDictionary.GetProperty("kind").GetInt32() == 15 &&
                behaviourDictionary.GetProperty("children").GetArrayLength() == 2,
            "Behaviour metadata must publish exact Dictionary shapes to the native Inspector.");
+    string eventBehaviourName = typeof(EventMetadataProbe).FullName!;
+    Assert(!document.RootElement.GetProperty("behaviours").EnumerateArray()
+                .Any(type => type.GetProperty("fullName").GetString() == eventBehaviourName),
+           "Built-in event listener collections must remain owned by the event Inspector instead of being " +
+           "rediscovered as generic nested Behaviour graphs.");
 }
 
 static unsafe void RuntimeFoundationContract()
@@ -2211,6 +2216,12 @@ file static unsafe class NativeRenderingFixture
 }
 
 file sealed class DetachedManagedContractProbe : Keire.Behaviour;
+
+[Keire.StableComponentId("73616e64-626f-4078-8000-00000000e001")]
+file sealed class EventMetadataProbe : Keire.Behaviour
+{
+    public Keire.KeireEvent Changed = new();
+}
 
 [Keire.StableAssetTypeId("d3762027-3016-4ec9-b315-67d654f46443")]
 file sealed class ManagedRuntimeAssetProbe : Keire.ScriptableObject;

@@ -3,7 +3,7 @@
 #include "Keire/BuildInfo.h"
 #include "KeireInternal/Diagnostics/SystemHardwareIdentityInternal.h"
 
-#include "DiagnosticBundleSupport.h"
+#include "KeireInternal/Diagnostics/DiagnosticBundleSupport.h"
 
 #include <nlohmann/json.hpp>
 
@@ -122,6 +122,7 @@ namespace Keire::Internal
                                      {"submitToPresentMilliseconds", timeline.SubmitToPresentMilliseconds},
                                      {"outstandingAtAdmission", timeline.OutstandingAtAdmission},
                                      {"retriedAfterDeviceLoss", timeline.RetriedAfterDeviceLoss},
+                                     {"presented", timeline.Presented},
                                      {"cancelled", timeline.Cancelled}});
             }
             return {{"frame", statistics.Frame},
@@ -133,9 +134,11 @@ namespace Keire::Internal
                     {"framesInFlightHighWaterMark", statistics.FramesInFlightHighWaterMark},
                     {"queueHighWaterMark", statistics.RendererQueueHighWaterMark},
                     {"acceptedFrames", statistics.AcceptedFrames},
+                    {"presentedFrames", statistics.PresentedFrames},
                     {"retiredFrames", statistics.RetiredFrames},
                     {"cancelledFrames", statistics.CancelledFrames},
                     {"lastAcceptedFrame", statistics.LastAcceptedFrame},
+                    {"lastPresentedFrame", statistics.LastPresentedFrame},
                     {"lastRetiredFrame", statistics.LastRetiredFrame},
                     {"ownerUpdateMilliseconds", statistics.OwnerUpdateMilliseconds},
                     {"frameCaptureMilliseconds", statistics.FrameCaptureMilliseconds},

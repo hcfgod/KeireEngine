@@ -8,17 +8,19 @@ internal static class PrivateKeyPermissions
 {
     private const UnixFileMode AllowedUnixMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
 
-    public static void Apply(string path)
+    public static void Apply(FileStream stream)
     {
+        ArgumentNullException.ThrowIfNull(stream);
+
         if (OperatingSystem.IsWindows())
         {
-            ApplyWindows(path);
+            ApplyWindows(stream);
             return;
         }
 
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS() || OperatingSystem.IsFreeBSD())
         {
-            File.SetUnixFileMode(path, AllowedUnixMode);
+            File.SetUnixFileMode(stream.Name, AllowedUnixMode);
             return;
         }
 
@@ -49,16 +51,29 @@ internal static class PrivateKeyPermissions
     }
 
     [SupportedOSPlatform("windows")]
-    private static void ApplyWindows(string path)
+    private static void ApplyWindows(FileStream stream)
     {
         SecurityIdentifier currentUser = CurrentUserSid();
         FileSecurity security = new();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.SetOwner(currentUser);
         AddFullControl(security, currentUser);
         AddFullControl(security, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null));
         AddFullControl(security, new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null));
-        new FileInfo(path).SetAccessControl(security);
+
+        try
+        {
+            // The creator already owns a new file. Rewriting that same owner requires WRITE_OWNER, which ordinary
+            // Windows users do not hold. Keep the exclusive handle open while replacing only the DACL so no other
+            // process can open the empty file under its inherited permissions before it is restricted.
+            new FileInfo(stream.Name).SetAccessControl(security);
+            ValidateWindows(stream.Name);
+        }
+        catch (Exception exception) when (exception is UnauthorizedAccessException or NotSupportedException)
+        {
+            throw new InvalidDataException(
+                "The private-key file ACL could not be restricted; use an explicitly named process environment variable instead.",
+                exception);
+        }
     }
 
     [SupportedOSPlatform("windows")]

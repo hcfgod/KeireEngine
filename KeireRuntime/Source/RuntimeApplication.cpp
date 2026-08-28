@@ -380,6 +380,10 @@ namespace
 
         void OnDetach() noexcept override
         {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            if (const auto renderer = Owner().Renderer())
+                m_AdditiveValidation.FinalizeDeviceLossShutdown(*renderer);
+#endif
             ApplyManagedCursorMode(true);
             KeireRuntime::SynchronizeRuntimeUiTextInput({}, Owner().Windows(), Owner().MainWindow());
             if (m_EventSink)
@@ -404,7 +408,7 @@ namespace
                 scripts->SetRuntimeServices(nullptr);
             UnbindManagedWorld();
             UnbindManagedApplication();
-            if (const auto renderer = Owner().Renderer())
+            if (const auto renderer = Owner().Renderer(); renderer && renderer->IsOpen())
                 Keire::RenderSystemInternalAccess::SetPresentationSurface(*renderer, {});
             if (m_Presentation)
                 m_Presentation->Clear();
@@ -525,7 +529,11 @@ namespace
             if (m_RenderBenchmark.Enabled())
                 m_RenderBenchmark.Update(Owner(), Owner().Renderer());
             if (m_CommandLine.Frames != 0 && ++m_RenderedFrames >= m_CommandLine.Frames)
+            {
+                if (m_AdditiveValidation.Enabled() && !m_AdditiveValidation.Complete())
+                    throw std::runtime_error("Additive runtime validation exceeded its rendered-frame watchdog.");
                 Owner().RequestExit();
+            }
         }
 
         static void HandleNativeEvent(void* context, const SDL_Event& event) noexcept
@@ -1399,7 +1407,11 @@ namespace Keire
             manifest.StartupScene = commandLine.Scene;
         const auto replayFingerprints = BuildReplayFingerprints(manifest, *moduleValidation);
         specification.MainWindow.Title = commandLine.WindowTitle;
-        specification.MainWindow.Visible = commandLine.Frames == 0 && !commandLine.Headless;
+        bool hiddenValidationWindow = false;
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        hiddenValidationWindow = commandLine.HiddenValidationWindow;
+#endif
+        specification.MainWindow.Visible = commandLine.Frames == 0 && !commandLine.Headless && !hiddenValidationWindow;
         specification.TargetFrameRate = specification.MainWindow.Visible ? 0 : 240;
         specification.SuspendWhenMainWindowMinimized = false;
         specification.Assets.Mode = AssetMode::Cooked;

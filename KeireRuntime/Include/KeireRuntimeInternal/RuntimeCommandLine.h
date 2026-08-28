@@ -40,6 +40,7 @@ namespace KeireRuntime
         bool PresentModeExplicit = false;
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         bool ValidateDeviceLoss = false;
+        bool HiddenValidationWindow = false;
 #endif
     };
 

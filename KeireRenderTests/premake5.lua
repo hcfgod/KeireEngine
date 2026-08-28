@@ -13,7 +13,8 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "RenderTests")
     includedirs
     {
         "Include",
-        "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
+        "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include",
+        "../Build/Generated"
     }
 
     externalincludedirs
@@ -23,3 +24,4 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "RenderTests")
 
     LinkKeireCore()
     LinkSDL3()
+    dependson { ProjectConfig.CORE_TARGET .. "GeneratedContent" }

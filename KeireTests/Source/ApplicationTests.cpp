@@ -811,6 +811,77 @@ namespace
 
         RecoveryBoundaryProbe& m_Probe;
     };
+
+    struct MidFrameRecoveryProfilerProbe final
+    {
+        bool RecoveryCompleted = false;
+        int Updates = 0;
+    };
+
+    class MidFrameRecoveryProfilerLayer final : public Keire::Layer
+    {
+      public:
+        explicit MidFrameRecoveryProfilerLayer(MidFrameRecoveryProfilerProbe& probe)
+            : Layer("mid-frame-recovery-profiler"), m_Probe(probe)
+        {
+        }
+
+      protected:
+        void OnUpdate(const Keire::Time&) override
+        {
+            CHECK(Owner().GetProfiler());
+            ++m_Probe.Updates;
+            if (m_Probe.Updates == 1)
+            {
+                const auto renderer = Owner().Renderer();
+                REQUIRE(renderer);
+                Keire::RenderSystemInternalAccess::SetDeviceRecoveryStateForTest(
+                    *renderer, Keire::RenderDeviceState::RecoveryPending);
+
+                SDL_Event quit{};
+                quit.type = SDL_EVENT_QUIT;
+                REQUIRE(SDL_PushEvent(&quit));
+                return;
+            }
+
+            CHECK(m_Probe.RecoveryCompleted);
+            Owner().RequestExit();
+        }
+
+        Keire::EventFlow OnEvent(const Keire::EventView& event) override
+        {
+            if (!event.Is<Keire::QuitEvent>())
+                return Keire::EventFlow::Continue;
+
+            m_Probe.RecoveryCompleted = true;
+            Keire::RenderSystemInternalAccess::SetDeviceRecoveryStateForTest(*Owner().Renderer(),
+                                                                             Keire::RenderDeviceState::Running);
+            return Keire::EventFlow::Handled;
+        }
+
+      private:
+        MidFrameRecoveryProfilerProbe& m_Probe;
+    };
+
+    class MidFrameRecoveryProfilerApplication final : public Keire::Application
+    {
+      public:
+        explicit MidFrameRecoveryProfilerApplication(MidFrameRecoveryProfilerProbe& probe)
+            : Application(BuildSpecification())
+        {
+            (void)PushLayer(std::make_unique<MidFrameRecoveryProfilerLayer>(probe));
+        }
+
+      private:
+        static Keire::ApplicationSpecification BuildSpecification()
+        {
+            auto specification = HiddenApplicationSpecification("mid-frame-recovery-profiler");
+            specification.Render.Mode = Keire::RenderMode::Headless;
+            specification.Ui.Mode = Keire::UiMode::Disabled;
+            specification.Profiling.Mode = Keire::ProfilerMode::Enabled;
+            return specification;
+        }
+    };
 #endif
 } // namespace
 
@@ -1038,5 +1109,18 @@ TEST_CASE("Application recovery boundary pauses update and UI while continuing q
     REQUIRE(resumeProbe.UpdateDeltas.size() == 2U);
     CHECK(resumeProbe.UpdateDeltas[0] < 0.05);
     CHECK(resumeProbe.UpdateDeltas[1] < 0.05);
+}
+
+TEST_CASE("Application closes an active profiler frame before waiting at a mid-frame recovery boundary")
+{
+    UseApplicationDummyVideoDriver();
+    MidFrameRecoveryProfilerProbe probe;
+    MidFrameRecoveryProfilerApplication application(probe);
+
+    int exitCode = -1;
+    CHECK_NOTHROW(exitCode = application.Run());
+    CHECK(exitCode == 0);
+    CHECK(probe.RecoveryCompleted);
+    CHECK(probe.Updates == 2);
 }
 #endif

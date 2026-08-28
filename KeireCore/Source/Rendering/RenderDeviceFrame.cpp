@@ -2,6 +2,7 @@
 
 #include "KeireInternal/Rendering/ImageBasedLightingInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
+#include "KeireInternal/UiContextAccessInternal.h"
 
 #include "Keire/BuiltinUnlitShaders.h"
 #include "Keire/Log.h"
@@ -156,6 +157,14 @@ namespace Keire::RenderBackend
         const auto uiRecordingStarted = std::chrono::steady_clock::now();
         if (swapchain)
         {
+            std::shared_ptr<Keire::Detail::UiContextAccess> editorUiContextAccess;
+            std::unique_lock<std::recursive_mutex> editorUiContextLock;
+            if (drawData)
+            {
+                editorUiContextAccess = EditorUiContextAccess.load(std::memory_order_acquire);
+                editorUiContextLock = Keire::Detail::AcquireRequiredUiContext(
+                    editorUiContextAccess, "Dear ImGui GPU recording requires the renderer's live UI context binding.");
+            }
             const bool renderEditorUi = drawData && drawData->DisplaySize.x > 0.0F && drawData->DisplaySize.y > 0.0F;
             bool presentedSurface = false;
             SDL_GPUBuffer* runtimeUiBuffer = nullptr;
@@ -228,7 +237,12 @@ namespace Keire::RenderBackend
                     Statistics.Triangles += runtimeUiVertexCount / 3U;
                 }
                 if (renderEditorUi)
+                {
                     ImGui_ImplSDLGPU3_RenderDrawData(drawData, commands, pass);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    RenderedEditorUiFrameCount.fetch_add(1U, std::memory_order_relaxed);
+#endif
+                }
                 SDL_EndGPURenderPass(pass);
                 ++Statistics.Passes;
             }
@@ -375,7 +389,34 @@ namespace Keire::RenderBackend
         {
             std::unique_lock lock(RenderQueueMutex);
             const auto capacity = static_cast<std::size_t>(Specification.MaximumFramesInFlight);
-            RenderQueueSpace.wait(lock, [&] { return StopRenderQueue || RenderQueue.size() < capacity; });
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            const bool admissionBlocked = !StopRenderQueue && RenderQueue.size() >= capacity;
+            if (admissionBlocked)
+            {
+                ++RenderDispatchAdmissionWaiters;
+                RenderQueueReady.notify_all();
+            }
+            try
+            {
+#endif
+                RenderQueueSpace.wait(lock, [&] { return StopRenderQueue || RenderQueue.size() < capacity; });
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            }
+            catch (...)
+            {
+                if (admissionBlocked)
+                {
+                    --RenderDispatchAdmissionWaiters;
+                    RenderQueueReady.notify_all();
+                }
+                throw;
+            }
+            if (admissionBlocked)
+            {
+                --RenderDispatchAdmissionWaiters;
+                RenderQueueReady.notify_all();
+            }
+#endif
             if (StopRenderQueue)
                 throw std::logic_error("Renderer submission queue is closed.");
             RenderQueue.push_back({[task] { (*task)(); }, 0});
@@ -457,6 +498,30 @@ namespace Keire::RenderBackend
         return {surface->Id, surface->Epoch, surface->Lifetime};
     }
 
+    SDL_GPUTexture* RenderSharedState::CaptureUiSurfaceTexture(const std::shared_ptr<RenderSurfaceState>& surface)
+    {
+        RequireOwner("CaptureUiSurfaceTexture");
+        if (!FrameActive)
+            throw std::logic_error("Render-surface UI images may only be captured during an active frame.");
+
+        const auto token = CaptureSurfaceToken(surface);
+        auto* texture = surface->PublishedTexture.load(std::memory_order_acquire);
+        if (!texture)
+            return nullptr;
+
+        const auto textureIdentity = reinterpret_cast<std::uintptr_t>(texture);
+        const auto existing =
+            std::ranges::find_if(PendingUiSurfaceTextureBindings,
+                                 [&token, textureIdentity](const CapturedSurfaceTextureBinding& binding)
+                                 {
+                                     return binding.Surface.Id == token.Id && binding.Surface.Epoch == token.Epoch &&
+                                            binding.TextureIdentity == textureIdentity;
+                                 });
+        if (existing == PendingUiSurfaceTextureBindings.end())
+            PendingUiSurfaceTextureBindings.push_back({token, textureIdentity});
+        return texture;
+    }
+
     std::shared_ptr<RenderSurfaceState> RenderSharedState::ResolveSurface(const RenderSurfaceToken& token)
     {
         if (!token)
@@ -488,9 +553,16 @@ namespace Keire::RenderBackend
         replacement->Epoch = previous->Epoch + 1U;
         replacement->RequestedWidth = width;
         replacement->RequestedHeight = height;
+        const auto previousProperties = previous->SurfacePropertiesSnapshot();
+        replacement->Width = previousProperties.Width;
+        replacement->Height = previousProperties.Height;
+        replacement->ActualSamples = previousProperties.SampleCount;
+        replacement->PublishedProperties = previousProperties;
         replacement->FrameClearColor = previous->Specification.ClearColor;
-        replacement->GpuOcclusionDebugMode = previous->GpuOcclusionDebugMode;
-        replacement->GpuOcclusionDebugMipLevel = previous->GpuOcclusionDebugMipLevel;
+        replacement->GpuOcclusionDebugMipLevel.store(
+            previous->GpuOcclusionDebugMipLevel.load(std::memory_order_acquire), std::memory_order_relaxed);
+        replacement->GpuOcclusionDebugMode.store(previous->GpuOcclusionDebugMode.load(std::memory_order_acquire),
+                                                 std::memory_order_relaxed);
         replacement->Lifetime = std::make_shared<RenderSurfaceEpochLease>(replacement->Id, replacement->Epoch);
         {
             std::scoped_lock lock(SurfaceMutex);

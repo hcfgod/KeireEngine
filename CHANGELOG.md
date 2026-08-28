@@ -5,7 +5,6 @@ versions.
 
 ## Unreleased
 
-<<<<<<< HEAD
 ### Changed
 
 - Bounded rendering now admits 1–3 immutable frames (default 2) before capture, publishes complete owner/render/GPU
@@ -38,6 +37,8 @@ versions.
 
 ### Fixed
 
+- Restricted Windows distribution signing keys before writing secret bytes without requiring a privileged owner
+  rewrite, while retaining explicit owner/DACL validation and fail-closed behavior on filesystems that cannot enforce it.
 - Windows install, update, recovery, and uninstall now revalidate receipt-owned bytes and every no-follow path component
   at each mutation boundary. Drift, registration/receipt mismatch, reparse substitution, and unknown neighbors fail
   closed; uninstall preserves modified files and never recursively removes the selected installation root.
@@ -49,12 +50,8 @@ versions.
   registration, reparse layouts fail closed, and uninstall preserves unrelated neighboring files and the selected root.
 - Composed all loaded runtime scenes and presentation trees into one deterministic render request per surface, so
   additive scenes no longer collide with the single-surface submission guard or replace earlier runtime UI.
-=======
 - Fixed Editor Play managed rendering, audio, physics, and UI services during primary-scene `Awake`/`OnEnable` by
   resolving the pending Play session before it is adopted into the runtime world.
-
-### Fixed
-
 - Kept Project Hub metadata refreshes from marking valid projects invalid when disposable cache files disappear after
   directory enumeration, and logged the exact project ID, path, and filesystem failure for genuine scan errors.
 - Made input map/action enablement idempotent, preserved enabled-map intent across hot reload, and made retained input
@@ -74,7 +71,6 @@ versions.
   apply, discard, and cancel controls beyond the monitor.
 - Routed managed callback faults into the Editor Console once per runtime diagnostic, including generation, type,
   callback, entity, and exception details without replaying retained faults every frame.
->>>>>>> e3871d70f1ee7df3bf702b6cc5936ed2f139ba6e
 
 ## 0.4.2 - 2026-08-25
 

@@ -919,6 +919,7 @@ namespace
             bool complete = false;
             if (m_Submitted)
             {
+                Owner().Renderer()->Flush();
                 m_Results->SkinningStaticBuilds.push_back(
                     Keire::RenderSystemInternalAccess::SkinningStaticBuildCount(*Owner().Renderer()));
                 m_Results->SkinningOutputBuilds.push_back(
@@ -2123,8 +2124,8 @@ TEST_CASE("skinned asset vertices follow bounded palette deformation")
           results->SkinningOutputBuilds.back());
     REQUIRE(results->HasStatistics);
     CHECK(results->Statistics.AllowedFramesInFlight == 3);
-    CHECK(std::ranges::any_of(results->SkinningPreparationMilliseconds,
-                              [](const float milliseconds) { return milliseconds > 0.0F; }));
+    CHECK(std::ranges::all_of(results->SkinningPreparationMilliseconds, [](const float milliseconds)
+                              { return std::isfinite(milliseconds) && milliseconds >= 0.0F; }));
     CHECK(results->Statistics.CommandRecordingUnattributedMilliseconds >= 0.0F);
 }
 

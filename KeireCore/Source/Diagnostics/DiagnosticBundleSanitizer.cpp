@@ -1,4 +1,4 @@
-#include "DiagnosticBundleSupport.h"
+#include "KeireInternal/Diagnostics/DiagnosticBundleSupport.h"
 
 #include <algorithm>
 #include <array>

@@ -24,6 +24,13 @@ project(ProjectConfig.CLIENT_TARGET)
         "Source/**.cpp",
         "Source/**.cxx"
     }
+    files
+    {
+        "Source/Editor/VfxEffectGraphCanvas.cpp",
+        "Source/Editor/VfxEffectGraphInspector.cpp",
+        "Source/Editor/VfxEffectPanel.cpp",
+        "Include/KeireClientInternal/Editor/VfxEffectPanelInternal.h"
+    }
     AddKeireApplicationIcon()
 
     includedirs

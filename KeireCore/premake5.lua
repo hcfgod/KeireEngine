@@ -277,6 +277,13 @@ ConfigureCoreArchive(ProjectConfig.CORE_TARGET .. "Ui", "Source/Pch/KeireCoreUiP
 -- linked against only the public VfxAssets facade.
 ConfigureCoreArchive(ProjectConfig.CORE_TARGET .. "Vfx", "Source/Pch/KeireCoreVfxPch.cpp",
                      {
+                         "Include/KeireInternal/Vfx/VfxWorldInternal.h",
+                         "Source/Vfx/VfxExpressionEvaluation.cpp",
+                         "Source/Vfx/VfxExpressions.cpp",
+                         "Source/Vfx/VfxSystem.cpp",
+                         "Source/Vfx/VfxWorldProgram.cpp",
+                         "Source/Vfx/VfxWorldSimulation.cpp",
+                         "Source/Vfx/VfxWorldSnapshots.cpp",
                          "Source/Vfx/**.c",
                          "Source/Vfx/**.cc",
                          "Source/Vfx/**.cpp",

@@ -40,6 +40,7 @@ if ($editorPlayValidation.schemaVersion -ne 1 -or
     $editorPlayValidation.build.gitCommit -ne $expectedHeadCommit -or
     $editorPlayValidation.build.configuration -ne $Configuration -or
     -not $editorPlayValidation.renderedWindowLoop -or
+    $editorPlayValidation.observedRenderedFrames -lt 2 -or
     $editorPlayValidation.twoSceneContributions -ne 2 -or
     -not $editorPlayValidation.twoPresentationTrees -or
     -not $editorPlayValidation.activeSessionRendered -or
@@ -237,7 +238,7 @@ $runtimeValidationOutput = Join-Path $runtimeValidationDirectory "packaged-addit
 New-Item -ItemType Directory -Force $runtimeValidationDirectory | Out-Null
 Remove-Item -LiteralPath $runtimeValidationOutput -Force -ErrorAction SilentlyContinue
 $runtimeValidationStartedAt = [DateTime]::UtcNow
-& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --frames 600 `
+& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --headless `
     --validate-additive-runtime $runtimeValidationOutput
 if ($LASTEXITCODE -ne 0) {
     throw "Packaged additive runtime validation failed with exit code $LASTEXITCODE."
@@ -253,8 +254,14 @@ if ($runtimeValidation.schemaVersion -ne 1 -or
     $runtimeValidation.status -ne "passed" -or
     $runtimeValidation.build.gitCommit -ne $commit -or
     $runtimeValidation.build.configuration -ne $Configuration -or
+    $runtimeValidation.renderMode -ne "rendered" -or
+    -not $runtimeValidation.renderedWindowLoop -or
+    -not $runtimeValidation.nativeWindowCreated -or
+    -not $runtimeValidation.validationWindowHidden -or
     $runtimeValidation.twoSceneContributions -ne 2 -or
     $runtimeValidation.threeSceneContributions -ne 3 -or
+    $runtimeValidation.twoSceneUiCommands -lt 2 -or
+    $runtimeValidation.threeSceneUiCommands -lt 2 -or
     -not $runtimeValidation.noPresentationSession -or
     -not $runtimeValidation.unloadReloadOrder -or
     -not $runtimeValidation.inputHandledByActiveTopmostPresentation -or

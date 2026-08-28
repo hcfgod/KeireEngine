@@ -4,6 +4,30 @@
 
 namespace Keire::RenderBackend
 {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    void RenderSharedState::MarkInjectedDeviceLossForTest() noexcept { InjectedDeviceLossForTest = true; }
+
+    bool
+    RenderSharedState::ReleaseInjectedLostDeviceForTest(const std::shared_ptr<RenderFramePacket>& interrupted) noexcept
+    {
+        if (!std::exchange(InjectedDeviceLossForTest, false) || !Device)
+            return false;
+        auto* const injectedDevice = Device;
+        auto* const injectedWindow = NativeWindow;
+        const bool injectedWindowClaimed = WindowClaimed;
+        GpuDestructionThread = std::this_thread::get_id();
+        (void)SDL_WaitForGPUIdle(injectedDevice);
+        AbandonLostDeviceResources(interrupted);
+        if (injectedWindowClaimed && injectedWindow)
+            SDL_ReleaseWindowFromGPUDevice(injectedDevice, injectedWindow);
+        WindowClaimed = false;
+        SDL_DestroyGPUDevice(injectedDevice);
+        Device = nullptr;
+        ReleasedInjectedLostDeviceCountForTest.fetch_add(1U, std::memory_order_release);
+        return true;
+    }
+#endif
+
     void RenderSharedState::DestroyDeviceAndResources(bool abandon, const bool preserveSurfaceEpochs) noexcept
     {
         GpuDestructionThread = std::this_thread::get_id();
@@ -27,18 +51,24 @@ namespace Keire::RenderBackend
             }
             if (abandon)
             {
-                AbandonLostDeviceResources();
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                if (!ReleaseInjectedLostDeviceForTest())
+#endif
+                    AbandonLostDeviceResources();
                 for (const auto& surface : AllSurfaceEpochs())
                 {
+                    surface->ResourcesAvailable.store(false, std::memory_order_release);
                     surface->PublishedTexture.store(nullptr, std::memory_order_release);
                     surface->PublishedDepthAvailable.store(false, std::memory_order_release);
                     if (!preserveSurfaceEpochs)
                         surface->Owner.reset();
                     surface->Width = 0;
                     surface->Height = 0;
+                    surface->PublishSurfacePropertiesSnapshot();
                 }
                 PendingSceneRequests.clear();
                 PendingRuntimeUiTrees.clear();
+                PendingUiSurfaceTextureBindings.clear();
                 CaptureRequests.clear();
                 CaptureRuntimeUiCommands.clear();
                 ActiveFrame.reset();
@@ -50,12 +80,14 @@ namespace Keire::RenderBackend
             for (const auto& surface : AllSurfaceEpochs())
             {
                 ReleaseResources(surface->Resources);
+                surface->ResourcesAvailable.store(false, std::memory_order_release);
                 surface->PublishedTexture.store(nullptr, std::memory_order_release);
                 surface->PublishedDepthAvailable.store(false, std::memory_order_release);
                 if (!preserveSurfaceEpochs)
                     surface->Owner.reset();
                 surface->Width = 0;
                 surface->Height = 0;
+                surface->PublishSurfacePropertiesSnapshot();
             }
             for (auto& resources : PendingRetired)
                 ReleaseResources(resources);
@@ -137,6 +169,7 @@ namespace Keire::RenderBackend
             InFlight.clear();
             PendingSceneRequests.clear();
             PendingRuntimeUiTrees.clear();
+            PendingUiSurfaceTextureBindings.clear();
             CaptureRequests.clear();
             CaptureRuntimeUiCommands.clear();
             ActiveFrame.reset();

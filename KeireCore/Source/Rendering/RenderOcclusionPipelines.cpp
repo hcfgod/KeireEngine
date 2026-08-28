@@ -93,7 +93,7 @@ namespace Keire::RenderBackend
         if (GpuOcclusionPipelinesAttempted)
             return GpuOcclusionClassifyPipeline != nullptr;
         GpuOcclusionPipelinesAttempted = true;
-        if (!Device || !GpuOcclusionCapability)
+        if (!Device || !GpuOcclusionCapability.load(std::memory_order_acquire))
             return false;
 
         try
@@ -345,7 +345,7 @@ namespace Keire::RenderBackend
             ThrowIfDeviceLost("GPU occlusion pipeline creation", error.what());
             GpuOcclusionPipelineFailure = error.what();
             ReleaseGpuOcclusionPipelines();
-            GpuOcclusionCapability = false;
+            GpuOcclusionCapability.store(false, std::memory_order_release);
             KEIRE_CORE_WARN("GPU occlusion culling is unavailable; retaining direct scene draws: {}",
                             GpuOcclusionPipelineFailure);
             return false;

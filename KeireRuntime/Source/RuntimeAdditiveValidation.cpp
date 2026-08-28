@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <stdexcept>
@@ -83,6 +84,7 @@ namespace KeireRuntime
             StartFailedLoad,
             WaitForFailedLoad,
             ObserveFinalFrame,
+            AwaitShutdown,
             Complete
         };
 
@@ -179,6 +181,8 @@ namespace KeireRuntime
         {
             if (Current == Phase::Disabled || Current == Phase::Complete)
                 return;
+            if (std::chrono::steady_clock::now() - ValidationStartedAt > std::chrono::minutes(5))
+                throw std::runtime_error("Additive runtime validation timed out.");
             const auto sessions = world->Sessions();
             switch (Current)
             {
@@ -186,7 +190,7 @@ namespace KeireRuntime
                 if (sessions.size() != 1U)
                     throw std::runtime_error("Additive runtime validation expected exactly one startup session.");
                 First = world->Active();
-                AddValidationButton(sessions.front(), "Validation startup", width, height);
+                (void)AddValidationButton(sessions.front(), "Validation startup", width, height);
                 AdditiveLoad = world->Load(BuildScenes[1], Keire::SceneLoadMode::Additive);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                 if (ValidateDeviceLoss)
@@ -306,6 +310,7 @@ namespace KeireRuntime
             case Phase::ObserveThreeScenes:
             case Phase::ObserveUnload:
             case Phase::ObserveFinalFrame:
+            case Phase::AwaitShutdown:
             case Phase::Disabled:
             case Phase::Complete:
                 break;
@@ -346,27 +351,37 @@ namespace KeireRuntime
                 requireSubmission(3U, 2U);
                 if (!InputHandled || !FailedLoadPreserved)
                     throw std::runtime_error("Additive runtime validation did not complete input and rollback checks.");
+                const auto nativeWindow = Keire::WindowSystemInternalAccess::NativeWindow(
+                    *application.Windows(), application.MainWindow()->Id());
+                const bool renderedWindowLoop = renderer->Mode() == Keire::RenderMode::Rendered;
                 const auto build = Keire::GetBuildInfo();
-                auto result = nlohmann::json{{"schemaVersion", 1},
-                                             {"status", "passed"},
-                                             {"build",
-                                              {{"gitCommit", std::string(build.GitCommit)},
-                                               {"configuration", std::string(build.Configuration)},
-                                               {"dirty", build.Dirty}}},
-                                             {"twoSceneContributions", 2},
-                                             {"threeSceneContributions", 3},
-                                             {"twoSceneUiCommands", TwoSceneUiCommands},
-                                             {"threeSceneUiCommands", ThreeSceneUiCommands},
-                                             {"noPresentationSession", true},
-                                             {"unloadReloadOrder", true},
-                                             {"inputHandledByActiveTopmostPresentation", true},
-                                             {"failedLoadPreservedWorld", true}};
+                PendingResult = nlohmann::json{{"schemaVersion", 1},
+                                               {"status", "passed"},
+                                               {"build",
+                                                {{"gitCommit", std::string(build.GitCommit)},
+                                                 {"configuration", std::string(build.Configuration)},
+                                                 {"dirty", build.Dirty}}},
+                                               {"renderMode", renderedWindowLoop ? "rendered" : "headless"},
+                                               {"renderedWindowLoop", renderedWindowLoop},
+                                               {"nativeWindowCreated", nativeWindow != nullptr},
+                                               {"validationWindowHidden", !application.MainWindow()->Visible()},
+                                               {"twoSceneContributions", 2},
+                                               {"threeSceneContributions", 3},
+                                               {"twoSceneUiCommands", TwoSceneUiCommands},
+                                               {"threeSceneUiCommands", ThreeSceneUiCommands},
+                                               {"noPresentationSession", true},
+                                               {"unloadReloadOrder", true},
+                                               {"inputHandledByActiveTopmostPresentation", true},
+                                               {"failedLoadPreservedWorld", true}};
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                 if (ValidateDeviceLoss)
                 {
-                    const auto timelines = renderer->RecentFrameTimelines();
-                    const auto retries =
-                        std::ranges::count(timelines, true, &Keire::RenderFrameTimeline::RetriedAfterDeviceLoss);
+                    if (!nativeWindow || !Keire::RenderSystemInternalAccess::Device(*renderer))
+                    {
+                        throw std::runtime_error(
+                            "Cooked runtime device-loss validation requires a real rendered window and GPU device.");
+                    }
+                    const auto retries = Keire::RenderSystemInternalAccess::RecoveryAttemptCountForTest(*renderer);
                     if (!DeviceLossInjectedDuringLoading || !RecoveredDeviceLoss || retries != 1U ||
                         Keire::RenderSystemInternalAccess::LostGenerationGpuCleanupCallCount(*renderer) != 0U ||
                         Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer) == 0U)
@@ -374,7 +389,7 @@ namespace KeireRuntime
                         throw std::runtime_error(
                             "Cooked runtime device-loss validation did not recover and retry exactly once.");
                     }
-                    result["deviceLoss"] = {
+                    (*PendingResult)["deviceLoss"] = {
                         {"duringLoading", true},
                         {"recoverySucceeded", RecoveredDeviceLoss->RecoverySucceeded},
                         {"operation", RecoveredDeviceLoss->Operation},
@@ -388,9 +403,16 @@ namespace KeireRuntime
                         {"continuedAfterRecovery", InputHandled && FailedLoadPreserved},
                         {"retainedVfxSnapshots",
                          Keire::RenderSystemInternalAccess::LastRetriedVfxSnapshotCount(*renderer)}};
+                    renderer->Flush();
+                    Keire::RenderSystemInternalAccess::BlockNextAcceptedFrame(*renderer);
+                    Keire::RenderSystemInternalAccess::InjectDeviceLoss(*renderer);
+                    ShutdownDeviceLossArmed = true;
+                    Current = Phase::AwaitShutdown;
+                    application.RequestExit();
+                    break;
                 }
 #endif
-                Keire::Detail::WriteTextFileAtomically(Output, result.dump(2) + '\n');
+                Keire::Detail::WriteTextFileAtomically(Output, PendingResult->dump(2) + '\n');
                 Current = Phase::Complete;
                 application.RequestExit();
                 break;
@@ -403,6 +425,7 @@ namespace KeireRuntime
         std::filesystem::path Output;
         std::vector<Keire::AssetId> BuildScenes;
         Phase Current = Phase::Disabled;
+        std::chrono::steady_clock::time_point ValidationStartedAt = std::chrono::steady_clock::now();
         Keire::Ref<Keire::SceneRuntimeLoadOperation> AdditiveLoad;
         Keire::Ref<Keire::SceneLoadOperation> NoPresentationLoad;
         Keire::Ref<Keire::SceneRuntimeLoadOperation> Reload;
@@ -417,10 +440,85 @@ namespace KeireRuntime
         std::size_t ThreeSceneUiCommands = 0;
         bool InputHandled = false;
         bool FailedLoadPreserved = false;
+        std::optional<nlohmann::json> PendingResult;
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         bool ValidateDeviceLoss = false;
         bool DeviceLossInjectedDuringLoading = false;
+        bool ShutdownDeviceLossArmed = false;
         std::optional<Keire::GpuDeviceLossDiagnostic> RecoveredDeviceLoss;
+#endif
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+      public:
+        void FinalizeDeviceLossShutdown(Keire::RenderSystem& renderer) noexcept
+        {
+            if (Current != Phase::AwaitShutdown || !ShutdownDeviceLossArmed)
+                return;
+
+            try
+            {
+                if (!Keire::RenderSystemInternalAccess::WaitForAcceptedFrameBlock(renderer))
+                {
+                    throw std::runtime_error(
+                        "Cooked runtime shutdown validation did not observe its accepted frame block.");
+                }
+                renderer.Close();
+
+                const auto diagnostic = renderer.LastDeviceLoss();
+                const auto statistics = renderer.Statistics();
+                const auto recoveryAttempts = Keire::RenderSystemInternalAccess::RecoveryAttemptCountForTest(renderer);
+                const auto cleanupCalls =
+                    Keire::RenderSystemInternalAccess::LostGenerationGpuCleanupCallCount(renderer);
+                const auto healthyCandidateCleanups =
+                    Keire::RenderSystemInternalAccess::HealthyRecoveryCandidateCleanupCount(renderer);
+                if (!PendingResult || !RecoveredDeviceLoss || !diagnostic ||
+                    diagnostic->Operation != "test frame injection" || diagnostic->RecoverySucceeded ||
+                    diagnostic->RecoveryAttempt != 0U || diagnostic->RecoveredDeviceGeneration != 0U ||
+                    diagnostic->DeviceGeneration != RecoveredDeviceLoss->RecoveredDeviceGeneration ||
+                    renderer.DeviceState() != Keire::RenderDeviceState::Closed || recoveryAttempts != 1U ||
+                    cleanupCalls != 0U || healthyCandidateCleanups != 0U || statistics.OutstandingFrames != 0U ||
+                    Keire::RenderSystemInternalAccess::TerminalFailure(renderer))
+                {
+                    throw std::runtime_error(
+                        "Cooked runtime shutdown device loss started recovery or failed to close safely.");
+                }
+
+                (*PendingResult)["deviceLoss"]["shutdown"] = {
+                    {"duringShutdown", true},
+                    {"acceptedFrameBlockedBeforeClose", true},
+                    {"operation", diagnostic->Operation},
+                    {"recoverySucceeded", false},
+                    {"recoveryAttempt", 0},
+                    {"oldGeneration", diagnostic->DeviceGeneration},
+                    {"newGeneration", 0},
+                    {"recoveryAttemptCount", recoveryAttempts},
+                    {"rendererClosed", true},
+                    {"outstandingFrames", statistics.OutstandingFrames},
+                    {"lostGenerationGpuCleanupCalls", cleanupCalls},
+                    {"healthyCandidateCleanupCalls", healthyCandidateCleanups}};
+                Keire::Detail::WriteTextFileAtomically(Output, PendingResult->dump(2) + '\n');
+            }
+            catch (const std::exception& error)
+            {
+                renderer.Close();
+                try
+                {
+                    if (!PendingResult)
+                        PendingResult = nlohmann::json::object();
+                    (*PendingResult)["status"] = "failed";
+                    (*PendingResult)["shutdownDeviceLossError"] = error.what();
+                    Keire::Detail::WriteTextFileAtomically(Output, PendingResult->dump(2) + '\n');
+                }
+                catch (...)
+                {
+                }
+            }
+            catch (...)
+            {
+                renderer.Close();
+            }
+            Current = Phase::Complete;
+        }
 #endif
     };
 
@@ -444,6 +542,8 @@ namespace KeireRuntime
 
     bool RuntimeAdditiveValidation::Enabled() const noexcept { return m_Impl->Current != Impl::Phase::Disabled; }
 
+    bool RuntimeAdditiveValidation::Complete() const noexcept { return m_Impl->Current == Impl::Phase::Complete; }
+
     void RuntimeAdditiveValidation::Update(Keire::Application& application,
                                            const Keire::Ref<Keire::SceneRuntimeWorld>& world, const float width,
                                            const float height)
@@ -459,4 +559,11 @@ namespace KeireRuntime
     {
         m_Impl->ObserveSubmission(application, renderer, surface);
     }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    void RuntimeAdditiveValidation::FinalizeDeviceLossShutdown(Keire::RenderSystem& renderer) noexcept
+    {
+        m_Impl->FinalizeDeviceLossShutdown(renderer);
+    }
+#endif
 } // namespace KeireRuntime
