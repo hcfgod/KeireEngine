@@ -529,6 +529,62 @@ namespace Keire
             return bytes.size() >= magic.size() && std::ranges::equal(magic, bytes.first(magic.size()));
         }
 
+        void ApplyAtlasSampling(TextureImportSettings& settings) noexcept
+        {
+            settings.Mips = TextureMipPolicy::None;
+            settings.Sampler.Minimum = TextureFilter::Nearest;
+            settings.Sampler.Magnification = TextureFilter::Nearest;
+            settings.Sampler.Mip = TextureFilter::Nearest;
+            settings.Sampler.AddressU = TextureAddressMode::Clamp;
+            settings.Sampler.AddressV = TextureAddressMode::Clamp;
+        }
+
+        [[nodiscard]] bool IsLikelyPaletteAtlas(const TextureMipLevel& level)
+        {
+            const auto pixelCount = static_cast<std::size_t>(level.Width) * level.Height;
+            if (level.Width < 8U || level.Height < 8U || level.Pixels.size() != pixelCount * 4U)
+                return false;
+
+            constexpr std::size_t MaximumSamples = 65'536;
+            constexpr std::size_t MaximumQuantizedColors = 256;
+            const auto stride = std::max(pixelCount / MaximumSamples, std::size_t{1});
+            std::unordered_set<std::uint32_t> colors;
+            colors.reserve(MaximumQuantizedColors + 1U);
+            std::size_t sampled = 0;
+            for (std::size_t pixel = 0; pixel < pixelCount; pixel += stride)
+            {
+                const auto offset = pixel * 4U;
+                if (std::to_integer<std::uint8_t>(level.Pixels[offset + 3U]) == 0U)
+                    continue;
+                const auto red = std::to_integer<std::uint8_t>(level.Pixels[offset]) >> 3U;
+                const auto green = std::to_integer<std::uint8_t>(level.Pixels[offset + 1U]) >> 3U;
+                const auto blue = std::to_integer<std::uint8_t>(level.Pixels[offset + 2U]) >> 3U;
+                colors.insert((static_cast<std::uint32_t>(red) << 10U) | (static_cast<std::uint32_t>(green) << 5U) |
+                              blue);
+                ++sampled;
+                if (colors.size() > MaximumQuantizedColors)
+                    return false;
+            }
+            return sampled >= 256U && colors.size() >= 4U && colors.size() * 48U <= sampled;
+        }
+
+        [[nodiscard]] bool ApplyAutomaticAtlasSampling(TextureImportSettings& settings,
+                                                       std::vector<TextureMipLevel>& mips)
+        {
+            if (settings.Semantic != TextureSemantic::Color || settings.Mips != TextureMipPolicy::Generate ||
+                settings.Sampler.Minimum != TextureFilter::Linear ||
+                settings.Sampler.Magnification != TextureFilter::Linear ||
+                settings.Sampler.AddressU != TextureAddressMode::Repeat ||
+                settings.Sampler.AddressV != TextureAddressMode::Repeat || mips.empty() ||
+                !IsLikelyPaletteAtlas(mips.front()))
+            {
+                return false;
+            }
+            ApplyAtlasSampling(settings);
+            mips.resize(1);
+            return true;
+        }
+
         [[nodiscard]] std::vector<TextureMipLevel> ImportFloatTexture(Detail::DecodedFloatTexture decoded,
                                                                       const TextureImportSettings& settings)
         {
@@ -980,7 +1036,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 17;
+        result.Version = 18;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -1040,8 +1096,7 @@ namespace Keire
             importer.SetPropertyBool(AI_CONFIG_PP_PTV_KEEP_HIERARCHY, true);
             constexpr unsigned int flags = aiProcess_Triangulate | aiProcess_GenSmoothNormals |
                                            aiProcess_CalcTangentSpace | aiProcess_SortByPType |
-                                           aiProcess_ValidateDataStructure | aiProcess_MakeLeftHanded |
-                                           aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
+                                           aiProcess_MakeLeftHanded | aiProcess_FlipUVs | aiProcess_FlipWindingOrder;
             auto extension = context.SourcePath.extension().string();
             if (!extension.empty() && extension.front() == '.')
                 extension.erase(extension.begin());
@@ -1231,16 +1286,22 @@ namespace Keire
                         TextureImportSettings settings;
                         settings.Semantic = semantic;
                         settings.ColorSpace = colorSpace;
+                        const auto textureKey = Lowercase(key);
+                        if (textureKey.find("atlas") != std::string::npos ||
+                            textureKey.find("palette") != std::string::npos)
+                            ApplyAtlasSampling(settings);
                         std::vector<TextureMipLevel> mips;
                         if (!embedded)
                         {
                             mips = ImportTexture(external->Bytes, settings, {});
+                            (void)ApplyAutomaticAtlasSampling(settings, mips);
                         }
                         else if (embedded->mHeight == 0)
                         {
                             const auto textureBytes = std::span(reinterpret_cast<const std::byte*>(embedded->pcData),
                                                                 static_cast<std::size_t>(embedded->mWidth));
                             mips = ImportTexture(textureBytes, settings, {});
+                            (void)ApplyAutomaticAtlasSampling(settings, mips);
                         }
                         else
                         {
@@ -2057,7 +2118,9 @@ namespace Keire
                 effective.Sampler.AddressU = TextureAddressMode::Repeat;
                 effective.Sampler.AddressV = TextureAddressMode::Clamp;
             }
-            return Texture2DAsset::Encode(effective, ImportTexture(bytes, effective, backend));
+            auto mips = ImportTexture(bytes, effective, backend);
+            (void)ApplyAutomaticAtlasSampling(effective, mips);
+            return Texture2DAsset::Encode(effective, mips);
         };
         result.ContextualImport = [settings, backend](const AssetImportContext& context,
                                                       const std::span<const std::byte> bytes) -> AssetImportOutput
@@ -2116,7 +2179,9 @@ namespace Keire
                     throw std::invalid_argument(
                         "Environment texture must be 2:1 equirectangular, a 4x3/3x4 cross, or a 6x1/1x6 strip.");
             }
-            return {Texture2DAsset::Encode(effective, ImportTexture(bytes, effective, backend, std::move(decoded)))};
+            auto mips = ImportTexture(bytes, effective, backend, std::move(decoded));
+            (void)ApplyAutomaticAtlasSampling(effective, mips);
+            return {Texture2DAsset::Encode(effective, mips)};
         };
         const auto choice = [](std::string key, std::string name, std::string group, std::string value,
                                std::vector<std::string> choices)
@@ -2187,6 +2252,16 @@ namespace Keire
                               containsToken("rough") || containsToken("occlusion") || containsToken("ao") ||
                               containsToken("orm") || containsToken("rma") || containsToken("mra") ||
                               containsToken("mask") || containsToken("pbr");
+            const bool atlas = containsToken("atlas") || containsToken("palette");
+            if (atlas)
+            {
+                suggestedSettings["mips"] = std::string("none");
+                suggestedSettings["minFilter"] = std::string("nearest");
+                suggestedSettings["magFilter"] = std::string("nearest");
+                suggestedSettings["mipFilter"] = std::string("nearest");
+                suggestedSettings["addressU"] = std::string("clamp");
+                suggestedSettings["addressV"] = std::string("clamp");
+            }
             if (Lowercase(path.extension().string()) == ".hdr")
             {
                 suggestedSettings["semantic"] = std::string("environment");

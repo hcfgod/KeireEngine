@@ -44,6 +44,8 @@ namespace Keire::Detail
                 return ImGuiKey_Q;
             case UiKey::R:
                 return ImGuiKey_R;
+            case UiKey::P:
+                return ImGuiKey_P;
             case UiKey::Right:
                 return ImGuiKey_RightArrow;
             case UiKey::S:

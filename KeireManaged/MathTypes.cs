@@ -123,6 +123,12 @@ public readonly record struct Color(float Red, float Green, float Blue, float Al
 {
     public static Color White => new(1.0f, 1.0f, 1.0f, 1.0f);
     public static Color RedColor => new(1.0f, 0.0f, 0.0f, 1.0f);
+    public static Color Lerp(Color from, Color to, float amount)
+    {
+        float t = Math.Clamp(amount, 0.0f, 1.0f);
+        return new(from.Red + ((to.Red - from.Red) * t), from.Green + ((to.Green - from.Green) * t),
+                   from.Blue + ((to.Blue - from.Blue) * t), from.Alpha + ((to.Alpha - from.Alpha) * t));
+    }
 
     public override string ToString() => string.Create(
         CultureInfo.InvariantCulture,

@@ -54,11 +54,6 @@ namespace Keire
             return h00 * left.Value + h10 * span * left.OutTangent + h01 * right.Value + h11 * span * right.InTangent;
         }
 
-        [[nodiscard]] Color Lerp(const Color left, const Color right, const float alpha) noexcept
-        {
-            return {left.Red + (right.Red - left.Red) * alpha, left.Green + (right.Green - left.Green) * alpha,
-                    left.Blue + (right.Blue - left.Blue) * alpha, left.Alpha + (right.Alpha - left.Alpha) * alpha};
-        }
     } // namespace
 
     Curve1D::Curve1D(std::vector<CurveKey> keys) { SetKeys(std::move(keys)); }
@@ -138,7 +133,7 @@ namespace Keire
         if (m_Interpolation == GradientInterpolation::Constant)
             return left->Value;
         const auto alpha = (time - left->Time) / (right->Time - left->Time);
-        return Lerp(left->Value, right->Value, alpha);
+        return Math::Lerp(left->Value, right->Value, alpha);
     }
 
     void ColorGradient::SetKeys(std::vector<ColorGradientKey> keys)

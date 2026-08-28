@@ -196,7 +196,20 @@ namespace KeireHub
         m_EditorInstallDestination =
             Utf8Path(snapshot.Settings.DefaultEditorRoot / PathFromUtf8("Kéire Editor " + candidate->Version));
         m_EditorComponentSearch.clear();
-        m_SelectedEditorComponents.clear();
+        for (auto& selection : m_SelectedEditorComponents)
+        {
+            const auto compatible = std::ranges::find(candidate->Components, selection.PackageId,
+                                                      &HubAvailableEditorComponentUiRecord::PackageId);
+            if (compatible != candidate->Components.end())
+                selection.Version = compatible->Version;
+        }
+        std::erase_if(m_SelectedEditorComponents,
+                      [&](const auto& selection)
+                      {
+                          return std::ranges::find(candidate->Components, selection.PackageId,
+                                                   &HubAvailableEditorComponentUiRecord::PackageId) ==
+                                 candidate->Components.end();
+                      });
         m_LastEditorInstallRequest.reset();
         m_ConfirmDuplicateEditorInstall =
             HasActiveEditorInstall(snapshot.Tasks, candidate->PackageId, candidate->Version);

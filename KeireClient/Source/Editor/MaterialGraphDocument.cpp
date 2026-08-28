@@ -347,20 +347,8 @@ namespace KeireEditor
 
     bool MaterialGraphDocument::AddExpressionNode(Keire::ShaderGraphNode node)
     {
-        if (node.Kind == Keire::ShaderGraphNodeKind::Master)
-            throw std::invalid_argument("Material Graph has one fixed Material Output node.");
-        return Edit("Add Material Graph expression",
-                    [node = std::move(node)](auto& definition) mutable
-                    {
-                        if (node.Kind == Keire::ShaderGraphNodeKind::Keyword)
-                        {
-                            if (node.Symbol.empty())
-                                throw std::invalid_argument("Static parameters require a shader symbol.");
-                            definition.SurfaceGraph.Keywords.push_back(
-                                {.Name = node.Symbol, .DefaultOption = "false", .Exposed = true});
-                        }
-                        definition.SurfaceGraph.Nodes.push_back(std::move(node));
-                    });
+        (void)node;
+        return false;
     }
 
     bool MaterialGraphDocument::EditExpressionNode(const Keire::AssetId node,
@@ -575,7 +563,7 @@ namespace KeireEditor
             output.Id = addIdentity(result.NodeIdentities, Definition().OutputNode, 0x4d474f5554505554ULL);
             output.Label = "Template Defaults";
             output.Subtitle = Definition().Shader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph
-                                  ? "Compatibility overrides"
+                                  ? "Shader Graph parameters"
                                   : "Raw shader bindings";
             output.Position = Definition().OutputPosition;
             output.Size = {260.0F, std::max(96.0F, 48.0F + static_cast<float>(Definition().Properties.size()) * 24.0F)};

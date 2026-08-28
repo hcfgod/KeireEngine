@@ -26,7 +26,7 @@ namespace KeireEditor
 
     [[nodiscard]] constexpr bool CompositesRuntimeGameUi(const EditorViewportTarget target) noexcept
     {
-        return target == EditorViewportTarget::Game;
+        return target == EditorViewportTarget::Scene || target == EditorViewportTarget::Game;
     }
 
     class ProjectSettingsDocument;
@@ -213,6 +213,7 @@ namespace KeireEditor
         std::unique_ptr<SceneCameraController> m_Camera;
         Keire::Ref<Keire::RenderView> m_RenderView;
         Keire::Ref<Keire::RenderView> m_CameraPreviewView;
+        Keire::Ref<Keire::ScenePresentationRuntime> m_UiPresentation;
         Keire::UiItemRect m_ViewportRect;
         Keire::RenderCamera m_LastCamera;
         std::filesystem::path m_ProjectRoot;

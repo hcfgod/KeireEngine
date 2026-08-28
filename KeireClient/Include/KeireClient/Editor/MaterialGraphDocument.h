@@ -84,7 +84,7 @@ namespace KeireEditor
         [[nodiscard]] bool RemoveConnection(Keire::AssetId connection);
         [[nodiscard]] NodeGraphConnectionValidation CheckConnection(Keire::MaterialGraphEndpoint output,
                                                                     Keire::MaterialGraphEndpoint input) const;
-        [[nodiscard]] MaterialGraphCanvasModel BuildCanvasModel(bool includeTemplateParameters = false) const;
+        [[nodiscard]] MaterialGraphCanvasModel BuildCanvasModel(bool includeTemplateParameters = true) const;
 
       private:
         void RefreshDiagnostics();

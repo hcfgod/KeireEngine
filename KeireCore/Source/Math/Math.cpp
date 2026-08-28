@@ -63,6 +63,12 @@ namespace Keire::Math
         return std::isfinite(value.Red) && std::isfinite(value.Green) && std::isfinite(value.Blue) &&
                std::isfinite(value.Alpha);
     }
+    Color Lerp(const Color from, const Color to, const float alpha) noexcept
+    {
+        const auto clamped = std::clamp(alpha, 0.0F, 1.0F);
+        return {from.Red + (to.Red - from.Red) * clamped, from.Green + (to.Green - from.Green) * clamped,
+                from.Blue + (to.Blue - from.Blue) * clamped, from.Alpha + (to.Alpha - from.Alpha) * clamped};
+    }
     bool IsFinite(const Matrix4& value) noexcept
     {
         return std::ranges::all_of(value.Elements, [](const float item) { return std::isfinite(item); });

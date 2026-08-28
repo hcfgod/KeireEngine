@@ -1366,11 +1366,23 @@ namespace KeireEditor
                             m_FunctionExtractionSelection = m_SelectedNodes;
                             m_OpenFunctionExtractionPopup = true;
                         }
-                        if (ui.MenuItem("Delete Node", false, node->Kind != Keire::ShaderGraphNodeKind::Master))
+                        std::vector<Keire::AssetId> removableNodes;
+                        for (const auto selected : m_SelectedNodes)
+                        {
+                            const auto* selectedNode = FindNode(document.Definition(), selected);
+                            if (selectedNode && selectedNode->Kind != Keire::ShaderGraphNodeKind::Master)
+                                removableNodes.push_back(selected);
+                        }
+                        if (removableNodes.empty() && node->Kind != Keire::ShaderGraphNodeKind::Master)
+                            removableNodes.push_back(node->Id);
+                        if (ui.MenuItem(m_SelectedNodes.size() > 1 ? "Delete Nodes" : "Delete Node", false,
+                                        !removableNodes.empty()))
                             try
                             {
-                                (void)document.RemoveNode(node->Id);
+                                (void)document.RemoveNodes(removableNodes);
                                 m_SelectedNode.reset();
+                                m_SelectedNodes.clear();
+                                m_Canvas.Select(std::nullopt);
                             }
                             catch (const std::exception& error)
                             {

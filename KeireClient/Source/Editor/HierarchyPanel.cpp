@@ -74,6 +74,15 @@ namespace KeireEditor
                                           Keire::Vector2{});
             return button;
         };
+        const auto createPanel = [&](const Keire::EntityId parent, std::string name)
+        {
+            const auto panel =
+                document.CreateEntity(std::move(name), parent, Keire::RectTransformComponent::StaticType());
+            (void)document.AddComponent(panel, Keire::UiImageComponent::StaticType());
+            document.SetComponentProperty(panel, Keire::RectTransformComponent::StaticType(), "sizeDelta",
+                                          Keire::Vector2{320.0F, 240.0F});
+            return panel;
+        };
         const auto createControl =
             [&](const Keire::EntityId parent, std::string name, const Keire::ComponentTypeId type)
         {
@@ -257,18 +266,7 @@ namespace KeireEditor
             const auto state = ui.LastItemState();
             const auto row = ui.LastItemRect();
             if (state.Hovered && ui.PointerState().LeftPressed)
-            {
-                const bool preserveForPotentialDrag = document.IsSelected(object.Id) &&
-                                                      document.Selections().size() > 1 && !ui.ControlDown() &&
-                                                      !ui.ShiftDown();
-                if (preserveForPotentialDrag)
-                    m_PendingSelectionCollapse = object.Id;
-                else
-                {
-                    m_PendingSelectionCollapse = {};
-                    select(object.Id, hierarchyOrder);
-                }
-            }
+                m_PendingSelectionCollapse = object.Id;
             if (auto context = ui.BeginItemContextMenu(); context)
             {
                 if (!document.IsSelected(object.Id))
@@ -289,6 +287,12 @@ namespace KeireEditor
                 {
                     m_Controller.RecordHierarchyUndo();
                     document.Select(createButton(Keire::EntityId(object.Id), "Button").Value());
+                    m_Controller.MarkHierarchyEntity(document.Selection());
+                }
+                if (ui.MenuItem("UI Panel Child"))
+                {
+                    m_Controller.RecordHierarchyUndo();
+                    document.Select(createPanel(Keire::EntityId(object.Id), "Panel").Value());
                     m_Controller.MarkHierarchyEntity(document.Selection());
                 }
                 if (ui.MenuItem("UI Slider Child"))
@@ -399,21 +403,22 @@ namespace KeireEditor
                 }
                 if (ui.MenuItem("Delete"))
                 {
-                    m_Controller.RecordHierarchyUndo();
-                    document.DeleteEntity(Keire::EntityId(object.Id));
-                    document.ClearSelection();
+                    m_Controller.DeleteHierarchySelection();
                 }
             }
             if (auto source = ui.BeginDragSource(); source)
             {
                 m_PendingSelectionCollapse = {};
                 std::vector<Keire::AssetId> dragged;
-                const auto selections = document.Selections();
-                for (const auto entity : hierarchyOrder)
-                    if (std::ranges::find(selections, entity) != selections.end())
-                        dragged.push_back(entity);
-                if (dragged.empty())
+                if (!document.IsSelected(object.Id))
                     dragged.push_back(object.Id);
+                else
+                {
+                    const auto selections = document.Selections();
+                    for (const auto entity : hierarchyOrder)
+                        if (std::ranges::find(selections, entity) != selections.end())
+                            dragged.push_back(entity);
+                }
                 const auto value = EncodeAssetPayload(dragged);
                 ui.SetDragPayload("KEIRE_SCENE_OBJECT", std::as_bytes(std::span(value.data(), value.size())));
                 ui.Text(dragged.size() == 1 ? object.Name : std::to_string(dragged.size()) + " selected entities");
@@ -472,10 +477,7 @@ namespace KeireEditor
             if (m_PendingSelectionCollapse == object.Id && ui.PointerState().LeftReleased)
             {
                 if (state.Hovered)
-                {
-                    document.Select(object.Id);
-                    m_SelectionAnchor = object.Id;
-                }
+                    select(object.Id, hierarchyOrder);
                 m_PendingSelectionCollapse = {};
             }
             if (node)
@@ -515,6 +517,12 @@ namespace KeireEditor
             {
                 m_Controller.RecordHierarchyUndo();
                 document.Select(createModernCanvas({}).Value());
+                m_Controller.MarkHierarchyEntity(document.Selection());
+            }
+            if (ui.MenuItem("UI / Panel"))
+            {
+                m_Controller.RecordHierarchyUndo();
+                document.Select(createPanel({}, "Panel").Value());
                 m_Controller.MarkHierarchyEntity(document.Selection());
             }
             if (ui.MenuItem("UI / Text"))

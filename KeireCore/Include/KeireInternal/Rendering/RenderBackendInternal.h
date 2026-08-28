@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
+
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Assets/LightingAssets.h"
@@ -620,6 +622,7 @@ namespace Keire::RenderBackend
         SkinningMethod Skinning = SkinningMethod::LinearBlend;
         SDL_GPUBuffer* SkinnedAssetVertices = nullptr;
         SDL_GPUBuffer* SkinnedBuiltinVertices = nullptr;
+        GpuVisibilityClass VisibilityClass = GpuVisibilityClass::StaticMesh;
     };
 
     [[nodiscard]] inline std::optional<SceneDrawItem> VfxMeshDrawItem(const VfxRenderParticle& particle)
@@ -640,7 +643,11 @@ namespace Keire::RenderBackend
                              {},
                              false,
                              true,
-                             false};
+                             false,
+                             SkinningMethod::LinearBlend,
+                             nullptr,
+                             nullptr,
+                             GpuVisibilityClass::MeshVfx};
     }
 
     [[nodiscard]] inline bool RequiresGpuDepthCollision(const std::span<const VfxGpuEmitter> emitters) noexcept

@@ -623,6 +623,35 @@ namespace KeireEditor
                         ui.TextColored(editor.AssetBrowserTheme().Error, TrashError);
                     if (TrashEntries.empty() && TrashError.empty())
                         ui.TextColored(editor.AssetBrowserTheme().MutedText, "Trash is empty.");
+
+                    if (auto disabled = ui.BeginDisabled(TrashEntries.empty()); disabled)
+                    {
+                        if (ui.Button("Restore All"))
+                        {
+                            for (const auto& record : TrashEntries)
+                            {
+                                editor.MutateAssetBrowser(
+                                    {.Kind = Keire::Detail::AssetWorkerMutationKind::RestoreTrash, .Trash = record.Id},
+                                    {}, {});
+                            }
+                            editor.SetAssetBrowserStatus("Restored all entries from trash.");
+                            TrashEntries = editor.AssetBrowserDatabase()->TrashRecords();
+                        }
+                        ui.SameLine();
+                        if (ui.Button("Delete All Permanently"))
+                        {
+                            for (const auto& record : TrashEntries)
+                            {
+                                editor.MutateAssetBrowser(
+                                    {.Kind = Keire::Detail::AssetWorkerMutationKind::PermanentlyDeleteTrash,
+                                     .Trash = record.Id},
+                                    {}, {});
+                            }
+                            editor.SetAssetBrowserStatus("Permanently removed all trash entries.");
+                            TrashEntries = editor.AssetBrowserDatabase()->TrashRecords();
+                        }
+                    }
+
                     Keire::AssetTrashId completed;
                     for (const auto& record : TrashEntries)
                     {
@@ -940,7 +969,7 @@ namespace KeireEditor
                     RequestDeleteAssets(editor);
                 ui.Separator();
                 if (ui.MenuItem("Reimport"))
-                    editor.ImportAssetBrowserAssets();
+                    editor.ImportAssetBrowserAssets(Selection);
                 if (record.Type == Keire::MeshAsset::StaticType() && !record.SubAssets.empty() &&
                     ui.MenuItem("Extract Materials"))
                     editor.ExtractAssetBrowserMaterials(record.Id);
@@ -984,7 +1013,25 @@ namespace KeireEditor
                     RequestDeleteFolders(FolderSelection);
                 ui.Separator();
                 if (ui.MenuItem("Reimport Recursively"))
-                    editor.ImportAssetBrowserAssets();
+                {
+                    std::vector<Keire::AssetId> assets;
+                    for (const auto& asset : editor.AssetBrowserRecords())
+                    {
+                        const bool selectedFolder =
+                            std::ranges::any_of(FolderSelection,
+                                                [&](const std::filesystem::path& selected)
+                                                {
+                                                    if (selected.empty())
+                                                        return true;
+                                                    const auto relative =
+                                                        asset.RelativePath.lexically_relative(selected);
+                                                    return !relative.empty() && *relative.begin() != "..";
+                                                });
+                        if (selectedFolder)
+                            assets.push_back(asset.Id);
+                    }
+                    editor.ImportAssetBrowserAssets(assets);
+                }
                 if (ui.MenuItem("Reveal in File Explorer"))
                     Detail::RevealAssetBrowserPath(editor, AssetRoot / folder);
                 if (ui.MenuItem("Copy Relative Path"))

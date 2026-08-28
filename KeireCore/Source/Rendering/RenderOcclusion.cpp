@@ -27,7 +27,8 @@ namespace
     namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;
 
     constexpr float OcclusionDepthBias = 0.0001F;
-    constexpr std::uint32_t ForceVisibleFlag = 1U;
+    constexpr std::uint32_t ForceVisibleFlag =
+        static_cast<std::uint32_t>(Keire::RenderBackend::GpuVisibilityFlags::ForceVisible);
     constexpr std::uint32_t MaximumGpuOcclusionCandidates = 262'144U;
     constexpr std::uint32_t MaximumGpuOcclusionSurfaceDimension = 16'384U;
 
@@ -155,6 +156,24 @@ namespace Keire::RenderBackend
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion prepare");
         PreparedGpuOcclusion prepared;
         const auto requested = packet.Environment.GpuOcclusion;
+        for (const auto& item : packet.DrawItems)
+        {
+            if (item.VisibilityClass == GpuVisibilityClass::MeshVfx)
+                ++Statistics.GpuOcclusionMeshVfxCandidates;
+            else if (item.Skin)
+                ++Statistics.GpuOcclusionSkinnedMeshCandidates;
+            else
+                ++Statistics.GpuOcclusionStaticMeshCandidates;
+
+            if (item.AlwaysVisible || item.Skin)
+                ++Statistics.GpuOcclusionForcedVisibleCandidates;
+        }
+        const auto localLightCandidates = static_cast<std::uint32_t>(packet.LocalLights.size());
+        const auto spatialVolumeCandidates =
+            static_cast<std::uint32_t>(packet.ReflectionProbes.size() + packet.LightProbeVolumes.size());
+        Statistics.GpuOcclusionLocalLightCandidates += localLightCandidates;
+        Statistics.GpuOcclusionSpatialVolumeCandidates += spatialVolumeCandidates;
+        Statistics.GpuOcclusionForcedVisibleCandidates += localLightCandidates + spatialVolumeCandidates;
         surface.GpuOcclusionDiagnostics.RequestedMode = requested;
         if (requested == GpuOcclusionMode::Disabled)
         {
@@ -270,7 +289,7 @@ namespace Keire::RenderBackend
             const auto& draw = draws.Opaque.Draws[drawIndex];
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
             if (!material || material->Topology != ShaderPrimitiveTopology::TriangleList || !material->DepthTest ||
-                IsTransparentMaterial(material->Surface.AlphaMode) || draw.Item->Skin)
+                IsTransparentMaterial(material->Surface.AlphaMode))
             {
                 continue;
             }
@@ -298,11 +317,15 @@ namespace Keire::RenderBackend
             for (std::uint32_t instance = 0; instance < sceneBatch.Count; ++instance)
             {
                 const auto& instanceDraw = draws.Opaque.Draws[drawIndex + instance];
-                candidates.push_back({{instanceDraw.Submesh.Bounds.Minimum.X, instanceDraw.Submesh.Bounds.Minimum.Y,
-                                       instanceDraw.Submesh.Bounds.Minimum.Z, 0.0F},
-                                      {instanceDraw.Submesh.Bounds.Maximum.X, instanceDraw.Submesh.Bounds.Maximum.Y,
-                                       instanceDraw.Submesh.Bounds.Maximum.Z, 0.0F},
-                                      {instanceDraw.Item->AlwaysVisible ? ForceVisibleFlag : 0U, 0U, 0U, 0U}});
+                candidates.push_back(
+                    {{instanceDraw.Submesh.Bounds.Minimum.X, instanceDraw.Submesh.Bounds.Minimum.Y,
+                      instanceDraw.Submesh.Bounds.Minimum.Z, 0.0F},
+                     {instanceDraw.Submesh.Bounds.Maximum.X, instanceDraw.Submesh.Bounds.Maximum.Y,
+                      instanceDraw.Submesh.Bounds.Maximum.Z, 0.0F},
+                     {(instanceDraw.Item->AlwaysVisible || instanceDraw.Item->Skin) ? ForceVisibleFlag : 0U,
+                      static_cast<std::uint32_t>(instanceDraw.Item->Skin ? GpuVisibilityClass::SkinnedMesh
+                                                                         : instanceDraw.Item->VisibilityClass),
+                      0U, 0U}});
                 inputInstances.push_back({instanceDraw.Item->World, Transpose(Math::Inverse(instanceDraw.Item->World)),
                                           instanceDraw.Item->Tint});
             }
@@ -324,7 +347,7 @@ namespace Keire::RenderBackend
             prepared.CandidateTriangles += static_cast<std::uint64_t>(triangleCount) * sceneBatch.Count;
 
             const bool depthCompatible =
-                material->Surface.AlphaMode == MaterialAlphaMode::Opaque && material->DepthWrite &&
+                material->Surface.AlphaMode == MaterialAlphaMode::Opaque && material->DepthWrite && !draw.Item->Skin &&
                 HasShaderOcclusionSupport(material->OcclusionSupport, ShaderOcclusionSupport::DepthOnlyGeometryMatch);
             if (!depthCompatible)
                 continue;
@@ -396,7 +419,7 @@ namespace Keire::RenderBackend
             const auto& draw = draws.Transparent.Draws[drawIndex];
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
             if (!material || material->Topology != ShaderPrimitiveTopology::TriangleList || !material->DepthTest ||
-                !IsTransparentMaterial(material->Surface.AlphaMode) || draw.Item->Skin)
+                !IsTransparentMaterial(material->Surface.AlphaMode))
             {
                 continue;
             }
@@ -419,7 +442,10 @@ namespace Keire::RenderBackend
             candidates.push_back(
                 {{draw.Submesh.Bounds.Minimum.X, draw.Submesh.Bounds.Minimum.Y, draw.Submesh.Bounds.Minimum.Z, 0.0F},
                  {draw.Submesh.Bounds.Maximum.X, draw.Submesh.Bounds.Maximum.Y, draw.Submesh.Bounds.Maximum.Z, 0.0F},
-                 {draw.Item->AlwaysVisible ? ForceVisibleFlag : 0U, 0U, 0U, 0U}});
+                 {(draw.Item->AlwaysVisible || draw.Item->Skin) ? ForceVisibleFlag : 0U,
+                  static_cast<std::uint32_t>(draw.Item->Skin ? GpuVisibilityClass::SkinnedMesh
+                                                             : draw.Item->VisibilityClass),
+                  0U, 0U}});
             inputInstances.push_back({draw.Item->World, Transpose(Math::Inverse(draw.Item->World)), draw.Item->Tint});
             const auto chunkFirst = static_cast<std::uint32_t>(chunks.size());
             chunks.push_back({candidateFirst, 1U, static_cast<std::uint32_t>(batches.size()), 0U});

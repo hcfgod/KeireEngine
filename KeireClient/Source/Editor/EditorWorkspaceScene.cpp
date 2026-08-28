@@ -1419,7 +1419,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game))
             for (const auto& presentation : presentations)
                 presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
-        if (playActive && !presentations.empty())
+        if (!presentations.empty())
         {
             const auto pointer = ui.PointerState();
             const float localX = pointer.Position.X - imageRect.Minimum.X;
@@ -1449,7 +1449,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             }
             if (imageRect.Contains(pointer.Position) && pointer.Wheel != 0.0F)
                 ui.CapturePointerWheel();
-            if (m_GameViewportInputActive)
+            if (playActive && m_GameViewportInputActive)
                 KeireEditor::RouteRuntimeUiKeyboard(ui, playSession->Presentation(), Owner().Windows(), mainWindow);
         }
         const auto occlusion = m_GameRenderView && m_GameRenderView->Surface()

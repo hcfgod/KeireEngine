@@ -368,6 +368,33 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             }
             m_EntityTagEditing = tagState.Active;
             ui.Separator();
+            const auto copiedRegistration = m_ComponentClipboard && m_ComponentClipboard->WholeComponent
+                                                ? scene->Components()->Find(m_ComponentClipboard->Type)
+                                                : std::nullopt;
+            const bool canPasteComponent =
+                copiedRegistration && copiedRegistration->Removable &&
+                (copiedRegistration->AllowMultiple || !entity.HasComponent(copiedRegistration->Type));
+            if (ui.WindowFocused() && ui.Shortcut({.Key = Keire::UiKey::V, .Primary = true}) && canPasteComponent)
+            {
+                try
+                {
+                    m_Controller.RecordInspectorUndo("Paste " + copiedRegistration->Name);
+                    const auto pasted = sceneDocument.AddComponent(entity.Id(), copiedRegistration->Type);
+                    try
+                    {
+                        sceneDocument.SetComponentValues(entity.Id(), pasted, m_ComponentClipboard->Values);
+                    }
+                    catch (...)
+                    {
+                        sceneDocument.RemoveComponent(entity.Id(), pasted);
+                        throw;
+                    }
+                }
+                catch (const std::exception& error)
+                {
+                    m_Controller.ReportInspectorAssetError(std::string("Component operation failed: ") + error.what());
+                }
+            }
             const auto componentOrder = entity.GetComponents();
             const auto drawComponentHeader = [&](const Keire::Ref<Keire::Component>& component,
                                                  const Keire::ComponentRegistration& registration, bool& expanded,
@@ -393,6 +420,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     (void)ui.TableNextColumn();
                     if (ui.Selectable((expanded ? "v  " : ">  ") + std::string(title)))
                         expanded = !expanded;
+                    const bool hoveredComponent = ui.LastItemState().Hovered;
                     const auto headerRect = ui.LastItemRect();
                     if (auto source = ui.BeginDragSource(); source)
                     {
@@ -416,6 +444,11 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 sceneDocument.MoveComponentBefore(entity.Id(), source, component);
                             }
                         }
+                    }
+                    if (hoveredComponent && ui.Shortcut({.Key = Keire::UiKey::C, .Primary = true}))
+                    {
+                        m_ComponentClipboard =
+                            ComponentClipboard{registration.Type, registration.Serialize(*component), true};
                     }
                     if (auto context = ui.BeginItemContextMenu("ComponentContext##" + unique); context)
                         removed = DrawComponentMenu(ui, entity, component, registration, sceneDocument, scene);

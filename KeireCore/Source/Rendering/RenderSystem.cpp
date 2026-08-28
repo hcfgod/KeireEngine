@@ -233,7 +233,13 @@ namespace Keire
                 .DynamicMeshPackets = rendered,
                 .SampledResolvedDepth = sampledResolvedDepth,
                 .GpuDepthCollision = sampledResolvedDepth,
-                .GpuOcclusionCulling = rendered && m_Impl->State->GpuOcclusionCapability};
+                .GpuOcclusionCulling = rendered && m_Impl->State->GpuOcclusionCapability,
+                .GpuOcclusionStaticMeshes = rendered && m_Impl->State->GpuOcclusionCapability,
+                .GpuOcclusionSkinnedMeshes = rendered && m_Impl->State->GpuOcclusionCapability,
+                .GpuOcclusionMeshVfx = rendered && m_Impl->State->GpuOcclusionCapability,
+                .GpuOcclusionVfxVisibilityMasks = false,
+                .GpuOcclusionLocalLightMasks = false,
+                .GpuOcclusionSpatialVolumeMasks = false};
     }
     RenderStatistics RenderSystem::Statistics() const noexcept
     {

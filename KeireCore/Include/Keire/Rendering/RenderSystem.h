@@ -235,6 +235,14 @@ namespace Keire
         // GPU particle simulation can collide with sampled scene depth.
         bool GpuDepthCollision = false;
         bool GpuOcclusionCulling = false;
+        // These flags describe visibility-contract participation. A class can participate while being forced visible
+        // when its bounds or downstream consumer are not safe for rejection.
+        bool GpuOcclusionStaticMeshes = false;
+        bool GpuOcclusionSkinnedMeshes = false;
+        bool GpuOcclusionMeshVfx = false;
+        bool GpuOcclusionVfxVisibilityMasks = false;
+        bool GpuOcclusionLocalLightMasks = false;
+        bool GpuOcclusionSpatialVolumeMasks = false;
     };
 
     struct RenderStatistics
@@ -272,6 +280,12 @@ namespace Keire
         std::uint32_t GpuOcclusionCandidates = 0;
         std::uint32_t GpuOcclusionVisible = 0;
         std::uint32_t GpuOcclusionCulled = 0;
+        std::uint32_t GpuOcclusionStaticMeshCandidates = 0;
+        std::uint32_t GpuOcclusionSkinnedMeshCandidates = 0;
+        std::uint32_t GpuOcclusionMeshVfxCandidates = 0;
+        std::uint32_t GpuOcclusionLocalLightCandidates = 0;
+        std::uint32_t GpuOcclusionSpatialVolumeCandidates = 0;
+        std::uint32_t GpuOcclusionForcedVisibleCandidates = 0;
         std::uint32_t GpuOcclusionSafeOccluders = 0;
         std::uint32_t GpuOcclusionIndirectDraws = 0;
         std::uint32_t GpuOcclusionPyramidMipCount = 0;

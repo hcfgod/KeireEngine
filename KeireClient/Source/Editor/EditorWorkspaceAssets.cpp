@@ -212,7 +212,22 @@ void EditorWorkspaceLayer::SetAssetBrowserStatus(std::string status) noexcept { 
 
 void EditorWorkspaceLayer::ReportAssetBrowserError(std::string message) noexcept { SetAssetError(std::move(message)); }
 
-void EditorWorkspaceLayer::ImportAssetBrowserAssets() { ImportAssets(); }
+void EditorWorkspaceLayer::ImportAssetBrowserAssets(const std::span<const Keire::AssetId> assets)
+{
+    if (assets.empty())
+    {
+        ImportAssets();
+        return;
+    }
+
+    for (const auto asset : assets)
+    {
+        m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::ExplicitAction,
+                                            {.ReloadAsset = assets.size() == 1 ? asset : Keire::AssetId{}});
+    }
+    m_AssetStatus = assets.size() == 1 ? "Reimporting 1 asset..."
+                                       : "Reimporting " + std::to_string(assets.size()) + " selected assets...";
+}
 
 bool EditorWorkspaceLayer::CreateAssetBrowserScene(const std::string_view name) { return CreateSceneAsset(name); }
 
@@ -732,7 +747,6 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
         {
             (void)Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*m_AssetDatabase,
                                                                               completion->SourceIndexPath);
-            RefreshAssetBrowserRecords();
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ExternalImport)
             {
                 m_ExternalAssetImport->Complete(std::move(*completion));
@@ -745,8 +759,24 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                                 std::to_string(cooked.PackCount) + " pack(s).";
                 continue;
             }
-            ApplyAssetImportResult(completion->Result.Import, true, completion->Context.ReloadAsset);
+            ApplyAssetImportResult(completion->Result.Import,
+                                   completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll,
+                                   completion->Context.ReloadAsset);
             CompletePendingMaterialAssignment(completion->Context.ReloadAsset);
+            const auto activeSceneAsset = m_SceneDocument->Asset();
+            if (activeSceneAsset && std::ranges::find(completion->Result.MutatedAssets, activeSceneAsset) !=
+                                        completion->Result.MutatedAssets.end())
+            {
+                const auto sceneRecord = m_AssetDatabase->Find(activeSceneAsset);
+                const auto editingScene = m_SceneDocument->EditingScene();
+                if (sceneRecord && editingScene && sceneRecord->Type == Keire::SceneAsset::StaticType())
+                {
+                    editingScene->SetName(sceneRecord->RelativePath.stem().string());
+                    m_AssetDatabase->ReplaceAssetSource(activeSceneAsset,
+                                                        Keire::SceneAsset::Encode(editingScene->Snapshot()));
+                    editingScene->MarkSaved();
+                }
+            }
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::BakeLighting)
             {
                 if (!completion->Result.CreatedAsset)
@@ -869,6 +899,12 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 if (completion->Context.ManagedAssembly)
                     ExtendManagedAssemblySourceRoot(completion->Context.ManagedAssembly,
                                                     completion->Context.ManagedSourceRoot);
+                if (const auto createdRecord = m_AssetDatabase->Find(created);
+                    createdRecord && (createdRecord->RelativePath.extension() == ".cs" ||
+                                      createdRecord->RelativePath.extension() == ".keireasm"))
+                {
+                    m_ManagedBuildDebounceSeconds = 0.1;
+                }
                 if (completion->Context.GraphFunctionExtraction)
                     CompleteGraphFunctionExtraction(*completion->Context.GraphFunctionExtraction, created);
                 m_SelectedAsset = created;

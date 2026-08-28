@@ -255,6 +255,12 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionCandidates = 0;
         Statistics.GpuOcclusionVisible = 0;
         Statistics.GpuOcclusionCulled = 0;
+        Statistics.GpuOcclusionStaticMeshCandidates = 0;
+        Statistics.GpuOcclusionSkinnedMeshCandidates = 0;
+        Statistics.GpuOcclusionMeshVfxCandidates = 0;
+        Statistics.GpuOcclusionLocalLightCandidates = 0;
+        Statistics.GpuOcclusionSpatialVolumeCandidates = 0;
+        Statistics.GpuOcclusionForcedVisibleCandidates = 0;
         Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
         Statistics.GpuOcclusionCandidateTriangles = 0;
         Statistics.GpuOcclusionCulledTriangles = 0;

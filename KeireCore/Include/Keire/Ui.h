@@ -124,6 +124,7 @@ namespace Keire
         Left,
         Q,
         R,
+        P,
         Right,
         S,
         Up,

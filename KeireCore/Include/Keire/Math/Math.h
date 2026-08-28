@@ -63,6 +63,7 @@ namespace Keire
         [[nodiscard]] KEIRE_API bool IsFinite(Vector4 value) noexcept;
         [[nodiscard]] KEIRE_API bool IsFinite(Quaternion value) noexcept;
         [[nodiscard]] KEIRE_API bool IsFinite(Color value) noexcept;
+        [[nodiscard]] KEIRE_API Color Lerp(Color from, Color to, float alpha) noexcept;
         [[nodiscard]] KEIRE_API bool IsFinite(const Matrix4& value) noexcept;
         [[nodiscard]] KEIRE_API float Length(Quaternion value) noexcept;
         [[nodiscard]] KEIRE_API Quaternion Normalize(Quaternion value);

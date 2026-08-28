@@ -1185,13 +1185,26 @@ namespace KeireEditor
                     (void)CreateGraphComment(ui, system->Id, nodeIdentities, nodes, node->EditorPosition, true);
                     return;
                 }
-                if (ui.MenuItem("Delete Node", false, node->Kind != Keire::VfxGraphNodeKind::Context))
+                std::vector<Keire::AssetId> removableNodes;
+                for (const auto selected : m_SelectedNodes)
                 {
-                    (void)ApplyAction("Removed VFX graph node", [&document, graph = system->Id, nodeId = node->Id]
-                                      { return document.RemoveNode(graph, nodeId); });
+                    const auto selectedNode = std::ranges::find(system->Nodes, selected, &Keire::VfxGraphNode::Id);
+                    if (selectedNode != system->Nodes.end() && selectedNode->Kind != Keire::VfxGraphNodeKind::Context)
+                        removableNodes.push_back(selected);
+                }
+                if (removableNodes.empty() && node->Kind != Keire::VfxGraphNodeKind::Context)
+                    removableNodes.push_back(node->Id);
+                if (ui.MenuItem(m_SelectedNodes.size() > 1 ? "Delete Nodes" : "Delete Node", false,
+                                !removableNodes.empty()))
+                {
+                    (void)ApplyAction(removableNodes.size() == 1 ? "Removed VFX graph node" : "Removed VFX graph nodes",
+                                      [&document, graph = system->Id, removableNodes]
+                                      { return document.RemoveNodes(graph, removableNodes); });
                     m_SelectedNode = {};
+                    m_SelectedNodes.clear();
                     m_SelectedBlock = {};
                     m_SelectedConnection = {};
+                    m_GraphCanvas.Select(std::nullopt);
                     return;
                 }
                 if (node->Kind == Keire::VfxGraphNodeKind::Context)

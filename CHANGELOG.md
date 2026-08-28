@@ -1,5 +1,10 @@
 # Changelog
 
+- Material Graph authoring now binds Shader Graph parameters without requiring duplicate surface shader logic; legacy
+  surface expressions remain import-compatible.
+- GPU occlusion now reports class-level coverage, classifies mesh VFX and skinned draws, and explicitly forces unsafe
+  or currently unmaskable lights and spatial work visible instead of risking incorrect rejection.
+
 All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
 versions.
 
@@ -7,6 +12,17 @@ versions.
 
 - Fixed Editor Play managed rendering, audio, physics, and UI services during primary-scene `Awake`/`OnEnable` by
   resolving the pending Play session before it is adopted into the runtime world.
+- Made Project asset reimports ID-scoped, removed duplicate catalog/browser refreshes and unrelated loaded-asset
+  reloads, and kept transient asset-worker progress-file locks from failing the underlying operation.
+- Added content-based atlas-safe texture defaults, tolerated duplicate Assimp bone names, recursively resolved project
+  material shaders, and replaced full imports after material extraction, duplication, and trash restoration.
+- Composited and hit-tested runtime UI in Scene view, routed Edit-mode pointer states, cleared disabled/hidden control
+  interaction state, and deferred Hierarchy selection until mouse release so entity drags preserve the Inspector.
+- Scheduled managed discovery after script creation, supported yielding nested `Coroutine` handles, synchronized scene
+  names after asset renames, corrected Windows Explorer reveal arguments, and retained compatible Build Support
+  component selections when changing editor versions.
+- Documented the Material Graph/Shader Graph single-authority migration and conservative per-system GPU occlusion
+  coverage plan.
 
 ### Fixed
 

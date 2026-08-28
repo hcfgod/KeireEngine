@@ -100,6 +100,12 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionCullingRecordingMilliseconds = 0.0F;
         // Editor UI is built after BeginFrame but before execution. Retain the finalized previous-frame workload until
         // this point so diagnostics never mistake a reset aggregate for the frame that actually reached the GPU.
+        Statistics.GpuOcclusionStaticMeshCandidates = 0;
+        Statistics.GpuOcclusionSkinnedMeshCandidates = 0;
+        Statistics.GpuOcclusionMeshVfxCandidates = 0;
+        Statistics.GpuOcclusionLocalLightCandidates = 0;
+        Statistics.GpuOcclusionSpatialVolumeCandidates = 0;
+        Statistics.GpuOcclusionForcedVisibleCandidates = 0;
         Statistics.GpuOcclusionSafeOccluders = 0;
         Statistics.GpuOcclusionIndirectDraws = 0;
         Statistics.GpuOcclusionPyramidMipCount = 0;

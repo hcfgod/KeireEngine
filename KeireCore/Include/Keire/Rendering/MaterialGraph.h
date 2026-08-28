@@ -72,8 +72,9 @@ namespace Keire
         std::vector<MaterialGraphPropertyBinding> Properties;
         std::vector<MaterialGraphValueNode> Nodes;
         std::vector<MaterialGraphConnection> Connections;
-        /// Artist-authored surface expressions. The Shader Graph supplies the reusable renderer/master template;
-        /// connections to this graph's Master node override matching template outputs during material compilation.
+        /// Legacy compatibility graph. New Material Graph authoring binds exposed Shader Graph parameters and does not
+        /// duplicate executable shader logic. Existing authored expressions remain loadable for
+        /// migration/compatibility.
         ShaderGraphDefinition SurfaceGraph;
         GraphAuthoringMetadata Authoring;
 
@@ -170,6 +171,7 @@ namespace Keire
                                                                                 Vector2 position = {120.0F, 120.0F});
     [[nodiscard]] KEIRE_API std::map<std::string, MaterialPropertyValue, std::less<>>
     EvaluateMaterialGraphProperties(const MaterialGraphDefinition& definition);
+    /// Legacy composition entry point used only for Material Graph assets that already contain surface expressions.
     [[nodiscard]] KEIRE_API ShaderGraphDefinition
     ComposeMaterialGraphShader(const MaterialGraphDefinition& definition, const ShaderGraphDefinition& shaderTemplate);
     KEIRE_API void ValidateMaterialGraph(const MaterialGraphDefinition& definition);

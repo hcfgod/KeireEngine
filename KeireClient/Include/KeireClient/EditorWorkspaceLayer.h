@@ -235,7 +235,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ClearAssetBrowserSceneSelection() noexcept override;
     void SetAssetBrowserStatus(std::string status) noexcept override;
     void ReportAssetBrowserError(std::string message) noexcept override;
-    void ImportAssetBrowserAssets() override;
+    void ImportAssetBrowserAssets(std::span<const Keire::AssetId> assets = {}) override;
     bool CreateAssetBrowserScene(std::string_view name) override;
     bool CreateAssetBrowserMaterial(std::string_view name) override;
     bool CreateAssetBrowserAnimationGraph(std::string_view name) override;

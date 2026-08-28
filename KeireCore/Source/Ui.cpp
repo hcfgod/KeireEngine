@@ -795,6 +795,9 @@ namespace Keire
         case UiKey::R:
             chord = ImGuiKey_R;
             break;
+        case UiKey::P:
+            chord = ImGuiKey_P;
+            break;
         case UiKey::Right:
             chord = ImGuiKey_RightArrow;
             break;

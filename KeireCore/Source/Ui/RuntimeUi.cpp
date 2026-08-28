@@ -651,7 +651,17 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Visible = visible;
+        auto& state = m_Impl->Nodes[*index].State;
+        state.Visible = visible;
+        if (!visible)
+        {
+            state.Hovered = false;
+            state.Pressed = false;
+            if (m_Impl->Hovered == element)
+                m_Impl->Hovered = {};
+            if (m_Impl->Pressed == element)
+                m_Impl->Pressed = {};
+        }
         return true;
     }
 
@@ -660,7 +670,17 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Enabled = enabled;
+        auto& state = m_Impl->Nodes[*index].State;
+        state.Enabled = enabled;
+        if (!enabled)
+        {
+            state.Hovered = false;
+            state.Pressed = false;
+            if (m_Impl->Hovered == element)
+                m_Impl->Hovered = {};
+            if (m_Impl->Pressed == element)
+                m_Impl->Pressed = {};
+        }
         return true;
     }
 
@@ -669,7 +689,17 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Interactable = interactable;
+        auto& state = m_Impl->Nodes[*index].State;
+        state.Interactable = interactable;
+        if (!interactable)
+        {
+            state.Hovered = false;
+            state.Pressed = false;
+            if (m_Impl->Hovered == element)
+                m_Impl->Hovered = {};
+            if (m_Impl->Pressed == element)
+                m_Impl->Pressed = {};
+        }
         return true;
     }
 

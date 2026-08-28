@@ -1405,6 +1405,16 @@ namespace Keire::Detail
             }
             windowsDirectory.resize(length);
             const auto executable = std::filesystem::path(windowsDirectory) / "explorer.exe";
+            const std::wstring parameters =
+                directory ? L"\"" + resolved.native() + L"\"" : L"/select,\"" + resolved.native() + L"\"";
+            const auto launched = ShellExecuteW(nullptr, L"open", executable.c_str(), parameters.c_str(),
+                                                workingDirectory.c_str(), SW_SHOWNORMAL);
+            if (reinterpret_cast<std::intptr_t>(launched) <= 32)
+            {
+                diagnostic = "Windows Explorer could not reveal the requested path.";
+                return false;
+            }
+            return true;
             const std::vector<std::string> arguments =
                 directory ? std::vector<std::string>{utf8Path} : std::vector<std::string>{"/select," + utf8Path};
 #elif defined(__APPLE__)
