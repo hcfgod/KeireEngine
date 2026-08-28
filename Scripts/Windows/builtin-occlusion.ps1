@@ -16,7 +16,8 @@ $Sources = @(
     (Join-Path $Root "KeireCore/Shaders/BuiltinOcclusionScanBatches.hlsl"),
     (Join-Path $Root "KeireCore/Shaders/BuiltinOcclusionScatter.hlsl"),
     (Join-Path $Root "KeireCore/Shaders/BuiltinOcclusionDebugPyramid.hlsl"),
-    (Join-Path $Root "KeireCore/Shaders/BuiltinOcclusionDebugBounds.hlsl")
+    (Join-Path $Root "KeireCore/Shaders/BuiltinOcclusionDebugBounds.hlsl"),
+    (Join-Path $Root "KeireCore/Shaders/BuiltinForwardPlusVisibility.hlsl")
 )
 
 if (-not (Test-Path -LiteralPath $Compiler)) {
@@ -46,7 +47,8 @@ try {
         (Join-Path $Temporary "ScanBatches.hlsl"),
         (Join-Path $Temporary "Scatter.hlsl"),
         (Join-Path $Temporary "DebugPyramid.hlsl"),
-        (Join-Path $Temporary "DebugBounds.hlsl")
+        (Join-Path $Temporary "DebugBounds.hlsl"),
+        (Join-Path $Temporary "ForwardPlusVisibility.hlsl")
     )
     for ($sourceIndex = 0; $sourceIndex -lt $Sources.Count; ++$sourceIndex) {
         Copy-Item -LiteralPath $Sources[$sourceIndex] -Destination $temporarySources[$sourceIndex]
@@ -63,7 +65,8 @@ try {
         @{ Source = $temporarySources[6]; Stage = "vertex"; Entry = "VSDebugPyramid"; Name = "DebugPyramidVertex" },
         @{ Source = $temporarySources[6]; Stage = "fragment"; Entry = "PSDebugPyramid"; Name = "DebugPyramidFragment" },
         @{ Source = $temporarySources[7]; Stage = "vertex"; Entry = "VSDebugBounds"; Name = "DebugBoundsVertex" },
-        @{ Source = $temporarySources[7]; Stage = "fragment"; Entry = "PSDebugBounds"; Name = "DebugBoundsFragment" }
+        @{ Source = $temporarySources[7]; Stage = "fragment"; Entry = "PSDebugBounds"; Name = "DebugBoundsFragment" },
+        @{ Source = $temporarySources[8]; Stage = "compute"; Entry = "CSCompactForwardPlusTiles"; Name = "ForwardPlusVisibility" }
     )
     $variants = @(
         @{ Destination = "DXIL"; Name = "Dxil"; Extension = "dxil" },

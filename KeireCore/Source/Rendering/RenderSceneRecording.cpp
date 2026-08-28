@@ -882,9 +882,15 @@ namespace Keire::RenderBackend
                     Statistics.VisibleLocalLights += static_cast<std::uint32_t>(request->Packet.LocalLights.size());
                     if (surface.ActiveWorkset().ForwardPlusContentValid &&
                         surface.ActiveWorkset().ForwardPlusContentHash == contentHash &&
-                        !surface.ActiveWorkset().ForwardPlus.Empty())
+                        !surface.ActiveWorkset().ForwardPlus.Empty() &&
+                        !surface.ActiveWorkset().ForwardPlus.VisibilityCompacted)
                     {
                         ++Statistics.ForwardPlusCacheHits;
+                        auto& forwardPlus = surface.ActiveWorkset().ForwardPlus;
+                        forwardPlus.TakeOwnership(request->Packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch,
+                                                  DeviceGeneration.load(std::memory_order_acquire));
+                        forwardPlus.VisibilityCompacted =
+                            RecordForwardPlusVisibilityMask(commands, surface, request->Packet, preparedOcclusion);
                         Statistics.ForwardPlusCullingMilliseconds +=
                             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started)
                                 .count();
@@ -977,10 +983,10 @@ namespace Keire::RenderBackend
                     if (requiresReplacement)
                     {
                         ForwardPlusGpuResources replacement;
-                        const auto createBuffer = [&](const std::uint32_t byteSize)
+                        const auto createBuffer = [&](const std::uint32_t byteSize, const SDL_GPUBufferUsageFlags usage)
                         {
                             SDL_GPUBufferCreateInfo information{};
-                            information.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+                            information.usage = usage;
                             information.size = byteSize;
                             auto* buffer = SDL_CreateGPUBuffer(Device, &information);
                             if (!buffer)
@@ -989,9 +995,13 @@ namespace Keire::RenderBackend
                         };
                         try
                         {
-                            replacement.Lights = createBuffer(requiredCapacities[0]);
-                            replacement.Tiles = createBuffer(requiredCapacities[1]);
-                            replacement.LightIndices = createBuffer(requiredCapacities[2]);
+                            replacement.Lights =
+                                createBuffer(requiredCapacities[0], SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
+                            constexpr auto compactedUsage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ |
+                                                            SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ |
+                                                            SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+                            replacement.Tiles = createBuffer(requiredCapacities[1], compactedUsage);
+                            replacement.LightIndices = createBuffer(requiredCapacities[2], compactedUsage);
                             replacement.LightCapacityBytes = requiredCapacities[0];
                             replacement.TileCapacityBytes = requiredCapacities[1];
                             replacement.LightIndexCapacityBytes = requiredCapacities[2];
@@ -1063,6 +1073,12 @@ namespace Keire::RenderBackend
                     surface.ActiveWorkset().ForwardPlus.Rows = tiles.Rows;
                     surface.ActiveWorkset().ForwardPlusContentHash = contentHash;
                     surface.ActiveWorkset().ForwardPlusContentValid = true;
+                    auto& forwardPlus = surface.ActiveWorkset().ForwardPlus;
+                    forwardPlus.TakeOwnership(request->Packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch,
+                                              DeviceGeneration.load(std::memory_order_acquire));
+                    forwardPlus.VisibilityCompacted = false;
+                    forwardPlus.VisibilityCompacted =
+                        RecordForwardPlusVisibilityMask(commands, surface, request->Packet, preparedOcclusion);
                     Statistics.ForwardPlusUploadBytes += totalBytes;
                     Statistics.ForwardPlusCullingMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();

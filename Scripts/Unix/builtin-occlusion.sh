@@ -18,6 +18,7 @@ sources=(
   "$ROOT/KeireCore/Shaders/BuiltinOcclusionScatter.hlsl"
   "$ROOT/KeireCore/Shaders/BuiltinOcclusionDebugPyramid.hlsl"
   "$ROOT/KeireCore/Shaders/BuiltinOcclusionDebugBounds.hlsl"
+  "$ROOT/KeireCore/Shaders/BuiltinForwardPlusVisibility.hlsl"
 )
 
 [[ -x "$compiler" ]] || {
@@ -53,6 +54,7 @@ stages=(
   "${sources[6]} fragment PSDebugPyramid DebugPyramidFragment"
   "${sources[7]} vertex VSDebugBounds DebugBoundsVertex"
   "${sources[7]} fragment PSDebugBounds DebugBoundsFragment"
+  "${sources[8]} compute CSCompactForwardPlusTiles ForwardPlusVisibility"
 )
 variants=("DXIL Dxil dxil" "SPIRV Spirv spv" "MSL Msl msl")
 

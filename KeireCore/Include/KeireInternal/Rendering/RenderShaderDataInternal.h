@@ -184,6 +184,13 @@ namespace Keire::RenderBackend
         std::array<std::uint32_t, 4> Indices{};
     };
 
+    struct alignas(16) ForwardPlusVisibilityUniforms final
+    {
+        std::array<std::uint32_t, 4> DispatchCounts{};
+    };
+
+    static_assert(sizeof(ForwardPlusVisibilityUniforms) == 16);
+
     inline constexpr std::size_t MaximumShadowedSpotLights = 8;
     inline constexpr std::size_t MaximumShadowedPointLights = 2;
     inline constexpr std::uint32_t LocalShadowResolution = 4096;

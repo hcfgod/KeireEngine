@@ -53,8 +53,13 @@ versions.
   force-visible instead of risking incorrect rejection.
 - Added frame-slot-, surface-epoch-, and device-generation-qualified geometry, VFX, local-light, and spatial-volume
   visibility buffers. Geometry consumes its same-frame mask for scan/scatter compaction and indexed indirect draws;
-  VFX, Forward+ local-light, and spatial-volume masks remain conservative infrastructure with their capability flags
-  disabled until those consumers are wired.
+  Forward+ now consumes its same-frame local-light mask on the GPU only when both mask and tile-list ownership match,
+  otherwise retaining the original all-eligible-light tile lists as a fail-visible fallback.
+- Added a deterministic, bounded VFX visibility-planning contract for supported GPU sprite, mesh, and whole-ribbon
+  groups. Runtime VFX mask consumption remains disabled, and unsafe, unsupported, invalid, or overflowing ranges remain
+  force-visible.
+- Kept spatial-volume mask consumption disabled pending a correctness-complete GPU per-draw selection pass that can
+  preserve reflection-probe and light-probe-volume fallback behavior without a GPU-to-CPU readback.
 
 ### Fixed
 

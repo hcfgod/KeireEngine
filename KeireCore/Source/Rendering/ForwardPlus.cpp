@@ -227,4 +227,39 @@ namespace Keire::RenderBackend
         }
         return result;
     }
+
+    void CompactForwardPlusTiles(ForwardPlusTileGrid& grid, const std::span<const std::uint32_t> visibilityMask)
+    {
+        if (visibilityMask.empty())
+            return;
+
+        const auto tileCount = static_cast<std::size_t>(grid.Columns) * grid.Rows;
+        if (grid.Columns != 0U && tileCount / grid.Columns != grid.Rows)
+            return;
+        if (grid.Offsets.size() != tileCount || grid.Counts.size() != tileCount)
+            return;
+        for (std::size_t tile = 0; tile < tileCount; ++tile)
+        {
+            const auto first = static_cast<std::size_t>(grid.Offsets[tile]);
+            const auto count = static_cast<std::size_t>(grid.Counts[tile]);
+            if (first > grid.LightIndices.size() || count > grid.LightIndices.size() - first)
+                return;
+        }
+
+        for (std::size_t tile = 0; tile < tileCount; ++tile)
+        {
+            const auto first = static_cast<std::size_t>(grid.Offsets[tile]);
+            const auto count = static_cast<std::size_t>(grid.Counts[tile]);
+            auto writeOffset = std::size_t{};
+            for (std::size_t offset = 0; offset < count; ++offset)
+            {
+                const auto lightIndex = grid.LightIndices[first + offset];
+                if (lightIndex < visibilityMask.size() && visibilityMask[lightIndex] == 0U)
+                    continue;
+                grid.LightIndices[first + writeOffset] = lightIndex;
+                ++writeOffset;
+            }
+            grid.Counts[tile] = static_cast<std::uint16_t>(writeOffset);
+        }
+    }
 } // namespace Keire::RenderBackend

@@ -1185,6 +1185,9 @@ namespace Keire::RenderBackend
         void RecordGpuOcclusionCulling(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                        const SceneRenderPacket& packet, PreparedSceneDrawLists& draws,
                                        const PreparedGpuOcclusion& occlusion);
+        [[nodiscard]] bool RecordForwardPlusVisibilityMask(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                           const SceneRenderPacket& packet,
+                                                           const PreparedGpuOcclusion& occlusion);
         void RecordGpuOcclusionDebug(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                      const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         [[nodiscard]] PreparedCpuVfx PrepareCpuVfxDraws(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
@@ -1308,6 +1311,7 @@ namespace Keire::RenderBackend
         SDL_GPUComputePipeline* GpuOcclusionScanBlocksPipeline = nullptr;
         SDL_GPUComputePipeline* GpuOcclusionScanBatchesPipeline = nullptr;
         SDL_GPUComputePipeline* GpuOcclusionScatterPipeline = nullptr;
+        SDL_GPUComputePipeline* ForwardPlusVisibilityPipeline = nullptr;
         SDL_GPUGraphicsPipeline* GpuOcclusionDebugPyramidPipeline = nullptr;
         SDL_GPUGraphicsPipeline* GpuOcclusionDebugBoundsPipeline = nullptr;
         SDL_GPUSampler* ShadowSampler = nullptr;

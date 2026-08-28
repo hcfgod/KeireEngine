@@ -259,6 +259,7 @@ namespace Keire::RenderBackend
         GpuOcclusionScanBlocksPipeline = nullptr;
         GpuOcclusionScanBatchesPipeline = nullptr;
         GpuOcclusionScatterPipeline = nullptr;
+        ForwardPlusVisibilityPipeline = nullptr;
         GpuOcclusionDebugPyramidPipeline = nullptr;
         GpuOcclusionDebugBoundsPipeline = nullptr;
         ShadowSampler = nullptr;

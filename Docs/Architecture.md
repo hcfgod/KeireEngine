@@ -230,14 +230,24 @@ thresholds, never safety checks. Allocation, pipeline, backend, content-eligibil
 failures preserve complete direct rendering and publish a typed reason instead of dropping geometry. Each surface epoch
 owns one occlusion workset per in-flight frame slot. Its pyramid, indirect arguments, `GeometryVisibility`,
 `VfxVisibilityMask`, `LocalLightVisibilityMask`, and `SpatialVolumeVisibilityMask` resources are qualified by the frame
-slot, surface generation, and device generation. Resize, minimize, recovery, and close therefore cannot expose an
+slot, surface epoch, and device generation. Resize, minimize, recovery, and close therefore cannot expose an
 old-epoch or old-device mask to a newer frame; device recovery releases the lost generation and rebuilds the interrupted
 frame's resources during retry. Geometry currently consumes `GeometryVisibility` through scan/scatter compaction and
-indexed indirect draws. The VFX, local-light, and spatial-volume buffers establish the bounded ownership and frame-graph
-ordering for later consumers, but are conservatively initialized visible and are not yet consumed by VFX expansion,
-Forward+ light culling, probes, or volumes. Capability reporting remains false for those three consumer paths until that
-wiring is complete. The readback ring and value-only `GpuOcclusionSurfaceDiagnostics` remain surface-owned. Aggregate
-statistics expose current recording work while visibility totals arrive asynchronously with their source frame and age.
+indexed indirect draws. Forward+ consumes `LocalLightVisibilityMask` in the same frame after classification and compacts
+each tile's light indices on the GPU. Both the mask and destination Forward+ workset must match the captured frame ID,
+frame slot, surface epoch, and device generation, and the mask count must match the packet's local-light count. Missing
+or mismatched ownership, buffers, counts, pipeline support, or dispatch bounds leaves the original CPU-built tile lists
+intact, so the path fails visible instead of accepting stale data or removing a light. Its capability flag is true only
+when GPU occlusion is available.
+
+VFX currently has only a deterministic, bounded visibility-planning contract. It reserves stable candidate ranges for
+supported GPU sprite, mesh, and whole-ribbon groups, while unsafe bounds, unsupported renderers, invalid ranges, and
+candidate-limit overflow remain force-visible; runtime VFX expansion and rendering do not yet consume
+`VfxVisibilityMask`. `SpatialVolumeVisibilityMask` likewise remains unconsumed until a correctness-complete GPU
+per-draw selection pass can replace the current CPU-selected probe and volume uniforms without losing a visible fallback.
+The VFX and spatial-volume capability flags therefore remain false. The readback ring and value-only
+`GpuOcclusionSurfaceDiagnostics` remain surface-owned. Aggregate statistics expose current recording work while
+visibility totals arrive asynchronously with their source frame and age.
 Occlusion depth remains presentation-resolution because directly rasterizing occluders at a lower resolution can close
 pixel-sized gaps and produce false occlusion. The separate R32 hierarchy begins at half resolution; at 3840x2160, with
 a 32-bit depth format, it and the depth texture consume about 42 MiB per frame slot (about 127 MiB for three slots),

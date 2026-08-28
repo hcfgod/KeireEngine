@@ -30,4 +30,8 @@ namespace Keire::RenderBackend
     [[nodiscard]] ForwardPlusTileGrid BuildForwardPlusCpuTiles(std::uint32_t width, std::uint32_t height,
                                                                const Matrix4& projection, float nearPlane,
                                                                std::span<const ForwardPlusLightBounds> lights);
+
+    /// Mirrors the stable per-tile compaction performed by the GPU visibility consumer. Missing mask entries are
+    /// treated as visible so malformed or stale input cannot remove lighting.
+    void CompactForwardPlusTiles(ForwardPlusTileGrid& grid, std::span<const std::uint32_t> visibilityMask);
 } // namespace Keire::RenderBackend

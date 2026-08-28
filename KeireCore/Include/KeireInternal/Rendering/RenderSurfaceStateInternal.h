@@ -104,6 +104,30 @@ namespace Keire::RenderBackend
         std::uint32_t LightCapacityBytes = 0;
         std::uint32_t TileCapacityBytes = 0;
         std::uint32_t LightIndexCapacityBytes = 0;
+        std::uint64_t FrameId = 0;
+        std::uint64_t SurfaceEpoch = 0;
+        std::uint32_t DeviceGeneration = 0;
+        std::uint32_t FrameSlot = 0;
+        bool VisibilityCompacted = false;
+        bool OwnershipValid = false;
+
+        void TakeOwnership(const std::uint64_t frameId, const std::uint32_t frameSlot, const std::uint64_t surfaceEpoch,
+                           const std::uint32_t deviceGeneration) noexcept
+        {
+            FrameId = frameId;
+            FrameSlot = frameSlot;
+            SurfaceEpoch = surfaceEpoch;
+            DeviceGeneration = deviceGeneration;
+            OwnershipValid = true;
+        }
+
+        [[nodiscard]] bool OwnedBy(const std::uint64_t frameId, const std::uint32_t frameSlot,
+                                   const std::uint64_t surfaceEpoch,
+                                   const std::uint32_t deviceGeneration) const noexcept
+        {
+            return OwnershipValid && FrameId == frameId && FrameSlot == frameSlot && SurfaceEpoch == surfaceEpoch &&
+                   DeviceGeneration == deviceGeneration;
+        }
 
         [[nodiscard]] bool Empty() const noexcept { return !Lights && !Tiles && !LightIndices; }
     };

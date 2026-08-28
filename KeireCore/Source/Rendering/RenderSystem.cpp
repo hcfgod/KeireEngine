@@ -279,7 +279,7 @@ namespace Keire
                 .GpuOcclusionSkinnedMeshes = gpuOcclusion,
                 .GpuOcclusionMeshVfx = gpuOcclusion,
                 .GpuOcclusionVfxVisibilityMasks = false,
-                .GpuOcclusionLocalLightMasks = false,
+                .GpuOcclusionLocalLightMasks = gpuOcclusion,
                 .GpuOcclusionSpatialVolumeMasks = false};
     }
     RenderStatistics RenderSystem::Statistics() const noexcept

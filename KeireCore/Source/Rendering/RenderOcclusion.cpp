@@ -1242,6 +1242,50 @@ namespace Keire::RenderBackend
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
     }
 
+    bool RenderSharedState::RecordForwardPlusVisibilityMask(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                                            const SceneRenderPacket& packet,
+                                                            const PreparedGpuOcclusion& occlusion)
+    {
+        if (!commands || !ForwardPlusVisibilityPipeline || !occlusion.Enabled || !occlusion.Resources)
+            return false;
+
+        const auto deviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
+        const auto& visibility = *occlusion.Resources;
+        auto& forwardPlus = surface.ActiveWorkset().ForwardPlus;
+        if (!VisibilityResourcesOwnedBy(visibility, surface, packet, deviceGeneration) ||
+            !forwardPlus.OwnedBy(packet.FrameIndex, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration) ||
+            !visibility.LocalLightVisibilityMask.Buffer ||
+            visibility.LocalLightVisibilityCount != packet.LocalLights.size() || packet.LocalLights.empty() ||
+            forwardPlus.Empty())
+        {
+            return false;
+        }
+
+        const auto tileCount = static_cast<std::uint64_t>(forwardPlus.Columns) * forwardPlus.Rows;
+        if (tileCount == 0U || tileCount > static_cast<std::uint64_t>(MaximumGpuDispatchGroupsPerDimension) * 64U)
+            return false;
+
+        KEIRE_TELEMETRY_ZONE_SCOPED("Forward+ local-light visibility mask consume");
+        const ScopedGpuDebugGroup debugGroup(commands, "Forward+ visibility compaction");
+        const std::array writes{SDL_GPUStorageBufferReadWriteBinding{forwardPlus.Tiles, false},
+                                SDL_GPUStorageBufferReadWriteBinding{forwardPlus.LightIndices, false}};
+        auto* pass =
+            SDL_BeginGPUComputePass(commands, nullptr, 0, writes.data(), static_cast<std::uint32_t>(writes.size()));
+        if (!pass)
+            throw std::runtime_error("SDL_BeginGPUComputePass(Forward+ visibility) failed: " + LastSdlError());
+        SDL_BindGPUComputePipeline(pass, ForwardPlusVisibilityPipeline);
+        const std::array read{visibility.LocalLightVisibilityMask.Buffer};
+        SDL_BindGPUComputeStorageBuffers(pass, 0, read.data(), static_cast<std::uint32_t>(read.size()));
+        const ForwardPlusVisibilityUniforms uniforms{
+            {static_cast<std::uint32_t>(tileCount), visibility.LocalLightVisibilityCount, 0U, 0U}};
+        SDL_PushGPUComputeUniformData(commands, 0, &uniforms, sizeof(uniforms));
+        SDL_DispatchGPUCompute(pass, (static_cast<std::uint32_t>(tileCount) + 63U) / 64U, 1, 1);
+        SDL_EndGPUComputePass(pass);
+        ++Statistics.GpuOcclusionDispatches;
+        ++Statistics.Passes;
+        return true;
+    }
+
     void RenderSharedState::RecordGpuOcclusionDebug(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet,
                                                     const PreparedGpuOcclusion& occlusion)

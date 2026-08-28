@@ -126,6 +126,7 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
     REQUIRE(scene.GpuOcclusionPyramid);
     REQUIRE(scene.GpuOcclusionIndirectArguments);
     REQUIRE(scene.GpuVisibilityMasks);
+    REQUIRE(scene.ForwardPlusLightTiles);
     REQUIRE(scene.ResolveDepth);
     REQUIRE(scene.Transparency);
     const auto& occlusionPyramidPass = scene.Graph.Passes()[scene.GpuOcclusionPyramidPass.Value];
@@ -140,10 +141,12 @@ TEST_CASE("static scene frame graph declares the complete production pass sequen
           occlusionCullingPass.Writes.end());
     const auto& forwardPlusPass = scene.Graph.Passes()[scene.ForwardPlusCulling.Value];
     CHECK(std::ranges::find(forwardPlusPass.Reads, scene.GpuVisibilityMasks) != forwardPlusPass.Reads.end());
+    CHECK(std::ranges::find(forwardPlusPass.Writes, scene.ForwardPlusLightTiles) != forwardPlusPass.Writes.end());
     const auto& vfxPreparationPass = scene.Graph.Passes()[scene.VfxPreparation.Value];
     CHECK(std::ranges::find(vfxPreparationPass.Reads, scene.GpuVisibilityMasks) != vfxPreparationPass.Reads.end());
     const auto& opaquePass = scene.Graph.Passes()[scene.Opaque.Value];
     CHECK(std::ranges::find(opaquePass.Reads, scene.GpuOcclusionIndirectArguments) != opaquePass.Reads.end());
+    CHECK(std::ranges::find(opaquePass.Reads, scene.ForwardPlusLightTiles) != opaquePass.Reads.end());
     const auto& depthPass = scene.Graph.Passes()[scene.ResolveDepth.Value];
     CHECK(std::ranges::find(depthPass.Writes, scene.SampledDepth) != depthPass.Writes.end());
     const auto& transparencyPass = scene.Graph.Passes()[scene.Transparency.Value];
@@ -191,6 +194,16 @@ TEST_CASE("surface worksets own one generation-tagged GPU occlusion resource set
         CHECK_FALSE(frame.OwnedBy(100U + slot, slot + 1U, 17U, 9U));
         CHECK_FALSE(frame.OwnedBy(100U + slot, slot, 18U, 9U));
         CHECK_FALSE(frame.OwnedBy(100U + slot, slot, 17U, 10U));
+
+        auto& forwardPlus = resources.Worksets[slot].ForwardPlus;
+        forwardPlus.TakeOwnership(100U + slot, slot, 17U, 9U);
+        forwardPlus.VisibilityCompacted = true;
+        CHECK(forwardPlus.OwnedBy(100U + slot, slot, 17U, 9U));
+        CHECK_FALSE(forwardPlus.OwnedBy(101U + slot, slot, 17U, 9U));
+        CHECK_FALSE(forwardPlus.OwnedBy(100U + slot, slot + 1U, 17U, 9U));
+        CHECK_FALSE(forwardPlus.OwnedBy(100U + slot, slot, 18U, 9U));
+        CHECK_FALSE(forwardPlus.OwnedBy(100U + slot, slot, 17U, 10U));
+        CHECK(forwardPlus.VisibilityCompacted);
     }
 
     CHECK(&resources.Worksets[0].GpuOcclusion != &resources.Worksets[1].GpuOcclusion);

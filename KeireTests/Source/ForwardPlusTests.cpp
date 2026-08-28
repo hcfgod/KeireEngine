@@ -101,3 +101,59 @@ TEST_CASE("Forward+ perspective tiles clip near-plane crossings conservatively")
     CHECK_THROWS_AS((void)Keire::RenderBackend::BuildForwardPlusCpuTiles(128, 128, projection, 0.0F, lights),
                     std::invalid_argument);
 }
+
+TEST_CASE("Forward+ visibility compaction preserves per-tile light order")
+{
+    Keire::RenderBackend::ForwardPlusTileGrid grid;
+    grid.Columns = 2;
+    grid.Rows = 1;
+    grid.Offsets = {0, 4};
+    grid.Counts = {4, 3};
+    grid.LightIndices = {0, 1, 2, 3, 3, 1, 4};
+
+    const std::vector<std::uint32_t> visibility{1, 0, 1, 0};
+    Keire::RenderBackend::CompactForwardPlusTiles(grid, visibility);
+
+    CHECK(grid.Counts == std::vector<std::uint16_t>{2, 1});
+    CHECK(grid.LightIndices[0] == 0);
+    CHECK(grid.LightIndices[1] == 2);
+    CHECK(grid.LightIndices[4] == 4);
+}
+
+TEST_CASE("Forward+ visibility compaction fails visible for unavailable mask entries")
+{
+    Keire::RenderBackend::ForwardPlusTileGrid grid;
+    grid.Columns = 1;
+    grid.Rows = 1;
+    grid.Offsets = {0};
+    grid.Counts = {3};
+    grid.LightIndices = {0, 1, 2};
+
+    const auto original = grid;
+    Keire::RenderBackend::CompactForwardPlusTiles(grid, {});
+    CHECK(grid.Counts == original.Counts);
+    CHECK(grid.LightIndices == original.LightIndices);
+
+    const std::vector<std::uint32_t> partialVisibility{0};
+    Keire::RenderBackend::CompactForwardPlusTiles(grid, partialVisibility);
+    CHECK(grid.Counts == std::vector<std::uint16_t>{2});
+    CHECK(grid.LightIndices[0] == 1);
+    CHECK(grid.LightIndices[1] == 2);
+}
+
+TEST_CASE("Forward+ visibility compaction leaves malformed tile layouts unchanged")
+{
+    Keire::RenderBackend::ForwardPlusTileGrid grid;
+    grid.Columns = 1;
+    grid.Rows = 1;
+    grid.Offsets = {2};
+    grid.Counts = {2};
+    grid.LightIndices = {0, 1, 2};
+
+    const auto original = grid;
+    const std::vector<std::uint32_t> visibility{0, 0, 0};
+    Keire::RenderBackend::CompactForwardPlusTiles(grid, visibility);
+
+    CHECK(grid.Counts == original.Counts);
+    CHECK(grid.LightIndices == original.LightIndices);
+}

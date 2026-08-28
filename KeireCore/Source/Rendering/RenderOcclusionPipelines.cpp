@@ -22,6 +22,7 @@ namespace
         ScanBlocks,
         ScanBatches,
         Scatter,
+        ForwardPlusVisibility,
         DebugPyramidVertex,
         DebugPyramidFragment,
         DebugBoundsVertex,
@@ -63,6 +64,8 @@ namespace
             KEIRE_SELECT_OCCLUSION_SHADER(BuiltinOcclusionScanBatches);
         case OcclusionShader::Scatter:
             KEIRE_SELECT_OCCLUSION_SHADER(BuiltinOcclusionScatter);
+        case OcclusionShader::ForwardPlusVisibility:
+            KEIRE_SELECT_OCCLUSION_SHADER(BuiltinOcclusionForwardPlusVisibility);
         case OcclusionShader::DebugPyramidVertex:
             KEIRE_SELECT_OCCLUSION_SHADER(BuiltinOcclusionDebugPyramidVertex);
         case OcclusionShader::DebugPyramidFragment:
@@ -91,7 +94,7 @@ namespace Keire::RenderBackend
     bool RenderSharedState::EnsureGpuOcclusionPipelines()
     {
         if (GpuOcclusionPipelinesAttempted)
-            return GpuOcclusionClassifyPipeline != nullptr;
+            return GpuOcclusionClassifyPipeline != nullptr && ForwardPlusVisibilityPipeline != nullptr;
         GpuOcclusionPipelinesAttempted = true;
         if (!Device || !GpuOcclusionCapability.load(std::memory_order_acquire))
             return false;
@@ -223,6 +226,8 @@ namespace Keire::RenderBackend
             GpuOcclusionScanBatchesPipeline =
                 createCompute(OcclusionShader::ScanBatches, "CSScanBatches", 256, 1, 0, 2, 0, 3);
             GpuOcclusionScatterPipeline = createCompute(OcclusionShader::Scatter, "CSScatter", 256, 1, 0, 6, 0, 1);
+            ForwardPlusVisibilityPipeline =
+                createCompute(OcclusionShader::ForwardPlusVisibility, "CSCompactForwardPlusTiles", 64, 1, 0, 1, 0, 2);
 
             SDL_GPUSamplerCreateInfo sampler{};
             sampler.min_filter = SDL_GPU_FILTER_NEAREST;
@@ -364,6 +369,8 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUGraphicsPipeline(Device, GpuOcclusionDebugPyramidPipeline);
             if (GpuOcclusionScatterPipeline)
                 SDL_ReleaseGPUComputePipeline(Device, GpuOcclusionScatterPipeline);
+            if (ForwardPlusVisibilityPipeline)
+                SDL_ReleaseGPUComputePipeline(Device, ForwardPlusVisibilityPipeline);
             if (GpuOcclusionScanBatchesPipeline)
                 SDL_ReleaseGPUComputePipeline(Device, GpuOcclusionScanBatchesPipeline);
             if (GpuOcclusionScanBlocksPipeline)
@@ -382,6 +389,7 @@ namespace Keire::RenderBackend
         GpuOcclusionDebugBoundsPipeline = nullptr;
         GpuOcclusionDebugPyramidPipeline = nullptr;
         GpuOcclusionScatterPipeline = nullptr;
+        ForwardPlusVisibilityPipeline = nullptr;
         GpuOcclusionScanBatchesPipeline = nullptr;
         GpuOcclusionScanBlocksPipeline = nullptr;
         GpuOcclusionClassifyPipeline = nullptr;
