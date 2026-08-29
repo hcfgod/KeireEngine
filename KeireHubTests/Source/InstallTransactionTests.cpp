@@ -203,6 +203,24 @@ namespace
         ScopedInstallMutationHook(const ScopedInstallMutationHook&) = delete;
         ScopedInstallMutationHook& operator=(const ScopedInstallMutationHook&) = delete;
     };
+
+    class ScopedTransientRenameFailures final
+    {
+      public:
+        explicit ScopedTransientRenameFailures(const std::size_t failureCount)
+        {
+            KeireHub::Detail::SetInstallMutationTransientRenameFailuresForTesting(failureCount);
+        }
+
+        ~ScopedTransientRenameFailures()
+        {
+            KeireHub::Detail::SetInstallMutationTransientRenameFailuresForTesting(0);
+            KeireHub::Detail::SetInstallMutationTransientDeleteFailuresForTesting(0);
+        }
+
+        ScopedTransientRenameFailures(const ScopedTransientRenameFailures&) = delete;
+        ScopedTransientRenameFailures& operator=(const ScopedTransientRenameFailures&) = delete;
+    };
 #endif
 
     void AddInstallerGeneratedFiles(const std::filesystem::path& root, const InstallProduct product,
@@ -222,6 +240,39 @@ namespace
             throw std::runtime_error("Could not create a legacy package fixture: " + error.message());
     }
 } // namespace
+
+#if defined(_WIN32) && defined(KEIRE_INSTALL_TRANSACTION_TESTING)
+TEST_CASE("anchored install mutations retry transient Windows file-filter interference")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / "transaction";
+    KeireHub::Detail::InstallMutationFileSystem files(root, true, true);
+    ScopedTransientRenameFailures failures(3);
+
+    const auto written = files.WriteTextAtomically("journal.json", "first\n", false);
+    if (!written)
+        INFO(written.Error().TechnicalDetails);
+    REQUIRE(written);
+    KeireHub::Detail::SetInstallMutationTransientRenameFailuresForTesting(2);
+    const auto replaced = files.WriteTextAtomically("journal.json", "second\n", true);
+    if (!replaced)
+        INFO(replaced.Error().TechnicalDetails);
+    REQUIRE(replaced);
+    const auto contents = files.ReadText("journal.json", 1024);
+    REQUIRE(contents);
+    CHECK(contents.Value() == "second\n");
+
+    const auto owned = files.Describe("journal.json");
+    REQUIRE(owned);
+    KeireHub::Detail::SetInstallMutationTransientDeleteFailuresForTesting(3);
+    const auto removed = files.RemoveVerified(owned.Value());
+    KeireHub::Detail::SetInstallMutationTransientDeleteFailuresForTesting(0);
+    if (!removed)
+        INFO(removed.Error().TechnicalDetails);
+    REQUIRE(removed);
+    CHECK_FALSE(std::filesystem::exists(root / "journal.json"));
+}
+#endif
 
 TEST_CASE("install worker accepts only an absent or empty fresh destination")
 {

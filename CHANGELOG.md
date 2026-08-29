@@ -23,6 +23,8 @@ versions.
 
 ### Fixed
 
+- Windows install journals and verified cleanup now retry transient antivirus and file-filter interference during
+  handle-anchored mutation while permanent errors still fail immediately.
 - Managed reloads now capture bounded, stable, SHA-256-identified assembly snapshots before asking Coral to load them
   from memory. A live DLL replacement can no longer invalidate an in-progress load, and failures retain the symbolic
   Coral status, snapshot identity, and underlying .NET exception while preserving the last-good generation. Windows

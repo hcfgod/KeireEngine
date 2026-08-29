@@ -72,6 +72,9 @@ project(HubTestsTarget)
         'KEIRE_HUB_WORKER_TEST_EXECUTABLE="Build/Bin/' .. OutputDir .. '/' .. HubWorkerTarget .. '/' .. HubWorkerTarget .. '"'
     }
 
+    filter "configurations:Debug or DebugASan"
+        defines { "KEIRE_INSTALL_TRANSACTION_TESTING" }
+
     LinkKeireHubNativeHttp()
 
     filter "system:windows"

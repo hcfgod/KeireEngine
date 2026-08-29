@@ -52,9 +52,8 @@ namespace KeireHub::Detail
     class InstallMutationAuthority final
     {
       public:
-        [[nodiscard]] HubResult<std::shared_ptr<InstallMutationFileSystem>> Pin(const std::filesystem::path& root,
-                                                                                bool createIfMissing = false,
-                                                                                bool requireNew = false);
+        [[nodiscard]] HubResult<std::shared_ptr<InstallMutationFileSystem>>
+        Pin(const std::filesystem::path& root, bool createIfMissing = false, bool requireNew = false);
         void Unpin(const std::filesystem::path& root) noexcept;
 
       private:
@@ -64,5 +63,9 @@ namespace KeireHub::Detail
 #if defined(KEIRE_INSTALL_TRANSACTION_TESTING)
     using InstallMutationHook = void (*)(std::string_view operation, const std::filesystem::path& relative);
     void SetInstallMutationHookForTesting(InstallMutationHook hook) noexcept;
+#if defined(_WIN32)
+    void SetInstallMutationTransientRenameFailuresForTesting(std::size_t failureCount) noexcept;
+    void SetInstallMutationTransientDeleteFailuresForTesting(std::size_t failureCount) noexcept;
+#endif
 #endif
 } // namespace KeireHub::Detail

@@ -8,11 +8,12 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <limits>
-#include <thread>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -53,6 +54,10 @@ namespace KeireHub::Detail
 
 #if defined(KEIRE_INSTALL_TRANSACTION_TESTING)
         std::atomic<InstallMutationHook> s_MutationHook = nullptr;
+#if defined(_WIN32)
+        std::atomic<std::size_t> s_TransientRenameFailures = 0;
+        std::atomic<std::size_t> s_TransientDeleteFailures = 0;
+#endif
 
         void InvokeMutationHook(const std::string_view operation, const std::filesystem::path& relative)
         {
@@ -79,10 +84,9 @@ namespace KeireHub::Detail
             const bool missing =
                 error == std::errc::no_such_file_or_directory || (!error && !std::filesystem::exists(status));
             const auto parentPath = m_Root.parent_path();
-            m_ParentHandle = Handle(CreateFileW(parentPath.c_str(), ParentAccess(),
-                                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-                                                OPEN_EXISTING,
-                                                FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
+            m_ParentHandle = Handle(CreateFileW(
+                parentPath.c_str(), ParentAccess(), FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr));
             if (!m_ParentHandle)
                 ThrowWindows("Cannot anchor install mutation root parent");
             RejectReparsePoint(m_ParentHandle.Get());
@@ -102,9 +106,9 @@ namespace KeireHub::Detail
             if (!createIfMissing)
                 ThrowWindows("Install mutation root does not exist", ERROR_PATH_NOT_FOUND);
 
-            m_RootHandle = OpenRelative(m_ParentHandle.Get(), m_Root.filename(), RootAccess(),
-                                        requireNew ? NtCreateNew : NtOpenOrCreate, NtFileDirectory,
-                                        FILE_ATTRIBUTE_DIRECTORY);
+            m_RootHandle =
+                OpenRelative(m_ParentHandle.Get(), m_Root.filename(), RootAccess(),
+                             requireNew ? NtCreateNew : NtOpenOrCreate, NtFileDirectory, FILE_ATTRIBUTE_DIRECTORY);
 #else
             std::error_code error;
             if (createIfMissing)
@@ -206,6 +210,47 @@ namespace KeireHub::Detail
             return convert ? convert(status) : ERROR_GEN_FAILURE;
         }
 
+        [[nodiscard]] static bool IsTransientFileFilterError(const DWORD error) noexcept
+        {
+            return error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION || error == ERROR_LOCK_VIOLATION ||
+                   error == ERROR_USER_MAPPED_FILE;
+        }
+
+        static void WaitForTransientFileFilter(const std::size_t attempt)
+        {
+            const auto delayMilliseconds = (std::min)(std::int64_t{25} << attempt, std::int64_t{1000});
+            std::this_thread::sleep_for(std::chrono::milliseconds(delayMilliseconds));
+        }
+
+        static void MarkForDeletion(const HANDLE handle, const std::string_view failureMessage)
+        {
+            constexpr std::size_t maximumAttempts = 8;
+            FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
+            for (std::size_t attempt = 0; attempt < maximumAttempts; ++attempt)
+            {
+                DWORD error = ERROR_SUCCESS;
+#if defined(KEIRE_INSTALL_TRANSACTION_TESTING)
+                auto injectedFailures = s_TransientDeleteFailures.load(std::memory_order_acquire);
+                while (injectedFailures != 0 && !s_TransientDeleteFailures.compare_exchange_weak(
+                                                    injectedFailures, injectedFailures - 1, std::memory_order_acq_rel,
+                                                    std::memory_order_acquire))
+                {
+                }
+                if (injectedFailures != 0)
+                    error = ERROR_ACCESS_DENIED;
+                else
+#endif
+                {
+                    if (SetFileInformationByHandle(handle, FileDispositionInfo, &disposition, sizeof(disposition)))
+                        return;
+                    error = GetLastError();
+                }
+                if (!IsTransientFileFilterError(error) || attempt + 1 == maximumAttempts)
+                    ThrowWindows(failureMessage, error);
+                WaitForTransientFileFilter(attempt);
+            }
+        }
+
         static void RejectReparsePoint(const HANDLE handle)
         {
             FILE_ATTRIBUTE_TAG_INFO attributes{};
@@ -288,6 +333,7 @@ namespace KeireHub::Detail
         static void RenameRelative(const HANDLE file, const HANDLE destinationParent,
                                    const std::filesystem::path& destinationName, const bool replaceExisting)
         {
+            constexpr std::size_t maximumAttempts = 8;
             const auto name = destinationName.native();
             const auto bytes = offsetof(FILE_RENAME_INFO, FileName) + name.size() * sizeof(wchar_t);
             std::vector<std::byte> storage(bytes);
@@ -296,12 +342,34 @@ namespace KeireHub::Detail
             rename->RootDirectory = destinationParent;
             rename->FileNameLength = static_cast<DWORD>(name.size() * sizeof(wchar_t));
             std::memcpy(rename->FileName, name.data(), rename->FileNameLength);
-            IO_STATUS_BLOCK statusBlock{};
             constexpr auto renameInformation = static_cast<FILE_INFORMATION_CLASS>(10);
-            const auto status = NtSetInformation()(file, &statusBlock, rename, static_cast<ULONG>(storage.size()),
-                                                   renameInformation);
-            if (status < 0)
-                ThrowWindows("Cannot rename anchored install file", DosError(status));
+            for (std::size_t attempt = 0; attempt < maximumAttempts; ++attempt)
+            {
+                DWORD error = ERROR_SUCCESS;
+#if defined(KEIRE_INSTALL_TRANSACTION_TESTING)
+                auto injectedFailures = s_TransientRenameFailures.load(std::memory_order_acquire);
+                while (injectedFailures != 0 && !s_TransientRenameFailures.compare_exchange_weak(
+                                                    injectedFailures, injectedFailures - 1, std::memory_order_acq_rel,
+                                                    std::memory_order_acquire))
+                {
+                }
+                if (injectedFailures != 0)
+                    error = ERROR_ACCESS_DENIED;
+                else
+#endif
+                {
+                    IO_STATUS_BLOCK statusBlock{};
+                    const auto status = NtSetInformation()(file, &statusBlock, rename,
+                                                           static_cast<ULONG>(storage.size()), renameInformation);
+                    if (status >= 0)
+                        return;
+                    error = DosError(status);
+                }
+
+                if (!IsTransientFileFilterError(error) || attempt + 1 == maximumAttempts)
+                    ThrowWindows("Cannot rename anchored install file", error);
+                WaitForTransientFileFilter(attempt);
+            }
         }
 
         [[nodiscard]] static InstallOwnedFile DescribeHandle(const HANDLE handle, const std::filesystem::path& relative)
@@ -412,24 +480,23 @@ namespace KeireHub::Detail
             }
         }
 
-        [[nodiscard]] HubStatus WriteTextAtomically(const std::filesystem::path& relative,
-                                                    const std::string_view text, const bool replaceExisting) const
+        [[nodiscard]] HubStatus WriteTextAtomically(const std::filesystem::path& relative, const std::string_view text,
+                                                    const bool replaceExisting) const
         {
             Handle file;
             try
             {
                 const auto components = Components(relative);
                 auto parent = OpenParent(components, true);
-                const auto unique = static_cast<std::uint64_t>(
-                                        std::chrono::steady_clock::now().time_since_epoch().count()) ^
-                                    static_cast<std::uint64_t>(
-                                        std::hash<std::thread::id>{}(std::this_thread::get_id()));
+                const auto unique =
+                    static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()) ^
+                    static_cast<std::uint64_t>(std::hash<std::thread::id>{}(std::this_thread::get_id()));
                 auto temporary = components.back();
                 temporary += ".tmp." + std::to_string(unique);
-                file = OpenRelative(parent.Get(), temporary,
-                                    FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES | FILE_READ_ATTRIBUTES | DELETE |
-                                        SYNCHRONIZE,
-                                    NtCreateNew, NtFileNonDirectory);
+                file =
+                    OpenRelative(parent.Get(), temporary,
+                                 FILE_WRITE_DATA | FILE_WRITE_ATTRIBUTES | FILE_READ_ATTRIBUTES | DELETE | SYNCHRONIZE,
+                                 NtCreateNew, NtFileNonDirectory);
                 InvokeMutationHook("write", relative);
                 std::size_t offset = 0;
                 while (offset != text.size())
@@ -437,7 +504,8 @@ namespace KeireHub::Detail
                     DWORD written = 0;
                     const auto remaining =
                         (std::min)(text.size() - offset, static_cast<std::size_t>((std::numeric_limits<DWORD>::max)()));
-                    if (!WriteFile(file.Get(), text.data() + offset, static_cast<DWORD>(remaining), &written, nullptr) ||
+                    if (!WriteFile(file.Get(), text.data() + offset, static_cast<DWORD>(remaining), &written,
+                                   nullptr) ||
                         written == 0)
                     {
                         ThrowWindows("Cannot write anchored install document");
@@ -592,9 +660,7 @@ namespace KeireHub::Detail
                 auto file = OpenFile(expected.Path, FILE_READ_DATA | DELETE);
                 VerifyExpected(expected, DescribeHandle(file.Get(), expected.Path));
                 InvokeMutationHook("remove", expected.Path);
-                FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
-                if (!SetFileInformationByHandle(file.Get(), FileDispositionInfo, &disposition, sizeof(disposition)))
-                    ThrowWindows("Cannot remove anchored install file");
+                MarkForDeletion(file.Get(), "Cannot remove anchored install file");
                 return HubStatus::Success();
             }
             catch (const std::exception& error)
@@ -616,10 +682,7 @@ namespace KeireHub::Detail
                                  NtOpenExisting, NtFileDirectory);
                 RejectNonDirectory(directory.Get());
                 InvokeMutationHook("remove-directory", relative);
-                FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
-                if (!SetFileInformationByHandle(directory.Get(), FileDispositionInfo, &disposition,
-                                                sizeof(disposition)))
-                    ThrowWindows("Cannot remove anchored install directory");
+                MarkForDeletion(directory.Get(), "Cannot remove anchored install directory");
                 return HubStatus::Success();
             }
             catch (const std::exception& error)
@@ -637,12 +700,7 @@ namespace KeireHub::Detail
                 InvokeMutationHook("remove-root", {});
                 RejectReparsePoint(m_RootHandle.Get());
                 RejectNonDirectory(m_RootHandle.Get());
-                FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
-                if (!SetFileInformationByHandle(m_RootHandle.Get(), FileDispositionInfo, &disposition,
-                                                sizeof(disposition)))
-                {
-                    ThrowWindows("Cannot remove anchored install root");
-                }
+                MarkForDeletion(m_RootHandle.Get(), "Cannot remove anchored install root");
                 return HubStatus::Success();
             }
             catch (const std::exception& error)
@@ -705,27 +763,26 @@ namespace KeireHub::Detail
                                : HubResult<std::string>::Success(std::move(result));
         }
 
-        [[nodiscard]] HubStatus WriteTextAtomically(const std::filesystem::path& relative,
-                                                    const std::string_view text, const bool replaceExisting) const
+        [[nodiscard]] HubStatus WriteTextAtomically(const std::filesystem::path& relative, const std::string_view text,
+                                                    const bool replaceExisting) const
         {
             if (!relative.parent_path().empty())
                 if (const auto created = CreateDirectories(relative.parent_path()); !created)
                     return created;
             auto temporary = m_Root / relative;
-            temporary += ".tmp." + std::to_string(
-                                       std::chrono::steady_clock::now().time_since_epoch().count());
+            temporary += ".tmp." + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
             std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
             output.write(text.data(), static_cast<std::streamsize>(text.size()));
             output.close();
             if (!output)
-                return HubStatus::Failure(MutationError(HubErrorCode::IoWrite,
-                                                        "An install document could not be staged.", relative));
+                return HubStatus::Failure(
+                    MutationError(HubErrorCode::IoWrite, "An install document could not be staged.", relative));
             std::error_code error;
             if (!replaceExisting && std::filesystem::exists(m_Root / relative, error))
             {
                 std::filesystem::remove(temporary, error);
-                return HubStatus::Failure(MutationError(HubErrorCode::DestinationConflict,
-                                                        "An install document already exists.", relative));
+                return HubStatus::Failure(
+                    MutationError(HubErrorCode::DestinationConflict, "An install document already exists.", relative));
             }
             std::filesystem::rename(temporary, m_Root / relative, error);
             return error ? HubStatus::Failure(MutationError(HubErrorCode::IoWrite,
@@ -940,5 +997,17 @@ namespace KeireHub::Detail
     {
         s_MutationHook.store(hook, std::memory_order_release);
     }
+
+#if defined(_WIN32)
+    void SetInstallMutationTransientRenameFailuresForTesting(const std::size_t failureCount) noexcept
+    {
+        s_TransientRenameFailures.store(failureCount, std::memory_order_release);
+    }
+
+    void SetInstallMutationTransientDeleteFailuresForTesting(const std::size_t failureCount) noexcept
+    {
+        s_TransientDeleteFailures.store(failureCount, std::memory_order_release);
+    }
+#endif
 #endif
 } // namespace KeireHub::Detail
