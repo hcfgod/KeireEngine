@@ -794,6 +794,69 @@ namespace Keire::Detail
                       ShaderGraphValueType::Bsdf};
             break;
         }
+        case ShaderGraphNodeKind::OpenPbrSurfaceBsdf:
+        {
+            constexpr std::array inputs{"BaseColor",         "Metallic",
+                                        "Roughness",         "SpecularWeight",
+                                        "CoatWeight",        "CoatRoughness",
+                                        "FuzzColor",         "FuzzWeight",
+                                        "FuzzRoughness",     "Normal",
+                                        "Emission",          "Occlusion",
+                                        "Opacity",           "SubsurfaceColor",
+                                        "SubsurfaceWeight",  "Anisotropy",
+                                        "Tangent",           "TransmissionWeight",
+                                        "IndexOfRefraction", "Refraction",
+                                        "Thickness"};
+            std::string arguments;
+            for (const auto name : inputs)
+            {
+                if (!arguments.empty())
+                    arguments += ", ";
+                arguments += namedInput(name).Code;
+            }
+            result = {"MakeOpenPbrShaderGraphBsdf(" + arguments + ")", ShaderGraphValueType::Bsdf};
+            break;
+        }
+        case ShaderGraphNodeKind::MixSlabs:
+        {
+            const auto first = CoerceShaderGraphExpression(namedInput("A"), ShaderGraphValueType::Bsdf);
+            const auto second = CoerceShaderGraphExpression(namedInput("B"), ShaderGraphValueType::Bsdf);
+            const auto factor = CoerceShaderGraphExpression(namedInput("Factor"), ShaderGraphValueType::Scalar);
+            result = {"MixShaderGraphSlabs(" + first.Code + ", " + second.Code + ", " + factor.Code + ")",
+                      ShaderGraphValueType::Bsdf};
+            break;
+        }
+        case ShaderGraphNodeKind::AddSlabs:
+        {
+            const auto first = CoerceShaderGraphExpression(namedInput("A"), ShaderGraphValueType::Bsdf);
+            const auto second = CoerceShaderGraphExpression(namedInput("B"), ShaderGraphValueType::Bsdf);
+            const auto firstWeight = CoerceShaderGraphExpression(namedInput("WeightA"), ShaderGraphValueType::Scalar);
+            const auto secondWeight = CoerceShaderGraphExpression(namedInput("WeightB"), ShaderGraphValueType::Scalar);
+            result = {"AddShaderGraphSlabs(" + first.Code + ", " + second.Code + ", " + firstWeight.Code + ", " +
+                          secondWeight.Code + ")",
+                      ShaderGraphValueType::Bsdf};
+            break;
+        }
+        case ShaderGraphNodeKind::CoatSlab:
+        {
+            const auto base = CoerceShaderGraphExpression(namedInput("Base"), ShaderGraphValueType::Bsdf);
+            const auto weight = CoerceShaderGraphExpression(namedInput("Weight"), ShaderGraphValueType::Scalar);
+            const auto roughness = CoerceShaderGraphExpression(namedInput("Roughness"), ShaderGraphValueType::Scalar);
+            result = {"ApplyShaderGraphClearCoat(" + base.Code + ", " + weight.Code + ", " + roughness.Code + ")",
+                      ShaderGraphValueType::Bsdf};
+            break;
+        }
+        case ShaderGraphNodeKind::FuzzSlab:
+        {
+            const auto base = CoerceShaderGraphExpression(namedInput("Base"), ShaderGraphValueType::Bsdf);
+            const auto color = CoerceShaderGraphExpression(namedInput("Color"), ShaderGraphValueType::Color);
+            const auto weight = CoerceShaderGraphExpression(namedInput("Weight"), ShaderGraphValueType::Scalar);
+            const auto roughness = CoerceShaderGraphExpression(namedInput("Roughness"), ShaderGraphValueType::Scalar);
+            result = {"ApplyShaderGraphSheen(" + base.Code + ", " + color.Code + ", " + weight.Code + ", " +
+                          roughness.Code + ")",
+                      ShaderGraphValueType::Bsdf};
+            break;
+        }
         case ShaderGraphNodeKind::ClearCoatBsdf:
         {
             const auto base = CoerceShaderGraphExpression(namedInput("Base"), ShaderGraphValueType::Bsdf);

@@ -905,10 +905,10 @@ application UI pass; managed control handles reach the presentation runtime only
 and `IScriptRuntimeServices`, never through native pointers.
 
 Editor material authoring has three deliberate workflows. `MaterialDocument` and `MaterialInspectorPanel` own compact
-Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own shader-contract selection, stable value
-and texture bindings, instance/static parameters, compatibility diagnostics, dirty lifecycle, and bounded undo/redo.
-Executable surface logic and the production expression catalog have one authority in `ShaderGraphDocument`; historical
-Material Graph surface expressions remain a labeled migration-only compatibility path.
+Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the authoritative OpenPBR/slab surface
+program, stable parameters and textures, compatibility diagnostics, dirty lifecycle, and bounded undo/redo.
+`ShaderGraphDocument` owns target-based UI, Fullscreen, VFX, Custom Graphics, and Compute programs. Legacy Surface
+remains a compatibility target until transactional material migration is complete.
 `MaterialInstanceAsset` stores only inherited property and surface overrides and is edited through the Inspector. All
 three preserve a tagged raw-Shader or Shader-Graph reference behind the same runtime material boundary. Material file
 snapshots enter the project-assets undo context; the workspace and asset-operation service coordinate persistence.
@@ -927,11 +927,13 @@ evaluates the validated built-in graph per shaded sample using the same coercion
 UV, procedural, shaping, surface, and neutral texture-semantic rules as generated shaders; unsupported custom functions
 retain a bounded node-default fallback. The shared stable canvas installs an RAII draw-list clip covering the exact
 canvas rectangle, so nodes and connection feedback cannot escape into adjacent preview or inspector regions. The graph
-schema-v5 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, legal shader
+schema-6 descriptor catalog assigns stable node type IDs, canonical pin contracts, cost metadata, legal shader
 stages, graph purpose, stable referenced-asset identities, shared editor-only authoring metadata, and a conservative
-maximum world-position-displacement radius for occlusion safety. Schema-v1/2/3/4 data is upgraded in memory through
-deterministic derived pin IDs, an explicit Shader purpose, and a zero displacement radius; only publication writes
-schema 5, and future schemas fail before the document or last-good preview changes. This keeps migration from
+maximum world-position-displacement radius for occlusion safety. Shader schema 6 adds an explicit target definition
+with legal stages, fullscreen injection point, and compute thread-group size. Schema-v1/2/3/4/5 data is upgraded in
+memory through deterministic derived pin IDs, target inference, and a zero displacement radius where the old schema
+had no bound; only publication writes schema 6, and future schemas fail before the document or last-good preview
+changes. This keeps migration from
 dirtying the same asset differently across machines. The compiler computes endpoint-aware reverse reachability from the single Master node
 before lowering vertex and fragment expressions; structured Material Attributes and BSDF values remain typed through
 validation and preview, then lower into private generated-shader structs rather than entering the renderer property ABI.
@@ -941,8 +943,8 @@ when disconnected, while legacy Master nodes accept neutral defaults for later s
 compilation is revisioned, debounced, and performed away from the owner thread; stale completions are discarded and only
 the newest valid result can replace the last-good preview. The workspace supplies confined include reads, nonblocking
 custom-mesh resolution through the asset system, and persistence. Both graph editors reserve the canvas as the dominant
-region and place a bounded, collapsible square preview on the right when space permits. Material Graph resolves the
-selected shader and applies its bindings before preview; legacy graphs compose their retained migration payload.
+region and place a bounded, collapsible square preview on the right when space permits. Material Graph evaluates its
+schema-6 surface graph against the selected reusable shader contract before preview.
 Shader Graph expands reusable calls first. Preview evaluation failures remain
 visible diagnostics rather than being converted into an indistinguishable checkerboard result.
 
@@ -953,8 +955,8 @@ with source authoring metadata but never enter shader, material, or VFX runtime 
 persisted nested local-graph stacks are not part of the 0.4.0 contract; cable routing remains presentation geometry.
 See [Unified Graph Authoring](GraphAuthoring.md) for the interaction and migration contract.
 
-Shader schema 5 retains the renderer-neutral resource declarations introduced by schema 4, while Material schema 5
-carries the same portable sampler, Texture2D-array/cube/3D, and bounded
+Shader schema 6 retains the renderer-neutral resource declarations and displacement bound introduced by schemas 4 and
+5, while Material schema 6 carries the same portable sampler, Texture2D-array/cube/3D, and bounded
 read-only structured/byte-address buffer declarations through encoding, reflection, dependency extraction, and typed
 material overrides. Generic backend GPU asset and binding realization for array/cube/3D textures and user buffers is
 deferred. Runtime import rejects those resources until the backend contract exists instead of manufacturing a fallback.
@@ -986,10 +988,10 @@ after the staged directory is live. Any source-publication failure restores the 
 preserving the original exception. The asset scanner ignores engine atomic-write temporaries and editor backups, so a
 concurrent scan cannot assign identities to files that will disappear at commit. A successful save then queues a
 targeted import of the parent graph, every generated shader/material subasset, and dependent loaded assets. Runtime
-`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Schema-5 Material Graph import resolves the
-selected Shader Graph contract and publishes one runtime material from stable bindings without recompiling duplicate
-surface logic. Schema-1–4 assets upgrade deterministically; when they contain executable surface expressions, those are
-retained under `legacySurfaceGraph` and use the compatibility composition path until explicitly migrated. Material
+`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Schema-6 Material Graph import compiles its
+authoritative OpenPBR/slab surface program through the shared graph compiler and publishes one runtime material.
+Schema-1–5 assets upgrade deterministically and preserve their surface expressions under the canonical
+`surfaceGraph`. Material
 Instance resolution starts from a Direct Material or Material Graph root
 before applying at most 16 ancestors; it rejects cycles, unknown properties, and type changes without introducing
 mutable renderer-global state. Instance import publishes its own stable ordinary `MaterialAsset` subasset referencing

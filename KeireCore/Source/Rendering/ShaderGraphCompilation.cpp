@@ -21,6 +21,9 @@ namespace Keire
             ValidateShaderGraph(definition);
             if (definition.Purpose != ShaderGraphPurpose::Shader)
                 throw std::invalid_argument("Reusable graph bodies must be called from a Shader or Material Graph.");
+            if (definition.Target.Target == ShaderGraphTarget::Compute)
+                throw std::invalid_argument(
+                    "Compute Shader Graph code generation requires the compute-program artifact ABI.");
             const auto expanded = ShaderGraphReferencedAssets(definition).empty()
                                       ? definition
                                       : ExpandShaderGraphFunctions(definition, options.ResolveFunction);
@@ -57,13 +60,12 @@ namespace Keire
                 {
                     if (reachable.contains(node.Id) || unusedDiagnostics == MaximumUnusedDiagnostics)
                         continue;
-                    result.Diagnostics.push_back(
-                        {ShaderGraphDiagnosticSeverity::Warning,
-                         "SG1001",
-                         "Node '" + node.Name + "' does not contribute to the material output.",
-                         node.Id,
-                         {},
-                         0});
+                    result.Diagnostics.push_back({ShaderGraphDiagnosticSeverity::Warning,
+                                                  "SG1001",
+                                                  "Node '" + node.Name + "' does not contribute to the program output.",
+                                                  node.Id,
+                                                  {},
+                                                  0});
                     ++unusedDiagnostics;
                 }
                 if (result.Statistics.UnusedNodeCount > MaximumUnusedDiagnostics)

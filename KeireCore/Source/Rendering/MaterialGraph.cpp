@@ -308,11 +308,8 @@ namespace Keire
                            {"nodes", std::move(nodes)},
                            {"connections", std::move(connections)},
                            {"authoring", Detail::EncodeGraphAuthoringMetadata(definition.Authoring)}};
-            if (HasMaterialSurfaceExpressions(definition))
-            {
-                const auto legacySource = ShaderGraphAsset::EncodeSource(definition.SurfaceGraph);
-                result["legacySurfaceGraph"] = Json::parse(Text(legacySource));
-            }
+            const auto surfaceSource = ShaderGraphAsset::EncodeSource(definition.SurfaceGraph);
+            result["surfaceGraph"] = Json::parse(Text(surfaceSource));
             return result;
         }
 
@@ -402,7 +399,12 @@ namespace Keire
                     result.Connections.push_back(std::move(connection));
                 }
             }
-            if (sourceSchema >= 5 && source.contains("legacySurfaceGraph"))
+            if (sourceSchema >= 6)
+            {
+                const auto encodedSurfaceGraph = source.at("surfaceGraph").dump();
+                result.SurfaceGraph = ShaderGraphAsset::DecodeSource(Bytes(encodedSurfaceGraph));
+            }
+            else if (sourceSchema >= 5 && source.contains("legacySurfaceGraph"))
             {
                 const auto encodedSurfaceGraph = source.at("legacySurfaceGraph").dump();
                 result.SurfaceGraph = ShaderGraphAsset::DecodeSource(Bytes(encodedSurfaceGraph));
@@ -600,6 +602,7 @@ namespace Keire
             throw std::invalid_argument("Shader Graph template has no output contract for a Material Graph.");
 
         ShaderGraphDefinition result;
+        result.Target = shaderTemplate.Target;
         result.Output = shaderTemplate.Output;
         result.Nodes.push_back(*templateOutput);
         result.Nodes.front().Id = AssetId::Generate();
@@ -1122,7 +1125,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.MaterialGraph";
-        result.Version = 8;
+        result.Version = 9;
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {".keirematerialgraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

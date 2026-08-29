@@ -195,28 +195,25 @@ namespace KeireEditor
         const bool stretchVertical = std::abs(preset->Preset.Minimum.Y - preset->Preset.Maximum.Y) > 0.0001F;
         m_Controller.RecordInspectorUndo("Change Anchor Preset",
                                          "rect-transform.anchor-preset." + entity.Id().ToString());
-        const auto setProperty = [&](const std::string_view property, Keire::ComponentPropertyValue value)
+        Keire::ComponentPropertyBag updates{{"anchorMinimum", preset->Preset.Minimum},
+                                            {"anchorMaximum", preset->Preset.Maximum}};
+        if (preset->FitStretch && (stretchHorizontal || stretchVertical))
         {
-            if (multiEditing)
-                sceneDocument.SetComponentsProperty(editTargets, registration.Type, property, value);
-            else
-                sceneDocument.SetComponentProperty(entity.Id(), registration.Type, property, std::move(value));
-        };
-        setProperty("anchorMinimum", preset->Preset.Minimum);
-        setProperty("anchorMaximum", preset->Preset.Maximum);
-        if (!preset->FitStretch || (!stretchHorizontal && !stretchVertical))
-            return;
-        if (stretchHorizontal)
-        {
-            anchoredPosition.X = 0.0F;
-            sizeDelta.X = 0.0F;
+            if (stretchHorizontal)
+            {
+                anchoredPosition.X = 0.0F;
+                sizeDelta.X = 0.0F;
+            }
+            if (stretchVertical)
+            {
+                anchoredPosition.Y = 0.0F;
+                sizeDelta.Y = 0.0F;
+            }
+            updates.insert_or_assign("anchoredPosition", anchoredPosition);
+            updates.insert_or_assign("sizeDelta", sizeDelta);
         }
-        if (stretchVertical)
-        {
-            anchoredPosition.Y = 0.0F;
-            sizeDelta.Y = 0.0F;
-        }
-        setProperty("anchoredPosition", anchoredPosition);
-        setProperty("sizeDelta", sizeDelta);
+
+        (void)multiEditing;
+        sceneDocument.SetComponentsProperties(editTargets, registration.Type, updates);
     }
 } // namespace KeireEditor

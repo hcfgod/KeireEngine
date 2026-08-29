@@ -1233,6 +1233,68 @@ namespace KeireEditor::ShaderGraphPreviewInternal
                 result = {.Type = Keire::ShaderGraphValueType::Bsdf, .Surface = surface};
                 break;
             }
+            case Keire::ShaderGraphNodeKind::OpenPbrSurfaceBsdf:
+            {
+                PreviewMaterialSurface surface;
+                surface.BaseColor = Coerce(NamedInput(node, "BaseColor"), Keire::ShaderGraphValueType::Color).Data;
+                surface.Metallic = Coerce(NamedInput(node, "Metallic"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.Roughness = Coerce(NamedInput(node, "Roughness"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.Specular =
+                    Coerce(NamedInput(node, "SpecularWeight"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.ClearCoat = Coerce(NamedInput(node, "CoatWeight"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.ClearCoatRoughness =
+                    Coerce(NamedInput(node, "CoatRoughness"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                const auto fuzz = Coerce(NamedInput(node, "FuzzColor"), Keire::ShaderGraphValueType::Color).Data;
+                const float fuzzWeight =
+                    Coerce(NamedInput(node, "FuzzWeight"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.SheenColor = {fuzz.X * fuzzWeight, fuzz.Y * fuzzWeight, fuzz.Z * fuzzWeight, fuzz.W};
+                surface.SheenRoughness =
+                    Coerce(NamedInput(node, "FuzzRoughness"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                const auto normal = Coerce(NamedInput(node, "Normal"), Keire::ShaderGraphValueType::Vector3).Data;
+                surface.Normal = Normalize({normal.X, normal.Y, normal.Z});
+                surface.Emission = Coerce(NamedInput(node, "Emission"), Keire::ShaderGraphValueType::Color).Data;
+                surface.Occlusion = Coerce(NamedInput(node, "Occlusion"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.Opacity = Coerce(NamedInput(node, "Opacity"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.SubsurfaceColor =
+                    Coerce(NamedInput(node, "SubsurfaceColor"), Keire::ShaderGraphValueType::Color).Data;
+                surface.Subsurface =
+                    Coerce(NamedInput(node, "SubsurfaceWeight"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.Anisotropy = Coerce(NamedInput(node, "Anisotropy"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                const auto tangent = Coerce(NamedInput(node, "Tangent"), Keire::ShaderGraphValueType::Vector3).Data;
+                surface.Tangent = Normalize({tangent.X, tangent.Y, tangent.Z}, {1.0F, 0.0F, 0.0F});
+                surface.Transmission =
+                    Coerce(NamedInput(node, "TransmissionWeight"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.IndexOfRefraction =
+                    Coerce(NamedInput(node, "IndexOfRefraction"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.Refraction = Coerce(NamedInput(node, "Refraction"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                surface.Thickness = Coerce(NamedInput(node, "Thickness"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                result = {.Type = Keire::ShaderGraphValueType::Bsdf, .Surface = surface};
+                break;
+            }
+            case Keire::ShaderGraphNodeKind::MixSlabs:
+            case Keire::ShaderGraphNodeKind::AddSlabs:
+            {
+                const auto first = Coerce(NamedInput(node, "A"), Keire::ShaderGraphValueType::Bsdf)
+                                       .Surface.value_or(PreviewMaterialSurface{});
+                const auto second = Coerce(NamedInput(node, "B"), Keire::ShaderGraphValueType::Bsdf)
+                                        .Surface.value_or(PreviewMaterialSurface{});
+                float factor = 0.0F;
+                if (node.Kind == Keire::ShaderGraphNodeKind::MixSlabs)
+                    factor = Coerce(NamedInput(node, "Factor"), Keire::ShaderGraphValueType::Scalar).Data.X;
+                else
+                {
+                    const float firstWeight =
+                        std::max(Coerce(NamedInput(node, "WeightA"), Keire::ShaderGraphValueType::Scalar).Data.X, 0.0F);
+                    const float secondWeight =
+                        std::max(Coerce(NamedInput(node, "WeightB"), Keire::ShaderGraphValueType::Scalar).Data.X, 0.0F);
+                    const float total = firstWeight + secondWeight;
+                    factor = total > 1.0e-8F ? secondWeight / total : 0.0F;
+                }
+                result = {.Type = Keire::ShaderGraphValueType::Bsdf,
+                          .Surface = BlendPreviewMaterialSurfaces(first, second, factor)};
+                break;
+            }
+            case Keire::ShaderGraphNodeKind::CoatSlab:
             case Keire::ShaderGraphNodeKind::ClearCoatBsdf:
             {
                 auto surface = Coerce(NamedInput(node, "Base"), Keire::ShaderGraphValueType::Bsdf)
@@ -1243,6 +1305,7 @@ namespace KeireEditor::ShaderGraphPreviewInternal
                 result = {.Type = Keire::ShaderGraphValueType::Bsdf, .Surface = surface};
                 break;
             }
+            case Keire::ShaderGraphNodeKind::FuzzSlab:
             case Keire::ShaderGraphNodeKind::SheenBsdf:
             {
                 auto surface = Coerce(NamedInput(node, "Base"), Keire::ShaderGraphValueType::Bsdf)

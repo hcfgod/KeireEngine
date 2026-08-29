@@ -31,9 +31,29 @@ TEST_CASE("Shader Graph schema three migrates without disturbing topology and cu
     CHECK(migrated.Connections.size() == connectionCount);
     CHECK(migrated.Authoring == Keire::GraphAuthoringMetadata{});
     const auto saved = Parse(Keire::ShaderGraphAsset::EncodeSource(migrated));
-    CHECK(saved.at("schemaVersion") == 5);
+    CHECK(saved.at("schemaVersion") == 6);
+    CHECK(saved.at("target") == static_cast<std::uint8_t>(Keire::ShaderGraphTarget::LegacySurface));
     CHECK(saved.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
     CHECK(saved.contains("authoring"));
+}
+
+TEST_CASE("Shader Graph legacy fullscreen sources infer the explicit fullscreen target")
+{
+    auto source = Parse(
+        Keire::ShaderGraphAsset::EncodeSource(Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Fullscreen)));
+    source["schemaVersion"] = 5U;
+    source.erase("target");
+    source.erase("stages");
+    source.erase("fullscreenInjectionPoint");
+    source.erase("threadGroupSize");
+    const auto legacy = source.dump();
+
+    const auto migrated = Keire::ShaderGraphAsset::DecodeSource(std::as_bytes(std::span(legacy)));
+    CHECK(migrated.SchemaVersion == Keire::ShaderGraphSourceSchemaVersion);
+    CHECK(migrated.Target.Target == Keire::ShaderGraphTarget::Fullscreen);
+    CHECK(migrated.Target.Stages == static_cast<Keire::ShaderGraphShaderStage>(
+                                        static_cast<std::uint8_t>(Keire::ShaderGraphShaderStage::Vertex) |
+                                        static_cast<std::uint8_t>(Keire::ShaderGraphShaderStage::Fragment)));
 }
 
 TEST_CASE("Material Graph future schemas fail before decoding required payload fields")

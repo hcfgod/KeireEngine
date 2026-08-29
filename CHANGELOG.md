@@ -5,6 +5,33 @@ versions.
 
 ## Unreleased
 
+### Changed
+
+- The Editor now uses unthrottled immediate presentation while packaged players retain their configured VSync policy,
+  and profiler captures expose frame-admission waits, render-queue delay, outstanding frames, and queue high-water
+  marks so refresh pacing is distinguishable from renderer work.
+- Multi-entity Inspector selections now expose only common component occurrences and apply active state, transforms,
+  enabled state, resets, properties, Rect Transform presets, and Mesh Renderer material slots across the selection as
+  one undoable operation.
+- Material Graph sources now publish canonical schema 6 with an authoritative OpenPBR/slab surface graph. OpenPBR
+  Surface, normalized Mix/Add Slabs, Coat, and Fuzz compile to generated HLSL and share the editor's CPU preview path;
+  schemas 1–5 remain readable.
+- Shader Graph sources now publish target-based schema 6 and generated contract 7. UI, Fullscreen, VFX, Custom
+  Graphics, and Compute targets persist legal stages and target settings; historical surface graphs remain available
+  through the explicit Legacy Surface migration target, and compute compilation fails clearly until its artifact ABI
+  ships.
+
+### Fixed
+
+- FBX imports tolerate exporter-authored absolute self references without following external paths, keep unrelated
+  absolute texture references sandboxed as actionable warnings, and continue extracting embedded material definitions.
+- Source shader manifests now read both legacy schema 1 and current schema 2, retaining the current instance-addressing,
+  occlusion, and displacement contracts instead of rejecting or lowering template-authored ABI metadata.
+- Visibility Bounds debug mode now activates a forced validation pass when Automatic occlusion is below its
+  profitability threshold, making eligible bounds visibly green or red without changing the saved project policy.
+- Pasting Shader Graph or Material Graph parameter nodes now allocates deterministic `_Copy`, `_Copy2`, and later
+  unique symbols before validating and atomically committing the graph.
+
 ## 0.4.4 - 2026-08-28
 
 ### Changed

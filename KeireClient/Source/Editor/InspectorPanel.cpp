@@ -203,6 +203,15 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                       : "Entity name cannot exceed 256 UTF-8 bytes.");
             m_EntityNameEditing = nameState.Active;
             auto active = entity.ActiveSelf();
+            const bool mixedActive =
+                multiEditing && std::ranges::any_of(editTargets,
+                                                    [&](const Keire::AssetId id)
+                                                    {
+                                                        const auto selected = scene->FindEntity(Keire::EntityId(id));
+                                                        return selected && selected.ActiveSelf() != active;
+                                                    });
+            if (mixedActive)
+                ui.TextColored(theme.MutedText, "Active: Mixed");
             if (ui.Checkbox("Active", active))
             {
                 m_Controller.RecordInspectorUndo();
@@ -254,7 +263,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 m_EntityTagTarget = entity.Id().Value();
                 m_EntityTagDraft = JoinEntityTags(currentTags);
             }
-            (void)ui.InputText("Tags", m_EntityTagDraft);
+            (void)ui.InputText(multiEditing ? "Primary Entity Tags" : "Tags", m_EntityTagDraft);
             const auto tagState = ui.LastItemState();
             const auto parsedTags = ParseEntityTags(m_EntityTagDraft);
             if (tagState.DeactivatedAfterEdit)
@@ -347,7 +356,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             };
             const auto drawComponentHeader = [&](const Keire::Ref<Keire::Component>& component,
                                                  const Keire::ComponentRegistration& registration, bool& expanded,
-                                                 const std::string_view title)
+                                                 const std::string_view title, const bool mixedValues)
             {
                 bool removed = false;
                 const auto ordinal = ComponentOrdinal(componentOrder, component);
@@ -375,8 +384,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     {
                         if (auto source = ui.BeginDragSource(); source)
                         {
-                            const auto payload =
-                                EncodeComponentOrderPayload({entity.Id(), registration.Type, ordinal});
+                            const auto payload = EncodeComponentOrderPayload({entity.Id(), registration.Type, ordinal});
                             ui.SetDragPayload("KEIRE_COMPONENT_ORDER",
                                               std::as_bytes(std::span(payload.data(), payload.size())));
                             ui.Text(entity.Name() + " / " + registration.Name);
@@ -415,7 +423,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     if (!multiEditing && ui.LastItemState().Hovered)
                         ui.SetTooltip("Component actions", {.Delayed = true});
                     if (multiEditing)
-                        ui.TextColored(theme.MutedText, "Common");
+                        ui.TextColored(theme.MutedText, mixedValues ? "Common | Mixed values" : "Common");
                 }
                 if (openMenu)
                     ui.OpenPopup(popupId);
@@ -433,6 +441,11 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 if (!displayedComponent || !commonComponent(displayedComponent))
                     continue;
                 editingComponentOrdinal = ComponentOrdinal(componentOrder, displayedComponent);
+                const auto displayedRegistration = scene->Components()->Find(displayedComponent->Type());
+                const bool mixedComponentValues =
+                    multiEditing && displayedRegistration &&
+                    !HaveUniformComponentValues(scene, editTargets, *displayedRegistration, displayedComponent,
+                                                editingComponentOrdinal);
                 if (displayedComponent->Type() == Keire::TransformComponent::StaticType())
                 {
                     auto& transformExpanded = expansion("transform");
@@ -444,8 +457,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     if (auto card = ui.BeginChild("TransformCard", {0.0F, transformCardHeight}, true); card)
                     {
                         if (transformRegistration)
-                            (void)drawComponentHeader(transform, *transformRegistration, transformExpanded,
-                                                      "TRANSFORM");
+                            (void)drawComponentHeader(transform, *transformRegistration, transformExpanded, "TRANSFORM",
+                                                      mixedComponentValues);
                         if (transformExpanded)
                         {
                             ui.TextColored(theme.MutedText, "Required | Local space");
@@ -535,9 +548,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             {
                                 if (multiEditing)
                                 {
-                                    m_Controller.RecordInspectorUndo("Change Scale",
-                                                                     "transform.multi.scale." +
-                                                                         std::to_string(m_EditSerial));
+                                    m_Controller.RecordInspectorUndo("Change Scale", "transform.multi.scale." +
+                                                                                         std::to_string(m_EditSerial));
                                     sceneDocument.SetTransforms(editTargets, {.Scale = scale});
                                 }
                                 else
@@ -567,8 +579,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             {
                                 m_Controller.RecordInspectorUndo();
                                 const SceneDocument::TransformValues defaults{.Position = Keire::Vector3{},
-                                                                             .EulerDegrees = Keire::Vector3{},
-                                                                             .Scale = Keire::Vector3{1.0F, 1.0F, 1.0F}};
+                                                                              .EulerDegrees = Keire::Vector3{},
+                                                                              .Scale =
+                                                                                  Keire::Vector3{1.0F, 1.0F, 1.0F}};
                                 if (multiEditing)
                                     sceneDocument.SetTransforms(editTargets, defaults);
                                 else
@@ -595,8 +608,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         {
                             const auto registration = scene->Components()->Find(light->Type());
                             const bool removed =
-                                registration &&
-                                drawComponentHeader(light, *registration, lightExpanded, "DIRECTIONAL LIGHT");
+                                registration && drawComponentHeader(light, *registration, lightExpanded,
+                                                                    "DIRECTIONAL LIGHT", mixedComponentValues);
                             if (lightExpanded && !removed)
                             {
                                 auto enabled = light->Enabled();
@@ -685,7 +698,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         {
                             const auto registration = scene->Components()->Find(camera->Type());
                             const bool removed =
-                                registration && drawComponentHeader(camera, *registration, cameraExpanded, "CAMERA");
+                                registration && drawComponentHeader(camera, *registration, cameraExpanded, "CAMERA",
+                                                                    mixedComponentValues);
                             if (cameraExpanded && !removed)
                             {
                                 ui.TextColored(theme.MutedText, "Game view | Priority-selected");
@@ -810,8 +824,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             card)
                         {
                             const auto registration = scene->Components()->Find(renderer->Type());
-                            const bool removed = registration && drawComponentHeader(renderer, *registration,
-                                                                                     rendererExpanded, "MESH RENDERER");
+                            const bool removed =
+                                registration && drawComponentHeader(renderer, *registration, rendererExpanded,
+                                                                    "MESH RENDERER", mixedComponentValues);
                             if (rendererExpanded && !removed)
                             {
                                 ui.TextColored(theme.MutedText, "Lit geometry submission");
@@ -895,7 +910,12 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     mesh = assets->Load<Keire::MeshAsset>(renderer->Mesh(), Keire::AssetPriority::High)
                                                .TryGetLoaded();
                                 }
-                                if (mesh)
+                                const bool commonMaterialLayout =
+                                    !multiEditing || HaveCommonMeshMaterialLayout(scene, editTargets, renderer);
+                                if (multiEditing && !commonMaterialLayout)
+                                    ui.TextColored(theme.Warning,
+                                                   "Material slots require the same mesh on every selected entity.");
+                                if (mesh && commonMaterialLayout)
                                 {
                                     ui.TextColored(theme.MutedText, "Material Slots");
                                     for (std::size_t slot = 0; slot < mesh->MaterialSlots().size(); ++slot)
@@ -1073,8 +1093,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             : 38.0F;
                     if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                     {
-                        const bool removed =
-                            drawComponentHeader(component, *registration, expanded, registration->Name);
+                        const bool removed = drawComponentHeader(component, *registration, expanded, registration->Name,
+                                                                 mixedComponentValues);
                         if (!expanded || removed)
                             continue;
                         auto enabled = component->Enabled();

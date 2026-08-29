@@ -1,79 +1,78 @@
-# Material Graph and Shader Graph Integration Plan
+# Material and Shader Graph Overhaul Contract
 
-## Implemented authoring boundary
+## Implemented foundation
 
-Shader Graph is the sole owner of executable texture sampling, UV manipulation, channel operations, and surface-output
-logic for newly authored content. Material Graph now opens with Shader Graph parameters visible and creates only value
-overrides. This removes the requirement to duplicate shader logic in `surfaceGraph`.
+Surface materials and target programs are separate authoring products that share the same typed graph model and shader
+publication boundary:
 
-Schema v5 no longer writes the redundant `surfaceGraph` field. When an older asset still contains executable surface
-connections, the writer preserves those connections under the explicit `legacySurfaceGraph` migration field so the
-project continues to compile without presenting that data as a second authoring authority. Ordinary and newly authored
-materials resolve the selected Shader Graph variant directly.
+- Material Graph schema 6 owns the authoritative OpenPBR/slab surface graph. It supports OpenPBR Surface, Mix Slabs,
+  Add Slabs, Coat, and Fuzz nodes in addition to the existing typed attributes and BSDF nodes.
+- Shader Graph schema 6 owns target programs. The serialized target declares `Ui`, `Fullscreen`, `Vfx`,
+  `CustomGraphics`, `Compute`, or the temporary `LegacySurface` compatibility target, legal stages, fullscreen
+  injection point, and compute thread-group size.
+- Generated graphics shaders use contract 7 and schema-2 shader manifests. Manifests publish the target, stages,
+  fullscreen/compute settings, stable properties, resources, render state, occlusion capabilities, and displacement
+  bounds.
+- Schemas 1–5 remain readable. Historical fullscreen graphs infer the Fullscreen target; other historical Shader
+  Graphs infer Legacy Surface. Historical Material Graph expressions are promoted into the schema-6 `surfaceGraph`
+  when saved.
+- UI, Fullscreen, VFX, and Custom Graphics targets publish shader variants without manufacturing a user material.
+  Compute validates and serializes now but fails compilation explicitly until the compute-program artifact ABI ships.
 
-## Objective
+The current `.keirematerialgraph` extension remains the schema-6 surface-authoring container during transactional
+migration. Promotion into `.keirematerial`, Material Instance schema 3, and redirector cleanup are later migration
+steps; documentation and UI must not claim those transitions are complete.
 
-Make Shader Graph the single source of executable surface logic. Material Graph should bind values, textures,
-material functions, and per-instance overrides to the shader's published property contract. Users must not recreate
-texture sampling, UV transforms, channel extraction, or other shader operations in a second `surfaceGraph`.
+## Target architecture
 
-## Target contract
+```text
+.keirematerialgraph / future .keirematerial -- OpenPBR closures --\
+                                                                +--> typed graph compiler --> HLSL --> shader artifacts
+.keireshadergraph ---------------------------- target program --/
+```
 
-Shader Graph compilation publishes a versioned `SurfaceProgramArtifact` containing generated variants, stable
-property IDs, types and defaults, required vertex streams, render-state capabilities, and conservative geometry
-metadata. Material assets reference that artifact and contain only property bindings and overrides.
+The common compiler boundary owns typed values, stage legality, stable properties, deterministic variants, source
+mapping, resource reflection, and last-good publication. Material-only value changes remain binding updates. Static
+topology, target, or resource changes require compilation.
 
-Material Graph remains useful for reusable parameter expressions and material-instance relationships, but its output
-is a typed binding table. It does not emit a second surface shader or own shader-stage logic.
+Material targets describe surface closures; program targets describe stage outputs and render integration. Neither
+public asset exposes SDL, native GPU handles, backend compiler objects, or third-party importer types.
 
-## Data model
+## Rollout state
 
-Material schema version 5 has these authoritative fields:
+| Initiative | State | Current boundary |
+| --- | --- | --- |
+| Schema-6 target contracts and compatibility readers | Complete | Deterministic encoding, validation, manifests, templates, and tests. |
+| OpenPBR/slab graph foundation | Partial | Core surface, bounded mix/add, coat, fuzz, HLSL lowering, and editor preview ship; complex deferred closure payloads remain. |
+| Shared typed compiler | Partial | Both authoring paths use the typed graph compiler and publication boundary; the planned SSA optimizer/artifact ABI extraction remains. |
+| Target integrations | Partial | Graphics variants publish; bounded UI/fullscreen/VFX runtime request APIs and compute dispatch remain. |
+| Deferred renderer | Planned | Current runtime remains Forward+; no setting or documentation may imply a working deferred path. |
+| Material promotion and instance schema 3 | Planned | `.keirematerialgraph` schema 6 and instance schema 2 remain authoritative. |
+| Certified interchange adapters | Planned | Assimp remains the current legacy FBX/OBJ/glTF adapter; USD, Alembic, MaterialX, and process plug-ins are not certified. |
+| IK Rig, Retargeter, and Control Rig assets | Planned | Existing arbitrary skeletons, Rig Definition, retargeting, and IK solvers remain supported. |
 
-- `shader`: the Shader Graph or compiled shader asset ID.
-- `bindings`: stable shader property ID to literal, texture, collection, or material-function output.
-- `renderStateOverrides`: the bounded states the shader explicitly allows materials to override.
-- `legacySurfaceGraph`: decode-only migration data, never evaluated after successful conversion.
+The detailed [Material Ecosystem capability matrix](MaterialParityMatrix.md) remains the acceptance authority.
+Unsupported rows must fail explicitly rather than silently downgrade.
 
-The shader artifact owns UV operations, samplers, channel logic, vertex displacement, alpha/depth behavior, and all
-stage-specific code. Property names remain display metadata; stable property IDs are serialization keys.
+## Migration sequence
 
-## Compiler flow
+1. Preserve current IDs, generated subasset identities, raw-shader references, and schema readers.
+2. Preview conversions and their before/after artifact hashes without writing.
+3. Convert compatible Legacy Surface Shader Graphs to schema-6 Material Graphs at the same identity.
+4. Convert binding-only legacy material graphs to Material Instances; inline genuine expressions only when a unique
+   material is required.
+5. Convert non-surface Shader Graphs to explicit targets and retain legacy paths as redirectors.
+6. Publish atomically, validate the whole project, and roll back every source and metadata pair on failure.
 
-1. Compile Shader Graph into one typed intermediate representation.
-2. Validate stage legality, property IDs, resource limits, and render-state capabilities once.
-3. Emit runtime variants plus the `SurfaceProgramArtifact` property schema.
-4. Resolve Material Graph against that schema and emit a compact binding table.
-5. Reject missing or incompatible bindings with node/property diagnostics instead of generating duplicate logic.
-6. Cache shader artifacts independently so material-only edits never recompile a shader.
-
-## Migration
-
-Phase 1 introduced schema v3, dual-read support, stable property IDs, and compiler diagnostics. Schema v4 added shared
-authoring metadata. Current writers emit schema v5 without `surfaceGraph`, while retaining schema 1–4 readers and an
-explicit `legacySurfaceGraph` compatibility payload only when an older material still has executable expressions.
-
-Phase 2 converts legacy `surfaceGraph` nodes that only bind or transform parameters into typed bindings. Executable
-surface behavior missing from the referenced Shader Graph becomes a reusable Shader Graph function before duplicate
-nodes are removed.
-
-Phase 3 adds a transactional migration preview showing created functions, changed bindings, unresolved properties,
-and before/after variant hashes. Any failure retains the original source.
-
-Phase 4 removes `surfaceGraph` authoring and compilation after shipped templates and examples migrate. The decoder
-remains for the documented compatibility window.
+Legacy readers remain until the documented two-minor-release window closes. Writers emit only current schemas, and
+legacy payloads and redirectors never enter final cooked packages.
 
 ## Acceptance criteria
 
-- Shader-authored texture sampling, UV transforms, and channel splits are never duplicated in Material Graph.
-- Material edits do not trigger Shader Graph compilation or a project-wide import.
-- Shader property renames preserve bindings through stable IDs.
-- Type changes produce targeted diagnostics and retain the last-good runtime material.
-- Legacy migration is deterministic, undoable, and byte-stable when rerun.
-- Runtime binding cost and shader variant counts do not increase relative to schema v2.
-
-## Validation matrix
-
-Cover scalar/vector/texture bindings, UV and channel-function migration, missing properties, renames and type changes,
-cyclic functions, shader hot reload, last-good fallback, undo/redo, asset move/rename, cooking, and v2-to-v3 round
-trips on Windows and Linux.
+- Encoding, lowering, variant ordering, and generated manifests are byte-deterministic.
+- Broken revisions retain the complete last-good preview and runtime artifact.
+- OpenPBR additive composition cannot create an unbounded closure weight.
+- Target/stage/resource mismatches fail with actionable diagnostics before publication.
+- Material value edits do not invoke shader compilation.
+- Schema-1–5 projects open without source mutation and save as canonical schema 6.
+- The Starter 3D schema-2 raw shader retains vertex layout 3, instance ABI 2, and occlusion metadata through import.

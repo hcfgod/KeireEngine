@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 18);
+    CHECK(importer.Version == 19);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -173,8 +173,8 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
-    CHECK(Keire::ShaderGraphSourceSchemaVersion == 5);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 6);
+    CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 7);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -184,13 +184,16 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
 
     const auto& variant = compilation.Variants.front();
     const auto manifest = nlohmann::json::parse(variant.Manifest);
+    CHECK(manifest.at("schemaVersion") == 2U);
     CHECK(manifest.at("materialGraphSourceSchemaVersion") == Keire::ShaderGraphSourceSchemaVersion);
     CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::ShaderGraphGeneratedShaderVersion);
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
     CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 6, source schema 5") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 7, source schema 6") != std::string::npos);
+    CHECK(manifest.at("programTarget") == "Legacy Surface");
+    CHECK(manifest.at("programStages") == 3U);
     CHECK(variant.Hlsl.find("cbuffer InstanceAddressingData : register(b2, space1)") != std::string::npos);
     CHECK(variant.Hlsl.find("uint4 InstanceParameters;") != std::string::npos);
     CHECK(variant.Hlsl.find("Instances[InstanceParameters.x + instanceId]") != std::string::npos);
@@ -218,13 +221,13 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     previousSource.erase("maximumWorldPositionDisplacementRadius");
     const auto previousSourceText = previousSource.dump();
     const auto migrated = Keire::ShaderGraphAsset::DecodeSource(std::as_bytes(std::span(previousSourceText)));
-    CHECK(migrated.SchemaVersion == 5U);
+    CHECK(migrated.SchemaVersion == 6U);
     CHECK(migrated.MaximumWorldPositionDisplacementRadius == doctest::Approx(0.0F));
 
     const auto future = nlohmann::json{{"schemaVersion", Keire::ShaderGraphSourceSchemaVersion + 1U}}.dump();
     const auto futureBytes = std::as_bytes(std::span(future));
     CHECK_THROWS_WITH_AS((void)Keire::ShaderGraphAsset::DecodeSource(futureBytes),
-                         "Shader Graph schema version 6 is newer than the supported version 5.", std::invalid_argument);
+                         "Shader Graph schema version 7 is newer than the supported version 6.", std::invalid_argument);
 }
 
 TEST_CASE("Shader Graph displacement bounds fail closed and never advertise depth-only geometry")
@@ -355,6 +358,25 @@ TEST_CASE("Shader Graph creation templates map to deliberate output domains")
           Keire::ShaderGraphOutput::Fullscreen);
     CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Hair).Output == Keire::ShaderGraphOutput::Hair);
     CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Eye).Output == Keire::ShaderGraphOutput::Eye);
+
+    const auto ui = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Ui);
+    CHECK(ui.Target.Target == Keire::ShaderGraphTarget::Ui);
+    CHECK(ui.Output == Keire::ShaderGraphOutput::Unlit);
+    CHECK(ui.Nodes.front().Name == "UI Shader Output");
+    const auto fullscreen = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Fullscreen);
+    CHECK(fullscreen.Target.Target == Keire::ShaderGraphTarget::Fullscreen);
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Vfx).Target.Target ==
+          Keire::ShaderGraphTarget::Vfx);
+    CHECK(Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::CustomGraphics).Target.Target ==
+          Keire::ShaderGraphTarget::CustomGraphics);
+    const auto compute = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Compute);
+    CHECK(compute.Target.Target == Keire::ShaderGraphTarget::Compute);
+    CHECK(compute.Target.Stages == Keire::ShaderGraphShaderStage::Compute);
+    const auto computeCompilation = Keire::CompileShaderGraph(compute);
+    CHECK_FALSE(computeCompilation.Succeeded());
+    REQUIRE_FALSE(computeCompilation.Diagnostics.empty());
+    CHECK(computeCompilation.Diagnostics.front().Message ==
+          "Compute Shader Graph code generation requires the compute-program artifact ABI.");
 }
 
 TEST_CASE("Shader Graph generated HLSL compiles through the production shader importer")
@@ -650,6 +672,40 @@ TEST_CASE("Shader Graph composes typed material attributes and four production B
     invalidParameter.Symbol = "InvalidAttributes";
     graph.Nodes.push_back(std::move(invalidParameter));
     CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
+}
+
+TEST_CASE("Shader Graph lowers bounded OpenPBR slabs with deterministic energy-conserving composition")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto first = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::OpenPbrSurfaceBsdf);
+    auto second = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::OpenPbrSurfaceBsdf);
+    auto coat = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::CoatSlab);
+    auto fuzz = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::FuzzSlab);
+    auto add = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::AddSlabs);
+    auto mix = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::MixSlabs);
+    auto attributes = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::BsdfToMaterialAttributes);
+    graph.Nodes.insert(graph.Nodes.end(), {first, second, coat, fuzz, add, mix, attributes});
+    Connect(graph, graph.Nodes[1], "Slab", graph.Nodes[3], "Base");
+    Connect(graph, graph.Nodes[2], "Slab", graph.Nodes[4], "Base");
+    Connect(graph, graph.Nodes[3], "Slab", graph.Nodes[5], "A");
+    Connect(graph, graph.Nodes[4], "Slab", graph.Nodes[5], "B");
+    Connect(graph, graph.Nodes[5], "Slab", graph.Nodes[6], "A");
+    Connect(graph, graph.Nodes[1], "Slab", graph.Nodes[6], "B");
+    Connect(graph, graph.Nodes[6], "Slab", graph.Nodes[7], "BSDF");
+    Connect(graph, graph.Nodes[7], "Attributes", graph.Nodes[0], "MaterialAttributes");
+
+    const auto compilation = Keire::CompileShaderGraph(graph);
+    INFO((compilation.Diagnostics.empty() ? std::string{} : compilation.Diagnostics.front().Message));
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1);
+    const auto& hlsl = compilation.Variants.front().Hlsl;
+    CHECK(hlsl.find("MakeOpenPbrShaderGraphBsdf(") != std::string::npos);
+    CHECK(hlsl.find("ApplyShaderGraphClearCoat(") != std::string::npos);
+    CHECK(hlsl.find("ApplyShaderGraphSheen(") != std::string::npos);
+    CHECK(hlsl.find("AddShaderGraphSlabs(") != std::string::npos);
+    CHECK(hlsl.find("MixShaderGraphSlabs(") != std::string::npos);
+    CHECK(hlsl.find("boundedSecond / total") != std::string::npos);
+    CHECK(Keire::ShaderGraphAsset::DecodeSource(Keire::ShaderGraphAsset::EncodeSource(graph)) == graph);
 }
 
 TEST_CASE("Shader Graph diagnostics identify unused work and validation rejects malformed disconnected nodes")

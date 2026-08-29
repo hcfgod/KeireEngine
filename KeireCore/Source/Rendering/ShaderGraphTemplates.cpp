@@ -10,6 +10,8 @@ namespace Keire
     {
         ShaderGraphDefinition definition;
         definition.Output = output;
+        if (output == ShaderGraphOutput::Fullscreen)
+            definition.Target.Target = ShaderGraphTarget::Fullscreen;
         auto master = CreateShaderGraphNode(ShaderGraphNodeKind::Master, ShaderGraphValueType::Color);
         master.EditorPosition = {480.0F, 120.0F};
         if (output == ShaderGraphOutput::Unlit || output == ShaderGraphOutput::Fullscreen)
@@ -53,6 +55,39 @@ namespace Keire
         return definition;
     }
 
+    ShaderGraphDefinition CreateTargetShaderGraph(const ShaderGraphTarget target)
+    {
+        ShaderGraphDefinition result;
+        switch (target)
+        {
+        case ShaderGraphTarget::LegacySurface:
+            result = CreateDefaultShaderGraph(ShaderGraphOutput::Surface);
+            break;
+        case ShaderGraphTarget::Ui:
+            result = CreateDefaultShaderGraph(ShaderGraphOutput::Unlit);
+            result.Nodes.front().Name = "UI Shader Output";
+            break;
+        case ShaderGraphTarget::Fullscreen:
+            result = CreateDefaultShaderGraph(ShaderGraphOutput::Fullscreen);
+            break;
+        case ShaderGraphTarget::Vfx:
+            result = CreateDefaultShaderGraph(ShaderGraphOutput::Transparent);
+            result.Nodes.front().Name = "VFX Shader Output";
+            break;
+        case ShaderGraphTarget::CustomGraphics:
+            result = CreateDefaultShaderGraph(ShaderGraphOutput::Unlit);
+            result.Nodes.front().Name = "Custom Graphics Output";
+            break;
+        case ShaderGraphTarget::Compute:
+            result = CreateDefaultShaderGraph(ShaderGraphOutput::Unlit);
+            result.Target.Stages = ShaderGraphShaderStage::Compute;
+            result.Nodes.front().Name = "Compute Shader Output";
+            break;
+        }
+        result.Target.Target = target;
+        return result;
+    }
+
     ShaderGraphDefinition CreateShaderGraphTemplate(const ShaderGraphTemplate graphTemplate)
     {
         switch (graphTemplate)
@@ -71,7 +106,35 @@ namespace Keire
             return CreateDefaultShaderGraph(ShaderGraphOutput::Hair);
         case ShaderGraphTemplate::Eye:
             return CreateDefaultShaderGraph(ShaderGraphOutput::Eye);
+        case ShaderGraphTemplate::Ui:
+            return CreateTargetShaderGraph(ShaderGraphTarget::Ui);
+        case ShaderGraphTemplate::Vfx:
+            return CreateTargetShaderGraph(ShaderGraphTarget::Vfx);
+        case ShaderGraphTemplate::CustomGraphics:
+            return CreateTargetShaderGraph(ShaderGraphTarget::CustomGraphics);
+        case ShaderGraphTemplate::Compute:
+            return CreateTargetShaderGraph(ShaderGraphTarget::Compute);
         }
         throw std::invalid_argument("Shader Graph template is unsupported.");
+    }
+
+    std::string_view ShaderGraphTargetName(const ShaderGraphTarget target) noexcept
+    {
+        switch (target)
+        {
+        case ShaderGraphTarget::LegacySurface:
+            return "Legacy Surface";
+        case ShaderGraphTarget::Ui:
+            return "UI";
+        case ShaderGraphTarget::Fullscreen:
+            return "Fullscreen";
+        case ShaderGraphTarget::Vfx:
+            return "VFX";
+        case ShaderGraphTarget::CustomGraphics:
+            return "Custom Graphics";
+        case ShaderGraphTarget::Compute:
+            return "Compute";
+        }
+        return "Unknown";
     }
 } // namespace Keire

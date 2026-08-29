@@ -1,13 +1,14 @@
 # Shader Graph
 
-A Shader Graph is a reusable renderer-facing shader template. It defines stage logic, reflected properties, keywords,
-variant policy, defaults, and generated shaders. It is not directly assignable to a Mesh Renderer; create a Direct
-Material or Material Graph that selects it.
+A Shader Graph is a target-based renderer program. It defines legal stages, resources, reflected properties, keywords,
+variant policy, output contract, and generated shaders for UI, Fullscreen, VFX, Custom Graphics, or Compute work. It is
+not directly assignable to a Mesh Renderer. Legacy Surface templates remain available only while surface graphs migrate
+into materials.
 
 ## Create And Open
 
 1. In Project, choose **Create > Shader Graph**.
-2. Select Lit/PBR, Unlit, Transparent, Decal, Fullscreen, Hair, or Eye as appropriate.
+2. Select UI, Fullscreen Effect, VFX, Custom Graphics, or Compute. Use a Legacy Surface template only for compatibility.
 3. Name the `.keireshadergraph` asset and double-click it.
 4. Use the Blackboard for exposed values and the search-first palette for nodes.
 5. Connect required results to the protected Shader Output.
@@ -22,15 +23,16 @@ Expose the properties that materials should control, give them durable stable pr
 Materials bind stable IDs before display names, which keeps compatible renames from silently losing values. Avoid
 duplicating renderer implementation details in every Material Graph; that is the reason the template boundary exists.
 
-Typical graph flow is:
+Typical graphics-program flow is:
 
 ```text
-Blackboard properties -> texture/coordinate/math nodes -> surface or stage logic -> Shader Output
+Blackboard properties -> texture/coordinate/math nodes -> target stage logic -> Shader Output
 ```
 
 Supported catalogs include texture sampling, UV/coordinate work, scalar/vector math, color operations, noise and
-procedural helpers, and renderer-specific output pins exposed by the selected template. The actual palette and its
-compatibility filtering are authoritative for the open graph and target.
+procedural helpers, and target-specific output pins. The actual palette and its compatibility filtering are
+authoritative for the open graph and target. Compute graphs serialize and validate their thread-group contract but do
+not compile until the compute-program artifact ABI ships.
 
 ## Preview, Compile, And Save
 

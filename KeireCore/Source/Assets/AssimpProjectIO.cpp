@@ -68,10 +68,6 @@ namespace Keire::Detail
                 result.push_back(character == '\\' ? '/' : character);
             }
 
-            if (result.starts_with('/') || result.find(':') != std::string::npos)
-            {
-                return std::nullopt;
-            }
             return result;
         }
 
@@ -82,11 +78,37 @@ namespace Keire::Detail
             return value;
         }
 
+        [[nodiscard]] bool StartsWithAsciiInsensitive(const std::string_view value,
+                                                      const std::string_view prefix) noexcept
+        {
+            return value.size() >= prefix.size() &&
+                   std::ranges::equal(value.substr(0, prefix.size()), prefix,
+                                      [](const char left, const char right)
+                                      {
+                                          return std::tolower(static_cast<unsigned char>(left)) ==
+                                                 std::tolower(static_cast<unsigned char>(right));
+                                      });
+        }
+
         [[nodiscard]] bool IsAbsoluteReference(const std::string_view value) noexcept
         {
-            return value.starts_with('/') || value.starts_with('\\') ||
-                   (value.size() >= 3U && std::isalpha(static_cast<unsigned char>(value[0])) != 0 &&
-                    value[1] == ':' && (value[2] == '/' || value[2] == '\\'));
+            if (value.starts_with('/') || value.starts_with('\\') ||
+                (value.size() >= 3U && std::isalpha(static_cast<unsigned char>(value[0])) != 0 && value[1] == ':' &&
+                 (value[2] == '/' || value[2] == '\\')))
+            {
+                return true;
+            }
+
+            constexpr std::string_view fileScheme = "file://";
+            if (!StartsWithAsciiInsensitive(value, fileScheme))
+                return false;
+            const auto authorityAndPath = value.substr(fileScheme.size());
+            if (authorityAndPath.empty())
+                return false;
+            if (authorityAndPath.starts_with('/') || authorityAndPath.starts_with('\\'))
+                return true;
+            const auto separator = authorityAndPath.find_first_of("/\\");
+            return separator != std::string_view::npos && separator != 0U && separator + 1U < authorityAndPath.size();
         }
 
         [[nodiscard]] std::string ReferenceFilename(std::string value)
@@ -152,8 +174,7 @@ namespace Keire::Detail
         };
     } // namespace
 
-    AssimpProjectIO::AssimpProjectIO(const AssetImportContext& context,
-                                     const std::span<const std::byte> primarySource)
+    AssimpProjectIO::AssimpProjectIO(const AssetImportContext& context, const std::span<const std::byte> primarySource)
         : m_MaximumDependencyBytes(context.MaximumDependencyBytes), m_ReadProjectFile(context.ReadProjectFile),
           m_PrimarySource(std::make_shared<const std::vector<std::byte>>(primarySource.begin(), primarySource.end()))
     {
@@ -286,14 +307,19 @@ namespace Keire::Detail
         const auto decoded = DecodeReference(file);
         if (!decoded)
         {
-            if (IsAbsoluteReference(file))
-            {
-                if (ReferenceFilename(std::string(file)) == m_SourceFilename)
-                    return m_SourceProjectRelative;
-                MarkUnavailable("Ignored non-portable absolute model reference: " + std::string(file));
-                return std::nullopt;
-            }
             Reject("Assimp model sidecar path is not a valid confined relative URI.");
+            return std::nullopt;
+        }
+        if (IsAbsoluteReference(*decoded))
+        {
+            if (ReferenceFilename(*decoded) == m_SourceFilename)
+                return m_SourceProjectRelative;
+            MarkUnavailable("Ignored non-portable absolute model reference: " + std::string(file));
+            return std::nullopt;
+        }
+        if (decoded->find(':') != std::string::npos)
+        {
+            Reject("Assimp model sidecar path is not a valid confined relative URI: " + *decoded);
             return std::nullopt;
         }
 

@@ -591,6 +591,46 @@ TEST_CASE("Shader Graph live preview resolves only the selected static-switch br
     CHECK(KeireEditor::RenderShaderGraphPreview(request) == evaluated);
 }
 
+TEST_CASE("Shader Graph live preview evaluates OpenPBR slab composition")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto first = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::OpenPbrSurfaceBsdf);
+    auto second = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::OpenPbrSurfaceBsdf);
+    auto mix = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::MixSlabs);
+    auto attributes = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::BsdfToMaterialAttributes);
+    const auto pin = [](Keire::ShaderGraphNode& node, const std::string_view name) -> Keire::ShaderGraphPin&
+    {
+        const auto located = std::ranges::find(node.Pins, name, &Keire::ShaderGraphPin::Name);
+        REQUIRE(located != node.Pins.end());
+        return *located;
+    };
+    const auto endpoint = [&pin](Keire::ShaderGraphNode& node, const std::string_view name)
+    { return Keire::ShaderGraphEndpoint{node.Id, pin(node, name).Id}; };
+    pin(first, "BaseColor").DefaultValue = Keire::Color{0.85F, 0.12F, 0.04F, 1.0F};
+    pin(second, "BaseColor").DefaultValue = Keire::Color{0.05F, 0.25F, 0.9F, 1.0F};
+    pin(second, "Metallic").DefaultValue = 1.0F;
+    pin(mix, "Factor").DefaultValue = 0.35F;
+    graph.Connections.push_back({Keire::AssetId::Generate(), endpoint(first, "Slab"), endpoint(mix, "A")});
+    graph.Connections.push_back({Keire::AssetId::Generate(), endpoint(second, "Slab"), endpoint(mix, "B")});
+    graph.Connections.push_back({Keire::AssetId::Generate(), endpoint(mix, "Slab"), endpoint(attributes, "BSDF")});
+    graph.Connections.push_back({Keire::AssetId::Generate(), endpoint(attributes, "Attributes"),
+                                 endpoint(graph.Nodes.front(), "MaterialAttributes")});
+    graph.Nodes.insert(graph.Nodes.end(), {std::move(first), std::move(second), std::move(mix), std::move(attributes)});
+
+    const KeireEditor::ShaderGraphPreviewRequest request{.Output = graph.Output,
+                                                         .Mesh = Keire::ShaderGraphPreviewMesh::Sphere,
+                                                         .Definition = &graph,
+                                                         .Width = 32,
+                                                         .Height = 32,
+                                                         .Exposure = 1.0F,
+                                                         .EnvironmentIntensity = 1.0F,
+                                                         .RotationDegrees = 0.0F};
+    const auto pixels = KeireEditor::RenderShaderGraphPreview(request);
+    CHECK(pixels.size() == static_cast<std::size_t>(request.Width) * request.Height * 4U);
+    CHECK(std::ranges::any_of(pixels, [](const std::byte channel) { return channel != std::byte{0}; }));
+    CHECK(KeireEditor::RenderShaderGraphPreview(request) == pixels);
+}
+
 TEST_CASE("Shader Graph Sandbox progression compiles without dead authored work")
 {
     const auto root = std::filesystem::current_path() / "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs";

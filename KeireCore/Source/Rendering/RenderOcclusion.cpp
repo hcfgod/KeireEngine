@@ -635,6 +635,11 @@ namespace Keire::RenderBackend
             diagnostics.EligibleSafeOccluders += occluder.InstanceCount;
         }
 
+        const bool visibilityBoundsRequested =
+            surface.GpuOcclusionDebugMode.load(std::memory_order_acquire) == GpuOcclusionDebugView::VisibilityBounds;
+        const bool debugBoundsOnly = Policy::RequiresConservativeVisibilityDebugUpload(
+            visibilityBoundsRequested, prepared.CandidateCount, !prepared.Occluders.empty());
+
         if (prepared.CandidateCount == 0)
         {
             const auto reason = oversizedBatch    ? GpuOcclusionFallbackReason::OversizedBatch
@@ -649,7 +654,8 @@ namespace Keire::RenderBackend
             Statistics.GpuOcclusionFallbacks +=
                 PublishFallback(surface, requested, GpuOcclusionFallbackReason::NoSafeOccluders) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
-            return {};
+            if (!debugBoundsOnly)
+                return {};
         }
 
         if (effective == GpuOcclusionMode::Automatic)
@@ -721,6 +727,8 @@ namespace Keire::RenderBackend
 
         if (!Policy::BeginAllocationAttempt(surface.GpuOcclusionAllocationRetry, frameIndex))
         {
+            if (debugBoundsOnly)
+                return prepared;
             Statistics.GpuOcclusionFallbacks +=
                 PublishFallback(surface, requested, GpuOcclusionFallbackReason::ResourceAllocationFailed) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
@@ -905,6 +913,8 @@ namespace Keire::RenderBackend
                 std::vector<std::uint32_t> visible(count, 1U);
                 append(visible, destination);
             };
+            if (debugBoundsOnly)
+                appendConservativeMask(prepared.CandidateCount, resources.GeometryVisibility.Buffer);
             appendConservativeMask(vfxVisibilityCandidates, resources.VfxVisibilityMask.Buffer);
             appendConservativeMask(localLightCandidates, resources.LocalLightVisibilityMask.Buffer);
             appendConservativeMask(spatialVolumeCandidates, resources.SpatialVolumeVisibilityMask.Buffer);
@@ -966,17 +976,20 @@ namespace Keire::RenderBackend
             SDL_EndGPUCopyPass(copy);
             Statistics.DynamicUploadBytes += upload.size();
 
-            for (std::size_t index = 0; index < preparedBatches.size(); ++index)
+            if (!debugBoundsOnly)
             {
-                auto& sceneBatch = *preparedBatches[index];
-                sceneBatch.GpuOcclusion = true;
-                sceneBatch.GpuOcclusionInstanceBase = batches[index].OutputFirst;
-                sceneBatch.GpuOcclusionIndirectOffset = batches[index].IndirectByteOffset;
+                for (std::size_t index = 0; index < preparedBatches.size(); ++index)
+                {
+                    auto& sceneBatch = *preparedBatches[index];
+                    sceneBatch.GpuOcclusion = true;
+                    sceneBatch.GpuOcclusionInstanceBase = batches[index].OutputFirst;
+                    sceneBatch.GpuOcclusionIndirectOffset = batches[index].IndirectByteOffset;
+                }
+                draws.Opaque.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
+                draws.Opaque.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
+                draws.Transparent.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
+                draws.Transparent.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
             }
-            draws.Opaque.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
-            draws.Opaque.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
-            draws.Transparent.GpuOcclusionVisibleInstances = resources.VisibleInstances.Buffer;
-            draws.Transparent.GpuOcclusionIndirectArguments = resources.IndirectArguments.Buffer;
             resources.FrameId = packet.AcceptedFrameId;
             resources.FrameSlot = frameSlot;
             resources.SurfaceEpoch = surface.Epoch;
@@ -987,7 +1000,13 @@ namespace Keire::RenderBackend
             resources.SpatialVolumeVisibilityCount = spatialVolumeCandidates;
             resources.OwnershipValid = true;
             prepared.Resources = std::addressof(resources);
-            prepared.Enabled = true;
+            prepared.DebugBoundsPrepared = visibilityBoundsRequested;
+            prepared.Enabled = !debugBoundsOnly;
+            if (debugBoundsOnly)
+            {
+                Policy::RegisterAllocationSuccess(surface.GpuOcclusionAllocationRetry, frameIndex);
+                return prepared;
+            }
             const auto partialFallbackReason = oversizedBatch    ? GpuOcclusionFallbackReason::OversizedBatch
                                                : legacyShaderAbi ? GpuOcclusionFallbackReason::LegacyShaderAbi
                                                                  : GpuOcclusionFallbackReason::None;
@@ -1028,6 +1047,15 @@ namespace Keire::RenderBackend
             draws.Opaque.GpuOcclusionIndirectArguments = nullptr;
             draws.Transparent.GpuOcclusionVisibleInstances = nullptr;
             draws.Transparent.GpuOcclusionIndirectArguments = nullptr;
+            if (debugBoundsOnly)
+            {
+                if (Policy::RegisterAllocationFailure(surface.GpuOcclusionAllocationRetry, frameIndex))
+                {
+                    KEIRE_CORE_WARN("GPU occlusion bounds debug resources failed for surface '{}': {}",
+                                    surface.Specification.Name, error.what());
+                }
+                return {};
+            }
             Statistics.GpuOcclusionFallbacks +=
                 PublishFallback(surface, requested, GpuOcclusionFallbackReason::ResourceAllocationFailed) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
@@ -1401,7 +1429,10 @@ namespace Keire::RenderBackend
     {
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion debug view record");
         const auto debugMode = surface.GpuOcclusionDebugMode.load(std::memory_order_acquire);
-        if (!commands || !occlusion.Enabled || !occlusion.Resources || debugMode == GpuOcclusionDebugView::None ||
+        const bool debugBoundsAvailable =
+            debugMode == GpuOcclusionDebugView::VisibilityBounds && occlusion.DebugBoundsPrepared;
+        if (!commands || (!occlusion.Enabled && !debugBoundsAvailable) || !occlusion.Resources ||
+            debugMode == GpuOcclusionDebugView::None ||
             !VisibilityResourcesOwnedBy(*occlusion.Resources, surface, packet,
                                         DeviceGeneration.load(std::memory_order_acquire)))
         {

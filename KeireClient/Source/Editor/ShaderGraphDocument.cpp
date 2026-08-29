@@ -40,9 +40,25 @@ namespace KeireEditor
             throw std::invalid_argument("Shader Graph purpose is unsupported.");
         }
 
-        [[nodiscard]] constexpr std::string_view ShaderOutputLabel(const Keire::ShaderGraphOutput output) noexcept
+        [[nodiscard]] constexpr std::string_view
+        ShaderOutputLabel(const Keire::ShaderGraphDefinition& definition) noexcept
         {
-            switch (output)
+            switch (definition.Target.Target)
+            {
+            case Keire::ShaderGraphTarget::Ui:
+                return "UI Shader Output";
+            case Keire::ShaderGraphTarget::Fullscreen:
+                return "Fullscreen Shader Output";
+            case Keire::ShaderGraphTarget::Vfx:
+                return "VFX Shader Output";
+            case Keire::ShaderGraphTarget::CustomGraphics:
+                return "Custom Graphics Output";
+            case Keire::ShaderGraphTarget::Compute:
+                return "Compute Shader Output";
+            case Keire::ShaderGraphTarget::LegacySurface:
+                break;
+            }
+            switch (definition.Output)
             {
             case Keire::ShaderGraphOutput::Surface:
                 return "Lit Shader Output";
@@ -75,7 +91,7 @@ namespace KeireEditor
                                                        const Keire::ShaderGraphDefinition& definition,
                                                        const Keire::ShaderGraphCompilation& compilation)
         {
-            if (previousDefinition.Output != definition.Output ||
+            if (previousDefinition.Target != definition.Target || previousDefinition.Output != definition.Output ||
                 previous.Variants.size() != compilation.Variants.size() ||
                 previous.Properties.size() != compilation.Properties.size())
             {
@@ -325,6 +341,11 @@ namespace KeireEditor
             case Keire::ShaderGraphNodeKind::BsdfToMaterialAttributes:
                 return {0.33F, 0.22F, 0.08F, 1.0F};
             case Keire::ShaderGraphNodeKind::StandardSurfaceBsdf:
+            case Keire::ShaderGraphNodeKind::OpenPbrSurfaceBsdf:
+            case Keire::ShaderGraphNodeKind::MixSlabs:
+            case Keire::ShaderGraphNodeKind::AddSlabs:
+            case Keire::ShaderGraphNodeKind::CoatSlab:
+            case Keire::ShaderGraphNodeKind::FuzzSlab:
             case Keire::ShaderGraphNodeKind::ClearCoatBsdf:
             case Keire::ShaderGraphNodeKind::SheenBsdf:
             case Keire::ShaderGraphNodeKind::SubsurfaceBsdf:
@@ -672,7 +693,7 @@ namespace KeireEditor
             NodeGraphNode node;
             node.Id = nodeId;
             node.Label = source.Kind == Keire::ShaderGraphNodeKind::Master
-                             ? std::string(ShaderOutputLabel(m_Host.Draft().Output))
+                             ? std::string(ShaderOutputLabel(m_Host.Draft()))
                              : source.Name;
             node.Subtitle = NodeCategory(source.Kind);
             node.Position = source.EditorPosition;

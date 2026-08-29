@@ -577,15 +577,46 @@ namespace Keire
 
     void ValidateShaderGraph(const ShaderGraphDefinition& definition)
     {
+        const auto stages = static_cast<std::uint8_t>(definition.Target.Stages);
+        const auto allStages = static_cast<std::uint8_t>(ShaderGraphShaderStage::All);
+        const auto graphicsStages = static_cast<std::uint8_t>(ShaderGraphShaderStage::Vertex) |
+                                    static_cast<std::uint8_t>(ShaderGraphShaderStage::Fragment);
+        const auto computeStage = static_cast<std::uint8_t>(ShaderGraphShaderStage::Compute);
+        const auto threadCount = static_cast<std::uint64_t>(definition.Target.ThreadGroupSizeX) *
+                                 definition.Target.ThreadGroupSizeY * definition.Target.ThreadGroupSizeZ;
         if (definition.SchemaVersion == 0 || definition.SchemaVersion > ShaderGraphSourceSchemaVersion ||
             definition.Purpose > ShaderGraphPurpose::MaterialLayerBlend ||
-            definition.Output > ShaderGraphOutput::Fullscreen || definition.Nodes.empty() ||
+            definition.Target.Target > ShaderGraphTarget::Compute || stages == 0U || (stages & ~allStages) != 0U ||
+            definition.Target.FullscreenInjectionPoint > ShaderGraphFullscreenInjectionPoint::AfterUi ||
+            definition.Target.ThreadGroupSizeX == 0U || definition.Target.ThreadGroupSizeX > 1024U ||
+            definition.Target.ThreadGroupSizeY == 0U || definition.Target.ThreadGroupSizeY > 1024U ||
+            definition.Target.ThreadGroupSizeZ == 0U || definition.Target.ThreadGroupSizeZ > 64U ||
+            threadCount > 1024U || definition.Output > ShaderGraphOutput::Fullscreen || definition.Nodes.empty() ||
             definition.Nodes.size() > MaximumGraphNodes || definition.Connections.size() > MaximumGraphConnections ||
             definition.Keywords.size() > MaximumGraphKeywords || definition.IncludeRoots.empty() ||
             definition.IncludeRoots.size() > MaximumGraphIncludeRoots ||
             !std::isfinite(definition.MaximumWorldPositionDisplacementRadius) ||
             definition.MaximumWorldPositionDisplacementRadius < 0.0F)
             throw std::invalid_argument("Shader Graph has an unsupported schema or exceeds a bounded collection.");
+
+        if (definition.Purpose == ShaderGraphPurpose::Shader)
+        {
+            const bool validTarget =
+                (definition.Target.Target == ShaderGraphTarget::LegacySurface &&
+                 definition.Output != ShaderGraphOutput::Fullscreen && stages == graphicsStages) ||
+                (definition.Target.Target == ShaderGraphTarget::Ui && definition.Output == ShaderGraphOutput::Unlit &&
+                 stages == graphicsStages) ||
+                (definition.Target.Target == ShaderGraphTarget::Fullscreen &&
+                 definition.Output == ShaderGraphOutput::Fullscreen && stages == graphicsStages) ||
+                (definition.Target.Target == ShaderGraphTarget::Vfx &&
+                 definition.Output == ShaderGraphOutput::Transparent && stages == graphicsStages) ||
+                (definition.Target.Target == ShaderGraphTarget::CustomGraphics &&
+                 definition.Output == ShaderGraphOutput::Unlit && stages == graphicsStages) ||
+                (definition.Target.Target == ShaderGraphTarget::Compute &&
+                 definition.Output == ShaderGraphOutput::Unlit && stages == computeStage);
+            if (!validTarget)
+                throw std::invalid_argument("Shader Graph target, stages, and output contract are incompatible.");
+        }
 
         ValidateShaderGraphResources(definition.Resources);
         std::set<AssetId> identities;
@@ -604,7 +635,7 @@ namespace Keire
                 throw std::invalid_argument("Shader Graph include roots must be confined relative paths.");
         for (const auto& node : definition.Nodes)
         {
-            if (!node.Id || !identities.insert(node.Id).second || node.Kind > ShaderGraphNodeKind::Logarithm ||
+            if (!node.Id || !identities.insert(node.Id).second || node.Kind > ShaderGraphNodeKind::FuzzSlab ||
                 node.ValueType > ShaderGraphValueType::Bsdf || node.Name.size() > MaximumGraphText ||
                 node.TextureSemantic > ShaderTextureSemantic::Roughness || node.Pins.empty() ||
                 node.Pins.size() > MaximumGraphPinsPerNode || !Math::IsFinite(node.EditorPosition) ||

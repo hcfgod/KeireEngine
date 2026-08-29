@@ -463,9 +463,12 @@ namespace Keire
             const auto fragmentUniformBuffers = fragment.value("uniform_buffers", 0U);
             const bool spatialLighting = definition.SpatialLightingAbiVersion >= 2U;
             const auto expectedFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U : 3U;
-            const auto minimumFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U
-                                                       : definition.ReceivesShadows      ? 3U
-                                                                                         : 2U;
+            const bool unlit = !definition.ReceivesShadows && !definition.UsesForwardPlus &&
+                               !definition.UsesImageBasedLighting && !spatialLighting;
+            const auto minimumFragmentUniformBuffers = unlit                               ? 1U
+                                                       : definition.UsesImageBasedLighting ? 4U
+                                                       : definition.ReceivesShadows        ? 3U
+                                                                                           : 2U;
             const auto expectedSamplers = textureCount + definition.UserResourceSlots +
                                           (definition.ReceivesShadows ? 2U : 0U) +
                                           (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U);
@@ -479,8 +482,8 @@ namespace Keire
                 fragment.value("storage_buffers", 0U) != expectedFragmentStorageBuffers ||
                 vertex.value("samplers", 0U) != 0 ||
                 vertex.value("uniform_buffers", 0U) != expectedVertexUniformBuffers ||
-                (fragmentUniformBuffers != minimumFragmentUniformBuffers &&
-                 fragmentUniformBuffers != expectedFragmentUniformBuffers) ||
+                fragmentUniformBuffers < minimumFragmentUniformBuffers ||
+                fragmentUniformBuffers > expectedFragmentUniformBuffers ||
                 fragment.value("samplers", 0U) != expectedSamplers)
                 throw std::invalid_argument("Shader violates Kéire's fixed graphics resource-binding ABI.");
 
@@ -489,14 +492,19 @@ namespace Keire
             const auto expectedInputs = definition.VertexLayoutVersion == 3   ? 6U
                                         : definition.VertexLayoutVersion == 2 ? 5U
                                                                               : 4U;
-            if (!vertex.at("inputs").is_array() || vertex.at("inputs").size() != expectedInputs)
+            if (!vertex.at("inputs").is_array() || vertex.at("inputs").empty() ||
+                vertex.at("inputs").size() > expectedInputs)
                 throw std::invalid_argument("Shader vertex inputs do not match the fixed mesh ABI.");
+            bool hasPosition = false;
             for (const auto& input : vertex.at("inputs"))
             {
                 const auto location = input.at("location").get<std::uint32_t>();
                 if (location >= expectedInputs || input.at("type").get<std::string>() != vertexTypes[location])
                     throw std::invalid_argument("Shader vertex inputs do not match the fixed mesh ABI.");
+                hasPosition |= location == 0U;
             }
+            if (!hasPosition)
+                throw std::invalid_argument("Shader vertex inputs must consume the fixed mesh position attribute.");
 
             std::map<std::uint32_t, std::string> outputs;
             for (const auto& output : vertex.at("outputs"))
@@ -696,7 +704,8 @@ namespace Keire
 
         [[nodiscard]] ShaderAssetDefinition ParseShaderManifest(const Json& manifest)
         {
-            if (!manifest.is_object() || manifest.value("schemaVersion", 0U) != 1)
+            const auto sourceSchemaVersion = manifest.is_object() ? manifest.value("schemaVersion", 0U) : 0U;
+            if (sourceSchemaVersion == 0U || sourceSchemaVersion > 2U)
                 throw std::invalid_argument("Shader manifest has an unsupported schema.");
             ShaderAssetDefinition result;
             result.Source = manifest.at("source").get<std::string>();
@@ -731,7 +740,7 @@ namespace Keire
                 manifest.value("instanceAddressingAbiVersion", static_cast<std::uint8_t>(0));
             result.OcclusionSupport = static_cast<ShaderOcclusionSupport>(
                 manifest.value("occlusionSupport", static_cast<std::uint8_t>(ShaderOcclusionSupport::None)));
-            if (manifest.contains("maximumWorldPositionDisplacementRadius") &&
+            if (sourceSchemaVersion >= 2U && manifest.contains("maximumWorldPositionDisplacementRadius") &&
                 !manifest.at("maximumWorldPositionDisplacementRadius").is_null())
             {
                 result.MaximumWorldPositionDisplacementRadius =

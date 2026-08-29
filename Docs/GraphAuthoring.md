@@ -115,10 +115,10 @@ transaction commits.
 
 ## Schema Migration
 
-Kéire 0.4.0 advances Shader Graph and Material Graph source schemas from 3 to 4 and VFX source schema from 4 to 5.
-The current Shader Graph schema is 5; it adds a conservative maximum world-position-displacement radius, while
-schemas 1–4 migrate in memory with a zero radius. Material Graph schema 5 removes redundant surface authoring from new
-files and preserves executable legacy expressions only under `legacySurfaceGraph`. Schema migration follows the same
+Kéire 0.4.0 introduced the shared schema-4 graph metadata and VFX schema 5. The current Shader Graph and Material
+Graph source schemas are 6. Shader schema 6 adds explicit UI, Fullscreen, VFX, Custom Graphics, and Compute program
+targets while retaining Legacy Surface as a migration target. Material schema 6 promotes `surfaceGraph` to the
+authoritative OpenPBR/slab material program. Schemas 1–5 migrate in memory. Schema migration follows the same
 fail-before-mutation rule across all three formats:
 
 1. supported historical sources decode and migrate in memory;
@@ -127,7 +127,8 @@ fail-before-mutation rule across all three formats:
 4. a future unsupported schema is rejected before the live document or last-good preview changes.
 
 Shader and Material schema 4 add the shared authoring metadata and renderer-neutral resource declarations. Shader
-schema 5 retains those declarations and adds the displacement bound used by the occlusion-safety contract. Portable
+schema 5 adds the displacement bound used by the occlusion-safety contract; schema 6 retains it alongside the target
+definition. Portable
 samplers, Texture2D-array, cube, 3D, and bounded read-only structured or byte-address buffer contracts round-trip,
 reflect, and participate in dependency extraction and typed overrides. Generic backend GPU realization for those
 array/cube/3D/user-buffer resources remains deferred, so runtime import rejects them rather than silently binding an

@@ -22,6 +22,14 @@ namespace KeireEditor
     DecodeComponentOrderPayload(std::span<const std::byte> bytes) noexcept;
     [[nodiscard]] std::size_t ComponentOrdinal(std::span<const Keire::Ref<Keire::Component>> components,
                                                const Keire::Ref<Keire::Component>& component) noexcept;
+    [[nodiscard]] bool HaveUniformComponentValues(const Keire::Ref<Keire::Scene>& scene,
+                                                  std::span<const Keire::AssetId> entities,
+                                                  const Keire::ComponentRegistration& registration,
+                                                  const Keire::Ref<Keire::Component>& reference,
+                                                  std::size_t ordinal) noexcept;
+    [[nodiscard]] bool HaveCommonMeshMaterialLayout(const Keire::Ref<Keire::Scene>& scene,
+                                                    std::span<const Keire::AssetId> entities,
+                                                    const Keire::Ref<Keire::MeshRendererComponent>& reference) noexcept;
     [[nodiscard]] Keire::Ref<Keire::Component>
     ResolveComponentOrderPayload(std::span<const Keire::Ref<Keire::Component>> components,
                                  Keire::EntityId expectedEntity, const ComponentOrderPayload& payload) noexcept;

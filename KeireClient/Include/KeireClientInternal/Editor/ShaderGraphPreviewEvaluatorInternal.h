@@ -72,6 +72,9 @@ namespace KeireEditor::ShaderGraphPreviewInternal
     [[nodiscard]] float MaterialHash(Keire::Vector2 value) noexcept;
     [[nodiscard]] float MaterialValueNoise(Keire::Vector2 position) noexcept;
     [[nodiscard]] float MaterialNoise(Keire::Vector2 uv, float scale, float detail) noexcept;
+    [[nodiscard]] PreviewMaterialSurface BlendPreviewMaterialSurfaces(const PreviewMaterialSurface& first,
+                                                                      const PreviewMaterialSurface& second,
+                                                                      float factor) noexcept;
 
     class ShaderGraphPreviewEvaluator final
     {

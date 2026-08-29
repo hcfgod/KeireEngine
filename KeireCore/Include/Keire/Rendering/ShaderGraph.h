@@ -20,9 +20,9 @@
 namespace Keire
 {
     /// Latest canonical source schema emitted by ShaderGraphAsset::EncodeSource.
-    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 5;
+    inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 6;
     /// Version of the deterministic HLSL generator contract embedded in every generated shader manifest.
-    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 6;
+    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 7;
     /// Renderer-facing vertex input and interpolator contract required by generated Shader Graph shaders.
     inline constexpr std::uint32_t ShaderGraphVertexLayoutVersion = 3;
 
@@ -45,7 +45,11 @@ namespace Keire
         Decal,
         Fullscreen,
         Hair,
-        Eye
+        Eye,
+        Ui,
+        Vfx,
+        CustomGraphics,
+        Compute
     };
 
     enum class ShaderGraphPurpose : std::uint8_t
@@ -82,6 +86,40 @@ namespace Keire
         Fragment = 1U << 1U,
         Compute = 1U << 2U,
         All = (1U << 0U) | (1U << 1U) | (1U << 2U)
+    };
+
+    /// Program contract selected by a Shader Graph. LegacySurface remains readable during the material migration but
+    /// new surface authoring belongs to .keirematerial assets.
+    enum class ShaderGraphTarget : std::uint8_t
+    {
+        LegacySurface,
+        Ui,
+        Fullscreen,
+        Vfx,
+        CustomGraphics,
+        Compute
+    };
+
+    enum class ShaderGraphFullscreenInjectionPoint : std::uint8_t
+    {
+        BeforeTonemapping,
+        AfterTonemapping,
+        AfterUi
+    };
+
+    struct ShaderGraphTargetDefinition
+    {
+        ShaderGraphTarget Target = ShaderGraphTarget::LegacySurface;
+        ShaderGraphShaderStage Stages =
+            static_cast<ShaderGraphShaderStage>(static_cast<std::uint8_t>(ShaderGraphShaderStage::Vertex) |
+                                                static_cast<std::uint8_t>(ShaderGraphShaderStage::Fragment));
+        ShaderGraphFullscreenInjectionPoint FullscreenInjectionPoint =
+            ShaderGraphFullscreenInjectionPoint::AfterTonemapping;
+        std::uint32_t ThreadGroupSizeX = 8;
+        std::uint32_t ThreadGroupSizeY = 8;
+        std::uint32_t ThreadGroupSizeZ = 1;
+
+        bool operator==(const ShaderGraphTargetDefinition&) const = default;
     };
 
     enum class ShaderGraphNodeKind : std::uint8_t
@@ -205,7 +243,12 @@ namespace Keire
         Negate,
         ScaleAndBias,
         Exponential,
-        Logarithm
+        Logarithm,
+        OpenPbrSurfaceBsdf,
+        MixSlabs,
+        AddSlabs,
+        CoatSlab,
+        FuzzSlab
     };
 
     enum class ShaderGraphDiagnosticSeverity : std::uint8_t
@@ -313,6 +356,8 @@ namespace Keire
     {
         std::uint32_t SchemaVersion = ShaderGraphSourceSchemaVersion;
         ShaderGraphPurpose Purpose = ShaderGraphPurpose::Shader;
+        ShaderGraphTargetDefinition Target;
+        /// Legacy surface output contract retained until surface Shader Graph assets complete transactional migration.
         ShaderGraphOutput Output = ShaderGraphOutput::Surface;
         std::vector<ShaderGraphNode> Nodes;
         std::vector<ShaderGraphConnection> Connections;
@@ -466,7 +511,9 @@ namespace Keire
 
     [[nodiscard]] KEIRE_API ShaderGraphDefinition
     CreateDefaultShaderGraph(ShaderGraphOutput output = ShaderGraphOutput::Surface);
+    [[nodiscard]] KEIRE_API ShaderGraphDefinition CreateTargetShaderGraph(ShaderGraphTarget target);
     [[nodiscard]] KEIRE_API ShaderGraphDefinition CreateShaderGraphTemplate(ShaderGraphTemplate graphTemplate);
+    [[nodiscard]] KEIRE_API std::string_view ShaderGraphTargetName(ShaderGraphTarget target) noexcept;
     [[nodiscard]] KEIRE_API ShaderGraphNode
     CreateShaderGraphNode(ShaderGraphNodeKind kind, ShaderGraphValueType valueType = ShaderGraphValueType::Scalar);
     [[nodiscard]] KEIRE_API ShaderGraphNode

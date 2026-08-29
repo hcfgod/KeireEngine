@@ -454,6 +454,45 @@ ShaderGraphBsdf MakeStandardShaderGraphBsdf(const float4 baseColor, const float 
     result.Surface.Opacity = opacity;
     return result;
 }
+)HLSL";
+        source << R"HLSL(
+
+ShaderGraphBsdf MakeOpenPbrShaderGraphBsdf(
+    const float4 baseColor, const float metallic, const float roughness, const float specularWeight,
+    const float coatWeight, const float coatRoughness, const float4 fuzzColor, const float fuzzWeight,
+    const float fuzzRoughness,
+    const float3 normal, const float4 emission, const float occlusion, const float opacity,
+    const float4 subsurfaceColor, const float subsurfaceWeight, const float anisotropy, const float3 tangent,
+    const float transmissionWeight, const float indexOfRefraction, const float refraction, const float thickness)
+{
+    ShaderGraphBsdf result;
+    result.Surface = MakeShaderGraphSurface(
+        baseColor, saturate(metallic), saturate(roughness), saturate(specularWeight), saturate(coatWeight),
+        saturate(coatRoughness), float4(fuzzColor.rgb * saturate(fuzzWeight), fuzzColor.a), saturate(fuzzRoughness),
+        SafeNormalize(normal, float3(0.0F, 0.0F, 1.0F)),
+        emission, saturate(occlusion), saturate(opacity), subsurfaceColor, saturate(subsurfaceWeight),
+        clamp(anisotropy, -1.0F, 1.0F), SafeNormalize(tangent, float3(1.0F, 0.0F, 0.0F)),
+        saturate(transmissionWeight), max(indexOfRefraction, 1.0F), refraction, max(thickness, 0.0F));
+    return result;
+}
+
+ShaderGraphBsdf MixShaderGraphSlabs(const ShaderGraphBsdf first, const ShaderGraphBsdf second, const float factor)
+{
+    ShaderGraphBsdf result;
+    result.Surface = BlendShaderGraphSurfaces(first.Surface, second.Surface, saturate(factor));
+    return result;
+}
+
+ShaderGraphBsdf AddShaderGraphSlabs(const ShaderGraphBsdf first, const ShaderGraphBsdf second,
+                                    const float firstWeight, const float secondWeight)
+{
+    const float boundedFirst = max(firstWeight, 0.0F);
+    const float boundedSecond = max(secondWeight, 0.0F);
+    const float total = boundedFirst + boundedSecond;
+    if (total > 1.0e-8F)
+        return MixShaderGraphSlabs(first, second, boundedSecond / total);
+    return DefaultShaderGraphBsdf();
+}
 
 ShaderGraphBsdf ApplyShaderGraphClearCoat(ShaderGraphBsdf result, const float weight, const float roughness)
 {

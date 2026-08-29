@@ -26,7 +26,7 @@ Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 | ME-AS-010 | Safe rename, duplicate, move, and trash | Complete | P0 | Generic stable-ID asset operations cover every new extension. |
 | ME-AS-011 | Deterministic source serialization | Complete | P0 | Canonical JSON and byte-equality tests for functions and collections. |
 | ME-AS-012 | Bounded source decoding | Complete | P0 | Explicit size, count, text, schema, identifier, and finite-value limits. |
-| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 5, Material schema 5, and reusable schema 1 reject unsupported future data. |
+| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 6, Material schema 6, and reusable schema 1 reject unsupported future data. |
 | ME-AS-014 | Import dependency extraction | Complete | P0 | Function calls publish sorted unique asset dependencies. |
 | ME-AS-015 | Dependent reimport after function change | Complete | P0 | Asset dependency graph invalidates Shader/Material Graph imports. |
 | ME-AS-016 | Transactional generated shader publication | Complete | P0 | Staged replacement and rollback retain last-good variants. |
@@ -75,7 +75,7 @@ Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 | ME-MA-009 | Sheen BSDF | Complete | P1 | Color, weight, and roughness modify a typed BSDF. |
 | ME-MA-010 | Subsurface BSDF | Complete | P1 | Color and weight publish bounded subsurface attributes. |
 | ME-MA-011 | Transmission BSDF | Complete | P1 | Weight, IOR, refraction, and thickness publish typed attributes. |
-| ME-MA-012 | Surface Stack multi-closure evaluation | Partial | P0 | Layered attributes and BSDF modifiers ship; multi-lobe energy evaluation remains. |
+| ME-MA-012 | Surface Stack multi-closure evaluation | Partial | P0 | OpenPBR, normalized Mix/Add Slabs, Coat, Fuzz, layered attributes, and BSDF modifiers ship; classified complex-closure lighting remains. |
 | ME-MA-013 | Material Layer call workflow | Complete | P0 | Layer functions appear in both graph palettes. |
 | ME-MA-014 | Layer Blend call workflow | Complete | P0 | Blend function exposes Bottom, Top, and Alpha. |
 | ME-MA-015 | Per-instance layer selection | Planned | P1 | Requires layer-stack instance schema and static permutation policy. |
@@ -125,7 +125,7 @@ Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 | ME-RS-004 | Structured/byte-address buffers | Planned | P1 | Requires security and size budgets in authoring/runtime. |
 | ME-RS-005 | Virtual textures | Planned | P2 | Requires streaming system and feedback integration. |
 | ME-RS-006 | Decal output | Complete | P1 | Dedicated template/output contract. |
-| ME-RS-007 | Fullscreen output | Complete | P1 | Dedicated template/output contract. |
+| ME-RS-007 | Fullscreen output | Complete | P1 | Dedicated target, legal stage contract, bounded injection-point metadata, template, and manifest reflection. |
 | ME-RS-008 | Hair output | Complete | P1 | Dedicated template/output contract. |
 | ME-RS-009 | Eye output | Complete | P1 | Dedicated template/output contract. |
 | ME-RS-010 | Transparent output | Complete | P0 | Premultiplied output and renderer state. |

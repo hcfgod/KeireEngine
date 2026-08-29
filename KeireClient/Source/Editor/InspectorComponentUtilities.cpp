@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/InspectorComponentUtilities.h"
 
+#include <algorithm>
 #include <sstream>
 
 namespace KeireEditor
@@ -45,6 +46,62 @@ namespace KeireEditor
                 ++ordinal;
         }
         return ordinal;
+    }
+
+    bool HaveUniformComponentValues(const Keire::Ref<Keire::Scene>& scene,
+                                    const std::span<const Keire::AssetId> entities,
+                                    const Keire::ComponentRegistration& registration,
+                                    const Keire::Ref<Keire::Component>& reference, const std::size_t ordinal) noexcept
+    {
+        if (!scene || !reference)
+            return false;
+        try
+        {
+            const auto expected = registration.Serialize(*reference);
+            const auto expectedEnabled = reference->Enabled();
+            for (const auto id : entities)
+            {
+                const auto entity = scene->FindEntity(Keire::EntityId(id));
+                if (!entity)
+                    return false;
+                std::size_t currentOrdinal = 0;
+                Keire::Ref<Keire::Component> candidate;
+                for (const auto& component : entity.GetComponents())
+                {
+                    if (!component || component->Type() != registration.Type)
+                        continue;
+                    if (currentOrdinal++ == ordinal)
+                    {
+                        candidate = component;
+                        break;
+                    }
+                }
+                if (!candidate || candidate->Enabled() != expectedEnabled ||
+                    registration.Serialize(*candidate) != expected)
+                    return false;
+            }
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool HaveCommonMeshMaterialLayout(const Keire::Ref<Keire::Scene>& scene,
+                                      const std::span<const Keire::AssetId> entities,
+                                      const Keire::Ref<Keire::MeshRendererComponent>& reference) noexcept
+    {
+        if (!scene || !reference)
+            return false;
+        return std::ranges::all_of(entities,
+                                   [&](const Keire::AssetId id)
+                                   {
+                                       const auto entity = scene->FindEntity(Keire::EntityId(id));
+                                       const auto renderer =
+                                           entity ? entity.GetComponent<Keire::MeshRendererComponent>() : nullptr;
+                                       return renderer && renderer->Mesh() == reference->Mesh();
+                                   });
     }
 
     Keire::Ref<Keire::Component>

@@ -1097,6 +1097,7 @@ namespace Keire::RenderBackend
         std::uint32_t FreshPoseSkinnedDepthDraws = 0;
         std::uint64_t CandidateTriangles = 0;
         bool Enabled = false;
+        bool DebugBoundsPrepared = false;
     };
 
     struct PreparedCpuVfxBatch final

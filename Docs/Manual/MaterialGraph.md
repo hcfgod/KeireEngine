@@ -1,14 +1,14 @@
 # Material Graph
 
-A Material Graph is an assignable artist-authored surface graph. It selects a Shader Graph template, reflects that
-template's inputs, builds surface expressions, and publishes a material asset for Mesh Renderers. Opening a Material
-Graph never redirects into its referenced Shader Graph.
+A Material Graph is an assignable artist-authored OpenPBR/slab surface graph. Schema 6 stores its authoritative
+`surfaceGraph`, stable parameters, material state, and reusable template reference, then publishes an immutable material
+for Mesh Renderers. Opening a Material Graph never redirects into its referenced Shader Graph.
 
 ## Choose The Right Asset
 
 | Asset | Use it for |
 | --- | --- |
-| Shader Graph | Reusable renderer and stage contract. |
+| Shader Graph | UI, Fullscreen, VFX, Custom Graphics, or Compute target program; Legacy Surface only during migration. |
 | Direct Material | Property values against a Shader Graph or raw shader without a surface-expression graph. |
 | Material Graph | Full surface-expression graph against a selected Shader Graph. |
 | Material Instance | Lightweight inherited overrides from a Direct Material, Material Graph, or another instance. |
@@ -22,8 +22,10 @@ Graph never redirects into its referenced Shader Graph.
 5. Connect final values to the protected Material Output.
 6. Save and assign the Material Graph asset to a Mesh Renderer material slot.
 
-The node catalog matches Shader Graph's production expression catalog. The shared picker, compatible wire search,
-pin/cable menus, routing knots, comments, and clipboard rules work the same way.
+The surface catalog includes OpenPBR Surface, Mix Slabs, Add Slabs, Coat, Fuzz, typed Material Attributes, and the
+existing BSDF modifiers. Mix clamps its factor and Add normalizes non-negative weights so the preview and generated
+shader cannot create an unbounded closure contribution. The shared picker, compatible wire search, pin/cable menus,
+routing knots, comments, and clipboard rules work the same way.
 
 ## Material State And Instances
 

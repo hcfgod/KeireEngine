@@ -231,30 +231,34 @@ namespace KeireEditor
         const auto sourceConnections = source.Connections;
         const auto sourceExpressionConnections = source.SurfaceGraph.Connections;
         const std::set selected(copied.begin(), copied.end());
+        auto transfer = definition;
         for (const auto& node : sourceValueNodes)
             if (selected.contains(node.Id))
-                definition.Nodes.push_back(node);
+                transfer.Nodes.push_back(node);
         for (const auto& node : sourceExpressionNodes)
             if (selected.contains(node.Id))
-                definition.SurfaceGraph.Nodes.push_back(node);
+                transfer.SurfaceGraph.Nodes.push_back(node);
         for (const auto& connection : sourceConnections)
             if (selected.contains(connection.Output.Node) && selected.contains(connection.Input.Node))
-                definition.Connections.push_back(connection);
+                transfer.Connections.push_back(connection);
         for (const auto& connection : sourceExpressionConnections)
             if (selected.contains(connection.Output.Node) && selected.contains(connection.Input.Node))
-                definition.SurfaceGraph.Connections.push_back(connection);
+                transfer.SurfaceGraph.Connections.push_back(connection);
         for (const auto& annotation : source.Authoring.NodeAnnotations)
             if (selected.contains(annotation.Node))
-                definition.Authoring.NodeAnnotations.push_back(annotation);
+                transfer.Authoring.NodeAnnotations.push_back(annotation);
         for (const auto& comment : source.Authoring.Comments)
             if (std::ranges::all_of(comment.Members, [&](const Keire::AssetId id) { return selected.contains(id); }))
-                definition.Authoring.Comments.push_back(comment);
+                transfer.Authoring.Comments.push_back(comment);
         for (const auto& annotation : source.SurfaceGraph.Authoring.NodeAnnotations)
             if (selected.contains(annotation.Node))
-                definition.SurfaceGraph.Authoring.NodeAnnotations.push_back(annotation);
+                transfer.SurfaceGraph.Authoring.NodeAnnotations.push_back(annotation);
         for (const auto& comment : source.SurfaceGraph.Authoring.Comments)
             if (std::ranges::all_of(comment.Members, [&](const Keire::AssetId id) { return selected.contains(id); }))
-                definition.SurfaceGraph.Authoring.Comments.push_back(comment);
+                transfer.SurfaceGraph.Authoring.Comments.push_back(comment);
+        ResolvePastedParameterSymbols(transfer.SurfaceGraph, selected);
+        Keire::ValidateMaterialGraph(transfer);
+        definition = std::move(transfer);
         return copied;
     }
 

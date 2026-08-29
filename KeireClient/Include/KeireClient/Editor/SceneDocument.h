@@ -92,6 +92,8 @@ namespace KeireEditor
         void SetComponentsProperty(std::span<const Keire::AssetId> entities, Keire::ComponentTypeId type,
                                    std::string_view property, const Keire::ComponentPropertyValue& value,
                                    std::size_t ordinal = 0);
+        void SetComponentsProperties(std::span<const Keire::AssetId> entities, Keire::ComponentTypeId type,
+                                     const Keire::ComponentPropertyBag& values, std::size_t ordinal = 0);
         void SetMeshRendererMaterial(Keire::EntityId entity, std::size_t slot, Keire::AssetId material);
         void SetMeshRenderersMaterial(std::span<const Keire::AssetId> entities, std::size_t slot,
                                       Keire::AssetId material);

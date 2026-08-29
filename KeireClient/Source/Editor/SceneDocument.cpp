@@ -160,8 +160,8 @@ namespace KeireEditor
         }
 
         [[nodiscard]] Keire::Ref<Keire::Component> ComponentAtOrdinal(const Keire::Entity& entity,
-                                                                       const Keire::ComponentTypeId type,
-                                                                       const std::size_t requested) noexcept
+                                                                      const Keire::ComponentTypeId type,
+                                                                      const std::size_t requested) noexcept
         {
             std::size_t ordinal = 0;
             for (const auto& component : entity.GetComponents())
@@ -719,19 +719,45 @@ namespace KeireEditor
         if (!defaults)
             throw std::runtime_error("The component factory returned null while resetting components.");
         const auto values = registration->Serialize(*defaults);
-        std::vector<Keire::Ref<Keire::Component>> components;
-        components.reserve(entities.size());
+        struct Candidate final
+        {
+            Keire::Ref<Keire::Component> Component;
+            Keire::ComponentPropertyBag Original;
+        };
+        std::vector<Candidate> candidates;
+        candidates.reserve(entities.size());
         for (const auto entity : entities)
         {
             const auto target = scene->FindEntity(Keire::EntityId(entity));
             const auto component = target ? ComponentAtOrdinal(target, type, ordinal) : nullptr;
             if (!component)
                 throw std::invalid_argument("Multi-edit requires a common component on every selected entity.");
-            components.push_back(component);
+            candidates.push_back({component, registration->Serialize(*component)});
         }
-        for (const auto& component : components)
-            registration->Deserialize(*component, values, registration->SchemaVersion);
-        if (!components.empty())
+
+        std::size_t applied = 0;
+        try
+        {
+            for (; applied < candidates.size(); ++applied)
+                registration->Deserialize(*candidates[applied].Component, values, registration->SchemaVersion);
+        }
+        catch (...)
+        {
+            const auto rollbackCount = std::min(applied + 1U, candidates.size());
+            for (std::size_t rollback = rollbackCount; rollback > 0; --rollback)
+            {
+                try
+                {
+                    registration->Deserialize(*candidates[rollback - 1U].Component, candidates[rollback - 1U].Original,
+                                              registration->SchemaVersion);
+                }
+                catch (...)
+                {
+                }
+            }
+            throw;
+        }
+        if (!candidates.empty())
             scene->MarkDirty();
     }
 
@@ -750,6 +776,8 @@ namespace KeireEditor
         auto values = registration->Serialize(*component);
         values.insert_or_assign(std::string(property), std::move(value));
         auto validation = registration->Factory();
+        if (!validation)
+            throw std::runtime_error("The component factory returned null while validating an edit.");
         registration->Deserialize(*validation, values, registration->SchemaVersion);
         registration->Deserialize(*component, values, registration->SchemaVersion);
         scene->MarkDirty();
@@ -759,13 +787,25 @@ namespace KeireEditor
                                               const Keire::ComponentTypeId type, const std::string_view property,
                                               const Keire::ComponentPropertyValue& value, const std::size_t ordinal)
     {
+        SetComponentsProperties(entities, type, {{std::string(property), value}}, ordinal);
+    }
+
+    void SceneDocument::SetComponentsProperties(const std::span<const Keire::AssetId> entities,
+                                                const Keire::ComponentTypeId type,
+                                                const Keire::ComponentPropertyBag& updates, const std::size_t ordinal)
+    {
         const auto scene = ActiveScene();
         const auto registration = scene ? scene->Components()->Find(type) : std::nullopt;
-        if (!registration ||
-            std::ranges::find(registration->Properties, property, &Keire::ComponentProperty::Key) ==
-                registration->Properties.end())
+        if (!registration)
+            throw std::invalid_argument("Cannot multi-edit components outside the active scene.");
+        for (const auto& [property, value] : updates)
         {
-            throw std::invalid_argument("The common component does not declare that property.");
+            (void)value;
+            if (std::ranges::find(registration->Properties, property, &Keire::ComponentProperty::Key) ==
+                registration->Properties.end())
+            {
+                throw std::invalid_argument("The common component does not declare property '" + property + "'.");
+            }
         }
 
         struct Candidate final
@@ -784,8 +824,11 @@ namespace KeireEditor
                 throw std::invalid_argument("Multi-edit requires a common component on every selected entity.");
             auto original = registration->Serialize(*component);
             auto values = original;
-            values.insert_or_assign(std::string(property), value);
+            for (const auto& [property, value] : updates)
+                values.insert_or_assign(property, value);
             const auto validation = registration->Factory();
+            if (!validation)
+                throw std::runtime_error("The component factory returned null while validating a multi-edit.");
             registration->Deserialize(*validation, values, registration->SchemaVersion);
             candidates.push_back({component, std::move(original), std::move(values)});
         }
@@ -799,12 +842,12 @@ namespace KeireEditor
         }
         catch (...)
         {
-            while (applied > 0)
+            const auto rollbackCount = std::min(applied + 1U, candidates.size());
+            for (std::size_t rollback = rollbackCount; rollback > 0; --rollback)
             {
-                --applied;
                 try
                 {
-                    registration->Deserialize(*candidates[applied].Component, candidates[applied].Original,
+                    registration->Deserialize(*candidates[rollback - 1U].Component, candidates[rollback - 1U].Original,
                                               registration->SchemaVersion);
                 }
                 catch (...)
@@ -829,23 +872,48 @@ namespace KeireEditor
         scene->MarkDirty();
     }
 
-    void SceneDocument::SetMeshRenderersMaterial(const std::span<const Keire::AssetId> entities,
-                                                 const std::size_t slot, const Keire::AssetId material)
+    void SceneDocument::SetMeshRenderersMaterial(const std::span<const Keire::AssetId> entities, const std::size_t slot,
+                                                 const Keire::AssetId material)
     {
         const auto scene = ActiveScene();
-        std::vector<Keire::Ref<Keire::MeshRendererComponent>> renderers;
-        renderers.reserve(entities.size());
+        struct Candidate final
+        {
+            Keire::Ref<Keire::MeshRendererComponent> Renderer;
+            std::vector<Keire::AssetId> OriginalMaterials;
+        };
+        std::vector<Candidate> candidates;
+        candidates.reserve(entities.size());
         for (const auto entity : entities)
         {
             const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
             const auto renderer = target ? target.GetComponent<Keire::MeshRendererComponent>() : nullptr;
             if (!renderer)
                 throw std::invalid_argument("Multi-edit requires a Mesh Renderer on every selected entity.");
-            renderers.push_back(renderer);
+            candidates.push_back({renderer, {renderer->Materials().begin(), renderer->Materials().end()}});
         }
-        for (const auto& renderer : renderers)
-            renderer->SetMaterial(slot, material);
-        if (!renderers.empty())
+
+        std::size_t applied = 0;
+        try
+        {
+            for (; applied < candidates.size(); ++applied)
+                candidates[applied].Renderer->SetMaterial(slot, material);
+        }
+        catch (...)
+        {
+            const auto rollbackCount = std::min(applied + 1U, candidates.size());
+            for (std::size_t rollback = rollbackCount; rollback > 0; --rollback)
+            {
+                try
+                {
+                    candidates[rollback - 1U].Renderer->SetMaterials(candidates[rollback - 1U].OriginalMaterials);
+                }
+                catch (...)
+                {
+                }
+            }
+            throw;
+        }
+        if (!candidates.empty())
             scene->MarkDirty();
     }
 

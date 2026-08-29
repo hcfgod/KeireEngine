@@ -239,8 +239,8 @@ Current authoring and runtime contracts include:
 | Project descriptor | 4 | Older descriptors are inspected and upgraded transactionally before mutation. |
 | Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
-| Shader Graph source | 5 | Schemas 1–4 migrate in memory; publication emits canonical schema 5. |
-| Material Graph source | 5 | Schemas 1–4 migrate in memory; publication emits canonical schema 5 and retains executable legacy surface data under an explicit migration-only field. |
+| Shader Graph source | 6 | Schemas 1–5 migrate in memory; publication emits canonical target-based schema 6. |
+| Material Graph source | 6 | Schemas 1–5 migrate in memory; publication emits canonical schema 6 with an authoritative OpenPBR/slab surface graph. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |

@@ -747,6 +747,71 @@ namespace Keire
             input("Opacity", ShaderGraphValueType::Scalar, 1.0F);
             output("BSDF", ShaderGraphValueType::Bsdf);
             break;
+        case ShaderGraphNodeKind::OpenPbrSurfaceBsdf:
+            node.Name = "OpenPBR Surface Slab";
+            node.ValueType = ShaderGraphValueType::Bsdf;
+            node.Value = ShaderGraphBsdfValue{};
+            input("BaseColor", ShaderGraphValueType::Color, Color{1.0F, 1.0F, 1.0F, 1.0F});
+            input("Metallic", ShaderGraphValueType::Scalar, 0.0F);
+            input("Roughness", ShaderGraphValueType::Scalar, 0.5F);
+            input("SpecularWeight", ShaderGraphValueType::Scalar, 0.5F);
+            input("CoatWeight", ShaderGraphValueType::Scalar, 0.0F);
+            input("CoatRoughness", ShaderGraphValueType::Scalar, 0.25F);
+            input("FuzzColor", ShaderGraphValueType::Color, Color{0.0F, 0.0F, 0.0F, 1.0F});
+            input("FuzzWeight", ShaderGraphValueType::Scalar, 0.0F);
+            input("FuzzRoughness", ShaderGraphValueType::Scalar, 0.5F);
+            input("Normal", ShaderGraphValueType::Vector3, Vector3{0.0F, 0.0F, 1.0F});
+            input("Emission", ShaderGraphValueType::Color, Color{0.0F, 0.0F, 0.0F, 1.0F});
+            input("Occlusion", ShaderGraphValueType::Scalar, 1.0F);
+            input("Opacity", ShaderGraphValueType::Scalar, 1.0F);
+            input("SubsurfaceColor", ShaderGraphValueType::Color, Color{1.0F, 0.35F, 0.25F, 1.0F});
+            input("SubsurfaceWeight", ShaderGraphValueType::Scalar, 0.0F);
+            input("Anisotropy", ShaderGraphValueType::Scalar, 0.0F);
+            input("Tangent", ShaderGraphValueType::Vector3, Vector3{1.0F, 0.0F, 0.0F});
+            input("TransmissionWeight", ShaderGraphValueType::Scalar, 0.0F);
+            input("IndexOfRefraction", ShaderGraphValueType::Scalar, 1.5F);
+            input("Refraction", ShaderGraphValueType::Scalar, 0.0F);
+            input("Thickness", ShaderGraphValueType::Scalar, 1.0F);
+            output("Slab", ShaderGraphValueType::Bsdf);
+            break;
+        case ShaderGraphNodeKind::MixSlabs:
+            node.Name = "Mix Slabs";
+            node.ValueType = ShaderGraphValueType::Bsdf;
+            node.Value = ShaderGraphBsdfValue{};
+            input("A", ShaderGraphValueType::Bsdf, ShaderGraphBsdfValue{});
+            input("B", ShaderGraphValueType::Bsdf, ShaderGraphBsdfValue{});
+            input("Factor", ShaderGraphValueType::Scalar, 0.5F);
+            output("Slab", ShaderGraphValueType::Bsdf);
+            break;
+        case ShaderGraphNodeKind::AddSlabs:
+            node.Name = "Add Slabs";
+            node.ValueType = ShaderGraphValueType::Bsdf;
+            node.Value = ShaderGraphBsdfValue{};
+            input("A", ShaderGraphValueType::Bsdf, ShaderGraphBsdfValue{});
+            input("B", ShaderGraphValueType::Bsdf, ShaderGraphBsdfValue{});
+            input("WeightA", ShaderGraphValueType::Scalar, 1.0F);
+            input("WeightB", ShaderGraphValueType::Scalar, 1.0F);
+            output("Slab", ShaderGraphValueType::Bsdf);
+            break;
+        case ShaderGraphNodeKind::CoatSlab:
+            node.Name = "Coat Slab";
+            node.ValueType = ShaderGraphValueType::Bsdf;
+            node.Value = ShaderGraphBsdfValue{};
+            input("Base", ShaderGraphValueType::Bsdf, ShaderGraphBsdfValue{});
+            input("Weight", ShaderGraphValueType::Scalar, 1.0F);
+            input("Roughness", ShaderGraphValueType::Scalar, 0.25F);
+            output("Slab", ShaderGraphValueType::Bsdf);
+            break;
+        case ShaderGraphNodeKind::FuzzSlab:
+            node.Name = "Fuzz Slab";
+            node.ValueType = ShaderGraphValueType::Bsdf;
+            node.Value = ShaderGraphBsdfValue{};
+            input("Base", ShaderGraphValueType::Bsdf, ShaderGraphBsdfValue{});
+            input("Color", ShaderGraphValueType::Color, Color{1.0F, 1.0F, 1.0F, 1.0F});
+            input("Weight", ShaderGraphValueType::Scalar, 1.0F);
+            input("Roughness", ShaderGraphValueType::Scalar, 0.5F);
+            output("Slab", ShaderGraphValueType::Bsdf);
+            break;
         case ShaderGraphNodeKind::ClearCoatBsdf:
             node.Name = "Clear Coat BSDF";
             node.ValueType = ShaderGraphValueType::Bsdf;

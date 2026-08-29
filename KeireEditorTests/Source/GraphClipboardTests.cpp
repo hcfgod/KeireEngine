@@ -6,6 +6,25 @@
 #include <array>
 #include <string>
 
+namespace
+{
+    [[nodiscard]] Keire::MaterialGraphDefinition MaterialGraph()
+    {
+        Keire::MaterialShaderReference shader;
+        shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+        shader.Asset = Keire::AssetId::Generate();
+        return Keire::CreateMaterialGraph(shader, {});
+    }
+
+    [[nodiscard]] Keire::ShaderGraphNode SurfaceParameter(const std::string& symbol)
+    {
+        auto result =
+            Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+        result.Symbol = symbol;
+        return result;
+    }
+} // namespace
+
 TEST_CASE("Shader Graph clipboard is canonical versioned JSON and remaps every topology identity")
 {
     auto source = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
@@ -94,10 +113,7 @@ TEST_CASE("Shader Graph clipboard gives pasted parameters deterministic unique s
 
 TEST_CASE("Material and VFX clipboard fragments remap editor topology across documents")
 {
-    Keire::MaterialGraphDefinition materialSource;
-    materialSource.Shader.Asset = Keire::AssetId::Generate();
-    materialSource.OutputNode = Keire::AssetId::Generate();
-    materialSource.SurfaceGraph = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
+    auto materialSource = MaterialGraph();
     auto materialFirst = Keire::CreateMaterialGraphValueNode(Keire::ShaderPropertyType::Scalar, 0.25F, {20.0F, 30.0F});
     auto materialSecond = Keire::CreateMaterialGraphValueNode(Keire::ShaderPropertyType::Color,
                                                               Keire::Color{1.0F, 1.0F, 1.0F, 1.0F}, {80.0F, 90.0F});
@@ -106,9 +122,7 @@ TEST_CASE("Material and VFX clipboard fragments remap editor topology across doc
     const std::array materialSelection{materialFirst.Id, materialSecond.Id};
 
     const auto materialFragment = KeireEditor::CopyMaterialGraphFragment(materialSource, materialSelection);
-    Keire::MaterialGraphDefinition materialTarget;
-    materialTarget.Shader.Asset = Keire::AssetId::Generate();
-    materialTarget.OutputNode = Keire::AssetId::Generate();
+    auto materialTarget = MaterialGraph();
     const auto materialPasted = KeireEditor::PasteMaterialGraphFragment(materialTarget, materialFragment);
 
     REQUIRE(materialPasted.size() == 2);
@@ -155,4 +169,50 @@ TEST_CASE("Material and VFX clipboard fragments remap editor topology across doc
     REQUIRE(vfxTarget.Systems.front().Connections.size() == 1);
     CHECK(vfxTarget.Systems.front().Connections.front().OutputNode == vfxPasted[0]);
     CHECK(vfxTarget.Systems.front().Connections.front().InputNode == vfxPasted[1]);
+}
+
+TEST_CASE("Material Graph clipboard gives pasted surface parameters deterministic resource-safe symbols")
+{
+    auto source = MaterialGraph();
+    const auto parameter = SurfaceParameter("SurfaceTint");
+    source.SurfaceGraph.Nodes.push_back(parameter);
+    const std::array selection{parameter.Id};
+    const auto fragment = KeireEditor::CopyMaterialGraphFragment(source, selection);
+
+    auto target = MaterialGraph();
+    target.SurfaceGraph.Resources.push_back({Keire::AssetId::Generate(), "Surface Tint Resource", "SurfaceTint",
+                                             Keire::ShaderGraphResourceKind::Sampler, Keire::SamplerDescription{}});
+    target.SurfaceGraph.Nodes.push_back(SurfaceParameter("SurfaceTint_Copy"));
+    REQUIRE_NOTHROW(Keire::ValidateMaterialGraph(target));
+
+    const auto first = KeireEditor::PasteMaterialGraphFragment(target, fragment);
+    const auto second = KeireEditor::PasteMaterialGraphFragment(target, fragment);
+
+    REQUIRE(first.size() == 1);
+    REQUIRE(second.size() == 1);
+    const auto firstNode = std::ranges::find(target.SurfaceGraph.Nodes, first.front(), &Keire::ShaderGraphNode::Id);
+    const auto secondNode = std::ranges::find(target.SurfaceGraph.Nodes, second.front(), &Keire::ShaderGraphNode::Id);
+    REQUIRE(firstNode != target.SurfaceGraph.Nodes.end());
+    REQUIRE(secondNode != target.SurfaceGraph.Nodes.end());
+    CHECK(firstNode->Symbol == "SurfaceTint_Copy2");
+    CHECK(secondNode->Symbol == "SurfaceTint_Copy3");
+    CHECK_NOTHROW(Keire::ValidateMaterialGraph(target));
+}
+
+TEST_CASE("Material Graph clipboard validates the complete candidate before committing")
+{
+    auto source = MaterialGraph();
+    const auto parameter = SurfaceParameter("AdditionalParameter");
+    source.SurfaceGraph.Nodes.push_back(parameter);
+    const std::array selection{parameter.Id};
+    const auto fragment = KeireEditor::CopyMaterialGraphFragment(source, selection);
+
+    auto target = MaterialGraph();
+    for (std::size_t index = 0; index < 80U; ++index)
+        target.SurfaceGraph.Nodes.push_back(SurfaceParameter("ExistingParameter" + std::to_string(index)));
+    REQUIRE_NOTHROW(Keire::ValidateMaterialGraph(target));
+    const auto original = target;
+
+    CHECK_THROWS_AS((void)KeireEditor::PasteMaterialGraphFragment(target, fragment), std::invalid_argument);
+    CHECK(target == original);
 }

@@ -27,7 +27,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ShaderGraph";
-        result.Version = 18;
+        result.Version = 19;
         result.Type = ShaderGraphAsset::StaticType();
         result.Extensions = {".keireshadergraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
@@ -103,7 +103,7 @@ namespace Keire
                 const auto diagnostic = compilation.Diagnostics.empty()
                                             ? std::string("Shader Graph generated no shader variants.")
                                             : compilation.Diagnostics.front().Message;
-                throw std::runtime_error("Shader Graph runtime material compilation failed: " + diagnostic);
+                throw std::runtime_error("Shader Graph program compilation failed: " + diagnostic);
             }
 
             const auto shaderImporter = CreateShaderAssetImporter();
@@ -148,6 +148,9 @@ namespace Keire
                                             importedShader.Bytes, importedShader.AssetDependencies});
                 shaderVariants.emplace_back(variant.Keywords, shaderId);
             }
+
+            if (definition.Target.Target != ShaderGraphTarget::LegacySurface)
+                return output;
 
             ShaderGraphInstanceDefinition defaults;
             defaults.Parent = context.Asset;
@@ -212,6 +215,10 @@ namespace Keire
                 if (source->Type == ShaderGraphAsset::StaticType())
                 {
                     graph = ShaderGraphAsset::DecodeSource(parentBytes);
+                    if (graph.Target.Target != ShaderGraphTarget::LegacySurface)
+                        throw std::invalid_argument(
+                            "Shader Graph instances only support legacy surface graphs; bind program properties "
+                            "through the target-specific runtime API.");
                     graphAsset = parent;
                     break;
                 }

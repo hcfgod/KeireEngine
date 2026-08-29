@@ -736,20 +736,17 @@ namespace Keire
                                                                 statistics.GpuFrameMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Renderer latency (ms)",
                                                             statistics.RendererLatencyMilliseconds);
-                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering,
-                                                            "Frame admission wait (ms)",
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Frame admission wait (ms)",
                                                             statistics.FrameAdmissionWaitMilliseconds);
-                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering,
-                                                            "Renderer queue delay (ms)",
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Renderer queue delay (ms)",
                                                             statistics.RendererQueueDelayMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Outstanding frames",
                                                             static_cast<double>(statistics.OutstandingFrames));
                         m_Impl->ProfilerService->SetCounter(
                             ProfileCategory::Rendering, "Frames in flight high-water",
                             static_cast<double>(statistics.FramesInFlightHighWaterMark));
-                        m_Impl->ProfilerService->SetCounter(
-                            ProfileCategory::Rendering, "Renderer queue high-water",
-                            static_cast<double>(statistics.RendererQueueHighWaterMark));
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "Renderer queue high-water",
+                                                            static_cast<double>(statistics.RendererQueueHighWaterMark));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion candidates",
                                                             static_cast<double>(statistics.GpuOcclusionCandidates));
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU occlusion visible",

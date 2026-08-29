@@ -110,6 +110,13 @@ namespace Keire::RenderBackend::GpuOcclusionPolicy
         return bytes <= MaximumTextureBytesPerSurface;
     }
 
+    [[nodiscard]] constexpr bool RequiresConservativeVisibilityDebugUpload(const bool visibilityBoundsRequested,
+                                                                           const std::uint32_t candidateCount,
+                                                                           const bool classificationAvailable) noexcept
+    {
+        return visibilityBoundsRequested && candidateCount != 0U && !classificationAvailable;
+    }
+
     constexpr void ResetAllocationRetry(AllocationRetryState& state) noexcept { state = {}; }
 
     constexpr void PrepareAllocationRetryExtent(AllocationRetryState& state, const ResourceExtent extent) noexcept

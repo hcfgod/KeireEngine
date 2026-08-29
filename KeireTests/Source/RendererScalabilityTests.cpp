@@ -251,6 +251,16 @@ TEST_CASE("GPU occlusion allocation retry uses bounded backoff and sparse warnin
     }
 }
 
+TEST_CASE("GPU visibility bounds retain conservative candidates when normal classification is unavailable")
+{
+    namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;
+
+    CHECK(Policy::RequiresConservativeVisibilityDebugUpload(true, 4U, false));
+    CHECK_FALSE(Policy::RequiresConservativeVisibilityDebugUpload(false, 4U, false));
+    CHECK_FALSE(Policy::RequiresConservativeVisibilityDebugUpload(true, 0U, false));
+    CHECK_FALSE(Policy::RequiresConservativeVisibilityDebugUpload(true, 4U, true));
+}
+
 TEST_CASE("optional GPU occlusion visualization failures remain isolated from core setup")
 {
     namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;

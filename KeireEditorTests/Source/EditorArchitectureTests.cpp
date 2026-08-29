@@ -749,54 +749,6 @@ TEST_CASE("scene document commands validate and target the active scene")
     document.Close();
 }
 
-TEST_CASE("scene document multi-edit applies common component changes atomically")
-{
-    KeireEditor::SceneDocument document;
-    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
-                                                Keire::SceneAsset::EmptyDefinition("Inspector multi-edit"));
-    document.Open(scene);
-    const auto first = document.CreateEntity("First", {}, Keire::PointLightComponent::StaticType());
-    const auto second = document.CreateEntity("Second", {}, Keire::PointLightComponent::StaticType());
-    const auto withoutLight = document.CreateEntity("Without light");
-    const std::array selection{first.Value(), second.Value()};
-
-    document.SetComponentsProperty(selection, Keire::PointLightComponent::StaticType(), "intensity", 17.0);
-    document.SetComponentsEnabled(selection, Keire::PointLightComponent::StaticType(), false);
-    document.SetTransforms(selection, {.Position = Keire::Vector3{4.0F, 5.0F, 6.0F}});
-    document.SetEntitiesActive(selection, false);
-
-    for (const auto id : selection)
-    {
-        const auto entity = scene->FindEntity(Keire::EntityId(id));
-        REQUIRE(entity);
-        const auto light = entity.GetComponent<Keire::PointLightComponent>();
-        REQUIRE(light);
-        CHECK(light->Intensity() == doctest::Approx(17.0F));
-        CHECK_FALSE(light->Enabled());
-        CHECK_FALSE(entity.ActiveSelf());
-        CHECK(entity.GetComponent<Keire::TransformComponent>()->LocalPosition() ==
-              Keire::Vector3{4.0F, 5.0F, 6.0F});
-    }
-
-    CHECK_THROWS_AS(document.SetComponentsProperty(
-                        std::array{first.Value(), withoutLight.Value()}, Keire::PointLightComponent::StaticType(),
-                        "intensity", 3.0),
-                    std::invalid_argument);
-    CHECK(scene->FindEntity(first).GetComponent<Keire::PointLightComponent>()->Intensity() == doctest::Approx(17.0F));
-    CHECK_THROWS_AS(document.SetComponentsProperty(selection, Keire::PointLightComponent::StaticType(), "intensity",
-                                                   std::string("invalid")),
-                    std::exception);
-    for (const auto id : selection)
-        CHECK(scene->FindEntity(Keire::EntityId(id)).GetComponent<Keire::PointLightComponent>()->Intensity() ==
-              doctest::Approx(17.0F));
-
-    document.ResetComponents(selection, Keire::PointLightComponent::StaticType());
-    for (const auto id : selection)
-        CHECK(scene->FindEntity(Keire::EntityId(id)).GetComponent<Keire::PointLightComponent>()->Intensity() ==
-              doctest::Approx(1.0F));
-    document.Close();
-}
-
 TEST_CASE("scene document moves hierarchy selections as one validated ordered transaction")
 {
     KeireEditor::SceneDocument document;

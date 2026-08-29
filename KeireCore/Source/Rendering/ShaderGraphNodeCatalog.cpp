@@ -230,6 +230,16 @@ namespace Keire
                            ShaderGraphValueType::Scalar, ShaderGraphShaderStage::All, 4},
             NodeDescriptor{ShaderGraphNodeKind::Logarithm, "keire.math.logarithm", "Logarithm", "Math",
                            ShaderGraphValueType::Scalar, ShaderGraphShaderStage::All, 4},
+            NodeDescriptor{ShaderGraphNodeKind::OpenPbrSurfaceBsdf, "keire.openpbr.surface", "OpenPBR Surface Slab",
+                           "OpenPBR / Slabs", ShaderGraphValueType::Bsdf, ShaderGraphShaderStage::Fragment, 12},
+            NodeDescriptor{ShaderGraphNodeKind::MixSlabs, "keire.openpbr.mix", "Mix Slabs", "OpenPBR / Slabs",
+                           ShaderGraphValueType::Bsdf, ShaderGraphShaderStage::Fragment, 28},
+            NodeDescriptor{ShaderGraphNodeKind::AddSlabs, "keire.openpbr.add", "Add Slabs", "OpenPBR / Slabs",
+                           ShaderGraphValueType::Bsdf, ShaderGraphShaderStage::Fragment, 34},
+            NodeDescriptor{ShaderGraphNodeKind::CoatSlab, "keire.openpbr.coat", "Coat Slab", "OpenPBR / Slabs",
+                           ShaderGraphValueType::Bsdf, ShaderGraphShaderStage::Fragment, 4},
+            NodeDescriptor{ShaderGraphNodeKind::FuzzSlab, "keire.openpbr.fuzz", "Fuzz Slab", "OpenPBR / Slabs",
+                           ShaderGraphValueType::Bsdf, ShaderGraphShaderStage::Fragment, 6},
         };
     } // namespace
 

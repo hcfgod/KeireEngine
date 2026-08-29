@@ -180,6 +180,12 @@ namespace Keire
             Json result{
                 {"schemaVersion", ShaderGraphSourceSchemaVersion},
                 {"purpose", static_cast<std::uint8_t>(definition.Purpose)},
+                {"target", static_cast<std::uint8_t>(definition.Target.Target)},
+                {"stages", static_cast<std::uint8_t>(definition.Target.Stages)},
+                {"fullscreenInjectionPoint", static_cast<std::uint8_t>(definition.Target.FullscreenInjectionPoint)},
+                {"threadGroupSize",
+                 {definition.Target.ThreadGroupSizeX, definition.Target.ThreadGroupSizeY,
+                  definition.Target.ThreadGroupSizeZ}},
                 {"output", static_cast<std::uint8_t>(definition.Output)},
                 {"nodes", std::move(nodes)},
                 {"connections", std::move(connections)},
@@ -221,6 +227,24 @@ namespace Keire
                                        source.value("purpose", static_cast<std::uint8_t>(ShaderGraphPurpose::Shader)))
                                  : ShaderGraphPurpose::Shader;
             result.Output = static_cast<ShaderGraphOutput>(source.value("output", static_cast<std::uint8_t>(0)));
+            if (sourceSchemaVersion >= 6U)
+            {
+                result.Target.Target = static_cast<ShaderGraphTarget>(
+                    source.value("target", static_cast<std::uint8_t>(ShaderGraphTarget::LegacySurface)));
+                result.Target.Stages = static_cast<ShaderGraphShaderStage>(
+                    source.value("stages", static_cast<std::uint8_t>(result.Target.Stages)));
+                result.Target.FullscreenInjectionPoint = static_cast<ShaderGraphFullscreenInjectionPoint>(
+                    source.value("fullscreenInjectionPoint",
+                                 static_cast<std::uint8_t>(ShaderGraphFullscreenInjectionPoint::AfterTonemapping)));
+                const auto& groupSize = source.value("threadGroupSize", Json::array({8U, 8U, 1U}));
+                if (!groupSize.is_array() || groupSize.size() != 3U)
+                    throw std::invalid_argument("Shader Graph compute thread-group size is invalid.");
+                result.Target.ThreadGroupSizeX = groupSize.at(0).get<std::uint32_t>();
+                result.Target.ThreadGroupSizeY = groupSize.at(1).get<std::uint32_t>();
+                result.Target.ThreadGroupSizeZ = groupSize.at(2).get<std::uint32_t>();
+            }
+            else if (result.Output == ShaderGraphOutput::Fullscreen)
+                result.Target.Target = ShaderGraphTarget::Fullscreen;
             result.MaximumWorldPositionDisplacementRadius =
                 sourceSchemaVersion >= 5U ? source.at("maximumWorldPositionDisplacementRadius").get<float>() : 0.0F;
             if (source.contains("generatedAssetOwner"))

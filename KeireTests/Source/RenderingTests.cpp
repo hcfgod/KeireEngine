@@ -1485,10 +1485,56 @@ TEST_CASE("Assimp project IO serves only an absolute primary-source alias from s
     CHECK(reads.empty());
     CHECK(io.Violation().empty());
 
+    for (const std::string_view alias :
+         {"file:///D:/Synty/SourceFiles/FBX/SM_Bld_Barn_01.fbx", "file://build-server/Synty/SM_Bld_Barn_01.fbx",
+          "D%3A%5CSynty%5CSourceFiles%5CFBX%5CSM_Bld_Barn_01.fbx"})
+    {
+        const auto referenced = io.ReadReferencedFile(alias);
+        REQUIRE(referenced);
+        CHECK(referenced->RelativePath == std::filesystem::path("Assets/Models/SM_Bld_Barn_01.fbx"));
+        CHECK(std::ranges::equal(referenced->Bytes, primary));
+    }
+    CHECK(reads.empty());
+    CHECK(io.Violation().empty());
+
     CHECK_FALSE(io.ReadReferencedFile("U:/Studio/Textures/PolygonWar_Texture.psd"));
     CHECK(io.Violation().empty());
     CHECK(io.LastReadFailure().find("Ignored non-portable absolute model reference") != std::string_view::npos);
+    CHECK_FALSE(io.ReadReferencedFile("file://asset-server/Textures/PolygonWar_Texture.psd"));
+    CHECK(io.Violation().empty());
+    CHECK(io.LastReadFailure().find("Ignored non-portable absolute model reference") != std::string_view::npos);
+    CHECK_FALSE(io.ReadReferencedFile("U%3A%5CStudio%5CTextures%5CPolygonWar_Texture.psd"));
+    CHECK(io.Violation().empty());
+    CHECK(io.LastReadFailure().find("Ignored non-portable absolute model reference") != std::string_view::npos);
     CHECK(reads.empty());
+}
+
+TEST_CASE("Assimp project IO rejects malformed encodings and encoded relative traversal")
+{
+    TemporaryDirectory directory("ModelMalformedReferenceTests");
+    const auto sourceRoot = directory.Path / "Assets";
+    std::filesystem::create_directories(sourceRoot / "Models");
+    const std::array primary{std::byte{0x01}};
+
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = sourceRoot / "Models/model.fbx";
+    context.RelativePath = "Models/model.fbx";
+    std::size_t reads = 0;
+    context.ReadProjectFile = [&reads](const std::filesystem::path&) -> std::vector<std::byte>
+    {
+        ++reads;
+        return {};
+    };
+
+    for (const std::string_view rejected : {"C%3G%5Cinvalid.fbx", "%2E%2E/outside.bin"})
+    {
+        Keire::Detail::AssimpProjectIO io(context, primary);
+        CHECK_FALSE(io.ReadReferencedFile(rejected));
+        CHECK_FALSE(io.Violation().empty());
+    }
+    CHECK(reads == 0);
 }
 
 TEST_CASE("model import can retain material slots without publishing source materials")
@@ -1741,6 +1787,34 @@ TEST_CASE("pinned shader compiler resolves from the executable while the project
     REQUIRE(output.SourceDependencies.size() == 1);
     CHECK(output.SourceDependencies.front().RelativePath == std::filesystem::path("Assets/Shaders/DefaultUnlit.hlsl"));
     CHECK(output.Diagnostics.empty());
+}
+
+TEST_CASE("shader importer accepts the current Starter 3D schema without lowering its ABI")
+{
+    const auto repository = std::filesystem::current_path();
+    const auto project = repository / "KeireHubContent/Templates/Payloads/Starter3D";
+    const auto sourceRoot = project / "Assets";
+    const auto manifest = sourceRoot / "Shaders/DefaultUnlit.keireshader";
+    Keire::AssetImportContext context;
+    context.ProjectRoot = project;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = manifest;
+    context.RelativePath = "Shaders/DefaultUnlit.keireshader";
+    context.ReadProjectFile = [project](const std::filesystem::path& relative)
+    { return ReadTestBytes(project / relative); };
+
+    const auto importer = Keire::CreateShaderAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    const auto output = importer.ContextualImport(context, ReadTestBytes(manifest));
+    const auto shader = Keire::ShaderAsset::Decode(output.Bytes);
+    CHECK(shader->Definition().SchemaVersion == 2U);
+    CHECK(shader->Definition().InstanceAddressingAbiVersion == 2U);
+    CHECK(Keire::HasShaderOcclusionSupport(shader->Definition().OcclusionSupport,
+                                           Keire::ShaderOcclusionSupport::ConservativeBounds));
+    CHECK(Keire::HasShaderOcclusionSupport(shader->Definition().OcclusionSupport,
+                                           Keire::ShaderOcclusionSupport::DepthOnlyGeometryMatch));
+    REQUIRE(shader->Definition().MaximumWorldPositionDisplacementRadius);
+    CHECK(*shader->Definition().MaximumWorldPositionDisplacementRadius == doctest::Approx(0.0F));
 }
 
 TEST_CASE("camera and mesh renderer components validate renderer-neutral authoring data")

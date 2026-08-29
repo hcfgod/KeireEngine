@@ -71,6 +71,21 @@ namespace Keire::Detail
                 result["step"] = *property.Step;
             return result;
         }
+
+        [[nodiscard]] std::string_view
+        FullscreenInjectionPointName(const ShaderGraphFullscreenInjectionPoint injectionPoint) noexcept
+        {
+            switch (injectionPoint)
+            {
+            case ShaderGraphFullscreenInjectionPoint::BeforeTonemapping:
+                return "BeforeTonemapping";
+            case ShaderGraphFullscreenInjectionPoint::AfterTonemapping:
+                return "AfterTonemapping";
+            case ShaderGraphFullscreenInjectionPoint::AfterUi:
+                return "AfterUi";
+            }
+            return "AfterTonemapping";
+        }
     } // namespace
 
     std::string BuildShaderGraphManifest(const ShaderGraphDefinition& definition,
@@ -96,12 +111,18 @@ namespace Keire::Detail
                         reinterpret_cast<const char*>(resourceBytes.data()) + resourceBytes.size());
         const bool transparent =
             definition.Output == ShaderGraphOutput::Transparent || definition.Output == ShaderGraphOutput::Decal;
-        const bool fullscreen = definition.Output == ShaderGraphOutput::Fullscreen;
+        const bool fullscreen = definition.Target.Target == ShaderGraphTarget::Fullscreen;
         const bool lit = definition.Output != ShaderGraphOutput::Unlit && !fullscreen;
         const Json manifest{
-            {"schemaVersion", 1},
+            {"schemaVersion", 2},
             {"materialGraphSourceSchemaVersion", definition.SchemaVersion},
             {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
+            {"programTarget", ShaderGraphTargetName(definition.Target.Target)},
+            {"programStages", static_cast<std::uint8_t>(definition.Target.Stages)},
+            {"fullscreenInjectionPoint", FullscreenInjectionPointName(definition.Target.FullscreenInjectionPoint)},
+            {"computeThreadGroupSize",
+             {definition.Target.ThreadGroupSizeX, definition.Target.ThreadGroupSizeY,
+              definition.Target.ThreadGroupSizeZ}},
             {"source", generatedSource.generic_string()},
             {"vertexLayoutVersion", ShaderGraphVertexLayoutVersion},
             {"receivesShadows", lit},
