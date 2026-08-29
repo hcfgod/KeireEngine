@@ -165,19 +165,27 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
     ui.Separator();
     if (scene && inspectedEntity)
     {
-        if (sceneDocument.Selections().size() > 1)
-            ui.TextColored(theme.MutedText, std::to_string(sceneDocument.Selections().size()) +
-                                                " entities selected; editing the primary selection.");
         auto entity = scene->FindEntity(Keire::EntityId(inspectedEntity));
         if (entity)
         {
+            const bool multiEditing = !m_Registration.Locked() && sceneDocument.Selections().size() > 1;
+            std::vector<Keire::AssetId> editTargets;
+            if (multiEditing)
+                editTargets.assign(sceneDocument.Selections().begin(), sceneDocument.Selections().end());
+            else
+                editTargets.push_back(entity.Id().Value());
+            if (multiEditing)
+            {
+                ui.TextColored(theme.MutedText, std::to_string(editTargets.size()) +
+                                                    " entities selected; common component changes apply to all.");
+            }
             const auto currentName = entity.Name();
             if (m_EntityNameTarget != entity.Id().Value() || !m_EntityNameEditing)
             {
                 m_EntityNameTarget = entity.Id().Value();
                 m_EntityNameDraft = currentName;
             }
-            (void)ui.InputText("Entity Name", m_EntityNameDraft);
+            (void)ui.InputText(multiEditing ? "Primary Entity Name" : "Entity Name", m_EntityNameDraft);
             const auto nameState = ui.LastItemState();
             const bool validEntityName = SceneDocument::IsValidEntityName(m_EntityNameDraft);
             if (nameState.DeactivatedAfterEdit)
@@ -198,7 +206,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             if (ui.Checkbox("Active", active))
             {
                 m_Controller.RecordInspectorUndo();
-                sceneDocument.SetEntityActive(entity.Id(), active);
+                if (multiEditing)
+                    sceneDocument.SetEntitiesActive(editTargets, active);
+                else
+                    sceneDocument.SetEntityActive(entity.Id(), active);
             }
             const auto layerNames = m_Controller.InspectorLayerNames();
             auto layer = entity.Layer();
@@ -292,6 +303,48 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 }
             }
             const auto componentOrder = entity.GetComponents();
+            std::size_t editingComponentOrdinal = 0;
+            const auto commonComponent = [&](const Keire::Ref<Keire::Component>& component)
+            {
+                if (!multiEditing)
+                    return true;
+                const auto ordinal = ComponentOrdinal(componentOrder, component);
+                for (const auto targetId : editTargets)
+                {
+                    const auto target = scene->FindEntity(Keire::EntityId(targetId));
+                    if (!target)
+                        return false;
+                    std::size_t matches = 0;
+                    for (const auto& candidate : target.GetComponents())
+                        if (candidate && candidate->Type() == component->Type())
+                            ++matches;
+                    if (matches <= ordinal)
+                        return false;
+                }
+                return true;
+            };
+            const auto setComponentEnabled = [&](const Keire::ComponentTypeId type, const bool enabled)
+            {
+                if (multiEditing)
+                    sceneDocument.SetComponentsEnabled(editTargets, type, enabled, editingComponentOrdinal);
+                else
+                    sceneDocument.SetComponentEnabled(entity.Id(), type, enabled);
+            };
+            const auto setComponentProperty = [&](const Keire::ComponentTypeId type, const std::string_view property,
+                                                  Keire::ComponentPropertyValue value)
+            {
+                if (multiEditing)
+                    sceneDocument.SetComponentsProperty(editTargets, type, property, value, editingComponentOrdinal);
+                else
+                    sceneDocument.SetComponentProperty(entity.Id(), type, property, std::move(value));
+            };
+            const auto resetComponent = [&](const Keire::ComponentTypeId type)
+            {
+                if (multiEditing)
+                    sceneDocument.ResetComponents(editTargets, type, editingComponentOrdinal);
+                else
+                    sceneDocument.ResetComponent(entity.Id(), type);
+            };
             const auto drawComponentHeader = [&](const Keire::Ref<Keire::Component>& component,
                                                  const Keire::ComponentRegistration& registration, bool& expanded,
                                                  const std::string_view title)
@@ -318,26 +371,30 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         expanded = !expanded;
                     const bool hoveredComponent = ui.LastItemState().Hovered;
                     const auto headerRect = ui.LastItemRect();
-                    if (auto source = ui.BeginDragSource(); source)
+                    if (!multiEditing)
                     {
-                        const auto payload = EncodeComponentOrderPayload({entity.Id(), registration.Type, ordinal});
-                        ui.SetDragPayload("KEIRE_COMPONENT_ORDER",
-                                          std::as_bytes(std::span(payload.data(), payload.size())));
-                        ui.Text(entity.Name() + " / " + registration.Name);
-                    }
-                    if (auto target = ui.BeginDragTarget(headerRect, "ComponentDrop##" + unique); target)
-                    {
-                        std::vector<std::byte> bytes;
-                        if (ui.AcceptDragPayload("KEIRE_COMPONENT_ORDER", bytes))
+                        if (auto source = ui.BeginDragSource(); source)
                         {
-                            const auto payload = DecodeComponentOrderPayload(bytes);
-                            const auto source =
-                                payload ? ResolveComponentOrderPayload(componentOrder, entity.Id(), *payload)
-                                        : Keire::Ref<Keire::Component>{};
-                            if (source && source != component)
+                            const auto payload =
+                                EncodeComponentOrderPayload({entity.Id(), registration.Type, ordinal});
+                            ui.SetDragPayload("KEIRE_COMPONENT_ORDER",
+                                              std::as_bytes(std::span(payload.data(), payload.size())));
+                            ui.Text(entity.Name() + " / " + registration.Name);
+                        }
+                        if (auto target = ui.BeginDragTarget(headerRect, "ComponentDrop##" + unique); target)
+                        {
+                            std::vector<std::byte> bytes;
+                            if (ui.AcceptDragPayload("KEIRE_COMPONENT_ORDER", bytes))
                             {
-                                m_Controller.RecordInspectorUndo("Reorder Components");
-                                sceneDocument.MoveComponentBefore(entity.Id(), source, component);
+                                const auto payload = DecodeComponentOrderPayload(bytes);
+                                const auto source =
+                                    payload ? ResolveComponentOrderPayload(componentOrder, entity.Id(), *payload)
+                                            : Keire::Ref<Keire::Component>{};
+                                if (source && source != component)
+                                {
+                                    m_Controller.RecordInspectorUndo("Reorder Components");
+                                    sceneDocument.MoveComponentBefore(entity.Id(), source, component);
+                                }
                             }
                         }
                     }
@@ -346,13 +403,19 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         m_ComponentClipboard =
                             ComponentClipboard{registration.Type, registration.Serialize(*component), true};
                     }
-                    if (auto context = ui.BeginItemContextMenu("ComponentContext##" + unique); context)
-                        removed = DrawComponentMenu(ui, entity, component, registration, sceneDocument, scene);
+                    if (!multiEditing)
+                        if (auto context = ui.BeginItemContextMenu("ComponentContext##" + unique); context)
+                            removed = DrawComponentMenu(ui, entity, component, registration, sceneDocument, scene);
                     (void)ui.TableNextColumn();
-                    if (ui.IconButton("ComponentMore##" + unique, Keire::UiIcon::More, false, {26.0F, 22.0F}))
+                    if (!multiEditing &&
+                        ui.IconButton("ComponentMore##" + unique, Keire::UiIcon::More, false, {26.0F, 22.0F}))
+                    {
                         openMenu = true;
-                    if (ui.LastItemState().Hovered)
+                    }
+                    if (!multiEditing && ui.LastItemState().Hovered)
                         ui.SetTooltip("Component actions", {.Delayed = true});
+                    if (multiEditing)
+                        ui.TextColored(theme.MutedText, "Common");
                 }
                 if (openMenu)
                     ui.OpenPopup(popupId);
@@ -367,8 +430,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
             };
             for (const auto& displayedComponent : componentOrder)
             {
-                if (!displayedComponent)
+                if (!displayedComponent || !commonComponent(displayedComponent))
                     continue;
+                editingComponentOrdinal = ComponentOrdinal(componentOrder, displayedComponent);
                 if (displayedComponent->Type() == Keire::TransformComponent::StaticType())
                 {
                     auto& transformExpanded = expansion("transform");
@@ -436,24 +500,52 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             const bool validScale = Keire::TransformComponent::IsValidLocalScale(scale);
                             if (positionChanged)
                             {
-                                m_Controller.ApplyInspectorTransformEdit(
-                                    MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Position,
-                                                               previousPosition, position, m_EditSerial));
+                                if (multiEditing)
+                                {
+                                    m_Controller.RecordInspectorUndo(
+                                        "Change Position", "transform.multi.position." + std::to_string(m_EditSerial));
+                                    sceneDocument.SetTransforms(editTargets, {.Position = position});
+                                }
+                                else
+                                {
+                                    m_Controller.ApplyInspectorTransformEdit(
+                                        MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Position,
+                                                                   previousPosition, position, m_EditSerial));
+                                }
                             }
                             if (rotationChanged)
                             {
                                 const auto orientation = Keire::Math::EulerDegreesToQuaternion(rotation);
-                                m_Controller.ApplyInspectorTransformEdit(
-                                    MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Rotation,
-                                                               currentOrientation, orientation, m_EditSerial));
+                                if (multiEditing)
+                                {
+                                    m_Controller.RecordInspectorUndo(
+                                        "Change Rotation", "transform.multi.rotation." + std::to_string(m_EditSerial));
+                                    sceneDocument.SetTransforms(editTargets, {.EulerDegrees = rotation});
+                                }
+                                else
+                                {
+                                    m_Controller.ApplyInspectorTransformEdit(
+                                        MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Rotation,
+                                                                   currentOrientation, orientation, m_EditSerial));
+                                }
                                 m_RotationEuler = rotation;
                                 m_RotationOrientation = orientation;
                             }
                             if (scaleChanged && validScale)
                             {
-                                m_Controller.ApplyInspectorTransformEdit(
-                                    MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Scale,
-                                                               previousScale, scale, m_EditSerial));
+                                if (multiEditing)
+                                {
+                                    m_Controller.RecordInspectorUndo("Change Scale",
+                                                                     "transform.multi.scale." +
+                                                                         std::to_string(m_EditSerial));
+                                    sceneDocument.SetTransforms(editTargets, {.Scale = scale});
+                                }
+                                else
+                                {
+                                    m_Controller.ApplyInspectorTransformEdit(
+                                        MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Scale,
+                                                                   previousScale, scale, m_EditSerial));
+                                }
                             }
                             if (scaleState.Active && !validScale)
                                 ui.TextColored(
@@ -474,9 +566,13 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             if (ui.Button("Reset"))
                             {
                                 m_Controller.RecordInspectorUndo();
-                                sceneDocument.SetTransform(entity.Id(), {.Position = Keire::Vector3{},
-                                                                         .EulerDegrees = Keire::Vector3{},
-                                                                         .Scale = Keire::Vector3{1.0F, 1.0F, 1.0F}});
+                                const SceneDocument::TransformValues defaults{.Position = Keire::Vector3{},
+                                                                             .EulerDegrees = Keire::Vector3{},
+                                                                             .Scale = Keire::Vector3{1.0F, 1.0F, 1.0F}};
+                                if (multiEditing)
+                                    sceneDocument.SetTransforms(editTargets, defaults);
+                                else
+                                    sceneDocument.SetTransform(entity.Id(), defaults);
                                 m_RotationTarget = entity.Id().Value();
                                 m_RotationEuler = {};
                                 m_RotationOrientation = {};
@@ -507,38 +603,34 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 if (ui.Checkbox("Enabled", enabled))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentEnabled(entity.Id(), light->Type(), enabled);
+                                    setComponentEnabled(light->Type(), enabled);
                                 }
                                 auto color = light->LightColor();
                                 Keire::UiColor editorColor{color.Red, color.Green, color.Blue, color.Alpha};
                                 if (ui.ColorEdit("Color", editorColor))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "color",
-                                                                       Keire::Color{editorColor.Red, editorColor.Green,
-                                                                                    editorColor.Blue,
-                                                                                    editorColor.Alpha});
+                                    setComponentProperty(light->Type(), "color",
+                                                         Keire::Color{editorColor.Red, editorColor.Green,
+                                                                      editorColor.Blue, editorColor.Alpha});
                                 }
                                 auto intensity = light->Intensity();
                                 if (ui.SliderFloat("Intensity", intensity, 0.0F, 100.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "intensity",
-                                                                       static_cast<double>(intensity));
+                                    setComponentProperty(light->Type(), "intensity", static_cast<double>(intensity));
                                 }
                                 auto temperature = light->UseColorTemperature();
                                 if (ui.Checkbox("Use Color Temperature", temperature))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "useTemperature",
-                                                                       temperature);
+                                    setComponentProperty(light->Type(), "useTemperature", temperature);
                                 }
                                 auto kelvin = light->ColorTemperatureKelvin();
                                 if (ui.SliderFloat("Temperature (K)", kelvin, 1000.0F, 20000.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "temperature",
-                                                                       static_cast<double>(kelvin));
+                                    setComponentProperty(light->Type(), "temperature", static_cast<double>(kelvin));
                                 }
                                 const auto shadows = light->Shadows();
                                 const auto shadowLabel = shadows == Keire::ShadowQuality::Disabled ? "Disabled"
@@ -554,8 +646,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                         if (ui.Selectable(labels[index], shadows == modes[index]))
                                         {
                                             m_Controller.RecordInspectorUndo();
-                                            sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadows",
-                                                                               static_cast<std::int64_t>(modes[index]));
+                                            setComponentProperty(light->Type(), "shadows",
+                                                                 static_cast<std::int64_t>(modes[index]));
                                         }
                                     }
                                 }
@@ -563,20 +655,19 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 if (ui.SliderFloat("Shadow Strength", shadowStrength, 0.0F, 1.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadowStrength",
-                                                                       static_cast<double>(shadowStrength));
+                                    setComponentProperty(light->Type(), "shadowStrength",
+                                                         static_cast<double>(shadowStrength));
                                 }
                                 auto bias = light->ShadowBias();
                                 if (ui.SliderFloat("Shadow Bias", bias, 0.0F, 1.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), light->Type(), "shadowBias",
-                                                                       static_cast<double>(bias));
+                                    setComponentProperty(light->Type(), "shadowBias", static_cast<double>(bias));
                                 }
                                 if (ui.Button("Reset Light"))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.ResetComponent(entity.Id(), light->Type());
+                                    resetComponent(light->Type());
                                 }
                                 ui.TextColored(theme.MutedText, "Direct lighting | Directional shadows");
                             }
@@ -603,13 +694,13 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 if (ui.Checkbox("Enabled##Camera", enabled))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentEnabled(entity.Id(), camera->Type(), enabled);
+                                    setComponentEnabled(camera->Type(), enabled);
                                 }
                                 auto primary = camera->Primary();
                                 if (ui.Checkbox("Primary", primary))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "primary", primary);
+                                    setComponentProperty(camera->Type(), "primary", primary);
                                 }
                                 const auto projection = camera->Projection();
                                 if (auto combo =
@@ -622,15 +713,13 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                       projection == Keire::CameraProjection::Perspective))
                                     {
                                         m_Controller.RecordInspectorUndo();
-                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "projection",
-                                                                           std::int64_t{0});
+                                        setComponentProperty(camera->Type(), "projection", std::int64_t{0});
                                     }
                                     if (ui.Selectable("Orthographic",
                                                       projection == Keire::CameraProjection::Orthographic))
                                     {
                                         m_Controller.RecordInspectorUndo();
-                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "projection",
-                                                                           std::int64_t{1});
+                                        setComponentProperty(camera->Type(), "projection", std::int64_t{1});
                                     }
                                 }
                                 const auto clearMode = camera->ClearMode();
@@ -642,22 +731,20 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     if (ui.Selectable("Skybox", clearMode == Keire::CameraClearMode::Skybox))
                                     {
                                         m_Controller.RecordInspectorUndo();
-                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
-                                                                           std::int64_t{0});
+                                        setComponentProperty(camera->Type(), "clearMode", std::int64_t{0});
                                     }
                                     if (ui.Selectable("Solid Color", clearMode == Keire::CameraClearMode::SolidColor))
                                     {
                                         m_Controller.RecordInspectorUndo();
-                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "clearMode",
-                                                                           std::int64_t{1});
+                                        setComponentProperty(camera->Type(), "clearMode", std::int64_t{1});
                                     }
                                 }
                                 auto priority = camera->Priority();
                                 if (ui.SliderInt("Priority", priority, -100, 100))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "priority",
-                                                                       static_cast<std::int64_t>(priority));
+                                    setComponentProperty(camera->Type(), "priority",
+                                                         static_cast<std::int64_t>(priority));
                                 }
                                 if (camera->Projection() == Keire::CameraProjection::Perspective)
                                 {
@@ -665,8 +752,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     if (ui.SliderFloat("Vertical FOV", fieldOfView, 1.0F, 179.0F))
                                     {
                                         m_Controller.RecordInspectorUndo();
-                                        sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "fieldOfView",
-                                                                           static_cast<double>(fieldOfView));
+                                        setComponentProperty(camera->Type(), "fieldOfView",
+                                                             static_cast<double>(fieldOfView));
                                     }
                                 }
                                 else
@@ -675,8 +762,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     if (ui.SliderFloat("Orthographic Size", size, 0.01F, 100.0F))
                                     {
                                         m_Controller.RecordInspectorUndo();
-                                        sceneDocument.SetComponentProperty(
-                                            entity.Id(), camera->Type(), "orthographicSize", static_cast<double>(size));
+                                        setComponentProperty(camera->Type(), "orthographicSize",
+                                                             static_cast<double>(size));
                                     }
                                 }
                                 auto nearPlane = camera->NearPlane();
@@ -688,10 +775,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 if (nearChanged || farChanged)
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "nearPlane",
-                                                                       static_cast<double>(nearPlane));
-                                    sceneDocument.SetComponentProperty(entity.Id(), camera->Type(), "farPlane",
-                                                                       static_cast<double>(farPlane));
+                                    setComponentProperty(camera->Type(), "nearPlane", static_cast<double>(nearPlane));
+                                    setComponentProperty(camera->Type(), "farPlane", static_cast<double>(farPlane));
                                 }
                                 if (camera->ClearMode() == Keire::CameraClearMode::SolidColor)
                                 {
@@ -700,16 +785,15 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     if (ui.ColorEdit("Clear Color", clearColor))
                                     {
                                         m_Controller.RecordInspectorUndo();
-                                        sceneDocument.SetComponentProperty(
-                                            entity.Id(), camera->Type(), "clearColor",
-                                            Keire::Color{clearColor.Red, clearColor.Green, clearColor.Blue,
-                                                         clearColor.Alpha});
+                                        setComponentProperty(camera->Type(), "clearColor",
+                                                             Keire::Color{clearColor.Red, clearColor.Green,
+                                                                          clearColor.Blue, clearColor.Alpha});
                                     }
                                 }
                                 if (ui.Button("Reset Camera"))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.ResetComponent(entity.Id(), camera->Type());
+                                    resetComponent(camera->Type());
                                 }
                             }
                         }
@@ -736,21 +820,19 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 if (ui.Checkbox("Enabled##MeshRenderer", enabled))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentEnabled(entity.Id(), renderer->Type(), enabled);
+                                    setComponentEnabled(renderer->Type(), enabled);
                                 }
                                 auto visible = renderer->Visible();
                                 if (ui.Checkbox("Visible", visible))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "visible",
-                                                                       visible);
+                                    setComponentProperty(renderer->Type(), "visible", visible);
                                 }
                                 auto alwaysVisible = renderer->AlwaysVisible();
                                 if (ui.Checkbox("Always Visible", alwaysVisible))
                                 {
                                     m_Controller.RecordInspectorUndo("Change Frustum Culling");
-                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "alwaysVisible",
-                                                                       alwaysVisible);
+                                    setComponentProperty(renderer->Type(), "alwaysVisible", alwaysVisible);
                                 }
                                 if (ui.LastItemState().Hovered)
                                 {
@@ -765,8 +847,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     m_Controller.RecordInspectorUndo("Change Tint", "mesh.tint." +
                                                                                         entity.Id().ToString() + "." +
                                                                                         std::to_string(m_EditSerial));
-                                    sceneDocument.SetComponentProperty(
-                                        entity.Id(), renderer->Type(), "tint",
+                                    setComponentProperty(
+                                        renderer->Type(), "tint",
                                         Keire::Color{tintColor.Red, tintColor.Green, tintColor.Blue, tintColor.Alpha});
                                 }
                                 if (ui.LastItemState().DeactivatedAfterEdit)
@@ -793,8 +875,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                 m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
                                                                                  "mesh-renderer." + property.Key + "." +
                                                                                      entity.Id().ToString());
-                                                sceneDocument.SetComponentProperty(entity.Id(), registration->Type,
-                                                                                   property.Key, std::move(candidate));
+                                                setComponentProperty(registration->Type, property.Key,
+                                                                     std::move(candidate));
                                             }
                                         }
                                         catch (const std::exception& error)
@@ -830,7 +912,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                              "mesh-renderer.material." +
                                                                                  std::to_string(slot) + "." +
                                                                                  entity.Id().ToString());
-                                            sceneDocument.SetMeshRendererMaterial(entity.Id(), slot, material);
+                                            if (multiEditing)
+                                                sceneDocument.SetMeshRenderersMaterial(editTargets, slot, material);
+                                            else
+                                                sceneDocument.SetMeshRendererMaterial(entity.Id(), slot, material);
                                             m_Controller.NotifyInspectorMaterialAssigned(material);
                                         }
                                     }
@@ -839,20 +924,18 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 if (ui.Checkbox("Cast Shadows", castShadows))
                                 {
                                     m_Controller.RecordInspectorUndo("Change Shadow Casting");
-                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "castShadows",
-                                                                       castShadows);
+                                    setComponentProperty(renderer->Type(), "castShadows", castShadows);
                                 }
                                 auto receiveShadows = renderer->ReceiveShadows();
                                 if (ui.Checkbox("Receive Shadows", receiveShadows))
                                 {
                                     m_Controller.RecordInspectorUndo("Change Shadow Receiving");
-                                    sceneDocument.SetComponentProperty(entity.Id(), renderer->Type(), "receiveShadows",
-                                                                       receiveShadows);
+                                    setComponentProperty(renderer->Type(), "receiveShadows", receiveShadows);
                                 }
                                 if (ui.Button("Reset Renderer"))
                                 {
                                     m_Controller.RecordInspectorUndo();
-                                    sceneDocument.ResetComponent(entity.Id(), renderer->Type());
+                                    resetComponent(renderer->Type());
                                 }
                             }
                         }
@@ -998,7 +1081,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         if (ui.Checkbox("Enabled##" + registration->Type.ToString(), enabled))
                         {
                             m_Controller.RecordInspectorUndo("Change " + registration->Name);
-                            sceneDocument.SetComponentEnabled(entity.Id(), registration->Type, enabled);
+                            setComponentEnabled(registration->Type, enabled);
                         }
                         if (const auto animator = Keire::DynamicRefCast<Keire::AnimatorComponent>(component);
                             animator && animator->PoseSource() == Keire::AnimatorPoseSource::ProceduralHumanoid)
@@ -1020,7 +1103,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             ui.Separator();
                         }
                         if (rectTransform)
-                            DrawRectTransformAnchorPreset(ui, entity, *registration, sceneDocument, theme);
+                            DrawRectTransformAnchorPreset(ui, entity, *registration, sceneDocument, theme, editTargets,
+                                                          multiEditing);
                         std::string activeGroup;
                         Keire::ComponentPropertyBag values;
                         bool serialized = false;
@@ -1248,12 +1332,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                      registration->Type.ToString() + "." +
                                                                          property.Key + "." + entity.Id().ToString() +
                                                                          "." + std::to_string(m_EditSerial));
-                                    sceneDocument.SetComponentProperty(entity.Id(), registration->Type, property.Key,
-                                                                       std::move(candidate));
+                                    setComponentProperty(registration->Type, property.Key, std::move(candidate));
                                     if (audioBusFallback)
                                     {
-                                        sceneDocument.SetComponentProperty(entity.Id(), registration->Type, "bus",
-                                                                           std::move(*audioBusFallback));
+                                        setComponentProperty(registration->Type, "bus", std::move(*audioBusFallback));
                                     }
                                 }
                                 if (changed && (editBoundary || ui.LastItemState().DeactivatedAfterEdit))

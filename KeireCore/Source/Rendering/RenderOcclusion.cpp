@@ -137,6 +137,10 @@ namespace Keire::RenderBackend
         KEIRE_TELEMETRY_ZONE_SCOPED("GPU occlusion prepare");
         PreparedGpuOcclusion prepared;
         const auto requested = packet.Environment.GpuOcclusion;
+        const bool debugValidation =
+            requested == GpuOcclusionMode::Automatic &&
+            surface.GpuOcclusionDebugMode.load(std::memory_order_acquire) == GpuOcclusionDebugView::VisibilityBounds;
+        const auto effective = debugValidation ? GpuOcclusionMode::Forced : requested;
         for (const auto& item : packet.DrawItems)
         {
             const auto visibilityClass = ResolvedVisibilityClass(item);
@@ -388,7 +392,7 @@ namespace Keire::RenderBackend
                 const auto rectangle = GeometryDetail::ProjectedBoundsPixels(
                     clipFromLocal, instanceDraw.Submesh.Bounds, resourceExtent.Width, resourceExtent.Height);
                 const float area = rectangle.Area();
-                const float minimumOccluderPixels = requested == GpuOcclusionMode::Automatic
+                const float minimumOccluderPixels = effective == GpuOcclusionMode::Automatic
                                                         ? Policy::AutomaticMinimumOccluderPixels
                                                         : Policy::ForcedMinimumOccluderPixels;
                 if (area < minimumOccluderPixels)
@@ -648,7 +652,7 @@ namespace Keire::RenderBackend
             return {};
         }
 
-        if (requested == GpuOcclusionMode::Automatic)
+        if (effective == GpuOcclusionMode::Automatic)
         {
             if (surface.GpuOcclusionAutomaticCooldownFrames > 0U)
             {
@@ -990,7 +994,7 @@ namespace Keire::RenderBackend
             const bool partialFallbackTransition = partialFallbackReason != GpuOcclusionFallbackReason::None &&
                                                    (diagnostics.State != GpuOcclusionSurfaceState::Active ||
                                                     diagnostics.FallbackReason != partialFallbackReason);
-            diagnostics.EffectiveMode = requested;
+            diagnostics.EffectiveMode = effective;
             diagnostics.State = GpuOcclusionSurfaceState::Active;
             diagnostics.FallbackReason = partialFallbackReason;
             diagnostics.PyramidMipCount = static_cast<std::uint32_t>(resources.Pyramid.size());

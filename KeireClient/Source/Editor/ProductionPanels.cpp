@@ -1155,9 +1155,14 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.ToneMapMilliseconds) + " ms tone map / " +
                         std::to_string(statistics.CommandRecordingUnattributedMilliseconds) + " ms other");
                 ui.Text("Scheduling " + std::to_string(statistics.AllowedFramesInFlight) + " frames in flight / " +
-                        std::to_string(statistics.GpuFenceWaitMilliseconds) + " ms fence wait / " +
-                        std::to_string(statistics.SwapchainWaitMilliseconds) + " ms swapchain wait / " +
-                        std::to_string(statistics.GpuCompletionLatencyMilliseconds) + " ms completion latency");
+                         std::to_string(statistics.GpuFenceWaitMilliseconds) + " ms fence wait / " +
+                         std::to_string(statistics.SwapchainWaitMilliseconds) + " ms swapchain wait / " +
+                         std::to_string(statistics.GpuCompletionLatencyMilliseconds) + " ms completion latency");
+                ui.Text("Frame queue " + std::to_string(statistics.FrameAdmissionWaitMilliseconds) +
+                        " ms admission / " + std::to_string(statistics.RendererQueueDelayMilliseconds) +
+                        " ms queue delay / " + std::to_string(statistics.OutstandingFrames) + " outstanding / " +
+                        std::to_string(statistics.FramesInFlightHighWaterMark) + " frame high-water / " +
+                        std::to_string(statistics.RendererQueueHighWaterMark) + " queue high-water");
                 ui.Text("Frame uploads " + std::to_string(statistics.FrameUploadMilliseconds) + " ms / " +
                         std::to_string(statistics.FrameUploadSubmissions) + " submissions / " +
                         std::to_string(statistics.ForwardPlusUploadBytes) + " Forward+ bytes / " +

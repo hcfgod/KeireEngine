@@ -75,6 +75,27 @@ namespace Keire::Detail
             return result;
         }
 
+        [[nodiscard]] std::string LowercaseAscii(std::string value)
+        {
+            std::ranges::transform(value, value.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::tolower(character)); });
+            return value;
+        }
+
+        [[nodiscard]] bool IsAbsoluteReference(const std::string_view value) noexcept
+        {
+            return value.starts_with('/') || value.starts_with('\\') ||
+                   (value.size() >= 3U && std::isalpha(static_cast<unsigned char>(value[0])) != 0 &&
+                    value[1] == ':' && (value[2] == '/' || value[2] == '\\'));
+        }
+
+        [[nodiscard]] std::string ReferenceFilename(std::string value)
+        {
+            std::ranges::replace(value, '\\', '/');
+            const auto separator = value.find_last_of('/');
+            return LowercaseAscii(separator == std::string::npos ? std::move(value) : value.substr(separator + 1U));
+        }
+
         class AssimpProjectStream final : public Assimp::IOStream
         {
           public:
@@ -131,8 +152,10 @@ namespace Keire::Detail
         };
     } // namespace
 
-    AssimpProjectIO::AssimpProjectIO(const AssetImportContext& context)
-        : m_MaximumDependencyBytes(context.MaximumDependencyBytes), m_ReadProjectFile(context.ReadProjectFile)
+    AssimpProjectIO::AssimpProjectIO(const AssetImportContext& context,
+                                     const std::span<const std::byte> primarySource)
+        : m_MaximumDependencyBytes(context.MaximumDependencyBytes), m_ReadProjectFile(context.ReadProjectFile),
+          m_PrimarySource(std::make_shared<const std::vector<std::byte>>(primarySource.begin(), primarySource.end()))
     {
         if (context.ProjectRoot.empty() || context.SourceRoot.empty() || !m_ReadProjectFile ||
             m_MaximumDependencyBytes == 0)
@@ -150,6 +173,8 @@ namespace Keire::Detail
             throw std::invalid_argument("Assimp model sources must remain inside the project source root.");
         }
         m_SourceDirectory = source.parent_path();
+        m_SourceProjectRelative = (m_SourcePrefix / source).lexically_normal();
+        m_SourceFilename = LowercaseAscii(PathToUtf8(source.filename()));
     }
 
     bool AssimpProjectIO::Exists(const char* const file) const
@@ -215,6 +240,11 @@ namespace Keire::Detail
 
         CachedFile cached;
         cached.RelativePath = *relative;
+        if (*relative == m_SourceProjectRelative)
+        {
+            cached.Bytes = m_PrimarySource;
+            return &m_Cache.emplace(key, std::move(cached)).first->second;
+        }
         std::vector<std::byte> bytes;
         try
         {
@@ -256,6 +286,13 @@ namespace Keire::Detail
         const auto decoded = DecodeReference(file);
         if (!decoded)
         {
+            if (IsAbsoluteReference(file))
+            {
+                if (ReferenceFilename(std::string(file)) == m_SourceFilename)
+                    return m_SourceProjectRelative;
+                MarkUnavailable("Ignored non-portable absolute model reference: " + std::string(file));
+                return std::nullopt;
+            }
             Reject("Assimp model sidecar path is not a valid confined relative URI.");
             return std::nullopt;
         }
@@ -299,4 +336,6 @@ namespace Keire::Detail
             m_Violation = std::move(message);
         m_LastReadFailure = m_Violation;
     }
+
+    void AssimpProjectIO::MarkUnavailable(std::string message) const { m_LastReadFailure = std::move(message); }
 } // namespace Keire::Detail

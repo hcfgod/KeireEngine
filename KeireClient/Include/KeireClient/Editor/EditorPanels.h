@@ -313,7 +313,8 @@ namespace KeireEditor
                                              SceneDocument& sceneDocument, const Keire::Ref<Keire::Scene>& scene);
         void DrawRectTransformAnchorPreset(Keire::UiFrame& ui, const Keire::Entity& entity,
                                            const Keire::ComponentRegistration& registration,
-                                           SceneDocument& sceneDocument, const Keire::UiThemeDefinition& theme);
+                                           SceneDocument& sceneDocument, const Keire::UiThemeDefinition& theme,
+                                           std::span<const Keire::AssetId> editTargets, bool multiEditing);
 
         IInspectorController& m_Controller;
         std::unique_ptr<AssetInspectorPanel> m_AssetInspector;

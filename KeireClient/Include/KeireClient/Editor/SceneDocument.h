@@ -61,6 +61,7 @@ namespace KeireEditor
         [[nodiscard]] Keire::EntityId DuplicateEntity(Keire::EntityId entity);
         void DeleteEntity(Keire::EntityId entity);
         void SetEntityActive(Keire::EntityId entity, bool active);
+        void SetEntitiesActive(std::span<const Keire::AssetId> entities, bool active);
         void SetEntityLayer(Keire::EntityId entity, std::uint32_t layer);
         void SetEntitiesLayer(std::span<const Keire::AssetId> entities, std::uint32_t layer);
         void SetEntityTags(Keire::EntityId entity, std::vector<std::string> tags);
@@ -72,18 +73,28 @@ namespace KeireEditor
                                                                 Keire::EntityId beforeSibling = {},
                                                                 bool keepWorldTransform = true);
         void SetTransform(Keire::EntityId entity, const TransformValues& values);
+        void SetTransforms(std::span<const Keire::AssetId> entities, const TransformValues& values);
         [[nodiscard]] Keire::Ref<Keire::Component> AddComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
         void RemoveComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
         void RemoveComponent(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component);
         void MoveComponentBefore(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,
                                  const Keire::Ref<Keire::Component>& before = {});
         void SetComponentEnabled(Keire::EntityId entity, Keire::ComponentTypeId type, bool enabled);
+        void SetComponentsEnabled(std::span<const Keire::AssetId> entities, Keire::ComponentTypeId type, bool enabled,
+                                  std::size_t ordinal = 0);
         void SetComponentValues(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,
                                 const Keire::ComponentPropertyBag& values);
         void ResetComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
+        void ResetComponents(std::span<const Keire::AssetId> entities, Keire::ComponentTypeId type,
+                             std::size_t ordinal = 0);
         void SetComponentProperty(Keire::EntityId entity, Keire::ComponentTypeId type, std::string_view property,
                                   Keire::ComponentPropertyValue value);
+        void SetComponentsProperty(std::span<const Keire::AssetId> entities, Keire::ComponentTypeId type,
+                                   std::string_view property, const Keire::ComponentPropertyValue& value,
+                                   std::size_t ordinal = 0);
         void SetMeshRendererMaterial(Keire::EntityId entity, std::size_t slot, Keire::AssetId material);
+        void SetMeshRenderersMaterial(std::span<const Keire::AssetId> entities, std::size_t slot,
+                                      Keire::AssetId material);
         void Open(Keire::Ref<Keire::Scene> scene, Keire::AssetId asset = {}, std::filesystem::path source = {},
                   Keire::Ref<Keire::UndoContext> undo = {});
         void ReplaceEditingScene(Keire::Ref<Keire::Scene> scene, bool preserveSelection = true);

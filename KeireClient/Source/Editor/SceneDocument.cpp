@@ -158,6 +158,21 @@ namespace KeireEditor
                     controller->ConfigureCapsule(0.5F, 1.0F, 0.3F, 0.05F);
             }
         }
+
+        [[nodiscard]] Keire::Ref<Keire::Component> ComponentAtOrdinal(const Keire::Entity& entity,
+                                                                       const Keire::ComponentTypeId type,
+                                                                       const std::size_t requested) noexcept
+        {
+            std::size_t ordinal = 0;
+            for (const auto& component : entity.GetComponents())
+            {
+                if (!component || component->Type() != type)
+                    continue;
+                if (ordinal++ == requested)
+                    return component;
+            }
+            return {};
+        }
     } // namespace
 
     Keire::Ref<Keire::RefCounted> InspectorTransformSceneScope::Identity() const noexcept
@@ -389,6 +404,22 @@ namespace KeireEditor
         target.SetActive(active);
     }
 
+    void SceneDocument::SetEntitiesActive(const std::span<const Keire::AssetId> entities, const bool active)
+    {
+        const auto scene = ActiveScene();
+        std::vector<Keire::Entity> targets;
+        targets.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+            if (!target)
+                throw std::invalid_argument("Cannot activate an entity outside the active scene.");
+            targets.push_back(std::move(target));
+        }
+        for (auto& target : targets)
+            target.SetActive(active);
+    }
+
     void SceneDocument::SetEntityLayer(const Keire::EntityId entity, const std::uint32_t layer)
     {
         const auto scene = ActiveScene();
@@ -548,6 +579,37 @@ namespace KeireEditor
             transform->SetLocalScale(*values.Scale);
     }
 
+    void SceneDocument::SetTransforms(const std::span<const Keire::AssetId> entities, const TransformValues& values)
+    {
+        if (values.Position && !Keire::Math::IsFinite(*values.Position))
+            throw std::invalid_argument("Transform position must be finite.");
+        if (values.EulerDegrees && !Keire::Math::IsFinite(*values.EulerDegrees))
+            throw std::invalid_argument("Transform Euler angles must be finite.");
+        if (values.Scale && !Keire::TransformComponent::IsValidLocalScale(*values.Scale))
+            throw std::invalid_argument("Transform scale axes must be finite with a magnitude of at least 0.000001.");
+
+        const auto scene = ActiveScene();
+        std::vector<Keire::Ref<Keire::TransformComponent>> transforms;
+        transforms.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+            const auto transform = target ? target.GetComponent<Keire::TransformComponent>() : nullptr;
+            if (!transform)
+                throw std::invalid_argument("Transform editing requires entities in the active scene.");
+            transforms.push_back(transform);
+        }
+        for (const auto& transform : transforms)
+        {
+            if (values.Position)
+                transform->SetLocalPosition(*values.Position);
+            if (values.EulerDegrees)
+                transform->SetLocalEulerAngles(*values.EulerDegrees);
+            if (values.Scale)
+                transform->SetLocalScale(*values.Scale);
+        }
+    }
+
     Keire::Ref<Keire::Component> SceneDocument::AddComponent(const Keire::EntityId entity,
                                                              const Keire::ComponentTypeId type)
     {
@@ -598,6 +660,25 @@ namespace KeireEditor
         component->SetEnabled(enabled);
     }
 
+    void SceneDocument::SetComponentsEnabled(const std::span<const Keire::AssetId> entities,
+                                             const Keire::ComponentTypeId type, const bool enabled,
+                                             const std::size_t ordinal)
+    {
+        const auto scene = ActiveScene();
+        std::vector<Keire::Ref<Keire::Component>> components;
+        components.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+            const auto component = target ? ComponentAtOrdinal(target, type, ordinal) : nullptr;
+            if (!component)
+                throw std::invalid_argument("Multi-edit requires a common component on every selected entity.");
+            components.push_back(component);
+        }
+        for (const auto& component : components)
+            component->SetEnabled(enabled);
+    }
+
     void SceneDocument::SetComponentValues(const Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,
                                            const Keire::ComponentPropertyBag& values)
     {
@@ -627,6 +708,33 @@ namespace KeireEditor
         registration->Deserialize(*component, registration->Serialize(*defaults), registration->SchemaVersion);
     }
 
+    void SceneDocument::ResetComponents(const std::span<const Keire::AssetId> entities,
+                                        const Keire::ComponentTypeId type, const std::size_t ordinal)
+    {
+        const auto scene = ActiveScene();
+        const auto registration = scene ? scene->Components()->Find(type) : std::nullopt;
+        if (!registration)
+            throw std::invalid_argument("Cannot reset components outside the active scene.");
+        const auto defaults = registration->Factory();
+        if (!defaults)
+            throw std::runtime_error("The component factory returned null while resetting components.");
+        const auto values = registration->Serialize(*defaults);
+        std::vector<Keire::Ref<Keire::Component>> components;
+        components.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            const auto target = scene->FindEntity(Keire::EntityId(entity));
+            const auto component = target ? ComponentAtOrdinal(target, type, ordinal) : nullptr;
+            if (!component)
+                throw std::invalid_argument("Multi-edit requires a common component on every selected entity.");
+            components.push_back(component);
+        }
+        for (const auto& component : components)
+            registration->Deserialize(*component, values, registration->SchemaVersion);
+        if (!components.empty())
+            scene->MarkDirty();
+    }
+
     void SceneDocument::SetComponentProperty(const Keire::EntityId entity, const Keire::ComponentTypeId type,
                                              const std::string_view property, Keire::ComponentPropertyValue value)
     {
@@ -647,6 +755,68 @@ namespace KeireEditor
         scene->MarkDirty();
     }
 
+    void SceneDocument::SetComponentsProperty(const std::span<const Keire::AssetId> entities,
+                                              const Keire::ComponentTypeId type, const std::string_view property,
+                                              const Keire::ComponentPropertyValue& value, const std::size_t ordinal)
+    {
+        const auto scene = ActiveScene();
+        const auto registration = scene ? scene->Components()->Find(type) : std::nullopt;
+        if (!registration ||
+            std::ranges::find(registration->Properties, property, &Keire::ComponentProperty::Key) ==
+                registration->Properties.end())
+        {
+            throw std::invalid_argument("The common component does not declare that property.");
+        }
+
+        struct Candidate final
+        {
+            Keire::Ref<Keire::Component> Component;
+            Keire::ComponentPropertyBag Original;
+            Keire::ComponentPropertyBag Values;
+        };
+        std::vector<Candidate> candidates;
+        candidates.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            const auto target = scene->FindEntity(Keire::EntityId(entity));
+            const auto component = target ? ComponentAtOrdinal(target, type, ordinal) : nullptr;
+            if (!component)
+                throw std::invalid_argument("Multi-edit requires a common component on every selected entity.");
+            auto original = registration->Serialize(*component);
+            auto values = original;
+            values.insert_or_assign(std::string(property), value);
+            const auto validation = registration->Factory();
+            registration->Deserialize(*validation, values, registration->SchemaVersion);
+            candidates.push_back({component, std::move(original), std::move(values)});
+        }
+
+        std::size_t applied = 0;
+        try
+        {
+            for (; applied < candidates.size(); ++applied)
+                registration->Deserialize(*candidates[applied].Component, candidates[applied].Values,
+                                          registration->SchemaVersion);
+        }
+        catch (...)
+        {
+            while (applied > 0)
+            {
+                --applied;
+                try
+                {
+                    registration->Deserialize(*candidates[applied].Component, candidates[applied].Original,
+                                              registration->SchemaVersion);
+                }
+                catch (...)
+                {
+                }
+            }
+            throw;
+        }
+        if (!candidates.empty())
+            scene->MarkDirty();
+    }
+
     void SceneDocument::SetMeshRendererMaterial(const Keire::EntityId entity, const std::size_t slot,
                                                 const Keire::AssetId material)
     {
@@ -657,6 +827,26 @@ namespace KeireEditor
             throw std::invalid_argument("Material editing requires a Mesh Renderer in the active scene.");
         renderer->SetMaterial(slot, material);
         scene->MarkDirty();
+    }
+
+    void SceneDocument::SetMeshRenderersMaterial(const std::span<const Keire::AssetId> entities,
+                                                 const std::size_t slot, const Keire::AssetId material)
+    {
+        const auto scene = ActiveScene();
+        std::vector<Keire::Ref<Keire::MeshRendererComponent>> renderers;
+        renderers.reserve(entities.size());
+        for (const auto entity : entities)
+        {
+            const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
+            const auto renderer = target ? target.GetComponent<Keire::MeshRendererComponent>() : nullptr;
+            if (!renderer)
+                throw std::invalid_argument("Multi-edit requires a Mesh Renderer on every selected entity.");
+            renderers.push_back(renderer);
+        }
+        for (const auto& renderer : renderers)
+            renderer->SetMaterial(slot, material);
+        if (!renderers.empty())
+            scene->MarkDirty();
     }
 
     void SceneDocument::Open(Keire::Ref<Keire::Scene> scene, const Keire::AssetId asset, std::filesystem::path source,

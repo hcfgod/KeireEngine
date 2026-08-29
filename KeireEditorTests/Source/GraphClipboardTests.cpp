@@ -57,6 +57,41 @@ TEST_CASE("Graph clipboard rejects malformed wrong-kind and oversized input befo
     CHECK(target == original);
 }
 
+TEST_CASE("Shader Graph clipboard gives pasted parameters deterministic unique symbols")
+{
+    auto source = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
+    auto parameter =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    parameter.Symbol = "SurfaceRoughness";
+    parameter.Name = "Surface Roughness";
+    parameter.ParameterMetadata.Description = "Preserved clipboard metadata";
+    source.Nodes.push_back(parameter);
+    const std::array selection{parameter.Id};
+    const auto fragment = KeireEditor::CopyShaderGraphFragment(source, selection);
+
+    auto target = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
+    auto existing = parameter;
+    existing.Id = Keire::AssetId::Generate();
+    for (auto& pin : existing.Pins)
+        pin.Id = Keire::AssetId::Generate();
+    target.Nodes.push_back(existing);
+
+    const auto first = KeireEditor::PasteShaderGraphFragment(target, fragment);
+    const auto second = KeireEditor::PasteShaderGraphFragment(target, fragment);
+
+    REQUIRE(first.size() == 1);
+    REQUIRE(second.size() == 1);
+    const auto firstNode = std::ranges::find(target.Nodes, first.front(), &Keire::ShaderGraphNode::Id);
+    const auto secondNode = std::ranges::find(target.Nodes, second.front(), &Keire::ShaderGraphNode::Id);
+    REQUIRE(firstNode != target.Nodes.end());
+    REQUIRE(secondNode != target.Nodes.end());
+    CHECK(firstNode->Symbol == "SurfaceRoughness_Copy");
+    CHECK(secondNode->Symbol == "SurfaceRoughness_Copy2");
+    CHECK(firstNode->Name == parameter.Name);
+    CHECK(firstNode->ParameterMetadata == parameter.ParameterMetadata);
+    CHECK_NOTHROW(Keire::ValidateShaderGraph(target));
+}
+
 TEST_CASE("Material and VFX clipboard fragments remap editor topology across documents")
 {
     Keire::MaterialGraphDefinition materialSource;

@@ -495,7 +495,11 @@ namespace Keire
         specification.Ui.Mode = commandLine.SmokeWindow      ? UiMode::Disabled
                                 : commandLine.SmokeWorkspace ? UiMode::Headless
                                                              : UiMode::Rendered;
-        specification.Ui.PresentMode = UiPresentMode::Mailbox;
+        // The editor owns several offscreen views and already bounds accepted frames in the renderer. Mailbox can
+        // block frame admission at the desktop refresh rate on otherwise idle GPUs, making editor interaction and
+        // profiling appear render-bound. Keep editor presentation unthrottled; packaged players retain their profile's
+        // explicit VSync choice.
+        specification.Ui.PresentMode = UiPresentMode::Immediate;
         specification.Ui.Workspace.Enabled = !commandLine.SmokeWindow;
         specification.Ui.Workspace.Ephemeral = commandLine.SmokeWorkspace || commandLine.SmokeUi;
         specification.Ui.Workspace.BuildFactoryLayout = BuildEditorLayout;

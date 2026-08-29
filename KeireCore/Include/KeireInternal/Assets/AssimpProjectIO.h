@@ -27,7 +27,7 @@ namespace Keire::Detail
     class AssimpProjectIO final : public Assimp::IOSystem
     {
       public:
-        explicit AssimpProjectIO(const AssetImportContext& context);
+        AssimpProjectIO(const AssetImportContext& context, std::span<const std::byte> primarySource);
 
         [[nodiscard]] bool Exists(const char* file) const override;
         [[nodiscard]] char getOsSeparator() const override;
@@ -51,9 +51,13 @@ namespace Keire::Detail
         [[nodiscard]] const CachedFile* Read(std::string_view file) const;
         [[nodiscard]] std::optional<std::filesystem::path> Resolve(std::string_view file) const;
         void Reject(std::string message) const;
+        void MarkUnavailable(std::string message) const;
 
         std::filesystem::path m_SourcePrefix;
         std::filesystem::path m_SourceDirectory;
+        std::filesystem::path m_SourceProjectRelative;
+        std::string m_SourceFilename;
+        std::shared_ptr<const std::vector<std::byte>> m_PrimarySource;
         std::size_t m_MaximumDependencyBytes = 0;
         std::function<std::vector<std::byte>(const std::filesystem::path&)> m_ReadProjectFile;
         mutable std::unordered_map<std::string, CachedFile> m_Cache;

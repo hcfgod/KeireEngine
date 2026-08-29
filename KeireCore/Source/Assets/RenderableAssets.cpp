@@ -269,7 +269,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 20;
+        result.Version = 21;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -307,7 +307,7 @@ namespace Keire
             Detail::AssimpProjectIO* projectIO = nullptr;
             if (context.ReadProjectFile)
             {
-                auto handler = std::make_unique<Detail::AssimpProjectIO>(context);
+                auto handler = std::make_unique<Detail::AssimpProjectIO>(context, bytes);
                 projectIO = handler.get();
                 importer.SetIOHandler(handler.release());
             }

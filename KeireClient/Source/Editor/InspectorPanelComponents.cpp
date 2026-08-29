@@ -178,7 +178,9 @@ namespace KeireEditor
     void InspectorPanel::DrawRectTransformAnchorPreset(Keire::UiFrame& ui, const Keire::Entity& entity,
                                                        const Keire::ComponentRegistration& registration,
                                                        SceneDocument& sceneDocument,
-                                                       const Keire::UiThemeDefinition& theme)
+                                                       const Keire::UiThemeDefinition& theme,
+                                                       const std::span<const Keire::AssetId> editTargets,
+                                                       const bool multiEditing)
     {
         const auto rect = entity.GetComponent<Keire::RectTransformComponent>();
         if (!rect)
@@ -193,8 +195,15 @@ namespace KeireEditor
         const bool stretchVertical = std::abs(preset->Preset.Minimum.Y - preset->Preset.Maximum.Y) > 0.0001F;
         m_Controller.RecordInspectorUndo("Change Anchor Preset",
                                          "rect-transform.anchor-preset." + entity.Id().ToString());
-        sceneDocument.SetComponentProperty(entity.Id(), registration.Type, "anchorMinimum", preset->Preset.Minimum);
-        sceneDocument.SetComponentProperty(entity.Id(), registration.Type, "anchorMaximum", preset->Preset.Maximum);
+        const auto setProperty = [&](const std::string_view property, Keire::ComponentPropertyValue value)
+        {
+            if (multiEditing)
+                sceneDocument.SetComponentsProperty(editTargets, registration.Type, property, value);
+            else
+                sceneDocument.SetComponentProperty(entity.Id(), registration.Type, property, std::move(value));
+        };
+        setProperty("anchorMinimum", preset->Preset.Minimum);
+        setProperty("anchorMaximum", preset->Preset.Maximum);
         if (!preset->FitStretch || (!stretchHorizontal && !stretchVertical))
             return;
         if (stretchHorizontal)
@@ -207,7 +216,7 @@ namespace KeireEditor
             anchoredPosition.Y = 0.0F;
             sizeDelta.Y = 0.0F;
         }
-        sceneDocument.SetComponentProperty(entity.Id(), registration.Type, "anchoredPosition", anchoredPosition);
-        sceneDocument.SetComponentProperty(entity.Id(), registration.Type, "sizeDelta", sizeDelta);
+        setProperty("anchoredPosition", anchoredPosition);
+        setProperty("sizeDelta", sizeDelta);
     }
 } // namespace KeireEditor

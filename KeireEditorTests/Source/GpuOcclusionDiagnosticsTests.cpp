@@ -22,6 +22,8 @@ TEST_CASE("GPU occlusion project modes have explicit editor labels and fallback 
           std::string_view::npos);
     CHECK(KeireEditor::GpuOcclusionModeDescription(GpuOcclusionMode::Automatic).find("deterministic") !=
           std::string_view::npos);
+    CHECK(KeireEditor::GpuOcclusionModeDescription(GpuOcclusionMode::Automatic).find("Visibility Bounds") !=
+          std::string_view::npos);
     CHECK(KeireEditor::GpuOcclusionModeDescription(GpuOcclusionMode::Forced).find("explicit fallback") !=
           std::string_view::npos);
 }

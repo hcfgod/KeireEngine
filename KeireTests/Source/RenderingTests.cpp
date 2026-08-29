@@ -1,4 +1,5 @@
 #include "Keire/Core.h"
+#include "KeireInternal/Assets/AssimpProjectIO.h"
 #include "KeireInternal/Assets/TextureImportBackend.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/RenderInternal.h"
@@ -925,7 +926,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 20);
+    CHECK(importer.Version == 21);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -1455,6 +1456,39 @@ TEST_CASE("model sidecar IO rejects escapes and bounds failures without direct f
             (void)importer.ContextualImport(context, std::as_bytes(std::span(gltf.data(), gltf.size()))),
             doctest::Contains("fixture sidecar is missing"), std::invalid_argument);
     }
+}
+
+TEST_CASE("Assimp project IO serves only an absolute primary-source alias from supplied bytes")
+{
+    TemporaryDirectory directory("ModelAbsolutePrimaryAliasTests");
+    const auto sourceRoot = directory.Path / "Assets";
+    std::filesystem::create_directories(sourceRoot / "Models");
+    const std::array primary{std::byte{0x01}, std::byte{0x02}, std::byte{0x03}};
+
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = sourceRoot / "Models/SM_Bld_Barn_01.fbx";
+    context.RelativePath = "Models/SM_Bld_Barn_01.fbx";
+    std::vector<std::filesystem::path> reads;
+    context.ReadProjectFile = [&reads](const std::filesystem::path& relative) -> std::vector<std::byte>
+    {
+        reads.push_back(relative);
+        throw std::runtime_error("unexpected project read");
+    };
+
+    Keire::Detail::AssimpProjectIO io(context, primary);
+    const auto main = io.ReadReferencedFile("D:\\Synty\\SourceFiles\\FBX\\SM_Bld_Barn_01.fbx");
+    REQUIRE(main);
+    CHECK(main->RelativePath == std::filesystem::path("Assets/Models/SM_Bld_Barn_01.fbx"));
+    CHECK(std::ranges::equal(main->Bytes, primary));
+    CHECK(reads.empty());
+    CHECK(io.Violation().empty());
+
+    CHECK_FALSE(io.ReadReferencedFile("U:/Studio/Textures/PolygonWar_Texture.psd"));
+    CHECK(io.Violation().empty());
+    CHECK(io.LastReadFailure().find("Ignored non-portable absolute model reference") != std::string_view::npos);
+    CHECK(reads.empty());
 }
 
 TEST_CASE("model import can retain material slots without publishing source materials")

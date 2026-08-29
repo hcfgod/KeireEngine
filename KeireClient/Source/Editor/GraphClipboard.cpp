@@ -99,6 +99,43 @@ namespace KeireEditor
             return Json::parse(reinterpret_cast<const char*>(source.data()),
                                reinterpret_cast<const char*>(source.data() + source.size()));
         }
+
+        [[nodiscard]] std::string UniqueParameterSymbol(const std::string_view requested,
+                                                        const std::set<std::string, std::less<>>& occupied)
+        {
+            if (!occupied.contains(requested))
+                return std::string(requested);
+
+            const std::string base = std::string(requested) + "_Copy";
+            if (!occupied.contains(base))
+                return base;
+            for (std::size_t suffix = 2; suffix <= occupied.size() + 2U; ++suffix)
+            {
+                const auto candidate = base + std::to_string(suffix);
+                if (!occupied.contains(candidate))
+                    return candidate;
+            }
+            throw std::invalid_argument("Shader Graph paste could not allocate a unique parameter symbol.");
+        }
+
+        void ResolvePastedParameterSymbols(Keire::ShaderGraphDefinition& definition,
+                                           const std::set<Keire::AssetId>& pasted)
+        {
+            std::set<std::string, std::less<>> occupied;
+            for (const auto& resource : definition.Resources)
+                occupied.insert(resource.Symbol);
+            for (const auto& node : definition.Nodes)
+                if (node.Kind == Keire::ShaderGraphNodeKind::Parameter && !pasted.contains(node.Id))
+                    occupied.insert(node.Symbol);
+
+            for (auto& node : definition.Nodes)
+            {
+                if (node.Kind != Keire::ShaderGraphNodeKind::Parameter || !pasted.contains(node.Id))
+                    continue;
+                node.Symbol = UniqueParameterSymbol(node.Symbol, occupied);
+                occupied.insert(node.Symbol);
+            }
+        }
     } // namespace
 
     std::string CopyShaderGraphFragment(const Keire::ShaderGraphDefinition& definition,
@@ -172,6 +209,8 @@ namespace KeireEditor
         for (const auto& comment : sourceAuthoring.Comments)
             if (std::ranges::all_of(comment.Members, [&](const Keire::AssetId id) { return selected.contains(id); }))
                 transfer.Authoring.Comments.push_back(comment);
+        ResolvePastedParameterSymbols(transfer, selected);
+        Keire::ValidateShaderGraph(transfer);
         definition = std::move(transfer);
         return appendedSelection;
     }

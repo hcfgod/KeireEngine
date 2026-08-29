@@ -71,7 +71,8 @@ namespace KeireEditor
         case Keire::GpuOcclusionMode::Disabled:
             return "Submit CPU-frustum-visible geometry without GPU occlusion culling.";
         case Keire::GpuOcclusionMode::Automatic:
-            return "Use GPU occlusion when the backend supports it, with a deterministic direct-draw fallback.";
+            return "Use GPU occlusion when the backend supports it, with a deterministic direct-draw fallback. "
+                   "Visibility Bounds temporarily validates below-threshold scenes in Forced mode.";
         case Keire::GpuOcclusionMode::Forced:
             return "Bypass profitability thresholds but retain safety checks; failures are an explicit fallback.";
         }
