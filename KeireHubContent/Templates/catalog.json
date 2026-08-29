@@ -165,7 +165,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_01_StudioPaint.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "bfed2070f6efa281646d7b1c69d3e8ba6157d69b8bd83df0e53a26edfe491ccb"
+          "sha256": "5e58a55c081a0a61d58c88f4cb35f259d785c0ba2dfccd4219574f93b4f4bc5e"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_02_TiledCeramic.keirematerialgraph",
@@ -175,7 +175,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_02_TiledCeramic.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "2407f4dbe22264830cea8077c7792400cb69243f5951cfad91d3f20a486cbb14"
+          "sha256": "892aab476cb4432a45f7e0a5bc4a7d6a831659265bbb7518fd21d717e49ed1e7"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_03_NeonPulse.keirematerialgraph",
@@ -185,7 +185,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_03_NeonPulse.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "b06b2fdba3d7ea0239f21d4d831616afc20eb67834f53c2def6b373f5521d538"
+          "sha256": "b43580dbbc2ae1d6791acf141d901bbade48c554b60351f9ac037f669d143068"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_04_ProceduralCutout.keirematerialgraph",
@@ -195,7 +195,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_04_ProceduralCutout.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "2e23480b1886f1df671a8f30a09dc17fdb75dd6d962dd78e4ca583865bb2f4d9"
+          "sha256": "b145021192b5fed5fbe6721a838b7827f001ef3435ee63835c9e791bd5f8cb71"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_05_AutomotiveClearCoat.keirematerialgraph",
@@ -205,7 +205,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_05_AutomotiveClearCoat.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "0017e72c667cb868dee22b95868b56b94851ef81f0443406dcb696c1f9619bc4"
+          "sha256": "f415132fb13b3d8ec5afc3298988c999d35346e37054957e221e5ecfa06eee58"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_06_BrushedAlloy.keirematerialgraph",
@@ -215,7 +215,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_06_BrushedAlloy.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "be84a38a20d8300acc65fd6fe429de0040a8ac42b3a7c24cd44d90ddeb885235"
+          "sha256": "088db1ebbcdecef21441f0e2fb93ec902368793283eeb9d393337b6d0b6d4f6e"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_07_FrostedGlass.keirematerialgraph",
@@ -225,7 +225,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_07_FrostedGlass.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "e230c7e91e0658e800483cfc652e611f75407c6ddd377a8cc182b6f7fe4fa6e8"
+          "sha256": "3cbf44d20aac709b848e3a129b5b56c0d7b036ec4f97f2b8bbbe2580cb26a099"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_08_WorldAlignedStone.keirematerialgraph",
@@ -235,7 +235,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/02_Production/MG_08_WorldAlignedStone.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "c6482f73b91b764d77670ad09fec91506ed158f320c039592d309dc19bed907e"
+          "sha256": "926ae84c5227b97590e40027788a1a393cb7baf726692fa568b87c4a00cff351"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_09_EnergyDissolve.keirematerialgraph",
@@ -245,7 +245,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_09_EnergyDissolve.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "6c8ca427f2bf9c3010ea673191495fcdb7823bf5796d389a86a8f80008f2633c"
+          "sha256": "0f65eb32e7c99d643d50fbd6cacaa299d4d3f9145fa83b8018ff63d3fc5a2344"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_10_HologramScanlines.keirematerialgraph",
@@ -255,7 +255,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_10_HologramScanlines.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "e042c3ee6c3ba9786fe6c8ff3600a48cb668acefe0e2ed10eeccb1b0f2c0da2d"
+          "sha256": "411ed89551aa511ebc6e34f4e716b189e069b8959bbc0773492ee183167337ae"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_11_VertexWave.keirematerialgraph",
@@ -265,7 +265,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_11_VertexWave.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "9937433c1c1398b48fdcaffca9583784ef21d8107967015cc97822c49de0c317"
+          "sha256": "c99d060cd541e4587fa79de5fd06bf1394091fd8e31720255c57bb04a40022ff"
         },
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_12_IridescentShield.keirematerialgraph",
@@ -275,7 +275,7 @@
         {
           "path": "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_12_IridescentShield.keirematerialgraph.keiremeta",
           "sizeBytes": 361,
-          "sha256": "08f7e2c4f8669c3d81a11a73abe197feb42350014fe52be59819222c5c351ea6"
+          "sha256": "926b370be5ec5c20f8d7f1feb7adb2064ca884cde52b68a0dce44f6b3a7557ca"
         },
         {
           "path": "Assets/Examples/MaterialLab/Materials/ShowcasePlinth.keirematerial",
@@ -305,7 +305,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_01_StudioPaint.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "47aa0e3dbf10b3d9ec3a0e5221b9f356cce7895bf695930df36bddd3f084d7a0"
+          "sha256": "dc935bdcdbfb5ed94162cd25324c902ca1a953cf1c03421bc7529b694a0bb887"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_02_TiledCeramic.keireshadergraph",
@@ -315,7 +315,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_02_TiledCeramic.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "36e8df8da0452a8c60a8bfcfe364ee12b4650c25b7fc8743949d102ad9706b5a"
+          "sha256": "801ba906a95b873e482466dbbbc402d09ea25110c0d8ce38a47a661a73331036"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_03_NeonPulse.keireshadergraph",
@@ -325,7 +325,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_03_NeonPulse.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "7f6bea1dd34278e369bfd0b837236319ce02747348aa0e8ae9abfaa26cf67bbb"
+          "sha256": "169b37bf7abe8fd7dea1d040514381163b278c893b20e81b3f4a73b57e27e755"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_04_ProceduralCutout.keireshadergraph",
@@ -335,7 +335,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_04_ProceduralCutout.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "8c744837ce6d1e68c04e2123e5325d1dd5984e96db9d5d4f45a256f17c1dbdc9"
+          "sha256": "07536680c5b88b6400d0b93556602649d89b0e6e4cc26b63acfd212b494fb5e9"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_05_AutomotiveClearCoat.keireshadergraph",
@@ -345,7 +345,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_05_AutomotiveClearCoat.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "fa02a24b28ef1eef36fae307072ee45a76a9096027b40674b40f62addc3547d9"
+          "sha256": "f8deaca80e829c0a695f07bf46e37a0ea18ce8da96147ca03dbd638da10b64bc"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_06_BrushedAlloy.keireshadergraph",
@@ -355,7 +355,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_06_BrushedAlloy.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "2b19761bcc53f15fb5cc8fa7b8ea99a0dd1997651c1696be6c3c007384bf9e7c"
+          "sha256": "0517465863318dde3214b9a0e50f677460ea6af2c3736f94b01549854f3ac561"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_07_FrostedGlass.keireshadergraph",
@@ -365,7 +365,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_07_FrostedGlass.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "a01216013703d865f17a9fda9a54d6ee994cac51a43d5db0d8b451e8dc403eac"
+          "sha256": "8f7715fbc26d7b573eed343d9e6f088d23a292d1f8ef4d34fc405364fd54c9d3"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_08_WorldAlignedStone.keireshadergraph",
@@ -375,7 +375,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/02_Production/SG_08_WorldAlignedStone.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "6b0674873d92698f380d8dae8f0e4ec7aa70d07ddcdee51d0ecac745392ce24f"
+          "sha256": "191211788b5dfcea5399c1f7573f2c42a1caa56157b46682461655635ad70265"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_09_EnergyDissolve.keireshadergraph",
@@ -385,7 +385,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_09_EnergyDissolve.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "5904a2ee0ef32781ec532aba47981a265b300afb938551ef754fb4892524000b"
+          "sha256": "732ab640cf0cf3403927bf25d1c255e9391b5bc06f499222f7163e033b54a7b1"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_10_HologramScanlines.keireshadergraph",
@@ -395,7 +395,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_10_HologramScanlines.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "7be3d259a74c2817bfaea43c4ffb2bb9fb97d7f7741183e4d79a2066304d8452"
+          "sha256": "4f4792d3548a99b40b41f251dd300e5ded6630a9457c17f00e805fc3291ddee5"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_11_VertexWave.keireshadergraph",
@@ -405,7 +405,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_11_VertexWave.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "537b4ce57418955ad19e3dec4b238df654c1b3b33f093b0c7aec9b1e9a34e94b"
+          "sha256": "ca9519e8647805028b5a8015c7ac566eb41d9c99bc0794c8e43468651b57ca55"
         },
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_12_IridescentShield.keireshadergraph",
@@ -415,7 +415,7 @@
         {
           "path": "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_12_IridescentShield.keireshadergraph.keiremeta",
           "sizeBytes": 314,
-          "sha256": "09173c67b1db348344e9908fcd214f370d861e9b22f245fc6d32d6a6ceeb0a5f"
+          "sha256": "33cc78c881568cbc850864864d10c05d82837a9ab5bfbcb853c57ce70c0cfb42"
         },
         {
           "path": "Assets/Input/DefaultInput.keireinput",
@@ -465,7 +465,7 @@
         {
           "path": "Assets/Meshes/Idle.fbx.keiremeta",
           "sizeBytes": 535,
-          "sha256": "4d4f04c013fad485a05e3366d321371b8b73c462700488484e86b83444c26b5b"
+          "sha256": "8cb40003e3ec5a7ed5fae96cb0406f3a617c5024cc74098126a14e6298e6c636"
         },
         {
           "path": "Assets/Meshes/T-Pose.fbx",
@@ -475,7 +475,7 @@
         {
           "path": "Assets/Meshes/T-Pose.fbx.keiremeta",
           "sizeBytes": 619,
-          "sha256": "e30e824f777a150626228f411d565fbe479f326059ea38915fb2b9b6b7d64ead"
+          "sha256": "9d6470c225191b68b597e8a2b65ca87e8a60dea40a210029a7ab2f0b6030e5ca"
         },
         {
           "path": "Assets/Meshes/TexturedPyramid.obj",
@@ -485,7 +485,7 @@
         {
           "path": "Assets/Meshes/TexturedPyramid.obj.keiremeta",
           "sizeBytes": 263,
-          "sha256": "445eb48030b64bd795432332ba17a1c70177a8df18b49f6ae7f29dad9ad9e70a"
+          "sha256": "17781cd61e5b1fc562b84ec7fe9ce07d094ce2e7023755540bd62141193508ba"
         },
         {
           "path": "Assets/NewAnimatorController.keireanimgraph",
@@ -785,7 +785,7 @@
         {
           "path": "Assets/Vfx/Meshes/ArcaneSigil.gltf.keiremeta",
           "sizeBytes": 263,
-          "sha256": "5423c2e3f05223282132f4f7056fa054daafebcecbf2a9b27efc3118b7553686"
+          "sha256": "92c83c0ec95d5ef99bd2c23af03c7db31274eb7d8bb08fda0bc98cddca45db4e"
         },
         {
           "path": "Assets/Vfx/Meshes/EmberShard.gltf",
@@ -795,7 +795,7 @@
         {
           "path": "Assets/Vfx/Meshes/EmberShard.gltf.keiremeta",
           "sizeBytes": 263,
-          "sha256": "29f5208aa15654e00cb83ce79eb228971c8469e031419a7d56e83dc2f41bb05e"
+          "sha256": "dd2fd8c147197213e838e9015e0ab8c4a9c337135911b83f945ddf7d0fd028be"
         },
         {
           "path": "Assets/Vfx/PlasmaLance.keirematerial",
