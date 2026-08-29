@@ -1,3 +1,4 @@
+#include "KeireInternal/Scripting/ManagedAssemblySnapshot.h"
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
 #include <algorithm>
@@ -77,10 +78,18 @@ namespace Keire
                 if (managedApiPath.is_relative())
                     managedApiPath = m_Impl->ProjectRoot / managedApiPath;
                 managedApiPath = std::filesystem::absolute(managedApiPath).lexically_normal();
-                auto& managedApi = m_Impl->CandidateContext->LoadAssembly(PathText(managedApiPath));
+                const auto managedApiSnapshot = Detail::CaptureManagedAssemblySnapshot(managedApiPath);
+                auto& managedApi = Detail::LoadManagedAssemblySnapshot(*m_Impl->CandidateContext, managedApiSnapshot);
                 if (managedApi.GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
-                    throw std::runtime_error("Managed reload rejected Keire.Managed (status " +
-                                             std::to_string(static_cast<int>(managedApi.GetLoadStatus())) + ").");
+                {
+                    std::string managedException;
+                    {
+                        std::scoped_lock lock(m_Impl->Mutex);
+                        managedException = m_Impl->RuntimeException;
+                    }
+                    throw std::runtime_error(Detail::ManagedAssemblyLoadFailure(
+                        "Keire.Managed", managedApiSnapshot, managedApi.GetLoadStatus(), managedException));
+                }
                 managedApi.AddInternalCall("Keire.NativeRuntime", "WriteLogIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeWriteLog));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "RegisterProfileNameIcall",
@@ -368,10 +377,18 @@ namespace Keire
                 path = std::filesystem::absolute(path).lexically_normal();
                 if (!std::filesystem::is_regular_file(path))
                     throw std::runtime_error("Managed reload assembly does not exist: " + PathText(path));
-                const auto& assembly = m_Impl->CandidateContext->LoadAssembly(PathText(path));
+                const auto snapshot = Detail::CaptureManagedAssemblySnapshot(path);
+                const auto& assembly = Detail::LoadManagedAssemblySnapshot(*m_Impl->CandidateContext, snapshot);
                 if (assembly.GetLoadStatus() != Coral::AssemblyLoadStatus::Success)
-                    throw std::runtime_error("Managed reload rejected assembly '" + PathText(path) + "' (status " +
-                                             std::to_string(static_cast<int>(assembly.GetLoadStatus())) + ").");
+                {
+                    std::string managedException;
+                    {
+                        std::scoped_lock lock(m_Impl->Mutex);
+                        managedException = m_Impl->RuntimeException;
+                    }
+                    throw std::runtime_error(Detail::ManagedAssemblyLoadFailure(
+                        "assembly '" + PathText(path) + "'", snapshot, assembly.GetLoadStatus(), managedException));
+                }
                 for (const auto& type : assembly.GetLocalTypes())
                     if (type)
                         managedRuntimeTypesByName.emplace(ManagedTypeName(const_cast<Coral::Type&>(type)),

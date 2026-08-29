@@ -453,6 +453,12 @@ caches are concurrent across independent runtime hosts; diagnostic load status i
 Managed build generations contain both the engine API and gameplay outputs. Source checkouts incrementally compile the
 API project into generation-local storage, while packaged editors copy their bundled API; candidate reloads consume
 that immutable pair transactionally rather than resolving a process-global API artifact.
+Before Coral sees an API or gameplay assembly, the owner thread captures a bounded snapshot, verifies that size and
+modification time stayed stable across the read, records its SHA-256 identity, and loads the retained bytes from memory.
+This removes memory-mapped access to a live publisher path. A rejected candidate reports the symbolic Coral status,
+source snapshot metadata, and the captured managed exception, then unloads only the candidate context. Windows package
+entrypoints also share the repository workspace lock; cooked runtime smoke tests execute against an invocation-unique
+content copy that is removed after validation, so parallel direct invocations cannot share mutable validation state.
 
 ## GPU VFX And Media Import Boundaries
 

@@ -5,6 +5,7 @@
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ScriptSystem.h"
+#include "KeireInternal/Scripting/ManagedAssemblySnapshot.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #include <doctest/doctest.h>
@@ -41,6 +42,70 @@ namespace
     {
         return std::filesystem::temp_directory_path() / (std::string(prefix) + Keire::AssetId::Generate().ToString());
     }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    std::filesystem::path SnapshotMutationSource;
+    std::filesystem::path SnapshotMutationBackup;
+    bool SnapshotReadMutationObserved = false;
+    bool SnapshotMutationObserved = false;
+
+    void TouchManagedAssemblyDuringSnapshot(const std::filesystem::path& source, const std::size_t attempt) noexcept
+    {
+        if (source != SnapshotMutationSource || attempt != 0 || SnapshotReadMutationObserved)
+            return;
+        std::error_code error;
+        std::filesystem::last_write_time(
+            source, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2), error);
+        SnapshotReadMutationObserved = !error;
+    }
+
+    void MoveManagedAssemblyAfterSnapshot(const Keire::Detail::ManagedAssemblySnapshot& snapshot) noexcept
+    {
+        if (snapshot.Source != SnapshotMutationSource || SnapshotMutationObserved)
+            return;
+        std::error_code error;
+        std::filesystem::rename(SnapshotMutationSource, SnapshotMutationBackup, error);
+        SnapshotMutationObserved = !error;
+    }
+
+    class ManagedAssemblySnapshotMutation final
+    {
+      public:
+        explicit ManagedAssemblySnapshotMutation(std::filesystem::path source)
+            : m_Source(std::move(source)), m_Backup(m_Source.string() + ".snapshot-test-backup")
+        {
+            std::error_code ignored;
+            std::filesystem::remove(m_Backup, ignored);
+            SnapshotMutationSource = m_Source;
+            SnapshotMutationBackup = m_Backup;
+            SnapshotReadMutationObserved = false;
+            SnapshotMutationObserved = false;
+            Keire::Detail::SetManagedAssemblySnapshotReadHookForTesting(&TouchManagedAssemblyDuringSnapshot);
+            Keire::Detail::SetManagedAssemblySnapshotHookForTesting(&MoveManagedAssemblyAfterSnapshot);
+        }
+
+        ~ManagedAssemblySnapshotMutation()
+        {
+            Keire::Detail::SetManagedAssemblySnapshotReadHookForTesting(nullptr);
+            Keire::Detail::SetManagedAssemblySnapshotHookForTesting(nullptr);
+            std::error_code ignored;
+            if (std::filesystem::is_regular_file(m_Backup, ignored))
+                std::filesystem::rename(m_Backup, m_Source, ignored);
+            SnapshotMutationSource.clear();
+            SnapshotMutationBackup.clear();
+        }
+
+        ManagedAssemblySnapshotMutation(const ManagedAssemblySnapshotMutation&) = delete;
+        ManagedAssemblySnapshotMutation& operator=(const ManagedAssemblySnapshotMutation&) = delete;
+
+        [[nodiscard]] bool Observed() const noexcept { return SnapshotMutationObserved; }
+        [[nodiscard]] bool ReadMutationObserved() const noexcept { return SnapshotReadMutationObserved; }
+
+      private:
+        std::filesystem::path m_Source;
+        std::filesystem::path m_Backup;
+    };
+#endif
 } // namespace
 
 TEST_CASE("Managed assembly definitions round trip and expose dependencies")
@@ -566,8 +631,24 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
 
     Keire::ManagedReloadRequest request;
     request.Assemblies = {assembly};
+    request.ManagedApiAssembly = buildStatus.ManagedApiAssembly;
     request.State = {{42, "Game.Player", {{"speed", "7.5"}, {"target", "entity:123"}}}};
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    bool snapshotReadMutationObserved = false;
+    bool snapshotMutationObserved = false;
+    bool prepared = false;
+    {
+        ManagedAssemblySnapshotMutation mutation(request.ManagedApiAssembly);
+        prepared = scripts->PrepareReload(request);
+        snapshotReadMutationObserved = mutation.ReadMutationObserved();
+        snapshotMutationObserved = mutation.Observed();
+    }
+    CHECK(snapshotReadMutationObserved);
+    CHECK(snapshotMutationObserved);
+    CHECK(std::filesystem::is_regular_file(request.ManagedApiAssembly));
+#else
     const auto prepared = scripts->PrepareReload(request);
+#endif
     INFO(scripts->ReloadStatus().Diagnostic);
     REQUIRE(prepared);
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Prepared);
@@ -958,6 +1039,21 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     request.Assemblies = {assembly};
     REQUIRE(scripts->PrepareReload(request));
     CHECK_NOTHROW(scripts->CommitReload());
+    CHECK(scripts->ReloadStatus().Generation == 2);
+
+    const auto invalidAssembly = root / "Invalid.dll";
+    {
+        std::ofstream stream(invalidAssembly, std::ios::binary | std::ios::trunc);
+        stream << "not a managed assembly";
+    }
+    request.Assemblies = {invalidAssembly};
+    CHECK_FALSE(scripts->PrepareReload(request));
+    const auto invalidDiagnostic = scripts->ReloadStatus().Diagnostic;
+    CHECK(invalidDiagnostic.find("Coral status ") != std::string::npos);
+    CHECK(invalidDiagnostic.find("snapshot path='") != std::string::npos);
+    CHECK(invalidDiagnostic.find("sha256=") != std::string::npos);
+    CHECK(invalidDiagnostic.find("Managed exception:") != std::string::npos);
+    CHECK(invalidDiagnostic.find("last-good generation remains active") != std::string::npos);
     CHECK(scripts->ReloadStatus().Generation == 2);
 
     request.Assemblies = {host / "Missing.dll"};

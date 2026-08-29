@@ -1232,7 +1232,11 @@ $windowsFfmpegContract = Get-Content (Join-Path $Windows "ffmpeg-runtime-contrac
 $windowsFfmpegStage = Get-Content (Join-Path $Windows "stage-ffmpeg-runtime.ps1") -Raw
 $windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
 Assert-True ($windowsPackage.Contains('"--validate-additive-runtime", $runtimeValidationOutput') -and
-              $windowsPackage.Contains('"--content", $runtimeContent, "--headless"') -and
+              $windowsPackage.Contains('"--content", $runtimeExecutionContent, "--headless"') -and
+              $windowsPackage.Contains('"Build\Validation\packaged-runtime-" + [guid]::NewGuid().ToString("N")') -and
+              $windowsPackage.Contains('Copy-Item -LiteralPath $runtimeContent -Destination $runtimeExecutionContent') -and
+              $windowsPackage.Contains('Remove-KeireGeneratedDirectory -RepositoryRoot $Root') -and
+              $windowsPackage.Contains('-Path $runtimeValidationRoot -Description "packaged runtime validation snapshot"') -and
               -not $windowsPackage.Contains('--frames 6000') -and
               $windowsPackage.Contains('$runtimeValidation.renderMode -ne "rendered"') -and
               $windowsPackage.Contains('$runtimeValidation.renderedWindowLoop') -and
@@ -1277,6 +1281,14 @@ Assert-True ($windowsPackage.Contains('"--validate-additive-runtime", $runtimeVa
               $windowsPackage.Contains('Copy-Item -LiteralPath $buildScenesSource -Destination $buildScenesDestination -Force') -and
               $windowsPackage.Contains('Test-Path -LiteralPath $buildScenesDestination -PathType Leaf')) `
     "Packaged cooked runtime exercises additive scenes, runtime UI, rollback, and exit"
+$directPackageScripts = @("package.ps1", "package-editor.ps1", "package-hub.ps1", "package-installer.ps1",
+    "package-hub-installer.ps1")
+foreach ($directPackageScript in $directPackageScripts) {
+    $directPackageSource = Get-Content (Join-Path $Windows $directPackageScript) -Raw
+    Assert-True ($directPackageSource.Contains('Enter-KeireWorkspaceLock -RepositoryRoot $Root') -and
+                 $directPackageSource.Contains('Exit-KeireWorkspaceLock -Lock $WorkspaceLock')) `
+        "Direct Windows package entrypoint '$directPackageScript' shares the repository workspace lock"
+}
 Assert-True ($windowsPackage.Contains('-SmokePlay -SmokeOutput $editorPlayValidationOutput') -and
              $windowsPackage.Contains('twoPresentationTrees') -and
              $windowsPackage.Contains('topmostInputHandled') -and

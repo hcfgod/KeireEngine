@@ -13,6 +13,8 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Get-RepositoryRoot
+$WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "package-hub"
+try {
 $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
@@ -253,3 +255,7 @@ finally {
 Write-Host "==> Ready-to-run standalone Hub distribution: $stage"
 Write-Host "==> Launch with: $(Join-Path $stage 'Launch-KeireHub.cmd')"
 Write-Host "==> Standalone Hub package archive created: $archive"
+}
+finally {
+    Exit-KeireWorkspaceLock -Lock $WorkspaceLock
+}

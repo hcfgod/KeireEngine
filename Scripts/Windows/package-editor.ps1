@@ -12,6 +12,8 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Get-RepositoryRoot
+$WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "package-editor"
+try {
 $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
@@ -197,3 +199,7 @@ Remove-Item -LiteralPath $sdkStage -Recurse -Force
 Write-Host "==> Ready-to-run editor distribution: $stage"
 Write-Host "==> Launch with: $(Join-Path $stage 'Launch-KeireEditor.cmd')"
 Write-Host "==> Editor package archive created: $archive"
+}
+finally {
+    Exit-KeireWorkspaceLock -Lock $WorkspaceLock
+}

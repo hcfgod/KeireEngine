@@ -23,6 +23,10 @@ versions.
 
 ### Fixed
 
+- Managed reloads now capture bounded, stable, SHA-256-identified assembly snapshots before asking Coral to load them
+  from memory. A live DLL replacement can no longer invalidate an in-progress load, and failures retain the symbolic
+  Coral status, snapshot identity, and underlying .NET exception while preserving the last-good generation. Windows
+  package entrypoints share one workspace lock and validate cooked runtimes from invocation-unique content snapshots.
 - FBX imports tolerate exporter-authored absolute self references without following external paths, keep unrelated
   absolute texture references sandboxed as actionable warnings, and continue extracting embedded material definitions.
 - Source shader manifests now read both legacy schema 1 and current schema 2, retaining the current instance-addressing,

@@ -3,6 +3,8 @@ param([ValidateSet("Release", "Dist")][string]$Configuration = "Release", [strin
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Get-RepositoryRoot; $Project = Get-ProjectConfig; $Lock = Get-DependencyLock
+$WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "package"
+try {
 $worktreePolicy = Get-WindowsPackageWorktreePolicy -Root $Root -AllowDirty:$AllowDirty -CI:$CI
 $dirty = $worktreePolicy.Dirty
 $developmentArtifact = $worktreePolicy.DevelopmentArtifact
@@ -262,15 +264,20 @@ if (-not (Test-Path (Join-Path $runtimeContent "catalog.json")) -or
     -not (Test-Path (Join-Path $runtimeContent "runtime-manifest.json"))) {
     throw "Packaged cooked runtime content is incomplete."
 }
-& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeContent --frames 12
+$runtimeValidationRoot = Join-Path $Root `
+    ("Build\Validation\packaged-runtime-" + [guid]::NewGuid().ToString("N"))
+$runtimeExecutionContent = Join-Path $runtimeValidationRoot "content"
+try {
+Initialize-KeireOrdinaryChildDirectory -Root $Root -Path $runtimeValidationRoot `
+    -Description "Packaged runtime validation snapshot"
+Copy-Item -LiteralPath $runtimeContent -Destination $runtimeExecutionContent -Recurse -Force
+& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeExecutionContent --frames 12
 if ($LASTEXITCODE -ne 0) { throw "Packaged runtime smoke failed with exit code $LASTEXITCODE." }
-$runtimeValidationDirectory = Join-Path $Root "Build\Validation"
-$runtimeValidationOutput = Join-Path $runtimeValidationDirectory "packaged-additive-runtime-$Configuration-$outputArchitecture.json"
-New-Item -ItemType Directory -Force $runtimeValidationDirectory | Out-Null
-Remove-Item -LiteralPath $runtimeValidationOutput -Force -ErrorAction SilentlyContinue
+$runtimeValidationOutput = Join-Path $runtimeValidationRoot "additive-runtime-report.json"
 $runtimeValidationStartedAt = [DateTime]::UtcNow
 $runtimeValidationResult = Invoke-WindowsExecutableCapture -Path (Join-Path $stage "bin\$runtimeName.exe") `
-    -Arguments @("--content", $runtimeContent, "--headless", "--validate-additive-runtime", $runtimeValidationOutput) `
+    -Arguments @("--content", $runtimeExecutionContent, "--headless", "--validate-additive-runtime", `
+        $runtimeValidationOutput) `
     -Timeout ([TimeSpan]::FromMinutes(6))
 if ($runtimeValidationResult.StandardOutput) { [Console]::Out.Write($runtimeValidationResult.StandardOutput) }
 if ($runtimeValidationResult.StandardError) { [Console]::Error.Write($runtimeValidationResult.StandardError) }
@@ -331,6 +338,11 @@ if ($runtimeValidation.schemaVersion -ne 1 -or
     $runtimeValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1 -or
     -not $runtimeValidation.gpuOcclusion.vfxVisibility.maskConsumed) {
     throw "Packaged additive runtime validation published an incomplete result."
+}
+}
+finally {
+    Remove-KeireGeneratedDirectory -RepositoryRoot $Root -AllowedRoot (Join-Path $Root "Build\Validation") `
+        -Path $runtimeValidationRoot -Description "packaged runtime validation snapshot"
 }
 $versionResult = Invoke-WindowsExecutableCapture `
     (Join-Path $stage "bin\$($Project.CLIENT_TARGET).exe") @("--version")
@@ -502,3 +514,7 @@ finally {
     Remove-Item $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 Write-Host "==> Package created: $archive"
+}
+finally {
+    Exit-KeireWorkspaceLock -Lock $WorkspaceLock
+}

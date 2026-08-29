@@ -12,6 +12,8 @@ param(
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Get-RepositoryRoot
+$WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "package-installer"
+try {
 $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
@@ -91,3 +93,7 @@ if ($signingThumbprint) {
     Set-Content -LiteralPath $checksum -Encoding ASCII
 Write-Host "==> Windows editor installer created: $artifact"
 Write-Host "==> Installer checksum created: $checksum"
+}
+finally {
+    Exit-KeireWorkspaceLock -Lock $WorkspaceLock
+}
