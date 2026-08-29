@@ -275,6 +275,13 @@ namespace KeireEditor
                             " culled (" + std::to_string(culledPercent) + "%)";
         result.Pyramid = std::to_string(diagnostics.PyramidMipCount) + " HZB mips / " +
                          std::to_string(diagnostics.SafeOccluders) + " safe occluders";
+        if (!diagnostics.ReadbackValid)
+        {
+            result.Visibility = std::to_string(diagnostics.EligibleCandidates) + " eligible candidates / " +
+                                std::to_string(diagnostics.EligibleCandidateTriangles) + " candidate triangles";
+            result.Pyramid =
+                std::to_string(diagnostics.EligibleSafeOccluders) + " eligible safe occluders / no completed HZB";
+        }
         if (aggregate && diagnostics.State == Keire::GpuOcclusionSurfaceState::Active)
         {
             result.Pyramid +=
@@ -334,10 +341,19 @@ namespace KeireEditor
             }
             break;
         case Keire::GpuOcclusionSurfaceState::Fallback:
-            result.State = GpuOcclusionDiagnosticState::Fallback;
-            result.Status = "GPU occlusion fallback: " + reason + " (direct draws)";
+            if (diagnostics.RequestedMode == Keire::GpuOcclusionMode::Automatic &&
+                diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::BelowAutomaticThreshold)
+            {
+                result.State = GpuOcclusionDiagnosticState::Disabled;
+                result.Status = "GPU occlusion idle: " + reason + " (direct draws; use Forced to validate this scene)";
+            }
+            else
+            {
+                result.State = GpuOcclusionDiagnosticState::Fallback;
+                result.Status = "GPU occlusion fallback: " + reason + " (direct draws)";
+                result.Warning = true;
+            }
             result.Readback = "Visibility readback unavailable while direct-draw fallback is active";
-            result.Warning = true;
             break;
         }
         if (!diagnostics.PyramidValid && diagnostics.State == Keire::GpuOcclusionSurfaceState::Active)

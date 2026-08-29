@@ -881,6 +881,8 @@ function Get-WindowsRequiredHubContentPaths {
         "content\Fonts\MaterialSymbolsRounded-Subset.ttf", "content\Fonts\SOURCES.md",
         "content\Templates\catalog.json", "content\Templates\Payloads\Empty\README.md",
         "content\Templates\Payloads\Starter3D\README.md",
+        "content\Templates\Payloads\Starter3D\Assets\Shaders\DefaultUnlit.keireshader",
+        "content\Templates\Payloads\Starter3D\Assets\Shaders\DefaultUnlit.keireshader.keiremeta",
         "content\Templates\Payloads\Starter3D\Assets\Shaders\StarterUnlit.hlsl",
         "content\Templates\Payloads\Starter3D\ProjectSettings\Rendering.keiresettings",
         "content\Templates\Payloads\Sandbox\README.md",
@@ -931,6 +933,114 @@ function Assert-WindowsRenderTestHooksAbsent {
                 throw "Distribution executable '$executable' contains renderer test hook '$marker'."
             }
         }
+    }
+}
+
+function Assert-WindowsPackagedBuildSupport {
+    param([string]$Stage)
+
+    $buildManifestPath = Join-Path $Stage "build-manifest.json"
+    try {
+        $buildManifest = Get-Content -LiteralPath $buildManifestPath -Raw | ConvertFrom-Json
+    }
+    catch {
+        throw "Editor package build identity is unavailable for Build Support validation."
+    }
+    $engineVersion = [string]$buildManifest.version
+    $architecture = if ([string]$buildManifest.architecture -in @("AARCH64", "ARM64")) { "arm64" } else {
+        [string]$buildManifest.architecture
+    }
+    if ($engineVersion -cnotmatch '^[A-Za-z0-9.+-]{1,128}$' -or
+        $architecture -notin @("x86_64", "arm64")) {
+        throw "Editor package build identity cannot select a compatible Build Support module."
+    }
+
+    $supportRoot = Join-Path $Stage "bin\BuildSupport"
+    $versionRoot = Join-Path $supportRoot $engineVersion
+    $packId = "windows-$architecture-$engineVersion"
+    $installation = Join-Path $versionRoot $packId
+    foreach ($directory in @($supportRoot, $versionRoot, $installation)) {
+        $entry = Get-Item -LiteralPath $directory -Force -ErrorAction SilentlyContinue
+        if (-not $entry -or -not $entry.PSIsContainer -or
+            ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Editor package is missing its ordinary $architecture Build Support directory: $directory"
+        }
+    }
+    if (@(Get-ChildItem -LiteralPath $supportRoot -Force).Count -ne 1 -or
+        @(Get-ChildItem -LiteralPath $versionRoot -Force).Count -ne 1) {
+        throw "Editor package must contain exactly one compatible host Build Support module."
+    }
+
+    $manifestPath = Join-Path $installation "manifest.json"
+    $manifestFile = Get-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
+    if (-not $manifestFile -or $manifestFile.PSIsContainer -or
+        ($manifestFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw "Editor package Build Support manifest is missing or redirected."
+    }
+    try {
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        $playerAbi = [uint64]$manifest.playerAbi
+    }
+    catch {
+        throw "Editor package Build Support manifest is invalid."
+    }
+    if ([int]$manifest.schemaVersion -ne 1 -or $playerAbi -eq 0 -or $playerAbi -gt [uint32]::MaxValue -or
+        [string]$manifest.id -cne $packId -or [string]$manifest.engineVersion -cne $engineVersion -or
+        [string]$manifest.platform -cne "windows" -or [string]$manifest.architecture -cne $architecture -or
+        -not [string]$manifest.moduleFingerprint) {
+        throw "Editor package Build Support identity or ABI is incompatible with the packaged Editor."
+    }
+
+    $files = @($manifest.files)
+    if ($files.Count -eq 0) { throw "Editor package Build Support inventory is empty." }
+    $installationPrefix = [IO.Path]::GetFullPath($installation).TrimEnd('\') + '\'
+    $inventory = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($file in $files) {
+        $relative = [string]$file.path
+        $nativeRelative = $relative -replace '/', '\'
+        $resolved = [IO.Path]::GetFullPath((Join-Path $installation $nativeRelative))
+        if (-not $relative -or $relative.Contains('\') -or $relative.StartsWith('/') -or
+            -not $resolved.StartsWith($installationPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+            -not $inventory.Add($relative) -or [uint64]$file.size -gt 16GB -or
+            [string]$file.sha256 -cnotmatch '^[0-9a-f]{64}$' -or [int]$file.mode -notin @(420, 493)) {
+            throw "Editor package Build Support inventory contains an unsafe or invalid record."
+        }
+        $payload = Get-Item -LiteralPath $resolved -Force -ErrorAction SilentlyContinue
+        if (-not $payload -or $payload.PSIsContainer -or
+            ($payload.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+            [uint64]$payload.Length -ne [uint64]$file.size -or
+            (Get-FileHash -LiteralPath $payload.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                [string]$file.sha256) {
+            throw "Editor package Build Support payload does not match its exact inventory: $relative"
+        }
+    }
+    $actualFiles = @(
+        Get-ChildItem -LiteralPath $installation -File -Force -Recurse |
+            Where-Object { $_.FullName -ne $manifestPath } |
+            ForEach-Object { ([IO.Path]::GetRelativePath($installation, $_.FullName) -replace '\\', '/') }
+    )
+    if ($actualFiles.Count -ne $inventory.Count -or
+        @($actualFiles | Where-Object { -not $inventory.Contains($_) }).Count -ne 0) {
+        throw "Editor package Build Support contains files outside its exact inventory."
+    }
+    foreach ($entry in Get-ChildItem -LiteralPath $installation -Directory -Force -Recurse) {
+        if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Editor package Build Support contains a redirected directory."
+        }
+    }
+
+    $configurations = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($variant in @($manifest.variants)) {
+        $configuration = [string]$variant.configuration
+        $executable = (([string]$variant.root).TrimEnd('/', '\') + '/' +
+            ([string]$variant.executable).TrimStart('/', '\'))
+        if ($configuration -notin @("development", "release", "dist") -or
+            -not $configurations.Add($configuration) -or -not $inventory.Contains($executable)) {
+            throw "Editor package Build Support variants are incomplete or inconsistent with their inventory."
+        }
+    }
+    if ($configurations.Count -ne 3) {
+        throw "Editor package Build Support must provide development, release, and dist variants."
     }
 }
 
@@ -992,6 +1102,7 @@ function Assert-WindowsEditorPackageStage {
     if (-not $dotnetSdk -or $manifest.bundledDotnetSdk -ne $dotnetSdk.Name) {
         throw "Editor package does not contain its declared .NET 10 SDK."
     }
+    Assert-WindowsPackagedBuildSupport -Stage $Stage
     foreach ($developmentDirectory in @("include", "lib", "examples")) {
         if (Test-Path -LiteralPath (Join-Path $Stage $developmentDirectory)) {
             throw "Editor package contains SDK-only content: $developmentDirectory"

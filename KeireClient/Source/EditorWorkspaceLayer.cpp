@@ -830,7 +830,26 @@ void EditorWorkspaceLayer::OnAttach()
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
             ConfigureAssetImporters(databaseSpecification);
-            m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+            const auto sourceIndex = project->Root() / "Library/AssetCache/Runtime/source-index.json";
+            bool openedFromSourceIndex = false;
+            std::error_code sourceIndexError;
+            if (std::filesystem::is_regular_file(sourceIndex, sourceIndexError) && !sourceIndexError)
+            {
+                try
+                {
+                    m_AssetDatabase = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(
+                        databaseSpecification, sourceIndex, true);
+                    openedFromSourceIndex = true;
+                }
+                catch (const std::exception& error)
+                {
+                    ReportError("Assets",
+                                std::string("The cached asset source index was invalid and will be rebuilt: ") +
+                                    error.what());
+                }
+            }
+            if (!m_AssetDatabase)
+                m_AssetDatabase = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             m_EditorSessionPath = project->WorkspaceDirectory() / "EditorSession.state";
             const auto editorSession = KeireEditor::LoadEditorSessionState(m_EditorSessionPath);
             const auto restoredScene = editorSession.LastScene;
@@ -869,13 +888,10 @@ void EditorWorkspaceLayer::OnAttach()
                 m_PendingStartupScene = startupCandidate;
                 ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             }
-            else if (AssetSourcesAreNewerThanCatalog(project->AssetsDirectory(), catalog))
-            {
-                m_AssetStatus =
-                    "Opened the cached catalog. Source changes are pending; use Refresh and Import when ready.";
-            }
             else
-                m_AssetStatus = "Opened the current development catalog without rebuilding it.";
+                m_AssetStatus = openedFromSourceIndex
+                                    ? "Opened the cached catalog. Source reconciliation is running in the background."
+                                    : "Opened the current development catalog after rebuilding the source index.";
             if (const auto input = Owner().Input())
             {
                 m_EditorInputUser = input->CreateUser("Editor");

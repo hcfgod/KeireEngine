@@ -424,6 +424,26 @@ namespace Keire::RenderBackend
         CaptureRuntimeUiCommands.clear();
     }
 
+    void RenderSharedState::QueueUiTextureRetirements(const std::span<const std::uintptr_t> logicalTextureIds)
+    {
+        RequireOwner("QueueUiTextureRetirements");
+        if (!FrameActive)
+            throw std::logic_error("UI texture retirements require an active render frame.");
+
+        constexpr std::size_t maximumTextureRetirements = 65'536U;
+        if (logicalTextureIds.size() > maximumTextureRetirements ||
+            PendingUiTextureRetirements.size() > maximumTextureRetirements - logicalTextureIds.size())
+        {
+            throw std::length_error("Dear ImGui texture retirements exceed the asynchronous frame-packet bound.");
+        }
+
+        auto candidate = PendingUiTextureRetirements;
+        candidate.insert(candidate.end(), logicalTextureIds.begin(), logicalTextureIds.end());
+        std::ranges::sort(candidate);
+        candidate.erase(std::unique(candidate.begin(), candidate.end()), candidate.end());
+        PendingUiTextureRetirements.swap(candidate);
+    }
+
     void RenderSharedState::Submit(SceneRenderRequest request)
     {
         RequireOwner("Submit");

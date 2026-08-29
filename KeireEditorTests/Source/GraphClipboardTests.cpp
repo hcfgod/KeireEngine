@@ -63,20 +63,11 @@ TEST_CASE("Material and VFX clipboard fragments remap editor topology across doc
     materialSource.Shader.Asset = Keire::AssetId::Generate();
     materialSource.OutputNode = Keire::AssetId::Generate();
     materialSource.SurfaceGraph = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
-    auto materialFirst =
-        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Scalar);
-    auto materialSecond =
-        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Reroute, Keire::ShaderGraphValueType::Scalar);
-    const auto materialOutput =
-        std::ranges::find(materialFirst.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction)
-            ->Id;
-    const auto materialInput =
-        std::ranges::find(materialSecond.Pins, Keire::ShaderGraphPinDirection::Input, &Keire::ShaderGraphPin::Direction)
-            ->Id;
-    materialSource.SurfaceGraph.Nodes.push_back(materialFirst);
-    materialSource.SurfaceGraph.Nodes.push_back(materialSecond);
-    materialSource.SurfaceGraph.Connections.push_back(
-        {Keire::AssetId::Generate(), {materialFirst.Id, materialOutput}, {materialSecond.Id, materialInput}});
+    auto materialFirst = Keire::CreateMaterialGraphValueNode(Keire::ShaderPropertyType::Scalar, 0.25F, {20.0F, 30.0F});
+    auto materialSecond = Keire::CreateMaterialGraphValueNode(Keire::ShaderPropertyType::Color,
+                                                              Keire::Color{1.0F, 1.0F, 1.0F, 1.0F}, {80.0F, 90.0F});
+    materialSource.Nodes.push_back(materialFirst);
+    materialSource.Nodes.push_back(materialSecond);
     const std::array materialSelection{materialFirst.Id, materialSecond.Id};
 
     const auto materialFragment = KeireEditor::CopyMaterialGraphFragment(materialSource, materialSelection);
@@ -88,9 +79,11 @@ TEST_CASE("Material and VFX clipboard fragments remap editor topology across doc
     REQUIRE(materialPasted.size() == 2);
     CHECK(materialPasted[0] != materialFirst.Id);
     CHECK(materialPasted[1] != materialSecond.Id);
-    REQUIRE(materialTarget.SurfaceGraph.Connections.size() == 1);
-    CHECK(materialTarget.SurfaceGraph.Connections.front().Output.Node == materialPasted[0]);
-    CHECK(materialTarget.SurfaceGraph.Connections.front().Input.Node == materialPasted[1]);
+    REQUIRE(materialTarget.Nodes.size() == 2);
+    CHECK(materialTarget.Nodes[0].Id == materialPasted[0]);
+    CHECK(materialTarget.Nodes[1].Id == materialPasted[1]);
+    CHECK(materialTarget.Nodes[0].Value == materialFirst.Value);
+    CHECK(materialTarget.Nodes[1].Value == materialSecond.Value);
 
     Keire::VfxEffectDefinition vfxSource;
     vfxSource.EmitterId = Keire::AssetId::Generate();

@@ -363,6 +363,60 @@ TEST_CASE("Indexed targeted import rescans when a requested source is newer than
     CHECK(indexed->Find(added->Id));
 }
 
+TEST_CASE("Published source index detects offline source changes without blocking startup")
+{
+    TemporaryAssetProject project;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.OfflineSourceChange";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".offline"};
+    std::atomic_size_t importCalls = 0;
+    importer.Import = [&importCalls](const std::span<const std::byte> bytes)
+    {
+        ++importCalls;
+        return std::vector<std::byte>(bytes.begin(), bytes.end());
+    };
+    const Keire::AssetDatabaseSpecification specification{.ProjectRoot = project.Root,
+                                                          .ChangeDebounce = std::chrono::milliseconds(0),
+                                                          .ChangeMonitorInterval = std::chrono::milliseconds(1),
+                                                          .Importers = {importer}};
+    project.Write("Changed.offline", "before");
+    project.Write("Unchanged.offline", "stable");
+    auto initial = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    REQUIRE(initial->ImportAll().Imported == 2);
+    const auto changed = initial->Find("Changed.offline");
+    const auto unchanged = initial->Find("Unchanged.offline");
+    REQUIRE(changed);
+    REQUIRE(unchanged);
+    const auto previousDigest = changed->SourceDigest;
+    const auto sourceIndex = project.Root / "Library/AssetCache/Runtime/source-index.json";
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*initial, sourceIndex);
+    const auto changedPath = project.Root / "Assets/Changed.offline";
+    const auto previousWriteTime = std::filesystem::last_write_time(changedPath);
+    project.Write("Changed.offline", "after!");
+    std::filesystem::last_write_time(changedPath, previousWriteTime);
+    auto indexed = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(specification, sourceIndex, true);
+    REQUIRE(indexed->Find(changed->Id));
+    CHECK(indexed->Find(changed->Id)->SourceDigest == previousDigest);
+    std::vector<Keire::AssetId> detected;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    do
+    {
+        detected = indexed->PollChangedAssets();
+        if (!detected.empty())
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    } while (std::chrono::steady_clock::now() < deadline);
+    CHECK(std::ranges::find(detected, changed->Id) != detected.end());
+    CHECK(std::ranges::find(detected, unchanged->Id) == detected.end());
+    REQUIRE(indexed->Find(changed->Id));
+    CHECK(indexed->Find(changed->Id)->SourceDigest != previousDigest);
+    const auto imported = indexed->ImportAll();
+    CHECK(imported.Imported == 1);
+    CHECK(imported.CacheHits == 1);
+    CHECK(importCalls.load() == 3);
+}
+
 TEST_CASE("Single asset creation and rename avoid unrelated project rescans")
 {
     TemporaryAssetProject project;
@@ -805,6 +859,9 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     {
         ++importCalls;
         CHECK(context.ImportSettings.contains("uppercase"));
+        const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        if (text == "invalid staged payload")
+            throw std::invalid_argument("intentional staged import failure");
         Keire::AssetImportOutput output;
         output.Bytes.assign(bytes.begin(), bytes.end());
         return output;
@@ -878,6 +935,35 @@ TEST_CASE("External asset imports persist normalized options and preserve identi
     const std::array batch{validBatchItem, invalidBatchItem};
     CHECK_THROWS_AS((void)database->ImportExternal(batch), std::invalid_argument);
     CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Batch/First.opt"));
+
+    const auto failing = project.Root / "Failing.opt";
+    {
+        std::ofstream stream(failing, std::ios::binary | std::ios::trunc);
+        stream << "invalid staged payload";
+    }
+    const std::array stagedFailureBatch{
+        validBatchItem, Keire::ExternalAssetImportItem{failing, "Batch/Failing.opt", {{"uppercase", false}}}};
+    Keire::AssetOperationProgress lastProgress;
+    try
+    {
+        (void)database->ImportExternal(stagedFailureBatch, {},
+                                       [&lastProgress](const Keire::AssetOperationProgress& value)
+                                       { lastProgress = value; });
+        FAIL_CHECK("Expected the staged external import to fail.");
+    }
+    catch (const std::invalid_argument& error)
+    {
+        const std::string_view message = error.what();
+        CHECK(message.find("External import failed for source '") != std::string_view::npos);
+        CHECK(message.find("Failing.opt") != std::string_view::npos);
+        CHECK(message.find("destination 'Batch/Failing.opt'") != std::string_view::npos);
+        CHECK(message.find("intentional staged import failure") != std::string_view::npos);
+    }
+    CHECK(lastProgress.Phase == Keire::AssetOperationPhase::Staging);
+    CHECK(lastProgress.Completed == 1);
+    CHECK(lastProgress.CurrentPath == std::filesystem::absolute(failing).lexically_normal());
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Batch/First.opt"));
+    CHECK_FALSE(std::filesystem::exists(project.Root / "Assets/Batch/Failing.opt"));
 
     const auto droppedFolder = project.Root / "DroppedFolder";
     std::filesystem::create_directories(droppedFolder);

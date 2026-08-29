@@ -5,7 +5,7 @@ versions.
 
 ## Unreleased
 
-## 0.4.3 - 2026-08-28
+## 0.4.4 - 2026-08-28
 
 ### Changed
 
@@ -42,13 +42,17 @@ versions.
   material shaders, and replaced full imports after material extraction, duplication, and trash restoration.
 - Composited and hit-tested runtime UI in Scene view, routed Edit-mode pointer states, cleared disabled/hidden control
   interaction state, and deferred Hierarchy selection until mouse release so entity drags preserve the Inspector.
+- Added backward-compatible Overlay, Screen Space Camera, and World Space Canvas modes. Scene view projects and picks
+  world canvases with its current camera and provides undoable Canvas/Rect Transform plane handles; world UI rejects
+  behind-camera input while scene-depth occlusion remains an explicit unsupported boundary.
 - Scheduled managed discovery after script creation, supported yielding nested `Coroutine` handles, synchronized scene
   names after asset renames, corrected Windows Explorer reveal arguments, and retained compatible Build Support
   component selections when changing editor versions.
 - Documented the Material Graph/Shader Graph single-authority migration and conservative per-system GPU occlusion
   coverage plan.
-- Material Graph authoring now binds Shader Graph parameters without requiring duplicate surface shader logic; legacy
-  surface expressions remain import-compatible.
+- Material Graph authoring now binds Shader Graph parameters without requiring duplicate surface shader logic and no
+  longer offers new expression/function nodes; legacy surface expressions remain visible and import-compatible for
+  migration.
 - GPU occlusion now derives conservative current-pose submesh bounds for imported linear-blend skins and accepts them
   only when pose generation, immutable frame index, and the deformed vertex stream all match. Stale bounds,
   dual-quaternion skinning, morph targets, unbounded world-position displacement, and unknown deformation remain
@@ -72,9 +76,27 @@ versions.
   spatial-volume-mask capability is likewise limited to active rendered GPU occlusion on a running device.
 - Invalidated VFX and spatial-selection outputs together with their visibility masks on frame retirement, resize, and
   device-generation changes so recovery retries cannot consume resources created by the lost device.
+- Bundled the verified host Windows Player Build Support module with the packaged Editor, preserving its current ABI,
+  module fingerprint, three configuration variants, and exact inventory without duplicating the component in Hub.
 
 ### Fixed
 
+- Removed the Editor's per-frame deep copy and GPU recreation of every registered ImGui texture. Immutable frame
+  packets now snapshot only referenced texture updates, while the render thread reuses generation-qualified GPU
+  textures and invalidates them safely during device recovery.
+- Opened current development catalogs through their published source index before background reconciliation, queued
+  asset moves and renames at the owner-thread safe boundary, drained bulk mutations without front-erasing a vector,
+  and synchronized active scene labels without overwriting unrelated unsaved scene edits.
+- Made built-in and material-less meshes use the instance-addressed indirect draw ABI, preserving conservative bounds
+  and depth-only occluder eligibility. Per-surface diagnostics now retain eligible counts and triangle evidence when
+  Automatic mode intentionally stays below its profitability threshold, and point users to Forced validation mode.
+- Advanced Material Graph sources to schema 5: new material files bind the selected Shader Graph contract without
+  serializing duplicate surface logic, while executable historical expressions remain readable under the explicit
+  `legacySurfaceGraph` migration field.
+- Added a canonical textured default shader contract to Starter 3D projects so safe external material extraction has a
+  valid project-owned shader target instead of silently ending before texture-reference diagnostics are produced.
+- Made FBX model IDs the deterministic identity behind duplicate node, cluster-bone, and animation-channel names, so
+  third-party character skeletons retain readable unique names and import repeatedly to identical asset bytes.
 - Restored decodable built-in Hub template thumbnails and made source/catalog plus Windows and Unix package validation
   reject missing or malformed declared artwork instead of silently shipping the runtime fallback.
 - Restricted Windows distribution signing keys before writing secret bytes without requiring a privileged owner

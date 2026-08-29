@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "source": "Assets/Shaders/StarterUnlit.hlsl",
+  "vertexLayoutVersion": 3,
+  "receivesShadows": false,
+  "usesForwardPlus": false,
+  "usesInstancing": true,
+  "instanceAddressingAbiVersion": 2,
+  "occlusionSupport": 3,
+  "maximumWorldPositionDisplacementRadius": 0.0,
+  "usesImageBasedLighting": false,
+  "spatialLightingAbiVersion": 0,
+  "stages": {
+    "vertex": "VSMain",
+    "fragment": "PSMain"
+  },
+  "defines": {},
+  "includeRoots": [
+    "Assets/Shaders"
+  ],
+  "renderState": {
+    "topology": "TriangleList",
+    "culling": "Back",
+    "depthTest": true,
+    "depthWrite": true,
+    "blend": false
+  },
+  "properties": [
+    {
+      "name": "Tint",
+      "displayName": "Base Color Factor",
+      "category": "Surface",
+      "type": "Color",
+      "default": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    {
+      "name": "MainTexture",
+      "displayName": "Base Color Texture",
+      "category": "Surface",
+      "type": "Texture2D",
+      "semantic": "BaseColor",
+      "default": null
+    }
+  ]
+}

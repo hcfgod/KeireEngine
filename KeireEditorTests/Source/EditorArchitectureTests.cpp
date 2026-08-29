@@ -837,6 +837,28 @@ TEST_CASE("scene document owns atomic save and recovery lifecycle")
     std::filesystem::remove_all(root, error);
 }
 
+TEST_CASE("scene document keeps the source path name authoritative after discarding dirty edits")
+{
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000067");
+    const auto source = std::filesystem::path("Assets/Scenes/RenamedScene.keirescene");
+    const auto staleDefinition = Keire::SceneAsset::EmptyDefinition("OriginalScene");
+    auto scene = Keire::CreateRef<Keire::Scene>(asset, staleDefinition);
+    scene->MarkSaved();
+    KeireEditor::SceneDocument document;
+    document.Open(scene, asset, source);
+    CHECK(document.EditingScene()->Name() == "RenamedScene");
+    CHECK_FALSE(document.Dirty());
+    (void)document.CreateEntity("Unsaved unrelated edit");
+    CHECK(document.Dirty());
+
+    auto reopened = Keire::CreateRef<Keire::Scene>(asset, staleDefinition);
+    reopened->MarkSaved();
+    document.Open(reopened, asset, source);
+    CHECK(document.EditingScene()->Name() == "RenamedScene");
+    CHECK_FALSE(document.Dirty());
+    document.Close();
+}
+
 TEST_CASE("play changes apply selected property and structural edits transactionally")
 {
     const auto registry = Keire::ComponentRegistry::CreateDefault();

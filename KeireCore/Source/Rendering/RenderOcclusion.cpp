@@ -33,19 +33,6 @@ namespace
     constexpr std::uint32_t MaximumGpuOcclusionCandidates = 262'144U;
     constexpr std::uint32_t MaximumGpuOcclusionSurfaceDimension = 16'384U;
 
-    struct ProjectedRectangle final
-    {
-        float MinimumX = 0.0F;
-        float MinimumY = 0.0F;
-        float MaximumX = 0.0F;
-        float MaximumY = 0.0F;
-
-        [[nodiscard]] float Area() const noexcept
-        {
-            return std::max(0.0F, MaximumX - MinimumX) * std::max(0.0F, MaximumY - MinimumY);
-        }
-    };
-
     class ScopedGpuDebugGroup final
     {
       public:
@@ -82,39 +69,6 @@ namespace
     [[nodiscard]] std::size_t AlignUpload(const std::size_t value) noexcept
     {
         return (value + 15U) & ~std::size_t{15U};
-    }
-
-    [[nodiscard]] ProjectedRectangle ProjectedBoundsPixels(const Keire::Matrix4& clipFromLocal,
-                                                           const Keire::MeshBounds bounds, const std::uint32_t width,
-                                                           const std::uint32_t height) noexcept
-    {
-        using Keire::RenderBackend::GeometryDetail::TransformClip;
-        float minimumX = static_cast<float>(width);
-        float minimumY = static_cast<float>(height);
-        float maximumX = 0.0F;
-        float maximumY = 0.0F;
-        for (std::uint32_t corner = 0; corner < 8U; ++corner)
-        {
-            const Keire::Vector3 point{(corner & 1U) != 0U ? bounds.Maximum.X : bounds.Minimum.X,
-                                       (corner & 2U) != 0U ? bounds.Maximum.Y : bounds.Minimum.Y,
-                                       (corner & 4U) != 0U ? bounds.Maximum.Z : bounds.Minimum.Z};
-            const auto clip = TransformClip(clipFromLocal, point);
-            if (!std::isfinite(clip.X) || !std::isfinite(clip.Y) || !std::isfinite(clip.W))
-                return {};
-            if (clip.W <= 0.00001F)
-                return {0.0F, 0.0F, static_cast<float>(width), static_cast<float>(height)};
-            const float x = (clip.X / clip.W * 0.5F + 0.5F) * static_cast<float>(width);
-            const float y = (-clip.Y / clip.W * 0.5F + 0.5F) * static_cast<float>(height);
-            minimumX = std::min(minimumX, x);
-            minimumY = std::min(minimumY, y);
-            maximumX = std::max(maximumX, x);
-            maximumY = std::max(maximumY, y);
-        }
-        minimumX = std::clamp(minimumX, 0.0F, static_cast<float>(width));
-        minimumY = std::clamp(minimumY, 0.0F, static_cast<float>(height));
-        maximumX = std::clamp(maximumX, 0.0F, static_cast<float>(width));
-        maximumY = std::clamp(maximumY, 0.0F, static_cast<float>(height));
-        return {minimumX, minimumY, maximumX, maximumY};
     }
 
     [[nodiscard]] SDL_GPUCullMode
@@ -209,7 +163,11 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionLocalLightCandidates += localLightCandidates;
         Statistics.GpuOcclusionSpatialVolumeCandidates += spatialVolumeCandidates;
         Statistics.GpuOcclusionForcedVisibleCandidates += localLightCandidates + spatialVolumeCandidates;
-        surface.GpuOcclusionDiagnostics.RequestedMode = requested;
+        auto& diagnostics = surface.GpuOcclusionDiagnostics;
+        diagnostics.RequestedMode = requested;
+        diagnostics.EligibleCandidates = 0;
+        diagnostics.EligibleSafeOccluders = 0;
+        diagnostics.EligibleCandidateTriangles = 0;
         if (requested == GpuOcclusionMode::Disabled)
         {
             (void)PublishFallback(surface, requested, GpuOcclusionFallbackReason::DisabledBySetting);
@@ -326,23 +284,28 @@ namespace Keire::RenderBackend
             const auto drawIndex = static_cast<std::size_t>(sceneBatch.First);
             const auto& draw = draws.Opaque.Draws[drawIndex];
             const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
-            if (!material || material->Topology != ShaderPrimitiveTopology::TriangleList || !material->DepthTest ||
-                IsTransparentMaterial(material->Surface.AlphaMode))
+            const bool builtInFallback = !draw.Material;
+            if ((!material && !builtInFallback) ||
+                (material && (material->Topology != ShaderPrimitiveTopology::TriangleList || !material->DepthTest ||
+                              IsTransparentMaterial(material->Surface.AlphaMode))))
             {
                 continue;
             }
-            if (material->InstanceAddressingAbiVersion != 2U)
+            if (material && material->InstanceAddressingAbiVersion != 2U)
             {
                 legacyShaderAbi = true;
                 continue;
             }
-            if (!HasShaderOcclusionSupport(material->OcclusionSupport, ShaderOcclusionSupport::ConservativeBounds))
+            if (material &&
+                !HasShaderOcclusionSupport(material->OcclusionSupport, ShaderOcclusionSupport::ConservativeBounds))
             {
                 continue;
             }
-            if (!DisplacementBounds::IsKnown(material->MaximumWorldPositionDisplacementRadius))
+            const std::optional<float> maximumDisplacement =
+                material ? material->MaximumWorldPositionDisplacementRadius : std::optional<float>{0.0F};
+            if (!DisplacementBounds::IsKnown(maximumDisplacement))
                 continue;
-            const auto displacementRadius = *material->MaximumWorldPositionDisplacementRadius;
+            const auto displacementRadius = *maximumDisplacement;
             if (sceneBatch.Count > MaximumGpuOcclusionBatchInstances)
             {
                 oversizedBatch = true;
@@ -394,8 +357,9 @@ namespace Keire::RenderBackend
             prepared.CandidateTriangles += static_cast<std::uint64_t>(triangleCount) * sceneBatch.Count;
 
             const bool depthCompatible =
-                material->Surface.AlphaMode == MaterialAlphaMode::Opaque && material->DepthWrite &&
-                HasShaderOcclusionSupport(material->OcclusionSupport, ShaderOcclusionSupport::DepthOnlyGeometryMatch);
+                builtInFallback ||
+                (material->Surface.AlphaMode == MaterialAlphaMode::Opaque && material->DepthWrite &&
+                 HasShaderOcclusionSupport(material->OcclusionSupport, ShaderOcclusionSupport::DepthOnlyGeometryMatch));
             if (!depthCompatible)
                 continue;
             std::uint32_t rangeFirst = 0;
@@ -405,7 +369,7 @@ namespace Keire::RenderBackend
                 if (rangeCount == 0U)
                     return;
                 prepared.Occluders.push_back({static_cast<std::uint32_t>(sceneBatchIndex), rangeFirst, rangeCount,
-                                              OcclusionCullMode(*material)});
+                                              material ? OcclusionCullMode(*material) : SDL_GPU_CULLMODE_BACK});
                 rangeCount = 0U;
             };
             for (std::uint32_t instance = 0; instance < sceneBatch.Count; ++instance)
@@ -421,8 +385,8 @@ namespace Keire::RenderBackend
                 }
                 const auto clipFromLocal = Math::Multiply(packet.Camera.Projection,
                                                           Math::Multiply(packet.Camera.View, instanceDraw.Item->World));
-                const auto rectangle = ProjectedBoundsPixels(clipFromLocal, instanceDraw.Submesh.Bounds,
-                                                             resourceExtent.Width, resourceExtent.Height);
+                const auto rectangle = GeometryDetail::ProjectedBoundsPixels(
+                    clipFromLocal, instanceDraw.Submesh.Bounds, resourceExtent.Width, resourceExtent.Height);
                 const float area = rectangle.Area();
                 const float minimumOccluderPixels = requested == GpuOcclusionMode::Automatic
                                                         ? Policy::AutomaticMinimumOccluderPixels
@@ -652,7 +616,8 @@ namespace Keire::RenderBackend
         prepared.ClassificationCandidateCount = static_cast<std::uint32_t>(candidates.size());
         prepared.BatchCount = static_cast<std::uint32_t>(batches.size());
         prepared.ChunkCount = static_cast<std::uint32_t>(chunks.size());
-        auto& diagnostics = surface.GpuOcclusionDiagnostics;
+        diagnostics.EligibleCandidates = prepared.CandidateCount;
+        diagnostics.EligibleCandidateTriangles = prepared.CandidateTriangles;
         if (!diagnostics.ReadbackValid)
         {
             diagnostics.Candidates = prepared.CandidateCount;
@@ -661,7 +626,10 @@ namespace Keire::RenderBackend
         }
         diagnostics.SafeOccluders = 0;
         for (const auto& occluder : prepared.Occluders)
+        {
             diagnostics.SafeOccluders += occluder.InstanceCount;
+            diagnostics.EligibleSafeOccluders += occluder.InstanceCount;
+        }
 
         if (prepared.CandidateCount == 0)
         {

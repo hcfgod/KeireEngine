@@ -1,6 +1,7 @@
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
 #include <algorithm>
+#include <unordered_map>
 
 namespace Keire
 {
@@ -460,37 +461,51 @@ namespace Keire
             throw std::runtime_error("Asset folder move destination already exists.");
         const auto sourceRelative = std::filesystem::relative(source, m_Impl->SourceRoot).lexically_normal();
         const auto destinationRelative = std::filesystem::relative(destination, m_Impl->SourceRoot).lexically_normal();
-        std::vector<AssetSourceRecord> affected;
-        for (const auto& record : Records())
+        auto candidate = Records();
+        std::vector<std::size_t> affected;
+        for (std::size_t index = 0; index < candidate.size(); ++index)
+        {
+            const auto& record = candidate[index];
             if (IsSameOrWithin(sourceRelative, record.RelativePath))
-                affected.push_back(record);
+                affected.push_back(index);
+        }
         m_Impl->SourceFiles->Rename(sourceRelative, destinationRelative);
         try
         {
-            for (const auto& record : affected)
+            std::unordered_map<AssetId, FileSignature> updatedSignatures;
+            updatedSignatures.reserve(affected.size());
+            for (const auto index : affected)
             {
-                auto moved = record;
+                auto& moved = candidate[index];
                 moved.RelativePath =
-                    (destinationRelative / record.RelativePath.lexically_relative(sourceRelative)).lexically_normal();
+                    (destinationRelative / moved.RelativePath.lexically_relative(sourceRelative)).lexically_normal();
                 const auto movedSource = ConfinedPath(m_Impl->SourceRoot, moved.RelativePath);
                 const auto movedMetadata = ConfinedMetadataPath(m_Impl->SourceRoot, moved.RelativePath);
                 moved.MetadataPath = movedMetadata;
-                m_Impl->PublishRecord(std::move(moved), m_Impl->ReadSignature(movedSource, movedMetadata));
+                updatedSignatures.emplace(moved.Id, m_Impl->ReadSignature(movedSource, movedMetadata));
             }
+            {
+                std::scoped_lock lock(m_Impl->Mutex);
+                auto observed = m_Impl->Observed;
+                for (const auto& [id, signature] : updatedSignatures)
+                    observed.insert_or_assign(id, signature);
+                m_Impl->ReplaceRecords(std::move(candidate));
+                m_Impl->Observed = std::move(observed);
+                for (const auto& [id, signature] : updatedSignatures)
+                {
+                    (void)signature;
+                    m_Impl->PendingChanges.erase(id);
+                }
+                m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
+            }
+            m_Impl->RequestChangeMonitorScan();
         }
         catch (...)
         {
             const auto failure = std::current_exception();
-            m_Impl->SourceFiles->Rename(destinationRelative, sourceRelative);
             try
             {
-                for (const auto& record : affected)
-                {
-                    const auto restoredSource = ConfinedPath(m_Impl->SourceRoot, record.RelativePath);
-                    m_Impl->PublishRecord(
-                        record, m_Impl->ReadSignature(restoredSource,
-                                                      ConfinedMetadataPath(m_Impl->SourceRoot, record.RelativePath)));
-                }
+                m_Impl->SourceFiles->Rename(destinationRelative, sourceRelative);
             }
             catch (...)
             {

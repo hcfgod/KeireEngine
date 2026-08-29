@@ -169,6 +169,10 @@ namespace Keire
         std::uint32_t Visible = 0;
         std::uint32_t Culled = 0;
         std::uint32_t SafeOccluders = 0;
+        /// CPU-prepared candidates from the latest surface frame, retained even when policy selects direct draws.
+        std::uint32_t EligibleCandidates = 0;
+        std::uint32_t EligibleSafeOccluders = 0;
+        std::uint64_t EligibleCandidateTriangles = 0;
         std::uint32_t PyramidMipCount = 0;
         bool PyramidValid = false;
         bool ReadbackValid = false;

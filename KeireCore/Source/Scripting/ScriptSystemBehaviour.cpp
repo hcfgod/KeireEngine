@@ -1,5 +1,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
+#include <algorithm>
+
 namespace Keire
 {
     ManagedBehaviourInstanceId ScriptSystem::CreateBehaviour(std::string typeName, const std::uint64_t world,

@@ -303,10 +303,14 @@ namespace Keire
                     RuntimeUiCanvasSettings settings = {});
         [[nodiscard]] std::span<const RuntimeUiDrawCommand> DrawCommands() const noexcept;
         [[nodiscard]] std::optional<RuntimeUiElementId> HitTest(float x, float y) const noexcept;
+        [[nodiscard]] std::optional<RuntimeUiElementId> HitTestWithin(RuntimeUiElementId root, float x,
+                                                                      float y) const noexcept;
 
         void PointerMove(float x, float y);
+        void PointerMoveTo(RuntimeUiElementId target, float x, float y);
         void PointerLeave();
         bool PointerButton(float x, float y, RuntimeUiPointerButton button, bool pressed);
+        bool PointerButtonTo(RuntimeUiElementId target, float x, float y, RuntimeUiPointerButton button, bool pressed);
         bool CancelPointerButton(RuntimeUiPointerButton button) noexcept;
         void Navigate(RuntimeUiNavigation navigation);
         [[nodiscard]] bool SetFocus(RuntimeUiElementId element);

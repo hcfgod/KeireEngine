@@ -5,8 +5,8 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-Kéire is currently version 0.4.3 and pre-1.0. Immutable signed catalog sequence 17 continues to publish the active
-Windows and Linux x86-64 0.4.2 Editor and Hub packages while the 0.4.3 Windows refresh completes validation. Guides describe the checked-in
+Kéire is currently version 0.4.4 and pre-1.0. Immutable signed catalog sequence 17 continues to publish the active
+Windows and Linux x86-64 0.4.2 Editor and Hub packages while the 0.4.4 Windows refresh completes validation. Guides describe the checked-in
 implementation and identify unfinished work honestly. Roadmap
 material is labeled as roadmap material and does not redefine the supported API or activate a release.
 
@@ -14,7 +14,7 @@ material is labeled as roadmap material and does not redefine the supported API 
 
 | Goal | Start here | Continue with |
 | --- | --- | --- |
-| Learn Kéire as a project author | [Kéire 0.4.3 User Manual](Manual/README.md) | [Projects and Editor](Manual/ProjectsAndEditor.md), [C# API Quick Reference](Manual/CSharpApiQuickReference.md) |
+| Learn Kéire as a project author | [Kéire 0.4.4 User Manual](Manual/README.md) | [Projects and Editor](Manual/ProjectsAndEditor.md), [C# API Quick Reference](Manual/CSharpApiQuickReference.md) |
 | Build or evaluate Kéire | [Getting Started](GettingStarted.md) | [Project Hub](ProjectHub.md), [Testing and Release](TestingAndRelease.md) |
 | Understand engine ownership | [Architecture](Architecture.md) | [Runtime Lifecycle](RuntimeLifecycle.md), [ECS and Components](ECSAndComponents.md) |
 | Author a project | [Project System](ProjectSystem.md) | [Scene Authoring](SceneAuthoring.md), [Asset Browser](AssetBrowser.md), [Unified Graph Authoring](GraphAuthoring.md) |
@@ -39,11 +39,11 @@ All 84 published guides are listed below in the same groups used by the document
 | [Project System](ProjectSystem.md) | Descriptor schema, stable identity, directory isolation, locking, templates, recent projects, and upgrades. |
 | [Project Settings](ProjectSettings.md) | Tracked rendering and authoring settings, validation, defaults, editor transactions, and persistence. |
 
-### Kéire 0.4.3 User Manual
+### Kéire 0.4.4 User Manual
 
 | Guide | Use it for |
 | --- | --- |
-| [Kéire 0.4.3 User Manual](Manual/README.md) | Task-oriented learning path for active project authors. |
+| [Kéire 0.4.4 User Manual](Manual/README.md) | Task-oriented learning path for active project authors. |
 | [Projects and the Editor](Manual/ProjectsAndEditor.md) | Hub project creation, workspace orientation, scenes, Play Mode, assets, and undo. |
 | [Visual Workflow Maps](Manual/VisualWorkflowMaps.md) | Diagrams connecting Hub, Editor, scripts, scenes, graphs, assets, and players. |
 | [C# Scripting Fundamentals](Manual/ScriptingFundamentals.md) | Assemblies, Behaviours, lifecycle, reload, cleanup, and Inspector fields. |

@@ -1,5 +1,8 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace Keire
 {
     [[nodiscard]] std::string SceneRuntimeSession::Impl::ApplyFootGrounding(

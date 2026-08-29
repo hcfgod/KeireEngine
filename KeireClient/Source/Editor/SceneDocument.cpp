@@ -666,6 +666,17 @@ namespace KeireEditor
             throw std::invalid_argument("SceneDocument::Open requires a scene.");
         Close();
         m_Scene = std::move(scene);
+        if (!source.empty())
+        {
+            const auto sourceName = source.stem().string();
+            if (!sourceName.empty() && m_Scene->Name() != sourceName)
+            {
+                const bool wasDirty = m_Scene->Dirty();
+                m_Scene->SetName(sourceName);
+                if (!wasDirty)
+                    m_Scene->MarkSaved();
+            }
+        }
         m_EditGeneration = Keire::CreateRef<SceneDocumentEditGeneration>();
         m_Asset = asset ? asset : m_Scene->Asset();
         m_Source = std::move(source);

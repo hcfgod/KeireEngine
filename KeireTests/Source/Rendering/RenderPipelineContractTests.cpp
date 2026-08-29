@@ -47,6 +47,24 @@ namespace
         ImGui::NewFrame();
     }
 
+    [[nodiscard]] std::shared_ptr<Keire::RenderBackend::OwnedImGuiDrawData>
+    CaptureImGuiTextureFrame(ImGuiContextScope& scope, ImTextureData& texture)
+    {
+        BeginImGuiPacketFrame(scope);
+        ImGui::GetForegroundDrawList()->AddImage(texture.GetTexRef(), {4.0F, 4.0F}, {28.0F, 28.0F});
+        ImGui::Render();
+        return Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), {});
+    }
+
+    [[nodiscard]] bool DrawDataUsesTexture(const ImDrawData& drawData, const ImTextureID texture)
+    {
+        for (const auto* drawList : drawData.CmdLists)
+            for (const auto& command : drawList->CmdBuffer)
+                if (command.GetTexID() == texture)
+                    return true;
+        return false;
+    }
+
     void UsePipelineDummyVideoDriver()
     {
 #if defined(_WIN32)
@@ -793,19 +811,50 @@ TEST_CASE("GPU device-loss exceptions retain actionable bounded identity without
 
 TEST_CASE("ImGui packet capture rejects overflowing texture dimensions before copying pixels")
 {
+    ImGuiContextScope contextScope;
     ImTextureData texture;
     texture.Create(ImTextureFormat_RGBA32, 1, 1);
     texture.Width = (std::numeric_limits<int>::max)();
     texture.Height = (std::numeric_limits<int>::max)();
 
+    BeginImGuiPacketFrame(contextScope);
+    ImGui::GetForegroundDrawList()->AddImage(texture.GetTexRef(), {4.0F, 4.0F}, {28.0F, 28.0F});
+    ImGui::Render();
+
+    CHECK_THROWS_WITH_AS((void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), {}),
+                         "Dear ImGui texture snapshots exceed the 64 MiB frame-packet bound.", std::length_error);
+}
+
+TEST_CASE("ImGui packet capture ignores globally registered textures that no draw command references")
+{
+    ImGuiContextScope contextScope;
+    ImGui::SetCurrentContext(contextScope.Context);
+    ImTextureData unreferenced;
+    unreferenced.Format = ImTextureFormat_RGBA32;
+    unreferenced.Width = (std::numeric_limits<int>::max)();
+    unreferenced.Height = (std::numeric_limits<int>::max)();
+    unreferenced.BytesPerPixel = 4;
+    unreferenced.Pixels = nullptr;
+    unreferenced.SetStatus(ImTextureStatus_WantCreate);
+
     ImVector<ImTextureData*> textures;
-    textures.push_back(&texture);
+    textures.push_back(&unreferenced);
     ImDrawData drawData;
     drawData.Valid = true;
     drawData.Textures = &textures;
 
-    CHECK_THROWS_WITH_AS((void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}),
-                         "Dear ImGui texture snapshots exceed the 64 MiB frame-packet bound.", std::length_error);
+    const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {});
+    REQUIRE(captured);
+    CHECK(unreferenced.Status == ImTextureStatus_WantCreate);
+    CHECK(unreferenced.GetTexID() == ImTextureID_Invalid);
+
+    Keire::RenderBackend::ImGuiTextureCache cache;
+    const auto resolved = captured->ResolveForRender(cache, 1U, {});
+    REQUIRE(resolved);
+    CHECK(resolved->Data()->Textures == nullptr);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    CHECK(cache.TextureCountForTest() == 0U);
+#endif
 }
 
 TEST_CASE("ImGui packet capture acknowledges texture requests transactionally and preserves their snapshot")
@@ -824,13 +873,7 @@ TEST_CASE("ImGui packet capture acknowledges texture requests transactionally an
         texture.Updates.push_back(texture.UpdateRect);
         texture.SetStatus(ImTextureStatus_WantUpdates);
 
-        ImVector<ImTextureData*> textures;
-        textures.push_back(&texture);
-        ImDrawData drawData;
-        drawData.Valid = true;
-        drawData.Textures = &textures;
-
-        const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {});
+        const auto captured = CaptureImGuiTextureFrame(contextScope, texture);
         REQUIRE(captured);
         CHECK(texture.Status == ImTextureStatus_OK);
         const ImTextureID logicalId = texture.GetTexID();
@@ -841,7 +884,8 @@ TEST_CASE("ImGui packet capture acknowledges texture requests transactionally an
         CHECK(texture.UpdateRect.h == 2U);
         REQUIRE(texture.Updates.Size == 1);
 
-        const auto resolved = captured->ResolveForRender({});
+        Keire::RenderBackend::ImGuiTextureCache cache;
+        const auto resolved = captured->ResolveForRender(cache, 1U, {});
         REQUIRE(resolved);
         REQUIRE(resolved->Data()->Textures);
         REQUIRE(resolved->Data()->Textures->Size == 1);
@@ -871,14 +915,13 @@ TEST_CASE("ImGui packet capture acknowledges texture requests transactionally an
         invalid.Pixels = nullptr;
         invalid.SetStatus(ImTextureStatus_WantCreate);
 
-        ImVector<ImTextureData*> textures;
-        textures.push_back(&valid);
-        textures.push_back(&invalid);
-        ImDrawData drawData;
-        drawData.Valid = true;
-        drawData.Textures = &textures;
+        BeginImGuiPacketFrame(contextScope);
+        ImGui::GetForegroundDrawList()->AddImage(valid.GetTexRef(), {4.0F, 4.0F}, {28.0F, 28.0F});
+        ImGui::GetForegroundDrawList()->AddImage(invalid.GetTexRef(), {30.0F, 4.0F}, {54.0F, 28.0F});
+        ImGui::Render();
 
-        CHECK_THROWS_AS((void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}), std::invalid_argument);
+        CHECK_THROWS_AS((void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), {}),
+                        std::invalid_argument);
         CHECK(valid.Status == ImTextureStatus_WantCreate);
         CHECK(valid.GetTexID() == ImTextureID_Invalid);
     }
@@ -887,22 +930,193 @@ TEST_CASE("ImGui packet capture acknowledges texture requests transactionally an
     {
         ImTextureData texture;
         texture.Create(ImTextureFormat_RGBA32, 1, 1);
+        REQUIRE(CaptureImGuiTextureFrame(contextScope, texture));
+        REQUIRE(texture.Status == ImTextureStatus_OK);
+        REQUIRE(texture.GetTexID() != ImTextureID_Invalid);
+        texture.SetStatus(ImTextureStatus_WantDestroy);
+
         ImVector<ImTextureData*> textures;
         textures.push_back(&texture);
         ImDrawData drawData;
         drawData.Valid = true;
         drawData.Textures = &textures;
-
-        REQUIRE(Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}));
-        REQUIRE(texture.Status == ImTextureStatus_OK);
-        REQUIRE(texture.GetTexID() != ImTextureID_Invalid);
-        texture.SetStatus(ImTextureStatus_WantDestroy);
-
         REQUIRE(Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}));
         CHECK(texture.Status == ImTextureStatus_Destroyed);
         CHECK(texture.GetTexID() == ImTextureID_Invalid);
         CHECK(texture.WantDestroyNextFrame);
     }
+}
+
+TEST_CASE("ImGui render-thread texture cache reuses updates destroys and recreates stable GPU identities")
+{
+    ImGuiContextScope contextScope;
+    ImTextureData texture;
+    texture.Create(ImTextureFormat_RGBA32, 2, 2);
+    std::memset(texture.Pixels, 0x5A, 16U);
+    Keire::RenderBackend::ImGuiTextureCache cache;
+
+    const auto firstPacket = CaptureImGuiTextureFrame(contextScope, texture);
+    REQUIRE(firstPacket);
+    REQUIRE(texture.Status == ImTextureStatus_OK);
+    const auto logicalId = texture.GetTexID();
+    REQUIRE(logicalId != ImTextureID_Invalid);
+
+    const auto firstResolved = firstPacket->ResolveForRender(cache, 7U, {});
+    REQUIRE(firstResolved);
+    REQUIRE(firstResolved->Data()->Textures);
+    REQUIRE(firstResolved->Data()->Textures->Size == 1);
+    auto* firstUpload = (*firstResolved->Data()->Textures)[0];
+    REQUIRE(firstUpload);
+    CHECK(firstUpload->Status == ImTextureStatus_WantCreate);
+    constexpr ImTextureID firstGpuTexture = static_cast<ImTextureID>(0x1234U);
+    firstUpload->SetTexID(firstGpuTexture);
+    firstUpload->SetStatus(ImTextureStatus_OK);
+    firstResolved->CommitGpuTextures(cache, 7U);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    CHECK(cache.TextureCountForTest() == 1U);
+    CHECK(cache.GpuTextureCountForTest(7U) == 1U);
+#endif
+
+    const auto unchangedPacket = CaptureImGuiTextureFrame(contextScope, texture);
+    REQUIRE(unchangedPacket);
+    const auto unchangedResolved = unchangedPacket->ResolveForRender(cache, 7U, {});
+    REQUIRE(unchangedResolved);
+    CHECK(unchangedResolved->Data()->Textures == nullptr);
+    CHECK(DrawDataUsesTexture(*unchangedResolved->Data(), firstGpuTexture));
+
+    texture.Pixels[0] = 0xA5U;
+    texture.UpdateRect = {0U, 0U, 1U, 1U};
+    texture.Updates.resize(0);
+    texture.Updates.push_back(texture.UpdateRect);
+    texture.SetStatus(ImTextureStatus_WantUpdates);
+    const auto updatePacket = CaptureImGuiTextureFrame(contextScope, texture);
+    REQUIRE(updatePacket);
+    REQUIRE(texture.Status == ImTextureStatus_OK);
+    REQUIRE(texture.GetTexID() == logicalId);
+    const auto updateResolved = updatePacket->ResolveForRender(cache, 7U, {});
+    REQUIRE(updateResolved);
+    REQUIRE(updateResolved->Data()->Textures);
+    REQUIRE(updateResolved->Data()->Textures->Size == 1);
+    auto* updateUpload = (*updateResolved->Data()->Textures)[0];
+    REQUIRE(updateUpload);
+    CHECK(updateUpload->Status == ImTextureStatus_WantUpdates);
+    CHECK(updateUpload->GetTexID() == firstGpuTexture);
+    CHECK(updateUpload->Pixels[0] == 0xA5U);
+    updateUpload->SetStatus(ImTextureStatus_OK);
+    updateResolved->CommitGpuTextures(cache, 7U);
+
+    const auto updatedPacket = CaptureImGuiTextureFrame(contextScope, texture);
+    REQUIRE(updatedPacket);
+    const auto updatedResolved = updatedPacket->ResolveForRender(cache, 7U, {});
+    REQUIRE(updatedResolved);
+    CHECK(updatedResolved->Data()->Textures == nullptr);
+    CHECK(DrawDataUsesTexture(*updatedResolved->Data(), firstGpuTexture));
+
+    cache.ReleaseGpuTextures(nullptr, true);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    CHECK(cache.TextureCountForTest() == 1U);
+    CHECK(cache.GpuTextureCountForTest(7U) == 0U);
+#endif
+    const auto recoveryPacket = CaptureImGuiTextureFrame(contextScope, texture);
+    REQUIRE(recoveryPacket);
+    const auto recoveryResolved = recoveryPacket->ResolveForRender(cache, 8U, {});
+    REQUIRE(recoveryResolved);
+    REQUIRE(recoveryResolved->Data()->Textures);
+    REQUIRE(recoveryResolved->Data()->Textures->Size == 1);
+    auto* recoveryUpload = (*recoveryResolved->Data()->Textures)[0];
+    REQUIRE(recoveryUpload);
+    CHECK(recoveryUpload->Status == ImTextureStatus_WantCreate);
+    CHECK(recoveryUpload->Pixels[0] == 0xA5U);
+    constexpr ImTextureID recoveredGpuTexture = static_cast<ImTextureID>(0x5678U);
+    recoveryUpload->SetTexID(recoveredGpuTexture);
+    recoveryUpload->SetStatus(ImTextureStatus_OK);
+    recoveryResolved->CommitGpuTextures(cache, 8U);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    CHECK(cache.GpuTextureCountForTest(8U) == 1U);
+#endif
+
+    const auto recoveredPacket = CaptureImGuiTextureFrame(contextScope, texture);
+    REQUIRE(recoveredPacket);
+    const auto recoveredResolved = recoveredPacket->ResolveForRender(cache, 8U, {});
+    REQUIRE(recoveredResolved);
+    CHECK(recoveredResolved->Data()->Textures == nullptr);
+    CHECK(DrawDataUsesTexture(*recoveredResolved->Data(), recoveredGpuTexture));
+
+    texture.SetStatus(ImTextureStatus_WantDestroy);
+    ImVector<ImTextureData*> textures;
+    textures.push_back(&texture);
+    ImDrawData destroyData;
+    destroyData.Valid = true;
+    destroyData.Textures = &textures;
+    const auto destroyPacket = Keire::RenderBackend::OwnedImGuiDrawData::Capture(&destroyData, {});
+    REQUIRE(destroyPacket);
+    CHECK(texture.Status == ImTextureStatus_Destroyed);
+    CHECK(texture.GetTexID() == ImTextureID_Invalid);
+    const auto destroyResolved = destroyPacket->ResolveForRender(cache, 8U, {});
+    REQUIRE(destroyResolved);
+    CHECK(destroyResolved->Data()->Textures == nullptr);
+    destroyResolved->CommitGpuTextures(cache, 8U);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    CHECK(cache.TextureCountForTest() == 0U);
+    CHECK(cache.GpuTextureCountForTest(8U) == 0U);
+#endif
+    destroyResolved->ReleaseGpuTextures(nullptr, true);
+}
+
+TEST_CASE("ImGui explicit UI-image retirements bound render-thread texture cache churn")
+{
+    ImGuiContextScope contextScope;
+    Keire::RenderBackend::ImGuiTextureCache cache;
+    constexpr std::uint32_t deviceGeneration = 11U;
+    constexpr std::size_t churnCount = 128U;
+
+    for (std::size_t index = 0; index < churnCount; ++index)
+    {
+        ImTextureData texture;
+        texture.Create(ImTextureFormat_RGBA32, 1, 1);
+        std::memset(texture.Pixels, static_cast<int>(index & 0xFFU), 4U);
+
+        const auto uploadPacket = CaptureImGuiTextureFrame(contextScope, texture);
+        REQUIRE(uploadPacket);
+        const auto logicalId = texture.GetTexID();
+        REQUIRE(logicalId != ImTextureID_Invalid);
+        const auto upload = uploadPacket->ResolveForRender(cache, deviceGeneration, {});
+        REQUIRE(upload);
+        REQUIRE(upload->Data()->Textures);
+        REQUIRE(upload->Data()->Textures->Size == 1);
+        auto* uploadTexture = (*upload->Data()->Textures)[0];
+        REQUIRE(uploadTexture);
+        const auto gpuIdentity = static_cast<ImTextureID>(0x1000U + index);
+        uploadTexture->SetTexID(gpuIdentity);
+        uploadTexture->SetStatus(ImTextureStatus_OK);
+        upload->CommitGpuTextures(cache, deviceGeneration);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        REQUIRE(cache.TextureCountForTest() == 1U);
+        REQUIRE(cache.GpuTextureCountForTest(deviceGeneration) == 1U);
+#endif
+
+        const std::array retirements{static_cast<std::uintptr_t>(logicalId), static_cast<std::uintptr_t>(logicalId)};
+        const auto retirePacket = Keire::RenderBackend::OwnedImGuiDrawData::Capture(nullptr, {}, retirements);
+        REQUIRE(retirePacket);
+        const auto retirement = retirePacket->ResolveForRender(cache, deviceGeneration, {});
+        REQUIRE(retirement);
+        CHECK(retirement->Data()->CmdListsCount == 0);
+        retirement->CommitGpuTextures(cache, deviceGeneration);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        CHECK(cache.TextureCountForTest() == 0U);
+        CHECK(cache.GpuTextureCountForTest(deviceGeneration) == 0U);
+        CHECK(retirement->PendingGpuTextureRetirementCountForTest() == 1U);
+#endif
+        retirement->ReleaseGpuTextures(nullptr, true);
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        CHECK(retirement->PendingGpuTextureRetirementCountForTest() == 0U);
+#endif
+    }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    CHECK(cache.TextureCountForTest() == 0U);
+    CHECK(cache.GpuTextureCountForTest(deviceGeneration) == 0U);
+#endif
 }
 
 TEST_CASE("ImGui live atlas acknowledgement remains valid through the next owner frame")
@@ -952,7 +1166,8 @@ TEST_CASE("ImGui frame packets preserve finalized non-empty draw output")
 
     const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(finalized, {});
     REQUIRE(captured);
-    const auto resolved = captured->ResolveForRender({});
+    Keire::RenderBackend::ImGuiTextureCache cache;
+    const auto resolved = captured->ResolveForRender(cache, 1U, {});
     REQUIRE(resolved);
     const auto* renderView = resolved->Data();
     REQUIRE(renderView);
@@ -985,20 +1200,21 @@ TEST_CASE("ImGui frame packets reject raw GPU textures borrowed pixels and arbit
 
     SUBCASE("borrowed texture pixels")
     {
+        ImGuiContextScope contextScope;
         ImTextureData texture;
         texture.Format = ImTextureFormat_RGBA32;
         texture.Width = 1;
         texture.Height = 1;
         texture.BytesPerPixel = 4;
         texture.Pixels = nullptr;
-        ImVector<ImTextureData*> textures;
-        textures.push_back(&texture);
-        ImDrawData drawData;
-        drawData.Valid = true;
-        drawData.Textures = &textures;
+        texture.SetStatus(ImTextureStatus_WantCreate);
+
+        BeginImGuiPacketFrame(contextScope);
+        ImGui::GetForegroundDrawList()->AddImage(texture.GetTexRef(), {4.0F, 4.0F}, {28.0F, 28.0F});
+        ImGui::Render();
 
         CHECK_THROWS_WITH_AS(
-            (void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(&drawData, {}),
+            (void)Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), {}),
             "Dear ImGui asynchronous packets require owned RGBA32 texture pixels; borrowed backend-only texture data "
             "is unsupported.",
             std::invalid_argument);

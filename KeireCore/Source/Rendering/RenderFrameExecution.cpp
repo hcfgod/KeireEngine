@@ -119,7 +119,7 @@ namespace Keire::RenderBackend
                             surfaceTextureBindings.push_back({token, textureIdentity});
                         }
                     }
-                    if (!drawData)
+                    if (!drawData && PendingUiTextureRetirements.empty())
                     {
                         frame->EditorUi.reset();
                     }
@@ -129,7 +129,8 @@ namespace Keire::RenderBackend
                         const auto contextLock = Keire::Detail::AcquireRequiredUiContext(
                             contextAccess,
                             "Dear ImGui packet capture requires the renderer's live UI context binding.");
-                        frame->EditorUi = OwnedImGuiDrawData::Capture(drawData, surfaceTextureBindings);
+                        frame->EditorUi =
+                            OwnedImGuiDrawData::Capture(drawData, surfaceTextureBindings, PendingUiTextureRetirements);
                     }
                     CpuPreparation.EndFrame();
                     frame->CpuPreparationMilliseconds = CpuPreparation.CompletedMilliseconds();
@@ -159,6 +160,7 @@ namespace Keire::RenderBackend
         PendingSceneRequests.clear();
         PendingRuntimeUiTrees.clear();
         PendingUiSurfaceTextureBindings.clear();
+        PendingUiTextureRetirements.clear();
     }
 
     void RenderSharedState::ExecuteAcceptedFrame(const std::shared_ptr<RenderFramePacket>& frame) noexcept
@@ -481,13 +483,14 @@ namespace Keire::RenderBackend
                 throw std::runtime_error("SDL_AcquireGPUCommandBuffer(swapchain) failed: " + LastSdlError());
             if (frame->EditorUi)
             {
-                resolvedEditorUi = frame->EditorUi->ResolveForRender(
-                    [this](const RenderSurfaceToken& token)
-                    {
-                        const auto surface = ResolveSurface(token);
-                        return reinterpret_cast<std::uintptr_t>(surface ? surface->Resources.PublishedColor()
-                                                                        : nullptr);
-                    });
+                resolvedEditorUi =
+                    frame->EditorUi->ResolveForRender(EditorUiTextures, frame->DeviceGeneration,
+                                                      [this](const RenderSurfaceToken& token)
+                                                      {
+                                                          const auto surface = ResolveSurface(token);
+                                                          return reinterpret_cast<std::uintptr_t>(
+                                                              surface ? surface->Resources.PublishedColor() : nullptr);
+                                                      });
             }
             RecordSwapchain(commands, resolvedEditorUi ? resolvedEditorUi->Data() : nullptr);
 
@@ -496,6 +499,8 @@ namespace Keire::RenderBackend
             if (!submittedFence)
                 throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
             gpuWorkSubmitted = true;
+            if (resolvedEditorUi)
+                resolvedEditorUi->CommitGpuTextures(EditorUiTextures, frame->DeviceGeneration);
             Statistics.GpuSubmissionMilliseconds =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - submissionStarted).count();
             frame->SubmittedAt = submissionStarted;
@@ -606,6 +611,7 @@ namespace Keire::RenderBackend
                 FrameGpuOcclusionReadbacks.clear();
                 if (resolvedEditorUi)
                     resolvedEditorUi->ReleaseGpuTextures(nullptr, true);
+                EditorUiTextures.ReleaseGpuTextures(nullptr, true);
             }
             else
             {

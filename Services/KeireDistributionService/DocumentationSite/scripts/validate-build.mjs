@@ -28,7 +28,7 @@ async function collectFiles(directory) {
 
 await access(path.join(outputRoot, "index.html"));
 await access(path.join(outputRoot, "changelog", "index.html"));
-for (const version of ["0.4.3", "0.4.2", "0.4.1", "0.4.0", "0.3.2", "0.3.1", "0.3.0", "0.2.0", "0.1.0"]) {
+for (const version of ["0.4.4", "0.4.2", "0.4.1", "0.4.0", "0.3.2", "0.3.1", "0.3.0", "0.2.0", "0.1.0"]) {
     await access(path.join(outputRoot, "changelog", version, "index.html"));
 }
 const publicationStatus = JSON.parse(await readFile(

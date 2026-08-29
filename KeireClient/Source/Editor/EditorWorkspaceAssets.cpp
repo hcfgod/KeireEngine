@@ -102,29 +102,6 @@ bool EditorWorkspaceLayer::FileIsNewerThan(const std::filesystem::path& path,
     return error || modified > reference;
 }
 
-bool EditorWorkspaceLayer::AssetSourcesAreNewerThanCatalog(const std::filesystem::path& assetsRoot,
-                                                           const std::filesystem::path& catalog) noexcept
-{
-    std::error_code error;
-    if (!std::filesystem::is_regular_file(catalog, error) || error)
-        return true;
-    const auto catalogTime = std::filesystem::last_write_time(catalog, error);
-    if (error)
-        return true;
-    for (std::filesystem::recursive_directory_iterator
-             iterator(assetsRoot, std::filesystem::directory_options::skip_permission_denied, error),
-         end;
-         iterator != end; iterator.increment(error))
-    {
-        if (error)
-            return true;
-        if (iterator->is_regular_file(error) && !error && FileIsNewerThan(iterator->path(), catalogTime))
-            return true;
-        error.clear();
-    }
-    return false;
-}
-
 const Keire::UiThemeDefinition& EditorWorkspaceLayer::AssetBrowserTheme() const noexcept { return m_Theme; }
 
 Keire::Ref<Keire::AssetDatabase> EditorWorkspaceLayer::AssetBrowserDatabase() const noexcept { return m_AssetDatabase; }
@@ -375,6 +352,16 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
     const auto& mutation = phase == KeireEditor::AssetMutationPhase::Undo ? state->Reverse : state->Forward;
     if (IsImmediateAssetMutation(mutation.Kind))
     {
+        if (!m_ExecutingQueuedAssetMutation)
+        {
+            m_PendingAssetMutations.push_back({std::move(state), phase});
+            m_AssetStatus = "Asset mutation queued for the next editor safe boundary.";
+            return;
+        }
+        const auto activeScene = m_SceneDocument ? m_SceneDocument->Asset() : Keire::AssetId{};
+        const bool renamesActiveScene = mutation.Kind == Keire::Detail::AssetWorkerMutationKind::MoveAsset &&
+                                        activeScene && mutation.Asset == activeScene;
+        const bool activeSceneWasDirty = renamesActiveScene && m_SceneDocument->Dirty();
         if (m_AssetOperations->Busy())
         {
             if (m_AssetOperations->PreemptBackgroundImports())
@@ -387,7 +374,7 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
                                      { return pending.State == state && pending.Phase == phase; });
             if (duplicate == m_PendingAssetMutations.end())
                 m_PendingAssetMutations.push_back({std::move(state), phase});
-            m_AssetStatus = "Queued asset trash update until the active asset operation completes.";
+            m_AssetStatus = "Queued asset mutation until the active asset operation completes.";
             return;
         }
 
@@ -429,6 +416,25 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
                 state->Reverse = std::move(restore);
         }
         RefreshAssetBrowserRecords();
+        if (renamesActiveScene)
+        {
+            const auto record = m_AssetDatabase->Find(activeScene);
+            const auto editingScene = m_SceneDocument->EditingScene();
+            if (record && editingScene && record->Type == Keire::SceneAsset::StaticType())
+            {
+                const auto expectedName = record->RelativePath.stem().string();
+                if (!expectedName.empty() && editingScene->Name() != expectedName)
+                {
+                    editingScene->SetName(expectedName);
+                    if (!activeSceneWasDirty)
+                    {
+                        m_AssetDatabase->ReplaceAssetSource(activeScene,
+                                                            Keire::SceneAsset::Encode(editingScene->Snapshot()));
+                        editingScene->MarkSaved();
+                    }
+                }
+            }
+        }
         if (m_SelectedAsset && !m_AssetDatabase->Find(m_SelectedAsset))
             m_SelectedAsset = {};
 
@@ -445,7 +451,7 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
             }
             state->RecordCommand = false;
         }
-        m_AssetStatus = "Asset trash updated.";
+        m_AssetStatus = "Asset mutation completed.";
         return;
     }
 
@@ -691,14 +697,22 @@ void EditorWorkspaceLayer::DrainQueuedAssetMutation()
     if (m_PendingAssetMutations.empty() || !m_AssetOperations || m_AssetOperations->Busy())
         return;
     auto pending = std::move(m_PendingAssetMutations.front());
-    m_PendingAssetMutations.erase(m_PendingAssetMutations.begin());
+    m_PendingAssetMutations.pop_front();
     try
     {
+        m_ExecutingQueuedAssetMutation = true;
         QueueAssetMutation(std::move(pending.State), pending.Phase);
+        m_ExecutingQueuedAssetMutation = false;
     }
     catch (const std::exception& error)
     {
-        SetAssetError(std::string("Queued asset trash operation failed: ") + error.what());
+        m_ExecutingQueuedAssetMutation = false;
+        SetAssetError(std::string("Queued asset mutation failed: ") + error.what());
+    }
+    catch (...)
+    {
+        m_ExecutingQueuedAssetMutation = false;
+        SetAssetError("Queued asset mutation failed with an unknown error.");
     }
 }
 
@@ -854,17 +868,26 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                                    completion->Context.ReloadAsset);
             CompletePendingMaterialAssignment(completion->Context.ReloadAsset);
             const auto activeSceneAsset = m_SceneDocument->Asset();
-            if (activeSceneAsset && std::ranges::find(completion->Result.MutatedAssets, activeSceneAsset) !=
-                                        completion->Result.MutatedAssets.end())
+            if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::Mutate && activeSceneAsset &&
+                std::ranges::find(completion->Result.MutatedAssets, activeSceneAsset) !=
+                    completion->Result.MutatedAssets.end())
             {
                 const auto sceneRecord = m_AssetDatabase->Find(activeSceneAsset);
                 const auto editingScene = m_SceneDocument->EditingScene();
                 if (sceneRecord && editingScene && sceneRecord->Type == Keire::SceneAsset::StaticType())
                 {
-                    editingScene->SetName(sceneRecord->RelativePath.stem().string());
-                    m_AssetDatabase->ReplaceAssetSource(activeSceneAsset,
-                                                        Keire::SceneAsset::Encode(editingScene->Snapshot()));
-                    editingScene->MarkSaved();
+                    const bool wasDirty = editingScene->Dirty();
+                    const auto expectedName = sceneRecord->RelativePath.stem().string();
+                    if (!expectedName.empty() && editingScene->Name() != expectedName)
+                    {
+                        editingScene->SetName(expectedName);
+                        if (!wasDirty)
+                        {
+                            m_AssetDatabase->ReplaceAssetSource(activeSceneAsset,
+                                                                Keire::SceneAsset::Encode(editingScene->Snapshot()));
+                            editingScene->MarkSaved();
+                        }
+                    }
                 }
             }
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::BakeLighting)

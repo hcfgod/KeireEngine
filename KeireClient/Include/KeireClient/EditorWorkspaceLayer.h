@@ -242,8 +242,6 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ConfigureAssetBrowserExternalEditor() override;
     [[nodiscard]] static bool FileIsNewerThan(const std::filesystem::path& path,
                                               std::filesystem::file_time_type reference) noexcept;
-    [[nodiscard]] static bool AssetSourcesAreNewerThanCatalog(const std::filesystem::path& assetsRoot,
-                                                              const std::filesystem::path& catalog) noexcept;
     void RefreshAssetBrowserRecords();
     void SetAssetBrowserSelected(Keire::AssetId asset) noexcept override;
     void ClearAssetBrowserSceneSelection() noexcept override;
@@ -824,7 +822,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
         std::shared_ptr<KeireEditor::AssetMutationUndoState> State;
         KeireEditor::AssetMutationPhase Phase;
     };
-    std::vector<PendingAssetMutation> m_PendingAssetMutations;
+    std::deque<PendingAssetMutation> m_PendingAssetMutations;
+    bool m_ExecutingQueuedAssetMutation = false;
     std::vector<PendingPrefabCreation> m_PendingPrefabCreations;
     struct PendingMaterialAssignment
     {

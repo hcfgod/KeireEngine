@@ -1,25 +1,26 @@
 # Shaders And Materials
 
-Kéire deliberately separates reusable shader contracts from artist-authored materials. A Shader Graph defines the
-renderer-facing template: output contract, supported stages and passes, default branches, lighting integration, and
-variant policy. A Material Graph selects that template and authors the surface expressions that feed its Material
-Output. Import composes both graphs, compiles material-owned shader variants, and publishes the same immutable
-`MaterialAsset` consumed by the renderer.
+Kéire deliberately separates executable shader logic from material values. A Shader Graph is the single authoring
+authority for texture sampling, UV operations, channel manipulation, surface outputs, supported stages and passes,
+lighting integration, and variant policy. A Material Graph selects that shader contract and binds its exposed values,
+textures, collections, and instance defaults. Import resolves those bindings and publishes the same immutable
+`MaterialAsset` consumed by the renderer without asking users to recreate shader logic in a second graph.
 
 ```text
-Raw HLSL + .keireshader ------------------------------> Direct Material --\
-                                                                           +--> MaterialAsset --> RenderSystem
-Shader Graph template + Material Graph surface expressions --> compose ----+
-                                                        Material Instance --/
+Raw HLSL + .keireshader ---------------------------> Direct Material --\
+                                                                        +--> MaterialAsset --> RenderSystem
+Shader Graph contract + Material Graph bindings ------------------------+
+                                                     Material Instance --/
 ```
 
 This boundary keeps Material Graphs as first-class material assets. Adding Shader Graph does not replace them, and the
 renderer never needs to understand either authoring graph format.
 
-Double-clicking a `.keireshadergraph` asset opens its shader logic in the Shader Graph panel. Double-clicking a
-`.keirematerialgraph` opens its own Material Graph canvas and Material Output node; it never redirects into the
-referenced Shader Graph. Ordinary `.keirematerial` and `.keirematerialinstance` assets open in the Inspector. Shader
-Graphs are not assignable to Mesh Renderers: users create a Direct Material or Material Graph that selects the shader.
+Double-clicking a `.keireshadergraph` asset opens its executable shader logic in the Shader Graph panel.
+Double-clicking a `.keirematerialgraph` opens its material-binding canvas and reflected parameter controls; it never
+requires duplicating the referenced shader's nodes. Ordinary `.keirematerial` and `.keirematerialinstance` assets open
+in the Inspector. Shader Graphs are not assignable to Mesh Renderers: users create a Direct Material or Material Graph
+that selects the shader.
 
 ## Asset Roles
 
@@ -28,7 +29,7 @@ Graphs are not assignable to Mesh Renderers: users create a Direct Material or M
 | Raw shader | `.hlsl` + `.keireshader` | Expert-authored HLSL, entries, defines, render state, and exposed properties. |
 | Shader Graph | `.keireshadergraph` | Reusable shader template, renderer contract, default logic, variants, generated shaders, and live preview. |
 | Direct Material | `.keirematerial` | Compact material authoring with a tagged raw-shader or Shader-Graph reference. |
-| Material Graph | `.keirematerialgraph` | Full artist surface-expression graph composed through a selected Shader Graph template. |
+| Material Graph | `.keirematerialgraph` | Shader selection plus stable parameter, texture, collection, and instance bindings. |
 | Material Instance | `.keirematerialinstance` | Lightweight property and surface overrides inherited from a Direct Material, Material Graph, or Material Instance. |
 | Material Function | `.keirematerialfunction` | Reusable typed material-expression body callable from Shader Graphs and Material Graphs. |
 | Shader Function | `.keireshaderfunction` | Reusable lower-level shader-expression body with an explicit typed interface. |
@@ -102,22 +103,19 @@ the same reflection and ABI validation as raw shaders.
 ## Materials Using Custom Shader Graphs
 
 Creating a Material Graph opens an explicit shader picker and opens the new graph as soon as its validated creation
-transaction completes. Selecting a Shader Graph creates a clean Material Output
-whose pins inherit that template's actual Lit, Unlit, Transparent, Decal, Fullscreen, Hair, or Eye contract. A raw
-Shader remains supported for the compact compatibility-value workflow, but full surface expressions deliberately
-require a Shader Graph template so renderer-specific implementation details remain behind a versioned boundary. The
-source stores a tagged shader reference:
+transaction completes. Selecting a Shader Graph reflects that template's actual Lit, Unlit, Transparent, Decal,
+Fullscreen, Hair, or Eye property contract. A raw Shader remains supported for compact value authoring. Executable
+surface expressions belong in Shader Graph so renderer-specific implementation details remain behind one versioned
+boundary. The source stores a tagged shader reference:
 
 - `asset` selects a raw `ShaderAsset`.
 - `graph` selects a Shader Graph target and canonical keyword permutation.
 - `builtin` reserves explicit engine-provided shader contracts.
 
 The Material Inspector edits Direct Materials with separate **Shader Graph** and **Raw Shader** pickers. Material Graph
-uses the same production expression catalog as Shader Graph: texture sampling, UV and coordinate operations, math,
-masks, normals, scene inputs, procedural nodes, Material Attributes, BSDF composition, confined custom functions, and
-120 typed operations. Right-clicking empty canvas space or using the toolbar opens a searchable palette grouped by node
-category. Node, pin, and cable context menus expose the same targeted inspection, compatible-add, unlink, and deletion
-workflow as Shader Graph. Material Output owns surface state and receives the final surface branches.
+shows the selected shader's stable parameters and material-level values without exposing a second texture-sampling or
+surface-output program. Historical assets with authored surface expressions remain readable and render-compatible;
+the editor labels those nodes as legacy migration content so new work goes into the selected Shader Graph.
 
 Parameter nodes become Material Instance properties and expose a stable symbol, display name, group, description,
 sort priority, optional range, step, and typed default. Keyword nodes provide static parameters backed by deterministic
@@ -135,10 +133,10 @@ published material usable.
 Shader Graph parameters publish stable property IDs. Compatibility bindings resolve those IDs before display names,
 so a template rename retains its value. Unknown properties, type changes, output-contract mismatches, duplicate
 symbols, cycles, invalid static parameters, and colliding identities produce `MAT` or underlying graph diagnostics
-instead of silently changing the material. Schema-1/2/3 sources upgrade in memory to schema 4 with a deterministic
-surface graph while retaining their former values and connections. Surface graphs use the shader compiler's portable
-limits of 1,024 nodes, 4,096 connections, 16 keywords, and 64 generated variants; source and cooked payloads remain
-capped at 4 MiB.
+instead of silently changing the material. Schema-1/2/3/4 sources upgrade in memory to schema 5 while retaining former
+values and executable legacy connections under `legacySurfaceGraph`. New schema-5 files omit that field entirely.
+Legacy graphs retain the shader compiler's portable limits of 1,024 nodes, 4,096 connections, 16 keywords, and 64
+generated variants; source and cooked payloads remain capped at 4 MiB.
 
 Material Instances never compile or duplicate shader code. Creation requires a selected Direct Material, Material
 Graph, or Material Instance parent. The Inspector presents parameters produced by the composed Material Graph and
@@ -152,8 +150,10 @@ upgrade to schema 2 with an empty static-override map. Resetting overrides retur
 Create reusable graph assets from **Reusable Material Graphs** in the Project panel. Double-clicking a function or
 layer opens the shared typed graph canvas in reusable-graph mode: it validates the function body and interface without
 pretending the asset is a standalone shader or publishing preview-only materials. Parameter nodes form call inputs;
-the function output node forms call outputs. Both Shader Graph and Material Graph palettes list project functions and
-layers under **Functions & Layers**. Saving preserves asset metadata and reimports dependents.
+the function output node forms call outputs. Shader Graph lists project functions and layers under **Functions &
+Layers**. Material Graph intentionally exposes only parameter overrides from its selected Shader Graph; legacy
+Material Graph expressions remain visible for migration but cannot be added to new schema-v5 authoring. Saving
+preserves asset metadata and reimports dependents.
 
 Function expansion is deterministic. Generated node, pin, and connection identities derive from the call site and
 source identities, so identical source produces identical generated shader text. Expansion is recursive but bounded;

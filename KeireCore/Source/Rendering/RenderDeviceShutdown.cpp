@@ -55,6 +55,7 @@ namespace Keire::RenderBackend
                 if (!ReleaseInjectedLostDeviceForTest())
 #endif
                     AbandonLostDeviceResources();
+                EditorUiTextures.ReleaseGpuTextures(nullptr, true);
                 for (const auto& surface : AllSurfaceEpochs())
                 {
                     surface->ResourcesAvailable.store(false, std::memory_order_release);
@@ -69,6 +70,7 @@ namespace Keire::RenderBackend
                 PendingSceneRequests.clear();
                 PendingRuntimeUiTrees.clear();
                 PendingUiSurfaceTextureBindings.clear();
+                PendingUiTextureRetirements.clear();
                 CaptureRequests.clear();
                 CaptureRuntimeUiCommands.clear();
                 ActiveFrame.reset();
@@ -76,6 +78,8 @@ namespace Keire::RenderBackend
                 Device = nullptr;
                 return;
             }
+
+            EditorUiTextures.ReleaseGpuTextures(Device, false);
 
             for (const auto& surface : AllSurfaceEpochs())
             {
@@ -170,6 +174,7 @@ namespace Keire::RenderBackend
             PendingSceneRequests.clear();
             PendingRuntimeUiTrees.clear();
             PendingUiSurfaceTextureBindings.clear();
+            PendingUiTextureRetirements.clear();
             CaptureRequests.clear();
             CaptureRuntimeUiCommands.clear();
             ActiveFrame.reset();

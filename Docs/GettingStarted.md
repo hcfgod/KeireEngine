@@ -30,7 +30,7 @@ pointers or stage Git changes.
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64 | Clean Debug source build on Tahoe with 733 Core tests and 51,809 assertions; Hub and render-test products link at the macOS 12 deployment target; VMware has no Metal device for rendered execution | Not published; native signing, notarization, Apple silicon, and Metal-hardware acceptance remain open |
 
-Version 0.4.3 is the current source and Windows publication target. Version 0.4.2 remains active through immutable
+Version 0.4.4 is the current source and Windows publication target. Version 0.4.2 remains active through immutable
 signed snapshot `release-0.4.2-sequence-17-e3eb5ac`; its Windows and Linux evidence and retained 0.4.1 records are
 historical package facts, and building current source does not relabel them or advance the catalog.
 

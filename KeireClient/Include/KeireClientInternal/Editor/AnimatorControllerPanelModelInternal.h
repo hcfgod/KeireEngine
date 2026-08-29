@@ -2,6 +2,7 @@
 
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>

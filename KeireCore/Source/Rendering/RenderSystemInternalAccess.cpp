@@ -806,6 +806,12 @@ namespace Keire
         state.EditorUiContextAccess.store(std::move(contextAccess), std::memory_order_release);
     }
 
+    void RenderSystemInternalAccess::QueueUiTextureRetirements(RenderSystem& renderer,
+                                                               const std::span<const std::uintptr_t> logicalTextureIds)
+    {
+        renderer.m_Impl->State->QueueUiTextureRetirements(logicalTextureIds);
+    }
+
     void RenderSystemInternalAccess::RunOnRenderThread(RenderSystem& renderer, std::function<void()> work)
     {
         auto& state = *renderer.m_Impl->State;

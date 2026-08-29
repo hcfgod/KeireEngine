@@ -8,7 +8,8 @@ namespace Keire::Detail
     {
       public:
         [[nodiscard]] static Ref<AssetDatabase> CreateFromSourceIndex(AssetDatabaseSpecification specification,
-                                                                      const std::filesystem::path& path);
+                                                                      const std::filesystem::path& path,
+                                                                      bool startChangeMonitor = false);
         static void PublishSourceIndex(const AssetDatabase& database, const std::filesystem::path& path);
         [[nodiscard]] static std::size_t ReloadSourceIndex(AssetDatabase& database, const std::filesystem::path& path);
         [[nodiscard]] static AssetImportResult

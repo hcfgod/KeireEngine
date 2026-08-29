@@ -256,6 +256,7 @@ namespace Keire
         }
 
         [[nodiscard]] ShaderGraphDefinition CreateStableMaterialSurfaceGraph(const MaterialShaderReference& shader);
+        [[nodiscard]] bool HasMaterialSurfaceExpressions(const MaterialGraphDefinition& definition) noexcept;
 
         [[nodiscard]] Json EncodeDefinition(const MaterialGraphDefinition& definition)
         {
@@ -291,25 +292,28 @@ namespace Keire
                      {"input", {{"node", connection.Input.Node.ToString()}, {"pin", connection.Input.Pin.ToString()}}},
                      {"routing", std::move(routing)}});
             }
-            const auto surfaceGraphSource = ShaderGraphAsset::EncodeSource(definition.SurfaceGraph);
-            const auto surfaceGraph = Json::parse(Text(surfaceGraphSource));
-            return {{"schemaVersion", definition.SchemaVersion},
-                    {"shader", EncodeShaderReference(definition.Shader)},
-                    {"surface",
-                     {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
-                      {"alphaCutoff", definition.Surface.AlphaCutoff},
-                      {"doubleSided", definition.Surface.DoubleSided}}},
-                    {"bakedLighting",
-                     {{"contributeEmission", definition.ContributeEmissionToGI},
-                      {"emissiveIntensity", definition.EmissiveGIIntensity}}},
-                    {"output",
-                     {{"node", definition.OutputNode.ToString()},
-                      {"position", Json::array({definition.OutputPosition.X, definition.OutputPosition.Y})}}},
-                    {"properties", std::move(properties)},
-                    {"nodes", std::move(nodes)},
-                    {"connections", std::move(connections)},
-                    {"surfaceGraph", surfaceGraph},
-                    {"authoring", Detail::EncodeGraphAuthoringMetadata(definition.Authoring)}};
+            Json result = {{"schemaVersion", definition.SchemaVersion},
+                           {"shader", EncodeShaderReference(definition.Shader)},
+                           {"surface",
+                            {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
+                             {"alphaCutoff", definition.Surface.AlphaCutoff},
+                             {"doubleSided", definition.Surface.DoubleSided}}},
+                           {"bakedLighting",
+                            {{"contributeEmission", definition.ContributeEmissionToGI},
+                             {"emissiveIntensity", definition.EmissiveGIIntensity}}},
+                           {"output",
+                            {{"node", definition.OutputNode.ToString()},
+                             {"position", Json::array({definition.OutputPosition.X, definition.OutputPosition.Y})}}},
+                           {"properties", std::move(properties)},
+                           {"nodes", std::move(nodes)},
+                           {"connections", std::move(connections)},
+                           {"authoring", Detail::EncodeGraphAuthoringMetadata(definition.Authoring)}};
+            if (HasMaterialSurfaceExpressions(definition))
+            {
+                const auto legacySource = ShaderGraphAsset::EncodeSource(definition.SurfaceGraph);
+                result["legacySurfaceGraph"] = Json::parse(Text(legacySource));
+            }
+            return result;
         }
 
         [[nodiscard]] MaterialGraphDefinition DecodeDefinition(const Json& source)
@@ -398,7 +402,12 @@ namespace Keire
                     result.Connections.push_back(std::move(connection));
                 }
             }
-            if (sourceSchema >= 3)
+            if (sourceSchema >= 5 && source.contains("legacySurfaceGraph"))
+            {
+                const auto encodedSurfaceGraph = source.at("legacySurfaceGraph").dump();
+                result.SurfaceGraph = ShaderGraphAsset::DecodeSource(Bytes(encodedSurfaceGraph));
+            }
+            else if (sourceSchema >= 3 && sourceSchema <= 4)
             {
                 const auto encodedSurfaceGraph = source.at("surfaceGraph").dump();
                 result.SurfaceGraph = ShaderGraphAsset::DecodeSource(Bytes(encodedSurfaceGraph));
@@ -516,7 +525,7 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] bool HasMaterialSurfaceExpressions(const MaterialGraphDefinition& definition)
+        [[nodiscard]] bool HasMaterialSurfaceExpressions(const MaterialGraphDefinition& definition) noexcept
         {
             const auto master =
                 std::ranges::find(definition.SurfaceGraph.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
@@ -1113,7 +1122,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.MaterialGraph";
-        result.Version = 7;
+        result.Version = 8;
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {".keirematerialgraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

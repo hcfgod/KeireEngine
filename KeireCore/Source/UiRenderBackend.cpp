@@ -78,8 +78,9 @@ namespace Keire
 
             ImGuiPlatformIO& platform = ImGui::GetPlatformIO();
             platform.Renderer_RenderState = nullptr;
-            // PlatformIO::Textures contains owner-thread producer records. Packet-local copies own every SDL texture,
-            // so device loss must not alter the live records' logical IDs, status, pixels, or dirty rectangles.
+            // PlatformIO::Textures contains owner-thread producer records. Immutable packets and the render-thread
+            // texture cache own every SDL texture, so device loss must not alter the live records' logical IDs,
+            // status, pixels, or dirty rectangles.
             for (ImGuiViewport* viewport : platform.Viewports)
             {
                 if (viewport)
@@ -148,6 +149,34 @@ namespace Keire
             }
             if (retired.empty())
                 return;
+            std::vector<std::uintptr_t> logicalTextureIds;
+            logicalTextureIds.reserve(retired.size());
+            for (const auto* texture : retired)
+            {
+                if (!texture)
+                    continue;
+                const auto logicalId = texture->GetTexID();
+                if (logicalId != ImTextureID_Invalid)
+                    logicalTextureIds.push_back(static_cast<std::uintptr_t>(logicalId));
+            }
+            try
+            {
+                if (!logicalTextureIds.empty() && m_Renderer && m_Renderer->IsOpen())
+                    RenderSystemInternalAccess::QueueUiTextureRetirements(*m_Renderer, logicalTextureIds);
+            }
+            catch (...)
+            {
+                std::scoped_lock lock(m_Mutex);
+                for (auto* texture : retired)
+                {
+                    if (texture && m_Active.contains(texture) &&
+                        std::ranges::find(m_Retired, texture) == m_Retired.end())
+                    {
+                        m_Retired.push_back(texture);
+                    }
+                }
+                throw;
+            }
             for (auto* texture : retired)
             {
                 {

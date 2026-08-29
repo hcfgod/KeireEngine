@@ -21,7 +21,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
     {
         id: "now",
         label: "Now",
-        timeframe: "Kéire 0.4.3 current source",
+        timeframe: "Kéire 0.4.4 current source",
         statement: "Extend release evidence for GPU occlusion, editor diagnostics, and cross-platform reliability.",
         initiatives: [
             {

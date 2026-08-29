@@ -660,6 +660,7 @@ namespace Keire::RenderBackend
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_uniform_buffers = Detail::BuiltinShaderUniformBufferCount(vertex);
+        information.num_storage_buffers = vertex ? 1U : 0U;
         information.num_samplers = vertex ? 0U : 2U;
 
         const auto formats = SDL_GetGPUShaderFormats(Device);

@@ -1,5 +1,7 @@
 #include "KeireClientInternal/Editor/VfxEffectPanelInternal.h"
 
+#include <algorithm>
+
 namespace KeireEditor
 {
     void VfxEffectPanel::DrawGraphCanvas(Keire::UiFrame& ui)

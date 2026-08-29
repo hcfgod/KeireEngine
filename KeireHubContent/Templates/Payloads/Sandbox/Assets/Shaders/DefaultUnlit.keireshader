@@ -5,6 +5,8 @@
   "receivesShadows": true,
   "usesForwardPlus": true,
   "usesInstancing": true,
+  "instanceAddressingAbiVersion": 2,
+  "occlusionSupport": 3,
   "usesImageBasedLighting": true,
   "spatialLightingAbiVersion": 3,
   "maximumWorldPositionDisplacementRadius": 0.0,

@@ -3,18 +3,22 @@
 #include "Keire/Api.h"
 #include "Keire/Audio/AudioSystem.h"
 #include "Keire/ECS/Component.h"
+#include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/Ref.h"
 #include "Keire/Ui/RuntimeUi.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
 namespace Keire
 {
     class AssetSystem;
+    struct RenderCamera;
     class Scene;
     class UiFrame;
 
@@ -75,6 +79,23 @@ namespace Keire
         std::vector<ScenePresentationUiEventCheckpoint> PendingUiEvents;
     };
 
+    struct ScenePresentationCanvasGeometry
+    {
+        EntityId Canvas;
+        CanvasRenderMode RenderMode = CanvasRenderMode::ScreenSpaceOverlay;
+        std::array<Vector2, 4> ViewportCorners{};
+        float PlaneDistance = 0.0F;
+        bool Visible = false;
+    };
+
+    struct ScenePresentationUiGeometry
+    {
+        EntityId Entity;
+        EntityId Canvas;
+        std::array<Vector2, 4> ViewportCorners{};
+        bool Visible = false;
+    };
+
     class KEIRE_API ScenePresentationRuntime final : public RefCounted
     {
       public:
@@ -87,6 +108,8 @@ namespace Keire
 
         void Synchronize(Ref<Scene> scene, float viewportWidth, float viewportHeight, bool playing,
                          RuntimeUiInsets safeArea = {});
+        void Synchronize(Ref<Scene> scene, float viewportWidth, float viewportHeight, bool playing,
+                         RuntimeUiInsets safeArea, const RenderCamera* viewportCamera);
         void SetDefaultMixer(AssetId mixer) noexcept;
         [[nodiscard]] AssetId DefaultMixer() const noexcept;
         void Clear() noexcept;
@@ -110,6 +133,9 @@ namespace Keire
         [[nodiscard]] bool TextInputFocused() const noexcept;
         [[nodiscard]] EntityId FocusedUiEntity() const noexcept;
         [[nodiscard]] EntityId HitTestUiEntity(float x, float y) const noexcept;
+        [[nodiscard]] EntityId HitTestCanvasEntity(float x, float y) const noexcept;
+        [[nodiscard]] std::optional<ScenePresentationCanvasGeometry> CanvasGeometry(EntityId canvas) const noexcept;
+        [[nodiscard]] std::optional<ScenePresentationUiGeometry> UiGeometry(EntityId entity) const noexcept;
         void Navigate(RuntimeUiNavigation navigation);
         [[nodiscard]] bool PollUiEvent(RuntimeUiEvent& event);
         [[nodiscard]] ScenePresentationCheckpoint CaptureCheckpoint() const;

@@ -110,7 +110,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
 ];
 
 const summaries: Readonly<Record<string, string>> = {
-    "0.4.3": "A pre-demo hardening update adding bounded rendering, device-loss recovery, additive scenes, transactional installers, managed serialization v3, diagnostic bundles, and conservative visibility consumers.",
+    "0.4.4": "A pre-demo hardening update adding bounded rendering, device-loss recovery, additive scenes, transactional installers, managed serialization v3, diagnostic bundles, and conservative visibility consumers.",
     "0.4.2": "A GPU-occlusion and editor-diagnostics update adding same-frame camera-local culling, compacted indirect draws, deterministic fallbacks, and production stress/render verification.",
     "0.4.1": "A performance and portability update that dramatically reduces dense-scene rendering cost, eliminates steady-state upload churn, and validates the release pipeline across Windows, Linux, and macOS source builds.",
     "0.4.0": "A unified graph-authoring and Unity-shaped scripting milestone with schema-4 Shader/Material graphs, executable VFX subgraphs, and explicit catalog-publication boundaries.",
@@ -122,7 +122,7 @@ const summaries: Readonly<Record<string, string>> = {
 };
 
 const parsedReleases = parseChangelog(changelogSource) as ParsedChangelogRelease[];
-const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.4.3";
+const currentVersion = /^PROJECT_VERSION=(.+)$/m.exec(projectConfiguration)?.[1]?.trim() ?? "0.4.4";
 const publicationStatus = JSON.parse(publicationStatusSource)?.releaseStatus;
 export const activeCatalogVersion = publicationStatus?.activeCatalogVersion ?? "unknown";
 const currentReleasePublished = publicationStatus?.state === "active" &&

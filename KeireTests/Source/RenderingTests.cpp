@@ -22,6 +22,7 @@
 #include <system_error>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -217,7 +218,7 @@ namespace
 
 TEST_CASE("built-in shader resource counts match each stage")
 {
-    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 1);
+    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 3);
     CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 2);
 }
 
@@ -924,7 +925,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 19);
+    CHECK(importer.Version == 20);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -951,7 +952,91 @@ TEST_CASE("model importer exposes explicit animation source routing")
     CHECK(motion->Choices == std::vector<std::string>{"rootMotion", "authored", "inPlaceHorizontal", "inPlace"});
 }
 
-TEST_CASE("model importer version nineteen publishes complete skinned influence bounds")
+TEST_CASE("FBX model identities keep duplicate bone names deterministic across nodes weights and animation")
+{
+    auto bytes = ReadTestBytes("Vendor/assimp/test/models/FBX/animation_with_skeleton.fbx");
+    REQUIRE_FALSE(bytes.empty());
+    constexpr std::string_view SourceName = "Bone.002";
+    constexpr std::string_view DuplicateName = "Bone.001";
+    static_assert(SourceName.size() == DuplicateName.size());
+    const auto sourcePattern = std::as_bytes(std::span(SourceName.data(), SourceName.size()));
+    const auto duplicatePattern = std::as_bytes(std::span(DuplicateName.data(), DuplicateName.size()));
+    std::size_t replacements = 0;
+    for (auto found = std::search(bytes.begin(), bytes.end(), sourcePattern.begin(), sourcePattern.end());
+         found != bytes.end(); found = std::search(found, bytes.end(), sourcePattern.begin(), sourcePattern.end()))
+    {
+        std::copy(duplicatePattern.begin(), duplicatePattern.end(), found);
+        ++replacements;
+        found += static_cast<std::ptrdiff_t>(sourcePattern.size());
+    }
+    REQUIRE(replacements >= 2);
+
+    TemporaryDirectory directory("DuplicateFbxBoneIdentityTests");
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Parse("12345678-1234-4567-89ab-100000000001");
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = directory.Path;
+    context.SourcePath = directory.Path / "duplicate-bones.fbx";
+    context.RelativePath = context.SourcePath.filename();
+    context.ImportSettings["materialImport"] = std::string("none");
+    context.ImportSettings["rigSource"] = std::string("embedded");
+    std::unordered_map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+
+    const auto importer = Keire::CreateMeshAssetImporter();
+    const auto first = importer.ContextualImport(context, bytes);
+    const auto second = importer.ContextualImport(context, bytes);
+    CHECK(first.Bytes == second.Bytes);
+    REQUIRE(first.SubAssets.size() == second.SubAssets.size());
+    for (std::size_t index = 0; index < first.SubAssets.size(); ++index)
+    {
+        CHECK(first.SubAssets[index].Id == second.SubAssets[index].Id);
+        CHECK(first.SubAssets[index].Type == second.SubAssets[index].Type);
+        CHECK(first.SubAssets[index].Key == second.SubAssets[index].Key);
+        CHECK(first.SubAssets[index].Bytes == second.SubAssets[index].Bytes);
+    }
+
+    const auto skeletonOutput =
+        std::ranges::find(first.SubAssets, Keire::SkeletonAsset::StaticType(), &Keire::AssetGeneratedSubAsset::Type);
+    REQUIRE(skeletonOutput != first.SubAssets.end());
+    const auto skeleton = Keire::SkeletonAsset::Decode(skeletonOutput->Bytes);
+    std::vector<std::string> duplicateBoneNames;
+    std::vector<std::uint32_t> duplicateBoneIndices;
+    for (std::size_t index = 0; index < skeleton->Bones().size(); ++index)
+    {
+        const auto& bone = skeleton->Bones()[index];
+        if (!bone.Name.starts_with("Bone.001_FBX_"))
+            continue;
+        duplicateBoneNames.push_back(bone.Name);
+        duplicateBoneIndices.push_back(static_cast<std::uint32_t>(index));
+    }
+    REQUIRE(duplicateBoneNames.size() == 2);
+    CHECK(duplicateBoneNames[0] != duplicateBoneNames[1]);
+
+    std::size_t animationClipCount = 0;
+    std::unordered_set<std::uint32_t> animatedBones;
+    for (const auto& subAsset : first.SubAssets)
+    {
+        if (subAsset.Type != Keire::AnimationClipAsset::StaticType())
+            continue;
+        ++animationClipCount;
+        const auto clip = Keire::AnimationClipAsset::Decode(subAsset.Bytes);
+        for (const auto& track : clip->Tracks())
+            animatedBones.insert(track.Bone);
+    }
+    REQUIRE(animationClipCount > 0);
+    REQUIRE(duplicateBoneIndices.size() == 2);
+    CHECK(animatedBones.contains(duplicateBoneIndices[0]));
+    CHECK(animatedBones.contains(duplicateBoneIndices[1]));
+
+    std::vector<Keire::SkeletonBone> invalidBones(skeleton->Bones().begin(), skeleton->Bones().end());
+    invalidBones.front().BindPose.Translation.X = std::numeric_limits<float>::infinity();
+    CHECK_THROWS_WITH_AS((void)Keire::SkeletonAsset::Encode(invalidBones),
+                         "Skeleton contains an invalid bone hierarchy or transform.", std::invalid_argument);
+}
+
+TEST_CASE("model importer version twenty publishes complete skinned influence bounds")
 {
     TemporaryDirectory directory("SkinnedBoundsImportTests");
     const auto sourcePath = directory.Path / "character.obj";

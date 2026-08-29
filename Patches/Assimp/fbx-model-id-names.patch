@@ -1,0 +1,152 @@
+diff --git a/code/AssetLib/FBX/FBXConverter.cpp b/code/AssetLib/FBX/FBXConverter.cpp
+index f190d600a..6a7e28ccc 100644
+--- a/code/AssetLib/FBX/FBXConverter.cpp
++++ b/code/AssetLib/FBX/FBXConverter.cpp
+@@ -134,12 +134,15 @@ FBXConverter::FBXConverter(aiScene *out, const Document &doc, bool removeEmptyBo
+         meshes_converted(),
+         node_anim_chain_bits(),
+         mNodeNames(),
++        mModelNames(),
+         anim_fps(),
+         mSceneOut(out),
+         doc(doc),
+         mRemoveEmptyBones(removeEmptyBones) {
+
+
++    BuildModelNames();
++
+     // animations need to be converted first since this will
+     // populate the node_anim_chain_bits map, which is needed
+     // to determine which nodes need to be generated.
+@@ -187,6 +190,64 @@ FBXConverter::FBXConverter(aiScene *out, const Document &doc, bool removeEmptyBo
+     }
+ }
+
++void FBXConverter::BuildModelNames() {
++    std::vector<std::pair<const Model *, std::string>> models;
++    std::map<std::string, size_t> baseNameCounts;
++    for (const ObjectMap::value_type &entry : doc.Objects()) {
++        const Token &key = entry.second->GetElement().KeyToken();
++        if (static_cast<size_t>(key.end() - key.begin()) != 5 || strncmp(key.begin(), "Model", 5) != 0) {
++            continue;
++        }
++        const Object *object = entry.second->Get();
++        const Model *model = dynamic_cast<const Model *>(object);
++        if (!model) {
++            continue;
++        }
++
++        std::string baseName = FixNodeName(model->Name());
++        if (baseName.empty()) {
++            baseName = "Model";
++        }
++        models.emplace_back(model, std::move(baseName));
++        ++baseNameCounts[models.back().second];
++    }
++
++    std::sort(models.begin(), models.end(), [](const auto &left, const auto &right) {
++        return left.first->ID() < right.first->ID();
++    });
++
++    std::unordered_set<std::string> usedNames;
++    for (const auto &[model, baseName] : models) {
++        if (baseNameCounts.at(baseName) == 1) {
++            mModelNames.emplace(model->ID(), baseName);
++            usedNames.insert(baseName);
++        }
++    }
++    for (const auto &[model, baseName] : models) {
++        if (baseNameCounts.at(baseName) == 1) {
++            continue;
++        }
++
++        std::string uniqueName = baseName + "_FBX_" + std::to_string(model->ID());
++        while (!usedNames.insert(uniqueName).second) {
++            uniqueName += '_';
++        }
++        mModelNames.emplace(model->ID(), std::move(uniqueName));
++    }
++    for (const auto &[id, name] : mModelNames) {
++        (void)id;
++        mNodeNames.emplace(name, 0);
++    }
++}
++
++const std::string &FBXConverter::ModelName(const Model &model) const {
++    const auto found = mModelNames.find(model.ID());
++    if (found == mModelNames.end()) {
++        throw DeadlyImportError("FBX model identity was not registered before scene conversion");
++    }
++    return found->second;
++}
++
+ FBXConverter::~FBXConverter() {
+     std::for_each(mMeshes.begin(), mMeshes.end(), Util::delete_fun<aiMesh>());
+     std::for_each(materials.begin(), materials.end(), Util::delete_fun<aiMaterial>());
+@@ -279,7 +340,7 @@ void FBXConverter::ConvertNodes(uint64_t id, aiNode *parent, aiNode *root_node,
+             nodes_chain.clear();
+             post_nodes_chain.clear();
+             aiMatrix4x4 new_abs_transform = parent_transform;
+-            std::string node_name = FixNodeName(model->Name());
++            const std::string &node_name = ModelName(*model);
+             // even though there is only a single input node, the design of
+             // assimp (or rather: the complicated transformation chain that
+             // is employed by fbx) means that we may need multiple aiNode's
+@@ -1661,8 +1722,8 @@ void FBXConverter::ConvertCluster(std::vector<aiBone*> &local_mesh_bones, const
+         aiNode *) {
+     ai_assert(cluster != nullptr); // make sure cluster valid
+
+-    std::string deformer_name = cluster->TargetNode()->Name();
+-    aiString bone_name = aiString(FixNodeName(deformer_name));
++    const std::string &deformer_name = ModelName(*cluster->TargetNode());
++    aiString bone_name = aiString(deformer_name);
+
+     aiBone *bone = nullptr;
+
+@@ -2681,7 +2742,7 @@ void FBXConverter::ConvertAnimationStack(const AnimationStack &st) {
+             ai_assert(node);
+             const Model *const model = dynamic_cast<const Model *>(node->Target());
+             if (model) {
+-                const std::string &curName = FixNodeName(model->Name());
++                const std::string &curName = ModelName(*model);
+                 node_map[curName].push_back(node);
+                 layer_map[node] = layer;
+                 continue;
+@@ -2815,7 +2876,7 @@ void FBXConverter::ProcessMorphAnimDatas(std::map<std::string, morphAnimData *>
+                             if (model) {
+                                 auto geoIt = std::find(model->GetGeometry().begin(), model->GetGeometry().end(), geo);
+                                 auto geoIndex = static_cast<unsigned int>(std::distance(model->GetGeometry().begin(), geoIt));
+-                                auto name = aiString(FixNodeName(model->Name() + "*"));
++                                auto name = aiString(ModelName(*model) + "*");
+                                 name.length = 1 + ASSIMP_itoa10(name.data + name.length, AI_MAXLEN - 1, geoIndex);
+                                 morphAnimData *animData;
+                                 auto animIt = morphAnimDatas->find(name.C_Str());
+diff --git a/code/AssetLib/FBX/FBXConverter.h b/code/AssetLib/FBX/FBXConverter.h
+index f33b26ee1..ef1a15243 100644
+--- a/code/AssetLib/FBX/FBXConverter.h
++++ b/code/AssetLib/FBX/FBXConverter.h
+@@ -135,6 +135,13 @@ private:
+     // collect and assign child nodes
+     void ConvertNodes(uint64_t id, aiNode *parent, aiNode *root_node, const aiMatrix4x4& parent_transform = aiMatrix4x4());
+
++    // ------------------------------------------------------------------------------------------------
++    // Build stable names before animations are converted so nodes, clusters, and channels share one identity.
++    void BuildModelNames();
++
++    // ------------------------------------------------------------------------------------------------
++    const std::string& ModelName(const Model& model) const;
++
+     // ------------------------------------------------------------------------------------------------
+     void ConvertLights(const Model& model, const std::string &orig_name );
+
+@@ -455,6 +462,10 @@ private:
+     using NodeNameCache = std::fbx_unordered_map<std::string, unsigned int>;
+     NodeNameCache mNodeNames;
+
++    // FBX connections use object IDs, while aiScene relationships use names. Duplicate source names therefore need a
++    // single stable ID-derived mapping shared by every converted relationship.
++    std::map<uint64_t, std::string> mModelNames;
++
+     // Deformer name is not the same as a bone name - it does contain the bone name though :)
+     // Deformer names in FBX are always unique in an FBX file.
+     std::map<const std::string, aiBone *> bone_map;

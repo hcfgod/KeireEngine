@@ -1,5 +1,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
+#include <algorithm>
+
 namespace Keire
 {
     bool ScriptSystem::PrepareReload(ManagedReloadRequest request)

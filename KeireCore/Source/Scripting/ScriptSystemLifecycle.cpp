@@ -1,5 +1,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
+#include <algorithm>
+
 namespace Keire
 {
     ScriptSystem::Impl::Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)

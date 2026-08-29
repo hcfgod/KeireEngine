@@ -31,6 +31,28 @@ namespace KeireEditor
         Uniform
     };
 
+    enum class SceneUiRectHandle : std::uint8_t
+    {
+        None,
+        TopLeft,
+        TopRight,
+        BottomRight,
+        BottomLeft,
+        Center
+    };
+
+    struct SceneUiRectHandleEdit
+    {
+        Keire::Vector2 AnchoredPosition;
+        Keire::Vector2 SizeDelta;
+        Keire::Vector2 ReferenceResolution;
+    };
+
+    [[nodiscard]] SceneUiRectHandleEdit
+    CalculateSceneUiRectHandleEdit(SceneUiRectHandle handle, std::span<const Keire::Vector2, 4> projectedCorners,
+                                   Keire::Vector2 pointerDelta, Keire::Vector2 anchoredPosition,
+                                   Keire::Vector2 sizeDelta, Keire::Vector2 referenceResolution, bool canvasRoot);
+
     struct SceneTransformTarget
     {
         Keire::Ref<Keire::TransformComponent> Transform;
@@ -97,7 +119,8 @@ namespace KeireEditor
                                                      Keire::UiItemRect viewport, bool allowManipulation,
                                                      bool pointerBlocked, const BeginUndo& beginUndo,
                                                      const MeshBoundsResolver& resolveMeshBounds = {},
-                                                     std::span<const Keire::AssetId> selections = {});
+                                                     std::span<const Keire::AssetId> selections = {},
+                                                     const Keire::ScenePresentationRuntime* presentation = nullptr);
 
         void Load(const std::filesystem::path& projectRoot);
         void Save(const std::filesystem::path& projectRoot) const noexcept;
@@ -176,9 +199,23 @@ namespace KeireEditor
             bool UndoRecorded = false;
         };
 
+        struct UiRectDragState
+        {
+            Keire::Ref<Keire::RectTransformComponent> RectTransform;
+            Keire::Ref<Keire::CanvasComponent> Canvas;
+            Keire::Vector2 InitialAnchoredPosition;
+            Keire::Vector2 InitialSizeDelta;
+            Keire::Vector2 InitialReferenceResolution;
+            Keire::UiPosition StartPointer;
+            std::array<Keire::Vector2, 4> InitialCorners{};
+            SceneUiRectHandle Handle = SceneUiRectHandle::None;
+            bool UndoRecorded = false;
+        };
+
         SceneToolSettings m_Settings;
         DragState m_Drag;
         ColliderDragState m_ColliderDrag;
+        UiRectDragState m_UiRectDrag;
         SceneTool m_Tool = SceneTool::Translate;
     };
 } // namespace KeireEditor

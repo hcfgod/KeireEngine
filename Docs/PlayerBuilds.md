@@ -90,6 +90,13 @@ Build Support is installed independently of projects beneath Kéire's per-user p
 BuildSupport/<engine-version>/<pack-id>/
 ```
 
+Each Windows Editor distribution also carries one matching host bootstrap module beside the Editor executable at
+`bin/BuildSupport/<engine-version>/windows-<architecture>-<engine-version>/`. It is generated from the same verified
+Player Support payload as the standalone package and retains the current player ABI, module fingerprint, configuration
+variants, and exact file inventory. This lets a fresh packaged Windows x86_64 Editor build Windows x86_64 players
+before the Hub has installed optional components. Per-user modules remain the first lookup authority, and the Hub does
+not duplicate the bootstrap payload in its own distribution.
+
 Open **Installs**, choose a healthy editor, and select **Manage Components** to import a `.keireplayersupport` file,
 monitor or cancel installation, repair an installed module from a matching package, inspect its size/status, or remove
 it with confirmation. Counts and actions are scoped to that editor's exact engine version and typed Asset Tool;

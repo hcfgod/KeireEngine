@@ -1,5 +1,7 @@
 #include "KeireClientInternal/Editor/AssetBrowserPanelInternal.h"
 
+#include <algorithm>
+
 namespace KeireEditor
 {
     void AssetBrowserPanel::Impl::DrawRenamePopups(Keire::UiFrame& ui, IAssetBrowserController& editor)

@@ -36,6 +36,92 @@ cleanup_dependencies_workspace_lock() {
 }
 trap cleanup_dependencies_workspace_lock EXIT
 
+assimp_patch_root="$ROOT/Patches/Assimp"
+assimp_patches=()
+while IFS= read -r patch; do
+  assimp_patches+=("$patch")
+done < <(find "$assimp_patch_root" -maxdepth 1 -type f -name '*.patch' -print | LC_ALL=C sort)
+((${#assimp_patches[@]} > 0)) || { printf 'The Kéire Assimp patch set is empty.\n' >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  assimp_patch_digest="$({ for patch in "${assimp_patches[@]}"; do basename "$patch"; printf '\n'; cat "$patch"; done; } | sha256sum | awk '{print $1}')"
+else
+  assimp_patch_digest="$({ for patch in "${assimp_patches[@]}"; do basename "$patch"; printf '\n'; cat "$patch"; done; } | shasum -a 256 | awk '{print $1}')"
+fi
+
+validate_patched_assimp_source() {
+  local source_path="${1:?source path is required}"
+  local expected_stamp="$assimp_commit|$assimp_patch_digest"
+  [[ -d "$source_path" && ! -L "$source_path" ]] || {
+    printf 'Patched Assimp source is missing or unsafe: %s\n' "$source_path" >&2
+    return 1
+  }
+  [[ "$(git -C "$source_path" rev-parse HEAD)" == "$assimp_commit" ]] || {
+    printf 'Patched Assimp source is not based on locked commit %s.\n' "$assimp_commit" >&2
+    return 1
+  }
+  [[ -f "$source_path/keire-assimp-patch.stamp" &&
+     "$(tr -d '\r\n' < "$source_path/keire-assimp-patch.stamp")" == "$expected_stamp" ]] || {
+    printf 'Patched Assimp source stamp does not match the locked commit and patch digest.\n' >&2
+    return 1
+  }
+  local patch
+  for patch in "${assimp_patches[@]}"; do
+    git -C "$source_path" apply --reverse --check --whitespace=error-all -- "$patch" || return 1
+  done
+  git -C "$source_path" diff --check || return 1
+  local expected_paths actual_paths untracked
+  expected_paths="$(sed -n 's#^diff --git a/[^ ]* b/##p' "${assimp_patches[@]}" | LC_ALL=C sort -u)"
+  actual_paths="$(git -C "$source_path" diff --name-only --no-ext-diff | LC_ALL=C sort -u)"
+  [[ "$actual_paths" == "$expected_paths" ]] || {
+    printf 'Patched Assimp source contains changes outside the committed patch set.\n' >&2
+    return 1
+  }
+  untracked="$(git -C "$source_path" ls-files --others --exclude-standard)"
+  [[ "$untracked" == keire-assimp-patch.stamp ]] || {
+    printf 'Patched Assimp source contains unexpected untracked files.\n' >&2
+    return 1
+  }
+}
+
+prepare_patched_assimp_source() {
+  local vendor_source="$ROOT/Vendor/assimp"
+  local cache_root="$ROOT/Build/Dependencies/assimp-patched"
+  local source_path="$cache_root/${assimp_commit:0:12}-${assimp_patch_digest:0:16}"
+  local temporary_path="$cache_root/.tmp-${assimp_commit:0:12}-${assimp_patch_digest:0:16}-$$"
+  [[ "$(git -C "$vendor_source" rev-parse HEAD)" == "$assimp_commit" &&
+     -z "$(git -C "$vendor_source" status --porcelain --untracked-files=all)" ]] || {
+    printf 'The Assimp submodule must match the locked commit and remain clean before downstream patches are applied.\n' >&2
+    return 1
+  }
+  if [[ -e "$source_path" || -L "$source_path" ]]; then
+    validate_patched_assimp_source "$source_path" || return 1
+    printf '%s\n' "$source_path"
+    return
+  fi
+  mkdir -p "$cache_root"
+  case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; *) return 1 ;; esac
+  if ! git clone --quiet --no-hardlinks "$vendor_source" "$temporary_path"; then
+    case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; esac
+    printf 'Could not clone the locked Assimp submodule.\n' >&2
+    return 1
+  fi
+  local patch
+  for patch in "${assimp_patches[@]}"; do
+    if ! git -C "$temporary_path" apply --whitespace=error-all -- "$patch"; then
+      case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; esac
+      printf 'Could not apply Assimp patch %s.\n' "$(basename "$patch")" >&2
+      return 1
+    fi
+  done
+  printf '%s\n' "$assimp_commit|$assimp_patch_digest" > "$temporary_path/keire-assimp-patch.stamp"
+  if ! validate_patched_assimp_source "$temporary_path" || ! mv "$temporary_path" "$source_path"; then
+    case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; esac
+    printf 'Could not publish patched Assimp source.\n' >&2
+    return 1
+  fi
+  printf '%s\n' "$source_path"
+}
+
 locked_source() {
   local name="${1:?dependency name is required}"
   local url="${2:?dependency URL is required}"
@@ -102,6 +188,7 @@ jolt_source="$(locked_source jolt "$jolt_url" "$jolt_commit")"
 recast_source="$(locked_source recast "$recast_url" "$recast_commit")"
 miniaudio_source="$(locked_source miniaudio "$miniaudio_url" "$miniaudio_commit")"
 libsodium_source="$(locked_source libsodium "$libsodium_url" "$libsodium_commit")"
+assimp_patched_source="$(prepare_patched_assimp_source)"
 if [[ "$toolset" == clang ]]; then export CC=clang CXX=clang++; else export CC=gcc CXX=g++; fi
 compiler="$($CXX --version | head -n 1)"
 bridge="$ROOT/Scripts/Dependencies/CMakeLists.txt"
@@ -135,7 +222,7 @@ if [[ "$platform" == Mac ]]; then
   options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture"
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 fi
-key="$sdl_commit|$assimp_commit|$jolt_commit|$recast_commit|$miniaudio_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
+key="$sdl_commit|$assimp_commit|$assimp_patch_digest|$jolt_commit|$recast_commit|$miniaudio_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
 base="$ROOT/Build/Dependencies/$system-$output_arch-$toolset"
 
 validate_sdl_input_backends() {
@@ -199,7 +286,7 @@ for configuration in Debug Release; do
   [[ "$build" == "$base/Debug" || "$build" == "$base/Release" ]] || { printf 'Refusing to replace dependency cache outside %s.\n' "$base" >&2; exit 1; }
   rm -rf "$build"
   mkdir -p "$build"
-  cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$ROOT/Vendor/assimp" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
+  cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$assimp_patched_source" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
   cmake --build "$build" --target install --parallel "$(build_parallel_jobs)"
   validate_sdl_input_backends "$build" "$configuration"
   sodium_build="$build/libsodium"
@@ -302,6 +389,7 @@ DependencyManifest = {
     SDLCommit = "$sdl_commit",
     JSONCommit = "$json_commit",
     AssimpCommit = "$assimp_commit",
+    AssimpPatchDigest = "$assimp_patch_digest",
     JoltCommit = "$jolt_commit",
     RecastCommit = "$recast_commit",
     MiniaudioCommit = "$miniaudio_commit",

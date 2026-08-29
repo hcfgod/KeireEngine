@@ -97,21 +97,27 @@ TEST_CASE("Material Graph source and cooked serialization are deterministic")
     CHECK_THROWS_AS(Keire::ValidateMaterialGraph(duplicate), std::invalid_argument);
 }
 
-TEST_CASE("Material Graph schema three migrates in memory and explicit save publishes schema four")
+TEST_CASE("Material Graph schema three migrates in memory and explicit save publishes schema five")
 {
-    const auto current = Keire::MaterialGraphAsset::EncodeSource(SampleMaterialGraph());
+    const auto definition = SampleMaterialGraph();
+    const auto current = Keire::MaterialGraphAsset::EncodeSource(definition);
     auto legacy = nlohmann::json::parse(std::string(reinterpret_cast<const char*>(current.data()), current.size()));
     legacy["schemaVersion"] = 3;
     legacy.erase("authoring");
+    const auto legacySurface = Keire::ShaderGraphAsset::EncodeSource(definition.SurfaceGraph);
+    legacy["surfaceGraph"] =
+        nlohmann::json::parse(std::string(reinterpret_cast<const char*>(legacySurface.data()), legacySurface.size()));
     const auto legacyText = legacy.dump();
     const auto migrated = Keire::MaterialGraphAsset::DecodeSource(std::as_bytes(std::span(legacyText)));
 
-    CHECK(migrated.SchemaVersion == 4);
+    CHECK(migrated.SchemaVersion == Keire::MaterialGraphSourceSchemaVersion);
     CHECK(migrated.Authoring == Keire::GraphAuthoringMetadata{});
     const auto saved = Keire::MaterialGraphAsset::EncodeSource(migrated);
     const auto savedJson =
         nlohmann::json::parse(std::string(reinterpret_cast<const char*>(saved.data()), saved.size()));
-    CHECK(savedJson.at("schemaVersion") == 4);
+    CHECK(savedJson.at("schemaVersion") == Keire::MaterialGraphSourceSchemaVersion);
+    CHECK_FALSE(savedJson.contains("surfaceGraph"));
+    CHECK_FALSE(savedJson.contains("legacySurfaceGraph"));
     CHECK(savedJson.contains("authoring"));
 }
 
@@ -224,6 +230,12 @@ TEST_CASE("Material Graph composes Unreal-style surface expressions through a Sh
     REQUIRE(composedRoughness != compilation.Properties.end());
     CHECK(composedRoughness->DefaultValue.X == doctest::Approx(0.45F));
     CHECK(Keire::MaterialGraphAsset::DecodeSource(Keire::MaterialGraphAsset::EncodeSource(definition)) == definition);
+
+    const auto saved = Keire::MaterialGraphAsset::EncodeSource(definition);
+    const auto savedJson =
+        nlohmann::json::parse(std::string(reinterpret_cast<const char*>(saved.data()), saved.size()));
+    CHECK_FALSE(savedJson.contains("surfaceGraph"));
+    CHECK(savedJson.contains("legacySurfaceGraph"));
 }
 
 TEST_CASE("Material Graph surface outputs inherit the selected Shader Graph template contract")
@@ -616,7 +628,7 @@ TEST_CASE("Material Graph baking resolves an exact Shader Graph variant and publ
     CHECK(std::get<float>(material.Properties.at("Roughness")) == doctest::Approx(0.45F));
 
     const auto importer = Keire::CreateMaterialGraphAssetImporter();
-    CHECK(importer.Version == 7);
+    CHECK(importer.Version == 8);
     const auto materialId = Keire::AssetId::Parse("a4000000-0000-4000-8000-000000000001");
     const auto variantOwner = Keire::AssetId::Parse("a4500000-0000-4000-8000-000000000001");
     auto shaderGraph = Keire::CreateDefaultShaderGraph();

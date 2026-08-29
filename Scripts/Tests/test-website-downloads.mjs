@@ -86,18 +86,18 @@ context.fixtureCandidates = validate(catalog([
     packageRecord("0.4.0"),
     packageRecord("0.4.1"),
     packageRecord("0.4.2"),
-    packageRecord("0.4.3"),
+    packageRecord("0.4.4"),
 ]));
-const currentCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.3')", context);
+const currentCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.4')", context);
 assert.deepEqual(Array.from(currentCandidates, (candidate) => candidate.version.raw),
-    ["0.4.3", "0.4.2", "0.4.1", "0.4.0", "0.3.2"]);
+    ["0.4.4", "0.4.2", "0.4.1", "0.4.0", "0.3.2"]);
 const activeCandidates = vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.2')", context);
 assert.deepEqual(Array.from(activeCandidates, (candidate) => candidate.version.raw),
     ["0.4.2", "0.4.1", "0.4.0", "0.3.2"]);
 context.fixtureCandidates = validate(catalog([packageRecord("0.4.2")]));
-assert.deepEqual(Array.from(vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.3')", context),
+assert.deepEqual(Array.from(vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.4')", context),
     (candidate) => candidate.version.raw), ["0.4.2"]);
-context.fixtureCandidates = validate(catalog([packageRecord("0.4.3")]));
+context.fixtureCandidates = validate(catalog([packageRecord("0.4.4")]));
 assert.equal(vm.runInContext("releaseCandidates(fixtureCandidates, '0.4.2').length", context), 0);
 assert.equal(vm.runInContext("releaseCandidates(fixtureCandidates, null).length", context), 0);
 
@@ -403,9 +403,9 @@ const platformRelease = {
     schemaVersion: 2,
     releaseStatus: {
         state: "active",
-        version: "0.4.3",
-        activeCatalogVersion: "0.4.3",
-        message: "Kéire 0.4.3 is active on Windows while Linux retains its validated 0.4.2 packages.",
+        version: "0.4.4",
+        activeCatalogVersion: "0.4.4",
+        message: "Kéire 0.4.4 is active on Windows while Linux retains its validated 0.4.2 packages.",
     },
     packages: [],
 };
@@ -432,7 +432,7 @@ const platformRenderContext = vm.createContext({
         }
         if (url === "/v2/catalog/stable/windows/x86_64") {
             return { ok: true, status: 200, json: async () => catalog([
-                packageRecord("0.4.2"), packageRecord("0.4.3"),
+                packageRecord("0.4.2"), packageRecord("0.4.4"),
             ]) };
         }
         if (url === "/v2/catalog/stable/linux/x86_64") {
@@ -452,7 +452,7 @@ for (let index = 0; index < 10 && platformCards.get("windows").variants.children
 }
 assert.equal(platformCards.get("windows").variants.children.length, 1);
 assert.equal(platformCards.get("windows").variants.children[0].children[1].textContent,
-    "Hub v0.4.3 · Verified by signed Kéire catalog");
+    "Hub v0.4.4 · Verified by signed Kéire catalog");
 assert.equal(platformCards.get("linux").variants.children.length, 2);
 assert.deepEqual(platformCards.get("linux").variants.children.map((variant) => variant.children[1].textContent), [
     "Hub v0.4.2 · Verified by signed Kéire catalog",

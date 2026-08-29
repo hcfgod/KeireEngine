@@ -8,7 +8,7 @@ implemented engine/editor path and focused evidence. `Partial` means the shipped
 instead of silently degrading. `Planned` is not a supported feature. Counts are useful for planning, but production
 scenarios and executable validation decide milestone acceptance.
 
-Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
+Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 
 ## Capability Matrix
 
@@ -26,7 +26,7 @@ Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 | ME-AS-010 | Safe rename, duplicate, move, and trash | Complete | P0 | Generic stable-ID asset operations cover every new extension. |
 | ME-AS-011 | Deterministic source serialization | Complete | P0 | Canonical JSON and byte-equality tests for functions and collections. |
 | ME-AS-012 | Bounded source decoding | Complete | P0 | Explicit size, count, text, schema, identifier, and finite-value limits. |
-| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 5, Material schema 4, and reusable schema 1 reject unsupported future data. |
+| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 5, Material schema 5, and reusable schema 1 reject unsupported future data. |
 | ME-AS-014 | Import dependency extraction | Complete | P0 | Function calls publish sorted unique asset dependencies. |
 | ME-AS-015 | Dependent reimport after function change | Complete | P0 | Asset dependency graph invalidates Shader/Material Graph imports. |
 | ME-AS-016 | Transactional generated shader publication | Complete | P0 | Staged replacement and rollback retain last-good variants. |
@@ -36,7 +36,7 @@ Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 | ME-AS-020 | Source-control-aware checkout/status | Planned | P2 | Requires provider-neutral source-control boundary. |
 | ME-GR-001 | Typed function call node | Complete | P0 | Interface derives from stable Parameter and Output pins. |
 | ME-GR-002 | Calls in Shader Graph | Complete | P0 | Search palette lists compatible project functions and layers. |
-| ME-GR-003 | Calls in Material Graph | Complete | P0 | Material expressions use the same call contract. |
+| ME-GR-003 | Calls in Material Graph | Partial | P0 | Schema v1-v4 expressions remain readable for migration; new executable calls belong in Shader Graph. |
 | ME-GR-004 | Deterministic recursive expansion | Complete | P0 | Derived IDs make repeated expansion byte-identical. |
 | ME-GR-005 | Missing function diagnostics | Complete | P0 | Expansion rejects unresolved assets before shader publication. |
 | ME-GR-006 | Function recursion rejection | Complete | P0 | Dependency stack rejects direct and indirect cycles. |

@@ -1,7 +1,7 @@
 {
   "name": "Kéire Engine",
   "short_name": "Kéire",
-  "description": "Kéire 0.4.3 open-source game technology; Hub downloads appear only after catalog verification.",
+  "description": "Kéire 0.4.4 open-source game technology; Hub downloads appear only after catalog verification.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#02040b",

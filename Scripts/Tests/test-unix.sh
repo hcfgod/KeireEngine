@@ -711,7 +711,17 @@ assert_true grep -F -q 'if [[ "$DEPENDENCY" == Tracy ]]' "$ROOT/Scripts/Unix/ven
 assert_true grep -F -q 'git add Config/Dependencies.lock' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -F -q 'git add Vendor/%s Config/Dependencies.lock' "$ROOT/Scripts/Unix/vendor-update.sh"
 assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
-assert_true grep -F -q -- '-DKEIRE_ASSIMP_SOURCE="$ROOT/Vendor/assimp"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q -- '-DKEIRE_ASSIMP_SOURCE="$assimp_patched_source"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'assimp_patch_root="$ROOT/Patches/Assimp"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'keire-assimp-patch.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'key="$sdl_commit|$assimp_commit|$assimp_patch_digest|' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'AssimpPatchDigest = "$assimp_patch_digest"' \
+  "$ROOT/Scripts/Unix/dependencies.sh"
+assimp_identity_patch="$ROOT/Patches/Assimp/fbx-model-id-names.patch"
+assert_true grep -F -q 'void FBXConverter::BuildModelNames()' "$assimp_identity_patch"
+assert_true grep -F -q 'ModelName(*cluster->TargetNode())' "$assimp_identity_patch"
+assert_true grep -F -q 'ModelName(*model)' "$assimp_identity_patch"
 assert_true grep -F -q 'locked_git_source_validate "$source_path" "$commit" "$name" || return 1' \
   "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q '".locks/$name-$commit.lock"' "$ROOT/Scripts/Unix/dependencies.sh"
@@ -1063,6 +1073,10 @@ assert_true grep -R -q 'AmbientAndExposure' "$ROOT/KeireCore/Source/Rendering" \
   "$ROOT/KeireCore/Include/KeireInternal/Rendering"
 assert_true grep -q 'LightDirection' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
 assert_true grep -q 'worldNormal' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
+assert_true grep -q 'InstanceAddressingData' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
+assert_true grep -F -q 'Instances[InstanceParameters.x + instanceId]' "$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl"
+assert_true grep -R -q 'GpuOcclusionVisibleInstances' "$ROOT/KeireCore/Source/Rendering"
+assert_true grep -R -q 'SDL_BindGPUVertexStorageBuffers' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'ReadbackRGBA8' "$ROOT/KeireCore/Source/Rendering"
 assert_true test -f "$ROOT/KeireRenderTests/Source/RenderedOutputTests.cpp"
 assert_true grep -q 'backends=(vulkan)' "$ROOT/Scripts/Unix/run-target.sh"
@@ -1078,7 +1092,7 @@ assert_false grep -R -q 'Vendor/SDL/test' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -q 'SDL_GetBasePath()' "$ROOT/KeireCore/Source/Assets/RenderingAssets.cpp"
 assert_true grep -q 'ImGuiDragDropFlags_SourceAllowNullID' "$ROOT/KeireCore/Source/Ui.cpp"
 assert_true test -f "$ROOT/KeireClient/Source/Editor/SceneGizmoController.cpp"
-assert_true grep -q '"/select," + utf8Path' "$ROOT/KeireCore/Source/Process.cpp"
+assert_true grep -F -q 'L"/select,\"" + resolved.native() + L"\""' "$ROOT/KeireCore/Source/Process.cpp"
 assert_false grep -q 'imgui.cpp' "$ROOT/KeireCore/premake5.lua"
 assert_false grep -q 'AddDearImGuiSources' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'LinkKeireCore()' "$ROOT/KeireClient/premake5.lua"
@@ -1239,8 +1253,10 @@ assert_false grep -R -q '#include "KeireClient/EditorWorkspaceLayer.h"' \
   "$ROOT/KeireClient/Source/Editor/AssetBrowserPanel.cpp"
 assert_false grep -E -q 'friend[[:space:]]+class[[:space:]]+KeireEditor::|Draw(Scene|Hierarchy|Inspector)Content' \
   "$ROOT/KeireClient/Include/KeireClient/EditorWorkspaceLayer.h"
-assert_true grep -q 'DisplayName(record.RelativePath)' "$ROOT/KeireClient/Source/Editor/AssetBrowserPanel.cpp"
-assert_true grep -q 'TrashRecords()' "$ROOT/KeireClient/Source/Editor/AssetBrowserPanel.cpp"
+assert_true grep -q 'DisplayName(record.RelativePath)' \
+  "$ROOT/KeireClient/Source/Editor/AssetBrowserPanelInteractions.cpp"
+assert_true grep -q 'TrashRecords()' \
+  "$ROOT/KeireClient/Include/KeireClientInternal/Editor/AssetBrowserPanelInternal.h"
 assert_true grep -q 'class KEIRE_API UndoService' "$ROOT/KeireCore/Include/Keire/Undo.h"
 assert_true grep -q 'CreateSystemTray' "$ROOT/KeireHub/Source/HubApplication.cpp"
 assert_true grep -q 'Show Hub' "$ROOT/KeireHub/Source/HubApplication.cpp"
@@ -1413,7 +1429,7 @@ assert_true grep -Fq 'RecoveryAttemptCountForTest(*renderer)' \
   "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
 assert_true grep -Fq 'ObserveOcclusionGameView' \
   "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
-assert_true grep -Fq 'SourceSurfaceEpoch == surface.Generation()' \
+assert_true grep -Fq 'diagnostics.SourceSurfaceEpoch == surfaceGeneration' \
   "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
 assert_true grep -Fq 'LocalLightMaskConsumed' \
   "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
@@ -1429,11 +1445,10 @@ assert_false grep -Fq 'RetriedAfterDeviceLoss' \
   "$ROOT/KeireClient/Source/Editor/EditorSmokePlayValidation.cpp"
 assert_true grep -Fq 'python3 - "$runtime_validation_output" "$commit" "$CONFIGURATION"' \
   "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq 'report["inputHandledByActiveTopmostPresentation"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"inputHandledByActiveTopmostPresentation",' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'report["renderMode"] == "rendered"' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq 'report["renderedWindowLoop"]' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq 'report["nativeWindowCreated"]' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq 'report["validationWindowHidden"]' "$ROOT/Scripts/Unix/package.sh"
+assert_true grep -Fq '"renderedWindowLoop", "nativeWindowCreated", "validationWindowHidden",' \
+  "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'integer_at_least(report["twoSceneUiCommands"], 2' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'integer_at_least(report["threeSceneUiCommands"], 2' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'gpu["fourSceneContributions"] == 4' "$ROOT/Scripts/Unix/package.sh"

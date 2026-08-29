@@ -394,6 +394,161 @@ TEST_CASE("scene runtime UI controls synchronize native values and emit typed in
     assets->Close();
 }
 
+TEST_CASE("Canvas schema two preserves overlay defaults and round trips world presentation fields")
+{
+    const auto registration = Keire::CreateCanvasComponentRegistration();
+    CHECK(registration.SchemaVersion == 2);
+    REQUIRE(registration.Migrate);
+
+    const auto migrated = registration.Migrate({}, 1);
+    auto legacy = Keire::CreateRef<Keire::CanvasComponent>();
+    registration.Deserialize(*legacy, migrated, registration.SchemaVersion);
+    CHECK(legacy->RenderMode() == Keire::CanvasRenderMode::ScreenSpaceOverlay);
+    CHECK_FALSE(legacy->RenderCameraEntity());
+    CHECK(legacy->PlaneDistance() == doctest::Approx(1.0F));
+    CHECK(legacy->WorldUnitsPerPixel() == doctest::Approx(0.01F));
+
+    const auto camera = Keire::EntityId::Generate();
+    auto source = Keire::CreateRef<Keire::CanvasComponent>();
+    source->SetRenderMode(Keire::CanvasRenderMode::WorldSpace);
+    source->SetRenderCameraEntity(camera);
+    source->SetPlaneDistance(4.0F);
+    source->SetWorldUnitsPerPixel(0.025F);
+    source->SetReferenceResolution({800.0F, 450.0F});
+
+    auto restored = Keire::CreateRef<Keire::CanvasComponent>();
+    registration.Deserialize(*restored, registration.Serialize(*source), registration.SchemaVersion);
+    CHECK(restored->RenderMode() == Keire::CanvasRenderMode::WorldSpace);
+    CHECK(restored->RenderCameraEntity() == camera);
+    CHECK(restored->PlaneDistance() == doctest::Approx(4.0F));
+    CHECK(restored->WorldUnitsPerPixel() == doctest::Approx(0.025F));
+    CHECK(restored->ReferenceResolution() == Keire::Vector2{800.0F, 450.0F});
+    CHECK_THROWS_AS(source->SetWorldUnitsPerPixel(0.0F), std::invalid_argument);
+    CHECK_THROWS_AS(source->SetPlaneDistance(std::numeric_limits<float>::infinity()), std::invalid_argument);
+}
+
+TEST_CASE("world-space Canvas projection and ray input share the same current camera plane")
+{
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("World Canvas"));
+    auto canvasEntity = scene->CreateEntity("Canvas");
+    const auto canvas = canvasEntity.AddComponent<Keire::CanvasComponent>();
+    REQUIRE(canvas);
+    canvas->SetRenderMode(Keire::CanvasRenderMode::WorldSpace);
+    canvas->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
+    canvas->SetReferenceResolution({200.0F, 100.0F});
+    canvas->SetWorldUnitsPerPixel(0.01F);
+    const auto canvasTransform = canvasEntity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(canvasTransform);
+    canvasTransform->SetLocalPosition({0.0F, 0.0F, 5.0F});
+
+    auto buttonEntity = scene->CreateEntity("Button", canvasEntity);
+    const auto rect = buttonEntity.AddComponent<Keire::RectTransformComponent>();
+    REQUIRE(rect);
+    rect->SetAnchorMinimum({0.0F, 0.0F});
+    rect->SetAnchorMaximum({1.0F, 1.0F});
+    rect->SetSizeDelta({});
+    REQUIRE(buttonEntity.AddComponent<Keire::UiButtonComponent>());
+
+    Keire::RenderCamera camera;
+    camera.View = {};
+    camera.Projection = Keire::Math::Perspective(60.0F, 2.0F, 0.1F, 100.0F);
+    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
+
+    const auto canvasGeometry = presentation->CanvasGeometry(canvasEntity.Id());
+    REQUIRE(canvasGeometry);
+    CHECK(canvasGeometry->Visible);
+    CHECK(canvasGeometry->RenderMode == Keire::CanvasRenderMode::WorldSpace);
+    const auto buttonGeometry = presentation->UiGeometry(buttonEntity.Id());
+    REQUIRE(buttonGeometry);
+    CHECK(buttonGeometry->Visible);
+    CHECK(presentation->HitTestUiEntity(200.0F, 100.0F) == buttonEntity.Id());
+    CHECK(presentation->HitTestCanvasEntity(200.0F, 100.0F) == canvasEntity.Id());
+    CHECK_FALSE(presentation->HitTestUiEntity(5.0F, 5.0F));
+
+    CHECK(presentation->PointerButton(200.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, true));
+    CHECK(presentation->PointerButton(200.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, false));
+    CHECK(presentation->ConsumeClick(buttonEntity.Id()));
+
+    canvasTransform->SetLocalPosition({0.0F, 0.0F, -5.0F});
+    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
+    REQUIRE(presentation->CanvasGeometry(canvasEntity.Id()));
+    CHECK_FALSE(presentation->CanvasGeometry(canvasEntity.Id())->Visible);
+    CHECK_FALSE(presentation->HitTestCanvasEntity(200.0F, 100.0F));
+
+    canvas->SetRenderMode(Keire::CanvasRenderMode::ScreenSpaceCamera);
+    canvas->SetPlaneDistance(0.05F);
+    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
+    REQUIRE(presentation->CanvasGeometry(canvasEntity.Id()));
+    CHECK_FALSE(presentation->CanvasGeometry(canvasEntity.Id())->Visible);
+    canvas->SetPlaneDistance(1.0F);
+    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
+    REQUIRE(presentation->CanvasGeometry(canvasEntity.Id()));
+    CHECK(presentation->CanvasGeometry(canvasEntity.Id())->Visible);
+    CHECK(presentation->HitTestUiEntity(200.0F, 100.0F) == buttonEntity.Id());
+
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("captured world-space slider drags keep using their Canvas projection outside the control")
+{
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Captured world slider"));
+    auto canvasEntity = scene->CreateEntity("Canvas");
+    const auto canvas = canvasEntity.AddComponent<Keire::CanvasComponent>();
+    REQUIRE(canvas);
+    canvas->SetRenderMode(Keire::CanvasRenderMode::WorldSpace);
+    canvas->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
+    canvas->SetReferenceResolution({200.0F, 100.0F});
+    canvas->SetWorldUnitsPerPixel(0.01F);
+    const auto canvasTransform = canvasEntity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(canvasTransform);
+    canvasTransform->SetLocalPosition({0.0F, 0.0F, 5.0F});
+
+    auto sliderEntity = scene->CreateEntity("Slider", canvasEntity);
+    const auto rect = sliderEntity.AddComponent<Keire::RectTransformComponent>();
+    REQUIRE(rect);
+    rect->SetAnchorMinimum({0.5F, 0.5F});
+    rect->SetAnchorMaximum({0.5F, 0.5F});
+    rect->SetPivot({0.5F, 0.5F});
+    rect->SetSizeDelta({80.0F, 20.0F});
+    const auto slider = sliderEntity.AddComponent<Keire::UiSliderComponent>();
+    REQUIRE(slider);
+    slider->SetRange(0.0F, 100.0F);
+
+    Keire::RenderCamera camera;
+    camera.View = {};
+    camera.Projection = Keire::Math::Perspective(60.0F, 2.0F, 0.1F, 100.0F);
+    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
+
+    const auto sliderGeometry = presentation->UiGeometry(sliderEntity.Id());
+    const auto canvasGeometry = presentation->CanvasGeometry(canvasEntity.Id());
+    REQUIRE(sliderGeometry);
+    REQUIRE(canvasGeometry);
+    const auto sliderCenter =
+        Keire::Vector2{(sliderGeometry->ViewportCorners[0].X + sliderGeometry->ViewportCorners[2].X) * 0.5F,
+                       (sliderGeometry->ViewportCorners[0].Y + sliderGeometry->ViewportCorners[2].Y) * 0.5F};
+    const float canvasRight = std::max({canvasGeometry->ViewportCorners[0].X, canvasGeometry->ViewportCorners[1].X,
+                                        canvasGeometry->ViewportCorners[2].X, canvasGeometry->ViewportCorners[3].X});
+    const Keire::Vector2 outsideCanvas{canvasRight + 1.0F, sliderCenter.Y};
+    REQUIRE(presentation->HitTestUiEntity(sliderCenter.X, sliderCenter.Y) == sliderEntity.Id());
+    REQUIRE_FALSE(presentation->HitTestCanvasEntity(outsideCanvas.X, outsideCanvas.Y));
+
+    CHECK(presentation->PointerButton(sliderCenter.X, sliderCenter.Y, Keire::RuntimeUiPointerButton::Primary, true));
+    CHECK(slider->Value() == doctest::Approx(50.0F));
+    presentation->PointerMove(outsideCanvas.X, outsideCanvas.Y);
+    CHECK(slider->Value() == doctest::Approx(100.0F));
+    CHECK(presentation->PointerButton(outsideCanvas.X, outsideCanvas.Y, Keire::RuntimeUiPointerButton::Primary, false));
+
+    scene->Close();
+    assets->Close();
+}
+
 TEST_CASE("runtime UI control components reject invalid state without partial mutation and round-trip properties")
 {
     auto slider = Keire::CreateRef<Keire::UiSliderComponent>();

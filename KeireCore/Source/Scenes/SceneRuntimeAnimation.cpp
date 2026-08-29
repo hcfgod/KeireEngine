@@ -1,5 +1,8 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
+#include <algorithm>
+#include <cmath>
+
 namespace Keire
 {
     [[nodiscard]] Ref<const AnimationClipAsset> SceneRuntimeSession::Impl::ResolveClip(AnimationRuntimeState& state,

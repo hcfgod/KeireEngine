@@ -48,13 +48,23 @@
       "compatibleEditors": ">=0.1.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 3214,
+      "estimatedSizeBytes": 5773,
       "payloadRoot": "Payloads/Starter3D",
       "payloadFiles": [
         {
+          "path": "Assets/Shaders/DefaultUnlit.keireshader",
+          "sizeBytes": 1062,
+          "sha256": "7486804d057a4fe8371db7f19a71c83a43497e34c4f453c125818d7286f1ea10"
+        },
+        {
+          "path": "Assets/Shaders/DefaultUnlit.keireshader.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "e4970cdb6b38ee7de69ba969aa26de6b5bfc40d5f0d469f2c5431728b6d46b94"
+        },
+        {
           "path": "Assets/Shaders/StarterUnlit.hlsl",
-          "sizeBytes": 154,
-          "sha256": "58b67763118c5d71fee9385edc179ffce6a40b1598bc83bcb45441b7521209e5"
+          "sizeBytes": 1433,
+          "sha256": "32820edbe40282cb64133f2a737b259021bf3543569a06c1347aad71469528d0"
         },
         {
           "path": "Assets/Scenes/StarterScene.keirescene",
@@ -81,6 +91,7 @@
         "startupScene": "10000000-0000-4000-8000-000000000001"
       },
       "starterContent": [
+        "Assets/Shaders/DefaultUnlit.keireshader",
         "Assets/Shaders/StarterUnlit.hlsl",
         "Assets/Scenes/StarterScene.keirescene"
       ],
@@ -108,7 +119,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25049613,
+      "estimatedSizeBytes": 25049788,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -648,8 +659,8 @@
         },
         {
           "path": "Assets/Shaders/DefaultUnlit.hlsl",
-          "sizeBytes": 35083,
-          "sha256": "3f7f1d7a408d6ae6bd1bce382a9932accdb634c07667120dc6dead5ccbe8e9cf"
+          "sizeBytes": 35196,
+          "sha256": "60271038cf155f5421dc6f971af1f9cc551231ecf71d57868be73764573b04c9"
         },
         {
           "path": "Assets/Shaders/DefaultUnlit.hlsl.keiremeta",
@@ -658,8 +669,8 @@
         },
         {
           "path": "Assets/Shaders/DefaultUnlit.keireshader",
-          "sizeBytes": 3286,
-          "sha256": "18d7e4d0d6eed6e0151ddd1e10ed9b71b64f424197980b19c495b3919ebfb3f5"
+          "sizeBytes": 3348,
+          "sha256": "1252bccfe64714c49388cd530a1fc97d3cee0377145eaf5d1546100da69aecd4"
         },
         {
           "path": "Assets/Shaders/DefaultUnlit.keireshader.keiremeta",

@@ -32,6 +32,11 @@ cbuffer ObjectData : register(b0, space1)
     float4x4 NormalMatrix;
 };
 
+cbuffer InstanceAddressingData : register(b2, space1)
+{
+    uint4 InstanceParameters;
+};
+
 struct InstanceData
 {
     float4x4 Model;
@@ -174,7 +179,7 @@ float3 OrthogonalTangent(const float3 normal)
 VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
 {
     VertexOutput output;
-    const InstanceData instance = Instances[instanceId];
+    const InstanceData instance = Instances[InstanceParameters.x + instanceId];
     const float4 worldPosition = mul(instance.Model, float4(input.Position, 1.0F));
     const float4 viewPosition = mul(View, worldPosition);
     output.Position = mul(Projection, viewPosition);

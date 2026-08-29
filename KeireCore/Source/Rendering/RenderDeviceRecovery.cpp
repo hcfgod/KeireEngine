@@ -194,6 +194,7 @@ namespace Keire::RenderBackend
         }
         LostGenerationAbandonedHandleCount.fetch_add(abandonedHandles, std::memory_order_relaxed);
 #endif
+        EditorUiTextures.ReleaseGpuTextures(nullptr, true);
         for (auto& frame : InFlight)
         {
             if (frame.ResolvedEditorUi)

@@ -812,10 +812,10 @@ namespace Keire::RenderBackend
     }
 
     [[nodiscard]] inline ObjectUniforms MakeObjectUniforms(const Matrix4& modelViewProjection, const Matrix4& model,
-                                                           const Matrix4& view, const Color tint,
-                                                           const SceneLighting& lighting,
+                                                           const Matrix4& view, const Matrix4& projection,
+                                                           const Color tint, const SceneLighting& lighting,
                                                            const RenderEnvironmentSettings& environment,
-                                                           const bool receiveLighting)
+                                                           const bool receiveLighting, const bool useInstancing)
     {
         auto direction = lighting.Direction;
         direction.W = receiveLighting && lighting.Enabled ? 1.0F : 0.0F;
@@ -827,9 +827,10 @@ namespace Keire::RenderBackend
                 {environment.AmbientColor.Red * environment.AmbientIntensity,
                  environment.AmbientColor.Green * environment.AmbientIntensity,
                  environment.AmbientColor.Blue * environment.AmbientIntensity, environment.Exposure},
-                {receiveLighting ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F},
+                {receiveLighting ? 1.0F : 0.0F, useInstancing ? 1.0F : 0.0F, 0.0F, 0.0F},
                 model,
-                view};
+                view,
+                projection};
     }
 
     struct RenderPipelineSet final
@@ -1192,6 +1193,7 @@ namespace Keire::RenderBackend
         void PrepareFrameForExecution(const std::shared_ptr<RenderFramePacket>& frame);
         void BeginFrame();
         void CancelFrame() noexcept;
+        void QueueUiTextureRetirements(std::span<const std::uintptr_t> logicalTextureIds);
         void Submit(SceneRenderRequest request);
         void CapturePendingSceneRequest(PendingSceneRequest request, std::uint64_t acceptedFrameId);
         [[nodiscard]] const GpuMeshResources& ResolveMesh(AssetId id);
@@ -1356,6 +1358,7 @@ namespace Keire::RenderBackend
         std::thread::id GpuCreationThread;
         std::thread::id GpuDestructionThread;
         std::atomic<std::shared_ptr<Keire::Detail::UiContextAccess>> EditorUiContextAccess;
+        ImGuiTextureCache EditorUiTextures;
         SDL_Window* NativeWindow = nullptr;
         SDL_GPUDevice* Device = nullptr;
         SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
@@ -1419,6 +1422,7 @@ namespace Keire::RenderBackend
         std::vector<Ref<RuntimeUiTree>> PendingRuntimeUiTrees;
         std::vector<PendingSceneRequest> PendingSceneRequests;
         std::vector<CapturedSurfaceTextureBinding> PendingUiSurfaceTextureBindings;
+        std::vector<std::uintptr_t> PendingUiTextureRetirements;
         std::vector<RuntimeUiDrawCommand> CaptureRuntimeUiCommands;
         std::vector<QueuedSceneRequest> CaptureRequests;
         std::shared_ptr<RenderFramePacket> ActiveFrame;

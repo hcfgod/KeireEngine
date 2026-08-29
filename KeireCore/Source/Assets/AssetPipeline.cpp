@@ -36,14 +36,15 @@ namespace Keire
 
     AssetDatabase::~AssetDatabase() = default;
 
-    Ref<AssetDatabase>
-    Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(AssetDatabaseSpecification specification,
-                                                             const std::filesystem::path& path)
+    Ref<AssetDatabase> Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(
+        AssetDatabaseSpecification specification, const std::filesystem::path& path, const bool startChangeMonitor)
     {
         auto database =
             CreateRef<AssetDatabase>(std::move(specification), AssetDatabase::Initialization::PublishedSourceIndex);
         (void)ReloadSourceIndex(*database, path);
         database->m_Impl->CompleteExternalImportRecovery(*database);
+        if (startChangeMonitor)
+            database->m_Impl->StartChangeMonitor();
         return database;
     }
 
@@ -82,7 +83,7 @@ namespace Keire
         database.m_Impl->Observed = std::move(signatures);
         database.m_Impl->PendingChanges.clear();
         database.m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
-        database.m_Impl->RequestChangeMonitorScan();
+        database.m_Impl->RequestChangeMonitorDigestVerification();
         std::erase_if(database.m_Impl->ImportStatuses,
                       [&database](const auto& entry)
                       {
@@ -252,8 +253,19 @@ namespace Keire
                     const auto previous = std::ranges::find(m_Impl->Records, record.Id, &AssetSourceRecord::Id);
                     if (previous != m_Impl->Records.end())
                     {
-                        record.SourceDigest = previous->SourceDigest;
-                        record.MetadataDigest = previous->MetadataDigest;
+                        if (monitored->DigestsVerified)
+                        {
+                            if (record.SourceDigest != previous->SourceDigest ||
+                                record.MetadataDigest != previous->MetadataDigest)
+                            {
+                                m_Impl->PendingChanges.try_emplace(record.Id, now);
+                            }
+                        }
+                        else
+                        {
+                            record.SourceDigest = previous->SourceDigest;
+                            record.MetadataDigest = previous->MetadataDigest;
+                        }
                     }
                 }
                 m_Impl->Observed = std::move(scanned.Signatures);

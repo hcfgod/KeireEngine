@@ -14,9 +14,9 @@ another.
 Review target: sustained commercial and AAA-team production use. A feature existing in source is not equivalent to a
 validated workflow, and a validated preview is not equivalent to a production-proven 1.0 release.
 
-## 0.4.3 Source Candidate
+## 0.4.4 Source Candidate
 
-Version 0.4.3 is the current source and Windows publication target. Its validation is tracked separately from this
+Version 0.4.4 is the current source and Windows publication target. Its validation is tracked separately from this
 review's immutable 0.4.2 sequence-17 evidence; no 0.4.2 Windows or Linux artifact is relabeled as the new release.
 
 ## 0.4.2 Release Update
@@ -189,10 +189,10 @@ Windows, DEB, and RPM records and states the native-signing limitations explicit
 
 - The frozen Unity 6.3 VFX ledger contains 278 rows: 248 implemented and 30 disabled. This is substantial coverage, not
   a complete Unity parity claim.
-- The Unreal-inspired Material Ecosystem matrix contains 145 rows: 98 Complete, 8 Partial, and 39 Planned. The ledger
+- The Unreal-inspired Material Ecosystem matrix contains 145 rows: 97 Complete, 9 Partial, and 39 Planned. The ledger
   distinguishes current source capability from immutable 0.3.2 package evidence; Planned rows remain unsupported.
 - Current content authorities are project schema 4, scene schema 6, mesh schema 5, Shader source schema 5, VFX schema 5,
-  Material source schema 4, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest
+  Material source schema 5, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest
   schema 4.
 
 ### Documentation and web platform
@@ -236,7 +236,7 @@ and explicit preview/launch labeling. The static migration fallback remains inde
 | Editor workspace and authoring | A- | Docking, documents, hierarchy/Inspector, asset browsing, targeted imports, previews, graph editors, settings, diagnostics, procedural profiles, and package management are implemented. The composition root remains intentionally centralized and needs further decomposition; full accessibility, localization, and collaborative-depot automation remain incomplete. |
 | Rendering | A- | SDL GPU isolation, D3D12/Vulkan formats, HDR/ACES, Forward+, shadows, lighting data, LODs, skinning, graph pipelines, last-good safety, and both rendered-output suites are substantial. Broader native GPU and long-session evidence remains open. |
 | Animation and rigging | B+ | Graph animation, retargeting, semantic rigs, arm/leg IK, procedural humanoid motion, terrain contacts, airborne states, and presentation interpolation are implemented. Procedural motion still needs broader rig/content tuning and long-session visual acceptance. |
-| Shader and material ecosystem | B | Shader/Material Graphs, functions, layers, persistent/dynamic instances, world-scoped collections, and live revisions exist. The 98/145 Complete matrix and 39 Planned rows make a full Unreal-parity claim inaccurate. |
+| Shader and material ecosystem | B | Shader/Material Graphs, functions, layers, persistent/dynamic instances, world-scoped collections, and live revisions exist. The 97/145 Complete matrix and 39 Planned rows make a full Unreal-parity claim inaccurate. |
 | VFX | B+ | Typed schema-4 graphs, ordered contexts/blocks, CPU/GPU execution, events, strips, resource operations, mesh/ribbon/volume output, diagnostics, and bounded pools cover 248/278 rows. The 30 disabled rows and incomplete GPU attribution remain. |
 | Managed scripting | A | Collectible generations, generation-safe handles, multi-scene worlds, native-asset residency, runtime UI, gameplay services, coroutines, last-good retention, and procedural callbacks are production-minded. Cross-platform reload soaks remain necessary. |
 | Assets and project packages | A | Stable metadata, isolated targeted imports, deterministic cooking, hardened archives, dependency resolution, selective import, executable-code consent, conflicts, journals, and recovery are implemented. Sustained production-corpus fuzzing remains gated. |
@@ -318,7 +318,7 @@ Production performance acceptance still requires:
    backup/restore, and legal gates
    while launch flags remain closed.
 4. Implement renderer timestamps and collect current named-hardware cold/warm and soak evidence.
-5. Prioritize the 39 Planned and 8 Partial material rows plus the 30 disabled VFX rows by production scenario.
+5. Prioritize the 39 Planned and 9 Partial material rows plus the 30 disabled VFX rows by production scenario.
 6. Establish native macOS/Metal validation before presenting macOS as supported.
 
 The correct public description is **production-oriented Kéire 0.4.2 technology preview with catalog-verified Windows

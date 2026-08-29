@@ -152,13 +152,17 @@ namespace Keire::RenderBackend
             {
                 const auto materialId = materialIdForSubmesh(mesh.Submeshes[firstSubmesh + offset]);
                 const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr;
-                if (!material || !DisplacementBounds::IsKnown(material->MaximumWorldPositionDisplacementRadius))
+                if (materialId &&
+                    (!material || !DisplacementBounds::IsKnown(material->MaximumWorldPositionDisplacementRadius)))
                 {
                     aggregateDisplacementRadius.reset();
                     break;
                 }
-                aggregateDisplacementRadius =
-                    std::max(*aggregateDisplacementRadius, *material->MaximumWorldPositionDisplacementRadius);
+                if (material)
+                {
+                    aggregateDisplacementRadius =
+                        std::max(*aggregateDisplacementRadius, *material->MaximumWorldPositionDisplacementRadius);
+                }
             }
             const auto selectedWorldBounds =
                 selectedBounds
@@ -178,9 +182,11 @@ namespace Keire::RenderBackend
                     submesh.Bounds = item.CurrentPoseSubmeshBounds[submeshIndex];
                 const auto materialId = materialIdForSubmesh(submesh);
                 const auto* material = materialId ? ResolveAssetMaterial(materialId, samples) : nullptr;
-                const auto worldBounds = DisplacementBounds::WorldBounds(
-                    submesh.Bounds, item.World,
-                    material ? material->MaximumWorldPositionDisplacementRadius : std::nullopt);
+                const auto worldBounds =
+                    DisplacementBounds::WorldBounds(submesh.Bounds, item.World,
+                                                    material     ? material->MaximumWorldPositionDisplacementRadius
+                                                    : materialId ? std::nullopt
+                                                                 : std::optional<float>{0.0F});
                 if (worldBounds && !IsFrustumVisible(clipFromWorld, *worldBounds, forceConservativeVisibility))
                 {
                     ++Statistics.CulledSubmeshes;
@@ -261,12 +267,15 @@ namespace Keire::RenderBackend
             for (const auto& draw : list.Draws)
             {
                 const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
-                instanceKeys.push_back({draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
-                                        draw.Item->ReceiveShadows, draw.Item->CastShadows,
-                                        material && material->UsesInstancing && !draw.Item->SkinnedAssetVertices &&
-                                            material->SpatialLightingAbiVersion != 3U &&
-                                            draw.Item->MaterialProperties.empty() &&
-                                            draw.Item->MaterialInstanceProperties.empty()});
+                const bool usesBuiltInInstancing =
+                    !draw.Material && !draw.Item->SkinnedAssetVertices && !draw.Item->SkinnedBuiltinVertices;
+                instanceKeys.push_back(
+                    {draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
+                     draw.Item->ReceiveShadows, draw.Item->CastShadows,
+                     usesBuiltInInstancing ||
+                         (material && material->UsesInstancing && !draw.Item->SkinnedAssetVertices &&
+                          !draw.Item->SkinnedBuiltinVertices && material->SpatialLightingAbiVersion != 3U &&
+                          draw.Item->MaterialProperties.empty() && draw.Item->MaterialInstanceProperties.empty())});
             }
             const auto batches = BuildInstanceBatches(instanceKeys);
             list.Batches.reserve(batches.size());
@@ -277,7 +286,8 @@ namespace Keire::RenderBackend
                 const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
                 std::uint32_t instanceDataFirst = 0;
                 std::uint32_t instanceDataCount = 0;
-                if (material && material->UsesInstancing)
+                if ((!draw.Material && !draw.Item->SkinnedAssetVertices && !draw.Item->SkinnedBuiltinVertices) ||
+                    (material && material->UsesInstancing))
                 {
                     if (instanceData.size() > std::numeric_limits<std::uint32_t>::max() - batch.Count)
                         throw std::length_error("Scene instance data exceeds the renderer's 32-bit draw limit.");
@@ -780,10 +790,11 @@ namespace Keire::RenderBackend
             }
             else
             {
+                const bool usesInstancing = batch.InstanceDataCount != 0U;
                 const Color tint = draw.Material ? Color{1.0F, 0.0F, 1.0F, 1.0F} : item.Tint;
-                const ObjectUniforms object =
-                    MakeObjectUniforms(Math::Multiply(camera.Projection, viewModel), item.World, camera.View, tint,
-                                       lighting, packet.Environment, item.ReceiveShadows);
+                const ObjectUniforms object = MakeObjectUniforms(
+                    Math::Multiply(camera.Projection, viewModel), item.World, camera.View, camera.Projection, tint,
+                    lighting, packet.Environment, item.ReceiveShadows, usesInstancing);
                 const auto& builtInShadows = item.ReceiveShadows ? shadowUniforms : disabledShadowUniforms;
                 const std::array shadowBindings{
                     SDL_GPUTextureSamplerBinding{surface.ActiveWorkset().DirectionalShadow
@@ -802,6 +813,14 @@ namespace Keire::RenderBackend
                 const SDL_GPUBufferBinding vertexBinding{
                     item.SkinnedBuiltinVertices ? item.SkinnedBuiltinVertices : mesh.Vertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
+                if (usesInstancing)
+                {
+                    const std::array<std::uint32_t, 4> instanceParameters{
+                        batch.GpuOcclusion ? batch.GpuOcclusionInstanceBase : 0U, 0U, 0U, 0U};
+                    SDL_PushGPUVertexUniformData(commands, 2, instanceParameters.data(), sizeof(instanceParameters));
+                    auto* instances = batch.GpuOcclusion ? prepared.GpuOcclusionVisibleInstances : batch.InstanceBuffer;
+                    SDL_BindGPUVertexStorageBuffers(pass, 0, &instances, 1);
+                }
             }
             if (batch.GpuOcclusion)
             {

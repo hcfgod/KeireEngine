@@ -253,7 +253,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             m_UiPresentation =
                 Keire::CreateRef<Keire::ScenePresentationRuntime>(assetSystem, Keire::Ref<Keire::AudioSystem>{});
         }
-        m_UiPresentation->Synchronize(activeScene, size.Width, size.Height, false);
+        m_UiPresentation->Synchronize(activeScene, size.Width, size.Height, false, {}, &camera);
         if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Scene))
             m_UiPresentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
         const auto pointer = ui.PointerState();
@@ -263,13 +263,17 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         if (imageState.Hovered)
         {
             const auto uiEntity = m_UiPresentation->HitTestUiEntity(localX, localY);
+            const auto canvasEntity =
+                uiEntity ? Keire::EntityId{} : m_UiPresentation->HitTestCanvasEntity(localX, localY);
             if (pointer.LeftPressed)
             {
                 m_UiPresentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
-                if (uiEntity)
-                    m_Controller.SetSceneViewportSelection(std::span<const Keire::EntityId>(&uiEntity, 1), false);
+                const auto selectedUiEntity = uiEntity ? uiEntity : canvasEntity;
+                if (selectedUiEntity)
+                    m_Controller.SetSceneViewportSelection(std::span<const Keire::EntityId>(&selectedUiEntity, 1),
+                                                           false);
             }
-            if (uiEntity)
+            if (uiEntity || canvasEntity)
                 imageState.Hovered = false;
         }
         if (pointer.LeftReleased)
@@ -523,7 +527,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         const auto gizmo = m_Gizmos->UpdateAndDraw(
             ui, renderScene, Keire::EntityId(document.Selection()), camera, imageRect, allowManipulation,
             pointerBlocked, [this](const std::string_view name) { m_Controller.RecordSceneViewportUndo(name); },
-            resolveMeshBounds, selections);
+            resolveMeshBounds, selections, m_UiPresentation.Get());
         if (gizmo.SelectionActivated)
             m_Controller.SelectSceneViewportEntity(gizmo.Selection.Value(), ui.ControlDown());
         if (imageState.Hovered && !pointerBlocked && pointer.LeftPressed)

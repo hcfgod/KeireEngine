@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 
 namespace Keire::RenderBackend::GeometryDetail
 {
@@ -22,6 +23,19 @@ namespace Keire::RenderBackend::GeometryDetail
         std::array<ClipPoint, 6> Values;
     };
 
+    struct ProjectedRectangle final
+    {
+        float MinimumX = 0.0F;
+        float MinimumY = 0.0F;
+        float MaximumX = 0.0F;
+        float MaximumY = 0.0F;
+
+        [[nodiscard]] float Area() const noexcept
+        {
+            return std::max(0.0F, MaximumX - MinimumX) * std::max(0.0F, MaximumY - MinimumY);
+        }
+    };
+
     [[nodiscard]] inline ClipPoint TransformClip(const Matrix4& matrix, const Vector3 point) noexcept
     {
         const auto& value = matrix.Elements;
@@ -29,6 +43,38 @@ namespace Keire::RenderBackend::GeometryDetail
                 value[1] * point.X + value[5] * point.Y + value[9] * point.Z + value[13],
                 value[2] * point.X + value[6] * point.Y + value[10] * point.Z + value[14],
                 value[3] * point.X + value[7] * point.Y + value[11] * point.Z + value[15]};
+    }
+
+    [[nodiscard]] inline ProjectedRectangle ProjectedBoundsPixels(const Matrix4& clipFromLocal, const MeshBounds bounds,
+                                                                  const std::uint32_t width,
+                                                                  const std::uint32_t height) noexcept
+    {
+        float minimumX = static_cast<float>(width);
+        float minimumY = static_cast<float>(height);
+        float maximumX = 0.0F;
+        float maximumY = 0.0F;
+        for (std::uint32_t corner = 0; corner < 8U; ++corner)
+        {
+            const Vector3 point{(corner & 1U) != 0U ? bounds.Maximum.X : bounds.Minimum.X,
+                                (corner & 2U) != 0U ? bounds.Maximum.Y : bounds.Minimum.Y,
+                                (corner & 4U) != 0U ? bounds.Maximum.Z : bounds.Minimum.Z};
+            const auto clip = TransformClip(clipFromLocal, point);
+            if (!std::isfinite(clip.X) || !std::isfinite(clip.Y) || !std::isfinite(clip.W))
+                return {};
+            if (clip.W <= 0.00001F)
+                return {0.0F, 0.0F, static_cast<float>(width), static_cast<float>(height)};
+            const float x = (clip.X / clip.W * 0.5F + 0.5F) * static_cast<float>(width);
+            const float y = (-clip.Y / clip.W * 0.5F + 0.5F) * static_cast<float>(height);
+            minimumX = std::min(minimumX, x);
+            minimumY = std::min(minimumY, y);
+            maximumX = std::max(maximumX, x);
+            maximumY = std::max(maximumY, y);
+        }
+        minimumX = std::clamp(minimumX, 0.0F, static_cast<float>(width));
+        minimumY = std::clamp(minimumY, 0.0F, static_cast<float>(height));
+        maximumX = std::clamp(maximumX, 0.0F, static_cast<float>(width));
+        maximumY = std::clamp(maximumY, 0.0F, static_cast<float>(height));
+        return {minimumX, minimumY, maximumX, maximumY};
     }
 
     [[nodiscard]] inline Vector3 Add(const Vector3 left, const Vector3 right) noexcept

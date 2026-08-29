@@ -1,5 +1,7 @@
 #include "KeireClientInternal/Editor/VfxEffectPanelInternal.h"
 
+#include <algorithm>
+
 namespace KeireEditor
 {
     bool VfxEffectPanel::DrawGraphValueEditor(Keire::UiFrame& ui, const std::string_view label,

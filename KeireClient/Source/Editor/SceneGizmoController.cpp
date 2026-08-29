@@ -14,7 +14,6 @@
 #include <optional>
 #include <sstream>
 #include <type_traits>
-#include <unordered_set>
 
 namespace KeireEditor
 {
@@ -510,117 +509,6 @@ namespace KeireEditor
         }
     } // namespace
 
-    std::vector<SceneTransformTarget> SceneTransformGroup::Capture(const Keire::Ref<Keire::Scene>& scene,
-                                                                   const std::span<const Keire::AssetId> selections,
-                                                                   const Keire::EntityId primary)
-    {
-        std::vector<SceneTransformTarget> result;
-        if (!scene || !primary)
-            return result;
-        std::unordered_set<Keire::AssetId> selectedIds(selections.begin(), selections.end());
-        selectedIds.insert(primary.Value());
-        result.reserve(selectedIds.size());
-        for (const auto id : selectedIds)
-        {
-            auto entity = scene->FindEntity(Keire::EntityId(id));
-            if (!entity)
-                continue;
-            bool selectedAncestor = false;
-            for (auto parent = entity.Parent(); parent; parent = parent.Parent())
-            {
-                if (selectedIds.contains(parent.Id().Value()))
-                {
-                    selectedAncestor = true;
-                    break;
-                }
-            }
-            if (selectedAncestor)
-                continue;
-            const auto transform = entity.GetComponent<Keire::TransformComponent>();
-            if (!transform)
-                continue;
-            result.push_back({transform, transform->WorldMatrix(), transform->LocalPosition(),
-                              transform->LocalRotation(), transform->LocalScale()});
-        }
-        return result;
-    }
-
-    void SceneTransformGroup::Restore(const std::span<const SceneTransformTarget> targets)
-    {
-        for (const auto& target : targets)
-        {
-            target.Transform->SetLocalPosition(target.InitialPosition);
-            target.Transform->SetLocalRotation(target.InitialRotation);
-            target.Transform->SetLocalScale(target.InitialScale);
-        }
-    }
-
-    void SceneTransformGroup::Apply(const std::span<const SceneTransformTarget> targets, const SceneTool tool,
-                                    const SceneTransformAxis axis, const float amount, const Keire::Vector3 worldAxis,
-                                    const Keire::Vector3 pivot, const Keire::Quaternion pivotRotation)
-    {
-        if (tool == SceneTool::View)
-            return;
-        const Keire::Vector3 one{1.0F, 1.0F, 1.0F};
-        Keire::Matrix4 delta;
-        if (tool == SceneTool::Translate)
-        {
-            delta = Keire::Math::ComposeTransform({worldAxis.X * amount, worldAxis.Y * amount, worldAxis.Z * amount},
-                                                  {}, one);
-        }
-        else
-        {
-            const auto pivotFrame = Keire::Math::ComposeTransform(pivot, pivotRotation, one);
-            Keire::Matrix4 localDelta;
-            if (tool == SceneTool::Rotate)
-            {
-                Keire::Vector3 rotation;
-                if (axis == SceneTransformAxis::X)
-                    rotation.X = amount;
-                else if (axis == SceneTransformAxis::Y)
-                    rotation.Y = amount;
-                else
-                    rotation.Z = amount;
-                localDelta = Keire::Math::ComposeTransform({}, Keire::Math::EulerDegreesToQuaternion(rotation), one);
-            }
-            else
-            {
-                Keire::Vector3 scale = one;
-                const float factor = std::max(0.0001F, 1.0F + amount);
-                if (axis == SceneTransformAxis::X || axis == SceneTransformAxis::Uniform)
-                    scale.X = factor;
-                if (axis == SceneTransformAxis::Y || axis == SceneTransformAxis::Uniform)
-                    scale.Y = factor;
-                if (axis == SceneTransformAxis::Z || axis == SceneTransformAxis::Uniform)
-                    scale.Z = factor;
-                localDelta = Keire::Math::ComposeTransform({}, {}, scale);
-            }
-            delta =
-                Keire::Math::Multiply(Keire::Math::Multiply(pivotFrame, localDelta), Keire::Math::Inverse(pivotFrame));
-        }
-        for (const auto& target : targets)
-        {
-            const auto desiredWorld = Keire::Math::Multiply(delta, target.InitialWorld);
-            const auto parent = target.Transform->Parent();
-            const auto parentTransform =
-                parent ? parent.GetComponent<Keire::TransformComponent>() : Keire::Ref<Keire::TransformComponent>{};
-            const auto desiredLocal =
-                parentTransform
-                    ? Keire::Math::Multiply(Keire::Math::Inverse(parentTransform->WorldMatrix()), desiredWorld)
-                    : desiredWorld;
-            Keire::Vector3 position;
-            Keire::Quaternion rotation;
-            Keire::Vector3 scale;
-            if (!Keire::Math::DecomposeTransform(desiredLocal, position, rotation, scale))
-                continue;
-            if (!Keire::TransformComponent::IsValidLocalScale(scale))
-                continue;
-            target.Transform->SetLocalPosition(position);
-            target.Transform->SetLocalRotation(rotation);
-            target.Transform->SetLocalScale(scale);
-        }
-    }
-
     bool SceneGizmoController::ApplyToolShortcut(const Keire::UiKey key) noexcept
     {
         switch (key)
@@ -737,7 +625,8 @@ namespace KeireEditor
                                                          const Keire::UiItemRect viewport, const bool allowManipulation,
                                                          const bool pointerBlocked, const BeginUndo& beginUndo,
                                                          const MeshBoundsResolver& resolveMeshBounds,
-                                                         const std::span<const Keire::AssetId> selections)
+                                                         const std::span<const Keire::AssetId> selections,
+                                                         const Keire::ScenePresentationRuntime* presentation)
     {
         if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
             return {selected};
@@ -763,6 +652,158 @@ namespace KeireEditor
         }
 
         const auto viewProjection = Keire::Math::Multiply(camera.Projection, camera.View);
+        if (presentation && selected)
+        {
+            const auto selectedEntity = scene->FindEntity(selected);
+            auto canvasEntity = selectedEntity;
+            while (canvasEntity && !canvasEntity.GetComponent<Keire::CanvasComponent>())
+                canvasEntity = canvasEntity.Parent();
+            const auto canvas = canvasEntity.GetComponent<Keire::CanvasComponent>();
+            const auto geometry = presentation->UiGeometry(selected);
+            if (canvas && canvas->RenderMode() == Keire::CanvasRenderMode::WorldSpace && geometry && geometry->Visible)
+            {
+                std::array<Keire::UiPosition, 4> corners{};
+                for (std::size_t index = 0; index < corners.size(); ++index)
+                {
+                    corners[index] = {viewport.Minimum.X + geometry->ViewportCorners[index].X,
+                                      viewport.Minimum.Y + geometry->ViewportCorners[index].Y};
+                    const auto next = (index + 1U) % corners.size();
+                    ui.DrawLine(corners[index],
+                                {viewport.Minimum.X + geometry->ViewportCorners[next].X,
+                                 viewport.Minimum.Y + geometry->ViewportCorners[next].Y},
+                                {0.20F, 0.82F, 1.0F, 0.95F}, 1.6F);
+                }
+
+                auto hoveredHandle = SceneUiRectHandle::None;
+                for (std::size_t index = 0; index < corners.size(); ++index)
+                {
+                    const Keire::UiItemRect handle{{corners[index].X - 5.0F, corners[index].Y - 5.0F},
+                                                   {corners[index].X + 5.0F, corners[index].Y + 5.0F}};
+                    ui.DrawFilledRectangle(handle, {0.16F, 0.68F, 0.94F, 1.0F}, 1.5F);
+                    ui.DrawRectangle(handle, {0.92F, 0.98F, 1.0F, 1.0F}, 1.0F, 1.5F);
+                    if (handle.Contains(pointer.Position))
+                        hoveredHandle = static_cast<SceneUiRectHandle>(index + 1U);
+                }
+
+                const bool selectedCanvas = selected == canvasEntity.Id();
+                const Keire::UiPosition center{(corners[0].X + corners[2].X) * 0.5F,
+                                               (corners[0].Y + corners[2].Y) * 0.5F};
+                if (!selectedCanvas)
+                {
+                    const Keire::UiItemRect centerHandle{{center.X - 6.0F, center.Y - 6.0F},
+                                                         {center.X + 6.0F, center.Y + 6.0F}};
+                    ui.DrawFilledCircle(center, 5.0F, {1.0F, 0.78F, 0.20F, 0.95F});
+                    if (centerHandle.Contains(pointer.Position))
+                        hoveredHandle = SceneUiRectHandle::Center;
+                }
+
+                if (hovered && !pointerBlocked && allowManipulation && pointer.LeftPressed &&
+                    hoveredHandle != SceneUiRectHandle::None && m_UiRectDrag.Handle == SceneUiRectHandle::None &&
+                    m_Drag.ActiveAxis == Axis::None && m_ColliderDrag.Handle == ColliderHandle::None)
+                {
+                    m_UiRectDrag.RectTransform = selectedEntity.GetComponent<Keire::RectTransformComponent>();
+                    m_UiRectDrag.Canvas = selectedCanvas ? canvas : Keire::Ref<Keire::CanvasComponent>{};
+                    if (m_UiRectDrag.RectTransform || m_UiRectDrag.Canvas)
+                    {
+                        m_UiRectDrag.InitialAnchoredPosition = m_UiRectDrag.RectTransform
+                                                                   ? m_UiRectDrag.RectTransform->AnchoredPosition()
+                                                                   : Keire::Vector2{};
+                        m_UiRectDrag.InitialSizeDelta =
+                            m_UiRectDrag.RectTransform ? m_UiRectDrag.RectTransform->SizeDelta() : Keire::Vector2{};
+                        m_UiRectDrag.InitialReferenceResolution = canvas->ReferenceResolution();
+                        m_UiRectDrag.StartPointer = pointer.Position;
+                        m_UiRectDrag.Handle = hoveredHandle;
+                        m_UiRectDrag.UndoRecorded = false;
+                        for (std::size_t index = 0; index < corners.size(); ++index)
+                            m_UiRectDrag.InitialCorners[index] = {corners[index].X, corners[index].Y};
+                        pointerConsumed = true;
+                    }
+                }
+            }
+        }
+
+        if (m_UiRectDrag.Handle != SceneUiRectHandle::None)
+        {
+            pointerConsumed = true;
+            if (ui.KeyDown(Keire::UiKey::Escape))
+            {
+                if (m_UiRectDrag.UndoRecorded)
+                {
+                    if (m_UiRectDrag.RectTransform)
+                    {
+                        m_UiRectDrag.RectTransform->SetAnchoredPosition(m_UiRectDrag.InitialAnchoredPosition);
+                        m_UiRectDrag.RectTransform->SetSizeDelta(m_UiRectDrag.InitialSizeDelta);
+                    }
+                    if (m_UiRectDrag.Canvas)
+                        m_UiRectDrag.Canvas->SetReferenceResolution(m_UiRectDrag.InitialReferenceResolution);
+                    scene->MarkDirty();
+                }
+                m_UiRectDrag = {};
+            }
+            else if (pointer.LeftDown)
+            {
+                const Keire::Vector2 delta{pointer.Position.X - m_UiRectDrag.StartPointer.X,
+                                           pointer.Position.Y - m_UiRectDrag.StartPointer.Y};
+                auto edit = CalculateSceneUiRectHandleEdit(
+                    m_UiRectDrag.Handle, m_UiRectDrag.InitialCorners, delta, m_UiRectDrag.InitialAnchoredPosition,
+                    m_UiRectDrag.InitialSizeDelta, m_UiRectDrag.InitialReferenceResolution, bool(m_UiRectDrag.Canvas));
+                bool changed = false;
+                if (m_UiRectDrag.Handle == SceneUiRectHandle::Center && m_UiRectDrag.RectTransform)
+                {
+                    if (m_Settings.Snapping)
+                    {
+                        edit.AnchoredPosition.X = Snap(edit.AnchoredPosition.X, m_Settings.PositionSnap.X);
+                        edit.AnchoredPosition.Y = Snap(edit.AnchoredPosition.Y, m_Settings.PositionSnap.Y);
+                    }
+                    changed = edit.AnchoredPosition != m_UiRectDrag.RectTransform->AnchoredPosition();
+                    if (changed)
+                    {
+                        if (!m_UiRectDrag.UndoRecorded)
+                        {
+                            beginUndo("Move Rect Transform");
+                            m_UiRectDrag.UndoRecorded = true;
+                        }
+                        m_UiRectDrag.RectTransform->SetAnchoredPosition(edit.AnchoredPosition);
+                    }
+                }
+                else
+                {
+                    if (m_UiRectDrag.Canvas)
+                    {
+                        changed = edit.ReferenceResolution != m_UiRectDrag.Canvas->ReferenceResolution();
+                        if (changed)
+                        {
+                            if (!m_UiRectDrag.UndoRecorded)
+                            {
+                                beginUndo("Resize World Canvas");
+                                m_UiRectDrag.UndoRecorded = true;
+                            }
+                            m_UiRectDrag.Canvas->SetReferenceResolution(edit.ReferenceResolution);
+                        }
+                    }
+                    else if (m_UiRectDrag.RectTransform)
+                    {
+                        changed = edit.SizeDelta != m_UiRectDrag.RectTransform->SizeDelta() ||
+                                  edit.AnchoredPosition != m_UiRectDrag.RectTransform->AnchoredPosition();
+                        if (changed)
+                        {
+                            if (!m_UiRectDrag.UndoRecorded)
+                            {
+                                beginUndo("Resize Rect Transform");
+                                m_UiRectDrag.UndoRecorded = true;
+                            }
+                            m_UiRectDrag.RectTransform->SetSizeDelta(edit.SizeDelta);
+                            m_UiRectDrag.RectTransform->SetAnchoredPosition(edit.AnchoredPosition);
+                        }
+                    }
+                }
+                if (changed)
+                    scene->MarkDirty();
+            }
+            else
+                m_UiRectDrag = {};
+        }
+
         if (m_Settings.ShowIcons)
         {
             const auto drawIcons = [&](const auto& entities, const bool cameraIcons, const bool directionalIcons)

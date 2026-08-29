@@ -6,9 +6,10 @@ Shader Graph is the sole owner of executable texture sampling, UV manipulation, 
 logic for newly authored content. Material Graph now opens with Shader Graph parameters visible and creates only value
 overrides. This removes the requirement to duplicate shader logic in `surfaceGraph`.
 
-The serialized `surfaceGraph` member remains as a compatibility container so existing projects continue to load and
-compile. The importer composes it only when a legacy asset contains authored surface connections; ordinary and newly
-authored materials resolve the selected Shader Graph variant directly.
+Schema v5 no longer writes the redundant `surfaceGraph` field. When an older asset still contains executable surface
+connections, the writer preserves those connections under the explicit `legacySurfaceGraph` migration field so the
+project continues to compile without presenting that data as a second authoring authority. Ordinary and newly authored
+materials resolve the selected Shader Graph variant directly.
 
 ## Objective
 
@@ -27,7 +28,7 @@ is a typed binding table. It does not emit a second surface shader or own shader
 
 ## Data model
 
-Material schema version 4 has these authoritative fields:
+Material schema version 5 has these authoritative fields:
 
 - `shader`: the Shader Graph or compiled shader asset ID.
 - `bindings`: stable shader property ID to literal, texture, collection, or material-function output.
@@ -48,8 +49,9 @@ stage-specific code. Property names remain display metadata; stable property IDs
 
 ## Migration
 
-Phase 1 introduced schema v3, dual-read support, stable property IDs, and compiler diagnostics. Current writers emit
-schema v4 with shared authoring metadata while retaining the legacy readers.
+Phase 1 introduced schema v3, dual-read support, stable property IDs, and compiler diagnostics. Schema v4 added shared
+authoring metadata. Current writers emit schema v5 without `surfaceGraph`, while retaining schema 1–4 readers and an
+explicit `legacySurfaceGraph` compatibility payload only when an older material still has executable expressions.
 
 Phase 2 converts legacy `surfaceGraph` nodes that only bind or transform parameters into typed bindings. Executable
 surface behavior missing from the referenced Shader Graph becomes a reusable Shader Graph function before duplicate

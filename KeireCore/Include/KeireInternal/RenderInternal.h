@@ -11,6 +11,7 @@
 #include <exception>
 #include <functional>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <vector>
 
@@ -23,7 +24,7 @@ namespace Keire::Detail
 
     [[nodiscard]] constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool vertex) noexcept
     {
-        return vertex ? 1U : 2U;
+        return vertex ? 3U : 2U;
     }
 } // namespace Keire::Detail
 
@@ -140,6 +141,8 @@ namespace Keire
         SetDeviceRecoveryCallbacks(RenderSystem& renderer, std::function<void()> before,
                                    std::function<void(SDL_GPUDevice*, SDL_GPUTextureFormat, SDL_GPUPresentMode)> after);
         static void SetUiContextAccess(RenderSystem& renderer, std::shared_ptr<Detail::UiContextAccess> contextAccess);
+        static void QueueUiTextureRetirements(RenderSystem& renderer,
+                                              std::span<const std::uintptr_t> logicalTextureIds);
         static void RunOnRenderThread(RenderSystem& renderer, std::function<void()> work);
         [[nodiscard]] static bool GpuLifecycleThreadAffinityValid(const RenderSystem& renderer) noexcept;
         [[nodiscard]] static bool WaitForDeviceRecovery(RenderSystem& renderer, std::function<bool()> pumpWindowEvents);

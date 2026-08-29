@@ -432,14 +432,16 @@ void EditorWorkspaceLayer::PersistInspectorManagedData(const Keire::AssetId asse
 
 void EditorWorkspaceLayer::RenameInspectorAsset(const Keire::AssetId asset, const std::string_view name)
 {
-    if (!m_AssetOperations)
-        throw std::logic_error("The isolated asset worker is unavailable.");
     const auto record = m_AssetDatabase->Find(asset);
     if (!record)
         throw std::invalid_argument("Cannot rename an unknown asset.");
-    m_AssetOperations->QueueMutation({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
-                                      .Asset = asset,
-                                      .Destination = record->RelativePath.parent_path() / std::string(name)});
+    MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
+                        .Asset = asset,
+                        .Destination = record->RelativePath.parent_path() / std::string(name)},
+                       {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
+                        .Asset = asset,
+                        .Destination = record->RelativePath},
+                       "Rename Asset", false);
 }
 
 void EditorWorkspaceLayer::DuplicateInspectorAsset(const Keire::AssetId asset, const std::filesystem::path& destination)

@@ -1,5 +1,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
+#include <cmath>
+
 namespace Keire
 {
     [[nodiscard]] Vector3 ScriptSystem::Impl::RuntimeGetLocalScale(const std::uint64_t world, const std::uint64_t high,

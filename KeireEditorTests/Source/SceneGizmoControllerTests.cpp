@@ -2,6 +2,7 @@
 
 #include <doctest/doctest.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
 
@@ -129,4 +130,24 @@ TEST_CASE("occlusion visibility quick toggle replaces hierarchical depth without
     CHECK(controller.Settings().OcclusionDebugView == Keire::GpuOcclusionDebugView::VisibilityBounds);
     CHECK(controller.Settings().OcclusionDebugMip == 0U);
     CHECK(controller.Settings().ShowOcclusionMetadata);
+}
+
+TEST_CASE("world Canvas and Rect Transform handles preserve the opposite projected edge")
+{
+    const std::array corners{Keire::Vector2{100.0F, 50.0F}, Keire::Vector2{300.0F, 50.0F},
+                             Keire::Vector2{300.0F, 150.0F}, Keire::Vector2{100.0F, 150.0F}};
+    const auto resized = KeireEditor::CalculateSceneUiRectHandleEdit(KeireEditor::SceneUiRectHandle::BottomRight,
+                                                                     corners, {20.0F, 10.0F}, {10.0F, 20.0F},
+                                                                     {200.0F, 100.0F}, {200.0F, 100.0F}, false);
+    CHECK(resized.SizeDelta == Keire::Vector2{220.0F, 110.0F});
+    CHECK(resized.AnchoredPosition == Keire::Vector2{20.0F, 25.0F});
+
+    const auto moved =
+        KeireEditor::CalculateSceneUiRectHandleEdit(KeireEditor::SceneUiRectHandle::Center, corners, {20.0F, -10.0F},
+                                                    {10.0F, 20.0F}, {200.0F, 100.0F}, {200.0F, 100.0F}, false);
+    CHECK(moved.AnchoredPosition == Keire::Vector2{30.0F, 10.0F});
+
+    const auto canvas = KeireEditor::CalculateSceneUiRectHandleEdit(KeireEditor::SceneUiRectHandle::TopLeft, corners,
+                                                                    {-20.0F, -10.0F}, {}, {}, {200.0F, 100.0F}, true);
+    CHECK(canvas.ReferenceResolution == Keire::Vector2{220.0F, 110.0F});
 }

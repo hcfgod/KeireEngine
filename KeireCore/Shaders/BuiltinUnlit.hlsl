@@ -27,7 +27,22 @@ cbuffer ObjectConstants : register(b0, space1)
     float4 LightingParameters;
     float4x4 Model;
     float4x4 View;
+    float4x4 Projection;
 };
+
+cbuffer InstanceAddressingData : register(b2, space1)
+{
+    uint4 InstanceParameters;
+};
+
+struct InstanceData
+{
+    float4x4 Model;
+    float4x4 NormalMatrix;
+    float4 Tint;
+};
+
+StructuredBuffer<InstanceData> Instances : register(t0, space0);
 
 cbuffer ShadowConstants : register(b0, space3)
 {
@@ -58,17 +73,28 @@ SamplerState DirectionalShadowSampler : register(s0, space2);
 Texture2DArray<float> LocalShadowTexture : register(t1, space2);
 SamplerState LocalShadowSampler : register(s1, space2);
 
-VertexOutput VSMain(VertexInput input)
+VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
 {
     VertexOutput output;
-    const float3 worldNormal = normalize(mul((float3x3)NormalMatrix, input.Normal));
-    const float4 worldPosition = mul(Model, float4(input.Position, 1.0F));
+    float4x4 model = Model;
+    float4x4 normalMatrix = NormalMatrix;
+    float4 tint = Tint;
+    if (LightingParameters.y > 0.5F)
+    {
+        const InstanceData instance = Instances[InstanceParameters.x + instanceId];
+        model = instance.Model;
+        normalMatrix = instance.NormalMatrix;
+        tint = instance.Tint;
+    }
+    const float3 worldNormal = normalize(mul((float3x3)normalMatrix, input.Normal));
+    const float4 worldPosition = mul(model, float4(input.Position, 1.0F));
     const float4 viewPosition = mul(View, worldPosition);
-    output.Position = mul(ModelViewProjection, float4(input.Position, 1.0F));
+    output.Position = LightingParameters.y > 0.5F ? mul(Projection, viewPosition)
+                                                  : mul(ModelViewProjection, float4(input.Position, 1.0F));
     output.WorldPosition = worldPosition.xyz;
     output.WorldNormal = worldNormal;
     output.ViewDepth = viewPosition.z;
-    const float4 baseColor = float4(input.Color, 1.0F) * Tint;
+    const float4 baseColor = float4(input.Color, 1.0F) * tint;
     output.BaseColor = baseColor;
     if (LightingParameters.x < 0.5F)
     {

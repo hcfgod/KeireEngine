@@ -7,6 +7,9 @@ param(
     [ValidateSet('stable', 'preview', 'nightly')]
     [string]$Channel = 'stable',
     [switch]$KeepStaging,
+    [Parameter(DontShow = $true)][string]$InstalledLayoutRoot,
+    [Parameter(DontShow = $true)][string]$PackagedLayoutPayload,
+    [Parameter(DontShow = $true)][string]$PackagedLayoutManifest,
     [Parameter(DontShow = $true)][string]$RuntimeClosureSource,
     [Parameter(DontShow = $true)][string]$RuntimeClosureDestination,
     [Parameter(DontShow = $true)][string]$CatalogPublishSource,
@@ -236,6 +239,103 @@ function Test-SafePlayerSupportCatalogVersion {
     return $Value -and $Value.Length -le 128 -and $Value -cmatch '^[A-Za-z0-9.+-]+$'
 }
 
+function Publish-PackagedPlayerSupportLayout {
+    param([string]$Payload, [object]$Manifest, [string]$Output)
+
+    $payloadRoot = (Assert-PlayerSupportDirectory -Path $Payload).FullName
+    if (-not (Test-SafePlayerSupportCatalogSegment ([string]$Manifest.id)) -or
+        -not (Test-SafePlayerSupportCatalogVersion ([string]$Manifest.engineVersion)) -or
+        [string]$Manifest.platform -cne 'windows' -or
+        [string]$Manifest.architecture -notin @('x86_64', 'arm64') -or
+        [uint64]$Manifest.playerAbi -eq 0 -or [uint64]$Manifest.playerAbi -gt [uint32]::MaxValue -or
+        -not [string]$Manifest.moduleFingerprint) {
+        throw 'Packaged Build Support has invalid or incomplete host metadata.'
+    }
+
+    $outputRoot = [IO.Path]::GetFullPath($Output)
+    New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+    Assert-PlayerSupportDirectory -Path $outputRoot | Out-Null
+    $versionRoot = Join-Path $outputRoot ([string]$Manifest.engineVersion)
+    New-Item -ItemType Directory -Force -Path $versionRoot | Out-Null
+    Assert-PlayerSupportDirectory -Path $versionRoot | Out-Null
+    $destination = Join-Path $versionRoot ([string]$Manifest.id)
+    if (Test-Path -LiteralPath $destination) {
+        throw "Refusing to replace an existing packaged Build Support layout: $destination"
+    }
+
+    $temporary = Join-Path $versionRoot ('.package-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $temporary | Out-Null
+    $operationMarker = Join-Path $temporary '.keire-player-support-layout-operation'
+    [IO.File]::WriteAllText($operationMarker, "owned`n", [Text.UTF8Encoding]::new($false))
+    try {
+        foreach ($entry in Get-ChildItem -LiteralPath $payloadRoot -Force -Recurse) {
+            if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Packaged Build Support payload contains a redirect: $($entry.FullName)"
+            }
+            if ($entry.PSIsContainer) { continue }
+            $relative = [IO.Path]::GetRelativePath($payloadRoot, $entry.FullName)
+            Copy-FileIfChanged -Source $entry.FullName -Destination (Join-Path $temporary $relative)
+        }
+
+        $executablePaths = @{}
+        foreach ($variant in @($Manifest.variants)) {
+            $relative = ([IO.Path]::Combine([string]$variant.root, [string]$variant.executable) -replace '\\', '/')
+            $executablePaths[$relative.ToLowerInvariant()] = $true
+        }
+        $files = @(
+            foreach ($file in Get-ChildItem -LiteralPath $temporary -File -Force -Recurse |
+                    Where-Object { $_.FullName -ne $operationMarker } |
+                    Sort-Object { [IO.Path]::GetRelativePath($temporary, $_.FullName) }) {
+                $relative = [IO.Path]::GetRelativePath($temporary, $file.FullName) -replace '\\', '/'
+                $executable = $executablePaths.ContainsKey($relative.ToLowerInvariant()) -or
+                    $file.Name -ieq 'createdump.exe'
+                [ordered]@{
+                    path = $relative
+                    size = [uint64]$file.Length
+                    sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+                    mode = if ($executable) { 493 } else { 420 }
+                }
+            }
+        )
+        if ($files.Count -eq 0) { throw 'Packaged Build Support payload is empty.' }
+
+        $installedManifest = [ordered]@{
+            schemaVersion = [int]$Manifest.schemaVersion
+            playerAbi = [uint32]$Manifest.playerAbi
+            id = [string]$Manifest.id
+            engineVersion = [string]$Manifest.engineVersion
+            platform = [string]$Manifest.platform
+            architecture = [string]$Manifest.architecture
+            moduleFingerprint = [string]$Manifest.moduleFingerprint
+            sourceModules = @($Manifest.sourceModules)
+            variants = @($Manifest.variants)
+            files = $files
+            brandingSlots = @($Manifest.brandingSlots)
+        }
+        [IO.File]::WriteAllText((Join-Path $temporary 'manifest.json'),
+            (($installedManifest | ConvertTo-Json -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
+        Remove-Item -LiteralPath $operationMarker -Force
+        Move-Item -LiteralPath $temporary -Destination $destination
+    }
+    catch {
+        $operationError = $_
+        try {
+            if (Test-Path -LiteralPath $temporary) {
+                $temporaryName = Split-Path -Leaf $temporary
+                if (-not $temporaryName.StartsWith('.package-', [StringComparison]::Ordinal) -or
+                    (Split-Path -Parent $temporary) -ne $versionRoot) {
+                    throw 'Refusing to clean an unverified packaged Build Support staging directory.'
+                }
+                Remove-Item -LiteralPath $temporary -Recurse -Force
+            }
+        }
+        catch {
+            Write-Warning "Packaged Build Support cleanup also failed: $($_.Exception.Message)"
+        }
+        throw $operationError
+    }
+}
+
 function Assert-ExistingPlayerSupportCatalogPackages {
     param([object[]]$Packages, [string]$Output)
 
@@ -421,6 +521,16 @@ if ($RuntimeClosureSource -or $RuntimeClosureDestination) {
     return
 }
 
+if ($PackagedLayoutPayload -or $PackagedLayoutManifest) {
+    if (-not $PackagedLayoutPayload -or -not $PackagedLayoutManifest -or -not $InstalledLayoutRoot) {
+        throw 'Packaged layout test parameters and InstalledLayoutRoot must be supplied together.'
+    }
+    $layoutManifest = Get-Content -LiteralPath $PackagedLayoutManifest -Raw | ConvertFrom-Json
+    Publish-PackagedPlayerSupportLayout -Payload $PackagedLayoutPayload -Manifest $layoutManifest `
+        -Output $InstalledLayoutRoot
+    return
+}
+
 if (-not $OutputDirectory) {
     $OutputDirectory = Join-Path $repositoryRoot 'Build\PlayerSupport'
 }
@@ -498,6 +608,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not create the Build Support package.' }
     & $assetTool verify-player-support --input $stagedArchive
     if ($LASTEXITCODE -ne 0) { throw 'Build Support package verification failed.' }
+    if ($InstalledLayoutRoot) {
+        Publish-PackagedPlayerSupportLayout -Payload $payload -Manifest $manifest -Output $InstalledLayoutRoot
+    }
     $archive = Publish-PlayerSupportArchive -Source $stagedArchive -Output $OutputDirectory -Id $packId `
         -EngineVersion ([string]$metadata.engineVersion) -Platform windows -Architecture $ManifestArchitecture
     Write-Host "Created $archive"

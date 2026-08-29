@@ -58,6 +58,36 @@ namespace Keire
         NotifyChanged();
     }
 
+    void CanvasComponent::SetRenderMode(const CanvasRenderMode value)
+    {
+        if (value > CanvasRenderMode::WorldSpace)
+            throw std::invalid_argument("Canvas render mode is invalid.");
+        m_RenderMode = value;
+        NotifyChanged();
+    }
+
+    void CanvasComponent::SetRenderCameraEntity(const EntityId value)
+    {
+        m_RenderCamera = value;
+        NotifyChanged();
+    }
+
+    void CanvasComponent::SetPlaneDistance(const float value)
+    {
+        if (!std::isfinite(value) || value <= 0.0F || value > 1'000'000.0F)
+            throw std::invalid_argument("Canvas plane distance must be finite, positive, and at most 1,000,000.");
+        m_PlaneDistance = value;
+        NotifyChanged();
+    }
+
+    void CanvasComponent::SetWorldUnitsPerPixel(const float value)
+    {
+        if (!std::isfinite(value) || value <= 0.0F || value > 1'000.0F)
+            throw std::invalid_argument("Canvas world units per pixel must be finite, positive, and at most 1,000.");
+        m_WorldUnitsPerPixel = value;
+        NotifyChanged();
+    }
+
     void CanvasComponent::SetScaleMode(const CanvasScaleMode value)
     {
         m_ScaleMode = value;
@@ -394,7 +424,14 @@ namespace Keire
         result.Type = CanvasComponent::StaticType();
         result.Name = "Canvas";
         result.Category = "UI";
+        result.SchemaVersion = 2;
         result.Properties = {
+            {"renderMode", "Render Mode", "Presentation", ComponentPropertyKind::Integer, false, 0.0, 2.0, 1.0},
+            {"renderCamera", "Render Camera", "Presentation", ComponentPropertyKind::Entity},
+            {"planeDistance", "Plane Distance", "Presentation", ComponentPropertyKind::Scalar, false, 0.001,
+             1'000'000.0, 0.1},
+            {"worldUnitsPerPixel", "World Units Per Pixel", "Presentation", ComponentPropertyKind::Scalar, false,
+             0.000001, 1'000.0, 0.001},
             {"referenceResolution", "Reference Resolution", "Canvas", ComponentPropertyKind::Vector2},
             {"scaleMode", "Scale Mode", "Canvas", ComponentPropertyKind::Integer, false, 0.0, 2.0, 1.0},
             {"match", "Match Width Or Height", "Canvas", ComponentPropertyKind::Scalar, false, 0.0, 1.0, 0.01},
@@ -404,11 +441,25 @@ namespace Keire
             {"respectSafeArea", "Respect Safe Area", "Canvas", ComponentPropertyKind::Boolean},
             {"pixelPerfect", "Pixel Perfect", "Canvas", ComponentPropertyKind::Boolean},
         };
+        result.Properties[0].Tooltip =
+            "Overlay and camera canvases composite after the scene. World canvases project from their Transform and "
+            "are rejected behind the camera, but scene-depth occlusion is not yet available.";
+        result.Properties[1].Tooltip =
+            "Optional camera entity for Screen Space Camera and Game-view World Space projection; the active camera "
+            "is used when unset.";
+        result.Properties[2].Tooltip =
+            "Distance from the selected camera to the Screen Space Camera presentation plane. The Canvas is hidden "
+            "when the plane lies outside that camera's clip range.";
+        result.Properties[3].Tooltip = "World-space size of one reference-resolution pixel.";
         result.Factory = [] { return Ref<Component>(CreateRef<CanvasComponent>()); };
         result.Serialize = [](const Component& component)
         {
             const auto& canvas = dynamic_cast<const CanvasComponent&>(component);
             return ComponentPropertyBag{
+                {"renderMode", static_cast<std::int64_t>(canvas.m_RenderMode)},
+                {"renderCamera", canvas.m_RenderCamera},
+                {"planeDistance", static_cast<double>(canvas.m_PlaneDistance)},
+                {"worldUnitsPerPixel", static_cast<double>(canvas.m_WorldUnitsPerPixel)},
                 {"referenceResolution", canvas.m_ReferenceResolution},
                 {"scaleMode", static_cast<std::int64_t>(canvas.m_ScaleMode)},
                 {"match", static_cast<double>(canvas.m_MatchWidthOrHeight)},
@@ -420,9 +471,13 @@ namespace Keire
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
-            if (version != 1)
+            if (version != 2)
                 throw std::invalid_argument("Unsupported Canvas component schema version.");
             auto& canvas = dynamic_cast<CanvasComponent&>(component);
+            canvas.SetRenderMode(ReadEnum(values, "renderMode", CanvasRenderMode::ScreenSpaceOverlay, 2));
+            canvas.SetRenderCameraEntity(ReadUiProperty(values, "renderCamera", EntityId{}));
+            canvas.SetPlaneDistance(static_cast<float>(ReadUiProperty(values, "planeDistance", 1.0)));
+            canvas.SetWorldUnitsPerPixel(static_cast<float>(ReadUiProperty(values, "worldUnitsPerPixel", 0.01)));
             canvas.SetReferenceResolution(ReadUiProperty(values, "referenceResolution", Vector2{1920.0F, 1080.0F}));
             canvas.SetScaleMode(ReadEnum(values, "scaleMode", CanvasScaleMode::ScaleWithViewport, 2));
             canvas.SetMatchWidthOrHeight(static_cast<float>(ReadUiProperty(values, "match", 0.5)));
@@ -434,6 +489,16 @@ namespace Keire
             canvas.SetSortingOrder(static_cast<std::int32_t>(sorting));
             canvas.SetRespectSafeArea(ReadUiProperty(values, "respectSafeArea", true));
             canvas.SetPixelPerfect(ReadUiProperty(values, "pixelPerfect", false));
+        };
+        result.Migrate = [](ComponentPropertyBag values, const std::uint32_t version)
+        {
+            if (version != 1)
+                throw std::invalid_argument("Unsupported Canvas component schema version.");
+            values.insert_or_assign("renderMode", std::int64_t{0});
+            values.insert_or_assign("renderCamera", EntityId{});
+            values.insert_or_assign("planeDistance", 1.0);
+            values.insert_or_assign("worldUnitsPerPixel", 0.01);
+            return values;
         };
         return result;
     }

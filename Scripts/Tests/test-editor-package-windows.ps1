@@ -43,8 +43,13 @@ if (-not ($launcher.Contains('"package-editor"') -and $launcher.Contains('$Confi
 $packager = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 foreach ($contract in @("-Configuration Dist", "-StageOnly", "Build\Dependencies\dotnet-sdk",
         "Build\Distributions", "Assert-WindowsEditorPackageStage", "write-package-manifest.py",
-        "editor-package.json", '$Project.CLIENT_TARGET', '(Join-Path $stage "third-party")')) {
+        "editor-package.json", "player-support.ps1", "InstalledLayoutRoot", "bin\BuildSupport",
+        '$Project.CLIENT_TARGET', '(Join-Path $stage "third-party")')) {
     if (-not $packager.Contains($contract)) { throw "The Windows editor packager is missing '$contract'." }
+}
+$hubPackager = Get-Content (Join-Path $Windows "package-hub.ps1") -Raw
+if ($hubPackager.Contains("InstalledLayoutRoot") -or $hubPackager.Contains("bin\BuildSupport")) {
+    throw "The Windows Hub package must not duplicate the Editor's bootstrap Build Support module."
 }
 if (-not $packager.Contains('"--project-schema-maximum", "4"')) {
     throw "The Windows editor package must advertise project schema 4 support."
@@ -59,6 +64,8 @@ if (-not $clientPremake.Contains("AddKeireManagedHostStaging()")) {
 
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("keire-editor-package-test-" + [guid]::NewGuid().ToString("N"))
 $archive = "$stage.zip"
+$playerSupportPayload = "$stage-player-support-payload"
+$playerSupportManifestSource = "$stage-player-support-manifest.json"
 try {
     foreach ($path in (Get-WindowsRequiredEditorPackagePaths Client Hub Core Core)) {
         $file = Join-Path $stage $path
@@ -74,6 +81,47 @@ try {
     $dotnetSdkBuild = Join-Path $stage "bin\Managed\Dotnet\sdk\10.0.100\Sdks\Fixture\build"
     New-Item -ItemType Directory -Force $dotnetSdkBuild | Out-Null
     New-Item -ItemType File -Force (Join-Path $dotnetSdkBuild "Fixture.targets") | Out-Null
+    [IO.File]::WriteAllText((Join-Path $stage "build-manifest.json"),
+        (([ordered]@{ version = "1.2.3"; platform = "Windows"; architecture = "x86_64";
+                     configuration = "Dist" } | ConvertTo-Json) + "`n"), [Text.UTF8Encoding]::new($false))
+
+    $playerSupportVariants = @(
+        [ordered]@{ configuration = "development"; root = "Development"; executable = "KeireRuntime.exe";
+                   bundle = ""; symbols = @() },
+        [ordered]@{ configuration = "release"; root = "Release"; executable = "KeireRuntime.exe";
+                   bundle = ""; symbols = @() },
+        [ordered]@{ configuration = "dist"; root = "Dist"; executable = "KeireRuntime.exe";
+                   bundle = ""; symbols = @() }
+    )
+    foreach ($variant in $playerSupportVariants) {
+        $variantRoot = Join-Path $playerSupportPayload $variant.root
+        New-Item -ItemType Directory -Force $variantRoot | Out-Null
+        [IO.File]::WriteAllText((Join-Path $variantRoot $variant.executable),
+            "$($variant.configuration)-runtime", [Text.UTF8Encoding]::new($false))
+    }
+    $playerSupportSource = [ordered]@{
+        schemaVersion = 1
+        playerAbi = 4096
+        id = "windows-x86_64-1.2.3"
+        engineVersion = "1.2.3"
+        platform = "windows"
+        architecture = "x86_64"
+        moduleFingerprint = "fixture-module-fingerprint"
+        sourceModules = @("Runtime")
+        variants = $playerSupportVariants
+        files = @()
+        brandingSlots = @()
+    }
+    [IO.File]::WriteAllText($playerSupportManifestSource,
+        (($playerSupportSource | ConvertTo-Json -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
+    & (Join-Path $Windows "player-support.ps1") -PackagedLayoutPayload $playerSupportPayload `
+        -PackagedLayoutManifest $playerSupportManifestSource `
+        -InstalledLayoutRoot (Join-Path $stage "bin\BuildSupport")
+    Assert-Throws {
+        & (Join-Path $Windows "player-support.ps1") -PackagedLayoutPayload $playerSupportPayload `
+            -PackagedLayoutManifest $playerSupportManifestSource `
+            -InstalledLayoutRoot (Join-Path $stage "bin\BuildSupport")
+    } "Packaged Build Support existing-layout overwrite rejection"
 
     $python = Get-PythonInvocation
     $pythonPrefix = @($python.PrefixArguments)
@@ -108,6 +156,10 @@ try {
         $manifest.compatibility.legacyTopLevelFields -notcontains "buildManifest" -or
         $manifest.files.path -notcontains "Config/Marketplace/trusted-marketplace-key.json" -or
         $manifest.files.path -notcontains "Config/Marketplace/trusted-marketplace-keys.json" -or
+        $manifest.files.path -notcontains
+            "bin/BuildSupport/1.2.3/windows-x86_64-1.2.3/manifest.json" -or
+        $manifest.files.path -notcontains
+            "bin/BuildSupport/1.2.3/windows-x86_64-1.2.3/Dist/KeireRuntime.exe" -or
         $manifest.files.path -contains "content/Content/en-US.json" -or
         $manifest.files.path -contains "content/Licenses/catalog.json" -or
         $manifest.licenseReferences -notcontains "content/Fonts/Inter-OFL.txt" -or
@@ -122,6 +174,56 @@ try {
         $script:ExecutableVerificationCalls[0].Arguments[0] -ne "--verify-installation") {
         throw "Editor package validation did not invoke the real executable's hidden installation verifier."
     }
+    $supportInstallation = Join-Path $stage "bin\BuildSupport\1.2.3\windows-x86_64-1.2.3"
+    $supportManifestPath = Join-Path $supportInstallation "manifest.json"
+    $supportManifestBytes = [IO.File]::ReadAllBytes($supportManifestPath)
+    $supportManifest = Get-Content -LiteralPath $supportManifestPath -Raw | ConvertFrom-Json
+    if ([uint64]$supportManifest.playerAbi -ne 4096 -or @($supportManifest.files).Count -ne 3) {
+        throw "Editor package did not preserve the generated Player Build Support ABI and inventory."
+    }
+    $buildManifestPath = Join-Path $stage "build-manifest.json"
+    $buildManifestBytes = [IO.File]::ReadAllBytes($buildManifestPath)
+    $armSupportInstallation = Join-Path $stage "bin\BuildSupport\1.2.3\windows-arm64-1.2.3"
+    Move-Item -LiteralPath $supportInstallation -Destination $armSupportInstallation
+    try {
+        $armSupportManifestPath = Join-Path $armSupportInstallation "manifest.json"
+        $armSupportManifest = Get-Content -LiteralPath $armSupportManifestPath -Raw | ConvertFrom-Json
+        $armSupportManifest.id = "windows-arm64-1.2.3"
+        $armSupportManifest.architecture = "arm64"
+        [IO.File]::WriteAllText($armSupportManifestPath,
+            (($armSupportManifest | ConvertTo-Json -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
+        foreach ($architectureAlias in @("ARM64", "AARCH64")) {
+            $armBuildManifest = Get-Content -LiteralPath $buildManifestPath -Raw | ConvertFrom-Json
+            $armBuildManifest.architecture = $architectureAlias
+            [IO.File]::WriteAllText($buildManifestPath,
+                (($armBuildManifest | ConvertTo-Json -Depth 8) + "`n"), [Text.UTF8Encoding]::new($false))
+            Assert-WindowsPackagedBuildSupport -Stage $stage
+        }
+    }
+    finally {
+        [IO.File]::WriteAllBytes($buildManifestPath, $buildManifestBytes)
+        if (Test-Path -LiteralPath $armSupportInstallation) {
+            Move-Item -LiteralPath $armSupportInstallation -Destination $supportInstallation
+        }
+        [IO.File]::WriteAllBytes($supportManifestPath, $supportManifestBytes)
+    }
+    $releaseRuntime = Join-Path $supportInstallation "Release\KeireRuntime.exe"
+    $releaseRuntimeBytes = [IO.File]::ReadAllBytes($releaseRuntime)
+    Remove-Item -LiteralPath $releaseRuntime -Force
+    Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
+        "Editor package missing Build Support payload rejection"
+    [IO.File]::WriteAllBytes($releaseRuntime, $releaseRuntimeBytes)
+    $supportManifest.playerAbi = 0
+    [IO.File]::WriteAllText($supportManifestPath, (($supportManifest | ConvertTo-Json -Depth 8) + "`n"),
+        [Text.UTF8Encoding]::new($false))
+    Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
+        "Editor package incompatible Build Support ABI rejection"
+    [IO.File]::WriteAllBytes($supportManifestPath, $supportManifestBytes)
+    $unknownSupportFile = Join-Path $supportInstallation "unknown.bin"
+    [IO.File]::WriteAllText($unknownSupportFile, "unknown", [Text.UTF8Encoding]::new($false))
+    Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
+        "Editor package unknown Build Support payload rejection"
+    Remove-Item -LiteralPath $unknownSupportFile -Force
     $script:ExecutableVerificationExitCode = 23
     Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
         "Editor package executable verification failure"
@@ -203,6 +305,8 @@ try {
 finally {
     Remove-Item $archive -Force -ErrorAction SilentlyContinue
     Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $playerSupportPayload -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $playerSupportManifestSource -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host "Windows editor package checks passed."

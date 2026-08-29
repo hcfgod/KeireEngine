@@ -3,11 +3,13 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 namespace Keire::RenderBackend
@@ -20,11 +22,17 @@ namespace Keire::RenderBackend
         {
             ImTextureData* Texture = nullptr;
             ImTextureStatus Request = ImTextureStatus_OK;
+            ImTextureID PreviousId = ImTextureID_Invalid;
+            ImTextureID LogicalId = ImTextureID_Invalid;
         };
 
-        [[nodiscard]] ImTextureID LogicalTextureId(const ImTextureData& texture) noexcept
+        [[nodiscard]] ImTextureID AllocateLogicalTextureId()
         {
-            return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(&texture));
+            static std::atomic<std::uint64_t> nextId{1U};
+            const auto id = nextId.fetch_add(1U, std::memory_order_relaxed);
+            if (id == 0U || id == (std::numeric_limits<std::uint64_t>::max)())
+                throw std::overflow_error("Dear ImGui logical texture identifiers are exhausted.");
+            return static_cast<ImTextureID>(id);
         }
 
         [[nodiscard]] std::size_t CheckedTextureByteCount(const ImTextureData& texture)
@@ -62,11 +70,95 @@ namespace Keire::RenderBackend
             drawData.TotalVtxCount += drawList->VtxBuffer.Size;
             drawData.TotalIdxCount += drawList->IdxBuffer.Size;
         }
+
+        [[nodiscard]] SDL_GPUTexture* TextureFromId(const ImTextureID texture) noexcept
+        {
+            return reinterpret_cast<SDL_GPUTexture*>(static_cast<std::intptr_t>(texture));
+        }
+
+        [[nodiscard]] ImTextureID TextureToId(SDL_GPUTexture* texture) noexcept
+        {
+            return static_cast<ImTextureID>(reinterpret_cast<std::intptr_t>(texture));
+        }
     } // namespace
+
+    class ImGuiTextureCache::Impl final
+    {
+      public:
+        struct Entry final
+        {
+            ImTextureID LogicalId = ImTextureID_Invalid;
+            SDL_GPUTexture* Texture = nullptr;
+            std::uint32_t DeviceGeneration = 0;
+        };
+
+        [[nodiscard]] auto Find(const ImTextureID logicalId)
+        {
+            return std::lower_bound(Entries.begin(), Entries.end(), logicalId,
+                                    [](const Entry& entry, const ImTextureID id) { return entry.LogicalId < id; });
+        }
+
+        [[nodiscard]] auto Find(const ImTextureID logicalId) const
+        {
+            return std::lower_bound(Entries.begin(), Entries.end(), logicalId,
+                                    [](const Entry& entry, const ImTextureID id) { return entry.LogicalId < id; });
+        }
+
+        std::vector<Entry> Entries;
+    };
+
+    ImGuiTextureCache::ImGuiTextureCache() : m_Impl(std::make_unique<Impl>()) {}
+
+    ImGuiTextureCache::~ImGuiTextureCache() = default;
+
+    void ImGuiTextureCache::ReleaseGpuTextures(SDL_GPUDevice* device, const bool abandon) noexcept
+    {
+        for (auto& entry : m_Impl->Entries)
+        {
+            if (!abandon && device && entry.Texture)
+                SDL_ReleaseGPUTexture(device, entry.Texture);
+            entry.Texture = nullptr;
+            entry.DeviceGeneration = 0;
+        }
+    }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    std::size_t ImGuiTextureCache::TextureCountForTest() const noexcept { return m_Impl->Entries.size(); }
+
+    std::size_t ImGuiTextureCache::GpuTextureCountForTest(const std::uint32_t deviceGeneration) const noexcept
+    {
+        return static_cast<std::size_t>(
+            std::ranges::count_if(m_Impl->Entries, [deviceGeneration](const Impl::Entry& entry)
+                                  { return entry.Texture && entry.DeviceGeneration == deviceGeneration; }));
+    }
+#endif
 
     class OwnedImGuiDrawData::Impl final
     {
       public:
+        struct TextureSnapshot final
+        {
+            ImTextureID LogicalId = ImTextureID_Invalid;
+            ImTextureStatus Request = ImTextureStatus_OK;
+            int UniqueId = 0;
+            ImTextureFormat Format = ImTextureFormat_RGBA32;
+            int Width = 0;
+            int Height = 0;
+            int BytesPerPixel = 0;
+            ImTextureRect UsedRect{};
+            ImTextureRect UpdateRect{};
+            std::vector<ImTextureRect> Updates;
+            bool UseColors = false;
+            std::vector<unsigned char> Pixels;
+        };
+
+        struct TextureBinding final
+        {
+            std::size_t DrawList = 0;
+            std::size_t Command = 0;
+            ImTextureID LogicalId = ImTextureID_Invalid;
+        };
+
         struct SurfaceBinding final
         {
             std::size_t DrawList = 0;
@@ -82,14 +174,22 @@ namespace Keire::RenderBackend
 
         ImDrawData Data;
         std::vector<ImDrawList*> DrawLists;
-        ImVector<ImTextureData*> Textures;
-        std::vector<std::unique_ptr<ImTextureData>> OwnedTextures;
+        std::vector<TextureSnapshot> Textures;
+        std::vector<TextureBinding> TextureBindings;
         std::vector<SurfaceBinding> SurfaceBindings;
+        std::vector<ImTextureID> DestroyedTextureIds;
     };
 
     class ResolvedImGuiDrawData::Impl final
     {
       public:
+        struct Upload final
+        {
+            ImTextureID LogicalId = ImTextureID_Invalid;
+            std::unique_ptr<ImTextureData> Texture;
+            bool OwnsGpuTexture = false;
+        };
+
         ~Impl()
         {
             for (auto* drawList : DrawLists)
@@ -99,7 +199,10 @@ namespace Keire::RenderBackend
         ImDrawData Data;
         std::vector<ImDrawList*> DrawLists;
         ImVector<ImTextureData*> Textures;
-        std::vector<std::unique_ptr<ImTextureData>> OwnedTextures;
+        std::vector<Upload> Uploads;
+        std::vector<ImTextureID> DestroyedTextureIds;
+        std::vector<SDL_GPUTexture*> RetiredGpuTextures;
+        bool Committed = false;
     };
 
     ResolvedImGuiDrawData::ResolvedImGuiDrawData(std::unique_ptr<Impl> implementation)
@@ -111,54 +214,131 @@ namespace Keire::RenderBackend
 
     ImDrawData* ResolvedImGuiDrawData::Data() noexcept { return &m_Impl->Data; }
 
-    void ResolvedImGuiDrawData::ReleaseGpuTextures(SDL_GPUDevice* device, const bool abandon) noexcept
+    void ResolvedImGuiDrawData::CommitGpuTextures(ImGuiTextureCache& cache,
+                                                  const std::uint32_t deviceGeneration) noexcept
     {
-        for (const auto& texture : m_Impl->OwnedTextures)
+        if (m_Impl->Committed)
+            return;
+        m_Impl->Committed = true;
+
+        for (auto& upload : m_Impl->Uploads)
         {
-            if (texture->GetTexID() == ImTextureID_Invalid)
+            if (!upload.OwnsGpuTexture)
                 continue;
-            if (!abandon && device)
+            auto* texture = TextureFromId(upload.Texture->GetTexID());
+            if (!texture || upload.Texture->Status != ImTextureStatus_OK)
+                continue;
+
+            auto found = cache.m_Impl->Find(upload.LogicalId);
+            if (found == cache.m_Impl->Entries.end() || found->LogicalId != upload.LogicalId)
             {
-                auto* raw = reinterpret_cast<SDL_GPUTexture*>(static_cast<intptr_t>(texture->GetTexID()));
-                if (raw)
-                    SDL_ReleaseGPUTexture(device, raw);
+                found = cache.m_Impl->Entries.insert(
+                    found, {.LogicalId = upload.LogicalId, .Texture = texture, .DeviceGeneration = deviceGeneration});
             }
-            texture->SetTexID(ImTextureID_Invalid);
-            texture->SetStatus(ImTextureStatus_Destroyed);
+            else
+            {
+                if (found->Texture && found->Texture != texture && found->DeviceGeneration == deviceGeneration)
+                    m_Impl->RetiredGpuTextures.push_back(found->Texture);
+                found->Texture = texture;
+                found->DeviceGeneration = deviceGeneration;
+            }
+            upload.OwnsGpuTexture = false;
+        }
+
+        for (const auto logicalId : m_Impl->DestroyedTextureIds)
+        {
+            const auto found = cache.m_Impl->Find(logicalId);
+            if (found == cache.m_Impl->Entries.end() || found->LogicalId != logicalId)
+                continue;
+            if (found->Texture)
+                m_Impl->RetiredGpuTextures.push_back(found->Texture);
+            cache.m_Impl->Entries.erase(found);
         }
     }
+
+    void ResolvedImGuiDrawData::ReleaseGpuTextures(SDL_GPUDevice* device, const bool abandon) noexcept
+    {
+        for (auto& upload : m_Impl->Uploads)
+        {
+            if (upload.OwnsGpuTexture && upload.Texture->GetTexID() != ImTextureID_Invalid)
+            {
+                if (!abandon && device)
+                {
+                    if (auto* raw = TextureFromId(upload.Texture->GetTexID()))
+                        SDL_ReleaseGPUTexture(device, raw);
+                }
+                upload.OwnsGpuTexture = false;
+            }
+            upload.Texture->SetTexID(ImTextureID_Invalid);
+            upload.Texture->WantDestroyNextFrame = true;
+            upload.Texture->SetStatus(ImTextureStatus_Destroyed);
+        }
+        for (auto* texture : m_Impl->RetiredGpuTextures)
+            if (!abandon && device && texture)
+                SDL_ReleaseGPUTexture(device, texture);
+        m_Impl->RetiredGpuTextures.clear();
+    }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+    std::size_t ResolvedImGuiDrawData::PendingGpuTextureRetirementCountForTest() const noexcept
+    {
+        return m_Impl->RetiredGpuTextures.size();
+    }
+#endif
 
     OwnedImGuiDrawData::OwnedImGuiDrawData(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
 
     OwnedImGuiDrawData::~OwnedImGuiDrawData() = default;
 
     std::shared_ptr<OwnedImGuiDrawData>
-    OwnedImGuiDrawData::Capture(ImDrawData* drawData, const std::span<const CapturedSurfaceTextureBinding> surfaces)
+    OwnedImGuiDrawData::Capture(ImDrawData* drawData, const std::span<const CapturedSurfaceTextureBinding> surfaces,
+                                const std::span<const std::uintptr_t> retiredTextureIds)
     {
-        if (!drawData)
+        if (!drawData && retiredTextureIds.empty())
             return {};
-        if (!drawData->Valid)
+        if (drawData && !drawData->Valid)
             throw std::invalid_argument("Dear ImGui draw data must be finalized before asynchronous capture.");
-        if (drawData->CmdListsCount != drawData->CmdLists.Size || drawData->CmdLists.Size < 0 ||
-            drawData->CmdLists.Size > 4096 || drawData->TotalVtxCount < 0 || drawData->TotalIdxCount < 0 ||
-            drawData->TotalVtxCount > 16'777'216 || drawData->TotalIdxCount > 33'554'432)
+        if (drawData && (drawData->CmdListsCount != drawData->CmdLists.Size || drawData->CmdLists.Size < 0 ||
+                         drawData->CmdLists.Size > 4096 || drawData->TotalVtxCount < 0 || drawData->TotalIdxCount < 0 ||
+                         drawData->TotalVtxCount > 16'777'216 || drawData->TotalIdxCount > 33'554'432))
         {
             throw std::length_error("Dear ImGui draw data exceeds the asynchronous frame-packet bounds.");
         }
+        constexpr std::size_t maximumTextureRetirements = 65'536U;
+        if (retiredTextureIds.size() > maximumTextureRetirements)
+            throw std::length_error("Dear ImGui texture retirements exceed the asynchronous frame-packet bound.");
 
         auto implementation = std::make_unique<Impl>();
         implementation->Data.Valid = true;
-        implementation->Data.DisplayPos = drawData->DisplayPos;
-        implementation->Data.DisplaySize = drawData->DisplaySize;
-        implementation->Data.FramebufferScale = drawData->FramebufferScale;
+        if (drawData)
+        {
+            implementation->Data.DisplayPos = drawData->DisplayPos;
+            implementation->Data.DisplaySize = drawData->DisplaySize;
+            implementation->Data.FramebufferScale = drawData->FramebufferScale;
+        }
         implementation->Data.OwnerViewport = nullptr;
-        std::unordered_map<const ImTextureData*, ImTextureData*> textureCopies;
+        implementation->DestroyedTextureIds.reserve(retiredTextureIds.size());
+        for (const auto retiredTextureId : retiredTextureIds)
+        {
+            const auto logicalId = static_cast<ImTextureID>(retiredTextureId);
+            if (logicalId != ImTextureID_Invalid)
+                implementation->DestroyedTextureIds.push_back(logicalId);
+        }
+        std::ranges::sort(implementation->DestroyedTextureIds);
+        implementation->DestroyedTextureIds.erase(
+            std::unique(implementation->DestroyedTextureIds.begin(), implementation->DestroyedTextureIds.end()),
+            implementation->DestroyedTextureIds.end());
+
+        if (!drawData)
+            return std::shared_ptr<OwnedImGuiDrawData>(new OwnedImGuiDrawData(std::move(implementation)));
+
+        std::unordered_map<const ImTextureData*, ImTextureID> textureCopies;
         std::vector<PendingTextureAcknowledgement> pendingTextureAcknowledgements;
         std::size_t copiedTextureBytes = 0;
-        const auto copyTexture = [&](ImTextureData* source) -> ImTextureData*
+        const auto copyTexture = [&](ImTextureData* source) -> ImTextureID
         {
             if (!source)
-                throw std::invalid_argument("Dear ImGui draw data contains a null texture-data entry.");
+                throw std::invalid_argument("Dear ImGui draw data contains a null referenced texture.");
             if (const auto found = textureCopies.find(source); found != textureCopies.end())
                 return found->second;
             if (source->Format != ImTextureFormat_RGBA32 || source->Width <= 0 || source->Height <= 0 ||
@@ -173,33 +353,39 @@ namespace Keire::RenderBackend
                 byteCount > MaximumImGuiTextureSnapshotBytes - copiedTextureBytes)
                 throw std::length_error("Dear ImGui texture snapshots exceed the 64 MiB frame-packet bound.");
             copiedTextureBytes += byteCount;
-            auto copy = std::make_unique<ImTextureData>();
-            copy->Create(source->Format, source->Width, source->Height);
-            std::memcpy(copy->Pixels, source->Pixels, byteCount);
-            copy->UniqueID = source->UniqueID;
-            copy->UseColors = source->UseColors;
-            copy->UsedRect = source->UsedRect;
-            copy->UpdateRect = source->UpdateRect;
-            copy->Updates = source->Updates;
-            copy->SetTexID(ImTextureID_Invalid);
-            copy->SetStatus(ImTextureStatus_WantCreate);
-            auto* result = copy.get();
-            implementation->OwnedTextures.push_back(std::move(copy));
-            textureCopies.emplace(source, result);
-            implementation->Textures.push_back(result);
-            if (source->Status == ImTextureStatus_WantCreate || source->Status == ImTextureStatus_WantUpdates ||
-                source->Status == ImTextureStatus_WantDestroy)
-                pendingTextureAcknowledgements.push_back({source, source->Status});
-            return result;
+
+            const auto previousId = source->GetTexID();
+            const auto logicalId = previousId == ImTextureID_Invalid ? AllocateLogicalTextureId() : previousId;
+            auto request = source->Status;
+            if (request == ImTextureStatus_Destroyed ||
+                (request == ImTextureStatus_OK && previousId == ImTextureID_Invalid))
+                request = ImTextureStatus_WantCreate;
+            if (request != ImTextureStatus_OK && request != ImTextureStatus_WantCreate &&
+                request != ImTextureStatus_WantUpdates && request != ImTextureStatus_WantDestroy)
+            {
+                throw std::invalid_argument("Dear ImGui referenced texture has an unsupported lifecycle state.");
+            }
+
+            Impl::TextureSnapshot snapshot;
+            snapshot.LogicalId = logicalId;
+            snapshot.Request = request;
+            snapshot.UniqueId = source->UniqueID;
+            snapshot.Format = source->Format;
+            snapshot.Width = source->Width;
+            snapshot.Height = source->Height;
+            snapshot.BytesPerPixel = source->BytesPerPixel;
+            snapshot.UsedRect = source->UsedRect;
+            snapshot.UpdateRect = source->UpdateRect;
+            snapshot.Updates.assign(source->Updates.begin(), source->Updates.end());
+            snapshot.UseColors = source->UseColors;
+            snapshot.Pixels.assign(source->Pixels, source->Pixels + byteCount);
+            implementation->Textures.push_back(std::move(snapshot));
+            textureCopies.emplace(source, logicalId);
+            pendingTextureAcknowledgements.push_back({source, source->Status, previousId, logicalId});
+            if (request == ImTextureStatus_WantDestroy)
+                implementation->DestroyedTextureIds.push_back(logicalId);
+            return logicalId;
         };
-        if (drawData->Textures)
-        {
-            implementation->Textures.reserve(drawData->Textures->Size);
-            implementation->OwnedTextures.reserve(static_cast<std::size_t>(drawData->Textures->Size));
-            for (auto* texture : *drawData->Textures)
-                (void)copyTexture(texture);
-        }
-        implementation->Data.Textures = implementation->Textures.empty() ? nullptr : &implementation->Textures;
 
         const auto resetCallback = ImGui::GetPlatformIO().DrawCallback_ResetRenderState;
         implementation->DrawLists.reserve(static_cast<std::size_t>(drawData->CmdLists.Size));
@@ -223,8 +409,6 @@ namespace Keire::RenderBackend
                         throw std::invalid_argument(
                             "Dear ImGui user callbacks cannot be executed from an asynchronous render packet.");
                     }
-                    // No custom callback state is retained in normalized packets, so the backend's initial render-state
-                    // setup already satisfies the reset command.
                     command.UserCallback = nullptr;
                     command.UserCallbackData = nullptr;
                     command.UserCallbackDataSize = 0;
@@ -234,7 +418,10 @@ namespace Keire::RenderBackend
 
                 if (command.TexRef._TexData)
                 {
-                    command.TexRef = copyTexture(command.TexRef._TexData)->GetTexRef();
+                    const auto logicalId = copyTexture(command.TexRef._TexData);
+                    implementation->TextureBindings.push_back(
+                        {static_cast<std::size_t>(listIndex), static_cast<std::size_t>(commandIndex), logicalId});
+                    command.TexRef = {};
                     continue;
                 }
                 if (command.GetTexID() == ImTextureID_Invalid)
@@ -260,30 +447,48 @@ namespace Keire::RenderBackend
             throw std::invalid_argument("Dear ImGui finalized draw-data totals do not match its output buffers.");
         }
 
+        if (drawData->Textures)
+        {
+            std::unordered_set<ImTextureID> destroyedIds(implementation->DestroyedTextureIds.begin(),
+                                                         implementation->DestroyedTextureIds.end());
+            for (auto* texture : *drawData->Textures)
+            {
+                if (!texture || textureCopies.contains(texture) || texture->Status != ImTextureStatus_WantDestroy)
+                    continue;
+                const auto logicalId = texture->GetTexID();
+                pendingTextureAcknowledgements.push_back({texture, ImTextureStatus_WantDestroy, logicalId, logicalId});
+                if (logicalId != ImTextureID_Invalid && destroyedIds.insert(logicalId).second)
+                    implementation->DestroyedTextureIds.push_back(logicalId);
+            }
+        }
+
         auto captured = std::shared_ptr<OwnedImGuiDrawData>(new OwnedImGuiDrawData(std::move(implementation)));
         for (const auto& acknowledgement : pendingTextureAcknowledgements)
         {
-            // Capture is owner-thread-affine, so a changed request here would indicate an unsupported concurrent
-            // producer. Do not overwrite a newer request if that contract is violated.
-            if (acknowledgement.Texture->Status != acknowledgement.Request)
+            if (acknowledgement.Texture->Status != acknowledgement.Request ||
+                acknowledgement.Texture->GetTexID() != acknowledgement.PreviousId)
                 continue;
             if (acknowledgement.Request == ImTextureStatus_WantDestroy)
             {
-                // Every accepted packet owns a complete CPU texture snapshot and its eventual GPU clone. No packet
-                // retains the live record, so its destruction can be acknowledged as soon as capture commits.
                 acknowledgement.Texture->WantDestroyNextFrame = true;
                 acknowledgement.Texture->BackendUserData = nullptr;
                 acknowledgement.Texture->SetTexID(ImTextureID_Invalid);
                 acknowledgement.Texture->SetStatus(ImTextureStatus_Destroyed);
                 continue;
             }
-            acknowledgement.Texture->SetTexID(LogicalTextureId(*acknowledgement.Texture));
-            acknowledgement.Texture->SetStatus(ImTextureStatus_OK);
+            acknowledgement.Texture->SetTexID(acknowledgement.LogicalId);
+            if (acknowledgement.Request == ImTextureStatus_WantCreate ||
+                acknowledgement.Request == ImTextureStatus_WantUpdates ||
+                acknowledgement.Request == ImTextureStatus_Destroyed)
+            {
+                acknowledgement.Texture->SetStatus(ImTextureStatus_OK);
+            }
         }
         return captured;
     }
 
     std::shared_ptr<ResolvedImGuiDrawData> OwnedImGuiDrawData::ResolveForRender(
+        ImGuiTextureCache& cache, const std::uint32_t deviceGeneration,
         const std::function<std::uintptr_t(const RenderSurfaceToken&)>& resolveTexture) const
     {
         auto resolved = std::make_unique<ResolvedImGuiDrawData::Impl>();
@@ -292,53 +497,71 @@ namespace Keire::RenderBackend
         resolved->Data.DisplaySize = m_Impl->Data.DisplaySize;
         resolved->Data.FramebufferScale = m_Impl->Data.FramebufferScale;
         resolved->Data.OwnerViewport = nullptr;
+        resolved->Uploads.reserve(m_Impl->Textures.size());
+        resolved->Textures.reserve(static_cast<int>(m_Impl->Textures.size()));
+        resolved->RetiredGpuTextures.reserve(m_Impl->Textures.size() + m_Impl->DestroyedTextureIds.size());
+        cache.m_Impl->Entries.reserve(cache.m_Impl->Entries.size() + m_Impl->Textures.size());
 
-        std::unordered_map<const ImTextureData*, ImTextureData*> textureCopies;
-        std::size_t copiedTextureBytes = 0;
-        resolved->Textures.reserve(static_cast<int>(m_Impl->OwnedTextures.size()));
-        resolved->OwnedTextures.reserve(m_Impl->OwnedTextures.size());
-        for (const auto& source : m_Impl->OwnedTextures)
+        std::unordered_map<ImTextureID, ImTextureData*> uploadTextures;
+        std::unordered_map<ImTextureID, SDL_GPUTexture*> stableTextures;
+        uploadTextures.reserve(m_Impl->Textures.size());
+        stableTextures.reserve(m_Impl->Textures.size());
+        for (const auto& snapshot : m_Impl->Textures)
         {
-            const auto byteCount = CheckedTextureByteCount(*source);
-            if (copiedTextureBytes > MaximumImGuiTextureSnapshotBytes ||
-                byteCount > MaximumImGuiTextureSnapshotBytes - copiedTextureBytes)
-                throw std::length_error("Dear ImGui texture snapshots exceed the 64 MiB frame-packet bound.");
-            copiedTextureBytes += byteCount;
-            auto copy = std::make_unique<ImTextureData>();
-            copy->Create(source->Format, source->Width, source->Height);
-            std::memcpy(copy->Pixels, source->Pixels, byteCount);
-            copy->UniqueID = source->UniqueID;
-            copy->UseColors = source->UseColors;
-            copy->UsedRect = source->UsedRect;
-            copy->UpdateRect = source->UpdateRect;
-            copy->Updates = source->Updates;
-            copy->SetTexID(ImTextureID_Invalid);
-            copy->SetStatus(ImTextureStatus_WantCreate);
-            auto* copiedTexture = copy.get();
-            textureCopies.emplace(source.get(), copiedTexture);
-            resolved->OwnedTextures.push_back(std::move(copy));
-            resolved->Textures.push_back(copiedTexture);
+            const auto found = cache.m_Impl->Find(snapshot.LogicalId);
+            auto* stable = found != cache.m_Impl->Entries.end() && found->LogicalId == snapshot.LogicalId &&
+                                   found->DeviceGeneration == deviceGeneration
+                               ? found->Texture
+                               : nullptr;
+            const bool replace = snapshot.Request == ImTextureStatus_WantCreate;
+            const bool update = snapshot.Request == ImTextureStatus_WantUpdates && stable;
+            if (!replace && !update && stable)
+            {
+                stableTextures.emplace(snapshot.LogicalId, stable);
+                continue;
+            }
+
+            auto texture = std::make_unique<ImTextureData>();
+            texture->Create(snapshot.Format, snapshot.Width, snapshot.Height);
+            std::memcpy(texture->Pixels, snapshot.Pixels.data(), snapshot.Pixels.size());
+            texture->UniqueID = snapshot.UniqueId;
+            texture->UseColors = snapshot.UseColors;
+            texture->UsedRect = snapshot.UsedRect;
+            texture->UpdateRect = snapshot.UpdateRect;
+            for (const auto& rectangle : snapshot.Updates)
+                texture->Updates.push_back(rectangle);
+            texture->SetTexID(update ? TextureToId(stable) : ImTextureID_Invalid);
+            texture->SetStatus(update ? ImTextureStatus_WantUpdates : ImTextureStatus_WantCreate);
+            auto* upload = texture.get();
+            resolved->Uploads.push_back(
+                {.LogicalId = snapshot.LogicalId, .Texture = std::move(texture), .OwnsGpuTexture = !update});
+            resolved->Textures.push_back(upload);
+            uploadTextures.emplace(snapshot.LogicalId, upload);
         }
         resolved->Data.Textures = resolved->Textures.empty() ? nullptr : &resolved->Textures;
+        resolved->DestroyedTextureIds = m_Impl->DestroyedTextureIds;
 
         resolved->DrawLists.reserve(m_Impl->DrawLists.size());
         for (const auto* source : m_Impl->DrawLists)
         {
             auto* clone = source->CloneOutput();
-            for (auto& command : clone->CmdBuffer)
-            {
-                if (!command.TexRef._TexData)
-                    continue;
-                const auto texture = textureCopies.find(command.TexRef._TexData);
-                if (texture == textureCopies.end())
-                {
-                    IM_DELETE(clone);
-                    throw std::logic_error("Captured Dear ImGui texture snapshot is missing from the render view.");
-                }
-                command.TexRef = texture->second->GetTexRef();
-            }
             resolved->DrawLists.push_back(clone);
             AppendFinalizedDrawList(resolved->Data, clone);
+        }
+        for (const auto& binding : m_Impl->TextureBindings)
+        {
+            auto& command = resolved->DrawLists[binding.DrawList]->CmdBuffer[static_cast<int>(binding.Command)];
+            if (const auto upload = uploadTextures.find(binding.LogicalId); upload != uploadTextures.end())
+            {
+                command.TexRef = upload->second->GetTexRef();
+                continue;
+            }
+            if (const auto stable = stableTextures.find(binding.LogicalId); stable != stableTextures.end())
+            {
+                command.TexRef = ImTextureRef(TextureToId(stable->second));
+                continue;
+            }
+            throw std::logic_error("Captured Dear ImGui texture snapshot is missing from the render view.");
         }
         for (const auto& binding : m_Impl->SurfaceBindings)
         {

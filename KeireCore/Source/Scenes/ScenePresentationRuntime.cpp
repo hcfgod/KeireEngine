@@ -6,8 +6,10 @@
 #include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Ui.h"
+#include "KeireInternal/Scenes/ScenePresentationCanvasProjectionInternal.h"
 
 #include <algorithm>
 #include <chrono>
@@ -312,19 +314,26 @@ namespace Keire
             (void)UiTree->SetInteractable(node, hasControl && interactable);
         }
 
-        void TraverseUi(const Entity& entity, const RuntimeUiElementId parent)
+        void TraverseUi(const Entity& entity, const RuntimeUiElementId parent, RuntimeUiElementId canvasRoot = {})
         {
             RuntimeUiElementId effectiveParent = parent;
             if (entity.GetComponent<CanvasComponent>() || entity.GetComponent<RectTransformComponent>())
+            {
                 effectiveParent = EnsureUiNode(entity, parent);
+                if (entity.GetComponent<CanvasComponent>())
+                    canvasRoot = effectiveParent;
+                if (canvasRoot)
+                    CanvasProjection.Assign(effectiveParent, canvasRoot);
+            }
             for (const auto& child : entity.Children())
-                TraverseUi(child, effectiveParent);
+                TraverseUi(child, effectiveParent, canvasRoot);
         }
 
         void SynchronizeUi(const Ref<Scene>& scene, const float viewportWidth, const float viewportHeight,
-                           const RuntimeUiInsets safeArea)
+                           const RuntimeUiInsets safeArea, const RenderCamera* viewportCamera)
         {
             SeenUi.clear();
+            CanvasProjection.ResetAssignments();
             RuntimeUiCanvasSettings settings;
             bool settingsFound = false;
             for (const auto& entity : scene->Query<CanvasComponent>())
@@ -370,6 +379,7 @@ namespace Keire
             if (ActiveSlider && !SeenUi.contains(ActiveSlider))
                 ActiveSlider = {};
             UiTree->Layout(viewportWidth, viewportHeight, safeArea, settings);
+            CanvasProjection.Rebuild(scene, UiNodes, viewportWidth, viewportHeight, viewportCamera);
         }
 
         [[nodiscard]] Entity UiEntity(const RuntimeUiElementId node) const
@@ -455,13 +465,21 @@ namespace Keire
             if (slider->Value() != previous)
                 QueueUiEvent(entity.Id(), RuntimeUiEventType::ValueChanged);
         }
-
-        [[nodiscard]] bool ScrollAt(const float x, const float y, const float horizontal, const float vertical)
+        [[nodiscard]] std::optional<Vector2> ActiveSliderPoint(const float x, const float y) const noexcept
         {
-            const auto hit = UiTree->HitTest(x, y);
+            const auto found = UiNodes.find(ActiveSlider);
+            if (!ActiveSlider || found == UiNodes.end())
+                return std::nullopt;
+            if (const auto canvas = CanvasProjection.ForNode(found->second))
+                return Detail::MapCapturedViewportToCanvasLayout(*canvas, {x, y});
+            return std::nullopt;
+        }
+
+        [[nodiscard]] bool ScrollAt(const RuntimeUiElementId hit, const float horizontal, const float vertical)
+        {
             if (!hit)
                 return false;
-            const auto [entity, node] = FindUiControl<UiScrollViewComponent>(*hit);
+            const auto [entity, node] = FindUiControl<UiScrollViewComponent>(hit);
             const auto scroll = entity ? entity.GetComponent<UiScrollViewComponent>() : Ref<UiScrollViewComponent>{};
             const auto state = UiTree->State(node);
             if (!scroll || !scroll->Interactable() || !state)
@@ -1061,6 +1079,7 @@ namespace Keire
         AssetId DefaultMixer;
         std::map<EntityId, RuntimeUiElementId> UiNodes;
         std::map<std::uint64_t, EntityId> NodeEntities;
+        Detail::ScenePresentationCanvasProjection CanvasProjection;
         std::set<EntityId> SeenUi;
         std::deque<RuntimeUiEvent> DeferredUiEvents;
         EntityId ActiveSlider;
@@ -1094,6 +1113,13 @@ namespace Keire
     void ScenePresentationRuntime::Synchronize(Ref<Scene> scene, const float viewportWidth, const float viewportHeight,
                                                const bool playing, const RuntimeUiInsets safeArea)
     {
+        Synchronize(std::move(scene), viewportWidth, viewportHeight, playing, safeArea, nullptr);
+    }
+
+    void ScenePresentationRuntime::Synchronize(Ref<Scene> scene, const float viewportWidth, const float viewportHeight,
+                                               const bool playing, const RuntimeUiInsets safeArea,
+                                               const RenderCamera* viewportCamera)
+    {
         if (!scene || !scene->IsOpen())
         {
             Clear();
@@ -1102,7 +1128,7 @@ namespace Keire
         const auto synchronizationStarted = std::chrono::steady_clock::now();
         m_Impl->ActiveScene = std::move(scene);
         const auto uiStarted = std::chrono::steady_clock::now();
-        m_Impl->SynchronizeUi(m_Impl->ActiveScene, viewportWidth, viewportHeight, safeArea);
+        m_Impl->SynchronizeUi(m_Impl->ActiveScene, viewportWidth, viewportHeight, safeArea, viewportCamera);
         const auto audioStarted = std::chrono::steady_clock::now();
         m_Impl->SynchronizeAudio(m_Impl->ActiveScene, playing);
         const auto completed = std::chrono::steady_clock::now();
@@ -1133,6 +1159,7 @@ namespace Keire
         m_Impl->AudioMixers.clear();
         m_Impl->UiNodes.clear();
         m_Impl->NodeEntities.clear();
+        m_Impl->CanvasProjection.Clear();
         m_Impl->SeenUi.clear();
         m_Impl->DeferredUiEvents.clear();
         m_Impl->ActiveSlider = {};
@@ -1271,8 +1298,11 @@ namespace Keire
 
     void ScenePresentationRuntime::PointerMove(const float x, const float y)
     {
-        m_Impl->UiTree->PointerMove(x, y);
-        m_Impl->UpdateSlider(x, y);
+        const auto hit = m_Impl->CanvasProjection.ResolveHit(*m_Impl->UiTree, x, y);
+        const auto point = hit ? hit->LayoutPoint : Vector2{x, y};
+        m_Impl->UiTree->PointerMoveTo(hit ? hit->Node : RuntimeUiElementId{}, point.X, point.Y);
+        if (const auto sliderPoint = m_Impl->ActiveSliderPoint(x, y))
+            m_Impl->UpdateSlider(sliderPoint->X, sliderPoint->Y);
         m_Impl->DrainUiEvents();
     }
 
@@ -1285,19 +1315,22 @@ namespace Keire
     bool ScenePresentationRuntime::PointerButton(const float x, const float y, const RuntimeUiPointerButton button,
                                                  const bool pressed)
     {
-        const bool handled = m_Impl->UiTree->PointerButton(x, y, button, pressed);
+        const auto hit = m_Impl->CanvasProjection.ResolveHit(*m_Impl->UiTree, x, y);
+        const auto point = hit ? hit->LayoutPoint : Vector2{x, y};
+        const bool handled =
+            m_Impl->UiTree->PointerButtonTo(hit ? hit->Node : RuntimeUiElementId{}, point.X, point.Y, button, pressed);
         if (button == RuntimeUiPointerButton::Primary)
         {
             if (pressed)
             {
-                const auto hit = m_Impl->UiTree->HitTest(x, y);
                 if (hit)
                 {
-                    const auto slider = m_Impl->FindUiControl<UiSliderComponent>(*hit);
+                    const auto slider = m_Impl->FindUiControl<UiSliderComponent>(hit->Node);
                     m_Impl->ActiveSlider = slider.first ? slider.first.Id() : EntityId{};
                 }
             }
-            m_Impl->UpdateSlider(x, y);
+            if (const auto sliderPoint = m_Impl->ActiveSliderPoint(x, y))
+                m_Impl->UpdateSlider(sliderPoint->X, sliderPoint->Y);
             if (!pressed)
                 m_Impl->ActiveSlider = {};
         }
@@ -1325,7 +1358,8 @@ namespace Keire
     {
         if (!std::isfinite(horizontal) || !std::isfinite(vertical))
             throw std::invalid_argument("Runtime UI pointer wheel must be finite.");
-        return m_Impl->ScrollAt(x, y, horizontal, vertical);
+        const auto hit = m_Impl->CanvasProjection.ResolveHit(*m_Impl->UiTree, x, y);
+        return hit && m_Impl->ScrollAt(hit->Node, horizontal, vertical);
     }
 
     void ScenePresentationRuntime::TextInput(const std::string_view text) { m_Impl->AppendText(text); }
@@ -1363,16 +1397,33 @@ namespace Keire
     {
         try
         {
-            const auto hit = m_Impl->UiTree->HitTest(x, y);
+            const auto hit = m_Impl->CanvasProjection.ResolveHit(*m_Impl->UiTree, x, y);
             if (!hit)
                 return {};
-            const auto entity = m_Impl->UiEntity(*hit);
+            const auto entity = m_Impl->UiEntity(hit->Node);
             return entity ? entity.Id() : EntityId{};
         }
         catch (...)
         {
             return {};
         }
+    }
+
+    EntityId ScenePresentationRuntime::HitTestCanvasEntity(const float x, const float y) const noexcept
+    {
+        return m_Impl->CanvasProjection.HitTestCanvas(x, y);
+    }
+
+    std::optional<ScenePresentationCanvasGeometry>
+    ScenePresentationRuntime::CanvasGeometry(const EntityId canvas) const noexcept
+    {
+        return m_Impl->CanvasProjection.CanvasGeometry(canvas);
+    }
+
+    std::optional<ScenePresentationUiGeometry>
+    ScenePresentationRuntime::UiGeometry(const EntityId entity) const noexcept
+    {
+        return m_Impl->CanvasProjection.UiGeometry(entity, *m_Impl->UiTree, m_Impl->UiNodes);
     }
 
     void ScenePresentationRuntime::Navigate(const RuntimeUiNavigation navigation)
@@ -1444,53 +1495,6 @@ namespace Keire
 
     void ScenePresentationRuntime::Draw(UiFrame& ui, const float offsetX, const float offsetY) const
     {
-        for (const auto& command : m_Impl->UiTree->DrawCommands())
-        {
-            if (command.Type == RuntimeUiDrawType::PushClip || command.Type == RuntimeUiDrawType::PopClip)
-                continue;
-            const auto clipped = command.Rect.Intersect(command.ClipRect);
-            if (clipped.Empty())
-                continue;
-            const UiItemRect rectangle{{offsetX + clipped.X, offsetY + clipped.Y},
-                                       {offsetX + clipped.X + clipped.Width, offsetY + clipped.Y + clipped.Height}};
-            const UiColor color{command.ColorValue.Red, command.ColorValue.Green, command.ColorValue.Blue,
-                                command.ColorValue.Alpha};
-            switch (command.Type)
-            {
-            case RuntimeUiDrawType::Quad:
-                ui.DrawFilledRectangle(rectangle, color, command.CornerRadius);
-                if (command.BorderWidth > 0.0F)
-                    ui.DrawRectangle(rectangle,
-                                     {command.BorderColor.Red, command.BorderColor.Green, command.BorderColor.Blue,
-                                      command.BorderColor.Alpha},
-                                     command.BorderWidth, command.CornerRadius);
-                break;
-            case RuntimeUiDrawType::Image:
-                ui.DrawFilledRectangle(rectangle, color, command.CornerRadius);
-                break;
-            case RuntimeUiDrawType::Text:
-            {
-                const auto measured = ui.MeasureText(command.Text, command.FontSize);
-                float textX = command.Rect.X;
-                float textY = command.Rect.Y;
-                if (command.HorizontalAlignment == RuntimeUiAlignment::Center)
-                    textX += (command.Rect.Width - measured.Width) * 0.5F;
-                else if (command.HorizontalAlignment == RuntimeUiAlignment::End)
-                    textX += command.Rect.Width - measured.Width;
-                if (command.VerticalAlignment == RuntimeUiAlignment::Center)
-                    textY += (command.Rect.Height - measured.Height) * 0.5F;
-                else if (command.VerticalAlignment == RuntimeUiAlignment::End)
-                    textY += command.Rect.Height - measured.Height;
-                const UiItemRect textClip{{offsetX + command.ClipRect.X, offsetY + command.ClipRect.Y},
-                                          {offsetX + command.ClipRect.X + command.ClipRect.Width,
-                                           offsetY + command.ClipRect.Y + command.ClipRect.Height}};
-                ui.DrawOverlayText({offsetX + textX, offsetY + textY}, color, command.Text, command.FontSize, textClip);
-                break;
-            }
-            case RuntimeUiDrawType::PushClip:
-            case RuntimeUiDrawType::PopClip:
-                break;
-            }
-        }
+        m_Impl->CanvasProjection.Draw(*m_Impl->UiTree, ui, offsetX, offsetY);
     }
 } // namespace Keire

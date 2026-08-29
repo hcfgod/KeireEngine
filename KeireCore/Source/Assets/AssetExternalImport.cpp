@@ -239,7 +239,36 @@ namespace Keire
                               item.Importer->Type, item.Importer->Name, item.Importer->Version, item.Settings);
                 const auto stagedRecord = ReadMetadata(*stagingFiles, item.Destination,
                                                        m_Impl->Specification.MaximumSourceBytes, true, item.Importer);
-                item.Validated = m_Impl->ImportSource(stagedRecord, item.SourceBytes, stagingRoot);
+                ReportOperationProgress(progress, AssetOperationPhase::Staging, index, planned.size(), item.Source);
+                const auto failureContext = [&item]
+                {
+                    return "External import failed for source '" + Detail::PathToUtf8(item.Source) +
+                           "' at destination '" + Detail::PathToUtf8(item.Destination) + "': ";
+                };
+                try
+                {
+                    item.Validated = m_Impl->ImportSource(stagedRecord, item.SourceBytes, stagingRoot);
+                }
+                catch (const AssetOperationCancelled&)
+                {
+                    throw;
+                }
+                catch (const std::invalid_argument& error)
+                {
+                    throw std::invalid_argument(failureContext() + error.what());
+                }
+                catch (const std::overflow_error& error)
+                {
+                    throw std::overflow_error(failureContext() + error.what());
+                }
+                catch (const std::logic_error& error)
+                {
+                    throw std::logic_error(failureContext() + error.what());
+                }
+                catch (const std::runtime_error& error)
+                {
+                    throw std::runtime_error(failureContext() + error.what());
+                }
                 UpdateMetadataImportOutput(*stagingFiles, Detail::PathWithSuffix(item.Destination, ".keiremeta"),
                                            item.Validated.PrimaryType.value_or(stagedRecord.Type),
                                            item.Validated.SubAssets);

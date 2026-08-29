@@ -31,7 +31,7 @@ require(
     "The sample identity changed.",
 )
 require(generator.PACKAGE_VERSION == "1.0.0", "The sample version changed.")
-require(generator.ENGINE_VERSION == "0.4.3", "The first-party sample must follow the current engine version.")
+require(generator.ENGINE_VERSION == "0.4.4", "The first-party sample must follow the current engine version.")
 require(
     len(generator.SAMPLE_ASSETS) == 6,
     "The upload sample must select six authored graph assets.",
@@ -82,8 +82,8 @@ with tempfile.TemporaryDirectory(
         "The sample must use selective asset import.",
     )
     require(
-        manifest["compatibility"]["minimumEngineVersion"] == "0.4.3"
-        and manifest["compatibility"]["managedApiVersion"] == "0.4.3",
+        manifest["compatibility"]["minimumEngineVersion"] == "0.4.4"
+        and manifest["compatibility"]["managedApiVersion"] == "0.4.4",
         "The first-party sample compatibility metadata is stale.",
     )
     require(

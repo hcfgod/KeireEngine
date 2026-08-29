@@ -49,6 +49,29 @@ namespace Keire::RenderBackend
         RenderSurfaceToken Surface;
     };
 
+    class ImGuiTextureCache final
+    {
+      public:
+        ImGuiTextureCache();
+        ~ImGuiTextureCache();
+
+        ImGuiTextureCache(const ImGuiTextureCache&) = delete;
+        ImGuiTextureCache& operator=(const ImGuiTextureCache&) = delete;
+
+        void ReleaseGpuTextures(SDL_GPUDevice* device, bool abandon) noexcept;
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        [[nodiscard]] std::size_t TextureCountForTest() const noexcept;
+        [[nodiscard]] std::size_t GpuTextureCountForTest(std::uint32_t deviceGeneration) const noexcept;
+#endif
+
+      private:
+        friend class OwnedImGuiDrawData;
+        friend class ResolvedImGuiDrawData;
+        class Impl;
+        std::unique_ptr<Impl> m_Impl;
+    };
+
     class ResolvedImGuiDrawData final
     {
       public:
@@ -58,7 +81,12 @@ namespace Keire::RenderBackend
         ResolvedImGuiDrawData& operator=(const ResolvedImGuiDrawData&) = delete;
 
         [[nodiscard]] ImDrawData* Data() noexcept;
+        void CommitGpuTextures(ImGuiTextureCache& cache, std::uint32_t deviceGeneration) noexcept;
         void ReleaseGpuTextures(SDL_GPUDevice* device, bool abandon) noexcept;
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+        [[nodiscard]] std::size_t PendingGpuTextureRetirementCountForTest() const noexcept;
+#endif
 
       private:
         friend class OwnedImGuiDrawData;
@@ -76,9 +104,11 @@ namespace Keire::RenderBackend
         OwnedImGuiDrawData& operator=(const OwnedImGuiDrawData&) = delete;
 
         [[nodiscard]] static std::shared_ptr<OwnedImGuiDrawData>
-        Capture(ImDrawData* drawData, std::span<const CapturedSurfaceTextureBinding> surfaces);
+        Capture(ImDrawData* drawData, std::span<const CapturedSurfaceTextureBinding> surfaces,
+                std::span<const std::uintptr_t> retiredTextureIds = {});
         [[nodiscard]] std::shared_ptr<ResolvedImGuiDrawData>
-        ResolveForRender(const std::function<std::uintptr_t(const RenderSurfaceToken&)>& resolveTexture) const;
+        ResolveForRender(ImGuiTextureCache& cache, std::uint32_t deviceGeneration,
+                         const std::function<std::uintptr_t(const RenderSurfaceToken&)>& resolveTexture) const;
 
       private:
         class Impl;

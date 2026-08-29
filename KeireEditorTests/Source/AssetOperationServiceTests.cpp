@@ -6,6 +6,7 @@
 
 #include "KeireInternal/FileSystem.h"
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -18,6 +19,85 @@
 
 namespace
 {
+    class AssetWorkerTestRuntime final
+    {
+      public:
+        explicit AssetWorkerTestRuntime(const std::filesystem::path& builtWorker)
+        {
+#if defined(_WIN32)
+            const auto executable = std::filesystem::absolute(KeireEditorTests::ExecutablePath).lexically_normal();
+            auto repositoryRoot = executable.parent_path();
+            while (!std::filesystem::is_regular_file(repositoryRoot / "Config/Dependencies.lock"))
+            {
+                const auto parent = repositoryRoot.parent_path();
+                if (parent == repositoryRoot)
+                    throw std::runtime_error("Could not locate the repository root for the asset-worker test runtime.");
+                repositoryRoot = parent;
+            }
+
+            const auto configurationOutput = executable.parent_path().parent_path().filename().string();
+            const auto separator = configurationOutput.find("-windows-");
+            if (separator == std::string::npos)
+                throw std::runtime_error("Could not identify the asset-worker test configuration.");
+            const auto configuration = configurationOutput.substr(0, separator);
+            const bool releaseRuntime =
+                configuration == "Release" || configuration == "Profile" || configuration == "Dist";
+            if (!releaseRuntime && configuration != "Debug" && configuration != "DebugASan" &&
+                configuration != "DebugUBSan" && configuration != "DebugTSan" && configuration != "Coverage")
+            {
+                throw std::runtime_error("Unsupported asset-worker test configuration: " + configuration);
+            }
+
+            m_StagingRoot = std::filesystem::temp_directory_path() /
+                            ("Keire-AssetWorker-Runtime-" + Keire::AssetId::Generate().ToString());
+            try
+            {
+                std::filesystem::create_directory(m_StagingRoot);
+                CopyRegularFile(builtWorker, m_StagingRoot / builtWorker.filename());
+                constexpr std::array RuntimeFiles{"avformat-63.dll", "avcodec-63.dll", "swresample-7.dll",
+                                                  "avutil-61.dll"};
+                const auto runtimeDirectory = repositoryRoot / "Build/Dependencies/ffmpeg" /
+                                              (releaseRuntime ? "Release" : "Debug") / "install/bin";
+                for (const auto* runtime : RuntimeFiles)
+                    CopyRegularFile(runtimeDirectory / runtime, m_StagingRoot / runtime);
+                m_Executable = m_StagingRoot / builtWorker.filename();
+            }
+            catch (...)
+            {
+                std::error_code ignored;
+                std::filesystem::remove_all(m_StagingRoot, ignored);
+                throw;
+            }
+#else
+            m_Executable = builtWorker;
+#endif
+        }
+
+        ~AssetWorkerTestRuntime()
+        {
+            if (m_StagingRoot.empty())
+                return;
+            std::error_code ignored;
+            std::filesystem::remove_all(m_StagingRoot, ignored);
+        }
+
+        AssetWorkerTestRuntime(const AssetWorkerTestRuntime&) = delete;
+        AssetWorkerTestRuntime& operator=(const AssetWorkerTestRuntime&) = delete;
+
+        [[nodiscard]] const std::filesystem::path& Executable() const noexcept { return m_Executable; }
+
+      private:
+        static void CopyRegularFile(const std::filesystem::path& source, const std::filesystem::path& destination)
+        {
+            if (!std::filesystem::is_regular_file(std::filesystem::symlink_status(source)))
+                throw std::runtime_error("Required asset-worker test runtime file is missing: " + source.string());
+            std::filesystem::copy_file(source, destination);
+        }
+
+        std::filesystem::path m_StagingRoot;
+        std::filesystem::path m_Executable;
+    };
+
     void SetTestWorkerMode(const char* value)
     {
 #if defined(_WIN32)
@@ -38,8 +118,11 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
     std::error_code cleanupError;
     std::filesystem::remove_all(location, cleanupError);
     std::filesystem::create_directories(location);
-    const auto worker = KeireEditor::AssetOperationService::ResolveWorkerExecutable(KeireEditorTests::ExecutablePath);
-    REQUIRE(std::filesystem::is_regular_file(worker));
+    const auto builtWorker =
+        KeireEditor::AssetOperationService::ResolveWorkerExecutable(KeireEditorTests::ExecutablePath);
+    REQUIRE(std::filesystem::is_regular_file(builtWorker));
+    const AssetWorkerTestRuntime worker(builtWorker);
+    REQUIRE(std::filesystem::is_regular_file(worker.Executable()));
     {
         auto project = Keire::Project::Create(
             {.Location = location, .Name = "Worker Project", .Template = Keire::ProjectTemplate::Empty});
@@ -50,7 +133,7 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         Keire::Detail::WriteTextFileAtomically(project->Root() / "Assets/Shaders/StaleAuxiliary.hlsl", "stale");
         Keire::Detail::WriteTextFileAtomically(interrupted / "create-auxiliary.journal",
                                                "Scenes/Missing.keirescene\nShaders/StaleAuxiliary.hlsl\n");
-        KeireEditor::AssetOperationService operations(worker, project->Root());
+        KeireEditor::AssetOperationService operations(worker.Executable(), project->Root());
         operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (operations.Busy() && std::chrono::steady_clock::now() < deadline)

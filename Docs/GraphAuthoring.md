@@ -117,7 +117,8 @@ transaction commits.
 
 Kéire 0.4.0 advances Shader Graph and Material Graph source schemas from 3 to 4 and VFX source schema from 4 to 5.
 The current Shader Graph schema is 5; it adds a conservative maximum world-position-displacement radius, while
-schemas 1–4 migrate in memory with a zero radius. Material Graph remains schema 4. Schema migration follows the same
+schemas 1–4 migrate in memory with a zero radius. Material Graph schema 5 removes redundant surface authoring from new
+files and preserves executable legacy expressions only under `legacySurfaceGraph`. Schema migration follows the same
 fail-before-mutation rule across all three formats:
 
 1. supported historical sources decode and migrate in memory;

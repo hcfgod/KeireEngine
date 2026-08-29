@@ -73,9 +73,10 @@ namespace Keire::RenderBackend
         Vector4 Parameters;
         Matrix4 Model;
         Matrix4 View;
+        Matrix4 Projection;
     };
 
-    static_assert(sizeof(ObjectUniforms) == sizeof(float) * 84);
+    static_assert(sizeof(ObjectUniforms) == sizeof(float) * 100);
 
     struct AssetObjectUniforms final
     {

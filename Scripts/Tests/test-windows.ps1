@@ -890,9 +890,21 @@ Assert-True ($dependencyScript.Contains('Get-KeireWorkspaceJunctionPath') -and
              $shaderCompilerScript.Contains('Get-KeireWorkspaceJunctionPath') -and
              $shaderCompilerScript.Contains('Initialize-KeireWorkspaceJunction')) `
     "Checkout-bound Windows dependency junctions use validated distinct workspace identities"
-Assert-True ($dependencyScript.Contains('$sourceLayoutIdentity = "workspace-assimp-v2:$assimpSourceLink"') -and
+Assert-True ($dependencyScript.Contains('$sourceLayoutIdentity = "workspace-assimp-v3:${assimpPatchedSource}:${assimpPatchDigest}"') -and
              $dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT, $sourceLayoutIdentity, $Architecture')) `
-    "Windows native dependency stamps invalidate the legacy shared Assimp source layout"
+    "Windows native dependency stamps include the isolated patched Assimp source layout"
+Assert-True ($dependencyScript.Contains('Patches\Assimp') -and
+             $dependencyScript.Contains('keire-assimp-patch.stamp') -and
+             $dependencyScript.Contains('git -C $temporary apply --whitespace=error-all') -and
+             $dependencyScript.Contains('"-DKEIRE_ASSIMP_SOURCE=$assimpPatchedSource"') -and
+             $dependencyScript.Contains('AssimpPatchDigest = "$assimpPatchDigest"')) `
+    "Windows dependencies apply and identify the committed Assimp patch set"
+$assimpIdentityPatch = Get-Content (Join-Path (Get-RepositoryRoot) `
+    "Patches\Assimp\fbx-model-id-names.patch") -Raw
+Assert-True ($assimpIdentityPatch.Contains('void FBXConverter::BuildModelNames()') -and
+             $assimpIdentityPatch.Contains('ModelName(*cluster->TargetNode())') -and
+             $assimpIdentityPatch.Contains('ModelName(*model)')) `
+    "Assimp FBX patch shares one model-ID name mapping across nodes, bones, and animations"
 Assert-True ($dependencyScript.Contains('Assert-KeireLockedGitSource') -and
              $dependencyScript.Contains('Enter-KeireWorkspaceLock') -and
              $dependencyScript.Contains('-LockRelativePath ".locks\$Name-$Commit.lock"')) `
@@ -1459,6 +1471,11 @@ $renderSource += "`n" + ((Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCo
 Assert-True ($renderSource.Contains('BuiltinUnlitShaders.h') -and $renderSource.Contains('renderer->Tint()') -and -not $renderSource.Contains('Vendor/SDL/test')) "Mesh tint shader ownership and draw wiring"
 $builtinShader = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl') -Raw
 Assert-True ($renderSource.Contains('ResolveLighting') -and $renderSource.Contains('DirectionalLightComponent') -and $renderSource.Contains('AmbientAndExposure') -and $builtinShader.Contains('LightDirection') -and $builtinShader.Contains('worldNormal')) "Directional and ambient light wiring"
+Assert-True ($builtinShader.Contains('InstanceAddressingData') -and
+             $builtinShader.Contains('Instances[InstanceParameters.x + instanceId]') -and
+             $renderSource.Contains('GpuOcclusionVisibleInstances') -and
+             $renderSource.Contains('SDL_BindGPUVertexStorageBuffers')) `
+    "Built-in and material-less meshes use the instance-addressed indirect occlusion path"
 Assert-True ($renderSource.Contains('ReadbackRGBA8') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireRenderTests\Source\RenderedOutputTests.cpp'))) "Rendered output readback tests"
 $testRunner = Get-Content (Join-Path $Windows 'test.ps1') -Raw
 Assert-True ($testRunner.Contains('direct3d12') -and $testRunner.Contains('vulkan') -and $testRunner.Contains('KEIRE_REQUIRE_GPU_TESTS')) "Conditional Windows GPU test backends"
@@ -1627,7 +1644,10 @@ Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPa
     $editorPackageScript.Contains('Build\Dependencies\dotnet-sdk') -and
     $editorPackageScript.Contains('Build\Distributions') -and
     $editorPackageScript.Contains('Assert-WindowsEditorPackageStage') -and
-    $editorPackageScript.Contains('editor-package.json')) "Windows Dist editor distribution packaging"
+    $editorPackageScript.Contains('editor-package.json') -and
+    $editorPackageScript.Contains('player-support.ps1') -and
+    $editorPackageScript.Contains('-InstalledLayoutRoot') -and
+    $editorPackageScript.Contains('bin\BuildSupport')) "Windows Dist editor distribution packaging"
 Assert-True ($editorPackageScript.Contains('editor=bin/$($Project.CLIENT_TARGET).exe') -and
     -not $editorPackageScript.Contains('"--entrypoint", "hub=') -and
     -not $editorPackageScript.Contains('"--entrypoint", "worker=') -and

@@ -1,5 +1,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
+#include <algorithm>
+
 namespace Keire
 {
     [[nodiscard]] Ref<AnimatorComponent> ScriptSystem::Impl::RuntimeAnimator(const std::uint64_t world,

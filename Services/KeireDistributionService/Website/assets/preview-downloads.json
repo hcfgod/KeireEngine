@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "releaseStatus": {
     "state": "preparing",
-    "version": "0.4.3",
+    "version": "0.4.4",
     "activeCatalogVersion": "0.4.2",
-    "message": "Kéire 0.4.3 Windows packages are being prepared; signed 0.4.2 Windows and Linux packages remain active until catalog activation."
+    "message": "Kéire 0.4.4 Windows packages are being prepared; signed 0.4.2 Windows and Linux packages remain active until catalog activation."
   },
   "packages": []
 }

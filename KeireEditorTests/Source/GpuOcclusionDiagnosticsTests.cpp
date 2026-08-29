@@ -164,13 +164,21 @@ TEST_CASE("GPU occlusion panels prefer active Scene surface diagnostics over res
     CHECK(presentation.Status.find("direct-draw fallback on 1 surface") != std::string::npos);
     CHECK(presentation.Pyramid.find("28 dispatches / 4 indirect draws") != std::string::npos);
 
+    surface.RequestedMode = Keire::GpuOcclusionMode::Automatic;
     surface.State = Keire::GpuOcclusionSurfaceState::Fallback;
     surface.EffectiveMode = Keire::GpuOcclusionMode::Disabled;
     surface.FallbackReason = Keire::GpuOcclusionFallbackReason::BelowAutomaticThreshold;
     surface.ReadbackValid = false;
+    surface.EligibleCandidates = 6;
+    surface.EligibleSafeOccluders = 4;
+    surface.EligibleCandidateTriangles = 26'664;
     presentation = KeireEditor::BuildGpuOcclusionPanelDiagnostics(capabilities, aggregate, surface);
-    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Fallback);
+    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Disabled);
+    CHECK_FALSE(presentation.Warning);
     CHECK(presentation.Status.find("below the Automatic activation threshold") != std::string::npos);
+    CHECK(presentation.Status.find("use Forced to validate this scene") != std::string::npos);
+    CHECK(presentation.Visibility.find("6 eligible candidates / 26664 candidate triangles") != std::string::npos);
+    CHECK(presentation.Pyramid.find("4 eligible safe occluders") != std::string::npos);
     CHECK(presentation.Pyramid.find("28 dispatches") == std::string::npos);
 }
 

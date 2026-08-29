@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <ranges>
@@ -18,62 +17,6 @@ namespace KeireEditor
 {
     namespace
     {
-        struct ExpressionEntry
-        {
-            Keire::ShaderGraphNodeKind Kind;
-            std::string_view Category;
-            std::string_view Name;
-            Keire::ShaderGraphValueType Type = Keire::ShaderGraphValueType::Scalar;
-        };
-
-        [[nodiscard]] const std::vector<ExpressionEntry>& ExpressionEntries()
-        {
-            static const auto entries = []
-            {
-                std::vector<ExpressionEntry> result{
-                    {Keire::ShaderGraphNodeKind::Parameter, "Parameters", "Scalar Parameter"},
-                    {Keire::ShaderGraphNodeKind::Parameter, "Parameters", "Vector2 Parameter",
-                     Keire::ShaderGraphValueType::Vector2},
-                    {Keire::ShaderGraphNodeKind::Parameter, "Parameters", "Vector3 Parameter",
-                     Keire::ShaderGraphValueType::Vector3},
-                    {Keire::ShaderGraphNodeKind::Parameter, "Parameters", "Vector4 Parameter",
-                     Keire::ShaderGraphValueType::Vector4},
-                    {Keire::ShaderGraphNodeKind::Parameter, "Parameters", "Color Parameter",
-                     Keire::ShaderGraphValueType::Color},
-                    {Keire::ShaderGraphNodeKind::Parameter, "Parameters", "Texture2D Parameter",
-                     Keire::ShaderGraphValueType::Texture2D},
-                    {Keire::ShaderGraphNodeKind::Constant, "Constants", "Scalar Constant"},
-                    {Keire::ShaderGraphNodeKind::Constant, "Constants", "Vector2 Constant",
-                     Keire::ShaderGraphValueType::Vector2},
-                    {Keire::ShaderGraphNodeKind::Constant, "Constants", "Vector3 Constant",
-                     Keire::ShaderGraphValueType::Vector3},
-                    {Keire::ShaderGraphNodeKind::Constant, "Constants", "Vector4 Constant",
-                     Keire::ShaderGraphValueType::Vector4},
-                    {Keire::ShaderGraphNodeKind::Constant, "Constants", "Color Constant",
-                     Keire::ShaderGraphValueType::Color},
-                };
-                for (const auto& descriptor : Keire::ShaderGraphNodeCatalog())
-                {
-                    if (!descriptor.UserCreatable || descriptor.Kind == Keire::ShaderGraphNodeKind::Master ||
-                        descriptor.Kind == Keire::ShaderGraphNodeKind::Parameter ||
-                        descriptor.Kind == Keire::ShaderGraphNodeKind::Constant)
-                        continue;
-                    result.push_back(
-                        {descriptor.Kind, descriptor.Category, descriptor.DisplayName, descriptor.DefaultValueType});
-                }
-                return result;
-            }();
-            return entries;
-        }
-
-        [[nodiscard]] std::string Lower(const std::string_view value)
-        {
-            std::string result(value);
-            std::ranges::transform(result, result.begin(), [](const unsigned char character)
-                                   { return static_cast<char>(std::tolower(character)); });
-            return result;
-        }
-
         [[nodiscard]] constexpr Keire::ShaderGraphValueType
         GraphValueType(const Keire::ShaderPropertyType type) noexcept
         {
@@ -163,7 +106,6 @@ namespace KeireEditor
         m_ShaderGraphPicker.Clear();
         m_RawShaderPicker.Clear();
         m_TexturePicker.Clear();
-        m_NodeSearch.clear();
         m_Bookmarks.Clear();
         m_InspectorComment.clear();
         m_InspectorCommentPinned = false;
@@ -271,8 +213,12 @@ namespace KeireEditor
                 Report(error.what());
             }
         }
-        ui.TextColored(theme.MutedText,
-                       "Shader Graph defines the reusable template; Material Graph expressions compile the surface.");
+        ui.TextColored(
+            theme.MutedText,
+            hasSurfaceExpressions
+                ? "Legacy surface expressions are preserved for migration; new shader logic belongs in "
+                  "Shader Graph."
+                : "Shader Graph owns executable surface logic; Material Graph binds its exposed parameters.");
         ui.SameLine();
         if (ui.Button(m_ShowPreview ? "Hide Preview" : "Show Preview"))
             m_ShowPreview = !m_ShowPreview;
@@ -447,128 +393,12 @@ namespace KeireEditor
                                                         const Keire::ShaderGraphNode* compatibleNode,
                                                         const Keire::ShaderGraphPin* compatiblePin)
     {
-        (void)ui.InputTextWithHint("##MaterialExpressionSearch", "Search expressions and categories...", m_NodeSearch);
-        ui.Separator();
-        const auto search = Lower(m_NodeSearch);
-        const auto compatible = [&](const Keire::ShaderGraphNode& candidate)
-        {
-            if (compatiblePin)
-                return std::ranges::any_of(candidate.Pins, [&](const Keire::ShaderGraphPin& pin)
-                                           { return ShaderGraphPinsCanConnect(*compatiblePin, pin); });
-            return !compatibleNode || ShaderGraphNodesCanConnect(*compatibleNode, candidate);
-        };
-        const auto entryCompatible = [&](const ExpressionEntry& entry)
-        {
-            try
-            {
-                return compatible(Keire::CreateShaderGraphNode(entry.Kind, entry.Type));
-            }
-            catch (...)
-            {
-                return false;
-            }
-        };
-        const auto functionCompatible = [&](const Keire::AssetSourceRecord& record)
-        {
-            if (!compatibleNode && !compatiblePin)
-                return true;
-            try
-            {
-                const auto function = m_Controller.ResolveMaterialGraphFunction(record.Id);
-                return function && compatible(Keire::CreateShaderGraphFunctionCallNode(record.Id, *function));
-            }
-            catch (...)
-            {
-                return false;
-            }
-        };
-        const auto addEntry = [&](const ExpressionEntry& entry, const std::string_view label)
-        {
-            if (!ui.MenuItem(label))
-                return false;
-            if (!AddExpressionNode(entry.Kind, entry.Type, position))
-                return false;
-            m_NodeSearch.clear();
-            ui.CloseCurrentPopup();
-            return true;
-        };
-
-        std::size_t visible = 0;
-        if (!search.empty())
-        {
-            for (const auto& entry : ExpressionEntries())
-            {
-                const auto path = std::string(entry.Category) + " / " + std::string(entry.Name);
-                if (!entryCompatible(entry) || Lower(path).find(search) == std::string::npos)
-                    continue;
-                ++visible;
-                if (addEntry(entry, path))
-                    return true;
-            }
-        }
-        else
-        {
-            std::vector<std::string_view> categories;
-            for (const auto& entry : ExpressionEntries())
-                if (entryCompatible(entry) && std::ranges::find(categories, entry.Category) == categories.end())
-                    categories.push_back(entry.Category);
-            visible = static_cast<std::size_t>(std::ranges::count_if(ExpressionEntries(), entryCompatible));
-            for (const auto category : categories)
-            {
-                if (auto categoryMenu = ui.BeginMenu(category); categoryMenu)
-                    for (const auto& entry : ExpressionEntries())
-                        if (entry.Category == category && entryCompatible(entry))
-                        {
-                            if (addEntry(entry, entry.Name))
-                                return true;
-                        }
-            }
-        }
-
-        std::vector<const Keire::AssetSourceRecord*> reusableGraphs;
-        for (const auto& record : m_Controller.MaterialGraphAssetRecords())
-        {
-            const bool reusable = record.Type == Keire::MaterialFunctionAsset::StaticType() ||
-                                  record.Type == Keire::ShaderFunctionAsset::StaticType() ||
-                                  record.Type == Keire::MaterialLayerAsset::StaticType() ||
-                                  record.Type == Keire::MaterialLayerBlendAsset::StaticType();
-            if (reusable && functionCompatible(record))
-                reusableGraphs.push_back(&record);
-        }
-        if (!search.empty())
-            for (const auto* record : reusableGraphs)
-            {
-                const auto name = record->RelativePath.stem().string();
-                const auto path = "Functions & Layers / " + name;
-                if (Lower(path).find(search) == std::string::npos)
-                    continue;
-                ++visible;
-                if (ui.MenuItem(path) && AddFunctionNode(record->Id, name, position))
-                {
-                    m_NodeSearch.clear();
-                    ui.CloseCurrentPopup();
-                    return true;
-                }
-            }
-        if (search.empty() && !reusableGraphs.empty())
-        {
-            visible += reusableGraphs.size();
-            if (auto functions = ui.BeginMenu("Functions & Layers"); functions)
-                for (const auto* record : reusableGraphs)
-                {
-                    const auto name = record->RelativePath.stem().string();
-                    if (ui.MenuItem(name) && AddFunctionNode(record->Id, name, position))
-                    {
-                        m_NodeSearch.clear();
-                        ui.CloseCurrentPopup();
-                        return true;
-                    }
-                }
-        }
-        if (visible == 0)
-            ui.TextColored(m_Controller.MaterialGraphTheme().MutedText, search.empty()
-                                                                            ? "No compatible expressions are available."
-                                                                            : "No expressions match this search.");
+        (void)position;
+        (void)compatibleNode;
+        (void)compatiblePin;
+        ui.TextColoredWrapped(m_Controller.MaterialGraphTheme().MutedText,
+                              "Shader Graph owns executable shader logic. Add or edit exposed parameters in the "
+                              "selected Shader Graph, then use Add Override here to set material values.");
         return false;
     }
 
@@ -828,7 +658,6 @@ namespace KeireEditor
         if (canvas.ContextRequested)
         {
             m_GraphContext = canvas.ContextRequested;
-            m_NodeSearch.clear();
             if (canvas.ContextRequested->Kind == NodeGraphContextTargetKind::Comment)
                 m_GraphContext.reset();
             else if (canvas.ContextRequested->Kind == NodeGraphContextTargetKind::Background)
@@ -1119,7 +948,8 @@ namespace KeireEditor
         ui.TextColored(theme.Accent, "MATERIAL GRAPH INSPECTOR");
         if (!m_SelectedNode)
         {
-            ui.TextColored(theme.MutedText, "Select Material Output, an expression, or a template override.");
+            ui.TextColored(theme.MutedText,
+                           "Select Material Output, a legacy expression, or a Shader Graph parameter override.");
             return;
         }
 
@@ -1374,8 +1204,8 @@ namespace KeireEditor
             ui.Text("Template Parameters");
             ui.Separator();
             ui.TextColored(theme.MutedText,
-                           "Compatibility uniform overrides. New materials should use expression Parameters and "
-                           "Material Output.");
+                           "These values override parameters exposed by the selected Shader Graph. Edit executable "
+                           "shader logic in Shader Graph.");
             for (const auto& property : document.Definition().Properties)
             {
                 const bool connected =
@@ -1442,35 +1272,6 @@ namespace KeireEditor
         catch (const std::exception& error)
         {
             Report(error.what());
-        }
-    }
-
-    bool MaterialGraphPanel::AddExpressionNode(const Keire::ShaderGraphNodeKind kind,
-                                               const Keire::ShaderGraphValueType type,
-                                               const std::optional<Keire::Vector2> position)
-    {
-        try
-        {
-            auto node = Keire::CreateShaderGraphNode(kind, type);
-            node.EditorPosition = position.value_or(Keire::Vector2{120.0F, 120.0F});
-            if (kind == Keire::ShaderGraphNodeKind::Parameter || kind == Keire::ShaderGraphNodeKind::Keyword)
-            {
-                const auto base = kind == Keire::ShaderGraphNodeKind::Keyword ? "STATIC_FEATURE" : "Parameter";
-                node.Symbol = UniqueExpressionSymbol(m_Controller.MaterialGraphState().Definition(), base);
-                node.Name = node.Symbol;
-                if (kind == Keire::ShaderGraphNodeKind::Parameter)
-                    node.ParameterMetadata.Category = "Material";
-            }
-            const auto id = node.Id;
-            if (!m_Controller.MaterialGraphState().AddExpressionNode(std::move(node)))
-                return false;
-            m_SelectedNode = id;
-            return true;
-        }
-        catch (const std::exception& error)
-        {
-            Report(error.what());
-            return false;
         }
     }
 

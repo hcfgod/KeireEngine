@@ -105,6 +105,16 @@ the orientation overlay snaps axes and toggles perspective/orthographic projecti
 pointer
 motion while vertical motion retains Unity's pitch convention. Game view renders the deterministic active scene Camera
 from the runtime clone during Play. Scene-camera state stays below `Library/Editor` and never dirties source content.
+
+Canvas defaults to **Screen Space Overlay** for compatibility. **Screen Space Camera** follows its selected Camera (or
+the active presentation Camera when none is assigned), remains fitted to the viewport, and is hidden when its authored
+plane distance lies outside that Camera's clip range. **World Space** uses the Canvas entity Transform,
+reference resolution, and world-units-per-pixel scale to define a plane. Scene view projects that plane through the
+editor camera, picks it with the matching ray-to-plane transform, and shows direct corner/center handles for undoable
+Canvas and Rect Transform edits. World canvases behind the current camera are neither drawn nor hit-tested. This first
+authoring slice does not test runtime UI against scene depth, so geometry cannot yet occlude a world Canvas; the Canvas
+Inspector reports that limitation rather than exposing an inactive depth option.
+
 Closing the editor cancels queued catalog refreshes instead of forcing pending background import work to finish;
 already-saved scene and material sources remain durable and refresh on the next launch. See
 [Rendering](Rendering.md). Prefab composition and managed scripting are supported authoring workflows; see

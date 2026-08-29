@@ -799,9 +799,46 @@ namespace Keire
         return std::nullopt;
     }
 
+    std::optional<RuntimeUiElementId> RuntimeUiTree::HitTestWithin(const RuntimeUiElementId root, const float x,
+                                                                   const float y) const noexcept
+    {
+        if (!root)
+            return HitTest(x, y);
+        for (auto iterator = m_Impl->HitElements.rbegin(); iterator != m_Impl->HitElements.rend(); ++iterator)
+        {
+            const auto index = m_Impl->Index(*iterator);
+            if (!index)
+                continue;
+            auto ancestor = *iterator;
+            while (ancestor && ancestor != root)
+            {
+                const auto ancestorIndex = m_Impl->Index(ancestor);
+                ancestor = ancestorIndex ? m_Impl->Nodes[*ancestorIndex].State.Parent : RuntimeUiElementId{};
+            }
+            if (ancestor != root)
+                continue;
+            const auto& state = m_Impl->Nodes[*index].State;
+            if (state.Visible && state.Enabled && state.Interactable && state.Rect.Contains(x, y) &&
+                state.ClipRect.Contains(x, y))
+                return *iterator;
+        }
+        return std::nullopt;
+    }
+
     void RuntimeUiTree::PointerMove(const float x, const float y)
     {
-        const auto hit = HitTest(x, y).value_or(RuntimeUiElementId{});
+        PointerMoveTo(HitTest(x, y).value_or(RuntimeUiElementId{}), x, y);
+    }
+
+    void RuntimeUiTree::PointerMoveTo(const RuntimeUiElementId target, const float x, const float y)
+    {
+        RuntimeUiElementId hit;
+        if (const auto index = m_Impl->Index(target))
+        {
+            const auto& state = m_Impl->Nodes[*index].State;
+            if (state.Visible && state.Enabled && state.Interactable)
+                hit = target;
+        }
         if (hit == m_Impl->Hovered)
             return;
         if (const auto old = m_Impl->Index(m_Impl->Hovered))
@@ -831,9 +868,15 @@ namespace Keire
     bool RuntimeUiTree::PointerButton(const float x, const float y, const RuntimeUiPointerButton button,
                                       const bool pressed)
     {
+        return PointerButtonTo(HitTest(x, y).value_or(RuntimeUiElementId{}), x, y, button, pressed);
+    }
+
+    bool RuntimeUiTree::PointerButtonTo(const RuntimeUiElementId requestedTarget, const float x, const float y,
+                                        const RuntimeUiPointerButton button, const bool pressed)
+    {
         if (button > RuntimeUiPointerButton::Middle)
             throw std::invalid_argument("Runtime UI pointer button is invalid.");
-        PointerMove(x, y);
+        PointerMoveTo(requestedTarget, x, y);
         const auto target = m_Impl->Hovered;
         const auto buttonIndex = PointerButtonIndex(button);
         auto& pressedElement = m_Impl->Pressed[buttonIndex];

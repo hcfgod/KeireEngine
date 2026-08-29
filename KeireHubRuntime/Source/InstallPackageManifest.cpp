@@ -5,6 +5,7 @@
 
 #include "KeireHubRuntime/PackageResolver.h"
 
+#include <algorithm>
 #include <array>
 #include <limits>
 #include <ranges>
@@ -166,8 +167,8 @@ namespace KeireHub::Detail
                 if (actualPaths.contains(key))
                     paths.insert(key);
             }
-            const bool missingOwnedFile = std::ranges::any_of(paths, [&actualPaths](const auto& path)
-                                                               { return !actualPaths.contains(path); });
+            const bool missingOwnedFile =
+                std::ranges::any_of(paths, [&actualPaths](const auto& path) { return !actualPaths.contains(path); });
             if (missingOwnedFile || (!allowUnknownFiles && actualPaths != paths))
             {
                 return HubResult<InstallerPackageManifest>::Failure(

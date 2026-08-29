@@ -1,5 +1,7 @@
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
+#include <algorithm>
+
 namespace Keire
 {
     [[nodiscard]] Entity ScriptSystem::Impl::ResolveRuntimeEntity(const std::uint64_t world, const std::uint64_t high,

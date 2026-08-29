@@ -112,6 +112,13 @@ $sdkManifest = Get-Content -LiteralPath (Join-Path $stage "build-manifest.json")
 if ($sdkManifest.configuration -ne "Dist" -or $sdkManifest.platform -ne "Windows") {
     throw "The editor package source manifest is not a Windows Dist build."
 }
+$playerSupportArchitecture = if ($Architecture -eq "ARM64") { "arm64" } else { "x86_64" }
+$playerSupportOutput = Join-Path $Root `
+    "Build\PlayerSupport\editor-$playerSupportArchitecture-$($Project.PROJECT_VERSION)"
+Invoke-CheckedWindowsCommand {
+    & (Join-Path $PSScriptRoot "player-support.ps1") -Architecture $playerSupportArchitecture `
+        -OutputDirectory $playerSupportOutput -InstalledLayoutRoot (Join-Path $stage "bin\BuildSupport")
+} "Packaged Editor host Build Support generation"
 $dotnetSdk = Get-ChildItem -LiteralPath (Join-Path $dotnetDestination "sdk") -Directory |
     Where-Object { $_.Name -match '^10\.' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (-not $dotnetSdk) { throw "The bundled editor runtime does not contain the .NET 10 SDK." }

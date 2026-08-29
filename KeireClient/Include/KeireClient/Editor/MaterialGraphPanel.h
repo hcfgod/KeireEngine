@@ -107,8 +107,6 @@ namespace KeireEditor
                                                      Keire::ShaderGraphValue& value);
         void AddValueNode(const Keire::MaterialGraphPropertyBinding& property,
                           std::optional<Keire::Vector2> position = std::nullopt);
-        [[nodiscard]] bool AddExpressionNode(Keire::ShaderGraphNodeKind kind, Keire::ShaderGraphValueType type,
-                                             std::optional<Keire::Vector2> position = std::nullopt);
         [[nodiscard]] bool AddFunctionNode(Keire::AssetId asset, std::string_view name,
                                            std::optional<Keire::Vector2> position);
         [[nodiscard]] bool DrawFunctionExtractionPopup(Keire::UiFrame& ui);
@@ -146,7 +144,6 @@ namespace KeireEditor
         bool m_InspectorHasStep = false;
         bool m_InspectorCommentPinned = false;
         bool m_ShowTemplateParameters = false;
-        std::string m_NodeSearch;
         std::string m_ExtractionName;
         std::vector<Keire::AssetId> m_FunctionExtractionSelection;
         GraphBookmarkSet m_Bookmarks;

@@ -14,6 +14,13 @@ namespace Keire
         ConstantPhysicalSize
     };
 
+    enum class CanvasRenderMode : std::uint8_t
+    {
+        ScreenSpaceOverlay,
+        ScreenSpaceCamera,
+        WorldSpace
+    };
+
     enum class UiTextAlignment : std::uint8_t
     {
         UpperLeft,
@@ -89,6 +96,10 @@ namespace Keire
         }
 
         [[nodiscard]] Vector2 ReferenceResolution() const noexcept { return m_ReferenceResolution; }
+        [[nodiscard]] CanvasRenderMode RenderMode() const noexcept { return m_RenderMode; }
+        [[nodiscard]] EntityId RenderCameraEntity() const noexcept { return m_RenderCamera; }
+        [[nodiscard]] float PlaneDistance() const noexcept { return m_PlaneDistance; }
+        [[nodiscard]] float WorldUnitsPerPixel() const noexcept { return m_WorldUnitsPerPixel; }
         [[nodiscard]] CanvasScaleMode ScaleMode() const noexcept { return m_ScaleMode; }
         [[nodiscard]] float MatchWidthOrHeight() const noexcept { return m_MatchWidthOrHeight; }
         [[nodiscard]] float AccessibilityScale() const noexcept { return m_AccessibilityScale; }
@@ -97,6 +108,10 @@ namespace Keire
         [[nodiscard]] bool PixelPerfect() const noexcept { return m_PixelPerfect; }
 
         void SetReferenceResolution(Vector2 value);
+        void SetRenderMode(CanvasRenderMode value);
+        void SetRenderCameraEntity(EntityId value);
+        void SetPlaneDistance(float value);
+        void SetWorldUnitsPerPixel(float value);
         void SetScaleMode(CanvasScaleMode value);
         void SetMatchWidthOrHeight(float value);
         void SetAccessibilityScale(float value);
@@ -107,6 +122,10 @@ namespace Keire
       private:
         friend ComponentRegistration CreateCanvasComponentRegistration();
         Vector2 m_ReferenceResolution{1920.0F, 1080.0F};
+        CanvasRenderMode m_RenderMode = CanvasRenderMode::ScreenSpaceOverlay;
+        EntityId m_RenderCamera;
+        float m_PlaneDistance = 1.0F;
+        float m_WorldUnitsPerPixel = 0.01F;
         CanvasScaleMode m_ScaleMode = CanvasScaleMode::ScaleWithViewport;
         float m_MatchWidthOrHeight = 0.5F;
         float m_AccessibilityScale = 1.0F;

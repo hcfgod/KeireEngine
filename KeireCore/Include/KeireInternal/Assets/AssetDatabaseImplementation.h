@@ -1241,6 +1241,7 @@ namespace Keire
         {
             ScanResult Result;
             std::uint64_t SourceRevision = 0;
+            bool DigestsVerified = false;
         };
 
         void StartChangeMonitor()
@@ -1262,6 +1263,8 @@ namespace Keire
                         monitorLock.unlock();
 
                         const auto revision = SourceRevision.load(std::memory_order_acquire);
+                        const bool verifyDigests =
+                            VerifyDigestsOnNextChangeMonitorScan.exchange(false, std::memory_order_acq_rel);
                         try
                         {
                             ScanResult scanned;
@@ -1270,19 +1273,30 @@ namespace Keire
                                 // reconciliation walk with asset transactions so moves, trash operations, and
                                 // atomic publications never race an open monitor iterator.
                                 std::scoped_lock operation(*OperationMutex);
-                                scanned = Scan(false);
+                                scanned = Scan(verifyDigests);
                             }
                             monitorLock.lock();
                             if (revision == SourceRevision.load(std::memory_order_acquire))
                             {
-                                PublishedChangeScan = MonitoredScan{std::move(scanned), revision};
+                                PublishedChangeScan = MonitoredScan{std::move(scanned), revision, verifyDigests};
                                 PublishedScans.fetch_add(1, std::memory_order_relaxed);
+                            }
+                            else if (verifyDigests)
+                            {
+                                VerifyDigestsOnNextChangeMonitorScan.store(true, std::memory_order_release);
+                                ChangeMonitorRequested = true;
                             }
                             monitorLock.unlock();
                         }
                         catch (...)
                         {
                             FailedScans.fetch_add(1, std::memory_order_relaxed);
+                            if (verifyDigests)
+                            {
+                                VerifyDigestsOnNextChangeMonitorScan.store(true, std::memory_order_release);
+                                std::scoped_lock retryLock(ChangeMonitorMutex);
+                                ChangeMonitorRequested = true;
+                            }
                         }
                         monitorLock.lock();
                     }
@@ -1296,6 +1310,12 @@ namespace Keire
                 ChangeMonitorRequested = true;
             }
             ChangeMonitorCondition.notify_one();
+        }
+
+        void RequestChangeMonitorDigestVerification() noexcept
+        {
+            VerifyDigestsOnNextChangeMonitorScan.store(true, std::memory_order_release);
+            RequestChangeMonitorScan();
         }
 
         void RemoveProjectTree(const std::filesystem::path& relative)
@@ -1432,6 +1452,7 @@ namespace Keire
         std::atomic<std::uint64_t> SourceRevision{1};
         std::atomic<std::uint64_t> PublishedScans{0};
         std::atomic<std::uint64_t> FailedScans{0};
+        std::atomic_bool VerifyDigestsOnNextChangeMonitorScan{false};
         mutable std::mutex ChangeMonitorMutex;
         std::condition_variable_any ChangeMonitorCondition;
         std::optional<MonitoredScan> PublishedChangeScan;

@@ -10,10 +10,10 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.4.3 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.4.4 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.3 is the current source and Windows publication target. Signed 0.4.2 Windows and Linux x86-64 packages
+Version 0.4.4 is the current source and Windows publication target. Signed 0.4.2 Windows and Linux x86-64 packages
 remain active through immutable catalog sequence 17 while the new Windows packages complete validation and catalog
 activation; macOS downloads remain gated pending platform, signing, and notarization validation.
 
@@ -240,7 +240,7 @@ Current authoring and runtime contracts include:
 | Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | Shader Graph source | 5 | Schemas 1–4 migrate in memory; publication emits canonical schema 5. |
-| Material Graph source | 4 | Schemas 1–3 migrate in memory; publication emits canonical schema 4. |
+| Material Graph source | 5 | Schemas 1–4 migrate in memory; publication emits canonical schema 5 and retains executable legacy surface data under an explicit migration-only field. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
@@ -352,7 +352,7 @@ output and reject stale or build-mismatched reports.
 ## Documentation
 
 The [documentation library](Docs/README.md) contains 84 maintained guides grouped around real tasks. Project authors
-should begin with the [Kéire 0.4.3 User Manual](Docs/Manual/README.md):
+should begin with the [Kéire 0.4.4 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
   [C# Scripting Fundamentals](Docs/Manual/ScriptingFundamentals.md), and

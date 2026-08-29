@@ -15,7 +15,7 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 4;
+    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 5;
     inline constexpr std::uint32_t MaterialInstanceSourceSchemaVersion = 2;
 
     struct MaterialGraphPropertyBinding
@@ -72,9 +72,8 @@ namespace Keire
         std::vector<MaterialGraphPropertyBinding> Properties;
         std::vector<MaterialGraphValueNode> Nodes;
         std::vector<MaterialGraphConnection> Connections;
-        /// Legacy compatibility graph. New Material Graph authoring binds exposed Shader Graph parameters and does not
-        /// duplicate executable shader logic. Existing authored expressions remain loadable for
-        /// migration/compatibility.
+        /// Decode-only legacy compatibility graph. Schema v5 writes it only as `legacySurfaceGraph` when executable
+        /// v1-v4 expressions still require migration. New Material Graph authoring has one shader authority.
         ShaderGraphDefinition SurfaceGraph;
         GraphAuthoringMetadata Authoring;
 

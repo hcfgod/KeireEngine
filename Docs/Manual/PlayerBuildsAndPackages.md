@@ -57,7 +57,7 @@ project copy and intentionally stops normal registry updates until reverted.
 ## Publication Status Matters
 
 Local package creation produces an archive; it does not publish, sign, moderate, or activate a Marketplace listing.
-Kéire 0.4.3 is the current source and Windows publication target. Signed 0.4.2 catalog sequence 17 remains active for
+Kéire 0.4.4 is the current source and Windows publication target. Signed 0.4.2 catalog sequence 17 remains active for
 Windows and Linux x86-64 and retains the immutable 0.4.1 records; a local build or quarantine package is still not a
 downloadable release unless it is present in the active catalog.
 
