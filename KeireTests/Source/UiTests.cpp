@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include "KeireInternal/UiInputInternal.h"
 #include "KeireInternal/UiRenderBackendInternal.h"
 
 #include <doctest/doctest.h>
@@ -864,6 +865,20 @@ TEST_CASE("UI item rectangles report bounded screen-space geometry")
     CHECK(rect.Contains({55.0F, 45.0F}));
     CHECK_FALSE(rect.Contains({9.0F, 45.0F}));
     CHECK_FALSE(rect.Contains({55.0F, 71.0F}));
+}
+
+TEST_CASE("external retained text focus requests the Dear ImGui platform text-input lifecycle")
+{
+    ImGuiContext* previous = ImGui::GetCurrentContext();
+    ImGuiContext* context = ImGui::CreateContext();
+    REQUIRE(context);
+    CHECK_FALSE(context->PlatformImeData.WantTextInput);
+
+    Keire::Detail::UiBackendRequestTextInput();
+    CHECK(context->PlatformImeData.WantTextInput);
+
+    ImGui::DestroyContext(context);
+    ImGui::SetCurrentContext(previous);
 }
 
 TEST_CASE("lost-device UI abandonment preserves CPU textures without releasing invalid GPU handles")

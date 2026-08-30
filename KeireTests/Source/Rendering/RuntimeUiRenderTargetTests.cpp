@@ -222,6 +222,8 @@ TEST_CASE("World runtime UI packet ownership is rebound only to an explicit fram
     panel.Surface.Id = 1U;
     panel.Surface.Epoch = 3U;
     panel.Surface.Lifetime = std::make_shared<const Keire::RenderBackend::RenderSurfaceEpochLease>(1U, 3U);
+    panel.Viewport = {640.0F, 360.0F};
+    panel.LayoutScale = 1.0F;
     frame.RuntimeUiWorldPanels.push_back(panel);
     CHECK_FALSE(Keire::RenderBackend::RuntimeUiWorldPanelOwnershipValid(frame.RuntimeUiWorldPanels.front(), frame));
     Keire::RenderBackend::QualifyRuntimeUiWorldPanels(frame);
@@ -231,6 +233,54 @@ TEST_CASE("World runtime UI packet ownership is rebound only to an explicit fram
     CHECK_FALSE(Keire::RenderBackend::RuntimeUiWorldPanelOwnershipValid(frame.RuntimeUiWorldPanels.front(), frame));
     Keire::RenderBackend::QualifyRuntimeUiWorldPanels(frame);
     CHECK(Keire::RenderBackend::RuntimeUiWorldPanelOwnershipValid(frame.RuntimeUiWorldPanels.front(), frame));
+    CHECK(frame.RuntimeUiWorldPanels.front().Viewport == (Keire::Vector2{640.0F, 360.0F}));
+    CHECK(frame.RuntimeUiWorldPanels.front().LayoutScale == doctest::Approx(1.0F));
+
+    Keire::RenderBackend::RenderFramePacket resizedFrame;
+    resizedFrame.DeviceGeneration = 8U;
+    resizedFrame.FrameSlot = 0U;
+    panel.Viewport = {1440.0F, 900.0F};
+    panel.LayoutScale = 2.3717082F;
+    resizedFrame.RuntimeUiWorldPanels.push_back(panel);
+    Keire::RenderBackend::QualifyRuntimeUiWorldPanels(resizedFrame);
+    CHECK(Keire::RenderBackend::RuntimeUiWorldPanelOwnershipValid(resizedFrame.RuntimeUiWorldPanels.front(),
+                                                                  resizedFrame));
+    CHECK(resizedFrame.RuntimeUiWorldPanels.front().Viewport == (Keire::Vector2{1440.0F, 900.0F}));
+    CHECK(resizedFrame.RuntimeUiWorldPanels.front().LayoutScale == doctest::Approx(2.3717082F));
+    CHECK(frame.RuntimeUiWorldPanels.front().Viewport == (Keire::Vector2{640.0F, 360.0F}));
+}
+
+TEST_CASE("World runtime UI geometry retains authored physical size across viewport scaling")
+{
+    Keire::RenderBackend::CapturedRuntimeUiWorldPanel initial;
+    initial.Commands.push_back({.Type = Keire::RuntimeUiDrawType::Quad,
+                                .Rect = {0.0F, 0.0F, 400.0F, 200.0F},
+                                .ClipRect = {0.0F, 0.0F, 400.0F, 200.0F}});
+    initial.Viewport = {640.0F, 360.0F};
+    initial.ReferenceResolution = {400.0F, 200.0F};
+    initial.Pivot = {0.5F, 0.5F};
+    initial.WorldUnitsPerPixel = {0.005F, 0.005F};
+    initial.LayoutScale = 1.0F;
+    const auto initialGeometry = Keire::RenderBackend::BuildRuntimeUiWorldGeometry(initial, 1024U, 1024U);
+
+    auto maximized = initial;
+    maximized.Viewport = {1440.0F, 900.0F};
+    maximized.LayoutScale = 2.3717082F;
+    maximized.Commands.front().Rect = {0.0F, 0.0F, 400.0F * maximized.LayoutScale, 200.0F * maximized.LayoutScale};
+    maximized.Commands.front().ClipRect = maximized.Commands.front().Rect;
+    const auto maximizedGeometry = Keire::RenderBackend::BuildRuntimeUiWorldGeometry(maximized, 1024U, 1024U);
+
+    REQUIRE(initialGeometry.Vertices.size() == maximizedGeometry.Vertices.size());
+    REQUIRE_FALSE(initialGeometry.Vertices.empty());
+    for (std::size_t index = 0; index < initialGeometry.Vertices.size(); ++index)
+    {
+        CHECK(maximizedGeometry.Vertices[index].Position.X ==
+              doctest::Approx(initialGeometry.Vertices[index].Position.X));
+        CHECK(maximizedGeometry.Vertices[index].Position.Y ==
+              doctest::Approx(initialGeometry.Vertices[index].Position.Y));
+        CHECK(maximizedGeometry.Vertices[index].Position.Z ==
+              doctest::Approx(initialGeometry.Vertices[index].Position.Z));
+    }
 }
 
 TEST_CASE("Camera-overlay runtime UI packets are invalidated across frame slots and device generations")

@@ -154,6 +154,10 @@ namespace Keire::RenderBackend
                             const auto camera = submission.View->Camera();
                             if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection))
                                 throw std::invalid_argument("World-surface runtime UI camera is invalid.");
+                            const auto rootState = submission.Tree->State(submission.Root);
+                            const float layoutScale = rootState ? rootState->LayoutScale : 1.0F;
+                            if (!std::isfinite(layoutScale) || layoutScale <= 0.0F)
+                                throw std::invalid_argument("World-surface runtime UI layout scale is invalid.");
                             frame->RuntimeUiWorldPanels.push_back(
                                 {.Commands = std::move(commands),
                                  .Surface = pending.Surface,
@@ -163,6 +167,7 @@ namespace Keire::RenderBackend
                                  .ReferenceResolution = submission.ReferenceResolution,
                                  .Pivot = submission.Pivot,
                                  .WorldUnitsPerPixel = submission.WorldUnitsPerPixel,
+                                 .LayoutScale = layoutScale,
                                  .SortingOrder = submission.SortingOrder,
                                  .Sequence = pending.Sequence,
                                  .DepthTest = submission.DepthTest});

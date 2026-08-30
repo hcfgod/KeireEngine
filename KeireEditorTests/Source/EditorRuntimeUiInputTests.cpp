@@ -2,9 +2,8 @@
 
 #include "KeireClient/Editor/EditorRuntimeUiInput.h"
 
-#include <doctest/doctest.h>
-
 #include <array>
+#include <doctest/doctest.h>
 #include <string>
 #include <string_view>
 
@@ -199,12 +198,16 @@ TEST_CASE("Editor world-surface UI routes projected focus text and submit input"
     REQUIRE(presentation->PointerButton(center.X, center.Y, Keire::RuntimeUiPointerButton::Primary, true));
     REQUIRE(presentation->PointerButton(center.X, center.Y, Keire::RuntimeUiPointerButton::Primary, false));
     CHECK(presentation->TextInputFocused());
+    CHECK(KeireEditor::RequestRuntimeUiTextInput(presentation));
     presentation->TextInput("status");
     CHECK(presentation->ReadUiDocumentElementText(documentEntity.Id(), command->DocumentGeneration, command->Element) ==
           "status");
     REQUIRE(presentation->KeyInput(Keire::RuntimeUiKey::Enter));
     CHECK(presentation->ConsumeUiDocumentElementEvent(documentEntity.Id(), command->DocumentGeneration,
                                                       command->Element, Keire::RuntimeUiEventType::Submit));
+
+    REQUIRE(presentation->Ui()->SetFocus({}));
+    CHECK_FALSE(KeireEditor::RequestRuntimeUiTextInput(presentation));
 
     presentation->Clear();
     scene->Close();

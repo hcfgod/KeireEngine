@@ -22,6 +22,7 @@ namespace Keire::Detail
         Vector2 Pivot{0.5F, 0.5F};
         Vector2 Viewport;
         Vector2 WorldUnitsPerPixel{0.01F, 0.01F};
+        float LayoutScale = 1.0F;
         std::int32_t SortingOrder = 0;
         bool ToolkitDocument = false;
         UiPanelTarget ToolkitTarget = UiPanelTarget::ScreenOverlay;

@@ -50,6 +50,10 @@ versions.
 
 ### Fixed
 
+- Retained UI now snapshots viewport and layout scaling per accepted render frame, so screen documents fit resized or
+  maximized Game views while world panels keep their authored physical size across bounded frames and device recovery.
+  Focused retained text fields also keep the SDL/ImGui text-input lifecycle active, restoring character entry for
+  depth-tested world-surface terminals and other external retained controls.
 - Packaged runtimes now request GPU VFX pipeline warmup while their startup scene loads, avoiding a large first-use
   gameplay stall. The Windows packaged-runtime gate retries once only when process capture fails to report an exit
   code, while real nonzero exits and incomplete validation reports still fail immediately.

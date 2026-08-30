@@ -523,6 +523,104 @@ TEST_CASE("camera-overlay UI documents resolve their exact authored camera witho
     assets->Close();
 }
 
+TEST_CASE("UI document layout follows resized game viewports while world panels retain physical scale")
+{
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    assetSpecification.Decoders.push_back(Keire::CreateUiPanelSettingsAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const Keire::AssetId screenTreeId(0x50524553454e5480ULL, 1);
+    const Keire::AssetId screenPanelId(0x50524553454e5480ULL, 2);
+    const Keire::AssetId screenRootId(0x50524553454e5480ULL, 3);
+    const Keire::AssetId worldTreeId(0x50524553454e5480ULL, 4);
+    const Keire::AssetId worldPanelId(0x50524553454e5480ULL, 5);
+    const Keire::AssetId worldRootId(0x50524553454e5480ULL, 6);
+
+    Keire::UiVisualTreeDefinition screenTree;
+    screenTree.Name = "ResizableScreenOverlay";
+    screenTree.Root.StableId = screenRootId;
+    screenTree.Root.InlineStyles = {{"width", "100%"}, {"height", "100%"}};
+    REQUIRE(assets->PublishDevelopmentAsset(screenTreeId, Keire::CreateRef<Keire::UiVisualTreeAsset>(screenTree)));
+    Keire::UiPanelSettingsDefinition screenPanel;
+    screenPanel.Target = Keire::UiPanelTarget::ScreenOverlay;
+    screenPanel.ScaleMode = Keire::RuntimeUiScaleMode::ScaleWithViewport;
+    screenPanel.ReferenceWidth = 640.0F;
+    screenPanel.ReferenceHeight = 360.0F;
+    REQUIRE(assets->PublishDevelopmentAsset(screenPanelId, Keire::CreateRef<Keire::UiPanelSettingsAsset>(screenPanel)));
+
+    Keire::UiVisualTreeDefinition worldTree;
+    worldTree.Name = "FixedWorldSurface";
+    worldTree.Root.StableId = worldRootId;
+    worldTree.Root.InlineStyles = {{"width", "400"}, {"height", "200"}};
+    REQUIRE(assets->PublishDevelopmentAsset(worldTreeId, Keire::CreateRef<Keire::UiVisualTreeAsset>(worldTree)));
+    Keire::UiPanelSettingsDefinition worldPanel;
+    worldPanel.Target = Keire::UiPanelTarget::WorldSurface;
+    worldPanel.ScaleMode = Keire::RuntimeUiScaleMode::ConstantPixels;
+    worldPanel.ReferenceWidth = 400.0F;
+    worldPanel.ReferenceHeight = 200.0F;
+    worldPanel.WorldWidth = 2.0F;
+    worldPanel.WorldHeight = 1.0F;
+    REQUIRE(assets->PublishDevelopmentAsset(worldPanelId, Keire::CreateRef<Keire::UiPanelSettingsAsset>(worldPanel)));
+
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Resizable UI documents"));
+    auto camera = scene->CreateEntity("Camera");
+    REQUIRE(camera.AddComponent<Keire::CameraComponent>());
+    camera.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.0F, -3.0F});
+    auto screenEntity = scene->CreateEntity("Screen overlay");
+    const auto screenDocument = screenEntity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(screenDocument);
+    screenDocument->SetVisualTree(screenTreeId);
+    screenDocument->SetPanelSettings(screenPanelId);
+    auto worldEntity = scene->CreateEntity("World surface");
+    const auto worldDocument = worldEntity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(worldDocument);
+    worldDocument->SetVisualTree(worldTreeId);
+    worldDocument->SetPanelSettings(worldPanelId);
+
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    presentation->Synchronize(scene, 640.0F, 360.0F, false);
+    const auto initialScreen = presentation->UiDocumentDebugSnapshot(screenEntity.Id());
+    const auto initialWorld = presentation->UiDocumentDebugSnapshot(worldEntity.Id());
+    REQUIRE(initialScreen);
+    REQUIRE(initialWorld);
+    REQUIRE(initialScreen->Elements.size() == 1U);
+    REQUIRE(initialWorld->Elements.size() == 1U);
+    CHECK(initialScreen->Elements.front().State.Rect == (Keire::RuntimeUiRect{0.0F, 0.0F, 640.0F, 360.0F}));
+    CHECK(initialScreen->Elements.front().State.ClipRect == (Keire::RuntimeUiRect{0.0F, 0.0F, 640.0F, 360.0F}));
+    CHECK(initialWorld->Elements.front().State.Rect == (Keire::RuntimeUiRect{0.0F, 0.0F, 400.0F, 200.0F}));
+    const auto initialSubmissions = presentation->UiRenderSubmissions({});
+    const auto initialWorldSubmission = std::ranges::find(
+        initialSubmissions, Keire::RuntimeUiRenderTarget::WorldSurface, &Keire::RuntimeUiRenderSubmission::Target);
+    REQUIRE(initialWorldSubmission != initialSubmissions.end());
+    CHECK(initialWorldSubmission->Viewport == (Keire::Vector2{640.0F, 360.0F}));
+
+    presentation->Synchronize(scene, 1440.0F, 900.0F, false);
+    const auto maximizedScreen = presentation->UiDocumentDebugSnapshot(screenEntity.Id());
+    const auto maximizedWorld = presentation->UiDocumentDebugSnapshot(worldEntity.Id());
+    REQUIRE(maximizedScreen);
+    REQUIRE(maximizedWorld);
+    REQUIRE(maximizedScreen->Elements.size() == 1U);
+    REQUIRE(maximizedWorld->Elements.size() == 1U);
+    CHECK(maximizedScreen->Elements.front().State.Rect == (Keire::RuntimeUiRect{0.0F, 0.0F, 1440.0F, 900.0F}));
+    CHECK(maximizedScreen->Elements.front().State.ClipRect == (Keire::RuntimeUiRect{0.0F, 0.0F, 1440.0F, 900.0F}));
+    CHECK(maximizedWorld->Elements.front().State.Rect == initialWorld->Elements.front().State.Rect);
+    CHECK(maximizedWorld->Elements.front().State.LayoutScale ==
+          doctest::Approx(initialWorld->Elements.front().State.LayoutScale));
+    const auto maximizedSubmissions = presentation->UiRenderSubmissions({});
+    const auto maximizedWorldSubmission = std::ranges::find(
+        maximizedSubmissions, Keire::RuntimeUiRenderTarget::WorldSurface, &Keire::RuntimeUiRenderSubmission::Target);
+    REQUIRE(maximizedWorldSubmission != maximizedSubmissions.end());
+    CHECK(maximizedWorldSubmission->Viewport == (Keire::Vector2{1440.0F, 900.0F}));
+    CHECK(maximizedWorldSubmission->ReferenceResolution == initialWorldSubmission->ReferenceResolution);
+    CHECK(maximizedWorldSubmission->WorldUnitsPerPixel == initialWorldSubmission->WorldUnitsPerPixel);
+
+    presentation->Clear();
+    scene->Close();
+    assets->Close();
+}
+
 TEST_CASE("scene UI document handles query mutate deliver events and reject stale generations")
 {
     Keire::AssetSystemSpecification assetSpecification;

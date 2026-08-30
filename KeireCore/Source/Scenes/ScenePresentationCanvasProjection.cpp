@@ -5,6 +5,7 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Ui.h"
+#include "KeireInternal/Ui/RuntimeUiStyleInternal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -74,7 +75,8 @@ namespace Keire::Detail
                 if (requireCanvasBounds &&
                     (normalizedX < 0.0F || normalizedX > 1.0F || normalizedY < 0.0F || normalizedY > 1.0F))
                     return std::nullopt;
-                return Vector2{normalizedX * canvas.Viewport.X, normalizedY * canvas.Viewport.Y};
+                return Vector2{normalizedX * canvas.ReferenceResolution.X * canvas.LayoutScale,
+                               normalizedY * canvas.ReferenceResolution.Y * canvas.LayoutScale};
             }
             catch (...)
             {
@@ -100,10 +102,10 @@ namespace Keire::Detail
             return std::nullopt;
         if (canvas.Geometry.RenderMode != CanvasRenderMode::WorldSpace)
             return point;
-        const float normalizedX = point.X / canvas.Viewport.X;
-        const float normalizedY = point.Y / canvas.Viewport.Y;
-        const Vector3 local{(normalizedX - canvas.Pivot.X) * canvas.ReferenceResolution.X * canvas.WorldUnitsPerPixel.X,
-                            (canvas.Pivot.Y - normalizedY) * canvas.ReferenceResolution.Y * canvas.WorldUnitsPerPixel.Y,
+        const Vector3 local{(point.X / canvas.LayoutScale - canvas.Pivot.X * canvas.ReferenceResolution.X) *
+                                canvas.WorldUnitsPerPixel.X,
+                            (canvas.Pivot.Y * canvas.ReferenceResolution.Y - point.Y / canvas.LayoutScale) *
+                                canvas.WorldUnitsPerPixel.Y,
                             0.0F};
         return ProjectPoint(Math::TransformPoint(canvas.World, local), canvas.ViewProjection, canvas.Viewport);
     }
@@ -240,6 +242,13 @@ namespace Keire::Detail
             state.Root = document.Root;
             state.ReferenceResolution = {document.Settings.ReferenceWidth, document.Settings.ReferenceHeight};
             state.Viewport = viewport;
+            RuntimeUiCanvasSettings canvasSettings;
+            canvasSettings.ScaleMode = document.Settings.ScaleMode;
+            canvasSettings.ReferenceWidth = document.Settings.ReferenceWidth;
+            canvasSettings.ReferenceHeight = document.Settings.ReferenceHeight;
+            canvasSettings.MatchWidthOrHeight = document.Settings.MatchWidthOrHeight;
+            canvasSettings.RespectSafeArea = document.Settings.RespectSafeArea;
+            state.LayoutScale = ResolveRuntimeUiScale(viewportWidth, viewportHeight, canvasSettings);
 
             switch (document.Settings.Target)
             {
@@ -288,8 +297,10 @@ namespace Keire::Detail
                 {
                     break;
                 }
-                const std::array layoutCorners{Vector2{0.0F, 0.0F}, Vector2{viewportWidth, 0.0F},
-                                               Vector2{viewportWidth, viewportHeight}, Vector2{0.0F, viewportHeight}};
+                const float layoutWidth = state.ReferenceResolution.X * state.LayoutScale;
+                const float layoutHeight = state.ReferenceResolution.Y * state.LayoutScale;
+                const std::array layoutCorners{Vector2{0.0F, 0.0F}, Vector2{layoutWidth, 0.0F},
+                                               Vector2{layoutWidth, layoutHeight}, Vector2{0.0F, layoutHeight}};
                 state.Geometry.Visible = true;
                 for (std::size_t index = 0; index < layoutCorners.size(); ++index)
                 {

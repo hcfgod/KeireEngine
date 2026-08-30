@@ -266,11 +266,11 @@ namespace Keire::RenderBackend
         ProjectRuntimeUiWorldVertex(const RuntimeUiVertex& source, const CapturedRuntimeUiWorldPanel& panel,
                                     const std::uint32_t width, const std::uint32_t height) noexcept
         {
-            const float normalizedX = source.Position.X / panel.Viewport.X;
-            const float normalizedY = source.Position.Y / panel.Viewport.Y;
-            const Vector3 local{
-                (normalizedX - panel.Pivot.X) * panel.ReferenceResolution.X * panel.WorldUnitsPerPixel.X,
-                (panel.Pivot.Y - normalizedY) * panel.ReferenceResolution.Y * panel.WorldUnitsPerPixel.Y, 0.0F};
+            const Vector3 local{(source.Position.X / panel.LayoutScale - panel.Pivot.X * panel.ReferenceResolution.X) *
+                                    panel.WorldUnitsPerPixel.X,
+                                (panel.Pivot.Y * panel.ReferenceResolution.Y - source.Position.Y / panel.LayoutScale) *
+                                    panel.WorldUnitsPerPixel.Y,
+                                0.0F};
             const auto world = Math::TransformPoint(panel.World, local);
             const auto& matrix = panel.ViewProjection.Elements;
             const float clipX = matrix[0] * world.X + matrix[4] * world.Y + matrix[8] * world.Z + matrix[12];

@@ -75,6 +75,7 @@ namespace Keire::RenderBackend
         Vector2 ReferenceResolution;
         Vector2 Pivot;
         Vector2 WorldUnitsPerPixel;
+        float LayoutScale = 1.0F;
         std::int32_t SortingOrder = 0;
         std::uint64_t Sequence = 0;
         bool DepthTest = true;

@@ -4,6 +4,7 @@
 #include "Keire/Scenes/SceneRuntimeWorld.h"
 #include "Keire/Ui.h"
 #include "Keire/Ui/RuntimeUi.h"
+#include "KeireInternal/UiInputInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <algorithm>
@@ -210,12 +211,20 @@ namespace KeireEditor
         return active && active->FocusedUiEntity() ? active : Keire::Ref<Keire::ScenePresentationRuntime>{};
     }
 
+    bool RequestRuntimeUiTextInput(const Keire::Ref<Keire::ScenePresentationRuntime>& presentation) noexcept
+    {
+        if (!presentation || !presentation->TextInputFocused())
+            return false;
+        Keire::Detail::UiBackendRequestTextInput();
+        return true;
+    }
+
     void RouteRuntimeUiKeyboard(Keire::UiFrame& ui, const Keire::Ref<Keire::ScenePresentationRuntime>& presentation,
                                 const Keire::Ref<Keire::WindowSystem>& windows, const Keire::Ref<Keire::Window>& window)
     {
         if (!presentation || !presentation->FocusedUiEntity())
             return;
-        const bool textInputFocused = presentation->TextInputFocused();
+        const bool textInputFocused = RequestRuntimeUiTextInput(presentation);
         if (windows && window)
             (void)Keire::WindowSystemInternalAccess::SetTextInput(*windows, window->Id(), textInputFocused);
         if (textInputFocused)

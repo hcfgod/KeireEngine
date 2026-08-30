@@ -1,6 +1,7 @@
 #include "KeireInternal/UiInputInternal.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 
 #include <cstdint>
 
@@ -96,6 +97,12 @@ namespace Keire::Detail
     bool UiBackendKeyDown(const UiKey key) noexcept { return ImGui::IsKeyDown(NativeKey(key)); }
 
     bool UiBackendKeyPressed(const UiKey key) noexcept { return ImGui::IsKeyPressed(NativeKey(key), false); }
+
+    void UiBackendRequestTextInput() noexcept
+    {
+        if (const auto context = ImGui::GetCurrentContext())
+            context->PlatformImeData.WantTextInput = true;
+    }
 
     std::string UiBackendTextInput()
     {

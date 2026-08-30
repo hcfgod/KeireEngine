@@ -55,6 +55,8 @@ namespace KeireEditor
                                                     float x, float y) noexcept;
     [[nodiscard]] Keire::Ref<Keire::ScenePresentationRuntime>
     SelectRuntimeUiKeyboardPresentation(const Keire::Ref<Keire::ScenePresentationRuntime>& active) noexcept;
+    [[nodiscard]] bool
+    RequestRuntimeUiTextInput(const Keire::Ref<Keire::ScenePresentationRuntime>& presentation) noexcept;
     void RouteRuntimeUiKeyboard(Keire::UiFrame& ui, const Keire::Ref<Keire::ScenePresentationRuntime>& presentation,
                                 const Keire::Ref<Keire::WindowSystem>& windows,
                                 const Keire::Ref<Keire::Window>& window);
