@@ -145,7 +145,10 @@ export const docAuthorities = {
     "Manual/ScriptingRecipes.md": ["KeireManaged/RuntimeWorld.cs", "Docs/Manual/Examples/ManualExamples.cs"],
     "Manual/WorldAndAssets.md": ["KeireManaged/Handles.cs", "KeireManaged/RuntimeWorld.cs", "KeireManaged/ScriptableObject.cs"],
     "Manual/InputPhysicsAndAudio.md": ["KeireManaged/RuntimeApi.cs", "KeireManaged/NativeInput.cs"],
-    "Manual/UiJobsAndDiagnostics.md": ["KeireManaged/RuntimeUiControls.cs", "KeireManaged/Jobs.cs", "KeireManaged/Profiler.cs"],
+    "Manual/UiJobsAndDiagnostics.md": [
+        "KeireManaged/UiToolkit.cs", "KeireManaged/UiToolkitControls.cs", "KeireManaged/Jobs.cs",
+        "KeireManaged/Profiler.cs",
+    ],
     "Manual/ShaderGraph.md": ["KeireCore/Include/Keire/Rendering/ShaderGraph.h", "KeireClient/Source/Editor/ShaderGraphPanel.cpp"],
     "Manual/ShaderGraphExamples.md": ["KeireCore/Include/Keire/Rendering/ShaderGraph.h", "Docs/ShadersAndMaterials.md"],
     "Manual/MaterialGraph.md": ["KeireCore/Include/Keire/Rendering/MaterialGraph.h", "KeireManaged/Rendering.cs"],
@@ -199,7 +202,9 @@ export const docAuthorities = {
     "Scripting/GameplayServices.md": ["KeireManaged/RuntimeApi.cs", "KeireManaged/NativeRuntime.cs"],
     "Scripting/Audio.md": ["KeireManaged/RuntimeApi.cs", "KeireCore/Include/Keire/Audio"],
     "Scripting/Animation.md": ["KeireManaged/RuntimeApi.cs", "KeireCore/Include/Keire/Animation"],
-    "Scripting/UiAndEvents.md": ["KeireManaged/RuntimeUi.cs", "KeireManaged/Events.cs"],
+    "Scripting/UiAndEvents.md": [
+        "KeireManaged/UiToolkit.cs", "KeireManaged/UiToolkitControls.cs", "KeireManaged/Events.cs",
+    ],
     "Scripting/RenderingAndMaterials.md": ["KeireManaged/Rendering.cs", "KeireCore/Source/Scripting/ManagedRuntimeRenderingServices.cpp"],
     "Scripting/ScenesAndRenderSettings.md": ["KeireManaged/RuntimeWorld.cs", "KeireCore/Source/Scripting/ManagedRuntimeWorld.cpp"],
     "Scripting/AsyncReloadAndDiagnostics.md": ["KeireManaged/Jobs.cs", "KeireManaged/BehaviourSynchronizationContext.cs"],

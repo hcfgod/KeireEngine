@@ -1232,7 +1232,8 @@ $windowsFfmpeg = Get-Content (Join-Path $Windows "ffmpeg.ps1") -Raw
 $windowsFfmpegContract = Get-Content (Join-Path $Windows "ffmpeg-runtime-contract.ps1") -Raw
 $windowsFfmpegStage = Get-Content (Join-Path $Windows "stage-ffmpeg-runtime.ps1") -Raw
 $windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
-Assert-True ($windowsPackage.Contains('"--validate-additive-runtime", $runtimeValidationOutput') -and
+Assert-True ($windowsPackage.Contains('"--validate-additive-runtime"') -and
+               $windowsPackage.Contains('$runtimeValidationOutput)') -and
               $windowsPackage.Contains('"--content", $runtimeExecutionContent, "--headless"') -and
               $windowsPackage.Contains('"Build\Validation\packaged-runtime-" + [guid]::NewGuid().ToString("N")') -and
               $windowsPackage.Contains('Copy-Item -LiteralPath $runtimeContent -Destination $runtimeExecutionContent') -and

@@ -23,7 +23,6 @@ namespace Keire
         }
 
         [[nodiscard]] bool Finite(const float value) noexcept { return std::isfinite(value); }
-
     } // namespace
 
     class RuntimeUiTree::Impl final
