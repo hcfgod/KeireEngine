@@ -50,6 +50,9 @@ versions.
 
 ### Fixed
 
+- Packaged runtimes now request GPU VFX pipeline warmup while their startup scene loads, avoiding a large first-use
+  gameplay stall. The Windows packaged-runtime gate retries once only when process capture fails to report an exit
+  code, while real nonzero exits and incomplete validation reports still fail immediately.
 - `[SerializeReference]` now propagates identity-preserving graph metadata through array, `List<T>`, and
   `Dictionary<TKey, TValue>` descendants, enabling Inspector type selection and cycle-safe graph editing for
   polymorphic collection elements.

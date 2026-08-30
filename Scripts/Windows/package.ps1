@@ -275,13 +275,25 @@ Copy-Item -LiteralPath $runtimeContent -Destination $runtimeExecutionContent -Re
 & (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeExecutionContent --frames 12
 if ($LASTEXITCODE -ne 0) { throw "Packaged runtime smoke failed with exit code $LASTEXITCODE." }
 $runtimeValidationOutput = Join-Path $runtimeValidationRoot "additive-runtime-report.json"
-$runtimeValidationStartedAt = [DateTime]::UtcNow
-$runtimeValidationResult = Invoke-WindowsExecutableCapture -Path (Join-Path $stage "bin\$runtimeName.exe") `
-    -Arguments @("--content", $runtimeExecutionContent, "--headless", "--validate-additive-runtime", `
-        $runtimeValidationOutput) `
-    -Timeout ([TimeSpan]::FromMinutes(6))
-if ($runtimeValidationResult.StandardOutput) { [Console]::Out.Write($runtimeValidationResult.StandardOutput) }
-if ($runtimeValidationResult.StandardError) { [Console]::Error.Write($runtimeValidationResult.StandardError) }
+$runtimeValidationResult = $null
+$runtimeValidationStartedAt = [DateTime]::MinValue
+for ($runtimeValidationAttempt = 1; $runtimeValidationAttempt -le 2; ++$runtimeValidationAttempt) {
+    if ($runtimeValidationAttempt -gt 1) {
+        Write-Warning "Packaged additive runtime validation did not report an exit code; retrying once."
+        Remove-Item -LiteralPath $runtimeValidationOutput -Force -ErrorAction SilentlyContinue
+    }
+    $runtimeValidationStartedAt = [DateTime]::UtcNow
+    $runtimeValidationResult = Invoke-WindowsExecutableCapture -Path (Join-Path $stage "bin\$runtimeName.exe") `
+        -Arguments @("--content", $runtimeExecutionContent, "--headless", "--validate-additive-runtime", `
+            $runtimeValidationOutput) `
+        -Timeout ([TimeSpan]::FromMinutes(6))
+    if ($runtimeValidationResult.StandardOutput) { [Console]::Out.Write($runtimeValidationResult.StandardOutput) }
+    if ($runtimeValidationResult.StandardError) { [Console]::Error.Write($runtimeValidationResult.StandardError) }
+    if ($null -ne $runtimeValidationResult.ExitCode) { break }
+}
+if ($null -eq $runtimeValidationResult.ExitCode) {
+    throw "Packaged additive runtime validation did not report an exit code after two attempts."
+}
 if ($runtimeValidationResult.ExitCode -ne 0) {
     throw "Packaged additive runtime validation failed with exit code $($runtimeValidationResult.ExitCode)."
 }

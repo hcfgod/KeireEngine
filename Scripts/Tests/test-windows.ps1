@@ -1200,9 +1200,10 @@ Assert-True ($runtimeAdditiveValidation.Contains('Additive runtime validation ti
               $runtimeAdditiveValidation.Contains('BlockNextAcceptedFrame(*renderer)') -and
               $runtimeAdditiveValidation.Contains('FinalizeDeviceLossShutdown') -and
               $runtimeCommandLine.Contains('--hidden-validation-window') -and
-              $runtimeCommandLine.Contains('--validate-device-loss does not support --headless') -and
-              $runtimeApplication.Contains('specification.Render.Mode = RenderMode::Rendered') -and
-              $runtimeApplication.Contains('!hiddenValidationWindow') -and
+               $runtimeCommandLine.Contains('--validate-device-loss does not support --headless') -and
+               $runtimeApplication.Contains('specification.Render.Mode = RenderMode::Rendered') -and
+               $runtimeApplication.Contains('Owner().Renderer()->RequestGpuVfxPipelineWarmup()') -and
+               $runtimeApplication.Contains('!hiddenValidationWindow') -and
               $editorPlayValidation.Contains('RecoveryAttemptCountForTest(*renderer)') -and
               $editorPlayValidation.Contains('ObserveOcclusionGameView') -and
               $editorPlayValidation.Contains('SourceSurfaceEpoch == surfaceGeneration') -and
@@ -1254,8 +1255,11 @@ Assert-True ($windowsPackage.Contains('"--validate-additive-runtime", $runtimeVa
                $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.freshPoseSkinned.depthDraws -lt 1') -and
                $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.vfxVisibility.maskEntries -lt 1') -and
                $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1') -and
-               $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.vfxVisibility.maskConsumed') -and
-               $windowsPackage.Contains('$editorPlayValidation.observedRenderedFrames -lt 2') -and
+                $windowsPackage.Contains('$runtimeValidation.gpuOcclusion.vfxVisibility.maskConsumed') -and
+                $windowsPackage.Contains('$runtimeValidationAttempt -le 2') -and
+                $windowsPackage.Contains('$null -eq $runtimeValidationResult.ExitCode') -and
+                $windowsPackage.Contains('did not report an exit code after two attempts') -and
+                $windowsPackage.Contains('$editorPlayValidation.observedRenderedFrames -lt 2') -and
                $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.threeSceneContributions -ne 3') -and
                $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.culled -lt 1') -and
                $windowsPackage.Contains('$editorPlayValidation.gpuOcclusion.ownership.sourceSurfaceEpoch -ne') -and
