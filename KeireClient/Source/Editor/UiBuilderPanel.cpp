@@ -145,6 +145,13 @@ namespace KeireEditor
                      origin.Y + (rectangle.Y + rectangle.Height) * scale}};
         }
 
+        [[nodiscard]] bool IsPositiveFinite(const Keire::UiItemRect rectangle) noexcept
+        {
+            return std::isfinite(rectangle.Minimum.X) && std::isfinite(rectangle.Minimum.Y) &&
+                   std::isfinite(rectangle.Maximum.X) && std::isfinite(rectangle.Maximum.Y) &&
+                   rectangle.Maximum.X > rectangle.Minimum.X && rectangle.Maximum.Y > rectangle.Minimum.Y;
+        }
+
         [[nodiscard]] float RulerStep(const float rasterScale) noexcept
         {
             const float logicalTarget = 72.0F / std::max(rasterScale, 0.001F);
@@ -924,6 +931,8 @@ namespace KeireEditor
             }
             const auto rectangle = TransformPreviewRect(command.Rect, canvasOrigin, rasterScale);
             const auto clipRectangle = TransformPreviewRect(command.ClipRect, canvasOrigin, rasterScale);
+            if (!IsPositiveFinite(rectangle) || !IsPositiveFinite(clipRectangle))
+                continue;
             [[maybe_unused]] auto commandClip = ui.PushClipRect(clipRectangle);
             switch (command.Type)
             {

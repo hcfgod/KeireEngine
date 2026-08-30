@@ -50,6 +50,10 @@ versions.
 
 ### Fixed
 
+- UI Builder previews now discard non-finite or zero-area custom-control draw commands before clipping, so data-bound
+  documents with controls awaiting runtime data remain editable instead of reaching invalid renderer clip rectangles.
+- Model sidecar resolution now permits normalized parent segments when the resolved file remains inside the project
+  source root, restoring relative external textures from exporters such as Synty while retaining traversal rejection.
 - Retained UI now snapshots viewport and layout scaling per accepted render frame, so screen documents fit resized or
   maximized Game views while world panels keep their authored physical size across bounded frames and device recovery.
   Focused retained text fields also keep the SDL/ImGui text-input lifecycle active, restoring character entry for

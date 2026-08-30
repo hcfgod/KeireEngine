@@ -926,7 +926,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 21);
+    CHECK(importer.Version == 22);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -1528,13 +1528,45 @@ TEST_CASE("Assimp project IO rejects malformed encodings and encoded relative tr
         return {};
     };
 
-    for (const std::string_view rejected : {"C%3G%5Cinvalid.fbx", "%2E%2E/outside.bin"})
+    for (const std::string_view rejected : {"C%3G%5Cinvalid.fbx", "%2E%2E/%2E%2E/outside.bin"})
     {
         Keire::Detail::AssimpProjectIO io(context, primary);
         CHECK_FALSE(io.ReadReferencedFile(rejected));
         CHECK_FALSE(io.Violation().empty());
     }
     CHECK(reads == 0);
+}
+
+TEST_CASE("Assimp project IO permits parent segments that remain inside the source root")
+{
+    TemporaryDirectory directory("ModelConfinedParentReferenceTests");
+    const auto sourceRoot = directory.Path / "Assets";
+    const auto textureRelative = std::filesystem::path("Polygon/Textures/Alternates/PolygonWar_Texture_01.png");
+    std::filesystem::create_directories((sourceRoot / textureRelative).parent_path());
+    const std::array primary{std::byte{0x01}};
+    const std::array texture{std::byte{0x02}, std::byte{0x03}};
+
+    Keire::AssetImportContext context;
+    context.ProjectRoot = directory.Path;
+    context.SourceRoot = sourceRoot;
+    context.SourcePath = sourceRoot / "Polygon/Source Files/Characters/Character_American_Soldier_01.fbx";
+    context.RelativePath = "Polygon/Source Files/Characters/Character_American_Soldier_01.fbx";
+    std::vector<std::filesystem::path> reads;
+    context.ReadProjectFile = [&reads, &texture, &textureRelative](const std::filesystem::path& relative)
+    {
+        reads.push_back(relative.lexically_normal());
+        if (relative.lexically_normal() != std::filesystem::path("Assets") / textureRelative)
+            throw std::runtime_error("unexpected project read");
+        return std::vector(texture.begin(), texture.end());
+    };
+
+    Keire::Detail::AssimpProjectIO io(context, primary);
+    const auto referenced = io.ReadReferencedFile("../../Textures/Alternates/PolygonWar_Texture_01.png");
+    REQUIRE(referenced);
+    CHECK(referenced->RelativePath == std::filesystem::path("Assets") / textureRelative);
+    CHECK(std::ranges::equal(referenced->Bytes, texture));
+    CHECK(reads == std::vector{std::filesystem::path("Assets") / textureRelative});
+    CHECK(io.Violation().empty());
 }
 
 TEST_CASE("model import can retain material slots without publishing source materials")

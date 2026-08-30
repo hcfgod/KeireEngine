@@ -269,7 +269,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 21;
+        result.Version = 22;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};

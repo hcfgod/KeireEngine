@@ -157,6 +157,20 @@ namespace KeireEditor
                 CollectPreviewElements(child, document, tree, result);
         }
 
+        [[nodiscard]] bool IsFinite(const Keire::RuntimeUiRect rectangle) noexcept
+        {
+            return std::isfinite(rectangle.X) && std::isfinite(rectangle.Y) && std::isfinite(rectangle.Width) &&
+                   std::isfinite(rectangle.Height);
+        }
+
+        [[nodiscard]] bool IsRenderablePreviewCommand(const Keire::RuntimeUiDrawCommand& command) noexcept
+        {
+            if (command.Type == Keire::RuntimeUiDrawType::PushClip || command.Type == Keire::RuntimeUiDrawType::PopClip)
+                return true;
+            const auto clipped = command.Rect.Intersect(command.ClipRect);
+            return IsFinite(clipped) && !clipped.Empty();
+        }
+
         void CollectRootSelections(const Keire::UiVisualElementDefinition& parent,
                                    const std::span<const Keire::AssetId> selections,
                                    std::vector<Keire::AssetId>& result)
@@ -370,7 +384,11 @@ namespace KeireEditor
 
         UiBuilderRetainedPreview result;
         result.Statistics = tree->Statistics();
-        result.DrawCommands.assign(tree->DrawCommands().begin(), tree->DrawCommands().end());
+        for (const auto& command : tree->DrawCommands())
+        {
+            if (IsRenderablePreviewCommand(command))
+                result.DrawCommands.push_back(command);
+        }
         result.LinkedStyleSheets = definition.StyleSheets.size();
         result.ResolvedStyleSheets = styleSheets.size();
         result.InlineStyleProperties = CountInlineStyleProperties(definition.Root);

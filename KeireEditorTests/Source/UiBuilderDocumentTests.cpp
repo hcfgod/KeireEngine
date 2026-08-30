@@ -253,6 +253,60 @@ TEST_CASE("UI Builder retained preview applies safe area and selected pseudo-sta
     undoService->Close();
 }
 
+TEST_CASE("UI Builder preview skips zero-area draw commands from data-bound custom controls")
+{
+    constexpr std::string_view source = R"xml(<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Data Binding and Custom Controls">
+  <VisualElement id="e40b1201-1111-4000-8000-000000000001" name="settings" class="card">
+    <Label id="e40b1201-1111-4000-8000-000000000002" name="player-name" class="title" bind:text="Player.DisplayName"/>
+    <TextField id="e40b1201-1111-4000-8000-000000000003" name="display-name" bind-two-way:value="Player.DisplayName"/>
+    <Toggle id="e40b1201-1111-4000-8000-000000000004" name="show-profiler" text="Show profiler" bind-two-way:checked="Settings.ShowProfiler"/>
+    <Slider id="e40b1201-1111-4000-8000-000000000005" name="master-volume" minimum="0" maximum="1" bind-two-way:value="Settings.MasterVolume"/>
+    <FeatureGauge id="e40b1201-1111-4000-8000-000000000006" name="frame-rate" label="Frame rate" bind:value="Telemetry.FrameRate"/>
+    <ListView id="e40b1201-1111-4000-8000-000000000007" name="recent-events" bind:items-source="Telemetry.RecentEvents"/>
+  </VisualElement>
+</ui>)xml";
+    constexpr std::string_view styleSource = R"css(@keire-style 1;
+.card {
+  width: 560px;
+  padding: 24px;
+  gap: 12px;
+  flex-direction: column;
+  background-color: #101827e8;
+}
+.title {
+  height: 42px;
+  color: #f3f8ffff;
+  font-size: 30px;
+}
+)css";
+    auto definition = Keire::UiVisualTreeAsset::ParseSource(AsBytes(source));
+    const auto style =
+        Keire::CreateRef<Keire::UiStyleSheetAsset>(Keire::UiStyleSheetAsset::ParseSource(AsBytes(styleSource)));
+    const std::array<Keire::Ref<const Keire::UiStyleSheetAsset>, 1> styles{style};
+    KeireEditor::UiBuilderPreviewSettings settings;
+    settings.Width = 1920;
+    settings.Height = 1080;
+
+    const auto preview =
+        KeireEditor::BuildUiBuilderRetainedPreview(definition, definition.Root.StableId, settings, styles);
+
+    REQUIRE_FALSE(preview.DrawCommands.empty());
+    for (const auto& command : preview.DrawCommands)
+    {
+        if (command.Type == Keire::RuntimeUiDrawType::PushClip || command.Type == Keire::RuntimeUiDrawType::PopClip)
+        {
+            continue;
+        }
+        const auto clipped = command.Rect.Intersect(command.ClipRect);
+        CHECK_FALSE(clipped.Empty());
+        CHECK(std::isfinite(clipped.X));
+        CHECK(std::isfinite(clipped.Y));
+        CHECK(std::isfinite(clipped.Width));
+        CHECK(std::isfinite(clipped.Height));
+    }
+}
+
 TEST_CASE("UI Builder retained preview resolves referenced templates")
 {
     const auto templateId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000240");

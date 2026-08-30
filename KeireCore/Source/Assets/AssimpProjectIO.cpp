@@ -326,16 +326,14 @@ namespace Keire::Detail
         try
         {
             const auto requested = PathFromUtf8(*decoded);
-            if (!IsConfinedRelative(requested, false))
+            const auto normalizedRequest = requested.lexically_normal();
+            if (requested.empty() || requested.is_absolute() || requested.has_root_name() ||
+                requested.has_root_directory() || normalizedRequest.empty() || normalizedRequest == ".")
             {
-                const auto normalized = requested.lexically_normal();
-                if (!normalized.empty() && *normalized.begin() == "..")
-                    Reject("Assimp model sidecar escapes the project source root: " + *decoded);
-                else
-                    Reject("Assimp model sidecar path is not a valid confined relative URI: " + *decoded);
+                Reject("Assimp model sidecar path is not a valid confined relative URI: " + *decoded);
                 return std::nullopt;
             }
-            const auto sourceRelative = (m_SourceDirectory / requested).lexically_normal();
+            const auto sourceRelative = (m_SourceDirectory / normalizedRequest).lexically_normal();
             if (!IsConfinedRelative(sourceRelative, false))
             {
                 Reject("Assimp model sidecar escapes the project source root: " + *decoded);
