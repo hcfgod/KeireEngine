@@ -1,26 +1,7 @@
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Keire;
-
-internal enum NativeUiScalarProperty : byte
-{
-    Minimum,
-    Maximum,
-    Value
-}
-
-internal enum NativeUiFlagProperty : byte
-{
-    Interactable,
-    Checked,
-    Focused
-}
-
-internal enum NativeUiVectorProperty : byte
-{
-    ScrollOffset,
-    ContentSize
-}
 
 internal enum NativeUiEventType : byte
 {
@@ -37,91 +18,182 @@ internal enum NativeUiEventType : byte
     TextChanged
 }
 
+internal enum NativeUiDocumentElementType : byte
+{
+    Canvas,
+    Panel,
+    Text,
+    Image,
+    Button,
+    HorizontalLayout,
+    VerticalLayout,
+    Spacer,
+    GridLayout,
+    Slider,
+    Toggle,
+    InputField,
+    ScrollView
+}
+
+internal enum NativeUiDocumentFlag : byte
+{
+    Interactable,
+    Checked,
+    Focused,
+    Enabled
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeUiDocumentElement
+{
+    internal ulong DocumentGeneration;
+    internal ulong Element;
+    internal ulong StableIdHigh;
+    internal ulong StableIdLow;
+    internal NativeUiDocumentElementType Type;
+
+    internal readonly AssetId StableId => new(StableIdHigh, StableIdLow);
+}
+
 internal static unsafe class NativeRuntimeUi
 {
 #pragma warning disable CS0649
-    internal static delegate* unmanaged<ulong, ulong, byte, float*, byte> GetScalarIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte, float, byte> SetScalarIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte, byte*, byte> GetFlagIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte, byte, byte> SetFlagIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte, Vector2*, byte> GetVectorIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte, Vector2, byte> SetVectorIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte*, int, int> GetInputTextIcall;
-    internal static delegate* unmanaged<ulong, ulong, NativeString, byte> SetInputTextIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte, byte> ConsumeEventIcall;
-    internal static delegate* unmanaged<ulong, ulong, byte> FocusIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeUiDocumentElement*, byte> ResolveDocumentRootIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, NativeUiDocumentElement*, byte>
+        ResolveDocumentElementByIdIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, NativeUiDocumentElement*, byte>
+        ResolveDocumentElementByNameIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte> DocumentElementAliveIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte*, int, int> GetDocumentElementTextIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, NativeString, byte> SetDocumentElementTextIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, float*, byte> GetDocumentElementValueIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, float, byte> SetDocumentElementValueIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte, byte*, byte> GetDocumentElementFlagIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte, byte, byte> SetDocumentElementFlagIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte, byte> ConsumeDocumentElementEventIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte> FocusDocumentElementIcall;
 #pragma warning restore CS0649
 
-    internal static float GetScalar(Entity entity, NativeUiScalarProperty property)
+    internal static NativeUiDocumentElement? ResolveDocumentRoot(Entity document)
     {
-        float value;
-        if (GetScalarIcall(entity.Id.High, entity.Id.Low, (byte)property, &value) == 0)
-            throw new InvalidOperationException("The runtime UI scalar property is unavailable.");
-        return value;
+        NativeUiDocumentElement result;
+        return ResolveDocumentRootIcall != null &&
+               ResolveDocumentRootIcall(document.Id.High, document.Id.Low, &result) != 0
+            ? result
+            : null;
     }
 
-    internal static void SetScalar(Entity entity, NativeUiScalarProperty property, float value)
+    internal static NativeUiDocumentElement? ResolveDocumentElement(Entity document, AssetId stableId)
     {
-        if (SetScalarIcall(entity.Id.High, entity.Id.Low, (byte)property, value) == 0)
-            throw new InvalidOperationException("The runtime UI scalar property could not be changed.");
+        NativeUiDocumentElement result;
+        return ResolveDocumentElementByIdIcall != null &&
+               ResolveDocumentElementByIdIcall(document.Id.High, document.Id.Low, stableId.High, stableId.Low,
+                                               &result) != 0
+            ? result
+            : null;
     }
 
-    internal static bool GetFlag(Entity entity, NativeUiFlagProperty property)
+    internal static NativeUiDocumentElement? ResolveDocumentElement(Entity document, string name)
     {
-        byte value;
-        if (GetFlagIcall(entity.Id.High, entity.Id.Low, (byte)property, &value) == 0)
-            throw new InvalidOperationException("The runtime UI flag property is unavailable.");
-        return value != 0;
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        NativeUiDocumentElement result;
+        using NativeString nativeName = name;
+        return ResolveDocumentElementByNameIcall != null &&
+               ResolveDocumentElementByNameIcall(document.Id.High, document.Id.Low, nativeName, &result) != 0
+            ? result
+            : null;
     }
 
-    internal static void SetFlag(Entity entity, NativeUiFlagProperty property, bool value)
-    {
-        if (SetFlagIcall(entity.Id.High, entity.Id.Low, (byte)property, value ? (byte)1 : (byte)0) == 0)
-            throw new InvalidOperationException("The runtime UI flag property could not be changed.");
-    }
+    internal static bool DocumentElementAlive(Entity document, NativeUiDocumentElement element) =>
+        DocumentElementAliveIcall != null &&
+        DocumentElementAliveIcall(document.Id.High, document.Id.Low, element.DocumentGeneration, element.Element) != 0;
 
-    internal static Vector2 GetVector(Entity entity, NativeUiVectorProperty property)
+    internal static string GetDocumentElementText(Entity document, NativeUiDocumentElement element)
     {
-        Vector2 value;
-        if (GetVectorIcall(entity.Id.High, entity.Id.Low, (byte)property, &value) == 0)
-            throw new InvalidOperationException("The runtime UI vector property is unavailable.");
-        return value;
-    }
-
-    internal static void SetVector(Entity entity, NativeUiVectorProperty property, Vector2 value)
-    {
-        if (SetVectorIcall(entity.Id.High, entity.Id.Low, (byte)property, value) == 0)
-            throw new InvalidOperationException("The runtime UI vector property could not be changed.");
-    }
-
-    internal static string GetInputText(Entity entity)
-    {
-        int length = GetInputTextIcall(entity.Id.High, entity.Id.Low, null, 0);
+        if (GetDocumentElementTextIcall == null)
+            throw StaleDocumentElement();
+        int length = GetDocumentElementTextIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                                 element.Element, null, 0);
         if (length < 0)
-            throw new InvalidOperationException("The runtime UI input text is unavailable.");
+            throw StaleDocumentElement();
         byte[] bytes = new byte[length];
         fixed (byte* destination = bytes)
         {
-            if (GetInputTextIcall(entity.Id.High, entity.Id.Low, destination, bytes.Length) != length)
-                throw new InvalidOperationException("The runtime UI input text changed while it was read.");
+            if (GetDocumentElementTextIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                            element.Element, destination, bytes.Length) != length)
+                throw new InvalidOperationException("The UI Document element text changed while it was read.");
         }
         return Encoding.UTF8.GetString(bytes);
     }
 
-    internal static void SetInputText(Entity entity, string text)
+    internal static void SetDocumentElementText(Entity document, NativeUiDocumentElement element, string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+        if (SetDocumentElementTextIcall == null)
+            throw StaleDocumentElement();
         using NativeString nativeText = text;
-        if (SetInputTextIcall(entity.Id.High, entity.Id.Low, nativeText) == 0)
-            throw new InvalidOperationException("The runtime UI input text could not be changed.");
+        if (SetDocumentElementTextIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                        element.Element, nativeText) == 0)
+            throw StaleDocumentElement();
     }
 
-    internal static bool ConsumeEvent(Entity entity, NativeUiEventType type) =>
-        ConsumeEventIcall(entity.Id.High, entity.Id.Low, (byte)type) != 0;
-
-    internal static void Focus(Entity entity)
+    internal static float GetDocumentElementValue(Entity document, NativeUiDocumentElement element)
     {
-        if (FocusIcall(entity.Id.High, entity.Id.Low) == 0)
-            throw new InvalidOperationException("The runtime UI control could not receive focus.");
+        if (GetDocumentElementValueIcall == null)
+            throw StaleDocumentElement();
+        float value;
+        if (GetDocumentElementValueIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                         element.Element, &value) == 0)
+            throw StaleDocumentElement();
+        return value;
     }
+
+    internal static void SetDocumentElementValue(Entity document, NativeUiDocumentElement element, float value)
+    {
+        if (SetDocumentElementValueIcall == null)
+            throw StaleDocumentElement();
+        if (SetDocumentElementValueIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                         element.Element, value) == 0)
+            throw StaleDocumentElement();
+    }
+
+    internal static bool GetDocumentElementFlag(Entity document, NativeUiDocumentElement element,
+                                                NativeUiDocumentFlag property)
+    {
+        if (GetDocumentElementFlagIcall == null)
+            throw StaleDocumentElement();
+        byte value;
+        if (GetDocumentElementFlagIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                        element.Element, (byte)property, &value) == 0)
+            throw StaleDocumentElement();
+        return value != 0;
+    }
+
+    internal static void SetDocumentElementFlag(Entity document, NativeUiDocumentElement element,
+                                                NativeUiDocumentFlag property, bool value)
+    {
+        if (SetDocumentElementFlagIcall == null)
+            throw StaleDocumentElement();
+        if (SetDocumentElementFlagIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                        element.Element, (byte)property, value ? (byte)1 : (byte)0) == 0)
+            throw StaleDocumentElement();
+    }
+
+    internal static bool ConsumeDocumentElementEvent(Entity document, NativeUiDocumentElement element,
+                                                     NativeUiEventType type) =>
+        ConsumeDocumentElementEventIcall != null &&
+        ConsumeDocumentElementEventIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                         element.Element, (byte)type) != 0;
+
+    internal static void FocusDocumentElement(Entity document, NativeUiDocumentElement element)
+    {
+        if (FocusDocumentElementIcall == null)
+            throw StaleDocumentElement();
+        if (FocusDocumentElementIcall(document.Id.High, document.Id.Low, element.DocumentGeneration,
+                                      element.Element) == 0)
+            throw StaleDocumentElement();
+    }
+
+    private static InvalidOperationException StaleDocumentElement() =>
+        new("The UI Document element is unavailable because its document was destroyed or reloaded.");
 }

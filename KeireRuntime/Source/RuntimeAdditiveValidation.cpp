@@ -141,28 +141,62 @@ namespace KeireRuntime
                    diagnostics.VfxMaskEntries != 0U && diagnostics.VfxMaskedDraws != 0U && diagnostics.VfxMaskConsumed;
         }
 
-        [[nodiscard]] static Keire::EntityId AddValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session,
-                                                                 const std::string& name, const float width,
-                                                                 const float height)
+        struct ValidationButton final
+        {
+            Keire::EntityId Document;
+            Keire::AssetId StableId;
+            std::uint64_t DocumentGeneration = 0;
+            std::uint64_t Element = 0;
+        };
+
+        [[nodiscard]] static ValidationButton
+        BeginValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session, const std::string& name)
         {
             if (!session || !session->RuntimeScene() || !session->Presentation())
                 throw std::runtime_error("Additive runtime validation requires a presentation-backed session.");
-            auto canvas = session->RuntimeScene()->CreateEntity(name + " Canvas");
-            const auto canvasComponent = canvas.AddComponent<Keire::CanvasComponent>();
-            if (!canvasComponent)
-                throw std::runtime_error("Additive runtime validation could not create its Canvas.");
-            canvasComponent->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
-            auto button = session->RuntimeScene()->CreateEntity(name + " Button", canvas);
-            const auto rect = button.AddComponent<Keire::RectTransformComponent>();
-            if (!rect || !button.AddComponent<Keire::UiButtonComponent>())
-                throw std::runtime_error("Additive runtime validation could not create its Button.");
-            rect->SetAnchorMinimum({});
-            rect->SetAnchorMaximum({});
-            rect->SetPivot({});
-            rect->SetAnchoredPosition({24.0F, 24.0F});
-            rect->SetSizeDelta({120.0F, 48.0F});
+            const auto visualTree = Keire::AssetId::Parse("6a100001-1111-4000-8000-000000000002");
+            const auto panelSettings = Keire::AssetId::Parse("6a100001-1111-4000-8000-000000000003");
+            const auto buttonStableId = Keire::AssetId::Parse("6a110001-1111-4000-8000-000000000005");
+            auto documentEntity = session->RuntimeScene()->CreateEntity(name + " UI Document");
+            const auto document = documentEntity.AddComponent<Keire::UiDocumentComponent>();
+            if (!document)
+                throw std::runtime_error("Additive runtime validation could not create its UI Document.");
+            document->SetVisualTree(visualTree);
+            document->SetPanelSettings(panelSettings);
+            return {.Document = documentEntity.Id(), .StableId = buttonStableId};
+        }
+
+        [[nodiscard]] static bool ResolveValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session,
+                                                          ValidationButton& result, const float width,
+                                                          const float height)
+        {
+            if (!session || !session->RuntimeScene() || !session->Presentation() || !result.Document ||
+                !result.StableId)
+                throw std::runtime_error("Additive runtime validation has an invalid pending UI Document Button.");
             session->Presentation()->Synchronize(session->RuntimeScene(), width, height, true);
-            return button.Id();
+            const auto button = session->Presentation()->FindUiDocumentElement(result.Document, result.StableId);
+            if (!button)
+                return false;
+            if (button->Type != Keire::RuntimeUiElementType::Button)
+                throw std::runtime_error(
+                    "Additive runtime validation resolved an unexpected UI Document element type.");
+            result.StableId = button->StableId;
+            result.DocumentGeneration = button->DocumentGeneration;
+            result.Element = button->Element;
+            return true;
+        }
+
+        [[nodiscard]] static std::optional<Keire::ScenePresentationUiDocumentDebugState>
+        ButtonState(const Keire::Ref<Keire::ScenePresentationRuntime>& presentation, const ValidationButton& button)
+        {
+            const auto snapshot = presentation ? presentation->UiDocumentDebugSnapshot(button.Document) : std::nullopt;
+            if (!snapshot || snapshot->DocumentGeneration != button.DocumentGeneration)
+                return std::nullopt;
+            const auto element = std::ranges::find(snapshot->Elements, button.StableId,
+                                                   &Keire::ScenePresentationUiDocumentDebugElement::StableId);
+            return element == snapshot->Elements.end()
+                       ? std::nullopt
+                       : std::optional<Keire::ScenePresentationUiDocumentDebugState>(element->State);
         }
 
         [[nodiscard]] static std::size_t PresentationCount(const Keire::Ref<Keire::SceneRuntimeWorld>& world)
@@ -258,8 +292,13 @@ namespace KeireRuntime
             case Phase::StartAdditiveLoad:
                 if (sessions.size() != 1U)
                     throw std::runtime_error("Additive runtime validation expected exactly one startup session.");
-                First = world->Active();
-                (void)AddValidationButton(sessions.front(), "Validation startup", width, height);
+                if (!FirstButton.Document)
+                {
+                    First = world->Active();
+                    FirstButton = BeginValidationButton(sessions.front(), "Validation startup");
+                }
+                if (!ResolveValidationButton(sessions.front(), FirstButton, width, height))
+                    return;
                 AdditiveLoad = world->Load(BuildScenes[1], Keire::SceneLoadMode::Additive);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                 if (ValidateDeviceLoss)
@@ -285,9 +324,14 @@ namespace KeireRuntime
                         RecoveredDeviceLoss = *diagnostic;
                     }
 #endif
-                    Second = AdditiveLoad->Result();
-                    RequireOrder(world, {First, Second});
-                    SecondButton = AddValidationButton(world->Session(Second), "Validation additive", width, height);
+                    if (!SecondButton.Document)
+                    {
+                        Second = AdditiveLoad->Result();
+                        RequireOrder(world, {First, Second});
+                        SecondButton = BeginValidationButton(world->Session(Second), "Validation additive");
+                    }
+                    if (!ResolveValidationButton(world->Session(Second), SecondButton, width, height))
+                        return;
                     if (PresentationCount(world) != 2U)
                         throw std::runtime_error("Additive runtime validation did not create two presentation trees.");
                     Current = Phase::ObserveTwoScenes;
@@ -328,6 +372,7 @@ namespace KeireRuntime
                 }
                 break;
             case Phase::StartReload:
+                SecondButton = {};
                 Reload = world->Load(BuildScenes[1], Keire::SceneLoadMode::Additive);
                 Current = Phase::WaitForReload;
                 break;
@@ -336,9 +381,14 @@ namespace KeireRuntime
                     throw std::runtime_error("Additive cooked-scene reload failed: " + Reload->Diagnostic().Message);
                 if (Reload->State() == Keire::SceneLoadState::Ready)
                 {
-                    Second = Reload->Result();
-                    RequireOrder(world, {First, Third, Second});
-                    SecondButton = AddValidationButton(world->Session(Second), "Validation reloaded", width, height);
+                    if (!SecondButton.Document)
+                    {
+                        Second = Reload->Result();
+                        RequireOrder(world, {First, Third, Second});
+                        SecondButton = BeginValidationButton(world->Session(Second), "Validation reloaded");
+                    }
+                    if (!ResolveValidationButton(world->Session(Second), SecondButton, width, height))
+                        return;
                     if (!world->SetActive(Second))
                         throw std::runtime_error("Additive runtime validation could not select the reloaded session.");
                     Current = Phase::WaitForActiveReload;
@@ -347,12 +397,18 @@ namespace KeireRuntime
             case Phase::WaitForActiveReload:
                 if (world->Active() == Second)
                 {
-                    PushClick(application, 40.0F, 40.0F);
+                    const auto state = ButtonState(world->Session(Second)->Presentation(), SecondButton);
+                    if (!state)
+                        throw std::runtime_error("Additive runtime validation Button state is unavailable.");
+                    PushClick(application, state->Rect.X + state->Rect.Width * 0.5F,
+                              state->Rect.Y + state->Rect.Height * 0.5F);
                     Current = Phase::WaitForInput;
                 }
                 break;
             case Phase::WaitForInput:
-                if (world->Session(Second)->Presentation()->ConsumeClick(SecondButton))
+                if (world->Session(Second)->Presentation()->ConsumeUiDocumentElementEvent(
+                        SecondButton.Document, SecondButton.DocumentGeneration, SecondButton.Element,
+                        Keire::RuntimeUiEventType::Click))
                 {
                     InputHandled = true;
                     Current = Phase::StartFailedLoad;
@@ -385,11 +441,16 @@ namespace KeireRuntime
                                              OcclusionLoad->Diagnostic().Message);
                 if (OcclusionLoad->State() == Keire::SceneLoadState::Ready)
                 {
-                    Occlusion = OcclusionLoad->Result();
-                    RequireOrder(world, {First, Third, Second, Occlusion});
-                    AddOccludedValidationLight(world->Session(Occlusion));
-                    PrepareFreshPoseOcclusionFixture(world->Session(Second));
-                    (void)AddValidationButton(world->Session(Occlusion), "Validation occlusion", width, height);
+                    if (!OcclusionButton.Document)
+                    {
+                        Occlusion = OcclusionLoad->Result();
+                        RequireOrder(world, {First, Third, Second, Occlusion});
+                        AddOccludedValidationLight(world->Session(Occlusion));
+                        PrepareFreshPoseOcclusionFixture(world->Session(Second));
+                        OcclusionButton = BeginValidationButton(world->Session(Occlusion), "Validation occlusion");
+                    }
+                    if (!ResolveValidationButton(world->Session(Occlusion), OcclusionButton, width, height))
+                        return;
                     if (!world->SetActive(Occlusion))
                         throw std::runtime_error("GPU occlusion validation could not activate its stress scene.");
                     Current = Phase::ObserveOcclusionFrame;
@@ -581,7 +642,9 @@ namespace KeireRuntime
         Keire::SceneHandle Second;
         Keire::SceneHandle Third;
         Keire::SceneHandle Occlusion;
-        Keire::EntityId SecondButton;
+        ValidationButton FirstButton;
+        ValidationButton SecondButton;
+        ValidationButton OcclusionButton;
         std::vector<Keire::SceneHandle> BeforeFailedLoad;
         std::size_t TwoSceneUiCommands = 0;
         std::size_t ThreeSceneUiCommands = 0;

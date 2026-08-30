@@ -18,6 +18,10 @@
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/ShaderGraphDocument.h"
+#include "KeireClient/Editor/UiBuilderDocument.h"
+#include "KeireClient/Editor/UiBuilderLiveDraft.h"
+#include "KeireClient/Editor/UiBuilderPanel.h"
+#include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
 #include "KeireClient/Editor/VfxEffectDocument.h"
 
 #include "KeireInternal/Diagnostics/DiagnosticBundleUiInternal.h"
@@ -78,7 +82,9 @@ void EditorWorkspaceLayer::OnDetach() noexcept
                 m_PlayModeCoordinator->Shutdown();
                 break;
             case Phase::TransientPanels:
+                m_UiBuilderLiveDraft->Close();
                 m_InputActionsPanel->ResetTransientState();
+                m_UiBuilderPanel->ResetTransientState();
                 m_AudioMixerPanel->StopTransientPreview();
                 m_VfxEffectPanel->StopTransientPreview();
                 StopEditModeVfxPreviews();
@@ -93,6 +99,8 @@ void EditorWorkspaceLayer::OnDetach() noexcept
                 break;
             case Phase::Documents:
                 m_DocumentCoordinator->Shutdown();
+                m_UiBuilderStyleSheetDocument->Close();
+                m_UiBuilderDocument->Close();
                 break;
             case Phase::AssetPackage:
                 m_PackageCoordinator->Shutdown();

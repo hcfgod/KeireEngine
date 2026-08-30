@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Starter World Terminal">
+  <style src="b1b20001-1000-4000-8000-000000000001"/>
+  <VisualElement id="b1b2c3d4-1000-4000-8000-000000000401" name="world-terminal" class="starter-card">
+    <Label id="b1b2c3d4-1000-4000-8000-000000000402" name="world-title" class="starter-title" text="World UI"/>
+    <Label id="b1b2c3d4-1000-4000-8000-000000000403" name="world-copy" class="starter-copy" text="Depth-tested and ray interactive"/>
+    <Image id="b1b2c3d4-1000-4000-8000-000000000405" name="render-target-preview" class="starter-render-preview" render-texture="b1b2c3d4-1000-4000-8000-0000000000ff" accessibility-label="Live starter UI render target"/>
+    <Button id="b1b2c3d4-1000-4000-8000-000000000404" name="world-action" class="primary" text="Activate"/>
+  </VisualElement>
+</ui>

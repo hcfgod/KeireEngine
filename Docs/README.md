@@ -50,7 +50,7 @@ All 84 published guides are listed below in the same groups used by the document
 | [C# Scripting Recipes](Manual/ScriptingRecipes.md) | Complete patterns for movement, reload-safe events, scene portals, prefabs, and presentation. |
 | [Entities, Prefabs, Assets, and Scenes](Manual/WorldAndAssets.md) | Managed world handles, prefab instantiation, ScriptableObjects, asset residency, and scene loading. |
 | [Input, Physics, and Audio](Manual/InputPhysicsAndAudio.md) | Authored actions, physics queries, fixed-step responsibilities, and audio playback. |
-| [UI, Jobs, and Diagnostics](Manual/UiJobsAndDiagnostics.md) | Scene UI, event cleanup, managed jobs, cancellation, logging, and profiling. |
+| [UI, Jobs, and Diagnostics](Manual/UiJobsAndDiagnostics.md) | Retained UI Toolkit entry point, event cleanup, managed jobs, cancellation, logging, and profiling. |
 | [Shader Graph](Manual/ShaderGraph.md) | Reusable shader templates, properties, preview, compilation, and functions. |
 | [Shader Graph Examples](Manual/ShaderGraphExamples.md) | Worked tinted, emissive, and world-height graph layouts. |
 | [Material Graph](Manual/MaterialGraph.md) | Surface graphs, materials, instances, runtime overrides, functions, and layers. |
@@ -121,7 +121,7 @@ All 84 published guides are listed below in the same groups used by the document
 | [Gameplay Services](Scripting/GameplayServices.md) | Time, input, physics, navigation, prefabs, VFX, cursor, logging, and profiling. |
 | [Audio](Scripting/Audio.md) | Audio clips, source components, playback, mixers, buses, parameters, and status. |
 | [Animation](Scripting/Animation.md) | Graph playback, procedural locomotion intent/state/events, root motion, and IK. |
-| [UI and Events](Scripting/UiAndEvents.md) | Scene UI, buttons, text, typed events, subscriptions, and cursor ownership. |
+| [UI and Events](Scripting/UiAndEvents.md) | UI Builder, retained documents/styles/panels, managed controls, binding, events, targets, and current limits. |
 | [Rendering and Materials](Scripting/RenderingAndMaterials.md) | Cameras, Mesh Renderers, lights, material slots, and bounded per-renderer shader overrides. |
 | [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md) | Runtime-world inspection, transactional player scene replacement, progress, cancellation, and transient render environments. |
 | [Async, Reload, and Diagnostics](Scripting/AsyncReloadAndDiagnostics.md) | Synchronization context, managed jobs, cancellation, hot reload, failure isolation, and troubleshooting. |

@@ -1,0 +1,1232 @@
+#include "Keire/Ui/UiToolkit.h"
+
+#include "Keire/Assets/AssetPipeline.h"
+
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cctype>
+#include <charconv>
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <ranges>
+#include <stdexcept>
+#include <unordered_set>
+#include <utility>
+
+namespace Keire
+{
+    namespace
+    {
+        using Json = nlohmann::json;
+
+        struct XmlTag
+        {
+            std::string Name;
+            std::vector<UiNamedValue> Attributes;
+            bool Closing = false;
+            bool SelfClosing = false;
+        };
+
+        [[nodiscard]] std::string_view Text(const std::span<const std::byte> bytes)
+        {
+            return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+        }
+
+        [[nodiscard]] std::vector<std::byte> Bytes(const std::string_view text)
+        {
+            std::vector<std::byte> result(text.size());
+            std::memcpy(result.data(), text.data(), text.size());
+            return result;
+        }
+
+        [[nodiscard]] const std::string* NamedValue(const std::vector<UiNamedValue>& values,
+                                                    const std::string_view name) noexcept
+        {
+            const auto found = std::ranges::find(values, name, &UiNamedValue::Name);
+            return found == values.end() ? nullptr : &found->Value;
+        }
+
+        [[nodiscard]] std::string Trim(std::string_view value)
+        {
+            const auto first = value.find_first_not_of(" \t\r\n");
+            if (first == std::string_view::npos)
+                return {};
+            const auto last = value.find_last_not_of(" \t\r\n");
+            return std::string(value.substr(first, last - first + 1));
+        }
+
+        [[nodiscard]] std::string DecodeXml(std::string value)
+        {
+            const std::pair<std::string_view, std::string_view> entities[] = {
+                {"&quot;", "\""}, {"&apos;", "'"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&amp;", "&"}};
+            for (std::size_t entityOffset = value.find('&'); entityOffset != std::string::npos;
+                 entityOffset = value.find('&', entityOffset + 1))
+            {
+                if (!std::ranges::any_of(
+                        entities, [&](const auto& entity)
+                        { return std::string_view(value).substr(entityOffset).starts_with(entity.first); }))
+                    throw std::runtime_error("UI document contains an unsupported XML entity.");
+            }
+            for (const auto& [encoded, decoded] : entities)
+            {
+                std::size_t offset = 0;
+                while ((offset = value.find(encoded, offset)) != std::string::npos)
+                {
+                    value.replace(offset, encoded.size(), decoded);
+                    offset += decoded.size();
+                }
+            }
+            return value;
+        }
+
+        [[nodiscard]] std::vector<XmlTag> ParseXmlTags(const std::string_view source)
+        {
+            std::vector<XmlTag> result;
+            std::size_t cursor = 0;
+            while (cursor < source.size())
+            {
+                const auto open = source.find('<', cursor);
+                if (open == std::string_view::npos)
+                {
+                    if (!Trim(source.substr(cursor)).empty())
+                        throw std::runtime_error("UI document text must be stored in element attributes.");
+                    break;
+                }
+                if (!Trim(source.substr(cursor, open - cursor)).empty())
+                    throw std::runtime_error("UI document text must be stored in element attributes.");
+                if (source.substr(open, 4) == "<!--")
+                {
+                    const auto close = source.find("-->", open + 4);
+                    if (close == std::string_view::npos)
+                        throw std::runtime_error("UI document contains an unterminated comment.");
+                    cursor = close + 3;
+                    continue;
+                }
+                if (source.substr(open, 2) == "<?")
+                {
+                    const auto close = source.find("?>", open + 2);
+                    if (close == std::string_view::npos)
+                        throw std::runtime_error("UI document contains an unterminated declaration.");
+                    cursor = close + 2;
+                    continue;
+                }
+                const auto close = source.find('>', open + 1);
+                if (close == std::string_view::npos)
+                    throw std::runtime_error("UI document contains an unterminated tag.");
+                auto body = Trim(source.substr(open + 1, close - open - 1));
+                if (body.empty())
+                    throw std::runtime_error("UI document contains an empty tag.");
+                XmlTag tag;
+                if (body.front() == '/')
+                {
+                    tag.Closing = true;
+                    body = Trim(std::string_view(body).substr(1));
+                }
+                if (!tag.Closing && body.back() == '/')
+                {
+                    tag.SelfClosing = true;
+                    body = Trim(std::string_view(body).substr(0, body.size() - 1));
+                }
+                const auto nameEnd = body.find_first_of(" \t\r\n");
+                tag.Name = body.substr(0, nameEnd);
+                if (tag.Name.empty())
+                    throw std::runtime_error("UI document contains a tag without a name.");
+                if (tag.Closing)
+                {
+                    if (nameEnd != std::string::npos)
+                        throw std::runtime_error("UI document closing tags cannot contain attributes.");
+                }
+                else
+                {
+                    std::size_t attributeCursor = nameEnd == std::string::npos ? body.size() : nameEnd;
+                    while (attributeCursor < body.size())
+                    {
+                        attributeCursor = body.find_first_not_of(" \t\r\n", attributeCursor);
+                        if (attributeCursor == std::string::npos)
+                            break;
+                        const auto equals = body.find('=', attributeCursor);
+                        if (equals == std::string::npos)
+                            throw std::runtime_error("UI document attribute is missing '='.");
+                        const auto name =
+                            Trim(std::string_view(body).substr(attributeCursor, equals - attributeCursor));
+                        if (name.empty() || name.find_first_of(" \t\r\n\"'<>") != std::string::npos)
+                            throw std::runtime_error("UI document contains an invalid attribute name.");
+                        const auto quotePosition = body.find_first_not_of(" \t\r\n", equals + 1);
+                        if (quotePosition == std::string::npos ||
+                            (body[quotePosition] != '\'' && body[quotePosition] != '\"'))
+                            throw std::runtime_error("UI document attribute values must be quoted.");
+                        const auto quote = body[quotePosition];
+                        const auto valueEnd = body.find(quote, quotePosition + 1);
+                        if (valueEnd == std::string::npos)
+                            throw std::runtime_error("UI document contains an unterminated attribute.");
+                        if (std::ranges::find(tag.Attributes, name, &UiNamedValue::Name) != tag.Attributes.end())
+                            throw std::runtime_error("UI document contains a duplicate attribute.");
+                        tag.Attributes.push_back(
+                            {name, DecodeXml(body.substr(quotePosition + 1, valueEnd - quotePosition - 1))});
+                        attributeCursor = valueEnd + 1;
+                    }
+                }
+                result.push_back(std::move(tag));
+                cursor = close + 1;
+            }
+            return result;
+        }
+
+        [[nodiscard]] const std::string* Attribute(const XmlTag& tag, const std::string_view name) noexcept
+        {
+            const auto found = std::ranges::find(tag.Attributes, name, &UiNamedValue::Name);
+            return found == tag.Attributes.end() ? nullptr : &found->Value;
+        }
+
+        [[nodiscard]] UiVisualElementType ParseElementType(const std::string_view name)
+        {
+            const std::pair<std::string_view, UiVisualElementType> types[] = {
+                {"VisualElement", UiVisualElementType::VisualElement},
+                {"TemplateContainer", UiVisualElementType::TemplateContainer},
+                {"Slot", UiVisualElementType::Slot},
+                {"Label", UiVisualElementType::Label},
+                {"Image", UiVisualElementType::Image},
+                {"Button", UiVisualElementType::Button},
+                {"TextField", UiVisualElementType::TextField},
+                {"Toggle", UiVisualElementType::Toggle},
+                {"Slider", UiVisualElementType::Slider},
+                {"ProgressBar", UiVisualElementType::ProgressBar},
+                {"ScrollView", UiVisualElementType::ScrollView},
+                {"ListView", UiVisualElementType::ListView},
+                {"TreeView", UiVisualElementType::TreeView},
+                {"DropdownField", UiVisualElementType::DropdownField},
+                {"Foldout", UiVisualElementType::Foldout},
+                {"TabView", UiVisualElementType::TabView},
+                {"Toolbar", UiVisualElementType::Toolbar},
+                {"Spacer", UiVisualElementType::Spacer},
+            };
+            const auto found = std::ranges::find_if(types, [&](const auto& value) { return value.first == name; });
+            return found == std::end(types) ? UiVisualElementType::Custom : found->second;
+        }
+
+        [[nodiscard]] std::string EncodeXml(std::string_view value)
+        {
+            std::string result;
+            result.reserve(value.size());
+            for (const auto character : value)
+            {
+                switch (character)
+                {
+                case '&':
+                    result += "&amp;";
+                    break;
+                case '\"':
+                    result += "&quot;";
+                    break;
+                case '<':
+                    result += "&lt;";
+                    break;
+                case '>':
+                    result += "&gt;";
+                    break;
+                default:
+                    result += character;
+                    break;
+                }
+            }
+            return result;
+        }
+
+        [[nodiscard]] const char* ToString(const UiVisualElementType value) noexcept
+        {
+            switch (value)
+            {
+            case UiVisualElementType::VisualElement:
+                return "VisualElement";
+            case UiVisualElementType::TemplateContainer:
+                return "TemplateContainer";
+            case UiVisualElementType::Slot:
+                return "Slot";
+            case UiVisualElementType::Label:
+                return "Label";
+            case UiVisualElementType::Image:
+                return "Image";
+            case UiVisualElementType::Button:
+                return "Button";
+            case UiVisualElementType::TextField:
+                return "TextField";
+            case UiVisualElementType::Toggle:
+                return "Toggle";
+            case UiVisualElementType::Slider:
+                return "Slider";
+            case UiVisualElementType::ProgressBar:
+                return "ProgressBar";
+            case UiVisualElementType::ScrollView:
+                return "ScrollView";
+            case UiVisualElementType::ListView:
+                return "ListView";
+            case UiVisualElementType::TreeView:
+                return "TreeView";
+            case UiVisualElementType::DropdownField:
+                return "DropdownField";
+            case UiVisualElementType::Foldout:
+                return "Foldout";
+            case UiVisualElementType::TabView:
+                return "TabView";
+            case UiVisualElementType::Toolbar:
+                return "Toolbar";
+            case UiVisualElementType::Spacer:
+                return "Spacer";
+            case UiVisualElementType::Custom:
+                return "Custom";
+            }
+            return "VisualElement";
+        }
+
+        [[nodiscard]] UiVisualElementType ParseEncodedElementType(const std::string_view name)
+        {
+            if (name == "Custom")
+                return UiVisualElementType::Custom;
+            const auto type = ParseElementType(name);
+            if (type == UiVisualElementType::Custom)
+                throw std::runtime_error("UI visual tree contains an unsupported element type.");
+            return type;
+        }
+
+        [[nodiscard]] std::vector<std::string> SplitClasses(const std::string_view value)
+        {
+            std::vector<std::string> result;
+            std::size_t cursor = 0;
+            while (cursor < value.size())
+            {
+                const auto begin = value.find_first_not_of(" \t\r\n", cursor);
+                if (begin == std::string_view::npos)
+                    break;
+                const auto end = value.find_first_of(" \t\r\n", begin);
+                result.emplace_back(value.substr(begin, end - begin));
+                cursor = end == std::string_view::npos ? value.size() : end;
+            }
+            return result;
+        }
+
+        [[nodiscard]] std::vector<UiNamedValue> ParseDeclarations(const std::string_view value)
+        {
+            std::vector<UiNamedValue> result;
+            std::size_t cursor = 0;
+            while (cursor < value.size())
+            {
+                const auto end = value.find(';', cursor);
+                const auto declaration = Trim(value.substr(cursor, end - cursor));
+                if (!declaration.empty())
+                {
+                    const auto colon = declaration.find(':');
+                    if (colon == std::string::npos)
+                        throw std::runtime_error("UI style declaration is missing ':'.");
+                    auto name = Trim(std::string_view(declaration).substr(0, colon));
+                    auto propertyValue = Trim(std::string_view(declaration).substr(colon + 1));
+                    if (name.empty() || propertyValue.empty() ||
+                        std::ranges::find(result, name, &UiNamedValue::Name) != result.end())
+                        throw std::runtime_error("UI style declaration is empty or duplicated.");
+                    result.push_back({std::move(name), std::move(propertyValue)});
+                }
+                if (end == std::string_view::npos)
+                    break;
+                cursor = end + 1;
+            }
+            return result;
+        }
+
+        [[nodiscard]] UiVisualElementDefinition ParseElement(const std::vector<XmlTag>& tags, std::size_t& cursor,
+                                                             const std::size_t depth)
+        {
+            if (depth > MaximumUiTreeDepth || cursor >= tags.size() || tags[cursor].Closing)
+                throw std::runtime_error("UI document element nesting is invalid or exceeds the safety limit.");
+            const auto& tag = tags[cursor++];
+            UiVisualElementDefinition result;
+            result.Type = ParseElementType(tag.Name);
+            if (result.Type == UiVisualElementType::Custom)
+                result.CustomType = tag.Name;
+            if (const auto* id = Attribute(tag, "id"))
+                result.StableId = AssetId::Parse(*id);
+            if (const auto* name = Attribute(tag, "name"))
+                result.Name = *name;
+            if (const auto* classes = Attribute(tag, "class"))
+                result.Classes = SplitClasses(*classes);
+            if (const auto* style = Attribute(tag, "style"))
+                result.InlineStyles = ParseDeclarations(*style);
+            if (const auto* value = Attribute(tag, "template"))
+                result.Template = AssetId::Parse(*value);
+            if (const auto* value = Attribute(tag, "slot"))
+                result.Slot = *value;
+            for (const auto& attribute : tag.Attributes)
+            {
+                if (attribute.Name == "id" || attribute.Name == "name" || attribute.Name == "class" ||
+                    attribute.Name == "style" || attribute.Name == "template" || attribute.Name == "slot")
+                    continue;
+                constexpr std::string_view BindingPrefix = "bind:";
+                constexpr std::string_view TwoWayBindingPrefix = "bind-two-way:";
+                constexpr std::string_view OneTimeBindingPrefix = "bind-one-time:";
+                if (attribute.Name.starts_with(TwoWayBindingPrefix))
+                    result.Bindings.push_back(
+                        {attribute.Name.substr(TwoWayBindingPrefix.size()), attribute.Value, "TwoWay"});
+                else if (attribute.Name.starts_with(OneTimeBindingPrefix))
+                    result.Bindings.push_back(
+                        {attribute.Name.substr(OneTimeBindingPrefix.size()), attribute.Value, "OneTime"});
+                else if (attribute.Name.starts_with(BindingPrefix))
+                    result.Bindings.push_back({attribute.Name.substr(BindingPrefix.size()), attribute.Value, "OneWay"});
+                else
+                    result.Attributes.push_back(attribute);
+            }
+            if (tag.SelfClosing)
+                return result;
+            while (cursor < tags.size() && !tags[cursor].Closing)
+                result.Children.push_back(ParseElement(tags, cursor, depth + 1));
+            if (cursor >= tags.size() || tags[cursor].Name != tag.Name)
+                throw std::runtime_error("UI document element tags are not balanced.");
+            ++cursor;
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeNamedValues(const std::vector<UiNamedValue>& values)
+        {
+            Json result = Json::array();
+            for (const auto& value : values)
+                result.push_back({{"name", value.Name}, {"value", value.Value}});
+            return result;
+        }
+
+        [[nodiscard]] std::vector<UiNamedValue> DecodeNamedValues(const Json& values)
+        {
+            std::vector<UiNamedValue> result;
+            if (!values.is_array())
+                throw std::runtime_error("UI named-value collection must be an array.");
+            for (const auto& value : values)
+                result.push_back({value.at("name").get<std::string>(), value.at("value").get<std::string>()});
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeElement(const UiVisualElementDefinition& element)
+        {
+            Json children = Json::array();
+            for (const auto& child : element.Children)
+                children.push_back(EncodeElement(child));
+            Json bindings = Json::array();
+            for (const auto& binding : element.Bindings)
+                bindings.push_back({{"property", binding.Property}, {"path", binding.Path}, {"mode", binding.Mode}});
+            return {{"id", element.StableId.ToString()},
+                    {"type", ToString(element.Type)},
+                    {"customType", element.CustomType},
+                    {"name", element.Name},
+                    {"classes", element.Classes},
+                    {"attributes", EncodeNamedValues(element.Attributes)},
+                    {"inlineStyles", EncodeNamedValues(element.InlineStyles)},
+                    {"bindings", std::move(bindings)},
+                    {"template", element.Template.ToString()},
+                    {"slot", element.Slot},
+                    {"children", std::move(children)}};
+        }
+
+        void EncodeSourceElement(const UiVisualElementDefinition& element, const std::size_t depth, std::string& output)
+        {
+            output.append(depth * 2, ' ');
+            const auto type = element.Type == UiVisualElementType::Custom ? element.CustomType : ToString(element.Type);
+            output += '<';
+            output += type;
+            output += " id=\"" + element.StableId.ToString() + "\"";
+            if (!element.Name.empty())
+                output += " name=\"" + EncodeXml(element.Name) + "\"";
+            if (!element.Classes.empty())
+            {
+                output += " class=\"";
+                for (std::size_t index = 0; index < element.Classes.size(); ++index)
+                {
+                    if (index != 0)
+                        output += ' ';
+                    output += EncodeXml(element.Classes[index]);
+                }
+                output += '\"';
+            }
+            if (!element.InlineStyles.empty())
+            {
+                output += " style=\"";
+                for (const auto& property : element.InlineStyles)
+                    output += EncodeXml(property.Name) + ": " + EncodeXml(property.Value) + "; ";
+                output += '\"';
+            }
+            if (element.Template)
+                output += " template=\"" + element.Template.ToString() + "\"";
+            if (!element.Slot.empty())
+                output += " slot=\"" + EncodeXml(element.Slot) + "\"";
+            for (const auto& binding : element.Bindings)
+            {
+                const auto prefix = binding.Mode == "TwoWay"    ? " bind-two-way:"
+                                    : binding.Mode == "OneTime" ? " bind-one-time:"
+                                                                : " bind:";
+                output += prefix + binding.Property + "=\"" + EncodeXml(binding.Path) + "\"";
+            }
+            for (const auto& attribute : element.Attributes)
+                output += ' ' + attribute.Name + "=\"" + EncodeXml(attribute.Value) + "\"";
+            if (element.Children.empty())
+            {
+                output += "/>\n";
+                return;
+            }
+            output += ">\n";
+            for (const auto& child : element.Children)
+                EncodeSourceElement(child, depth + 1, output);
+            output.append(depth * 2, ' ');
+            output += "</" + std::string(type) + ">\n";
+        }
+
+        [[nodiscard]] UiVisualElementDefinition DecodeElement(const Json& source)
+        {
+            UiVisualElementDefinition result;
+            result.StableId = AssetId::Parse(source.at("id").get<std::string>());
+            result.Type = ParseEncodedElementType(source.at("type").get<std::string>());
+            result.CustomType = source.value("customType", std::string{});
+            result.Name = source.value("name", std::string{});
+            result.Classes = source.value("classes", std::vector<std::string>{});
+            result.Attributes = DecodeNamedValues(source.value("attributes", Json::array()));
+            result.InlineStyles = DecodeNamedValues(source.value("inlineStyles", Json::array()));
+            for (const auto& binding : source.value("bindings", Json::array()))
+                result.Bindings.push_back({binding.at("property").get<std::string>(),
+                                           binding.at("path").get<std::string>(),
+                                           binding.value("mode", std::string("OneWay"))});
+            result.Template =
+                AssetId::Parse(source.value("template", std::string("00000000-0000-0000-0000-000000000000")));
+            result.Slot = source.value("slot", std::string{});
+            for (const auto& child : source.at("children"))
+                result.Children.push_back(DecodeElement(child));
+            return result;
+        }
+
+        [[nodiscard]] UiStylePseudoState ParsePseudoState(const std::string_view value)
+        {
+            if (value == "hover")
+                return UiStylePseudoState::Hover;
+            if (value == "active")
+                return UiStylePseudoState::Active;
+            if (value == "focus")
+                return UiStylePseudoState::Focus;
+            if (value == "disabled")
+                return UiStylePseudoState::Disabled;
+            if (value == "checked")
+                return UiStylePseudoState::Checked;
+            throw std::runtime_error("UI stylesheet contains an unsupported pseudo-state.");
+        }
+
+        [[nodiscard]] bool IdentifierCharacter(const char value) noexcept
+        {
+            return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') || (value >= '0' && value <= '9') ||
+                   value == '-' || value == '_';
+        }
+
+        [[nodiscard]] UiStyleRuleDefinition ParseSelector(std::string selector)
+        {
+            UiStyleRuleDefinition result;
+            result.Selector = Trim(selector);
+            if (result.Selector.empty() || result.Selector.find(',') != std::string::npos)
+                throw std::runtime_error("UI stylesheet selector is empty or uses unsupported selector groups.");
+            std::size_t cursor = 0;
+            UiStyleCombinator nextCombinator = UiStyleCombinator::None;
+            while (cursor < result.Selector.size())
+            {
+                bool consumedWhitespace = false;
+                while (cursor < result.Selector.size() &&
+                       std::isspace(static_cast<unsigned char>(result.Selector[cursor])))
+                {
+                    consumedWhitespace = true;
+                    ++cursor;
+                }
+                if (cursor >= result.Selector.size())
+                    break;
+                if (result.Selector[cursor] == '>')
+                {
+                    if (result.Parts.empty() || nextCombinator == UiStyleCombinator::Child)
+                        throw std::runtime_error("UI stylesheet contains an invalid child combinator.");
+                    nextCombinator = UiStyleCombinator::Child;
+                    ++cursor;
+                    continue;
+                }
+                if (consumedWhitespace && !result.Parts.empty() && nextCombinator == UiStyleCombinator::None)
+                    nextCombinator = UiStyleCombinator::Descendant;
+                UiStyleSelectorPart part;
+                part.Combinator = result.Parts.empty() ? UiStyleCombinator::None : nextCombinator;
+                nextCombinator = UiStyleCombinator::None;
+                bool hasTerm = false;
+                while (cursor < result.Selector.size() && result.Selector[cursor] != '>' &&
+                       !std::isspace(static_cast<unsigned char>(result.Selector[cursor])))
+                {
+                    const auto prefix = result.Selector[cursor];
+                    if (prefix == '*' && !hasTerm)
+                    {
+                        hasTerm = true;
+                        ++cursor;
+                        continue;
+                    }
+                    if (prefix != '#' && prefix != '.' && prefix != ':' && hasTerm && !part.Type.empty())
+                        throw std::runtime_error("UI stylesheet selector term is malformed.");
+                    if (prefix == '#' || prefix == '.' || prefix == ':')
+                        ++cursor;
+                    const auto begin = cursor;
+                    while (cursor < result.Selector.size() && IdentifierCharacter(result.Selector[cursor]))
+                        ++cursor;
+                    if (begin == cursor)
+                        throw std::runtime_error("UI stylesheet selector contains an empty term.");
+                    const auto term = result.Selector.substr(begin, cursor - begin);
+                    hasTerm = true;
+                    if (prefix == '#')
+                    {
+                        if (!part.Name.empty())
+                            throw std::runtime_error("UI stylesheet selector contains multiple names.");
+                        part.Name = term;
+                        result.Specificity += 100;
+                    }
+                    else if (prefix == '.')
+                    {
+                        part.Classes.push_back(term);
+                        result.Specificity += 10;
+                    }
+                    else if (prefix == ':')
+                    {
+                        part.States = part.States | ParsePseudoState(term);
+                        result.Specificity += 10;
+                    }
+                    else
+                    {
+                        part.Type = term;
+                        result.Specificity += 1;
+                    }
+                }
+                if (!hasTerm)
+                    throw std::runtime_error("UI stylesheet selector contains an empty compound selector.");
+                result.Parts.push_back(std::move(part));
+            }
+            if (result.Parts.empty() || nextCombinator != UiStyleCombinator::None)
+                throw std::runtime_error("UI stylesheet selector is incomplete.");
+            return result;
+        }
+
+        [[nodiscard]] std::string RemoveCssComments(const std::string_view source)
+        {
+            std::string result;
+            result.reserve(source.size());
+            std::size_t cursor = 0;
+            while (cursor < source.size())
+            {
+                const auto open = source.find("/*", cursor);
+                if (open == std::string_view::npos)
+                {
+                    result.append(source.substr(cursor));
+                    break;
+                }
+                result.append(source.substr(cursor, open - cursor));
+                const auto close = source.find("*/", open + 2);
+                if (close == std::string_view::npos)
+                    throw std::runtime_error("UI stylesheet contains an unterminated comment.");
+                cursor = close + 2;
+            }
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeSelectorPart(const UiStyleSelectorPart& part)
+        {
+            return {{"combinator", static_cast<std::uint8_t>(part.Combinator)},
+                    {"type", part.Type},
+                    {"name", part.Name},
+                    {"classes", part.Classes},
+                    {"states", static_cast<std::uint16_t>(part.States)}};
+        }
+
+        [[nodiscard]] UiStyleSelectorPart DecodeSelectorPart(const Json& source)
+        {
+            UiStyleSelectorPart result;
+            result.Combinator = static_cast<UiStyleCombinator>(source.at("combinator").get<std::uint8_t>());
+            result.Type = source.value("type", std::string{});
+            result.Name = source.value("name", std::string{});
+            result.Classes = source.value("classes", std::vector<std::string>{});
+            result.States = static_cast<UiStylePseudoState>(source.value("states", std::uint16_t{}));
+            return result;
+        }
+
+        template <typename Callback>
+        void VisitElements(const UiVisualElementDefinition& element, const std::size_t depth, Callback&& callback)
+        {
+            callback(element, depth);
+            for (const auto& child : element.Children)
+                VisitElements(child, depth + 1, callback);
+        }
+
+        [[nodiscard]] std::size_t VisualTreeResidentBytes(const UiVisualTreeDefinition& definition)
+        {
+            std::size_t result = sizeof(UiVisualTreeDefinition) + definition.Name.size() +
+                                 definition.StyleSheets.size() * sizeof(AssetId);
+            VisitElements(definition.Root, 1,
+                          [&](const UiVisualElementDefinition& element, std::size_t)
+                          {
+                              result += sizeof(UiVisualElementDefinition) + element.CustomType.size() +
+                                        element.Name.size() + element.Slot.size();
+                              for (const auto& value : element.Classes)
+                                  result += value.size();
+                              for (const auto& value : element.Attributes)
+                                  result += value.Name.size() + value.Value.size();
+                              for (const auto& value : element.InlineStyles)
+                                  result += value.Name.size() + value.Value.size();
+                              for (const auto& value : element.Bindings)
+                                  result += value.Property.size() + value.Path.size() + value.Mode.size();
+                          });
+            return result;
+        }
+
+        [[nodiscard]] const char* ToString(const UiPanelTarget value) noexcept
+        {
+            switch (value)
+            {
+            case UiPanelTarget::ScreenOverlay:
+                return "ScreenOverlay";
+            case UiPanelTarget::CameraOverlay:
+                return "CameraOverlay";
+            case UiPanelTarget::RenderTexture:
+                return "RenderTexture";
+            case UiPanelTarget::WorldSurface:
+                return "WorldSurface";
+            }
+            return "ScreenOverlay";
+        }
+
+        [[nodiscard]] UiPanelTarget ParsePanelTarget(const std::string_view value)
+        {
+            if (value == "ScreenOverlay")
+                return UiPanelTarget::ScreenOverlay;
+            if (value == "CameraOverlay")
+                return UiPanelTarget::CameraOverlay;
+            if (value == "RenderTexture")
+                return UiPanelTarget::RenderTexture;
+            if (value == "WorldSurface")
+                return UiPanelTarget::WorldSurface;
+            throw std::runtime_error("UI panel settings contain an unsupported target.");
+        }
+
+        [[nodiscard]] const char* ToString(const RuntimeUiScaleMode value) noexcept
+        {
+            switch (value)
+            {
+            case RuntimeUiScaleMode::ConstantPixels:
+                return "ConstantPixels";
+            case RuntimeUiScaleMode::ScaleWithViewport:
+                return "ScaleWithViewport";
+            case RuntimeUiScaleMode::ConstantPhysicalSize:
+                return "ConstantPhysicalSize";
+            }
+            return "ScaleWithViewport";
+        }
+
+        [[nodiscard]] RuntimeUiScaleMode ParseScaleMode(const std::string_view value)
+        {
+            if (value == "ConstantPixels")
+                return RuntimeUiScaleMode::ConstantPixels;
+            if (value == "ScaleWithViewport")
+                return RuntimeUiScaleMode::ScaleWithViewport;
+            if (value == "ConstantPhysicalSize")
+                return RuntimeUiScaleMode::ConstantPhysicalSize;
+            throw std::runtime_error("UI panel settings contain an unsupported scale mode.");
+        }
+
+        [[nodiscard]] Json ParseJson(const std::span<const std::byte> bytes, const std::string_view kind)
+        {
+            if (bytes.size() > MaximumUiDocumentBytes)
+                throw std::runtime_error(std::string(kind) + " exceeds the 16 MiB safety limit.");
+            try
+            {
+                return Json::parse(reinterpret_cast<const char*>(bytes.data()),
+                                   reinterpret_cast<const char*>(bytes.data() + bytes.size()));
+            }
+            catch (const Json::exception& error)
+            {
+                throw std::runtime_error(std::string(kind) + " JSON is malformed: " + error.what());
+            }
+        }
+    } // namespace
+
+    UiVisualTreeAsset::UiVisualTreeAsset(UiVisualTreeDefinition definition) : m_Definition(std::move(definition))
+    {
+        if (!m_Definition.Root.StableId && m_Definition.Name.empty())
+            return;
+        Validate(m_Definition);
+        m_ResidentBytes = VisualTreeResidentBytes(m_Definition);
+    }
+
+    std::size_t UiVisualTreeAsset::ResidentBytes() const noexcept { return m_ResidentBytes; }
+
+    const UiVisualElementDefinition* UiVisualTreeAsset::Find(const AssetId stableId) const noexcept
+    {
+        const UiVisualElementDefinition* result = nullptr;
+        VisitElements(m_Definition.Root, 1,
+                      [&](const UiVisualElementDefinition& element, std::size_t)
+                      {
+                          if (element.StableId == stableId)
+                              result = &element;
+                      });
+        return result;
+    }
+
+    const UiVisualElementDefinition* UiVisualTreeAsset::Find(const std::string_view name) const noexcept
+    {
+        const UiVisualElementDefinition* result = nullptr;
+        VisitElements(m_Definition.Root, 1,
+                      [&](const UiVisualElementDefinition& element, std::size_t)
+                      {
+                          if (element.Name == name)
+                              result = &element;
+                      });
+        return result;
+    }
+
+    UiVisualTreeDefinition UiVisualTreeAsset::ParseSource(const std::span<const std::byte> bytes)
+    {
+        if (bytes.size() > MaximumUiDocumentBytes)
+            throw std::runtime_error("UI document exceeds the 16 MiB safety limit.");
+        const auto tags = ParseXmlTags(Text(bytes));
+        if (tags.size() < 3 || tags.front().Name != "ui" || tags.front().Closing || tags.front().SelfClosing)
+            throw std::runtime_error("UI document must have a non-empty <ui> root.");
+        const auto* schema = Attribute(tags.front(), "schemaVersion");
+        const auto* name = Attribute(tags.front(), "name");
+        if (schema == nullptr || *schema != "1" || name == nullptr)
+            throw std::runtime_error("UI document has an unsupported schema or no name.");
+        UiVisualTreeDefinition result;
+        result.Name = *name;
+        std::size_t cursor = 1;
+        while (cursor < tags.size() && !tags[cursor].Closing && tags[cursor].Name == "style")
+        {
+            const auto* source = Attribute(tags[cursor], "src");
+            if (!tags[cursor].SelfClosing || source == nullptr)
+                throw std::runtime_error("UI document style references must be self-closing and have a source.");
+            result.StyleSheets.push_back(AssetId::Parse(*source));
+            ++cursor;
+        }
+        result.Root = ParseElement(tags, cursor, 1);
+        if (cursor >= tags.size() || !tags[cursor].Closing || tags[cursor].Name != "ui" || cursor + 1 != tags.size())
+            throw std::runtime_error("UI document must contain exactly one visual root.");
+        Validate(result);
+        return result;
+    }
+
+    Ref<UiVisualTreeAsset> UiVisualTreeAsset::Decode(const std::span<const std::byte> bytes)
+    {
+        const auto document = ParseJson(bytes, "UI visual tree asset");
+        if (!document.is_object() || document.value("schemaVersion", 0) != 1)
+            throw std::runtime_error("UI visual tree asset has an unsupported schema.");
+        UiVisualTreeDefinition definition;
+        definition.Name = document.at("name").get<std::string>();
+        for (const auto& style : document.at("styleSheets"))
+            definition.StyleSheets.push_back(AssetId::Parse(style.get<std::string>()));
+        definition.Root = DecodeElement(document.at("root"));
+        return CreateRef<UiVisualTreeAsset>(std::move(definition));
+    }
+
+    std::vector<std::byte> UiVisualTreeAsset::Encode(const UiVisualTreeDefinition& definition)
+    {
+        Validate(definition);
+        Json styles = Json::array();
+        for (const auto style : definition.StyleSheets)
+            styles.push_back(style.ToString());
+        const Json document{{"schemaVersion", 1},
+                            {"name", definition.Name},
+                            {"styleSheets", std::move(styles)},
+                            {"root", EncodeElement(definition.Root)}};
+        return Bytes(document.dump(2) + '\n');
+    }
+
+    std::vector<std::byte> UiVisualTreeAsset::EncodeSource(const UiVisualTreeDefinition& definition)
+    {
+        Validate(definition);
+        std::string result = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<ui schemaVersion=\"1\" name=\"" +
+                             EncodeXml(definition.Name) + "\">\n";
+        for (const auto style : definition.StyleSheets)
+            result += "  <style src=\"" + style.ToString() + "\"/>\n";
+        EncodeSourceElement(definition.Root, 1, result);
+        result += "</ui>\n";
+        return Bytes(result);
+    }
+
+    void UiVisualTreeAsset::Validate(const UiVisualTreeDefinition& definition)
+    {
+        if (definition.SchemaVersion != 1 || definition.Name.empty() || definition.Name.size() > 256 ||
+            definition.StyleSheets.size() > 64)
+            throw std::invalid_argument("UI document name, schema, or stylesheet count is invalid.");
+        std::unordered_set<AssetId> identities;
+        std::unordered_set<std::string> names;
+        std::size_t count = 0;
+        std::size_t stringBytes = definition.Name.size();
+        for (const auto style : definition.StyleSheets)
+        {
+            if (!style)
+                throw std::invalid_argument("UI document contains an empty stylesheet reference.");
+        }
+        VisitElements(
+            definition.Root, 1,
+            [&](const UiVisualElementDefinition& element, const std::size_t depth)
+            {
+                if (++count > MaximumUiElements || depth > MaximumUiTreeDepth || !element.StableId ||
+                    !identities.insert(element.StableId).second || element.Name.size() > 256 ||
+                    (!element.Name.empty() && !names.insert(element.Name).second) || element.Classes.size() > 64 ||
+                    element.Attributes.size() > 128 || element.InlineStyles.size() > 128 ||
+                    element.Bindings.size() > 128 || element.Children.size() > 4'096 ||
+                    element.CustomType.size() > 256 || element.Slot.size() > 256 ||
+                    (element.Type == UiVisualElementType::Custom && element.CustomType.empty()) ||
+                    (element.Type != UiVisualElementType::Custom && !element.CustomType.empty()))
+                    throw std::invalid_argument("UI document contains an invalid or duplicated element.");
+                if (element.Type == UiVisualElementType::TemplateContainer && !element.Template)
+                    throw std::invalid_argument("UI template containers require a template asset.");
+                if (element.Type == UiVisualElementType::Slot && (element.Template || !element.Slot.empty()))
+                    throw std::invalid_argument("UI slot declarations cannot reference a template or slot.");
+                std::unordered_set<std::string> classNames;
+                for (const auto& value : element.Classes)
+                {
+                    if (value.empty() || value.size() > 128 || !classNames.insert(value).second)
+                        throw std::invalid_argument("UI document element class is empty or duplicated.");
+                    stringBytes += value.size();
+                }
+                const auto validateValues = [&](const std::vector<UiNamedValue>& values)
+                {
+                    std::unordered_set<std::string> keys;
+                    for (const auto& value : values)
+                    {
+                        if (value.Name.empty() || value.Name.size() > 128 || value.Value.size() > 65'536 ||
+                            !keys.insert(value.Name).second)
+                            throw std::invalid_argument("UI document value is empty, duplicated, or too large.");
+                        stringBytes += value.Name.size() + value.Value.size();
+                    }
+                };
+                validateValues(element.Attributes);
+                validateValues(element.InlineStyles);
+                const auto* image = NamedValue(element.Attributes, "image");
+                const auto* renderTexture = NamedValue(element.Attributes, "render-texture");
+                const auto* font = NamedValue(element.Attributes, "font");
+                if (image != nullptr && renderTexture != nullptr)
+                    throw std::invalid_argument(
+                        "UI elements cannot reference both an asset image and logical render texture.");
+                if (renderTexture != nullptr && (element.Type != UiVisualElementType::Image || renderTexture->empty()))
+                    throw std::invalid_argument(
+                        "UI render-texture references require a non-empty logical ID on an Image element.");
+                const auto validateAssetReference = [](const std::string* value, const std::string_view name)
+                {
+                    if (value == nullptr || value->empty())
+                        return;
+                    if (!AssetId::Parse(*value))
+                        throw std::invalid_argument("UI " + std::string(name) + " reference cannot be the empty ID.");
+                };
+                validateAssetReference(image, "image");
+                validateAssetReference(font, "font");
+                validateAssetReference(renderTexture, "render-texture");
+                std::unordered_set<std::string> bindingProperties;
+                for (const auto& binding : element.Bindings)
+                {
+                    if (binding.Property.empty() || binding.Path.empty() || binding.Property.size() > 128 ||
+                        binding.Path.size() > 1'024 ||
+                        (binding.Mode != "OneWay" && binding.Mode != "TwoWay" && binding.Mode != "OneTime") ||
+                        !bindingProperties.insert(binding.Property).second)
+                        throw std::invalid_argument("UI document binding is invalid or duplicated.");
+                    stringBytes += binding.Property.size() + binding.Path.size() + binding.Mode.size();
+                }
+                stringBytes += element.Name.size() + element.CustomType.size() + element.Slot.size();
+            });
+        if (stringBytes > MaximumUiDocumentBytes)
+            throw std::invalid_argument("UI document string data exceeds the 16 MiB safety limit.");
+    }
+
+    UiStyleSheetAsset::UiStyleSheetAsset(UiStyleSheetDefinition definition) : m_Definition(std::move(definition))
+    {
+        if (m_Definition.Rules.empty())
+            return;
+        Validate(m_Definition);
+        m_ResidentBytes = sizeof(*this);
+        for (const auto& rule : m_Definition.Rules)
+        {
+            m_ResidentBytes += sizeof(rule) + rule.Selector.size();
+            for (const auto& part : rule.Parts)
+            {
+                m_ResidentBytes += sizeof(part) + part.Type.size() + part.Name.size();
+                for (const auto& value : part.Classes)
+                    m_ResidentBytes += value.size();
+            }
+            for (const auto& property : rule.Properties)
+                m_ResidentBytes += property.Name.size() + property.Value.size();
+        }
+    }
+
+    std::size_t UiStyleSheetAsset::ResidentBytes() const noexcept { return m_ResidentBytes; }
+
+    UiStyleSheetDefinition UiStyleSheetAsset::ParseSource(const std::span<const std::byte> bytes)
+    {
+        if (bytes.size() > MaximumUiDocumentBytes)
+            throw std::runtime_error("UI stylesheet exceeds the 16 MiB safety limit.");
+        auto source = RemoveCssComments(Text(bytes));
+        constexpr std::string_view Header = "@keire-style 1;";
+        const auto first = source.find_first_not_of(" \t\r\n");
+        if (first == std::string::npos || std::string_view(source).substr(first, Header.size()) != Header)
+            throw std::runtime_error("UI stylesheet must begin with '@keire-style 1;'.");
+        std::size_t cursor = first + Header.size();
+        UiStyleSheetDefinition result;
+        while (cursor < source.size())
+        {
+            const auto open = source.find('{', cursor);
+            if (open == std::string::npos)
+            {
+                if (!Trim(std::string_view(source).substr(cursor)).empty())
+                    throw std::runtime_error("UI stylesheet contains text outside a rule.");
+                break;
+            }
+            auto rule = ParseSelector(source.substr(cursor, open - cursor));
+            const auto close = source.find('}', open + 1);
+            if (close == std::string::npos)
+                throw std::runtime_error("UI stylesheet contains an unterminated rule.");
+            if (source.find('{', open + 1) < close)
+                throw std::runtime_error("UI stylesheet does not support nested rules.");
+            rule.Properties = ParseDeclarations(std::string_view(source).substr(open + 1, close - open - 1));
+            result.Rules.push_back(std::move(rule));
+            cursor = close + 1;
+        }
+        Validate(result);
+        return result;
+    }
+
+    Ref<UiStyleSheetAsset> UiStyleSheetAsset::Decode(const std::span<const std::byte> bytes)
+    {
+        const auto document = ParseJson(bytes, "UI stylesheet asset");
+        if (!document.is_object() || document.value("schemaVersion", 0) != 1)
+            throw std::runtime_error("UI stylesheet asset has an unsupported schema.");
+        UiStyleSheetDefinition definition;
+        for (const auto& sourceRule : document.at("rules"))
+        {
+            UiStyleRuleDefinition rule;
+            rule.Selector = sourceRule.at("selector").get<std::string>();
+            rule.Specificity = sourceRule.at("specificity").get<std::uint32_t>();
+            for (const auto& sourcePart : sourceRule.at("parts"))
+                rule.Parts.push_back(DecodeSelectorPart(sourcePart));
+            rule.Properties = DecodeNamedValues(sourceRule.at("properties"));
+            definition.Rules.push_back(std::move(rule));
+        }
+        return CreateRef<UiStyleSheetAsset>(std::move(definition));
+    }
+
+    std::vector<std::byte> UiStyleSheetAsset::Encode(const UiStyleSheetDefinition& definition)
+    {
+        Validate(definition);
+        Json rules = Json::array();
+        for (const auto& rule : definition.Rules)
+        {
+            Json parts = Json::array();
+            for (const auto& part : rule.Parts)
+                parts.push_back(EncodeSelectorPart(part));
+            rules.push_back({{"selector", rule.Selector},
+                             {"specificity", rule.Specificity},
+                             {"parts", std::move(parts)},
+                             {"properties", EncodeNamedValues(rule.Properties)}});
+        }
+        return Bytes(Json{{"schemaVersion", 1}, {"rules", std::move(rules)}}.dump(2) + '\n');
+    }
+
+    std::vector<std::byte> UiStyleSheetAsset::EncodeSource(const UiStyleSheetDefinition& definition)
+    {
+        Validate(definition);
+        std::string result = "@keire-style 1;\n\n";
+        for (const auto& rule : definition.Rules)
+        {
+            result += rule.Selector + "\n{\n";
+            for (const auto& property : rule.Properties)
+                result += "  " + property.Name + ": " + property.Value + ";\n";
+            result += "}\n\n";
+        }
+        return Bytes(result);
+    }
+
+    void UiStyleSheetAsset::Validate(const UiStyleSheetDefinition& definition)
+    {
+        if (definition.SchemaVersion != 1 || definition.Rules.size() > MaximumUiStyleRules)
+            throw std::invalid_argument("UI stylesheet schema or rule count is invalid.");
+        std::size_t properties = 0;
+        std::size_t stringBytes = 0;
+        for (const auto& rule : definition.Rules)
+        {
+            if (rule.Selector.empty() || rule.Selector.size() > 1'024 || rule.Parts.empty() || rule.Parts.size() > 32 ||
+                rule.Specificity > 100'000 || rule.Properties.empty() || rule.Properties.size() > 256)
+                throw std::invalid_argument("UI stylesheet rule is empty or exceeds a safety limit.");
+            std::unordered_set<std::string> propertyNames;
+            for (std::size_t index = 0; index < rule.Parts.size(); ++index)
+            {
+                const auto& part = rule.Parts[index];
+                if ((index == 0 && part.Combinator != UiStyleCombinator::None) ||
+                    (index != 0 && part.Combinator == UiStyleCombinator::None) || part.Type.size() > 256 ||
+                    part.Name.size() > 256 || part.Classes.size() > 64 ||
+                    static_cast<std::uint16_t>(part.States) >
+                        static_cast<std::uint16_t>(UiStylePseudoState::Hover | UiStylePseudoState::Active |
+                                                   UiStylePseudoState::Focus | UiStylePseudoState::Disabled |
+                                                   UiStylePseudoState::Checked))
+                    throw std::invalid_argument("UI stylesheet selector part is invalid.");
+                stringBytes += part.Type.size() + part.Name.size();
+                for (const auto& className : part.Classes)
+                {
+                    if (className.empty() || className.size() > 128)
+                        throw std::invalid_argument("UI stylesheet selector class is invalid.");
+                    stringBytes += className.size();
+                }
+            }
+            for (const auto& property : rule.Properties)
+            {
+                if (property.Name.empty() || property.Name.size() > 128 || property.Value.empty() ||
+                    property.Value.size() > 65'536 || !propertyNames.insert(property.Name).second)
+                    throw std::invalid_argument("UI stylesheet property is empty, duplicated, or too large.");
+                stringBytes += property.Name.size() + property.Value.size();
+            }
+            properties += rule.Properties.size();
+            stringBytes += rule.Selector.size();
+        }
+        if (properties > MaximumUiStyleProperties || stringBytes > MaximumUiDocumentBytes)
+            throw std::invalid_argument("UI stylesheet exceeds the property or string-data safety limit.");
+    }
+
+    UiPanelSettingsAsset::UiPanelSettingsAsset(UiPanelSettingsDefinition definition)
+        : m_Definition(std::move(definition))
+    {
+        Validate(m_Definition);
+    }
+
+    RuntimeUiCanvasSettings UiPanelSettingsAsset::CanvasSettings() const noexcept
+    {
+        return {m_Definition.ReferenceWidth,
+                m_Definition.ReferenceHeight,
+                m_Definition.ScaleMode,
+                m_Definition.MatchWidthOrHeight,
+                1.0F,
+                m_Definition.RespectSafeArea};
+    }
+
+    Ref<UiPanelSettingsAsset> UiPanelSettingsAsset::Decode(const std::span<const std::byte> bytes)
+    {
+        const auto document = ParseJson(bytes, "UI panel settings asset");
+        if (!document.is_object() || document.value("schemaVersion", 0) != 1)
+            throw std::runtime_error("UI panel settings asset has an unsupported schema.");
+        UiPanelSettingsDefinition definition;
+        definition.Target = ParsePanelTarget(document.at("target").get<std::string>());
+        definition.ScaleMode = ParseScaleMode(document.at("scaleMode").get<std::string>());
+        definition.ReferenceWidth = document.at("referenceWidth").get<float>();
+        definition.ReferenceHeight = document.at("referenceHeight").get<float>();
+        definition.MatchWidthOrHeight = document.at("matchWidthOrHeight").get<float>();
+        definition.SortingOrder = document.value("sortingOrder", 0);
+        definition.Camera =
+            AssetId::Parse(document.value("camera", std::string("00000000-0000-0000-0000-000000000000")));
+        definition.RenderTexture =
+            AssetId::Parse(document.value("renderTexture", std::string("00000000-0000-0000-0000-000000000000")));
+        definition.RespectSafeArea = document.value("respectSafeArea", true);
+        definition.WorldWidth = document.value("worldWidth", 1.92F);
+        definition.WorldHeight = document.value("worldHeight", 1.08F);
+        definition.PixelsPerUnit = document.value("pixelsPerUnit", 1000.0F);
+        definition.DepthTest = document.value("depthTest", true);
+        return CreateRef<UiPanelSettingsAsset>(definition);
+    }
+
+    std::vector<std::byte> UiPanelSettingsAsset::Encode(const UiPanelSettingsDefinition& definition)
+    {
+        Validate(definition);
+        const Json document{{"schemaVersion", 1},
+                            {"target", ToString(definition.Target)},
+                            {"scaleMode", ToString(definition.ScaleMode)},
+                            {"referenceWidth", definition.ReferenceWidth},
+                            {"referenceHeight", definition.ReferenceHeight},
+                            {"matchWidthOrHeight", definition.MatchWidthOrHeight},
+                            {"sortingOrder", definition.SortingOrder},
+                            {"camera", definition.Camera.ToString()},
+                            {"renderTexture", definition.RenderTexture.ToString()},
+                            {"respectSafeArea", definition.RespectSafeArea},
+                            {"worldWidth", definition.WorldWidth},
+                            {"worldHeight", definition.WorldHeight},
+                            {"pixelsPerUnit", definition.PixelsPerUnit},
+                            {"depthTest", definition.DepthTest}};
+        return Bytes(document.dump(2) + '\n');
+    }
+
+    void UiPanelSettingsAsset::Validate(const UiPanelSettingsDefinition& definition)
+    {
+        if (definition.SchemaVersion != 1 || !std::isfinite(definition.ReferenceWidth) ||
+            !std::isfinite(definition.ReferenceHeight) || !std::isfinite(definition.MatchWidthOrHeight) ||
+            !std::isfinite(definition.WorldWidth) || !std::isfinite(definition.WorldHeight) ||
+            !std::isfinite(definition.PixelsPerUnit) || definition.ReferenceWidth <= 0.0F ||
+            definition.ReferenceHeight <= 0.0F || definition.ReferenceWidth > 65'536.0F ||
+            definition.ReferenceHeight > 65'536.0F || definition.MatchWidthOrHeight < 0.0F ||
+            definition.MatchWidthOrHeight > 1.0F || definition.SortingOrder < -32'768 ||
+            definition.SortingOrder > 32'767 || definition.WorldWidth <= 0.0F || definition.WorldHeight <= 0.0F ||
+            definition.WorldWidth > 10'000.0F || definition.WorldHeight > 10'000.0F ||
+            definition.PixelsPerUnit <= 0.0F || definition.PixelsPerUnit > 100'000.0F ||
+            (definition.Target == UiPanelTarget::RenderTexture && !definition.RenderTexture) ||
+            (definition.Target != UiPanelTarget::RenderTexture && definition.RenderTexture) ||
+            (definition.Target == UiPanelTarget::CameraOverlay && !definition.Camera) ||
+            (definition.Target != UiPanelTarget::CameraOverlay && definition.Camera))
+            throw std::invalid_argument("UI panel settings contain an invalid target or dimensions.");
+    }
+
+    AssetImporterRegistration CreateUiVisualTreeAssetImporter()
+    {
+        AssetImporterRegistration result{"Keire.UiVisualTree", 1, UiVisualTreeAsset::StaticType(), {".keireui"}};
+        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        {
+            auto definition = UiVisualTreeAsset::ParseSource(bytes);
+            AssetImportOutput output;
+            output.Bytes = UiVisualTreeAsset::Encode(definition);
+            output.AssetDependencies = definition.StyleSheets;
+            VisitElements(definition.Root, 1,
+                          [&](const UiVisualElementDefinition& element, std::size_t)
+                          {
+                              if (element.Template)
+                                  output.AssetDependencies.push_back(element.Template);
+                              for (const auto name : {std::string_view("image"), std::string_view("font")})
+                              {
+                                  const auto* value = NamedValue(element.Attributes, name);
+                                  if (value != nullptr && !value->empty())
+                                      output.AssetDependencies.push_back(AssetId::Parse(*value));
+                              }
+                          });
+            std::ranges::sort(output.AssetDependencies);
+            const auto unique = std::ranges::unique(output.AssetDependencies);
+            output.AssetDependencies.erase(unique.begin(), unique.end());
+            return output;
+        };
+        return result;
+    }
+
+    AssetImporterRegistration CreateUiStyleSheetAssetImporter()
+    {
+        return {"Keire.UiStyleSheet",
+                1,
+                UiStyleSheetAsset::StaticType(),
+                {".keirestyle"},
+                [](const std::span<const std::byte> bytes)
+                { return UiStyleSheetAsset::Encode(UiStyleSheetAsset::ParseSource(bytes)); }};
+    }
+
+    AssetImporterRegistration CreateUiPanelSettingsAssetImporter()
+    {
+        return {"Keire.UiPanelSettings",
+                1,
+                UiPanelSettingsAsset::StaticType(),
+                {".keireuipanel"},
+                [](const std::span<const std::byte> bytes)
+                { return UiPanelSettingsAsset::Encode(UiPanelSettingsAsset::Decode(bytes)->Definition()); }};
+    }
+
+    AssetDecoderRegistration CreateUiVisualTreeAssetDecoder()
+    {
+        return {UiVisualTreeAsset::StaticType(), CreateRef<UiVisualTreeAsset>(),
+                [](const std::span<const std::byte> bytes) -> Ref<Asset> { return UiVisualTreeAsset::Decode(bytes); }};
+    }
+
+    AssetDecoderRegistration CreateUiStyleSheetAssetDecoder()
+    {
+        return {UiStyleSheetAsset::StaticType(), CreateRef<UiStyleSheetAsset>(),
+                [](const std::span<const std::byte> bytes) -> Ref<Asset> { return UiStyleSheetAsset::Decode(bytes); }};
+    }
+
+    AssetDecoderRegistration CreateUiPanelSettingsAssetDecoder()
+    {
+        return {UiPanelSettingsAsset::StaticType(), CreateRef<UiPanelSettingsAsset>(),
+                [](const std::span<const std::byte> bytes) -> Ref<Asset>
+                { return UiPanelSettingsAsset::Decode(bytes); }};
+    }
+} // namespace Keire

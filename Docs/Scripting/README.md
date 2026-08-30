@@ -86,7 +86,7 @@ state serialization; collection authoring is currently available for persistent 
 | [Animation](Animation.md) | Animator states, parameters, layers, events, and IK |
 | [Rendering And Materials](RenderingAndMaterials.md) | Cameras, renderers, lights, dynamic materials, and parameters |
 | [Scenes And Render Settings](ScenesAndRenderSettings.md) | Scene objects, loading, activation, queries, and environments |
-| [UI And Events](UiAndEvents.md) | Scene UI components, runtime overlays, events, and cursor ownership |
+| [UI And Events](UiAndEvents.md) | UI Builder, retained documents/styles/panels, managed controls, events, and target modes |
 | [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) | `Job`, cancellation, hot reload, failures, and diagnostics |
 | [Managed API Index](ApiIndex.md) | Compact type and method lookup |
 

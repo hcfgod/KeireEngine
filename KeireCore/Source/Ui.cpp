@@ -1322,6 +1322,26 @@ namespace Keire
                 RenderSystemInternalAccess::EndFrame(*Renderer, drawData);
         }
 
+        void CancelFrame() noexcept
+        {
+            if (!FrameActive)
+            {
+                FrameContextLock = {};
+                return;
+            }
+
+            try
+            {
+                Frame->m_Impl->Deactivate();
+                ImGui::EndFrame();
+            }
+            catch (...)
+            {
+            }
+            FrameActive = false;
+            FrameContextLock = {};
+        }
+
         void Shutdown() noexcept
         {
             if (ShutdownComplete)
@@ -1463,6 +1483,7 @@ namespace Keire
     void UiSystem::SetTheme(const UiTheme theme) { m_Impl->SetTheme(theme); }
     UiTheme UiSystem::Theme() const noexcept { return m_Impl->Specification.Theme; }
     void UiSystem::EndFrame() { m_Impl->EndFrame(); }
+    void UiSystem::CancelFrame() noexcept { m_Impl->CancelFrame(); }
     void UiSystem::Shutdown() noexcept { m_Impl->Shutdown(); }
     UiCaptureState UiSystem::Capture() const noexcept { return m_Impl->CaptureState; }
 } // namespace Keire

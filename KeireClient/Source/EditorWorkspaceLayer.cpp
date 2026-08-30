@@ -42,6 +42,8 @@
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
 #include "KeireClient/Editor/ShaderGraphDocument.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
+#include "KeireClient/Editor/UiBuilderLiveDraft.h"
+#include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
@@ -329,7 +331,11 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
       m_ShaderGraphDocument(m_ConstructedDocuments->ShaderGraph.get()),
       m_MaterialGraphDocument(m_ConstructedDocuments->MaterialGraph.get()),
       m_ProjectSettingsDocument(m_ConstructedDocuments->ProjectSettings.get()),
-      m_MaterialDocument(m_ConstructedDocuments->Material.get()), m_DocumentCoordinator(CreateDocumentCoordinator()),
+      m_MaterialDocument(m_ConstructedDocuments->Material.get()),
+      m_UiBuilderDocument(std::make_unique<KeireEditor::UiBuilderDocument>()),
+      m_UiBuilderStyleSheetDocument(std::make_unique<KeireEditor::UiBuilderStyleSheetDocument>()),
+      m_UiBuilderLiveDraft(std::make_unique<KeireEditor::UiBuilderLiveDraftSession>()),
+      m_DocumentCoordinator(CreateDocumentCoordinator()),
       m_CommandRouter(std::make_unique<KeireEditor::EditorCommandRouter>()),
       m_LifecycleCoordinator(std::make_unique<KeireEditor::EditorWorkspaceLifecycleCoordinator>()),
       m_ReplayProfilingCoordinator(std::make_unique<KeireEditor::EditorReplayProfilingCoordinator>()),
@@ -354,6 +360,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
           static_cast<KeireEditor::IShaderGraphPanelController&>(*this))),
       m_MaterialGraphPanel(std::make_unique<KeireEditor::MaterialGraphPanel>(
           static_cast<KeireEditor::IMaterialGraphPanelController&>(*this))),
+      m_UiBuilderPanel(
+          std::make_unique<KeireEditor::UiBuilderPanel>(static_cast<KeireEditor::IUiBuilderController&>(*this))),
       m_ProjectSettingsPanel(std::make_unique<KeireEditor::ProjectSettingsPanel>(
           *m_ProjectSettingsDocument, static_cast<KeireEditor::IProjectSettingsController&>(*this))),
       m_LightingPanel(
@@ -761,6 +769,7 @@ void EditorWorkspaceLayer::OnAttach()
     m_VfxEffectPanel->Attach(workspace);
     m_ShaderGraphPanel->Attach(workspace);
     m_MaterialGraphPanel->Attach(workspace);
+    m_UiBuilderPanel->Attach(workspace);
     m_InputDebugger = workspace.RegisterPanel({"editor.input-debugger", "Input Debugger", false});
     m_ProjectSettingsPanel->Attach(workspace);
     m_LightingPanel->Attach(workspace);
@@ -1004,6 +1013,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
                 }
                 break;
             case Phase::PlayRuntime:
+                SynchronizeUiBuilderLiveDraft();
                 m_PlayModeCoordinator->UpdateRuntime(time.DeltaTime().Seconds(), time.InterpolationAlpha());
                 break;
             case Phase::EditModePreview:
@@ -1109,6 +1119,10 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
             m_ActiveUndoContext = m_ShaderGraphDocument->UndoContext();
         else if (m_MaterialGraphDocument->UndoContext() && m_MaterialGraphDocument->UndoContext()->IsOpen())
             m_ActiveUndoContext = m_MaterialGraphDocument->UndoContext();
+        else if (m_UiBuilderDocument->UndoContext() && m_UiBuilderDocument->UndoContext()->IsOpen())
+            m_ActiveUndoContext = m_UiBuilderDocument->UndoContext();
+        else if (m_UiBuilderStyleSheetDocument->UndoContext() && m_UiBuilderStyleSheetDocument->UndoContext()->IsOpen())
+            m_ActiveUndoContext = m_UiBuilderStyleSheetDocument->UndoContext();
         else if (m_AssetBrowserPanel)
             m_ActiveUndoContext = m_AssetBrowserPanel->UndoContext();
     }
@@ -1132,8 +1146,32 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         SaveSceneAs();
     else if (ui.Shortcut({.Key = Keire::UiKey::S, .Primary = true, .Global = true}))
     {
-        if (m_MaterialGraphDocument->Dirty() && m_MaterialGraphPanel->Registration().Visible() &&
-            m_ActiveUndoContext == m_MaterialGraphDocument->UndoContext())
+        if (m_UiBuilderStyleSheetDocument->Dirty() && m_UiBuilderPanel->Registration().Visible() &&
+            m_ActiveUndoContext == m_UiBuilderStyleSheetDocument->UndoContext())
+        {
+            try
+            {
+                SaveUiBuilderStyleSheet();
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("UI Builder", error.what());
+            }
+        }
+        else if (m_UiBuilderDocument->Dirty() && m_UiBuilderPanel->Registration().Visible() &&
+                 m_ActiveUndoContext == m_UiBuilderDocument->UndoContext())
+        {
+            try
+            {
+                SaveUiBuilderDocument();
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("UI Builder", error.what());
+            }
+        }
+        else if (m_MaterialGraphDocument->Dirty() && m_MaterialGraphPanel->Registration().Visible() &&
+                 m_ActiveUndoContext == m_MaterialGraphDocument->UndoContext())
         {
             try
             {
@@ -1301,6 +1339,7 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         m_VfxEffectPanel->Draw(ui);
         m_ShaderGraphPanel->Draw(ui);
         m_MaterialGraphPanel->Draw(ui);
+        m_UiBuilderPanel->Draw(ui);
         DrawInputDebugger(ui);
         m_ProjectSettingsPanel->Draw(ui, m_Theme);
         m_LightingPanel->Draw(ui, m_Theme);

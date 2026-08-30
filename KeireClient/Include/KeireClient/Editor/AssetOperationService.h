@@ -31,6 +31,7 @@ namespace KeireEditor
         Reveal,
         OpenScene,
         OpenInputActions,
+        OpenUiBuilder,
         OpenExternal,
         OpenMaterialGraph,
         OpenShaderGraph,

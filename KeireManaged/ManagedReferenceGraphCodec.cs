@@ -19,6 +19,7 @@ internal static class ManagedReferenceGraphCodec
     private const int MaximumStringBytes = 1_048_576;
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
     private static readonly ConditionalWeakTable<AssemblyLoadContext, SerializedTypeRegistry> TypeRegistries = new();
+    private static readonly object TypeRegistryLock = new();
 
     private sealed class SerializedTypeRegistry(Dictionary<Guid, Type> types)
     {
@@ -729,8 +730,11 @@ internal static class ManagedReferenceGraphCodec
     {
         AssemblyLoadContext loadContext = AssemblyLoadContext.GetLoadContext(declaredType.Assembly) ??
                                           AssemblyLoadContext.Default;
-        return TypeRegistries.GetValue(loadContext,
-            context => new SerializedTypeRegistry(CreateTypeRegistry(context, path, declaredType))).Types;
+        lock (TypeRegistryLock)
+        {
+            return TypeRegistries.GetValue(loadContext,
+                context => new SerializedTypeRegistry(CreateTypeRegistry(context, path, declaredType))).Types;
+        }
     }
 
     internal static IReadOnlyDictionary<Guid, Type> TypeRegistryForTests(Type declaredType) =>
@@ -739,6 +743,22 @@ internal static class ManagedReferenceGraphCodec
     internal static IReadOnlyDictionary<Guid, Type> TypeRegistryForTests(IEnumerable<Type> candidates,
                                                                          Type declaredType, string path) =>
         CreateTypeRegistry(candidates, path, declaredType);
+
+    internal static IReadOnlyDictionary<Guid, Type> InstallTypeRegistry(IEnumerable<Type> candidates,
+                                                                         Type contextType, string path)
+    {
+        AssemblyLoadContext loadContext = AssemblyLoadContext.GetLoadContext(contextType.Assembly) ??
+                                          AssemblyLoadContext.Default;
+        IEnumerable<Type> registryCandidates = candidates.Concat(SafeTypes(typeof(SerializableTypeAttribute).Assembly))
+            .Distinct();
+        var replacement = new SerializedTypeRegistry(CreateTypeRegistry(registryCandidates, path, contextType));
+        lock (TypeRegistryLock)
+        {
+            TypeRegistries.Remove(loadContext);
+            TypeRegistries.Add(loadContext, replacement);
+        }
+        return replacement.Types;
+    }
 
     private static IReadOnlyDictionary<Guid, Type> BuildTypeRegistry(string path, Type declaredType) =>
         TypeRegistry(declaredType, path);

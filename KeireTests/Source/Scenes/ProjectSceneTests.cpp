@@ -2,6 +2,9 @@
 
 #include "KeireInternal/FileSystem.h"
 
+#include "Keire/ECS/Components/UiDocumentComponent.h"
+#include "Keire/Ui/UiToolkit.h"
+
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
@@ -17,6 +20,7 @@
 #include <ranges>
 #include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
@@ -678,6 +682,16 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(std::filesystem::exists(created->Root() / "Assets/Shaders/DefaultUnlit.hlsl"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/Shaders/DefaultUnlit.keireshader"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/Materials/DefaultUnlit.keirematerial"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/Starter.keirestyle"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterHud.keireui"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterCard.keireui"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterBindingExample.keireui"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/ScreenOverlay.keireuipanel"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/WorldTerminal.keireui"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/WorldSurface.keireuipanel"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterRenderTexture.keireui"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterRenderTexture.keireuipanel"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/Scripts/Runtime/StarterUi.cs"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Project.keireproject"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Rendering.keiresettings"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Scripting.keiresettings"));
@@ -699,6 +713,28 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
         Keire::Math::ComposeTransform({}, starterLight->Transform.Rotation, {1.0F, 1.0F, 1.0F});
     const auto starterLightDirection = Keire::Math::TransformDirection(starterLightTransform, {0.0F, 0.0F, 1.0F});
     CHECK(starterLightDirection.Y < -0.5F);
+    const auto starterUi = std::ranges::find(starterScene->Definition().Objects, "Starter UI Document",
+                                             &Keire::SceneObjectDefinition::Name);
+    REQUIRE(starterUi != starterScene->Definition().Objects.end());
+    CHECK(std::ranges::count(starterUi->Components, Keire::UiDocumentComponent::StaticType(),
+                             &Keire::SceneComponentDefinition::Type) == 1);
+    CHECK(std::ranges::count(starterUi->Components,
+                             Keire::ComponentTypeId(Keire::AssetId::Parse("b1b2d001-1000-4000-8000-000000000001")),
+                             &Keire::SceneComponentDefinition::Type) == 1);
+    const auto starterWorldUi =
+        std::ranges::find(starterScene->Definition().Objects, "Starter World UI", &Keire::SceneObjectDefinition::Name);
+    REQUIRE(starterWorldUi != starterScene->Definition().Objects.end());
+    CHECK(starterWorldUi->Transform.Position == Keire::Vector3{0.0F, 2.0F, 3.0F});
+    CHECK(std::ranges::count(starterWorldUi->Components, Keire::UiDocumentComponent::StaticType(),
+                             &Keire::SceneComponentDefinition::Type) == 1);
+    CHECK(std::ranges::count(starterWorldUi->Components,
+                             Keire::ComponentTypeId(Keire::AssetId::Parse("b1b2d001-1000-4000-8000-000000000002")),
+                             &Keire::SceneComponentDefinition::Type) == 1);
+    const auto starterRenderTextureUi = std::ranges::find(
+        starterScene->Definition().Objects, "Starter UI Render Target", &Keire::SceneObjectDefinition::Name);
+    REQUIRE(starterRenderTextureUi != starterScene->Definition().Objects.end());
+    CHECK(std::ranges::count(starterRenderTextureUi->Components, Keire::UiDocumentComponent::StaticType(),
+                             &Keire::SceneComponentDefinition::Type) == 1);
     auto rendering = Keire::LoadRenderEnvironmentSettings(created->Root());
     CHECK(rendering.AmbientIntensity == doctest::Approx(0.75F));
     rendering.AmbientColor = {0.1F, 0.2F, 0.3F, 1.0F};
@@ -1046,6 +1082,169 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
     CHECK(first.AssetDependencies == expected);
     CHECK(second.AssetDependencies == expected);
     CHECK(std::ranges::find(first.AssetDependencies, ignoredEntity) == first.AssetDependencies.end());
+}
+
+TEST_CASE("Scene reimport retains UI Document visual-tree and panel dependencies")
+{
+    const auto visualTree = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000020");
+    const auto panelSettings = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000021");
+    auto definition = Keire::SceneAsset::EmptyDefinition("UI Document Dependencies");
+    definition.Objects.push_back(
+        {.Id = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000020"),
+         .Name = "HUD",
+         .Components = {{Keire::UiDocumentComponent::StaticType(), 1, true,
+                         "{\"visualTree\":" + JsonString(visualTree.ToString()) + ",\"panelSettings\":" +
+                             JsonString(panelSettings.ToString()) + ",\"sortingOrder\":0,\"receivesInput\":true}"}}});
+
+    const auto importer = Keire::CreateSceneAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    auto expected = std::vector{visualTree, panelSettings};
+    std::ranges::sort(expected);
+    const auto first = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
+    const auto second = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
+    CHECK(first.AssetDependencies == expected);
+    CHECK(second.AssetDependencies == expected);
+}
+
+TEST_CASE("A rooted UI Document scene cook retains complete toolkit dependency closure and every panel target")
+{
+    TemporaryDirectory directory("SceneUiToolkitDependencyCook");
+    std::filesystem::create_directories(directory.Path / "Assets");
+
+    Keire::AssetImporterRegistration leafImporter;
+    leafImporter.Name = "Test.UiResource";
+    leafImporter.Type = Keire::AssetTypeId::Parse("51000000-0000-4000-8000-000000000001");
+    leafImporter.Extensions = {".uiresource"};
+    leafImporter.Import = [](const std::span<const std::byte> bytes)
+    { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+    const auto visualTreeImporter = Keire::CreateUiVisualTreeAssetImporter();
+    const auto styleImporter = Keire::CreateUiStyleSheetAssetImporter();
+    const auto panelImporter = Keire::CreateUiPanelSettingsAssetImporter();
+    Keire::AssetDatabaseSpecification specification{.ProjectRoot = directory.Path};
+    specification.Importers = {leafImporter, visualTreeImporter, styleImporter, panelImporter,
+                               Keire::CreateSceneAssetImporter()};
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
+
+    const std::string leafSource = "ui resource";
+    const auto image = database->CreateAsset("UI/HudImage.uiresource", leafImporter,
+                                             std::as_bytes(std::span(leafSource.data(), leafSource.size())));
+    const auto font = database->CreateAsset("UI/HudFont.uiresource", leafImporter,
+                                            std::as_bytes(std::span(leafSource.data(), leafSource.size())));
+    const auto unrelated = database->CreateAsset("UI/Unrelated.uiresource", leafImporter,
+                                                 std::as_bytes(std::span(leafSource.data(), leafSource.size())));
+    const std::string styleSource = "@keire-style 1;\n\n.hud { width: 100%; height: 100%; }\n";
+    const auto style = database->CreateAsset("UI/Hud.keirestyle", styleImporter,
+                                             std::as_bytes(std::span(styleSource.data(), styleSource.size())));
+
+    const std::string templateSource = "<ui schemaVersion=\"1\" name=\"HudTemplate\">\n"
+                                       "  <Label id=\"52000000-0000-4000-8000-000000000001\" name=\"caption\" font=\"" +
+                                       font.ToString() + "\" text=\"Status\"/>\n</ui>\n";
+    const auto templateTree =
+        database->CreateAsset("UI/HudTemplate.keireui", visualTreeImporter,
+                              std::as_bytes(std::span(templateSource.data(), templateSource.size())));
+    const std::string documentSource =
+        "<ui schemaVersion=\"1\" name=\"Hud\">\n  <style src=\"" + style.ToString() +
+        "\"/>\n  <VisualElement id=\"52000000-0000-4000-8000-000000000002\" name=\"root\" class=\"hud\" "
+        "image=\"" +
+        image.ToString() + "\">\n    <TemplateContainer id=\"52000000-0000-4000-8000-000000000003\" template=\"" +
+        templateTree.ToString() + "\"/>\n  </VisualElement>\n</ui>\n";
+    const auto visualTree = database->CreateAsset(
+        "UI/Hud.keireui", visualTreeImporter, std::as_bytes(std::span(documentSource.data(), documentSource.size())));
+
+    const auto createPanel = [&](const std::string_view name, const Keire::UiPanelSettingsDefinition& definition)
+    {
+        const auto source = Keire::UiPanelSettingsAsset::Encode(definition);
+        return database->CreateAsset(std::filesystem::path("UI") / (std::string(name) + ".keireuipanel"), panelImporter,
+                                     source);
+    };
+    Keire::UiPanelSettingsDefinition screen;
+    screen.Target = Keire::UiPanelTarget::ScreenOverlay;
+    Keire::UiPanelSettingsDefinition camera;
+    camera.Target = Keire::UiPanelTarget::CameraOverlay;
+    camera.Camera = Keire::AssetId::Parse("53000000-0000-4000-8000-000000000001");
+    Keire::UiPanelSettingsDefinition renderTexture;
+    renderTexture.Target = Keire::UiPanelTarget::RenderTexture;
+    renderTexture.RenderTexture = Keire::AssetId::Parse("53000000-0000-4000-8000-000000000002");
+    Keire::UiPanelSettingsDefinition world;
+    world.Target = Keire::UiPanelTarget::WorldSurface;
+    world.WorldWidth = 2.0F;
+    world.WorldHeight = 1.0F;
+    const std::array panels{createPanel("Screen", screen), createPanel("Camera", camera),
+                            createPanel("RenderTexture", renderTexture), createPanel("World", world)};
+
+    auto sceneDefinition = Keire::SceneAsset::EmptyDefinition("UI Toolkit Cook Root");
+    for (std::size_t index = 0; index < panels.size(); ++index)
+    {
+        sceneDefinition.Objects.push_back(
+            {.Id = Keire::AssetId(0x5400000000004000ULL, index + 1),
+             .Name = "UI Document " + std::to_string(index),
+             .Components = {{Keire::UiDocumentComponent::StaticType(), 1, true,
+                             "{\"visualTree\":" + JsonString(visualTree.ToString()) +
+                                 ",\"panelSettings\":" + JsonString(panels[index].ToString()) +
+                                 ",\"sortingOrder\":" + std::to_string(index) + ",\"receivesInput\":true}"}}});
+    }
+    const auto sceneSource = Keire::SceneAsset::Encode(sceneDefinition);
+    const auto scene =
+        database->CreateAsset("Scenes/UiToolkit.keirescene", Keire::CreateSceneAssetImporter(), sceneSource);
+
+    Keire::AssetBuildProfile profile;
+    profile.Strict = true;
+    profile.Roots = {scene};
+    const auto first = Keire::AssetCooker::Cook(*database, profile, directory.Path / "CookA");
+    const auto second = Keire::AssetCooker::Cook(*database, profile, directory.Path / "CookB");
+    CHECK(first.AssetCount == 10);
+    CHECK(KeireTests::ReadFile(first.CatalogPath) == KeireTests::ReadFile(second.CatalogPath));
+    const auto catalog = KeireTests::ReadFile(first.CatalogPath);
+    const std::array closure{scene, visualTree, templateTree, style,     image,
+                             font,  panels[0],  panels[1],    panels[2], panels[3]};
+    for (const auto dependency : closure)
+    {
+        CAPTURE(dependency.ToString());
+        CHECK(catalog.find(dependency.ToString()) != std::string::npos);
+    }
+    CHECK(catalog.find(unrelated.ToString()) == std::string::npos);
+}
+
+TEST_CASE("Scene import rejects retired Canvas UI with an exact entity and component diagnostic")
+{
+    auto definition = Keire::SceneAsset::EmptyDefinition("Retired UI");
+    const auto entity = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000099");
+    const auto retiredCanvas = Keire::ComponentTypeId::Parse("4b454952-4555-4943-414e-564153000001");
+    definition.Objects.push_back({.Id = entity, .Name = "Pause Menu", .Components = {{retiredCanvas, 1, true, "{}"}}});
+
+    const auto importer = Keire::CreateSceneAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    const Keire::AssetImportContext context;
+    CHECK_THROWS_WITH_AS(importer.ContextualImport(context, Keire::SceneAsset::Encode(definition)),
+                         "Scene entity 'Pause Menu' (30000000-0000-4000-8000-000000000099) contains retired legacy "
+                         "component 'Canvas' (4b454952-4555-4943-414e-564153000001). Recreate this UI as a UI "
+                         "Document that references .keireui and .keireuipanel assets.",
+                         std::invalid_argument);
+}
+
+TEST_CASE("Scene import rejects retired UI introduced by prefab instance overrides")
+{
+    auto definition = Keire::SceneAsset::EmptyDefinition("Retired Prefab UI");
+    const auto entity = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000098");
+    const auto source = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000097");
+    const auto retiredButton = Keire::ComponentTypeId::Parse("4b454952-4555-4942-5554-544f4e000001");
+    definition.Objects.push_back({.Id = entity, .Name = "Prefab Pause Menu"});
+    definition.PrefabInstances.push_back(
+        {.Prefab = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000096"),
+         .Root = entity,
+         .Objects = {{source, entity}},
+         .Overrides = {{.Kind = Keire::PrefabOverrideKind::AddComponent,
+                        .Object = entity,
+                        .AddedComponent = Keire::SceneComponentDefinition{retiredButton, 1, true, "{}"}}}});
+
+    const auto importer = Keire::CreateSceneAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    const Keire::AssetImportContext context;
+    CHECK_THROWS_WITH_AS(importer.ContextualImport(context, Keire::SceneAsset::Encode(definition)),
+                         "Scene entity 'Prefab Pause Menu' (30000000-0000-4000-8000-000000000098) contains retired "
+                         "legacy component 'UI Button' (4b454952-4555-4942-5554-544f4e000001). Recreate this UI as a "
+                         "UI Document that references .keireui and .keireuipanel assets.",
+                         std::invalid_argument);
 }
 
 TEST_CASE("A rooted scene cook includes managed data dependency closure")

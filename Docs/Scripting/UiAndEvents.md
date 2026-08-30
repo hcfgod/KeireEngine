@@ -1,434 +1,252 @@
-# UI And Events From C#
+# UI Toolkit And Events From C#
 
-Kéire supports scene-authored runtime UI, managed control bindings, text updates, persistent Inspector events,
-runtime listeners, keyboard/gamepad navigation, UTF-8 input, scrolling, and cooperative cursor ownership.
+Kéire UI Toolkit is a retained visual-tree system. UI structure, styling, and presentation policy are separate
+assets, and a scene references them through one `UIDocument` component. The Editor shell remains ImGui; UI Toolkit is
+for game and tool content authored by a project.
 
-## Scene UI References
+## Asset Model
 
-Use `Entity` for general UI objects such as panels and labels:
+- `.keireui` stores the visual tree. Every element has a stable ID and may have a name, classes, attributes, inline
+  properties, bindings, a template reference, a slot, and children.
+- `.keirestyle` stores CSS-like selectors and declarations. Type, `#name`, `.class`, descendant, child, compound, and
+  pseudo-state selectors participate in a deterministic specificity cascade.
+- `.keireuipanel` stores scaling and output policy: screen overlay, camera overlay, render texture, or world surface.
+
+Double-click a `.keireui` file to open the dockable UI Builder. The Builder owns its own hierarchy, control library,
+preview, Inspector, stylesheet and selector list, binding view, and source previews. Builder edits use the document
+undo stack and are not written until the document is saved.
+
+Add a `UIDocument` component to a scene entity and assign both the visual-tree and panel-settings assets. Component and
+panel sorting orders are added together. Later documents draw above earlier documents; pointer input is offered in the
+reverse order until handled.
+
+## UI Builder Workflow
+
+Create a UI Document from the Project panel, then assign imported `.keirestyle` and `.keireuipanel` assets as needed.
+A `.keireui` document opens with these working authoring surfaces:
+
+- Hierarchy multi-selection, drag-and-drop reparenting, copy/paste with regenerated stable IDs and names, and one
+  undoable transaction per accepted edit.
+- A control library containing the built-in controls and the custom controls explicitly registered by the active
+  last-good managed generation.
+- Inspector editing for names, reusable classes, inline properties, templates, slots, and one-way, two-way, or one-time
+  binding declarations.
+- Linked stylesheet management plus selector/declaration add, edit, and remove operations. Style edits have their own
+  undo/redo history and explicit Save/Reload boundary.
+- A retained-tree preview with resolution presets or a custom size, landscape/portrait orientation, **Match Game
+  View**, DPI/reference scaling, safe-area visualization, zoom/pan, rulers, guides, and live pseudo-state toggles.
+
+Preview resolution, DPI, safe-area, rulers, guides, zoom, and pseudo-state choices are authoring aids; they do not
+silently rewrite the referenced `.keireuipanel`. Edit presentation target, scaling, ordering, camera/texture identity,
+and world dimensions on the Panel Settings asset.
+
+While Play Mode is active, an unsaved edit to the open visual tree replaces matching running `UIDocument` instances
+through a development-only asset revision. **Save** makes the authored source authoritative. Stopping Play Mode,
+switching documents, reloading, or closing the workspace restores the imported baseline when the draft was not saved.
+Rejected drafts leave the last-good running document intact and surface an actionable Builder diagnostic.
+
+The Debugger can pick a presented element in Game view and inspect its stable ID, resolved layout/style state, selector
+precedence, focus and pointer capture, event capture/target/bubble routes, dirty reasons, UI vertices/batches, atlas
+usage, and style/layout/repaint timings when the corresponding runtime provider is available. Missing providers and
+stale generations are shown as unavailable or stale instead of fabricated zeroes. Debug snapshots stay local to the
+Editor, do not modify source assets, and are not uploaded by UI Builder.
+
+## Viewport Contract
+
+Screen-overlay and camera-overlay documents render in Game view, Play Mode, and packaged players. They are never
+painted over the 3D Scene viewport and do not intercept Scene-view input. Selecting a screen-space document focuses its
+UI Builder document.
+
+World-surface documents have physical width and height, pixels per unit, depth-test policy, and the owning entity's
+transform. They are projected into Scene view as world content. Pointer rays are mapped into panel UV and then layout
+coordinates. Render-texture documents target their configured texture rather than a viewport overlay.
+
+## Managed Visual Trees
+
+The managed API is under `Keire.UI`:
 
 ```csharp
-[SerializeField, StableFieldId("4abb4e35-ad42-4bc0-8208-22bc7d7fc078")]
-private Entity _panel;
+using Keire.UI;
 
-[SerializeField, StableFieldId("fcb61c69-1ec5-4d90-9f7a-ab06503dddae")]
-private Entity _ammoLabel;
+VisualElement root = new() { Name = "pause-menu" };
+root.AddToClassList("menu");
+
+Label title = new("Paused") { Name = "title" };
+Button resume = new(() => ResumeGame()) { Name = "resume", Text = "Resume" };
+resume.AddToClassList("primary-action");
+
+root.Add(title);
+root.Add(resume);
+
+Button? queried = root.Q<Button>("resume");
+IReadOnlyList<Button> actions = root.Query<Button>(className: "primary-action").ToList();
 ```
 
-Use typed managed handles for scene-authored controls:
+`VisualElement` owns hierarchy, classes, inline style, enablement, focus metadata, user data, and an inherited data
+source. `UQueryBuilder<T>` filters by type, name, and class without exposing native renderer state.
+
+`BindableElement` adds the authoring `BindingPath` used by fields and custom controls. A binding declared in markup or
+through `SetBinding` still owns its explicit `OneWay`, `TwoWay`, or `OneTime` mode; the path property is stable authoring
+metadata and does not implicitly create an ambient reflection binding.
+
+The built-in controls are `Label`, `Image`, `Button`, `TextField`, `Toggle`, `Slider`, `ProgressBar`, `ScrollView`,
+virtualized `ListView` and `TreeView`, `DropdownField`, `Foldout`, `TabView`, `Toolbar`, and `TemplateContainer`.
+
+Scene scripts query the live source-backed tree through the entity's `UIDocument`. Returned handles are checked against
+the document generation and become inert after a successful reload or destruction; a failed reload keeps the previous
+valid generation alive:
 
 ```csharp
-[SerializeField, StableFieldId("3ea684dc-669f-4407-a358-8ed110de569b")]
-private UiButton? _resumeButton;
+UIDocument document = Entity.GetComponent<UIDocument>()!;
+RuntimeVisualElement? launch = document.Q("launch");
 
-[SerializeField, StableFieldId("71a9094c-d1c5-4e7c-8bfe-ab0726129b78")]
-private UiSlider? _sensitivity;
-
-[SerializeField, StableFieldId("eb542341-d318-4931-ae6a-2f1c95608fe3")]
-private UiInputField? _profileName;
-```
-
-`UiButton`, `UiSlider`, `UiToggle`, `UiInputField`, and `UiScrollView` are managed reference types and may be `null`.
-Their `IsValid` properties also verify that the entity still has the corresponding native component.
-
-Direct asset and scene-object references are likewise `null` when unassigned and expose `IsValid` once resolved.
-
-## Button Events
-
-Bind and unbind symmetrically:
-
-```csharp
-private UiButton? _subscribedButton;
-
-protected override void OnEnable()
+if (launch?.ClickedThisFrame == true)
 {
-    BindButton();
-}
-
-protected override void OnDisable()
-{
-    UnbindButton();
-}
-
-protected override void OnBeforeReload()
-{
-    UnbindButton();
-}
-
-protected override void OnAfterReload()
-{
-    BindButton();
-}
-
-private void BindButton()
-{
-    if (ReferenceEquals(_subscribedButton, _resumeButton))
-        return;
-
-    UnbindButton();
-    _subscribedButton = _resumeButton;
-    if (_subscribedButton is not null)
-        _subscribedButton.Clicked += HandleResumeClicked;
-}
-
-private void UnbindButton()
-{
-    if (_subscribedButton is not null)
-        _subscribedButton.Clicked -= HandleResumeClicked;
-    _subscribedButton = null;
-}
-```
-
-Native clicks are dispatched before managed script `Update`, so a button event and input polling in that frame observe
-a consistent order.
-
-For a wrapper obtained at runtime:
-
-```csharp
-UiButton? button = RuntimeUi.GetButton(buttonEntity);
-```
-
-or:
-
-```csharp
-UiButton? button = UiButton.FromEntity(buttonEntity);
-```
-
-Both return `null` when the entity lacks a UI Button component.
-
-## Sliders, Toggles, Input Fields, And Scroll Views
-
-Typed controls read and write the live scene component used by both editor Play Mode and packaged players:
-
-```csharp
-protected override void Update()
-{
-    if (_sensitivity is not null && _sensitivity.ChangedThisFrame)
-        PlayerPreferences.SetFloat("input.lookSensitivity", _sensitivity.Value);
-
-    if (_profileName is not null && _profileName.SubmittedThisFrame)
-        PlayerPreferences.SetString("profile.name", _profileName.Text);
+    launch.Text = "Loading…";
+    launch.Interactable = false;
 }
 ```
 
-`UiSlider` exposes `Minimum`, `Maximum`, `Value`, `Interactable`, and `ChangedThisFrame`. `UiToggle` exposes `IsOn`,
-`Interactable`, and `ChangedThisFrame`. `UiInputField` exposes UTF-8 `Text`, focus, change/submit/cancel events, and
-interactability. `UiScrollView` exposes `Offset`, `ContentSize`, interactability, and `ScrolledThisFrame`.
+## Events
 
-Call `Focus()` to move runtime focus to a control. Tab/Shift+Tab, arrow keys, Enter/Escape, mouse wheels, and gamepad
-D-pad/accept/cancel are routed through the retained UI tree. Input-field length limits are measured in UTF-8 bytes so
-the native and managed contracts remain identical.
-
-The Inspector exposes accessibility label, hint, semantic role, and explicit navigation order through the
-`UiAccessibility`. Navigation order is stable; equal or automatic values retain scene order.
-
-## Polling UI
-
-Polling remains available:
+Callbacks participate in trickle-down, target, and bubble phases:
 
 ```csharp
-protected override void Update()
+root.RegisterCallback<ClickEvent>(OnMenuClick, TrickleDown.TrickleDown);
+resume.RegisterCallback<ClickEvent>(OnResumeClick);
+
+private static void OnResumeClick(ClickEvent evt)
 {
-    if (RuntimeUi.WasClicked(_resumeButtonEntity))
-        ResumeGame();
+    evt.StopPropagation();
 }
 ```
 
-`WasClicked` consumes the pending native click. Prefer either an event binding or polling for a particular button;
-mixing both creates competing consumers.
+Pointer, keyboard, focus, submit, and `ChangeEvent<T>` values derive from `EventBase`. A callback may stop propagation,
+stop immediate propagation, or prevent the control's default action. Pointer capture and focus are panel-owned and are
+released when a document, panel, scene, or device generation is retired.
 
-## Updating Text
+`PreventDefault` currently suppresses click activation, including the built-in toggle mutation. Focus assignment and
+text-field editing are committed by the lower-level input owner before their notification callbacks run, so those
+notifications can stop further propagation but cannot roll the already-applied value back in this release.
+
+## Data Binding
+
+Bindings address a property path on the nearest inherited `DataSource`:
 
 ```csharp
-bool updated = RuntimeUi.SetText(_ammoLabel, $"{rounds} / {reserve}");
-if (!updated)
-    Debug.Warn("Ammo label is unavailable.");
+TextField playerName = new();
+playerName.SetBinding(nameof(TextField.Value), new DataBinding
+{
+    SourcePath = "Profile.DisplayName",
+    Mode = BindingMode.TwoWay
+});
+
+playerName.DataSource = viewModel;
 ```
 
-A native-bound `RuntimeCanvas` provides equivalent helpers:
+`OneWay` updates the element, `TwoWay` also writes control changes back to the source, and `OneTime` stops observing
+after the first successful value transfer. Objects implementing `INotifyPropertyChanged` refresh affected bindings.
+Conversion and missing-path failures retain the previous valid target value and identify both the target property and
+source path.
+
+Native source-backed documents require an explicit `UiDocumentBindingSource`; authored paths remain visible on each
+element and publish `UiBindingSourceUnavailable` until that provider is attached. The runtime never searches ambient
+objects or assemblies to guess a data source. A successful document reload retains the provider, while a failed reload
+keeps the prior bound document generation.
+
+## Custom Controls
+
+Custom controls use explicit registration. Kéire does not scan every assembly in the ambient load context:
 
 ```csharp
-RuntimeCanvas canvas = new(canvasEntity);
-canvas.SetText(_ammoLabel, $"{rounds} / {reserve}");
+using Keire.UI;
+
+[UxmlElement("HealthReadout")]
+public sealed class HealthReadout : VisualElement
+{
+    [UxmlAttribute("caption")]
+    public string Caption { get; set; } = "Health";
+
+    [UxmlAttribute("maximum")]
+    public float Maximum { get; set; } = 100.0f;
+}
+
+UxmlElementRegistry.Register<HealthReadout>();
 ```
 
-The call returns `false` when the entity is invalid or does not expose compatible UI text state.
+Registration requires a parameterless constructor, stable element and attribute identifiers, and readable/writable
+public attributed properties. Registry snapshots are immutable generation views, so failed managed reloads cannot
+replace the last-good Builder/Inspector catalog.
 
-## Inspector Events
+## Virtualized Collections
 
-Declare persistent events:
-
-```csharp
-[SerializeField, StableFieldId("f912e5a1-dd50-45e7-8998-ae78135a1256")]
-private KeireEvent _opened = new();
-
-[SerializeField, StableFieldId("4199ba71-0afc-4340-a863-2a8f3e0bff56")]
-private KeireEvent<float> _progressChanged = new();
-```
-
-The Inspector stores each persistent listener's:
-
-- enabled state;
-- target entity;
-- managed component stable ID;
-- callback method.
-
-Persistent callbacks may be public or non-public, must return `void`, and must accept compatible arguments in the same
-order:
+`ListView` and `TreeView` create only the visible range plus bounded overscan:
 
 ```csharp
-private void HandleOpened()
+ListView inventory = new()
 {
-    Debug.Log("Menu opened.");
-}
-
-private void HandleProgress(float value)
-{
-    RuntimeUi.SetText(_progressLabel, $"{value:P0}");
-}
-```
-
-Invoke events:
-
-```csharp
-_opened.Invoke();
-_progressChanged.Invoke(0.75f);
-```
-
-Generic `KeireEvent` variants support one through four arguments. Persistent listeners run before runtime listeners.
-Renaming a target component type is safe when its `StableComponentId` remains unchanged. Renaming a callback method
-requires updating its persistent listener selection.
-
-## Runtime Event Listeners
-
-```csharp
-protected override void OnEnable()
-{
-    _opened.AddListener(HandleOpened);
-}
-
-protected override void OnDisable()
-{
-    _opened.RemoveListener(HandleOpened);
-}
-
-protected override void OnBeforeReload()
-{
-    _opened.RemoveListener(HandleOpened);
-}
-
-protected override void OnAfterReload()
-{
-    _opened.AddListener(HandleOpened);
-}
-```
-
-`RemoveAllListeners` removes runtime listeners only; persistent Inspector listeners remain serialized.
-
-Avoid anonymous lambdas when you need to unsubscribe unless the delegate is stored:
-
-```csharp
-private Action? _listener;
-
-protected override void OnEnable()
-{
-    _listener = () => Debug.Log("Opened");
-    _opened.AddListener(_listener);
-}
-
-protected override void OnDisable()
-{
-    if (_listener is not null)
-        _opened.RemoveListener(_listener);
-    _listener = null;
-}
-```
-
-Named methods are simpler for most lifecycle-bound subscriptions.
-
-## Cursor Ownership
-
-Menus should request a visible cursor rather than directly fighting gameplay capture:
-
-```csharp
-private IDisposable? _cursorVisibility;
-
-private void ApplyVisibility(bool visible)
-{
-    if (visible)
-        _cursorVisibility ??= Cursor.RequestVisible();
-    else
-        ReleaseCursorVisibility();
-}
-
-private void ReleaseCursorVisibility()
-{
-    _cursorVisibility?.Dispose();
-    _cursorVisibility = null;
-}
-```
-
-Visible requests take priority over active capture requests. When the final menu request is disposed, gameplay capture
-resumes automatically if its owner still holds a `RequestCapture` token.
-
-Release cursor requests in `OnDisable` and `OnBeforeReload`.
-
-## Complete Menu Controller
-
-```csharp
-using Keire;
-
-namespace MyGame;
-
-[StableComponentId("39559aac-e6d9-4387-9445-3b7718e83f71")]
-public sealed class PauseMenu : Behaviour
-{
-    [SerializeField, StableFieldId("92fd3515-cdbb-48bc-946f-7554e53b5575")]
-    private Entity _panel;
-
-    [SerializeField, StableFieldId("f1152698-2941-4a72-84da-a3e3ecf47d28")]
-    private UiButton? _resumeButton;
-
-    [SerializeField, StableFieldId("c90f0583-8c4f-418d-a159-4b014b1efeed")]
-    private AudioClip? _toggleSound;
-
-    [SerializeField, StableFieldId("98f8428b-f8e9-4621-b280-f2a3cd5fe153")]
-    private KeireEvent _opened = new();
-
-    [SerializeField, StableFieldId("241f55cb-04c8-4246-9289-6c54f61663ca")]
-    private KeireEvent _closed = new();
-
-    private UiButton? _subscribedButton;
-    private IDisposable? _cursorVisibility;
-    private bool _eventsBound;
-
-    protected override void OnEnable()
-    {
-        BindRuntimeRelationships();
-        ApplyVisibility(_panel.Id.IsValid && _panel.Active);
-    }
-
-    protected override void Update()
-    {
-        if (Input.Pressed("TogglePause"))
-            Toggle();
-    }
-
-    protected override void OnDisable()
-    {
-        UnbindRuntimeRelationships();
-        ApplyVisibility(false);
-    }
-
-    protected override void OnBeforeReload()
-    {
-        UnbindRuntimeRelationships();
-        ApplyVisibility(false);
-    }
-
-    protected override void OnAfterReload()
-    {
-        BindRuntimeRelationships();
-        ApplyVisibility(_panel.Id.IsValid && _panel.Active);
-    }
-
-    private void Toggle()
-    {
-        if (!_panel.IsValid)
-            return;
-
-        bool open = !_panel.Active;
-        _panel.Active = open;
-
-        if (open)
-            _opened.Invoke();
-        else
-            _closed.Invoke();
-
-        if (_toggleSound.IsValid)
-        {
-            Audio.Play(Entity, _toggleSound, new AudioPlaybackOptions
-            {
-                Bus = "UI",
-                Spatial = false
-            });
-        }
-    }
-
-    private void BindRuntimeRelationships()
-    {
-        if (!ReferenceEquals(_subscribedButton, _resumeButton))
-        {
-            UnbindButton();
-            _subscribedButton = _resumeButton;
-            if (_subscribedButton is not null)
-                _subscribedButton.Clicked += Toggle;
-        }
-
-        if (_eventsBound)
-            return;
-        _opened.AddListener(HandleOpened);
-        _closed.AddListener(HandleClosed);
-        _eventsBound = true;
-    }
-
-    private void UnbindRuntimeRelationships()
-    {
-        UnbindButton();
-        if (!_eventsBound)
-            return;
-        _opened.RemoveListener(HandleOpened);
-        _closed.RemoveListener(HandleClosed);
-        _eventsBound = false;
-    }
-
-    private void UnbindButton()
-    {
-        if (_subscribedButton is not null)
-            _subscribedButton.Clicked -= Toggle;
-        _subscribedButton = null;
-    }
-
-    private void HandleOpened() => ApplyVisibility(true);
-    private void HandleClosed() => ApplyVisibility(false);
-
-    private void ApplyVisibility(bool visible)
-    {
-        if (visible)
-            _cursorVisibility ??= Cursor.RequestVisible();
-        else
-        {
-            _cursorVisibility?.Dispose();
-            _cursorVisibility = null;
-        }
-    }
-}
-```
-
-The shared `Toggle` method gives keyboard and button activation the same audio and event behavior.
-
-## In-Memory Runtime UI Layout
-
-`RuntimeCanvas` also contains an in-memory UI tree:
-
-```csharp
-RuntimeCanvas canvas = new();
-canvas.ReferenceResolution = new Vector2(1920.0f, 1080.0f);
-canvas.MatchWidthOrHeight = 0.5f;
-
-UiPanel panel = new()
-{
-    Name = "PausePanel",
-    AnchorMinimum = new Vector2(0.5f, 0.5f),
-    AnchorMaximum = new Vector2(0.5f, 0.5f),
-    Size = new Vector2(480.0f, 320.0f)
+    ItemsSource = items,
+    MakeItem = static () => new Label(),
+    BindItem = (element, index) =>
+        ((Label)element).Text = items[index].DisplayName,
+    Overscan = 2
 };
 
-canvas.Root.Add(panel);
-canvas.Layout(new Vector2(2560.0f, 1440.0f));
-UiRect result = panel.LayoutRect;
+inventory.SetViewport(firstVisibleIndex: 120, visibleCount: 18);
 ```
 
-`UiPanel`, `UiText`, `UiImage`, and unbound `UiButton` values support hierarchy and layout calculation. Cycles are
-rejected. This model is useful for runtime layout data; scene-authored UI rendering and native interaction remain
-entity/component operations through `RuntimeUi` and native-bound control handles.
+Rebinding realizes only the bounded range rather than instantiating the complete source collection.
+
+## Styles, Transitions, And Render Targets
+
+Style sheets support inherited variables, bounded linear and radial gradients, rounded borders, nested clipping, and
+pseudo-state transitions. A document may animate at most eight supported properties per element; durations are finite,
+clamped to 60 seconds, and advance only through the document's explicit update. An unchanged document performs no
+style, layout, or geometry recomputation after warm-up.
+
+A render-texture panel publishes to the logical ID in its `.keireuipanel`. An `Image` consumes that output with the
+separate `render-texture` markup attribute:
+
+```xml
+<Image id="3c1ed643-5424-4a6e-8689-5bd959c13187"
+       name="security-feed"
+       render-texture="15236dfa-afaf-437e-a6a7-88f114a671b5"/>
+```
+
+Logical render targets are not Asset Database dependencies and cannot be combined with the ordinary `image` asset
+attribute. Producers are ordered before same-frame consumers; cycles fail with an actionable diagnostic. The renderer
+bounds the target cache, retains one published output plus one writer per possible in-flight frame, and invalidates all
+old-device target generations during recovery.
+
+## Runtime And Recovery Ownership
+
+Style, layout, and geometry invalidation propagates only through affected descendants and required ancestors. An
+unchanged tree reuses its warm layout. Render submission captures immutable draw data, text geometry, and logical
+texture/surface leases into the accepted frame; it never stores borrowed visual-element or scene pointers. Leases are
+qualified by frame slot and GPU device generation. Device recovery rebuilds UI GPU resources and retries from immutable
+CPU data, so a pre-loss texture or render-target handle cannot be consumed by the recovered frame.
+
+## Current Limits
+
+The current renderer uses a deterministic 95-character printable-ASCII fallback glyph atlas. Custom font
+rasterization, Unicode shaping, bidirectional layout, ligatures, script-specific fallback, localization, and platform
+screen-reader adapters remain follow-up work. Unsupported code points render the fallback glyph. Images use individual
+immutable frame leases rather than a shared image atlas, so the Debugger reports image-atlas occupancy as zero.
+
+UI Toolkit authors project content only; the Kéire Editor shell remains on its existing immediate-mode UI. Kéire does
+not import Unity UXML/USS files, and the clean break deliberately provides no automatic Canvas/Rect Transform
+converter.
+
+The Project panel currently creates `.keireui` documents directly. The focused stylesheet editor opens an existing
+linked `.keirestyle`; Panel Settings and brand-new stylesheet source assets must come from a starter/example asset or
+another valid project-source workflow. Preview controls are not a substitute for persistent Panel Settings authoring.
+
+## Legacy Scene UI
+
+Canvas, Rect Transform, and the old scene UI control component IDs are permanently reserved and are not available for
+new authoring. Importing a scene that contains one fails before project state changes with the exact entity name, entity
+ID, component name, and component ID. Recreate that UI as a `.keireui` document referenced by `UIDocument`; there is no
+automatic converter or permanent dual runtime.
+
+Persistent `KeireEvent` fields and cooperative `Cursor.RequestVisible()` / `Cursor.RequestCapture()` tokens remain
+general scripting APIs and may be used by UI Toolkit controllers exactly as they are used by gameplay systems.

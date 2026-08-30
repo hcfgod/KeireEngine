@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "b1b20001-1000-4000-8000-000000000002",
+  "type": "4b454952-4555-4954-5245-450000000001",
+  "importer": "Keire.UiVisualTree",
+  "importerVersion": 1,
+  "dependencies": ["b1b20001-1000-4000-8000-000000000001"],
+  "subAssets": [],
+  "importSettings": {}
+}

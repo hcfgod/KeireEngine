@@ -14,6 +14,8 @@ internal static class ManagedAssetMetadata
     private const int MaximumRegisteredTypes = 4_096;
     private const int MaximumReferenceTypeChoices = 256;
     private const int MaximumFieldsPerType = 1_024;
+    private const int MaximumAllowlistBytes = 16 * 1_024 * 1_024;
+    private const int MaximumAllowedTypes = 65_536;
 
     private sealed class ExportDocument
     {
@@ -21,6 +23,18 @@ internal static class ManagedAssetMetadata
         public List<TypeDocument> Types { get; } = [];
         public List<BehaviourGraphDocument> Behaviours { get; } = [];
         public List<DiagnosticDocument> Diagnostics { get; } = [];
+    }
+
+    private sealed class ExportRequest
+    {
+        public int SchemaVersion { get; init; }
+        public List<AllowedAssemblyDocument> Assemblies { get; init; } = [];
+    }
+
+    private sealed class AllowedAssemblyDocument
+    {
+        public string Name { get; init; } = string.Empty;
+        public List<string> Types { get; init; } = [];
     }
 
     private sealed class BehaviourGraphDocument
@@ -100,17 +114,101 @@ internal static class ManagedAssetMetadata
         public IReadOnlyDictionary<Guid, Type>? SerializedTypeRegistry { get; set; }
     }
 
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
     internal static string Export()
     {
-        _ = ManagedReferenceGraphCodec.TypeRegistry(typeof(ManagedAssetMetadata), nameof(ManagedAssetMetadata));
+        Assembly caller = Assembly.GetCallingAssembly();
+        var request = new ExportRequest
+        {
+            SchemaVersion = 1,
+            Assemblies =
+            [
+                new AllowedAssemblyDocument
+                {
+                    Name = caller.GetName().Name ??
+                           throw new InvalidOperationException("Managed metadata test assembly has no stable name."),
+                    Types = SafeTypes(caller).Where(type => !string.IsNullOrWhiteSpace(type.FullName))
+                        .Select(type => type.FullName!).Order(StringComparer.Ordinal).ToList(),
+                },
+            ],
+        };
+        return Export(JsonSerializer.Serialize(request));
+    }
+
+    internal static string Export(string requestJson)
+    {
+        if (string.IsNullOrWhiteSpace(requestJson))
+            throw new InvalidOperationException("Managed asset metadata requires an explicit candidate type allowlist.");
+        if (Encoding.UTF8.GetByteCount(requestJson) > MaximumAllowlistBytes)
+            throw new InvalidOperationException("Managed asset metadata candidate allowlists cannot exceed 16 MiB.");
+        ExportRequest request = JsonSerializer.Deserialize<ExportRequest>(requestJson,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ??
+            throw new InvalidOperationException("Managed asset metadata received an invalid candidate allowlist.");
+        if (request.SchemaVersion != 1)
+            throw new InvalidOperationException("Managed asset metadata received an unsupported allowlist schema.");
+        if (request.Assemblies is null || request.Assemblies.Count == 0)
+            throw new InvalidOperationException("Managed asset metadata requires at least one candidate assembly.");
+
+        AssemblyLoadContext loadContext = AssemblyLoadContext.GetLoadContext(typeof(ManagedAssetMetadata).Assembly) ??
+                                          AssemblyLoadContext.Default;
+        Dictionary<string, Assembly[]> assembliesByName = loadContext.Assemblies
+            .Where(assembly => !assembly.IsDynamic && !string.IsNullOrWhiteSpace(assembly.GetName().Name))
+            .GroupBy(assembly => assembly.GetName().Name!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        var allowedTypes = new List<Type>();
+        var seenAssemblies = new HashSet<string>(StringComparer.Ordinal);
+        var seenTypes = new HashSet<Type>();
+        foreach (AllowedAssemblyDocument allowedAssembly in request.Assemblies.OrderBy(value => value.Name,
+                                                                                       StringComparer.Ordinal))
+        {
+            if (string.IsNullOrWhiteSpace(allowedAssembly.Name) || !seenAssemblies.Add(allowedAssembly.Name))
+                throw new InvalidOperationException("Managed asset metadata candidate assembly names must be unique.");
+            if (allowedAssembly.Types is null)
+                throw new InvalidOperationException("Managed asset metadata candidate type lists cannot be null.");
+            if (!assembliesByName.TryGetValue(allowedAssembly.Name, out Assembly[]? matches) || matches.Length != 1)
+            {
+                throw new InvalidOperationException(
+                    $"Managed asset metadata candidate assembly '{allowedAssembly.Name}' is unavailable or ambiguous.");
+            }
+            Dictionary<string, Type[]> typesByName = SafeTypes(matches[0])
+                .Where(type => !string.IsNullOrWhiteSpace(type.FullName))
+                .GroupBy(type => type.FullName!, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+            var seenNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string allowedName in allowedAssembly.Types.Order(StringComparer.Ordinal))
+            {
+                if (string.IsNullOrWhiteSpace(allowedName) || !seenNames.Add(allowedName))
+                    throw new InvalidOperationException(
+                        $"Managed asset metadata type names in '{allowedAssembly.Name}' must be unique.");
+                if (!typesByName.TryGetValue(allowedName, out Type[]? typeMatches) || typeMatches.Length != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Managed asset metadata candidate type '{allowedName}' in '{allowedAssembly.Name}' is " +
+                        "unavailable or ambiguous.");
+                }
+                if (!seenTypes.Add(typeMatches[0]))
+                    throw new InvalidOperationException("Managed asset metadata candidate types must be unique.");
+                allowedTypes.Add(typeMatches[0]);
+                if (allowedTypes.Count > MaximumAllowedTypes)
+                    throw new InvalidOperationException("Managed asset metadata cannot allow more than 65,536 types.");
+            }
+        }
+        IGrouping<string, Type>? ambiguousPublishedType = allowedTypes
+            .Where(type => !type.IsAbstract &&
+                           (typeof(ScriptableObject).IsAssignableFrom(type) || typeof(Behaviour).IsAssignableFrom(type)))
+            .GroupBy(type => type.FullName ?? type.Name, StringComparer.Ordinal)
+            .FirstOrDefault(group => group.Skip(1).Any());
+        if (ambiguousPublishedType is not null)
+        {
+            throw new InvalidOperationException(
+                $"Managed asset metadata candidate type '{ambiguousPublishedType.Key}' is ambiguous across " +
+                "candidate assemblies.");
+        }
+        IReadOnlyDictionary<Guid, Type> serializedTypeRegistry = ManagedReferenceGraphCodec.InstallTypeRegistry(
+            allowedTypes, typeof(ManagedAssetMetadata), nameof(ManagedAssetMetadata));
+
         var document = new ExportDocument();
-        AssemblyLoadContext? loadContext = AssemblyLoadContext.GetLoadContext(typeof(ManagedAssetMetadata).Assembly);
-        IEnumerable<Assembly> loadedAssemblies = loadContext?.Assemblies ?? AppDomain.CurrentDomain.GetAssemblies();
-        Type[] loadedTypes = loadedAssemblies
-            .Where(assembly => !assembly.IsDynamic)
-            .SelectMany(SafeTypes)
-            .ToArray();
-        IEnumerable<Type> candidates = loadedTypes
+        IEnumerable<Type> candidates = allowedTypes
             .Where(type => type.Assembly != typeof(ScriptableObject).Assembly &&
                            type != typeof(ScriptableObject) && !type.IsAbstract &&
                            typeof(ScriptableObject).IsAssignableFrom(type))
@@ -120,7 +218,7 @@ internal static class ManagedAssetMetadata
         {
             try
             {
-                document.Types.Add(DescribeType(candidate));
+                document.Types.Add(DescribeType(candidate, serializedTypeRegistry));
             }
             catch (ManagedSerializationException exception)
             {
@@ -155,7 +253,7 @@ internal static class ManagedAssetMetadata
             }
         }
 
-        IEnumerable<Type> behaviourCandidates = loadedTypes
+        IEnumerable<Type> behaviourCandidates = allowedTypes
             .Where(type => type.Assembly != typeof(Behaviour).Assembly && !type.IsAbstract &&
                            typeof(Behaviour).IsAssignableFrom(type))
             .OrderBy(type => type.FullName, StringComparer.Ordinal);
@@ -163,7 +261,7 @@ internal static class ManagedAssetMetadata
         {
             try
             {
-                BehaviourGraphDocument? behaviour = DescribeBehaviourGraphs(candidate);
+                BehaviourGraphDocument? behaviour = DescribeBehaviourGraphs(candidate, serializedTypeRegistry);
                 if (behaviour is not null)
                     document.Behaviours.Add(behaviour);
             }
@@ -214,7 +312,7 @@ internal static class ManagedAssetMetadata
         });
     }
 
-    private static TypeDocument DescribeType(Type type)
+    private static TypeDocument DescribeType(Type type, IReadOnlyDictionary<Guid, Type> serializedTypeRegistry)
     {
         StableAssetTypeIdAttribute stableType = type.GetCustomAttribute<StableAssetTypeIdAttribute>(false) ??
             throw Invalid(type, "concrete ScriptableObject types require StableAssetTypeId");
@@ -239,7 +337,7 @@ internal static class ManagedAssetMetadata
             DefaultFileName = string.IsNullOrWhiteSpace(menu?.FileName) ? type.Name : menu!.FileName,
         };
 
-        var context = new DiscoveryContext();
+        var context = new DiscoveryContext { SerializedTypeRegistry = serializedTypeRegistry };
         context.ActiveTypes.Add(type);
         foreach (SerializableMember member in SerializableMembers(type, stopAtScriptableObject: true))
             result.Properties.Add(DescribeMember(type, member, context, 0, stableType.Id));
@@ -248,13 +346,14 @@ internal static class ManagedAssetMetadata
         return result;
     }
 
-    private static BehaviourGraphDocument? DescribeBehaviourGraphs(Type type)
+    private static BehaviourGraphDocument? DescribeBehaviourGraphs(Type type,
+                                                                    IReadOnlyDictionary<Guid, Type> serializedTypeRegistry)
     {
         StableComponentIdAttribute? stableType = type.GetCustomAttribute<StableComponentIdAttribute>(false);
         if (stableType is null)
             return null;
         var result = new BehaviourGraphDocument { FullName = type.FullName ?? type.Name };
-        var context = new DiscoveryContext();
+        var context = new DiscoveryContext { SerializedTypeRegistry = serializedTypeRegistry };
         context.ActiveTypes.Add(type);
         foreach (SerializableMember member in SerializableMembers(type, stopAtScriptableObject: false))
         {
@@ -408,21 +507,21 @@ internal static class ManagedAssetMetadata
             if (!valueType.IsSZArray)
                 throw Invalid(ownerType, $"member '{member.Member.Name}' uses a non-SZ array");
             result.Children.Add(DescribeElement(ownerType, stableId, valueType.GetElementType()!, context, depth + 1,
-                                                graphContext));
+                                                referenceGraph));
             return result;
         }
         if (IsList(valueType, out Type? elementType))
         {
-            result.Children.Add(DescribeElement(ownerType, stableId, elementType, context, depth + 1, graphContext));
+            result.Children.Add(DescribeElement(ownerType, stableId, elementType, context, depth + 1, referenceGraph));
             return result;
         }
         if (IsDictionary(valueType, out Type? keyType, out Type? dictionaryValueType))
         {
             ValidateDictionaryKeyType(ownerType, keyType, memberPath);
             result.Children.Add(DescribeDictionaryPart(ownerType, stableId, "Key", keyType, context, depth + 1,
-                                                       graphContext));
+                                                       referenceGraph));
             result.Children.Add(DescribeDictionaryPart(ownerType, stableId, "Value", dictionaryValueType, context,
-                                                       depth + 1, graphContext));
+                                                       depth + 1, referenceGraph));
             return result;
         }
         if (result.Kind == 11)

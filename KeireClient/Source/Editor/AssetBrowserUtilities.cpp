@@ -323,6 +323,8 @@ namespace KeireEditor
             return "Physics Material";
         if (extension == ".keirevfx")
             return "VFX Effect";
+        if (extension == ".keireui")
+            return "UI Document";
         if (extension == ".keiredata")
             return "Managed Data";
         if (extension == ".keireprefab")
@@ -349,6 +351,8 @@ namespace KeireEditor
             return AssetBrowserOpenAction::AudioMixer;
         if (extension == ".keirevfx")
             return AssetBrowserOpenAction::VfxEffect;
+        if (extension == ".keireui")
+            return AssetBrowserOpenAction::UiDocument;
         if (extension == ".keirematerial")
             return AssetBrowserOpenAction::Material;
         if (extension == ".keirematerialgraph")

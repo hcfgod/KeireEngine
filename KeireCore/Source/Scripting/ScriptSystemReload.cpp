@@ -71,6 +71,7 @@ namespace Keire
             Coral::Type* managedAssetMetadataType = nullptr;
             Coral::Type* nativeRuntimeType = nullptr;
             std::map<std::string, const Coral::Type*, std::less<>> managedRuntimeTypesByName;
+            std::map<std::string, std::vector<std::string>, std::less<>> managedMetadataAllowlist;
             auto managedApiPath =
                 request.ManagedApiAssembly.empty() ? m_Impl->ManagedApi : std::move(request.ManagedApiAssembly);
             if (!managedApiPath.empty())
@@ -316,10 +317,6 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetVfxVector4Range));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetVfxColorRangeIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeSetVfxColorRange));
-                managedApi.AddInternalCall("Keire.NativeRuntime", "SetUiTextIcall",
-                                           reinterpret_cast<void*>(&Impl::RuntimeSetUiText));
-                managedApi.AddInternalCall("Keire.NativeRuntime", "ConsumeUiClickIcall",
-                                           reinterpret_cast<void*>(&Impl::RuntimeConsumeUiClick));
                 Detail::RegisterManagedRuntimeBindings(managedApi);
                 managedApi.UploadInternalCalls();
                 behaviourType = &managedApi.GetLocalType("Keire.Behaviour");
@@ -389,10 +386,21 @@ namespace Keire
                     throw std::runtime_error(Detail::ManagedAssemblyLoadFailure(
                         "assembly '" + PathText(path) + "'", snapshot, assembly.GetLoadStatus(), managedException));
                 }
+                auto [allowedAssembly, insertedAssembly] =
+                    managedMetadataAllowlist.emplace(std::string(assembly.GetName()), std::vector<std::string>{});
+                if (!insertedAssembly)
+                {
+                    throw std::runtime_error("Managed reload contains duplicate candidate assembly names.");
+                }
                 for (const auto& type : assembly.GetLocalTypes())
+                {
                     if (type)
-                        managedRuntimeTypesByName.emplace(ManagedTypeName(const_cast<Coral::Type&>(type)),
-                                                          std::addressof(type));
+                    {
+                        auto typeName = ManagedTypeName(const_cast<Coral::Type&>(type));
+                        allowedAssembly->second.push_back(typeName);
+                        managedRuntimeTypesByName.emplace(std::move(typeName), std::addressof(type));
+                    }
+                }
                 if (behaviourType)
                 {
                     for (const auto& type : assembly.GetLocalTypes())
@@ -447,8 +455,18 @@ namespace Keire
             Detail::PopulateManagedBehaviourReferenceCompatibility(candidateTypes, managedRuntimeTypesByName);
             if (!managedAssetMetadataType)
                 throw std::runtime_error("Managed asset discovery requires Keire.Managed metadata.");
+            nlohmann::json managedMetadataRequest{{"schemaVersion", 1}, {"assemblies", nlohmann::json::array()}};
+            for (auto& [assemblyName, types] : managedMetadataAllowlist)
+            {
+                std::ranges::sort(types);
+                if (std::ranges::adjacent_find(types) != types.end())
+                    throw std::runtime_error("Managed reload contains duplicate candidate type names.");
+                managedMetadataRequest["assemblies"].push_back({{"name", assemblyName}, {"types", types}});
+            }
+            const Coral::ScopedString managedMetadataRequestText(Coral::String::New(managedMetadataRequest.dump()));
             const auto exportedManagedAssetMetadata =
-                managedAssetMetadataType->InvokeStaticMethod<Coral::String>("Export");
+                managedAssetMetadataType->InvokeStaticMethod<Coral::String, Coral::String>(
+                    "Export", static_cast<Coral::String>(managedMetadataRequestText));
             if (!exportedManagedAssetMetadata.Data())
             {
                 throw std::runtime_error(
@@ -530,8 +548,9 @@ namespace Keire
                 if (runtimeException.empty())
                 {
                     m_Impl->CandidateTypes = std::move(candidateTypes);
-                    m_Impl->CandidateManagedAssetTypes = std::move(discoveredManagedAssets.Types);
-                    m_Impl->CandidateManagedAssetDiagnostics = std::move(discoveredManagedAssets.Diagnostics);
+                    m_Impl->CandidateManagedAssetCatalog = std::make_shared<const ManagedAssetTypeCatalog>(
+                        ManagedAssetTypeCatalog{candidateGeneration, std::move(discoveredManagedAssets.Types),
+                                                std::move(discoveredManagedAssets.Diagnostics)});
                     m_Impl->CandidateManagedAssetRuntimeTypes = std::move(discoveredManagedRuntimeTypes);
                     m_Impl->CandidateNativeRuntimeType = nativeRuntimeType;
                     m_Impl->Reload.AvailableTypes = std::move(availableTypes);
@@ -549,8 +568,7 @@ namespace Keire
                                                     ? 0
                                                     : m_Impl->Reload.Generation + 1);
             m_Impl->CandidateTypes.clear();
-            m_Impl->CandidateManagedAssetTypes.clear();
-            m_Impl->CandidateManagedAssetDiagnostics.clear();
+            m_Impl->CandidateManagedAssetCatalog.reset();
             m_Impl->CandidateManagedAssetRuntimeTypes.clear();
             m_Impl->CandidateNativeRuntimeType = nullptr;
             m_Impl->Unload(m_Impl->CandidateContext);
@@ -568,7 +586,8 @@ namespace Keire
             throw std::logic_error("ScriptSystem is closed.");
         {
             std::scoped_lock lock(m_Impl->Mutex);
-            if (m_Impl->Reload.State != ManagedReloadState::Prepared || !m_Impl->CandidateContext)
+            if (m_Impl->Reload.State != ManagedReloadState::Prepared || !m_Impl->CandidateContext ||
+                !m_Impl->CandidateManagedAssetCatalog)
                 throw std::logic_error("No prepared managed reload is available.");
         }
 
@@ -602,8 +621,7 @@ namespace Keire
         {
             m_Impl->ResetManagedAssetGeneration(m_Impl->CandidateNativeRuntimeType, candidateGeneration);
             m_Impl->CandidateTypes.clear();
-            m_Impl->CandidateManagedAssetTypes.clear();
-            m_Impl->CandidateManagedAssetDiagnostics.clear();
+            m_Impl->CandidateManagedAssetCatalog.reset();
             m_Impl->CandidateManagedAssetRuntimeTypes.clear();
             m_Impl->CandidateNativeRuntimeType = nullptr;
             m_Impl->Unload(m_Impl->CandidateContext);
@@ -670,8 +688,7 @@ namespace Keire
                 }
             }
             m_Impl->CandidateTypes.clear();
-            m_Impl->CandidateManagedAssetTypes.clear();
-            m_Impl->CandidateManagedAssetDiagnostics.clear();
+            m_Impl->CandidateManagedAssetCatalog.reset();
             m_Impl->ResetManagedAssetGeneration(m_Impl->CandidateNativeRuntimeType, candidateGeneration);
             m_Impl->CandidateManagedAssetRuntimeTypes.clear();
             m_Impl->CandidateNativeRuntimeType = nullptr;
@@ -684,14 +701,13 @@ namespace Keire
 
         // Reverse-P/Invoke callbacks must finish while the old assembly load context is still alive.
         m_Impl->DrainManagedJobs(true);
+        auto candidateManagedAssetCatalog = std::move(m_Impl->CandidateManagedAssetCatalog);
         auto previous = std::move(m_Impl->ActiveContext);
         const auto* previousNativeRuntime = m_Impl->ActiveNativeRuntimeType;
         const auto previousGeneration = m_Impl->Reload.Generation;
         m_Impl->Instances = std::move(migrated);
         m_Impl->ActiveContext = std::move(m_Impl->CandidateContext);
         m_Impl->ActiveTypes = std::move(m_Impl->CandidateTypes);
-        m_Impl->ActiveManagedAssetTypes = std::move(m_Impl->CandidateManagedAssetTypes);
-        m_Impl->ActiveManagedAssetDiagnostics = std::move(m_Impl->CandidateManagedAssetDiagnostics);
         m_Impl->ActiveManagedAssetRuntimeTypes = std::move(m_Impl->CandidateManagedAssetRuntimeTypes);
         m_Impl->ActiveNativeRuntimeType = m_Impl->CandidateNativeRuntimeType;
         m_Impl->CandidateNativeRuntimeType = nullptr;
@@ -699,12 +715,14 @@ namespace Keire
             std::scoped_lock lock(m_Impl->ManagedAssetMutex);
             std::erase_if(m_Impl->PendingManagedAssetLoads, [previousGeneration](const auto& entry)
                           { return entry.second.Generation == previousGeneration; });
+            m_Impl->ManagedAssetRuntimeDiagnostics.clear();
         }
         m_Impl->ResetManagedAssetGeneration(previousNativeRuntime, previousGeneration);
         m_Impl->Unload(previous);
         {
             std::scoped_lock lock(m_Impl->Mutex);
-            ++m_Impl->Reload.Generation;
+            m_Impl->ActiveManagedAssetCatalog = std::move(candidateManagedAssetCatalog);
+            m_Impl->Reload.Generation = candidateGeneration;
             m_Impl->Reload.State = ManagedReloadState::Active;
             m_Impl->Reload.Diagnostic.clear();
         }
@@ -722,8 +740,7 @@ namespace Keire
             m_Impl->CandidateNativeRuntimeType,
             m_Impl->Reload.Generation == std::numeric_limits<std::uint64_t>::max() ? 0 : m_Impl->Reload.Generation + 1);
         m_Impl->CandidateTypes.clear();
-        m_Impl->CandidateManagedAssetTypes.clear();
-        m_Impl->CandidateManagedAssetDiagnostics.clear();
+        m_Impl->CandidateManagedAssetCatalog.reset();
         m_Impl->CandidateManagedAssetRuntimeTypes.clear();
         m_Impl->CandidateNativeRuntimeType = nullptr;
         m_Impl->Unload(m_Impl->CandidateContext);
@@ -753,16 +770,25 @@ namespace Keire
         return result;
     }
 
-    std::vector<ManagedAssetTypeDescriptor> ScriptSystem::ManagedAssetTypes() const
+    ManagedAssetTypeCatalog ScriptSystem::ManagedAssetCatalog() const
     {
         m_Impl->RequireOwner();
-        return m_Impl->ActiveManagedAssetTypes;
+        std::scoped_lock lock(m_Impl->Mutex);
+        return m_Impl->ActiveManagedAssetCatalog ? *m_Impl->ActiveManagedAssetCatalog : ManagedAssetTypeCatalog{};
+    }
+
+    std::vector<ManagedAssetTypeDescriptor> ScriptSystem::ManagedAssetTypes() const
+    {
+        return ManagedAssetCatalog().Types;
     }
 
     std::vector<ManagedAssetTypeDiagnostic> ScriptSystem::ManagedAssetTypeDiagnostics() const
     {
-        m_Impl->RequireOwner();
-        return m_Impl->ActiveManagedAssetDiagnostics;
+        auto result = ManagedAssetCatalog().Diagnostics;
+        std::scoped_lock lock(m_Impl->ManagedAssetMutex);
+        result.insert(result.end(), m_Impl->ManagedAssetRuntimeDiagnostics.begin(),
+                      m_Impl->ManagedAssetRuntimeDiagnostics.end());
+        return result;
     }
 
     void ScriptSystem::SetAssetSystem(Ref<AssetSystem> assets)
@@ -895,7 +921,7 @@ namespace Keire
             catch (const std::exception& exception)
             {
                 std::scoped_lock lock(m_Impl->ManagedAssetMutex);
-                m_Impl->ActiveManagedAssetDiagnostics.push_back(
+                m_Impl->ManagedAssetRuntimeDiagnostics.push_back(
                     {"Asset " + id.ToString(),
                      std::string("Hot reload kept the last-good object: ") + exception.what()});
                 if (const auto found = m_Impl->ManagedAssetSources.find(id); found != m_Impl->ManagedAssetSources.end())

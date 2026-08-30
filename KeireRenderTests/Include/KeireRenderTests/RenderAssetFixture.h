@@ -155,13 +155,38 @@ namespace KeireRenderTests::Detail
             std::filesystem::create_directories(shaderDirectory);
             ShaderSourcePath = shaderDirectory / "DefaultUnlit.hlsl";
             std::filesystem::copy_file("Samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl", ShaderSourcePath);
+            const auto legacyShaderSourcePath = shaderDirectory / "LegacyUnlit.hlsl";
+            std::filesystem::copy_file(ShaderSourcePath, legacyShaderSourcePath);
+            {
+                std::ifstream input(legacyShaderSourcePath, std::ios::binary);
+                std::string source(std::istreambuf_iterator<char>(input), {});
+                const auto addressingBegin = source.find("cbuffer InstanceAddressingData");
+                const auto addressingEnd =
+                    addressingBegin == std::string::npos ? std::string::npos : source.find("};", addressingBegin);
+                constexpr std::string_view currentInstanceLookup = "Instances[InstanceParameters.x + instanceId]";
+                const auto instanceLookup = source.find(currentInstanceLookup);
+                if (!input || addressingBegin == std::string::npos || addressingEnd == std::string::npos ||
+                    instanceLookup == std::string::npos)
+                {
+                    throw std::runtime_error("The render-test shader fixture could not derive its legacy ABI variant.");
+                }
+                source.erase(addressingBegin, addressingEnd + 2U - addressingBegin);
+                const auto adjustedInstanceLookup = source.find(currentInstanceLookup);
+                source.replace(adjustedInstanceLookup, currentInstanceLookup.size(), "Instances[instanceId]");
+                std::ofstream output(legacyShaderSourcePath, std::ios::binary | std::ios::trunc);
+                output << source;
+                output.close();
+                if (!output)
+                    throw std::runtime_error("The render-test legacy shader fixture could not be written.");
+            }
             const std::string shaderManifest = R"({
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "source": "Assets/Shaders/DefaultUnlit.hlsl",
   "vertexLayoutVersion": 3,
   "receivesShadows": true,
   "usesForwardPlus": true,
   "usesInstancing": true,
+  "instanceAddressingAbiVersion": 2,
   "usesImageBasedLighting": true,
   "spatialLightingAbiVersion": 3,
   "occlusionSupport": 3,
@@ -187,6 +212,24 @@ namespace KeireRenderTests::Detail
 })";
             Shader = Database->CreateAsset("Shader.keireshader", shaderImporter,
                                            std::as_bytes(std::span(shaderManifest.data(), shaderManifest.size())));
+            auto legacyShaderManifest = shaderManifest;
+            const auto schemaVersion = legacyShaderManifest.find("\"schemaVersion\": 2");
+            const auto sourcePath = legacyShaderManifest.find("Assets/Shaders/DefaultUnlit.hlsl");
+            const auto instanceAbi = legacyShaderManifest.find("  \"instanceAddressingAbiVersion\": 2,\n");
+            if (schemaVersion == std::string::npos || sourcePath == std::string::npos ||
+                instanceAbi == std::string::npos)
+            {
+                throw std::runtime_error("The render-test legacy shader manifest could not be derived.");
+            }
+            legacyShaderManifest.replace(schemaVersion, std::string_view("\"schemaVersion\": 2").size(),
+                                         "\"schemaVersion\": 1");
+            legacyShaderManifest.replace(sourcePath, std::string_view("Assets/Shaders/DefaultUnlit.hlsl").size(),
+                                         "Assets/Shaders/LegacyUnlit.hlsl");
+            legacyShaderManifest.erase(instanceAbi,
+                                       std::string_view("  \"instanceAddressingAbiVersion\": 2,\n").size());
+            LegacyShader = Database->CreateAsset(
+                "LegacyShader.keireshader", shaderImporter,
+                std::as_bytes(std::span(legacyShaderManifest.data(), legacyShaderManifest.size())));
             const std::string materialManifest = "{\"schemaVersion\":1,\"shader\":\"" + Shader.ToString() +
                                                  "\",\"properties\":{\"Tint\":[1,1,1,1],\"MainTexture\":\"" +
                                                  Texture.ToString() + "\"}}";
@@ -194,6 +237,11 @@ namespace KeireRenderTests::Detail
             Material =
                 Database->CreateAsset("Material.keirematerial", materialImporter,
                                       std::as_bytes(std::span(materialManifest.data(), materialManifest.size())));
+            const std::string legacyMaterialManifest =
+                "{\"schemaVersion\":1,\"shader\":\"" + LegacyShader.ToString() + "\",\"properties\":{}}";
+            LegacyMaterial = Database->CreateAsset(
+                "LegacyMaterial.keirematerial", materialImporter,
+                std::as_bytes(std::span(legacyMaterialManifest.data(), legacyMaterialManifest.size())));
 
             if (includeShaderGraph)
             {
@@ -231,8 +279,7 @@ namespace KeireRenderTests::Detail
 
                 if (includeTransparentShaderGraph)
                 {
-                    auto transparentGraph = Keire::CreateDefaultShaderGraph();
-                    transparentGraph.Output = Keire::ShaderGraphOutput::Transparent;
+                    auto transparentGraph = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Transparent);
                     auto transparentBaseColor = std::ranges::find(transparentGraph.Nodes.front().Pins, "BaseColor",
                                                                   &Keire::ShaderGraphPin::Name);
                     auto transparentOpacity =
@@ -330,11 +377,13 @@ namespace KeireRenderTests::Detail
         Keire::AssetId CubeMesh;
         Keire::AssetId OcclusionStressMesh;
         Keire::AssetId Material;
+        Keire::AssetId LegacyMaterial;
         Keire::AssetId ShaderGraph;
         Keire::AssetId ShaderGraphMaterial;
         Keire::AssetId TransparentShaderGraph;
         Keire::AssetId TransparentShaderGraphMaterial;
         Keire::AssetId Shader;
+        Keire::AssetId LegacyShader;
         Keire::AssetId Texture;
         Keire::AssetId TransparentTexture;
         Keire::AssetId NeutralNormal;

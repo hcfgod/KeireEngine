@@ -15,6 +15,7 @@
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
+#include "Keire/Ui/UiToolkit.h"
 #include "Keire/Vfx/VfxSubgraph.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "Keire/Vfx/VfxVolumeAsset.h"
@@ -59,6 +60,9 @@ namespace Keire
         result.emplace_back(CreateAudioMixerAssetImporter());
         result.emplace_back(CreatePhysicsMaterialAssetImporter());
         result.emplace_back(CreateManagedDataAssetImporter());
+        result.emplace_back(CreateUiVisualTreeAssetImporter());
+        result.emplace_back(CreateUiStyleSheetAssetImporter());
+        result.emplace_back(CreateUiPanelSettingsAssetImporter());
         result.emplace_back(CreateVfxEffectAssetImporter());
         result.emplace_back(CreateVfxSubgraphAssetImporter());
         result.emplace_back(CreateVfxVolumeAssetImporter());
@@ -113,6 +117,9 @@ namespace Keire
         result.emplace_back(CreateAudioMixerAssetDecoder());
         result.emplace_back(CreatePhysicsMaterialAssetDecoder());
         result.emplace_back(CreateManagedDataAssetDecoder());
+        result.emplace_back(CreateUiVisualTreeAssetDecoder());
+        result.emplace_back(CreateUiStyleSheetAssetDecoder());
+        result.emplace_back(CreateUiPanelSettingsAssetDecoder());
         result.emplace_back(CreateVfxEffectAssetDecoder());
         result.emplace_back(CreateVfxSubgraphAssetDecoder());
         result.emplace_back(CreateVfxVolumeAssetDecoder());

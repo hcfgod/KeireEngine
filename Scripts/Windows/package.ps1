@@ -130,7 +130,8 @@ $coralConfiguration = if ($Configuration -eq "Dist") { "Release" } else { $Confi
 Copy-Item "$Root\Build\Dependencies\coral-patched\Build\$coralConfiguration\Coral.Native.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Dependencies\coral-nethost\nethost.lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
-Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox"
+Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox" `
+    -AdditionalRelativeFiles (Get-WindowsKeireSandboxUiPackageFiles)
 $buildScenesSource = Join-Path $Root "Samples\KeireSandbox\ProjectSettings\BuildScenes.keiresettings"
 $buildScenesDestination = Join-Path $stage "samples\KeireSandbox\ProjectSettings\BuildScenes.keiresettings"
 if (-not (Test-Path -LiteralPath $buildScenesSource -PathType Leaf)) {

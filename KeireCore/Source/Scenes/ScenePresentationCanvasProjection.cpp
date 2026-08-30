@@ -68,9 +68,9 @@ namespace Keire::Detail
                     return std::nullopt;
                 const Vector3 local{nearPoint.X + direction.X * distance, nearPoint.Y + direction.Y * distance, 0.0F};
                 const float normalizedX =
-                    local.X / (canvas.ReferenceResolution.X * canvas.WorldUnitsPerPixel) + canvas.Pivot.X;
+                    local.X / (canvas.ReferenceResolution.X * canvas.WorldUnitsPerPixel.X) + canvas.Pivot.X;
                 const float normalizedY =
-                    canvas.Pivot.Y - local.Y / (canvas.ReferenceResolution.Y * canvas.WorldUnitsPerPixel);
+                    canvas.Pivot.Y - local.Y / (canvas.ReferenceResolution.Y * canvas.WorldUnitsPerPixel.Y);
                 if (requireCanvasBounds &&
                     (normalizedX < 0.0F || normalizedX > 1.0F || normalizedY < 0.0F || normalizedY > 1.0F))
                     return std::nullopt;
@@ -80,6 +80,17 @@ namespace Keire::Detail
             {
                 return std::nullopt;
             }
+        }
+
+        [[nodiscard]] bool MatricesApproximatelyEqual(const Matrix4& first, const Matrix4& second) noexcept
+        {
+            for (std::size_t index = 0; index < first.Elements.size(); ++index)
+            {
+                const float scale = std::max({1.0F, std::abs(first.Elements[index]), std::abs(second.Elements[index])});
+                if (std::abs(first.Elements[index] - second.Elements[index]) > scale * 0.00001F)
+                    return false;
+            }
+            return true;
         }
     } // namespace
 
@@ -91,8 +102,8 @@ namespace Keire::Detail
             return point;
         const float normalizedX = point.X / canvas.Viewport.X;
         const float normalizedY = point.Y / canvas.Viewport.Y;
-        const Vector3 local{(normalizedX - canvas.Pivot.X) * canvas.ReferenceResolution.X * canvas.WorldUnitsPerPixel,
-                            (canvas.Pivot.Y - normalizedY) * canvas.ReferenceResolution.Y * canvas.WorldUnitsPerPixel,
+        const Vector3 local{(normalizedX - canvas.Pivot.X) * canvas.ReferenceResolution.X * canvas.WorldUnitsPerPixel.X,
+                            (canvas.Pivot.Y - normalizedY) * canvas.ReferenceResolution.Y * canvas.WorldUnitsPerPixel.Y,
                             0.0F};
         return ProjectPoint(Math::TransformPoint(canvas.World, local), canvas.ViewProjection, canvas.Viewport);
     }
@@ -163,17 +174,27 @@ namespace Keire::Detail
 
     void ScenePresentationCanvasProjection::Rebuild(const Ref<Scene>& scene,
                                                     const std::map<EntityId, RuntimeUiElementId>& uiNodes,
+                                                    const std::span<const UiDocumentPanelProjection> documents,
                                                     const float viewportWidth, const float viewportHeight,
                                                     const RenderCamera* viewportCamera)
     {
-        const auto resolveCamera = [&](const CanvasComponent& canvas) -> std::optional<RenderCamera>
+        const auto resolveCamera = [&](const EntityId requested) -> std::optional<RenderCamera>
         {
-            if (viewportCamera)
-                return *viewportCamera;
             Entity selected;
-            if (canvas.RenderCameraEntity())
-                selected = scene->FindEntity(canvas.RenderCameraEntity());
-            if (!selected || !selected.GetComponent<CameraComponent>() || !selected.GetComponent<TransformComponent>())
+            if (requested)
+            {
+                selected = scene->FindEntity(requested);
+                if (!selected || !selected.ActiveInHierarchy() || !selected.GetComponent<CameraComponent>() ||
+                    !selected.GetComponent<TransformComponent>())
+                {
+                    return std::nullopt;
+                }
+            }
+            else if (viewportCamera)
+            {
+                return *viewportCamera;
+            }
+            else
             {
                 std::int32_t priority = std::numeric_limits<std::int32_t>::min();
                 for (const auto& candidate : scene->Query<CameraComponent>())
@@ -202,85 +223,95 @@ namespace Keire::Detail
 
         m_Canvases.clear();
         const Vector2 viewport{viewportWidth, viewportHeight};
-        for (const auto& entity : scene->Query<CanvasComponent>())
-        {
-            const auto foundRoot = uiNodes.find(entity.Id());
-            if (!entity || foundRoot == uiNodes.end())
-                continue;
-            const auto canvas = entity.GetComponent<CanvasComponent>();
-            ProjectedCanvasState state;
-            state.Geometry.Canvas = entity.Id();
-            state.Geometry.RenderMode = canvas->RenderMode();
-            state.Geometry.PlaneDistance = canvas->PlaneDistance();
-            state.Root = foundRoot->second;
-            state.ReferenceResolution = canvas->ReferenceResolution();
-            state.WorldUnitsPerPixel = canvas->WorldUnitsPerPixel();
-            state.Viewport = viewport;
-            if (const auto rect = entity.GetComponent<RectTransformComponent>())
-                state.Pivot = rect->Pivot();
+        (void)uiNodes;
 
-            if (canvas->RenderMode() != CanvasRenderMode::WorldSpace)
+        for (const auto& document : documents)
+        {
+            if (!document.Entity || !document.Root)
+                continue;
+            ProjectedCanvasState state;
+            state.ToolkitDocument = true;
+            state.ToolkitTarget = document.Settings.Target;
+            state.RenderTexture = document.Settings.RenderTexture;
+            state.DepthTest = document.Settings.DepthTest;
+            state.ReceivesInput = document.ReceivesInput;
+            state.SortingOrder = document.Settings.SortingOrder;
+            state.Geometry.Canvas = document.Entity;
+            state.Root = document.Root;
+            state.ReferenceResolution = {document.Settings.ReferenceWidth, document.Settings.ReferenceHeight};
+            state.Viewport = viewport;
+
+            switch (document.Settings.Target)
             {
+            case UiPanelTarget::ScreenOverlay:
+                state.Geometry.RenderMode = CanvasRenderMode::ScreenSpaceOverlay;
+                state.Geometry.Visible = true;
                 state.Geometry.ViewportCorners = {Vector2{0.0F, 0.0F}, Vector2{viewportWidth, 0.0F},
                                                   Vector2{viewportWidth, viewportHeight},
                                                   Vector2{0.0F, viewportHeight}};
-                if (canvas->RenderMode() == CanvasRenderMode::ScreenSpaceOverlay)
+                break;
+            case UiPanelTarget::CameraOverlay:
+            {
+                state.Geometry.RenderMode = CanvasRenderMode::ScreenSpaceCamera;
+                const auto camera = resolveCamera(EntityId(document.Settings.Camera));
+                state.Geometry.Visible = camera.has_value();
+                if (camera)
+                    state.ViewProjection = Math::Multiply(camera->Projection, camera->View);
+                state.Geometry.ViewportCorners = {Vector2{0.0F, 0.0F}, Vector2{viewportWidth, 0.0F},
+                                                  Vector2{viewportWidth, viewportHeight},
+                                                  Vector2{0.0F, viewportHeight}};
+                break;
+            }
+            case UiPanelTarget::RenderTexture:
+                // Render-texture panels are submitted by the renderer's offscreen UI pass, not composited here.
+                state.Geometry.RenderMode = CanvasRenderMode::ScreenSpaceCamera;
+                state.Geometry.Visible = false;
+                break;
+            case UiPanelTarget::WorldSurface:
+            {
+                state.Geometry.RenderMode = CanvasRenderMode::WorldSpace;
+                state.WorldUnitsPerPixel = {
+                    document.Settings.WorldWidth / std::max(document.Settings.ReferenceWidth, 1.0F),
+                    document.Settings.WorldHeight / std::max(document.Settings.ReferenceHeight, 1.0F)};
+                const auto camera = resolveCamera({});
+                const auto entity = scene->FindEntity(document.Entity);
+                const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                if (!camera || !transform)
+                    break;
+                state.World = transform->PresentationWorldMatrix();
+                state.ViewProjection = Math::Multiply(camera->Projection, camera->View);
+                try
                 {
-                    state.Geometry.Visible = true;
+                    state.InverseViewProjection = Math::Inverse(state.ViewProjection);
                 }
-                else if (const auto camera = resolveCamera(*canvas))
+                catch (...)
                 {
-                    state.Geometry.Visible =
-                        canvas->PlaneDistance() >= camera->NearPlane && canvas->PlaneDistance() <= camera->FarPlane;
-                }
-                m_Canvases.push_back(std::move(state));
-                continue;
-            }
-
-            const auto camera = resolveCamera(*canvas);
-            const auto transform = entity.GetComponent<TransformComponent>();
-            if (!camera || !transform)
-            {
-                m_Canvases.push_back(std::move(state));
-                continue;
-            }
-            state.World = transform->PresentationWorldMatrix();
-            state.ViewProjection = Math::Multiply(camera->Projection, camera->View);
-            try
-            {
-                state.InverseViewProjection = Math::Inverse(state.ViewProjection);
-            }
-            catch (...)
-            {
-                m_Canvases.push_back(std::move(state));
-                continue;
-            }
-            const std::array layoutCorners{Vector2{0.0F, 0.0F}, Vector2{viewportWidth, 0.0F},
-                                           Vector2{viewportWidth, viewportHeight}, Vector2{0.0F, viewportHeight}};
-            bool visible = true;
-            state.Geometry.Visible = true;
-            for (std::size_t index = 0; index < layoutCorners.size(); ++index)
-            {
-                const auto projected = MapCanvasLayoutToViewport(state, layoutCorners[index]);
-                if (!projected)
-                {
-                    visible = false;
                     break;
                 }
-                state.Geometry.ViewportCorners[index] = *projected;
+                const std::array layoutCorners{Vector2{0.0F, 0.0F}, Vector2{viewportWidth, 0.0F},
+                                               Vector2{viewportWidth, viewportHeight}, Vector2{0.0F, viewportHeight}};
+                state.Geometry.Visible = true;
+                for (std::size_t index = 0; index < layoutCorners.size(); ++index)
+                {
+                    const auto projected = MapCanvasLayoutToViewport(state, layoutCorners[index]);
+                    if (!projected)
+                    {
+                        state.Geometry.Visible = false;
+                        break;
+                    }
+                    state.Geometry.ViewportCorners[index] = *projected;
+                }
+                break;
             }
-            state.Geometry.Visible = visible;
+            }
             m_Canvases.push_back(std::move(state));
         }
         std::ranges::stable_sort(m_Canvases,
-                                 [scene](const ProjectedCanvasState& left, const ProjectedCanvasState& right)
+                                 [](const ProjectedCanvasState& left, const ProjectedCanvasState& right)
                                  {
-                                     const auto leftEntity = scene->FindEntity(left.Geometry.Canvas);
-                                     const auto rightEntity = scene->FindEntity(right.Geometry.Canvas);
-                                     const auto leftCanvas = leftEntity.GetComponent<CanvasComponent>();
-                                     const auto rightCanvas = rightEntity.GetComponent<CanvasComponent>();
-                                     return leftCanvas && rightCanvas &&
-                                            leftCanvas->SortingOrder() < rightCanvas->SortingOrder();
+                                     if (left.SortingOrder != right.SortingOrder)
+                                         return left.SortingOrder < right.SortingOrder;
+                                     return left.Geometry.Canvas < right.Geometry.Canvas;
                                  });
     }
 
@@ -290,6 +321,8 @@ namespace Keire::Detail
     {
         for (auto iterator = m_Canvases.rbegin(); iterator != m_Canvases.rend(); ++iterator)
         {
+            if (!iterator->ReceivesInput)
+                continue;
             const auto point = MapViewportToCanvasLayout(*iterator, {x, y});
             if (!point)
                 continue;
@@ -363,8 +396,75 @@ namespace Keire::Detail
         }
     }
 
+    std::vector<RuntimeUiRenderSubmission>
+    ScenePresentationCanvasProjection::RenderSubmissions(const Ref<RuntimeUiTree>& tree,
+                                                         const Ref<RenderView>& view) const
+    {
+        std::vector<RuntimeUiRenderSubmission> result;
+        if (!tree)
+            return result;
+        result.reserve(m_Canvases.size());
+        for (const auto& canvas : m_Canvases)
+        {
+            RuntimeUiRenderTarget target = RuntimeUiRenderTarget::ScreenOverlay;
+            if (canvas.ToolkitDocument)
+            {
+                switch (canvas.ToolkitTarget)
+                {
+                case UiPanelTarget::ScreenOverlay:
+                    target = RuntimeUiRenderTarget::ScreenOverlay;
+                    break;
+                case UiPanelTarget::CameraOverlay:
+                    target = RuntimeUiRenderTarget::CameraOverlay;
+                    break;
+                case UiPanelTarget::RenderTexture:
+                    target = RuntimeUiRenderTarget::RenderTexture;
+                    break;
+                case UiPanelTarget::WorldSurface:
+                    target = RuntimeUiRenderTarget::WorldSurface;
+                    break;
+                }
+            }
+            else if (canvas.Geometry.RenderMode == CanvasRenderMode::ScreenSpaceCamera)
+            {
+                target = RuntimeUiRenderTarget::CameraOverlay;
+            }
+            else if (canvas.Geometry.RenderMode == CanvasRenderMode::WorldSpace)
+            {
+                target = RuntimeUiRenderTarget::WorldSurface;
+            }
+            if (!canvas.Geometry.Visible && target != RuntimeUiRenderTarget::RenderTexture)
+                continue;
+            if (target == RuntimeUiRenderTarget::CameraOverlay)
+            {
+                if (!view)
+                    continue;
+                const auto camera = view->Camera();
+                if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) ||
+                    !MatricesApproximatelyEqual(canvas.ViewProjection, Math::Multiply(camera.Projection, camera.View)))
+                {
+                    continue;
+                }
+            }
+            result.push_back({.Tree = tree,
+                              .Root = canvas.Root,
+                              .Target = target,
+                              .View = view,
+                              .World = canvas.World,
+                              .Viewport = canvas.Viewport,
+                              .ReferenceResolution = canvas.ReferenceResolution,
+                              .Pivot = canvas.Pivot,
+                              .WorldUnitsPerPixel = canvas.WorldUnitsPerPixel,
+                              .RenderTexture = canvas.RenderTexture,
+                              .SortingOrder = canvas.SortingOrder,
+                              .DepthTest = canvas.DepthTest});
+        }
+        return result;
+    }
+
     void ScenePresentationCanvasProjection::Draw(const RuntimeUiTree& tree, UiFrame& ui, const float offsetX,
-                                                 const float offsetY) const
+                                                 const float offsetY, const bool includeOverlay,
+                                                 const bool includeWorld) const
     {
         for (const auto& command : tree.DrawCommands())
         {
@@ -372,6 +472,9 @@ namespace Keire::Detail
                 continue;
             const auto projection = ForNode(command.Element);
             if (!projection || !projection->Geometry.Visible)
+                continue;
+            const bool world = projection->Geometry.RenderMode == CanvasRenderMode::WorldSpace;
+            if ((world && !includeWorld) || (!world && !includeOverlay))
                 continue;
             const auto clipped = command.Rect.Intersect(command.ClipRect);
             if (clipped.Empty())

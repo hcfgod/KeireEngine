@@ -44,13 +44,16 @@ for lifecycle, validation, and failure behavior; this is a navigation aid, not a
 
 | Need | Kéire API |
 | --- | --- |
-| Runtime UI | `RuntimeUi`, `UiButton`, `UiSlider`, `UiToggle`, `UiInputField`, `UiScrollView` |
+| Runtime UI | `Keire.UI.UIDocument`, `VisualElement`, controls, queries, events, bindings, and custom elements |
 | Rendering | `Camera`, `MeshRenderer`, typed lights, `MaterialPropertyBlock`, `DynamicMaterial` |
 | Global material data | `MaterialParameterCollection`, `GlobalMaterialParameters` |
 | Jobs | `Jobs.Submit/Run`, `Job`, `JobDescription`, `JobContext`, `Job.Completion` |
 | Logging | `Debug`, `Log` |
 | Profiling | `Profiler.Sample`, `Profiler.Counter` |
 | Preferences | `PlayerPreferences` |
+
+The [UI Toolkit and Events](../Scripting/UiAndEvents.md) guide covers UI Builder authoring, panel targets, live Play
+drafts, runtime queries/events, and the current text/accessibility limits.
 
 ## Important Non-Parity Boundaries
 

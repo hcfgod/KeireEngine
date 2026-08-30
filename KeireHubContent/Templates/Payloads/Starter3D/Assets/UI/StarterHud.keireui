@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Starter HUD">
+  <style src="b1b20001-1000-4000-8000-000000000001"/>
+  <VisualElement id="b1b2c3d4-1000-4000-8000-000000000101" name="starter-hud" class="starter-hud">
+    <TemplateContainer id="b1b2c3d4-1000-4000-8000-000000000102" name="starter-card" template="b1b20001-1000-4000-8000-000000000002">
+      <Label id="b1b2c3d4-1000-4000-8000-000000000103" name="starter-title" slot="header" class="starter-title" text="Kéire Starter"/>
+      <Label id="b1b2c3d4-1000-4000-8000-000000000104" name="starter-copy" slot="content" class="starter-copy" text="Double-click this document to open UI Builder."/>
+      <VisualElement id="b1b2c3d4-1000-4000-8000-000000000105" name="starter-actions" slot="actions" class="starter-actions">
+        <Button id="b1b2c3d4-1000-4000-8000-000000000106" name="continue" class="primary" text="Continue"/>
+      </VisualElement>
+    </TemplateContainer>
+  </VisualElement>
+</ui>

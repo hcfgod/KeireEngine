@@ -13,6 +13,7 @@
 #include "KeireRuntimeInternal/RuntimeAdditiveValidation.h"
 #include "KeireRuntimeInternal/RuntimeCommandLine.h"
 #include "KeireRuntimeInternal/RuntimeRenderBenchmark.h"
+#include "KeireRuntimeInternal/RuntimeReplayCheckpoint.h"
 #include "KeireRuntimeInternal/RuntimeSceneRendering.h"
 #include "KeireRuntimeInternal/RuntimeUiInput.h"
 
@@ -55,93 +56,6 @@ namespace
         bool Audio = false;
         bool Navigation = false;
     };
-
-    [[nodiscard]] nlohmann::json EncodeAnimatorCheckpoint(const Keire::SceneAnimatorCheckpoint& animator)
-    {
-        nlohmann::json parameters = nlohmann::json::array();
-        for (const auto& parameter : animator.State.Parameters)
-            parameters.push_back({{"id", parameter.Id},
-                                  {"type", static_cast<std::uint8_t>(parameter.Type)},
-                                  {"float", parameter.FloatValue},
-                                  {"integer", parameter.IntegerValue},
-                                  {"boolean", parameter.BooleanValue}});
-        nlohmann::json layers = nlohmann::json::array();
-        for (const auto& layer : animator.State.Layers)
-        {
-            nlohmann::json encoded{{"id", layer.Id},
-                                   {"state", layer.StateId},
-                                   {"time", layer.Time},
-                                   {"weight", layer.Weight},
-                                   {"normalizedTime", layer.NormalizedTime}};
-            if (layer.Transition)
-            {
-                const auto& transition = *layer.Transition;
-                encoded["transition"] = {{"id", transition.Id},
-                                         {"source", transition.SourceStateId},
-                                         {"destination", transition.DestinationStateId},
-                                         {"sourceTime", transition.SourceTime},
-                                         {"destinationTime", transition.DestinationTime},
-                                         {"elapsed", transition.Elapsed},
-                                         {"duration", transition.Duration}};
-            }
-            layers.push_back(std::move(encoded));
-        }
-        const auto& root = animator.State.PreviousRoot;
-        return {{"entity", animator.Entity.ToString()},
-                {"playing", animator.State.Playing},
-                {"hasPreviousRootRotation", animator.State.HasPreviousRootRotation},
-                {"previousRoot",
-                 {{"translation", {root.Translation.X, root.Translation.Y, root.Translation.Z}},
-                  {"rotation", {root.Rotation.X, root.Rotation.Y, root.Rotation.Z, root.Rotation.W}},
-                  {"scale", {root.Scale.X, root.Scale.Y, root.Scale.Z}}}},
-                {"parameters", std::move(parameters)},
-                {"layers", std::move(layers)}};
-    }
-
-    [[nodiscard]] Keire::SceneAnimatorCheckpoint DecodeAnimatorCheckpoint(const nlohmann::json& encoded)
-    {
-        const auto vector3 = [](const nlohmann::json& value)
-        {
-            if (!value.is_array() || value.size() != 3U)
-                throw std::runtime_error("Animator replay checkpoint vector is malformed.");
-            return Keire::Vector3{value[0].get<float>(), value[1].get<float>(), value[2].get<float>()};
-        };
-        Keire::SceneAnimatorCheckpoint result;
-        result.Entity = Keire::EntityId::Parse(encoded.at("entity").get<std::string>());
-        result.State.Playing = encoded.at("playing").get<bool>();
-        result.State.HasPreviousRootRotation = encoded.at("hasPreviousRootRotation").get<bool>();
-        const auto& root = encoded.at("previousRoot");
-        result.State.PreviousRoot.Translation = vector3(root.at("translation"));
-        const auto& rotation = root.at("rotation");
-        if (!rotation.is_array() || rotation.size() != 4U)
-            throw std::runtime_error("Animator replay checkpoint rotation is malformed.");
-        result.State.PreviousRoot.Rotation = {rotation[0].get<float>(), rotation[1].get<float>(),
-                                              rotation[2].get<float>(), rotation[3].get<float>()};
-        result.State.PreviousRoot.Scale = vector3(root.at("scale"));
-        for (const auto& parameter : encoded.at("parameters"))
-            result.State.Parameters.push_back(
-                {parameter.at("id").get<std::string>(),
-                 static_cast<Keire::AnimationParameterType>(parameter.at("type").get<std::uint8_t>()),
-                 parameter.at("float").get<float>(), parameter.at("integer").get<std::int32_t>(),
-                 parameter.at("boolean").get<bool>()});
-        for (const auto& layer : encoded.at("layers"))
-        {
-            Keire::AnimatorCheckpointLayer decoded{
-                layer.at("id").get<std::string>(), layer.at("state").get<std::string>(), layer.at("time").get<float>(),
-                layer.at("weight").get<float>(), layer.at("normalizedTime").get<float>()};
-            if (layer.contains("transition"))
-            {
-                const auto& transition = layer.at("transition");
-                decoded.Transition = Keire::AnimatorCheckpointTransition{
-                    transition.at("id").get<std::string>(),          transition.at("source").get<std::string>(),
-                    transition.at("destination").get<std::string>(), transition.at("sourceTime").get<float>(),
-                    transition.at("destinationTime").get<float>(),   transition.at("elapsed").get<float>(),
-                    transition.at("duration").get<float>()};
-            }
-            result.State.Layers.push_back(std::move(decoded));
-        }
-        return result;
-    }
 
     [[nodiscard]] RuntimeManifest LoadManifest(const std::filesystem::path& content)
     {
@@ -892,99 +806,100 @@ namespace
             }
         }
 
-        [[nodiscard]] bool SetManagedUiText(const Keire::AssetId entity, const std::string_view text) noexcept override
+        [[nodiscard]] std::optional<Keire::ManagedUiDocumentElement>
+        ManagedUiDocumentRoot(const Keire::AssetId document) noexcept override
         {
-            try
-            {
-                const auto scene = RuntimeSceneFor(entity);
-                const auto target = scene ? scene->FindEntity(Keire::EntityId(entity)) : Keire::Entity{};
-                const auto component =
-                    target ? target.GetComponent<Keire::UiTextComponent>() : Keire::Ref<Keire::UiTextComponent>{};
-                if (!component)
-                    return false;
-                component->SetText(std::string(text));
-                return true;
-            }
-            catch (...)
-            {
-                return false;
-            }
+            return Keire::Detail::ManagedUiDocumentRoot(PresentationFor(document), document);
         }
 
-        [[nodiscard]] bool ConsumeManagedUiClick(const Keire::AssetId entity) noexcept override
+        [[nodiscard]] std::optional<Keire::ManagedUiDocumentElement>
+        FindManagedUiDocumentElement(const Keire::AssetId document, const Keire::AssetId stableId) noexcept override
         {
-            try
-            {
-                const auto presentation = PresentationFor(entity);
-                return presentation && presentation->ConsumeClick(Keire::EntityId(entity));
-            }
-            catch (...)
-            {
-                return false;
-            }
+            return Keire::Detail::FindManagedUiDocumentElement(PresentationFor(document), document, stableId);
+        }
+
+        [[nodiscard]] std::optional<Keire::ManagedUiDocumentElement>
+        FindManagedUiDocumentElement(const Keire::AssetId document, const std::string_view name) noexcept override
+        {
+            return Keire::Detail::FindManagedUiDocumentElement(PresentationFor(document), document, name);
+        }
+
+        [[nodiscard]] bool ManagedUiDocumentElementAlive(const Keire::AssetId document,
+                                                         const std::uint64_t documentGeneration,
+                                                         const std::uint64_t element) noexcept override
+        {
+            return Keire::Detail::ManagedUiDocumentElementAlive(PresentationFor(document), document, documentGeneration,
+                                                                element);
+        }
+
+        [[nodiscard]] std::optional<std::string>
+        ReadManagedUiDocumentElementText(const Keire::AssetId document, const std::uint64_t documentGeneration,
+                                         const std::uint64_t element) noexcept override
+        {
+            return Keire::Detail::ReadManagedUiDocumentElementText(PresentationFor(document), document,
+                                                                   documentGeneration, element);
+        }
+
+        [[nodiscard]] bool SetManagedUiDocumentElementText(const Keire::AssetId document,
+                                                           const std::uint64_t documentGeneration,
+                                                           const std::uint64_t element,
+                                                           const std::string_view text) noexcept override
+        {
+            return Keire::Detail::SetManagedUiDocumentElementText(PresentationFor(document), document,
+                                                                  documentGeneration, element, text);
         }
 
         [[nodiscard]] std::optional<float>
-        ReadManagedUiScalar(const Keire::AssetId entity,
-                            const Keire::ManagedUiScalarProperty property) noexcept override
+        ReadManagedUiDocumentElementValue(const Keire::AssetId document, const std::uint64_t documentGeneration,
+                                          const std::uint64_t element) noexcept override
         {
-            return Keire::Detail::ReadManagedUiScalar(RuntimeSceneFor(entity), entity, property);
+            return Keire::Detail::ReadManagedUiDocumentElementValue(PresentationFor(document), document,
+                                                                    documentGeneration, element);
         }
 
-        [[nodiscard]] bool SetManagedUiScalar(const Keire::AssetId entity,
-                                              const Keire::ManagedUiScalarProperty property,
-                                              const float value) noexcept override
+        [[nodiscard]] bool SetManagedUiDocumentElementValue(const Keire::AssetId document,
+                                                            const std::uint64_t documentGeneration,
+                                                            const std::uint64_t element,
+                                                            const float value) noexcept override
         {
-            return Keire::Detail::SetManagedUiScalar(RuntimeSceneFor(entity), entity, property, value);
+            return Keire::Detail::SetManagedUiDocumentElementValue(PresentationFor(document), document,
+                                                                   documentGeneration, element, value);
         }
 
         [[nodiscard]] std::optional<bool>
-        ReadManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property) noexcept override
+        ReadManagedUiDocumentElementFlag(const Keire::AssetId document, const std::uint64_t documentGeneration,
+                                         const std::uint64_t element,
+                                         const Keire::ManagedUiDocumentFlag property) noexcept override
         {
-            return Keire::Detail::ReadManagedUiFlag(RuntimeSceneFor(entity), PresentationFor(entity), entity, property);
+            return Keire::Detail::ReadManagedUiDocumentElementFlag(PresentationFor(document), document,
+                                                                   documentGeneration, element, property);
         }
 
-        [[nodiscard]] bool SetManagedUiFlag(const Keire::AssetId entity, const Keire::ManagedUiFlagProperty property,
-                                            const bool value) noexcept override
+        [[nodiscard]] bool SetManagedUiDocumentElementFlag(const Keire::AssetId document,
+                                                           const std::uint64_t documentGeneration,
+                                                           const std::uint64_t element,
+                                                           const Keire::ManagedUiDocumentFlag property,
+                                                           const bool value) noexcept override
         {
-            return Keire::Detail::SetManagedUiFlag(RuntimeSceneFor(entity), PresentationFor(entity), entity, property,
-                                                   value);
+            return Keire::Detail::SetManagedUiDocumentElementFlag(PresentationFor(document), document,
+                                                                  documentGeneration, element, property, value);
         }
 
-        [[nodiscard]] std::optional<Keire::Vector2>
-        ReadManagedUiVector(const Keire::AssetId entity,
-                            const Keire::ManagedUiVectorProperty property) noexcept override
+        [[nodiscard]] bool ConsumeManagedUiDocumentElementEvent(const Keire::AssetId document,
+                                                                const std::uint64_t documentGeneration,
+                                                                const std::uint64_t element,
+                                                                const Keire::RuntimeUiEventType type) noexcept override
         {
-            return Keire::Detail::ReadManagedUiVector(RuntimeSceneFor(entity), entity, property);
+            return Keire::Detail::ConsumeManagedUiDocumentElementEvent(PresentationFor(document), document,
+                                                                       documentGeneration, element, type);
         }
 
-        [[nodiscard]] bool SetManagedUiVector(const Keire::AssetId entity,
-                                              const Keire::ManagedUiVectorProperty property,
-                                              const Keire::Vector2 value) noexcept override
+        [[nodiscard]] bool FocusManagedUiDocumentElement(const Keire::AssetId document,
+                                                         const std::uint64_t documentGeneration,
+                                                         const std::uint64_t element) noexcept override
         {
-            return Keire::Detail::SetManagedUiVector(RuntimeSceneFor(entity), entity, property, value);
-        }
-
-        [[nodiscard]] std::optional<std::string> ReadManagedUiInputText(const Keire::AssetId entity) noexcept override
-        {
-            return Keire::Detail::ReadManagedUiInputText(RuntimeSceneFor(entity), entity);
-        }
-
-        [[nodiscard]] bool SetManagedUiInputText(const Keire::AssetId entity,
-                                                 const std::string_view text) noexcept override
-        {
-            return Keire::Detail::SetManagedUiInputText(RuntimeSceneFor(entity), entity, text);
-        }
-
-        [[nodiscard]] bool ConsumeManagedUiEvent(const Keire::AssetId entity,
-                                                 const Keire::RuntimeUiEventType type) noexcept override
-        {
-            return Keire::Detail::ConsumeManagedUiEvent(PresentationFor(entity), entity, type);
-        }
-
-        [[nodiscard]] bool FocusManagedUi(const Keire::AssetId entity) noexcept override
-        {
-            return Keire::Detail::FocusManagedUi(PresentationFor(entity), entity);
+            return Keire::Detail::FocusManagedUiDocumentElement(PresentationFor(document), document, documentGeneration,
+                                                                element);
         }
 
         [[nodiscard]] Keire::Ref<Keire::Scene>
@@ -1133,7 +1048,7 @@ namespace
                          throw std::logic_error("Runtime animation replay state is unavailable.");
                      nlohmann::json animators = nlohmann::json::array();
                      for (const auto& animator : state->Session->CaptureAnimatorCheckpoint())
-                         animators.push_back(EncodeAnimatorCheckpoint(animator));
+                         animators.push_back(KeireRuntime::EncodeAnimatorCheckpoint(animator));
                      const auto encoded = nlohmann::json::to_cbor(
                          nlohmann::json{{"schemaVersion", 1}, {"animators", std::move(animators)}});
                      return std::vector<std::byte>(reinterpret_cast<const std::byte*>(encoded.data()),
@@ -1152,7 +1067,7 @@ namespace
                      std::vector<Keire::SceneAnimatorCheckpoint> animators;
                      animators.reserve(document.at("animators").size());
                      for (const auto& animator : document.at("animators"))
-                         animators.push_back(DecodeAnimatorCheckpoint(animator));
+                         animators.push_back(KeireRuntime::DecodeAnimatorCheckpoint(animator));
                      state->Session->RestoreAnimatorCheckpoint(animators);
                  }});
             Replay()->RegisterSerializer(

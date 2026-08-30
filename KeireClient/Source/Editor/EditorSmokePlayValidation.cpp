@@ -30,6 +30,7 @@ namespace KeireEditor
         {
             WaitForPlay,
             WaitForAdditiveLoad,
+            WaitForInitialUi,
             WaitForDeviceRecovery,
             ObserveInitialGameView,
             WaitForPointerPress,
@@ -38,6 +39,7 @@ namespace KeireEditor
             WaitForUnload,
             StartReload,
             WaitForReload,
+            WaitForReloadedUi,
             ObserveReloadedGameView,
             StartOcclusionLoad,
             WaitForOcclusionLoad,
@@ -53,6 +55,8 @@ namespace KeireEditor
                 return "wait-for-play";
             case Phase::WaitForAdditiveLoad:
                 return "wait-for-additive-load";
+            case Phase::WaitForInitialUi:
+                return "wait-for-initial-ui";
             case Phase::WaitForDeviceRecovery:
                 return "wait-for-device-recovery";
             case Phase::ObserveInitialGameView:
@@ -69,6 +73,8 @@ namespace KeireEditor
                 return "start-reload";
             case Phase::WaitForReload:
                 return "wait-for-reload";
+            case Phase::WaitForReloadedUi:
+                return "wait-for-reloaded-ui";
             case Phase::ObserveReloadedGameView:
                 return "observe-reloaded-game-view";
             case Phase::StartOcclusionLoad:
@@ -158,33 +164,62 @@ namespace KeireEditor
         {
         }
 
-        [[nodiscard]] static Keire::EntityId AddValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session,
-                                                                 const std::string& name,
-                                                                 Keire::RuntimeUiElementId& element)
+        struct ValidationButton final
+        {
+            Keire::EntityId Document;
+            Keire::AssetId StableId;
+            std::uint64_t DocumentGeneration = 0;
+            std::uint64_t Element = 0;
+        };
+
+        [[nodiscard]] static ValidationButton AddValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session,
+                                                                  const std::string& name)
         {
             if (!session || !session->RuntimeScene() || !session->Presentation())
                 throw std::runtime_error("Editor Play validation requires a presentation-backed runtime session.");
-            auto canvas = session->RuntimeScene()->CreateEntity(name + " Canvas");
-            const auto canvasComponent = canvas.AddComponent<Keire::CanvasComponent>();
-            if (!canvasComponent)
-                throw std::runtime_error("Editor Play validation could not create its Canvas.");
-            canvasComponent->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
-            auto button = session->RuntimeScene()->CreateEntity(name + " Button", canvas);
-            const auto rect = button.AddComponent<Keire::RectTransformComponent>();
-            if (!rect || !button.AddComponent<Keire::UiButtonComponent>())
-                throw std::runtime_error("Editor Play validation could not create its Button.");
-            rect->SetAnchorMinimum({});
-            rect->SetAnchorMaximum({});
-            rect->SetPivot({});
-            rect->SetAnchoredPosition({24.0F, 24.0F});
-            rect->SetSizeDelta({120.0F, 48.0F});
+            const auto visualTree = Keire::AssetId::Parse("6a100001-1111-4000-8000-000000000002");
+            const auto panelSettings = Keire::AssetId::Parse("6a100001-1111-4000-8000-000000000003");
+            const auto buttonStableId = Keire::AssetId::Parse("6a110001-1111-4000-8000-000000000005");
+            auto documentEntity = session->RuntimeScene()->CreateEntity(name + " UI Document");
+            const auto document = documentEntity.AddComponent<Keire::UiDocumentComponent>();
+            if (!document)
+                throw std::runtime_error("Editor Play validation could not create its UI Document.");
+            document->SetVisualTree(visualTree);
+            document->SetPanelSettings(panelSettings);
+            return {.Document = documentEntity.Id(), .StableId = buttonStableId};
+        }
+
+        [[nodiscard]] static bool ResolveValidationButton(const Keire::Ref<Keire::SceneRuntimeSession>& session,
+                                                          ValidationButton& result)
+        {
+            if (result.DocumentGeneration != 0 && result.Element != 0)
+                return true;
+            if (!session || !session->RuntimeScene() || !session->Presentation())
+                throw std::runtime_error("Editor Play validation lost its presentation-backed runtime session.");
+
             session->Presentation()->Synchronize(session->RuntimeScene(), 1280.0F, 720.0F, true);
-            if (!session->Presentation()->SetFocus(button.Id()))
-                throw std::runtime_error("Editor Play validation could not resolve its Button UI node.");
-            element = session->Presentation()->Ui()->Focus();
-            if (!element)
-                throw std::runtime_error("Editor Play validation resolved an invalid Button UI node.");
-            return button.Id();
+            const auto button = session->Presentation()->FindUiDocumentElement(result.Document, result.StableId);
+            if (!button)
+                return false;
+            if (button->Type != Keire::RuntimeUiElementType::Button)
+                throw std::runtime_error("Editor Play validation resolved a non-Button UI Document element.");
+            result.StableId = button->StableId;
+            result.DocumentGeneration = button->DocumentGeneration;
+            result.Element = button->Element;
+            return true;
+        }
+
+        [[nodiscard]] static std::optional<Keire::ScenePresentationUiDocumentDebugState>
+        ButtonState(const Keire::Ref<Keire::ScenePresentationRuntime>& presentation, const ValidationButton& button)
+        {
+            const auto snapshot = presentation ? presentation->UiDocumentDebugSnapshot(button.Document) : std::nullopt;
+            if (!snapshot || snapshot->DocumentGeneration != button.DocumentGeneration)
+                return std::nullopt;
+            const auto element = std::ranges::find(snapshot->Elements, button.StableId,
+                                                   &Keire::ScenePresentationUiDocumentDebugElement::StableId);
+            return element == snapshot->Elements.end()
+                       ? std::nullopt
+                       : std::optional<Keire::ScenePresentationUiDocumentDebugState>(element->State);
         }
 
         [[nodiscard]] static std::size_t PresentationCount(const Keire::Ref<Keire::SceneRuntimeWorld>& world)
@@ -249,7 +284,7 @@ namespace KeireEditor
                 windows && mainWindow ? windows->GetCursorMode(mainWindow->Id()) : Keire::CursorMode::Normal;
             const auto totalMilliseconds = std::chrono::duration<float, std::milli>(now - ValidationStartedAt).count();
             const auto phaseMilliseconds = std::chrono::duration<float, std::milli>(now - PhaseStartedAt).count();
-            const auto uiStateDiagnostic = [](const std::optional<Keire::RuntimeUiElementState>& state)
+            const auto uiStateDiagnostic = [](const std::optional<Keire::ScenePresentationUiDocumentDebugState>& state)
             {
                 if (!state)
                     return nlohmann::json{{"present", false}};
@@ -434,7 +469,8 @@ namespace KeireEditor
                 Fail(application, world, "Editor Play additive validation exceeded its total deadline");
 
             const auto phaseDeadline = Current == Phase::WaitForPlay ? std::chrono::seconds(180)
-                                       : Current == Phase::WaitForAdditiveLoad || Current == Phase::WaitForReload ||
+                                       : Current == Phase::WaitForAdditiveLoad || Current == Phase::WaitForInitialUi ||
+                                               Current == Phase::WaitForReload || Current == Phase::WaitForReloadedUi ||
                                                Current == Phase::WaitForOcclusionLoad ||
                                                Current == Phase::ObserveOcclusionGameView
                                            ? std::chrono::seconds(60)
@@ -463,7 +499,14 @@ namespace KeireEditor
             const auto windowId = SDL_GetWindowID(native);
             const auto hitRect = target.Intersect(SecondButtonState ? SecondButtonState->ClipRect : target);
             if (hitRect.Empty())
-                throw std::runtime_error("Editor Play validation Button has no visible hit-test area.");
+            {
+                const auto clip = SecondButtonState ? SecondButtonState->ClipRect : target;
+                throw std::runtime_error(
+                    "Editor Play validation Button has no visible hit-test area (rect=" + std::to_string(target.X) +
+                    ',' + std::to_string(target.Y) + '+' + std::to_string(target.Width) + 'x' +
+                    std::to_string(target.Height) + ", clip=" + std::to_string(clip.X) + ',' + std::to_string(clip.Y) +
+                    '+' + std::to_string(clip.Width) + 'x' + std::to_string(clip.Height) + ").");
+            }
             const auto x = viewport.Minimum.X + hitRect.X + hitRect.Width * 0.5F;
             const auto y = viewport.Minimum.Y + hitRect.Y + hitRect.Height * 0.5F;
 
@@ -548,8 +591,7 @@ namespace KeireEditor
                 }
                 OcclusionAsset = enabled[3];
                 First = world->Active();
-                FirstButton =
-                    AddValidationButton(world->Session(First), "Editor validation startup", FirstButtonElement);
+                FirstButton = AddValidationButton(world->Session(First), "Editor validation startup");
                 Load = world->Load(*secondAsset, Keire::SceneLoadMode::Additive);
                 TransitionTo(Phase::WaitForAdditiveLoad);
                 break;
@@ -561,10 +603,18 @@ namespace KeireEditor
                 {
                     Second = Load->Result();
                     RequireOrder(world, {First, Second});
-                    SecondButton =
-                        AddValidationButton(world->Session(Second), "Editor validation additive", SecondButtonElement);
+                    SecondButton = AddValidationButton(world->Session(Second), "Editor validation additive");
                     if (PresentationCount(world) != 2U || !world->SetActive(Second))
                         throw std::runtime_error("Editor Play validation could not activate two presentation trees.");
+                    TransitionTo(Phase::WaitForInitialUi);
+                }
+                break;
+            case Phase::WaitForInitialUi:
+            {
+                const bool firstReady = ResolveValidationButton(world->Session(First), FirstButton);
+                const bool secondReady = ResolveValidationButton(world->Session(Second), SecondButton);
+                if (firstReady && secondReady)
+                {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                     if (ValidateDeviceLoss)
                     {
@@ -579,6 +629,7 @@ namespace KeireEditor
                     }
                 }
                 break;
+            }
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
             case Phase::WaitForDeviceRecovery:
                 if (const auto diagnostic = application.Renderer()->LastDeviceLoss();
@@ -616,12 +667,15 @@ namespace KeireEditor
                 {
                     Second = Load->Result();
                     RequireOrder(world, {First, Second});
-                    SecondButton =
-                        AddValidationButton(world->Session(Second), "Editor validation reloaded", SecondButtonElement);
+                    SecondButton = AddValidationButton(world->Session(Second), "Editor validation reloaded");
                     if (PresentationCount(world) != 2U || !world->SetActive(Second))
                         throw std::runtime_error("Editor Play validation could not activate the reloaded session.");
-                    TransitionTo(Phase::ObserveReloadedGameView);
+                    TransitionTo(Phase::WaitForReloadedUi);
                 }
+                break;
+            case Phase::WaitForReloadedUi:
+                if (ResolveValidationButton(world->Session(Second), SecondButton))
+                    TransitionTo(Phase::ObserveReloadedGameView);
                 break;
             case Phase::StartOcclusionLoad:
                 Load = world->Load(OcclusionAsset, Keire::SceneLoadMode::Additive);
@@ -696,8 +750,8 @@ namespace KeireEditor
                                                 : Keire::Ref<Keire::ScenePresentationRuntime>{};
             const auto firstTree = firstPresentation ? firstPresentation->Ui() : Keire::Ref<Keire::RuntimeUiTree>{};
             const auto secondTree = secondPresentation ? secondPresentation->Ui() : Keire::Ref<Keire::RuntimeUiTree>{};
-            FirstButtonState = firstTree ? firstTree->State(FirstButtonElement) : std::nullopt;
-            SecondButtonState = secondTree ? secondTree->State(SecondButtonElement) : std::nullopt;
+            FirstButtonState = ButtonState(firstPresentation, FirstButton);
+            SecondButtonState = ButtonState(secondPresentation, SecondButton);
             FirstUiStatistics = firstTree ? firstTree->Statistics() : Keire::RuntimeUiStatistics{};
             SecondUiStatistics = secondTree ? secondTree->Statistics() : Keire::RuntimeUiStatistics{};
             LastSecondPendingEvents = 0;
@@ -708,9 +762,11 @@ namespace KeireEditor
             SecondButtonClickPending = false;
             if (secondPresentation)
             {
-                const auto checkpoint = secondPresentation->CaptureCheckpoint();
-                LastSecondPendingEvents = checkpoint.PendingUiEvents.size();
-                for (const auto& event : checkpoint.PendingUiEvents)
+                const auto snapshot = secondPresentation->UiDocumentDebugSnapshot(SecondButton.Document);
+                const auto& events = snapshot ? snapshot->PendingTargetEvents
+                                              : std::vector<Keire::ScenePresentationUiDocumentDebugEvent>{};
+                LastSecondPendingEvents = events.size();
+                for (const auto& event : events)
                 {
                     if (event.Type == Keire::RuntimeUiEventType::PointerDown)
                         ++LastSecondPointerDownEvents;
@@ -718,19 +774,23 @@ namespace KeireEditor
                         ++LastSecondPointerUpEvents;
                     else if (event.Type == Keire::RuntimeUiEventType::Click)
                         ++LastSecondClickEvents;
-                    if (event.Target == SecondButton && event.Type == Keire::RuntimeUiEventType::PointerUp)
+                    if (event.Target == SecondButton.StableId && event.Type == Keire::RuntimeUiEventType::PointerUp)
                         SecondButtonPointerUpPending = true;
-                    if (event.Target == SecondButton && event.Type == Keire::RuntimeUiEventType::Click)
+                    if (event.Target == SecondButton.StableId && event.Type == Keire::RuntimeUiEventType::Click)
                         SecondButtonClickPending = true;
                 }
             }
-            const auto directHit =
-                secondTree ? secondTree->HitTest(LastPointerLocalX, LastPointerLocalY) : std::nullopt;
+            const auto directHit = secondPresentation
+                                       ? secondPresentation->HitTestUiDocument(LastPointerLocalX, LastPointerLocalY)
+                                       : std::nullopt;
             TopmostDirectHit = directHit.has_value();
-            TopmostDirectHitIsButton = directHit && *directHit == SecondButtonElement;
-            const auto canonicalHit = secondTree ? secondTree->HitTest(40.0F, 40.0F) : std::nullopt;
+            TopmostDirectHitIsButton = directHit && directHit->Document == SecondButton.Document &&
+                                       directHit->StableId == SecondButton.StableId;
+            const auto canonicalHit =
+                secondPresentation ? secondPresentation->HitTestUiDocument(40.0F, 40.0F) : std::nullopt;
             TopmostCanonicalHit = canonicalHit.has_value();
-            TopmostCanonicalHitIsButton = canonicalHit && *canonicalHit == SecondButtonElement;
+            TopmostCanonicalHitIsButton = canonicalHit && canonicalHit->Document == SecondButton.Document &&
+                                          canonicalHit->StableId == SecondButton.StableId;
             LastContributionCount =
                 surface ? Keire::RenderSystemInternalAccess::SceneContributionCount(*application.Renderer(), *surface)
                         : 0U;
@@ -746,8 +806,15 @@ namespace KeireEditor
             }
             if (Current == Phase::WaitForTopmostInput)
             {
-                const auto firstClicked = world->Session(First)->Presentation()->ConsumeClick(FirstButton);
-                const auto secondClicked = world->Session(Second)->Presentation()->ConsumeClick(SecondButton);
+                const auto consumeClick =
+                    [](const Keire::Ref<Keire::ScenePresentationRuntime>& presentation, const ValidationButton& button)
+                {
+                    return presentation && presentation->ConsumeUiDocumentElementEvent(
+                                               button.Document, button.DocumentGeneration, button.Element,
+                                               Keire::RuntimeUiEventType::Click);
+                };
+                const auto firstClicked = consumeClick(world->Session(First)->Presentation(), FirstButton);
+                const auto secondClicked = consumeClick(world->Session(Second)->Presentation(), SecondButton);
                 if (!secondClicked)
                     return;
                 if (firstClicked)
@@ -908,10 +975,8 @@ namespace KeireEditor
         Keire::SceneHandle Occlusion;
         Keire::AssetId SecondAsset;
         Keire::AssetId OcclusionAsset;
-        Keire::EntityId FirstButton;
-        Keire::EntityId SecondButton;
-        Keire::RuntimeUiElementId FirstButtonElement;
-        Keire::RuntimeUiElementId SecondButtonElement;
+        ValidationButton FirstButton;
+        ValidationButton SecondButton;
         std::chrono::steady_clock::time_point ValidationStartedAt = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point PhaseStartedAt = ValidationStartedAt;
         std::uint64_t UpdateCalls = 0;
@@ -937,8 +1002,8 @@ namespace KeireEditor
         float ClickX = 0.0F;
         float ClickY = 0.0F;
         Keire::UiPointerState LastPointer;
-        std::optional<Keire::RuntimeUiElementState> FirstButtonState;
-        std::optional<Keire::RuntimeUiElementState> SecondButtonState;
+        std::optional<Keire::ScenePresentationUiDocumentDebugState> FirstButtonState;
+        std::optional<Keire::ScenePresentationUiDocumentDebugState> SecondButtonState;
         Keire::RuntimeUiStatistics FirstUiStatistics;
         Keire::RuntimeUiStatistics SecondUiStatistics;
         bool LastSurfacePresent = false;

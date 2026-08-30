@@ -620,13 +620,12 @@ namespace KeireEditor
         return {origin, {position.X - gap, origin.Y + size}};
     }
 
-    SceneGizmoResult SceneGizmoController::UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
-                                                         Keire::EntityId selected, const Keire::RenderCamera& camera,
-                                                         const Keire::UiItemRect viewport, const bool allowManipulation,
-                                                         const bool pointerBlocked, const BeginUndo& beginUndo,
-                                                         const MeshBoundsResolver& resolveMeshBounds,
-                                                         const std::span<const Keire::AssetId> selections,
-                                                         const Keire::ScenePresentationRuntime* presentation)
+    SceneGizmoResult SceneGizmoController::UpdateAndDraw(
+        Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene, Keire::EntityId selected,
+        const Keire::RenderCamera& camera, const Keire::UiItemRect viewport, const bool allowManipulation,
+        const bool pointerBlocked, const BeginUndo& beginUndo, const MeshBoundsResolver& resolveMeshBounds,
+        const std::span<const Keire::AssetId> selections, const Keire::ScenePresentationRuntime* presentation,
+        const UiPanelSettingsResolver& resolveUiPanelSettings, const OpenUiDocument& openUiDocument)
     {
         if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
             return {selected};
@@ -635,11 +634,11 @@ namespace KeireEditor
         bool selectionActivated = false;
         bool pointerConsumed = false;
         const bool hovered = viewport.Contains(pointer.Position);
-        const bool selectionRequested = hovered && !pointerBlocked && pointer.LeftPressed &&
-                                        m_Drag.ActiveAxis == Axis::None &&
-                                        m_ColliderDrag.Handle == ColliderHandle::None;
+        const bool selectionRequested =
+            hovered && !pointerBlocked && pointer.LeftPressed && m_Drag.ActiveAxis == Axis::None &&
+            m_ColliderDrag.Handle == ColliderHandle::None && m_UiWorldPanelDrag.Handle == SceneUiRectHandle::None;
         if (hovered && !ui.ControlDown() && !ui.AltDown() && m_Drag.ActiveAxis == Axis::None &&
-            m_ColliderDrag.Handle == ColliderHandle::None)
+            m_ColliderDrag.Handle == ColliderHandle::None && m_UiWorldPanelDrag.Handle == SceneUiRectHandle::None)
         {
             if (ui.Shortcut({Keire::UiKey::Q}))
                 (void)ApplyToolShortcut(Keire::UiKey::Q);
@@ -652,156 +651,160 @@ namespace KeireEditor
         }
 
         const auto viewProjection = Keire::Math::Multiply(camera.Projection, camera.View);
-        if (presentation && selected)
+        auto selectedUiDocumentRoute = SceneUiDocumentAuthoringRoute::None;
+        if (selected)
         {
             const auto selectedEntity = scene->FindEntity(selected);
-            auto canvasEntity = selectedEntity;
-            while (canvasEntity && !canvasEntity.GetComponent<Keire::CanvasComponent>())
-                canvasEntity = canvasEntity.Parent();
-            const auto canvas = canvasEntity.GetComponent<Keire::CanvasComponent>();
-            const auto geometry = presentation->UiGeometry(selected);
-            if (canvas && canvas->RenderMode() == Keire::CanvasRenderMode::WorldSpace && geometry && geometry->Visible)
+            const auto uiDocument = selectedEntity.GetComponent<Keire::UiDocumentComponent>();
+            if (uiDocument)
             {
-                std::array<Keire::UiPosition, 4> corners{};
-                for (std::size_t index = 0; index < corners.size(); ++index)
+                std::optional<Keire::UiPanelSettingsDefinition> panelSettings;
+                if (uiDocument->PanelSettings())
                 {
-                    corners[index] = {viewport.Minimum.X + geometry->ViewportCorners[index].X,
-                                      viewport.Minimum.Y + geometry->ViewportCorners[index].Y};
-                    const auto next = (index + 1U) % corners.size();
-                    ui.DrawLine(corners[index],
-                                {viewport.Minimum.X + geometry->ViewportCorners[next].X,
-                                 viewport.Minimum.Y + geometry->ViewportCorners[next].Y},
-                                {0.20F, 0.82F, 1.0F, 0.95F}, 1.6F);
+                    if (resolveUiPanelSettings)
+                        panelSettings = resolveUiPanelSettings(uiDocument->PanelSettings());
+                }
+                else
+                    panelSettings = Keire::UiPanelSettingsDefinition{};
+                selectedUiDocumentRoute = ResolveSceneUiDocumentAuthoringRoute(*uiDocument, panelSettings);
+
+                const bool routeChanged = m_RoutedUiDocument != selected ||
+                                          m_RoutedUiVisualTree != uiDocument->VisualTree() ||
+                                          m_RoutedUiPanelSettings != uiDocument->PanelSettings() ||
+                                          m_RoutedUiDocumentRoute != selectedUiDocumentRoute;
+                if (selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::None)
+                {
+                    m_RoutedUiDocument = {};
+                    m_RoutedUiVisualTree = {};
+                    m_RoutedUiPanelSettings = {};
+                    m_RoutedUiDocumentRoute = SceneUiDocumentAuthoringRoute::None;
+                }
+                else if (routeChanged)
+                {
+                    m_RoutedUiDocument = selected;
+                    m_RoutedUiVisualTree = uiDocument->VisualTree();
+                    m_RoutedUiPanelSettings = uiDocument->PanelSettings();
+                    m_RoutedUiDocumentRoute = selectedUiDocumentRoute;
+                    if (selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::FocusUiBuilder && openUiDocument)
+                        openUiDocument(uiDocument->VisualTree());
                 }
 
-                auto hoveredHandle = SceneUiRectHandle::None;
-                for (std::size_t index = 0; index < corners.size(); ++index)
+                if (selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::WorldSurfaceGizmo && panelSettings &&
+                    presentation)
                 {
-                    const Keire::UiItemRect handle{{corners[index].X - 5.0F, corners[index].Y - 5.0F},
-                                                   {corners[index].X + 5.0F, corners[index].Y + 5.0F}};
-                    ui.DrawFilledRectangle(handle, {0.16F, 0.68F, 0.94F, 1.0F}, 1.5F);
-                    ui.DrawRectangle(handle, {0.92F, 0.98F, 1.0F, 1.0F}, 1.0F, 1.5F);
-                    if (handle.Contains(pointer.Position))
-                        hoveredHandle = static_cast<SceneUiRectHandle>(index + 1U);
-                }
-
-                const bool selectedCanvas = selected == canvasEntity.Id();
-                const Keire::UiPosition center{(corners[0].X + corners[2].X) * 0.5F,
-                                               (corners[0].Y + corners[2].Y) * 0.5F};
-                if (!selectedCanvas)
-                {
-                    const Keire::UiItemRect centerHandle{{center.X - 6.0F, center.Y - 6.0F},
-                                                         {center.X + 6.0F, center.Y + 6.0F}};
-                    ui.DrawFilledCircle(center, 5.0F, {1.0F, 0.78F, 0.20F, 0.95F});
-                    if (centerHandle.Contains(pointer.Position))
-                        hoveredHandle = SceneUiRectHandle::Center;
-                }
-
-                if (hovered && !pointerBlocked && allowManipulation && pointer.LeftPressed &&
-                    hoveredHandle != SceneUiRectHandle::None && m_UiRectDrag.Handle == SceneUiRectHandle::None &&
-                    m_Drag.ActiveAxis == Axis::None && m_ColliderDrag.Handle == ColliderHandle::None)
-                {
-                    m_UiRectDrag.RectTransform = selectedEntity.GetComponent<Keire::RectTransformComponent>();
-                    m_UiRectDrag.Canvas = selectedCanvas ? canvas : Keire::Ref<Keire::CanvasComponent>{};
-                    if (m_UiRectDrag.RectTransform || m_UiRectDrag.Canvas)
+                    const auto geometry = presentation->UiGeometry(selected);
+                    const auto transform = selectedEntity.GetComponent<Keire::TransformComponent>();
+                    if (geometry && geometry->Visible && transform)
                     {
-                        m_UiRectDrag.InitialAnchoredPosition = m_UiRectDrag.RectTransform
-                                                                   ? m_UiRectDrag.RectTransform->AnchoredPosition()
-                                                                   : Keire::Vector2{};
-                        m_UiRectDrag.InitialSizeDelta =
-                            m_UiRectDrag.RectTransform ? m_UiRectDrag.RectTransform->SizeDelta() : Keire::Vector2{};
-                        m_UiRectDrag.InitialReferenceResolution = canvas->ReferenceResolution();
-                        m_UiRectDrag.StartPointer = pointer.Position;
-                        m_UiRectDrag.Handle = hoveredHandle;
-                        m_UiRectDrag.UndoRecorded = false;
+                        std::array<Keire::UiPosition, 4> corners{};
                         for (std::size_t index = 0; index < corners.size(); ++index)
-                            m_UiRectDrag.InitialCorners[index] = {corners[index].X, corners[index].Y};
-                        pointerConsumed = true;
+                        {
+                            corners[index] = {viewport.Minimum.X + geometry->ViewportCorners[index].X,
+                                              viewport.Minimum.Y + geometry->ViewportCorners[index].Y};
+                            ui.DrawLine(corners[index], corners[(index + 1U) % corners.size()],
+                                        {0.20F, 0.82F, 1.0F, 0.95F}, 1.6F);
+                        }
+
+                        auto hoveredHandle = SceneUiRectHandle::None;
+                        for (std::size_t index = 0; index < corners.size(); ++index)
+                        {
+                            const Keire::UiItemRect handle{{corners[index].X - 5.0F, corners[index].Y - 5.0F},
+                                                           {corners[index].X + 5.0F, corners[index].Y + 5.0F}};
+                            ui.DrawFilledRectangle(handle, {0.16F, 0.68F, 0.94F, 1.0F}, 1.5F);
+                            ui.DrawRectangle(handle, {0.92F, 0.98F, 1.0F, 1.0F}, 1.0F, 1.5F);
+                            if (handle.Contains(pointer.Position))
+                                hoveredHandle = static_cast<SceneUiRectHandle>(index + 1U);
+                        }
+
+                        const Keire::Vector2 baseSize{panelSettings->WorldWidth, panelSettings->WorldHeight};
+                        const auto effectiveSize = EffectiveSceneUiWorldPanelSize(baseSize, transform->LocalScale());
+                        std::ostringstream sizeLabel;
+                        sizeLabel.precision(3);
+                        sizeLabel << "World UI  base " << baseSize.X << " x " << baseSize.Y << " m  | effective "
+                                  << effectiveSize.X << " x " << effectiveSize.Y << " m";
+                        const auto labelPosition = Keire::UiPosition{corners[0].X + 8.0F, corners[0].Y + 8.0F};
+                        ui.DrawOverlayText(labelPosition, {0.92F, 0.98F, 1.0F, 1.0F}, sizeLabel.str(), 11.0F, viewport);
+
+                        if (hovered && !pointerBlocked && allowManipulation && pointer.LeftPressed &&
+                            hoveredHandle != SceneUiRectHandle::None &&
+                            m_UiWorldPanelDrag.Handle == SceneUiRectHandle::None && m_Drag.ActiveAxis == Axis::None &&
+                            m_ColliderDrag.Handle == ColliderHandle::None)
+                        {
+                            m_UiWorldPanelDrag.Transform = transform;
+                            m_UiWorldPanelDrag.InitialLocalScale = transform->LocalScale();
+                            m_UiWorldPanelDrag.BasePhysicalSize = baseSize;
+                            m_UiWorldPanelDrag.StartPointer = pointer.Position;
+                            m_UiWorldPanelDrag.Handle = hoveredHandle;
+                            m_UiWorldPanelDrag.UndoRecorded = false;
+                            for (std::size_t index = 0; index < corners.size(); ++index)
+                                m_UiWorldPanelDrag.InitialCorners[index] = {corners[index].X, corners[index].Y};
+                            pointerConsumed = true;
+                        }
                     }
                 }
             }
+            else
+            {
+                m_RoutedUiDocument = {};
+                m_RoutedUiVisualTree = {};
+                m_RoutedUiPanelSettings = {};
+                m_RoutedUiDocumentRoute = SceneUiDocumentAuthoringRoute::None;
+            }
+        }
+        else
+        {
+            m_RoutedUiDocument = {};
+            m_RoutedUiVisualTree = {};
+            m_RoutedUiPanelSettings = {};
+            m_RoutedUiDocumentRoute = SceneUiDocumentAuthoringRoute::None;
         }
 
-        if (m_UiRectDrag.Handle != SceneUiRectHandle::None)
+        if (m_UiWorldPanelDrag.Handle != SceneUiRectHandle::None)
         {
             pointerConsumed = true;
             if (ui.KeyDown(Keire::UiKey::Escape))
             {
-                if (m_UiRectDrag.UndoRecorded)
+                if (m_UiWorldPanelDrag.UndoRecorded && m_UiWorldPanelDrag.Transform)
                 {
-                    if (m_UiRectDrag.RectTransform)
-                    {
-                        m_UiRectDrag.RectTransform->SetAnchoredPosition(m_UiRectDrag.InitialAnchoredPosition);
-                        m_UiRectDrag.RectTransform->SetSizeDelta(m_UiRectDrag.InitialSizeDelta);
-                    }
-                    if (m_UiRectDrag.Canvas)
-                        m_UiRectDrag.Canvas->SetReferenceResolution(m_UiRectDrag.InitialReferenceResolution);
+                    m_UiWorldPanelDrag.Transform->SetLocalScale(m_UiWorldPanelDrag.InitialLocalScale);
                     scene->MarkDirty();
                 }
-                m_UiRectDrag = {};
+                m_UiWorldPanelDrag = {};
             }
-            else if (pointer.LeftDown)
+            else if (pointer.LeftDown && m_UiWorldPanelDrag.Transform)
             {
-                const Keire::Vector2 delta{pointer.Position.X - m_UiRectDrag.StartPointer.X,
-                                           pointer.Position.Y - m_UiRectDrag.StartPointer.Y};
-                auto edit = CalculateSceneUiRectHandleEdit(
-                    m_UiRectDrag.Handle, m_UiRectDrag.InitialCorners, delta, m_UiRectDrag.InitialAnchoredPosition,
-                    m_UiRectDrag.InitialSizeDelta, m_UiRectDrag.InitialReferenceResolution, bool(m_UiRectDrag.Canvas));
-                bool changed = false;
-                if (m_UiRectDrag.Handle == SceneUiRectHandle::Center && m_UiRectDrag.RectTransform)
+                const Keire::Vector2 delta{pointer.Position.X - m_UiWorldPanelDrag.StartPointer.X,
+                                           pointer.Position.Y - m_UiWorldPanelDrag.StartPointer.Y};
+                auto edit = CalculateSceneUiWorldPanelHandleEdit(
+                    m_UiWorldPanelDrag.Handle, m_UiWorldPanelDrag.InitialCorners, delta,
+                    m_UiWorldPanelDrag.InitialLocalScale, m_UiWorldPanelDrag.BasePhysicalSize, ui.ShiftDown());
+                if (m_Settings.Snapping)
                 {
-                    if (m_Settings.Snapping)
-                    {
-                        edit.AnchoredPosition.X = Snap(edit.AnchoredPosition.X, m_Settings.PositionSnap.X);
-                        edit.AnchoredPosition.Y = Snap(edit.AnchoredPosition.Y, m_Settings.PositionSnap.Y);
-                    }
-                    changed = edit.AnchoredPosition != m_UiRectDrag.RectTransform->AnchoredPosition();
-                    if (changed)
-                    {
-                        if (!m_UiRectDrag.UndoRecorded)
-                        {
-                            beginUndo("Move Rect Transform");
-                            m_UiRectDrag.UndoRecorded = true;
-                        }
-                        m_UiRectDrag.RectTransform->SetAnchoredPosition(edit.AnchoredPosition);
-                    }
+                    edit.EffectivePhysicalSize.X = std::max(Keire::TransformComponent::MinimumScaleMagnitude,
+                                                            Snap(edit.EffectivePhysicalSize.X, m_Settings.ScaleSnap));
+                    edit.EffectivePhysicalSize.Y = std::max(Keire::TransformComponent::MinimumScaleMagnitude,
+                                                            Snap(edit.EffectivePhysicalSize.Y, m_Settings.ScaleSnap));
+                    edit.LocalScale.X = std::copysign(edit.EffectivePhysicalSize.X /
+                                                          std::max(m_UiWorldPanelDrag.BasePhysicalSize.X, 0.000001F),
+                                                      m_UiWorldPanelDrag.InitialLocalScale.X);
+                    edit.LocalScale.Y = std::copysign(edit.EffectivePhysicalSize.Y /
+                                                          std::max(m_UiWorldPanelDrag.BasePhysicalSize.Y, 0.000001F),
+                                                      m_UiWorldPanelDrag.InitialLocalScale.Y);
                 }
-                else
+                if (Keire::TransformComponent::IsValidLocalScale(edit.LocalScale) &&
+                    edit.LocalScale != m_UiWorldPanelDrag.Transform->LocalScale())
                 {
-                    if (m_UiRectDrag.Canvas)
+                    if (!m_UiWorldPanelDrag.UndoRecorded)
                     {
-                        changed = edit.ReferenceResolution != m_UiRectDrag.Canvas->ReferenceResolution();
-                        if (changed)
-                        {
-                            if (!m_UiRectDrag.UndoRecorded)
-                            {
-                                beginUndo("Resize World Canvas");
-                                m_UiRectDrag.UndoRecorded = true;
-                            }
-                            m_UiRectDrag.Canvas->SetReferenceResolution(edit.ReferenceResolution);
-                        }
+                        beginUndo("Resize World UI Document");
+                        m_UiWorldPanelDrag.UndoRecorded = true;
                     }
-                    else if (m_UiRectDrag.RectTransform)
-                    {
-                        changed = edit.SizeDelta != m_UiRectDrag.RectTransform->SizeDelta() ||
-                                  edit.AnchoredPosition != m_UiRectDrag.RectTransform->AnchoredPosition();
-                        if (changed)
-                        {
-                            if (!m_UiRectDrag.UndoRecorded)
-                            {
-                                beginUndo("Resize Rect Transform");
-                                m_UiRectDrag.UndoRecorded = true;
-                            }
-                            m_UiRectDrag.RectTransform->SetSizeDelta(edit.SizeDelta);
-                            m_UiRectDrag.RectTransform->SetAnchoredPosition(edit.AnchoredPosition);
-                        }
-                    }
-                }
-                if (changed)
+                    m_UiWorldPanelDrag.Transform->SetLocalScale(edit.LocalScale);
                     scene->MarkDirty();
+                }
             }
             else
-                m_UiRectDrag = {};
+                m_UiWorldPanelDrag = {};
         }
 
         if (m_Settings.ShowIcons)
@@ -963,6 +966,15 @@ namespace KeireEditor
         const auto entity = scene->FindEntity(selected);
         const auto transform = entity.GetComponent<Keire::TransformComponent>();
         const auto collider = entity.GetComponent<Keire::ColliderComponent>();
+        if (selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::FocusUiBuilder)
+        {
+            if (selectionRequested && !selectionActivated && !pointerConsumed)
+            {
+                selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds);
+                selectionActivated = true;
+            }
+            return {selected, selectionActivated, pointerConsumed};
+        }
 
         struct ProjectedColliderHandle
         {

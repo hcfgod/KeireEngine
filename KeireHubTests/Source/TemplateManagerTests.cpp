@@ -144,7 +144,12 @@ TEST_CASE("Project-name validation matches the creation preflight contract")
 TEST_CASE("Template manager loads the three manifest-driven built-in templates")
 {
     TemplateManager manager(BuiltInTemplates(), Services());
-    REQUIRE(manager.Load());
+    const auto loadStatus = manager.Load();
+    const auto loadDiagnostic = loadStatus ? std::string{}
+                                           : loadStatus.Error().Message + " " + loadStatus.Error().AffectedItem + " " +
+                                                 loadStatus.Error().TechnicalDetails;
+    INFO(loadDiagnostic);
+    REQUIRE(loadStatus);
     REQUIRE(manager.Snapshot()->size() == 3);
     CHECK(std::ranges::find(*manager.Snapshot(), "keire.empty", &HubTemplateManifest::Id) != manager.Snapshot()->end());
     CHECK(std::ranges::find(*manager.Snapshot(), "keire.3d-starter", &HubTemplateManifest::Id) !=

@@ -1,8 +1,8 @@
+#include "KeireRenderTests/RenderAssetFixture.h"
 #include "KeireRenderTests/RenderedOutputTestSupport.h"
 
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
-#include "Keire/BuiltinUnlitShaders.h"
 #include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
@@ -23,7 +23,6 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -32,6 +31,8 @@
 
 namespace
 {
+    using KeireRenderTests::Detail::RenderAssetFixture;
+
     [[nodiscard]] Keire::RenderBackend::RenderSurfacePropertySnapshot
     CurrentSurfaceProperties(const Keire::RenderSurface& surface)
     {
@@ -841,44 +842,69 @@ namespace
         bool m_DrawSurface = false;
     };
 
-    template <std::size_t Size>
-    [[nodiscard]] std::vector<std::byte> CopyShaderBytes(const unsigned char (&source)[Size])
+    struct UiFrameFailureSurfaceRetirementResults final
     {
-        const auto bytes = std::as_bytes(std::span(source));
-        return {bytes.begin(), bytes.end()};
-    }
+        bool Detached = false;
+        std::uint32_t UiFrames = 0U;
+    };
 
-    [[nodiscard]] Keire::AssetId PublishTransparentTestMaterial(Keire::Application& application)
+    class UiFrameFailureSurfaceRetirementLayer final : public Keire::Layer
     {
-        const auto assets = application.Assets();
-        REQUIRE(assets);
-        const auto shaderId = Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000020");
-        const auto materialId = Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000021");
-        Keire::ShaderPropertyDefinition baseColor;
-        baseColor.Name = "BaseColorTexture";
-        baseColor.Type = Keire::ShaderPropertyType::Texture2D;
-        baseColor.TextureSemantic = Keire::ShaderTextureSemantic::BaseColor;
-        Keire::ShaderPropertyDefinition normal;
-        normal.Name = "NormalTexture";
-        normal.Type = Keire::ShaderPropertyType::Texture2D;
-        normal.TextureSemantic = Keire::ShaderTextureSemantic::Normal;
-        Keire::ShaderAssetDefinition shader;
-        shader.Source = "Test/AdditiveCaptureUnlit.hlsl";
-        shader.Properties = {std::move(baseColor), std::move(normal)};
-        shader.Variants = {{Keire::ShaderBinaryFormat::Dxil, CopyShaderBytes(Keire::Detail::BuiltinUnlitVertexDxil),
-                            CopyShaderBytes(Keire::Detail::BuiltinUnlitFragmentDxil)},
-                           {Keire::ShaderBinaryFormat::SpirV, CopyShaderBytes(Keire::Detail::BuiltinUnlitVertexSpirV),
-                            CopyShaderBytes(Keire::Detail::BuiltinUnlitFragmentSpirV)},
-                           {Keire::ShaderBinaryFormat::Msl, CopyShaderBytes(Keire::Detail::BuiltinUnlitVertexMsl),
-                            CopyShaderBytes(Keire::Detail::BuiltinUnlitFragmentMsl)}};
-        REQUIRE(assets->PublishDevelopmentAsset(shaderId, Keire::CreateRef<Keire::ShaderAsset>(std::move(shader))));
-        Keire::MaterialAssetDefinition material;
-        material.Shader = shaderId;
-        material.Surface.AlphaMode = Keire::MaterialAlphaMode::Blend;
-        REQUIRE(
-            assets->PublishDevelopmentAsset(materialId, Keire::CreateRef<Keire::MaterialAsset>(std::move(material))));
-        return materialId;
-    }
+      public:
+        explicit UiFrameFailureSurfaceRetirementLayer(UiFrameFailureSurfaceRetirementResults& results)
+            : Layer("UI frame failure surface retirement"), m_Results(results)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(
+                Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("UI frame failure surface retirement"));
+            m_View = Owner().Renderer()->CreateView(
+                {.Name = "UI frame failure surface retirement", .Width = 32U, .Height = 32U});
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Results.UiFrames != 0U)
+                return;
+
+            const auto renderer = Owner().Renderer();
+            Keire::RenderSystemInternalAccess::DelayNextAcceptedFrame(*renderer, 50U);
+            renderer->Submit({m_Scene, m_View});
+        }
+
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            auto window = ui.BeginWindow("UI frame failure surface retirement");
+            REQUIRE(window);
+            ui.Image(m_View->Surface(), {32.0F, 32.0F});
+
+            if (m_Results.UiFrames++ == 0U)
+                return;
+
+            // Let the preceding accepted frame reach its rendered-UI context acquisition while this owner frame
+            // holds that context. Exception cleanup must release the UI frame before layer teardown retires the
+            // surface, otherwise the owner and render threads wait on each other indefinitely.
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            throw std::runtime_error("injected rendered UI frame failure");
+        }
+
+        void OnDetach() noexcept override
+        {
+            m_View.Reset();
+            if (m_Scene)
+                m_Scene->Close();
+            m_Scene.Reset();
+            m_Results.Detached = true;
+        }
+
+      private:
+        UiFrameFailureSurfaceRetirementResults& m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+    };
 
     struct AdditiveSessionFixture final
     {
@@ -952,20 +978,22 @@ namespace
     class AdditiveCaptureLayer final : public Keire::Layer
     {
       public:
-        explicit AdditiveCaptureLayer(AdditiveCaptureResults& results) : Layer("Additive capture"), m_Results(results)
+        AdditiveCaptureLayer(AdditiveCaptureResults& results, const Keire::AssetId transparentMaterial)
+            : Layer("Additive capture"), m_Results(results), m_TransparentMaterial(transparentMaterial)
         {
         }
 
       protected:
         void OnAttach() override
         {
-            const auto transparentMaterial = PublishTransparentTestMaterial(Owner());
+            m_TransparentMaterialHandle =
+                Owner().Assets()->Load<Keire::MaterialAsset>(m_TransparentMaterial, Keire::AssetPriority::High);
             m_Results.FallbackScene = Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000022");
             m_Results.ActiveScene = Keire::AssetId::Parse("711ace00-0000-4000-8000-000000000023");
             m_Fallback =
-                CreateAdditiveSession(Owner().Assets(), m_Results.FallbackScene, "Fallback", transparentMaterial,
+                CreateAdditiveSession(Owner().Assets(), m_Results.FallbackScene, "Fallback", m_TransparentMaterial,
                                       {0.0F, 0.0F, 4.0F}, Keire::CameraClearMode::Skybox, {0.05F, 0.10F, 0.30F, 1.0F});
-            m_Active = CreateAdditiveSession(Owner().Assets(), m_Results.ActiveScene, "Active", transparentMaterial,
+            m_Active = CreateAdditiveSession(Owner().Assets(), m_Results.ActiveScene, "Active", m_TransparentMaterial,
                                              {1.0F, 0.0F, 3.0F}, Keire::CameraClearMode::SolidColor,
                                              {0.35F, 0.04F, 0.02F, 1.0F});
             m_World = Keire::CreateRef<Keire::SceneRuntimeWorld>(
@@ -999,6 +1027,8 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
+            if (!PrepareTransparentMaterial())
+                return;
             switch (m_Phase++)
             {
             case 0U:
@@ -1029,12 +1059,51 @@ namespace
                 if (scene)
                     scene->Close();
             m_View.Reset();
+            m_TransparentShaderHandle = {};
+            m_TransparentMaterialHandle = {};
             m_World.Reset();
             m_Active = {};
             m_Fallback = {};
         }
 
       private:
+        [[nodiscard]] bool PrepareTransparentMaterial()
+        {
+            if (!m_TransparentShaderHandle)
+            {
+                const auto material = m_TransparentMaterialHandle.TryGetLoaded();
+                if (!material)
+                {
+                    if (m_TransparentMaterialHandle.State() == Keire::AssetState::Failed ||
+                        m_TransparentMaterialHandle.State() == Keire::AssetState::Cancelled)
+                    {
+                        throw std::runtime_error("The additive-render test material failed to load.");
+                    }
+                    if (++m_AssetWaitFrames > 600U)
+                        throw std::runtime_error("The additive-render test material did not load in time.");
+                    return false;
+                }
+                if (material->Definition().Surface.AlphaMode != Keire::MaterialAlphaMode::Blend)
+                    throw std::logic_error("The additive-render test material is not transparent.");
+                m_TransparentShaderHandle = Owner().Assets()->Load<Keire::ShaderAsset>(material->Definition().Shader,
+                                                                                       Keire::AssetPriority::High);
+                m_AssetWaitFrames = 0U;
+                return false;
+            }
+            if (!m_TransparentShaderHandle.TryGetLoaded())
+            {
+                if (m_TransparentShaderHandle.State() == Keire::AssetState::Failed ||
+                    m_TransparentShaderHandle.State() == Keire::AssetState::Cancelled)
+                {
+                    throw std::runtime_error("The additive-render test shader failed to load.");
+                }
+                if (++m_AssetWaitFrames > 600U)
+                    throw std::runtime_error("The additive-render test shader did not load in time.");
+                return false;
+            }
+            return true;
+        }
+
         void SubmitSelectedFrame()
         {
             const auto selected = Keire::Internal::SelectRuntimeRenderSession(m_World);
@@ -1091,6 +1160,10 @@ namespace
         }
 
         AdditiveCaptureResults& m_Results;
+        Keire::AssetId m_TransparentMaterial;
+        Keire::AssetHandle<Keire::MaterialAsset> m_TransparentMaterialHandle;
+        Keire::AssetHandle<Keire::ShaderAsset> m_TransparentShaderHandle;
+        std::uint32_t m_AssetWaitFrames = 0U;
         AdditiveSessionFixture m_Fallback;
         AdditiveSessionFixture m_Active;
         Keire::Ref<Keire::SceneRuntimeWorld> m_World;
@@ -1321,15 +1394,32 @@ TEST_CASE("rendered UI captures a logical surface lease before admission rotates
     CHECK(results.Timelines[2U].AdmissionWaitMilliseconds > 0.0F);
 }
 
+TEST_CASE("rendered UI failure releases its frame before layer teardown retires surfaces")
+{
+    UiFrameFailureSurfaceRetirementResults results;
+    auto specification = RenderTestSpecification();
+    specification.Ui.Mode = Keire::UiMode::Rendered;
+
+    {
+        Keire::Application application(specification);
+        (void)application.PushLayer(std::make_unique<UiFrameFailureSurfaceRetirementLayer>(results));
+        CHECK_THROWS_WITH_AS((void)application.Run(), "injected rendered UI frame failure", std::runtime_error);
+    }
+
+    CHECK(results.Detached);
+    CHECK(results.UiFrames == 2U);
+}
+
 TEST_CASE("additive capture preserves active ownership fallback camera and global deterministic draw order")
 {
+    RenderAssetFixture assets(true, false, false, true);
     AdditiveCaptureResults results;
     auto specification = RenderTestSpecification();
     specification.Assets.Mode = Keire::AssetMode::Development;
-    specification.Assets.DevelopmentCatalog.clear();
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
     specification.Scenes.Mode = Keire::SceneMode::Enabled;
     Keire::Application application(specification);
-    (void)application.PushLayer(std::make_unique<AdditiveCaptureLayer>(results));
+    (void)application.PushLayer(std::make_unique<AdditiveCaptureLayer>(results, assets.TransparentShaderGraphMaterial));
     CHECK(application.Run() == 0);
 
     REQUIRE(results.Captures.size() == 3U);

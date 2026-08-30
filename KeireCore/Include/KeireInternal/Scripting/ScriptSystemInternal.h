@@ -619,14 +619,6 @@ namespace Keire
                                 const std::uint64_t entityLow, const std::uint64_t parameterHigh,
                                 const std::uint64_t parameterLow, const Color minimum, const Color maximum) noexcept;
 
-        [[nodiscard]] static std::uint8_t RuntimeSetUiText(const std::uint64_t world, const std::uint64_t entityHigh,
-                                                           const std::uint64_t entityLow,
-                                                           const Coral::String text) noexcept;
-
-        [[nodiscard]] static std::uint8_t RuntimeConsumeUiClick(const std::uint64_t world,
-                                                                const std::uint64_t entityHigh,
-                                                                const std::uint64_t entityLow) noexcept;
-
         struct RuntimeRaycastResult
         {
             std::uint64_t EntityHigh = 0;
@@ -691,10 +683,10 @@ namespace Keire
         std::unique_ptr<Coral::AssemblyLoadContext> CandidateContext;
         std::vector<BehaviourType> ActiveTypes;
         std::vector<BehaviourType> CandidateTypes;
-        std::vector<ManagedAssetTypeDescriptor> ActiveManagedAssetTypes;
-        std::vector<ManagedAssetTypeDescriptor> CandidateManagedAssetTypes;
-        std::vector<ManagedAssetTypeDiagnostic> ActiveManagedAssetDiagnostics;
-        std::vector<ManagedAssetTypeDiagnostic> CandidateManagedAssetDiagnostics;
+        std::shared_ptr<const ManagedAssetTypeCatalog> ActiveManagedAssetCatalog =
+            std::make_shared<const ManagedAssetTypeCatalog>();
+        std::shared_ptr<const ManagedAssetTypeCatalog> CandidateManagedAssetCatalog;
+        std::vector<ManagedAssetTypeDiagnostic> ManagedAssetRuntimeDiagnostics;
         std::map<ManagedTypeId, const Coral::Type*> ActiveManagedAssetRuntimeTypes;
         std::map<ManagedTypeId, const Coral::Type*> CandidateManagedAssetRuntimeTypes;
         const Coral::Type* ActiveNativeRuntimeType = nullptr;

@@ -22,7 +22,10 @@ namespace KeireRuntime
         {
             if (const auto presentation =
                     session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
-                renderer->SubmitRuntimeUi(presentation->Ui());
+            {
+                for (auto submission : presentation->UiRenderSubmissions(view))
+                    renderer->SubmitRuntimeUiTarget(std::move(submission));
+            }
         }
         const auto fallback = Keire::Internal::SelectRuntimeRenderSession(world);
         auto renderRequest = Keire::Internal::CaptureRuntimeSceneRenderRequest(

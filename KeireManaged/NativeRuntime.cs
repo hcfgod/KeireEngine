@@ -462,8 +462,6 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, Vector4, Vector4, byte>
         SetVfxVector4RangeIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, ulong, Color, Color, byte> SetVfxColorRangeIcall;
-    internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> SetUiTextIcall;
-    internal static delegate* unmanaged<ulong, ulong, ulong, byte> ConsumeUiClickIcall;
 #pragma warning restore CS0649
 
     internal static void WriteLog(byte level, string message)
@@ -1073,15 +1071,6 @@ internal static unsafe class NativeRuntime
                                                                                          entity.Id.Low, parameter.High,
                                                                                          parameter.Low, value.Minimum,
                                                                                          value.Maximum) != 0;
-
-    internal static bool SetUiText(Entity entity, string text)
-    {
-        using NativeString nativeText = text;
-        return SetUiTextIcall(entity.World, entity.Id.High, entity.Id.Low, nativeText) != 0;
-    }
-
-    internal static bool ConsumeUiClick(Entity entity) =>
-        ConsumeUiClickIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
 
     internal static bool TryRaycast(Entity context, Vector3 origin, Vector3 direction, float maximumDistance,
                                     uint mask, Entity? ignoredEntity, out RaycastHit hit)

@@ -4,28 +4,46 @@
 
 namespace Keire
 {
-    class Scene;
     class ScenePresentationRuntime;
 } // namespace Keire
 
 namespace Keire::Detail
 {
-    [[nodiscard]] std::optional<float> ReadManagedUiScalar(const Ref<Scene>& scene, AssetId entity,
-                                                           ManagedUiScalarProperty property) noexcept;
-    [[nodiscard]] bool SetManagedUiScalar(const Ref<Scene>& scene, AssetId entity, ManagedUiScalarProperty property,
-                                          float value) noexcept;
-    [[nodiscard]] std::optional<bool> ReadManagedUiFlag(const Ref<Scene>& scene,
-                                                        const Ref<ScenePresentationRuntime>& presentation,
-                                                        AssetId entity, ManagedUiFlagProperty property) noexcept;
-    [[nodiscard]] bool SetManagedUiFlag(const Ref<Scene>& scene, const Ref<ScenePresentationRuntime>& presentation,
-                                        AssetId entity, ManagedUiFlagProperty property, bool value) noexcept;
-    [[nodiscard]] std::optional<Vector2> ReadManagedUiVector(const Ref<Scene>& scene, AssetId entity,
-                                                             ManagedUiVectorProperty property) noexcept;
-    [[nodiscard]] bool SetManagedUiVector(const Ref<Scene>& scene, AssetId entity, ManagedUiVectorProperty property,
-                                          Vector2 value) noexcept;
-    [[nodiscard]] std::optional<std::string> ReadManagedUiInputText(const Ref<Scene>& scene, AssetId entity) noexcept;
-    [[nodiscard]] bool SetManagedUiInputText(const Ref<Scene>& scene, AssetId entity, std::string_view text) noexcept;
-    [[nodiscard]] bool ConsumeManagedUiEvent(const Ref<ScenePresentationRuntime>& presentation, AssetId entity,
-                                             RuntimeUiEventType type) noexcept;
-    [[nodiscard]] bool FocusManagedUi(const Ref<ScenePresentationRuntime>& presentation, AssetId entity) noexcept;
+    [[nodiscard]] std::optional<ManagedUiDocumentElement>
+    ManagedUiDocumentRoot(const Ref<ScenePresentationRuntime>& presentation, AssetId document) noexcept;
+    [[nodiscard]] std::optional<ManagedUiDocumentElement>
+    FindManagedUiDocumentElement(const Ref<ScenePresentationRuntime>& presentation, AssetId document,
+                                 AssetId stableId) noexcept;
+    [[nodiscard]] std::optional<ManagedUiDocumentElement>
+    FindManagedUiDocumentElement(const Ref<ScenePresentationRuntime>& presentation, AssetId document,
+                                 std::string_view name) noexcept;
+    [[nodiscard]] bool ManagedUiDocumentElementAlive(const Ref<ScenePresentationRuntime>& presentation,
+                                                     AssetId document, std::uint64_t documentGeneration,
+                                                     std::uint64_t element) noexcept;
+    [[nodiscard]] std::optional<std::string>
+    ReadManagedUiDocumentElementText(const Ref<ScenePresentationRuntime>& presentation, AssetId document,
+                                     std::uint64_t documentGeneration, std::uint64_t element) noexcept;
+    [[nodiscard]] bool SetManagedUiDocumentElementText(const Ref<ScenePresentationRuntime>& presentation,
+                                                       AssetId document, std::uint64_t documentGeneration,
+                                                       std::uint64_t element, std::string_view text) noexcept;
+    [[nodiscard]] std::optional<float>
+    ReadManagedUiDocumentElementValue(const Ref<ScenePresentationRuntime>& presentation, AssetId document,
+                                      std::uint64_t documentGeneration, std::uint64_t element) noexcept;
+    [[nodiscard]] bool SetManagedUiDocumentElementValue(const Ref<ScenePresentationRuntime>& presentation,
+                                                        AssetId document, std::uint64_t documentGeneration,
+                                                        std::uint64_t element, float value) noexcept;
+    [[nodiscard]] std::optional<bool>
+    ReadManagedUiDocumentElementFlag(const Ref<ScenePresentationRuntime>& presentation, AssetId document,
+                                     std::uint64_t documentGeneration, std::uint64_t element,
+                                     ManagedUiDocumentFlag property) noexcept;
+    [[nodiscard]] bool SetManagedUiDocumentElementFlag(const Ref<ScenePresentationRuntime>& presentation,
+                                                       AssetId document, std::uint64_t documentGeneration,
+                                                       std::uint64_t element, ManagedUiDocumentFlag property,
+                                                       bool value) noexcept;
+    [[nodiscard]] bool ConsumeManagedUiDocumentElementEvent(const Ref<ScenePresentationRuntime>& presentation,
+                                                            AssetId document, std::uint64_t documentGeneration,
+                                                            std::uint64_t element, RuntimeUiEventType type) noexcept;
+    [[nodiscard]] bool FocusManagedUiDocumentElement(const Ref<ScenePresentationRuntime>& presentation,
+                                                     AssetId document, std::uint64_t documentGeneration,
+                                                     std::uint64_t element) noexcept;
 } // namespace Keire::Detail

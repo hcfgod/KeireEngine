@@ -277,6 +277,7 @@ namespace Keire
         void Register(ComponentRegistration registration);
         void ReplaceBatch(std::span<const ComponentTypeId> removals, std::vector<ComponentRegistration> registrations);
         [[nodiscard]] bool Contains(ComponentTypeId type) const noexcept;
+        [[nodiscard]] static bool IsReservedType(ComponentTypeId type) noexcept;
         [[nodiscard]] std::uint64_t Revision() const noexcept;
         [[nodiscard]] std::optional<ComponentRegistration> Find(ComponentTypeId type) const;
         [[nodiscard]] std::vector<ComponentRegistration> Registrations() const;

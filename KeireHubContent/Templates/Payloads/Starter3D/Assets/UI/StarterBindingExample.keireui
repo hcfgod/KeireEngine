@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Starter Binding Example">
+  <style src="b1b20001-1000-4000-8000-000000000001"/>
+  <VisualElement id="b1b2c3d4-1000-4000-8000-000000000301" name="settings" class="starter-card">
+    <Label id="b1b2c3d4-1000-4000-8000-000000000302" name="player-name" class="starter-title" bind:text="Player.DisplayName"/>
+    <TextField id="b1b2c3d4-1000-4000-8000-000000000303" name="display-name" bind-two-way:value="Player.DisplayName"/>
+    <StarterStatus id="b1b2c3d4-1000-4000-8000-000000000304" name="status" bind:value="Session.Progress"/>
+    <ListView id="b1b2c3d4-1000-4000-8000-000000000305" name="recent-events" bind:items-source="Session.RecentEvents"/>
+  </VisualElement>
+</ui>

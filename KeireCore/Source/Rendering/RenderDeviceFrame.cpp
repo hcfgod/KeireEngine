@@ -2,6 +2,7 @@
 
 #include "KeireInternal/Rendering/ImageBasedLightingInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
+#include "KeireInternal/Rendering/RuntimeUiGeometryInternal.h"
 #include "KeireInternal/UiContextAccessInternal.h"
 
 #include "Keire/BuiltinUnlitShaders.h"
@@ -18,6 +19,7 @@
 #include <cstring>
 #include <future>
 #include <stdexcept>
+#include <tuple>
 
 namespace Keire::RenderBackend
 {
@@ -36,19 +38,42 @@ namespace Keire::RenderBackend
 
         static_assert(sizeof(EasyFontVertex) == 16);
 
-        void AppendRuntimeUiRectangle(std::vector<RuntimeUiVertex>& output, const RuntimeUiRect rectangle,
-                                      const Color color)
+        using RuntimeUiGeometryBatch = Keire::RenderBackend::RuntimeUiGeometryBatch;
+        using RuntimeUiGeometry = Keire::RenderBackend::RuntimeUiGeometry;
+
+        [[maybe_unused]] void AppendRuntimeUiRectangle(std::vector<RuntimeUiVertex>& output,
+                                                       const RuntimeUiRect rectangle, const Color color,
+                                                       const Vector2 uvMinimum = {}, const Vector2 uvMaximum = {})
         {
             if (rectangle.Empty() || color.Alpha <= 0.0F || output.size() > MaximumRuntimeUiVertices - 6U)
                 return;
-            const RuntimeUiVertex topLeft{{rectangle.X, rectangle.Y}, color};
-            const RuntimeUiVertex topRight{{rectangle.X + rectangle.Width, rectangle.Y}, color};
-            const RuntimeUiVertex bottomLeft{{rectangle.X, rectangle.Y + rectangle.Height}, color};
-            const RuntimeUiVertex bottomRight{{rectangle.X + rectangle.Width, rectangle.Y + rectangle.Height}, color};
+            const RuntimeUiVertex topLeft{{rectangle.X, rectangle.Y, 0.0F}, color, uvMinimum};
+            const RuntimeUiVertex topRight{
+                {rectangle.X + rectangle.Width, rectangle.Y, 0.0F}, color, {uvMaximum.X, uvMinimum.Y}};
+            const RuntimeUiVertex bottomLeft{
+                {rectangle.X, rectangle.Y + rectangle.Height, 0.0F}, color, {uvMinimum.X, uvMaximum.Y}};
+            const RuntimeUiVertex bottomRight{
+                {rectangle.X + rectangle.Width, rectangle.Y + rectangle.Height, 0.0F}, color, uvMaximum};
             output.insert(output.end(), {topLeft, topRight, bottomRight, topLeft, bottomRight, bottomLeft});
         }
 
-        void AppendRuntimeUiBorder(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
+        [[maybe_unused]] void AppendRuntimeUiImage(std::vector<RuntimeUiVertex>& output,
+                                                   const RuntimeUiDrawCommand& command)
+        {
+            if (command.Rect.Empty())
+                return;
+            const auto clipped = command.Rect.Intersect(command.ClipRect);
+            if (clipped.Empty())
+                return;
+            const Vector2 uvMinimum{(clipped.X - command.Rect.X) / command.Rect.Width,
+                                    (clipped.Y - command.Rect.Y) / command.Rect.Height};
+            const Vector2 uvMaximum{(clipped.X + clipped.Width - command.Rect.X) / command.Rect.Width,
+                                    (clipped.Y + clipped.Height - command.Rect.Y) / command.Rect.Height};
+            AppendRuntimeUiRectangle(output, clipped, command.ColorValue, uvMinimum, uvMaximum);
+        }
+
+        [[maybe_unused]] void AppendRuntimeUiBorder(std::vector<RuntimeUiVertex>& output,
+                                                    const RuntimeUiDrawCommand& command)
         {
             const float thickness = std::min(command.BorderWidth, std::min(command.Rect.Width, command.Rect.Height));
             if (thickness <= 0.0F || command.BorderColor.Alpha <= 0.0F)
@@ -63,7 +88,8 @@ namespace Keire::RenderBackend
                     std::max(0.0F, command.Rect.Height - thickness * 2.0F)});
         }
 
-        void AppendRuntimeUiText(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
+        [[maybe_unused]] void AppendRuntimeUiText(std::vector<RuntimeUiVertex>& output,
+                                                  const RuntimeUiDrawCommand& command)
         {
             if (command.Text.empty() || command.FontSize <= 0.0F || command.ColorValue.Alpha <= 0.0F ||
                 output.size() >= MaximumRuntimeUiVertices)
@@ -108,34 +134,56 @@ namespace Keire::RenderBackend
             }
         }
 
-        [[nodiscard]] std::vector<RuntimeUiVertex>
-        BuildRuntimeUiVertices(const std::span<const RuntimeUiDrawCommand> commands)
+        [[maybe_unused, nodiscard]] std::optional<RuntimeUiVertex>
+        ProjectRuntimeUiWorldVertex(const RuntimeUiVertex& source, const CapturedRuntimeUiWorldPanel& panel,
+                                    const std::uint32_t width, const std::uint32_t height) noexcept
         {
-            std::vector<RuntimeUiVertex> result;
-            result.reserve(std::min<std::size_t>(commands.size() * 12U, MaximumRuntimeUiVertices));
-            for (const auto& command : commands)
-            {
-                if (result.size() >= MaximumRuntimeUiVertices)
-                    break;
-                switch (command.Type)
-                {
-                case RuntimeUiDrawType::Quad:
-                    AppendRuntimeUiRectangle(result, command.Rect.Intersect(command.ClipRect), command.ColorValue);
-                    AppendRuntimeUiBorder(result, command);
-                    break;
-                case RuntimeUiDrawType::Image:
-                    AppendRuntimeUiRectangle(result, command.Rect.Intersect(command.ClipRect), command.ColorValue);
-                    break;
-                case RuntimeUiDrawType::Text:
-                    AppendRuntimeUiText(result, command);
-                    break;
-                case RuntimeUiDrawType::PushClip:
-                case RuntimeUiDrawType::PopClip:
-                    break;
-                }
-            }
-            return result;
+            const float normalizedX = source.Position.X / panel.Viewport.X;
+            const float normalizedY = source.Position.Y / panel.Viewport.Y;
+            const Vector3 local{
+                (normalizedX - panel.Pivot.X) * panel.ReferenceResolution.X * panel.WorldUnitsPerPixel.X,
+                (panel.Pivot.Y - normalizedY) * panel.ReferenceResolution.Y * panel.WorldUnitsPerPixel.Y, 0.0F};
+            const auto world = Math::TransformPoint(panel.World, local);
+            const auto& matrix = panel.ViewProjection.Elements;
+            const float clipX = matrix[0] * world.X + matrix[4] * world.Y + matrix[8] * world.Z + matrix[12];
+            const float clipY = matrix[1] * world.X + matrix[5] * world.Y + matrix[9] * world.Z + matrix[13];
+            const float clipZ = matrix[2] * world.X + matrix[6] * world.Y + matrix[10] * world.Z + matrix[14];
+            const float clipW = matrix[3] * world.X + matrix[7] * world.Y + matrix[11] * world.Z + matrix[15];
+            if (!std::isfinite(clipW) || clipW <= 0.0001F)
+                return std::nullopt;
+            const float inverseW = 1.0F / clipW;
+            const float depth = clipZ * inverseW;
+            if (!std::isfinite(depth) || depth < 0.0F || depth > 1.0F)
+                return std::nullopt;
+            return RuntimeUiVertex{{(clipX * inverseW * 0.5F + 0.5F) * static_cast<float>(width),
+                                    (0.5F - clipY * inverseW * 0.5F) * static_cast<float>(height), depth},
+                                   source.ColorValue,
+                                   source.UV};
         }
+
+        void AccumulateRuntimeUiRepaint(RenderStatistics& statistics,
+                                        const std::chrono::steady_clock::time_point started) noexcept
+        {
+            statistics.RuntimeUiRenderer.RepaintCpuMilliseconds +=
+                std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
+        }
+
+        [[nodiscard]] SDL_Rect RuntimeUiScissor(const RuntimeUiRect clip, const std::uint32_t width,
+                                                const std::uint32_t height) noexcept
+        {
+            if (clip.Empty() || width == 0U || height == 0U)
+                return {0, 0, static_cast<int>(width), static_cast<int>(height)};
+            const float minimumX = std::clamp(clip.X, 0.0F, static_cast<float>(width));
+            const float minimumY = std::clamp(clip.Y, 0.0F, static_cast<float>(height));
+            const float maximumX = std::clamp(clip.X + clip.Width, minimumX, static_cast<float>(width));
+            const float maximumY = std::clamp(clip.Y + clip.Height, minimumY, static_cast<float>(height));
+            const int x = static_cast<int>(std::floor(minimumX));
+            const int y = static_cast<int>(std::floor(minimumY));
+            const int maximumPixelX = static_cast<int>(std::ceil(maximumX));
+            const int maximumPixelY = static_cast<int>(std::ceil(maximumY));
+            return {x, y, std::max(0, maximumPixelX - x), std::max(0, maximumPixelY - y)};
+        }
+
     } // namespace
 
     void RenderSharedState::RecordSwapchain(SDL_GPUCommandBuffer*& commands, ImDrawData* drawData)
@@ -157,33 +205,27 @@ namespace Keire::RenderBackend
         const auto uiRecordingStarted = std::chrono::steady_clock::now();
         if (swapchain)
         {
-            std::shared_ptr<Keire::Detail::UiContextAccess> editorUiContextAccess;
-            std::unique_lock<std::recursive_mutex> editorUiContextLock;
-            if (drawData)
-            {
-                editorUiContextAccess = EditorUiContextAccess.load(std::memory_order_acquire);
-                editorUiContextLock = Keire::Detail::AcquireRequiredUiContext(
-                    editorUiContextAccess, "Dear ImGui GPU recording requires the renderer's live UI context binding.");
-            }
             const bool renderEditorUi = drawData && drawData->DisplaySize.x > 0.0F && drawData->DisplaySize.y > 0.0F;
             bool presentedSurface = false;
             SDL_GPUBuffer* runtimeUiBuffer = nullptr;
-            std::uint32_t runtimeUiVertexCount = 0;
+            RuntimeUiGeometry runtimeUiGeometry;
             const auto runtimeUiCommands = ActiveFrame
                                                ? std::span<const RuntimeUiDrawCommand>(ActiveFrame->RuntimeUiCommands)
                                                : std::span<const RuntimeUiDrawCommand>{};
             if (!runtimeUiCommands.empty())
             {
-                const auto vertices = BuildRuntimeUiVertices(runtimeUiCommands);
-                if (!vertices.empty())
+                const auto runtimeUiRepaintStarted = std::chrono::steady_clock::now();
+                runtimeUiGeometry = Keire::RenderBackend::BuildRuntimeUiGeometry(runtimeUiCommands);
+                AccumulateRuntimeUiGeometryStatistics(Statistics.RuntimeUiRenderer, runtimeUiGeometry);
+                if (!runtimeUiGeometry.Vertices.empty())
                 {
                     if (!RuntimeUiPipeline)
                         RuntimeUiPipeline = CreateRuntimeUiPipeline();
-                    runtimeUiBuffer =
-                        UploadBuffer(commands, std::as_bytes(std::span(vertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
+                    runtimeUiBuffer = UploadBuffer(commands, std::as_bytes(std::span(runtimeUiGeometry.Vertices)),
+                                                   SDL_GPU_BUFFERUSAGE_VERTEX);
                     FrameTransientBuffers.push_back(runtimeUiBuffer);
-                    runtimeUiVertexCount = static_cast<std::uint32_t>(vertices.size());
                 }
+                AccumulateRuntimeUiRepaint(Statistics, runtimeUiRepaintStarted);
             }
             const auto presentation =
                 ActiveFrame ? ResolveSurface(ActiveFrame->PresentationSurface) : std::shared_ptr<RenderSurfaceState>{};
@@ -206,8 +248,15 @@ namespace Keire::RenderBackend
                 SDL_BlitGPUTexture(commands, &blit);
                 presentedSurface = true;
             }
+            std::shared_ptr<Keire::Detail::UiContextAccess> editorUiContextAccess;
+            std::unique_lock<std::recursive_mutex> editorUiContextLock;
             if (renderEditorUi)
+            {
+                editorUiContextAccess = EditorUiContextAccess.load(std::memory_order_acquire);
+                editorUiContextLock = Keire::Detail::AcquireRequiredUiContext(
+                    editorUiContextAccess, "Dear ImGui GPU recording requires the renderer's live UI context binding.");
                 ImGui_ImplSDLGPU3_PrepareDrawData(drawData, commands);
+            }
 
             if (renderEditorUi || runtimeUiBuffer || !presentedSurface)
             {
@@ -222,6 +271,7 @@ namespace Keire::RenderBackend
                     throw std::runtime_error("SDL_BeginGPURenderPass(swapchain) failed: " + LastSdlError());
                 if (runtimeUiBuffer)
                 {
+                    const auto runtimeUiDrawStarted = std::chrono::steady_clock::now();
                     const SDL_GPUViewport viewport{
                         0.0F, 0.0F, static_cast<float>(swapchainWidth), static_cast<float>(swapchainHeight),
                         0.0F, 1.0F};
@@ -232,9 +282,19 @@ namespace Keire::RenderBackend
                     SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
                     SDL_SetGPUViewport(pass, &viewport);
                     SDL_PushGPUVertexUniformData(commands, 0, &viewportUniform, sizeof(viewportUniform));
-                    SDL_DrawGPUPrimitives(pass, runtimeUiVertexCount, 1, 0, 0);
-                    ++Statistics.DrawCalls;
-                    Statistics.Triangles += runtimeUiVertexCount / 3U;
+                    for (const auto& batch : runtimeUiGeometry.Batches)
+                    {
+                        const auto scissor = RuntimeUiScissor(batch.ClipRect, swapchainWidth, swapchainHeight);
+                        if (scissor.w == 0 || scissor.h == 0)
+                            continue;
+                        SDL_SetGPUScissor(pass, &scissor);
+                        const auto texture = RuntimeUiTextureBinding(batch.Asset);
+                        SDL_BindGPUFragmentSamplers(pass, 0, &texture, 1);
+                        SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
+                        ++Statistics.DrawCalls;
+                        Statistics.Triangles += batch.VertexCount / 3U;
+                    }
+                    AccumulateRuntimeUiRepaint(Statistics, runtimeUiDrawStarted);
                 }
                 if (renderEditorUi)
                 {
@@ -249,6 +309,204 @@ namespace Keire::RenderBackend
         }
         Statistics.UiRecordingMilliseconds =
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uiRecordingStarted).count();
+    }
+
+    void RenderSharedState::RecordRuntimeUiWorldPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface)
+    {
+        auto* colorTarget = surface.ActiveWorkset().MultisampleHdrColor ? surface.ActiveWorkset().MultisampleHdrColor
+                                                                        : surface.ActiveWorkset().HdrColor;
+        if (!ActiveFrame || !commands || !colorTarget)
+            return;
+        auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
+        struct PreparedWorldPanel final
+        {
+            const CapturedRuntimeUiWorldPanel* Panel = nullptr;
+            RuntimeUiGeometry Geometry;
+        };
+        std::vector<PreparedWorldPanel> prepared;
+        const auto runtimeUiRepaintStarted = std::chrono::steady_clock::now();
+        for (const auto& panel : ActiveFrame->RuntimeUiWorldPanels)
+        {
+            if (panel.Surface.Id != surface.Id || panel.Surface.Epoch != surface.Epoch)
+                continue;
+            if (!RuntimeUiWorldPanelOwnershipValid(panel, *ActiveFrame))
+            {
+                throw std::logic_error(
+                    "World-surface runtime UI packet does not belong to the active frame slot and device generation.");
+            }
+            if (panel.DepthTest && !surface.ActiveWorkset().Depth)
+                throw std::logic_error("Depth-tested world-surface runtime UI lost its surface depth attachment.");
+            auto geometry = Keire::RenderBackend::BuildRuntimeUiWorldGeometry(panel, surface.Width, surface.Height);
+            if (!geometry.Vertices.empty())
+            {
+                AccumulateRuntimeUiGeometryStatistics(Statistics.RuntimeUiRenderer, geometry);
+                prepared.push_back({&panel, std::move(geometry)});
+            }
+        }
+        std::ranges::sort(prepared,
+                          [](const PreparedWorldPanel& first, const PreparedWorldPanel& second)
+                          {
+                              return std::tie(first.Panel->SortingOrder, first.Panel->Sequence) <
+                                     std::tie(second.Panel->SortingOrder, second.Panel->Sequence);
+                          });
+        for (std::size_t panelIndex = 0; panelIndex < prepared.size(); ++panelIndex)
+        {
+            const auto& panel = *prepared[panelIndex].Panel;
+            const auto& geometry = prepared[panelIndex].Geometry;
+            auto* pipeline = panel.DepthTest ? pipelines.RuntimeUiWorldDepth : pipelines.RuntimeUiWorldOverlay;
+            if (!pipeline)
+            {
+                pipeline = CreateRuntimeUiPipeline(true, panel.DepthTest, pipelines.Samples);
+                if (panel.DepthTest)
+                    pipelines.RuntimeUiWorldDepth = pipeline;
+                else
+                    pipelines.RuntimeUiWorldOverlay = pipeline;
+            }
+            auto* buffer =
+                UploadBuffer(commands, std::as_bytes(std::span(geometry.Vertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
+            FrameTransientBuffers.push_back(buffer);
+
+            SDL_GPUColorTargetInfo color{};
+            color.texture = colorTarget;
+            color.load_op = SDL_GPU_LOADOP_LOAD;
+            const bool resolve = surface.ActiveWorkset().MultisampleHdrColor && panelIndex + 1U == prepared.size();
+            color.store_op = resolve ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+            color.resolve_texture = resolve ? surface.ActiveWorkset().HdrColor : nullptr;
+            SDL_GPUDepthStencilTargetInfo depth{};
+            SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
+            if (panel.DepthTest)
+            {
+                depth.texture = surface.ActiveWorkset().Depth;
+                depth.load_op = SDL_GPU_LOADOP_LOAD;
+                depth.store_op = SDL_GPU_STOREOP_STORE;
+                depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+                depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+                depthPointer = &depth;
+            }
+            auto* pass = SDL_BeginGPURenderPass(commands, &color, 1, depthPointer);
+            if (!pass)
+                throw std::runtime_error("SDL_BeginGPURenderPass(world runtime UI) failed: " + LastSdlError());
+            const SDL_GPUViewport viewport{
+                0.0F, 0.0F, static_cast<float>(surface.Width), static_cast<float>(surface.Height), 0.0F, 1.0F};
+            const Vector4 viewportUniform{static_cast<float>(surface.Width), static_cast<float>(surface.Height), 0.0F,
+                                          0.0F};
+            const SDL_GPUBufferBinding binding{buffer, 0};
+            SDL_BindGPUGraphicsPipeline(pass, pipeline);
+            SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+            SDL_SetGPUViewport(pass, &viewport);
+            SDL_PushGPUVertexUniformData(commands, 0, &viewportUniform, sizeof(viewportUniform));
+            for (const auto& batch : geometry.Batches)
+            {
+                const auto scissor = RuntimeUiScissor(batch.ClipRect, surface.Width, surface.Height);
+                if (scissor.w == 0 || scissor.h == 0)
+                    continue;
+                SDL_SetGPUScissor(pass, &scissor);
+                const auto texture = RuntimeUiTextureBinding(batch.Asset);
+                SDL_BindGPUFragmentSamplers(pass, 0, &texture, 1);
+                SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
+                ++Statistics.DrawCalls;
+                Statistics.Triangles += batch.VertexCount / 3U;
+            }
+            SDL_EndGPURenderPass(pass);
+            ++Statistics.Passes;
+        }
+        if (!prepared.empty())
+            AccumulateRuntimeUiRepaint(Statistics, runtimeUiRepaintStarted);
+    }
+
+    void RenderSharedState::RecordRuntimeUiRenderTextures(std::vector<SDL_GPUCommandBuffer*>& frameCommands)
+    {
+        if (!ActiveFrame || FrameRuntimeUiRenderTextureTargets.empty())
+            return;
+        if (!RuntimeUiRenderTexturePipeline)
+            RuntimeUiRenderTexturePipeline =
+                CreateRuntimeUiPipeline(false, false, SDL_GPU_SAMPLECOUNT_1, SceneColorFormat);
+
+        for (const auto targetId : FrameRuntimeUiRenderTextureTargets)
+        {
+            const auto runtimeUiRepaintStarted = std::chrono::steady_clock::now();
+            auto target =
+                std::ranges::find(RuntimeUiRenderTextureCache, targetId, &RuntimeUiRenderTextureCacheEntry::Asset);
+            if (target == RuntimeUiRenderTextureCache.end() ||
+                target->DeviceGeneration != ActiveFrame->DeviceGeneration ||
+                ActiveFrame->FrameSlot >= target->Writers.size() || !target->Writers[ActiveFrame->FrameSlot])
+            {
+                throw std::logic_error(
+                    "Runtime UI RenderTexture target is unavailable for the active frame slot and device generation.");
+            }
+
+            std::vector<const CapturedRuntimeUiRenderTexture*> panels;
+            for (const auto& panel : ActiveFrame->RuntimeUiRenderTextures)
+            {
+                if (panel.Target != targetId)
+                    continue;
+                if (!RuntimeUiRenderTextureOwnershipValid(panel, *ActiveFrame))
+                {
+                    throw std::logic_error("Runtime UI RenderTexture packet ownership became stale before recording.");
+                }
+                panels.push_back(&panel);
+            }
+            std::ranges::sort(panels,
+                              [](const auto* first, const auto* second)
+                              {
+                                  return std::tie(first->SortingOrder, first->Sequence) <
+                                         std::tie(second->SortingOrder, second->Sequence);
+                              });
+            std::vector<RuntimeUiDrawCommand> commands;
+            for (const auto* panel : panels)
+                commands.insert(commands.end(), panel->Commands.begin(), panel->Commands.end());
+            auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(commands);
+            AccumulateRuntimeUiGeometryStatistics(Statistics.RuntimeUiRenderer, geometry);
+
+            auto* renderCommands = SDL_AcquireGPUCommandBuffer(Device);
+            if (!renderCommands)
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(runtime UI RenderTexture) failed: " +
+                                         LastSdlError());
+            frameCommands.push_back(renderCommands);
+            SDL_GPUBuffer* buffer = nullptr;
+            if (!geometry.Vertices.empty())
+            {
+                buffer = UploadBuffer(renderCommands, std::as_bytes(std::span(geometry.Vertices)),
+                                      SDL_GPU_BUFFERUSAGE_VERTEX);
+                FrameTransientBuffers.push_back(buffer);
+            }
+
+            SDL_GPUColorTargetInfo color{};
+            color.texture = target->Writers[ActiveFrame->FrameSlot];
+            color.clear_color = {0.0F, 0.0F, 0.0F, 0.0F};
+            color.load_op = SDL_GPU_LOADOP_CLEAR;
+            color.store_op = SDL_GPU_STOREOP_STORE;
+            auto* pass = SDL_BeginGPURenderPass(renderCommands, &color, 1, nullptr);
+            if (!pass)
+                throw std::runtime_error("SDL_BeginGPURenderPass(runtime UI RenderTexture) failed: " + LastSdlError());
+            if (buffer)
+            {
+                const SDL_GPUViewport viewport{
+                    0.0F, 0.0F, static_cast<float>(target->Width), static_cast<float>(target->Height), 0.0F, 1.0F};
+                const Vector4 viewportUniform{static_cast<float>(target->Width), static_cast<float>(target->Height),
+                                              0.0F, 0.0F};
+                const SDL_GPUBufferBinding binding{buffer, 0};
+                SDL_BindGPUGraphicsPipeline(pass, RuntimeUiRenderTexturePipeline);
+                SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
+                SDL_SetGPUViewport(pass, &viewport);
+                SDL_PushGPUVertexUniformData(renderCommands, 0, &viewportUniform, sizeof(viewportUniform));
+                for (const auto& batch : geometry.Batches)
+                {
+                    const auto scissor = RuntimeUiScissor(batch.ClipRect, target->Width, target->Height);
+                    if (scissor.w == 0 || scissor.h == 0)
+                        continue;
+                    SDL_SetGPUScissor(pass, &scissor);
+                    const auto texture = RuntimeUiTextureBinding(batch.Asset);
+                    SDL_BindGPUFragmentSamplers(pass, 0, &texture, 1);
+                    SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
+                    ++Statistics.DrawCalls;
+                    Statistics.Triangles += batch.VertexCount / 3U;
+                }
+            }
+            SDL_EndGPURenderPass(pass);
+            ++Statistics.Passes;
+            AccumulateRuntimeUiRepaint(Statistics, runtimeUiRepaintStarted);
+        }
     }
 
     RenderSharedState::RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows,
@@ -270,6 +528,7 @@ namespace Keire::RenderBackend
         Statistics.AllowedFramesInFlight = Specification.MaximumFramesInFlight;
         PublishedStatistics = Statistics;
         InFlight.reserve(Specification.MaximumFramesInFlight);
+        RuntimeUiRenderTextureCache.reserve(32U);
         for (std::uint32_t slot = 0; slot < Specification.MaximumFramesInFlight; ++slot)
             AvailableFrameSlots.push_back(slot);
         if (Specification.Mode != RenderMode::Rendered)
@@ -765,6 +1024,10 @@ namespace Keire::RenderBackend
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_uniform_buffers = vertex ? 1U : 0U;
+        // BuiltinShadow's fragment stage is intentionally empty. Advertising a sampler here makes SDL's Vulkan
+        // backend allocate a descriptor binding that the depth-only pass can never populate; drawing then dereferences
+        // an incomplete descriptor set in the driver. Keep the declared resource counts identical to the shader.
+        information.num_samplers = 0U;
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)
         {
@@ -836,6 +1099,7 @@ namespace Keire::RenderBackend
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_uniform_buffers = vertex ? 1U : 0U;
+        information.num_samplers = vertex ? 0U : 1U;
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)
         {
@@ -867,7 +1131,9 @@ namespace Keire::RenderBackend
         return shader;
     }
 
-    SDL_GPUGraphicsPipeline* RenderSharedState::CreateRuntimeUiPipeline()
+    SDL_GPUGraphicsPipeline* RenderSharedState::CreateRuntimeUiPipeline(const bool worldSurface, const bool depthTest,
+                                                                        const SDL_GPUSampleCount samples,
+                                                                        const SDL_GPUTextureFormat targetFormat)
     {
         SDL_GPUShader* vertex = nullptr;
         SDL_GPUShader* fragment = nullptr;
@@ -878,8 +1144,9 @@ namespace Keire::RenderBackend
 
             const SDL_GPUVertexBufferDescription buffer{0, sizeof(RuntimeUiVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0};
             const std::array attributes{
-                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(RuntimeUiVertex, Position)},
+                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(RuntimeUiVertex, Position)},
                 SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(RuntimeUiVertex, ColorValue)},
+                SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(RuntimeUiVertex, UV)},
             };
             SDL_GPUVertexInputState input{};
             input.vertex_buffer_descriptions = &buffer;
@@ -888,7 +1155,9 @@ namespace Keire::RenderBackend
             input.num_vertex_attributes = static_cast<std::uint32_t>(attributes.size());
 
             SDL_GPUColorTargetDescription color{};
-            color.format = SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow);
+            color.format = targetFormat != SDL_GPU_TEXTUREFORMAT_INVALID ? targetFormat
+                           : worldSurface ? SceneColorFormat
+                                          : SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow);
             color.blend_state.enable_blend = true;
             color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
             color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
@@ -901,6 +1170,8 @@ namespace Keire::RenderBackend
             SDL_GPUGraphicsPipelineTargetInfo target{};
             target.color_target_descriptions = &color;
             target.num_color_targets = 1;
+            target.has_depth_stencil_target = worldSurface && depthTest;
+            target.depth_stencil_format = worldSurface && depthTest ? DepthFormat : SDL_GPU_TEXTUREFORMAT_INVALID;
 
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
@@ -910,7 +1181,11 @@ namespace Keire::RenderBackend
             information.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
             information.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
             information.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
-            information.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+            information.rasterizer_state.enable_depth_clip = worldSurface;
+            information.multisample_state.sample_count = worldSurface ? samples : SDL_GPU_SAMPLECOUNT_1;
+            information.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS_OR_EQUAL;
+            information.depth_stencil_state.enable_depth_test = worldSurface && depthTest;
+            information.depth_stencil_state.enable_depth_write = false;
             information.target_info = target;
             SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(Device, &information);
             if (!pipeline)
@@ -1117,245 +1392,6 @@ namespace Keire::RenderBackend
             throw std::runtime_error("SDL_CreateGPUSampler failed: " + LastSdlError());
         SamplerCache.emplace_back(description, created);
         return created;
-    }
-
-    GpuTextureResources RenderSharedState::CreateTextureResources(const Texture2DAsset& asset)
-    {
-        const auto mips = asset.Mips();
-        if (mips.empty() || mips.size() > std::numeric_limits<std::uint32_t>::max())
-            throw std::invalid_argument("Texture GPU upload requires a bounded mip chain.");
-        std::size_t totalBytes = 0;
-        for (const auto& mip : mips)
-        {
-            if (mip.Pixels.size() > std::numeric_limits<std::uint32_t>::max() - totalBytes)
-                throw std::invalid_argument("Texture GPU upload exceeds SDL's 32-bit transfer limit.");
-            totalBytes += mip.Pixels.size();
-        }
-
-        GpuTextureResources result;
-        result.EstimatedBytes = totalBytes;
-        SDL_GPUTransferBuffer* transfer = nullptr;
-        try
-        {
-            SDL_GPUTextureCreateInfo texture{};
-            texture.type = SDL_GPU_TEXTURETYPE_2D;
-            texture.format = asset.Settings().ColorSpace == TextureColorSpace::Srgb
-                                 ? SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB
-                                 : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-            texture.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-            texture.width = asset.Width();
-            texture.height = asset.Height();
-            texture.layer_count_or_depth = 1;
-            texture.num_levels = static_cast<std::uint32_t>(mips.size());
-            texture.sample_count = SDL_GPU_SAMPLECOUNT_1;
-            result.Texture = SDL_CreateGPUTexture(Device, &texture);
-            if (!result.Texture)
-                throw std::runtime_error("SDL_CreateGPUTexture(asset) failed: " + LastSdlError());
-
-            result.Sampler = ResolveSampler(asset.Settings().Sampler);
-            result.HdrEncoded = asset.Settings().HighDynamicRange;
-            result.EnvironmentLayout = asset.Settings().EnvironmentLayout;
-            result.MipLevels = static_cast<std::uint32_t>(mips.size());
-            if (asset.Settings().Semantic == TextureSemantic::Environment)
-            {
-                const auto irradiance = BakeDiffuseIrradiance(asset);
-                for (std::size_t index = 0; index < irradiance.Coefficients.size(); ++index)
-                {
-                    const auto& coefficient = irradiance.Coefficients[index];
-                    result.DiffuseIrradiance[index] = {coefficient.X, coefficient.Y, coefficient.Z, 0.0F};
-                }
-                result.HasDiffuseIrradiance = true;
-            }
-
-            SDL_GPUTransferBufferCreateInfo transferInformation{};
-            transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-            transferInformation.size = static_cast<std::uint32_t>(totalBytes);
-            transfer = SDL_CreateGPUTransferBuffer(Device, &transferInformation);
-            if (!transfer)
-                throw std::runtime_error("SDL_CreateGPUTransferBuffer(texture) failed: " + LastSdlError());
-            auto* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(Device, transfer, false));
-            if (!mapped)
-                throw std::runtime_error("SDL_MapGPUTransferBuffer(texture) failed: " + LastSdlError());
-            std::size_t offset = 0;
-            for (const auto& mip : mips)
-            {
-                std::memcpy(mapped + offset, mip.Pixels.data(), mip.Pixels.size());
-                offset += mip.Pixels.size();
-            }
-            SDL_UnmapGPUTransferBuffer(Device, transfer);
-
-            if (FrameActive)
-            {
-                EnsureFrameUploadContext();
-                offset = 0;
-                for (std::size_t index = 0; index < mips.size(); ++index)
-                {
-                    const auto& mip = mips[index];
-                    SDL_GPUTextureTransferInfo source{transfer, static_cast<std::uint32_t>(offset), mip.Width,
-                                                      mip.Height};
-                    SDL_GPUTextureRegion destination{
-                        result.Texture, static_cast<std::uint32_t>(index), 0, 0, 0, 0, mip.Width, mip.Height, 1};
-                    SDL_UploadToGPUTexture(FrameUploadPass, &source, &destination, false);
-                    offset += mip.Pixels.size();
-                }
-                FrameUploadTransfers.push_back(transfer);
-                transfer = nullptr;
-                return result;
-            }
-
-            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
-            if (!commands)
-                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(texture) failed: " + LastSdlError());
-            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
-            if (!copy)
-            {
-                (void)SDL_CancelGPUCommandBuffer(commands);
-                throw std::runtime_error("SDL_BeginGPUCopyPass(texture) failed: " + LastSdlError());
-            }
-            offset = 0;
-            for (std::size_t index = 0; index < mips.size(); ++index)
-            {
-                const auto& mip = mips[index];
-                SDL_GPUTextureTransferInfo source{transfer, static_cast<std::uint32_t>(offset), mip.Width, mip.Height};
-                SDL_GPUTextureRegion destination{
-                    result.Texture, static_cast<std::uint32_t>(index), 0, 0, 0, 0, mip.Width, mip.Height, 1};
-                SDL_UploadToGPUTexture(copy, &source, &destination, false);
-                offset += mip.Pixels.size();
-            }
-            SDL_EndGPUCopyPass(copy);
-            if (!SDL_SubmitGPUCommandBuffer(commands))
-                throw std::runtime_error("SDL_SubmitGPUCommandBuffer(texture) failed: " + LastSdlError());
-            SDL_ReleaseGPUTransferBuffer(Device, transfer);
-            return result;
-        }
-        catch (...)
-        {
-            RethrowIfDeviceLost("GPU texture upload");
-            if (transfer)
-                SDL_ReleaseGPUTransferBuffer(Device, transfer);
-            if (result.Texture)
-                SDL_ReleaseGPUTexture(Device, result.Texture);
-            throw;
-        }
-    }
-
-    GpuTextureResources RenderSharedState::CreateLightingTextureResources(const LightingTextureArrayAsset& asset)
-    {
-        const auto& definition = asset.Definition();
-        if (definition.Mips.empty() || definition.Mips.size() > std::numeric_limits<std::uint32_t>::max())
-            throw std::invalid_argument("Baked-lighting GPU upload requires a bounded mip chain.");
-        std::size_t totalBytes = 0;
-        for (const auto& mip : definition.Mips)
-        {
-            if (mip.Pixels.size() > std::numeric_limits<std::uint32_t>::max() - totalBytes)
-                throw std::invalid_argument("Baked-lighting GPU upload exceeds SDL's transfer limit.");
-            totalBytes += mip.Pixels.size();
-        }
-
-        GpuTextureResources result;
-        result.EstimatedBytes = totalBytes;
-        SDL_GPUTransferBuffer* transfer = nullptr;
-        try
-        {
-            SDL_GPUTextureCreateInfo texture{};
-            texture.type = definition.Target == LightingTextureTarget::CubeArray ? SDL_GPU_TEXTURETYPE_CUBE_ARRAY
-                                                                                 : SDL_GPU_TEXTURETYPE_2D_ARRAY;
-            texture.format = definition.Encoding == LightingTextureEncoding::Rgba16Float
-                                 ? SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT
-                                 : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-            texture.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-            texture.width = definition.Mips.front().Width;
-            texture.height = definition.Mips.front().Height;
-            texture.layer_count_or_depth = definition.Mips.front().Layers;
-            texture.num_levels = static_cast<std::uint32_t>(definition.Mips.size());
-            texture.sample_count = SDL_GPU_SAMPLECOUNT_1;
-            result.Texture = SDL_CreateGPUTexture(Device, &texture);
-            if (!result.Texture)
-                throw std::runtime_error("SDL_CreateGPUTexture(baked lighting) failed: " + LastSdlError());
-            SamplerDescription sampler;
-            sampler.AddressU = TextureAddressMode::Clamp;
-            sampler.AddressV = TextureAddressMode::Clamp;
-            sampler.AddressW = TextureAddressMode::Clamp;
-            result.Sampler = ResolveSampler(sampler);
-            result.HdrEncoded = definition.Encoding == LightingTextureEncoding::Rgbe8;
-            result.MipLevels = static_cast<std::uint32_t>(definition.Mips.size());
-
-            SDL_GPUTransferBufferCreateInfo transferInformation{};
-            transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-            transferInformation.size = static_cast<std::uint32_t>(totalBytes);
-            transfer = SDL_CreateGPUTransferBuffer(Device, &transferInformation);
-            if (!transfer)
-                throw std::runtime_error("SDL_CreateGPUTransferBuffer(baked lighting) failed: " + LastSdlError());
-            auto* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(Device, transfer, false));
-            if (!mapped)
-                throw std::runtime_error("SDL_MapGPUTransferBuffer(baked lighting) failed: " + LastSdlError());
-            std::size_t offset = 0;
-            for (const auto& mip : definition.Mips)
-            {
-                std::memcpy(mapped + offset, mip.Pixels.data(), mip.Pixels.size());
-                offset += mip.Pixels.size();
-            }
-            SDL_UnmapGPUTransferBuffer(Device, transfer);
-
-            const auto upload = [&](SDL_GPUCopyPass* copy)
-            {
-                std::size_t sourceOffset = 0;
-                for (std::size_t index = 0; index < definition.Mips.size(); ++index)
-                {
-                    const auto& mip = definition.Mips[index];
-                    const auto layerBytes = mip.Pixels.size() / mip.Layers;
-                    for (std::uint32_t layer = 0; layer < mip.Layers; ++layer)
-                    {
-                        SDL_GPUTextureTransferInfo source{transfer,
-                                                          static_cast<std::uint32_t>(sourceOffset + layerBytes * layer),
-                                                          mip.Width, mip.Height};
-                        SDL_GPUTextureRegion destination{result.Texture,
-                                                         static_cast<std::uint32_t>(index),
-                                                         layer,
-                                                         0,
-                                                         0,
-                                                         0,
-                                                         mip.Width,
-                                                         mip.Height,
-                                                         1};
-                        SDL_UploadToGPUTexture(copy, &source, &destination, false);
-                    }
-                    sourceOffset += mip.Pixels.size();
-                }
-            };
-            if (FrameActive)
-            {
-                EnsureFrameUploadContext();
-                upload(FrameUploadPass);
-                FrameUploadTransfers.push_back(transfer);
-                transfer = nullptr;
-                return result;
-            }
-            SDL_GPUCommandBuffer* commands = SDL_AcquireGPUCommandBuffer(Device);
-            if (!commands)
-                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(baked lighting) failed: " + LastSdlError());
-            SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(commands);
-            if (!copy)
-            {
-                (void)SDL_CancelGPUCommandBuffer(commands);
-                throw std::runtime_error("SDL_BeginGPUCopyPass(baked lighting) failed: " + LastSdlError());
-            }
-            upload(copy);
-            SDL_EndGPUCopyPass(copy);
-            if (!SDL_SubmitGPUCommandBuffer(commands))
-                throw std::runtime_error("SDL_SubmitGPUCommandBuffer(baked lighting) failed: " + LastSdlError());
-            SDL_ReleaseGPUTransferBuffer(Device, transfer);
-            return result;
-        }
-        catch (...)
-        {
-            RethrowIfDeviceLost("baked-lighting texture upload");
-            if (transfer)
-                SDL_ReleaseGPUTransferBuffer(Device, transfer);
-            if (result.Texture)
-                SDL_ReleaseGPUTexture(Device, result.Texture);
-            throw;
-        }
     }
 
     GpuMeshResources RenderSharedState::CreateMeshResources(const MeshAsset& mesh)

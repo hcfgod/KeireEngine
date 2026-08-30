@@ -449,6 +449,7 @@ namespace Keire
                 }
 
                 bool renderFrame = false;
+                bool uiFrame = false;
                 if (!ExitRequested() && !nowSuspended && m_Impl->Renderer)
                 {
                     ProfileScope beginRender(m_Impl->ProfilerService, ProfileCategory::Rendering, "Render begin");
@@ -510,11 +511,13 @@ namespace Keire
                             ProfileScope editorUi(m_Impl->ProfilerService, ProfileCategory::Application, "Editor UI");
                             m_Impl->UserInterface->BeginFrame(m_Impl->Clock->UnscaledDeltaTime(),
                                                               m_Impl->PrimaryWindow->LogicalSize());
+                            uiFrame = true;
                             m_Impl->LayerSystem->Ui(m_Impl->UserInterface->Frame());
                         }
                         {
                             ProfileScope present(m_Impl->ProfilerService, ProfileCategory::Rendering, "Present");
                             m_Impl->UserInterface->EndFrame();
+                            uiFrame = false;
                         }
                         renderFrame = false;
                     }
@@ -530,6 +533,9 @@ namespace Keire
                 }
                 catch (const RenderRecoveryBoundaryRequired&)
                 {
+                    if (uiFrame)
+                        m_Impl->UserInterface->CancelFrame();
+                    uiFrame = false;
                     if (renderFrame)
                         RenderSystemInternalAccess::CancelFrame(*m_Impl->Renderer);
                     renderFrame = false;
@@ -537,6 +543,9 @@ namespace Keire
                 }
                 catch (...)
                 {
+                    if (uiFrame)
+                        m_Impl->UserInterface->CancelFrame();
+                    uiFrame = false;
                     if (renderFrame)
                         RenderSystemInternalAccess::CancelFrame(*m_Impl->Renderer);
                     throw;
@@ -1103,6 +1112,8 @@ namespace Keire
             service.Reset();
         };
 
+        if (m_Impl->UserInterface)
+            m_Impl->UserInterface->CancelFrame();
         m_Impl->LayerSystem->Deactivate();
         if (initialized)
         {

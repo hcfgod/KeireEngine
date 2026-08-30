@@ -86,7 +86,8 @@ if ($installWorkerText.Contains("KEIRE_INSTALL_WORKER_INTERRUPT_AFTER")) {
 Get-ChildItem -LiteralPath (Join-Path $Root "KeireHubContent") -Force |
     Copy-Item -Destination (Join-Path $stage "content") -Recurse
 Copy-WindowsTrackedTree $Root "Docs" (Join-Path $stage "Docs")
-Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" (Join-Path $stage "Samples\KeireSandbox")
+Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" (Join-Path $stage "Samples\KeireSandbox") `
+    -AdditionalRelativeFiles (Get-WindowsKeireSandboxUiPackageFiles)
 Copy-Item -LiteralPath (Join-Path $Root "Config\Branding\Keire.png") `
     -Destination (Join-Path $stage "Config\Branding")
 Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-key.json") `

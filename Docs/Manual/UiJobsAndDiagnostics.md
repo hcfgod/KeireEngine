@@ -1,22 +1,30 @@
 # UI, Jobs, And Diagnostics
 
-Kéire's runtime UI is scene-backed. Canvas, text, image, button, slider, toggle, input-field, scroll-view, layout, and
-accessibility components are authored in the Editor and driven through typed managed wrappers in Play Mode and players.
+Kéire UI Toolkit separates `.keireui` visual trees, `.keirestyle` style sheets, and `.keireuipanel` presentation
+settings. A scene entity has one `Keire.UI.UIDocument` component. Screen/camera documents render in Game/Play/runtime
+and UI Builder, while world-surface documents render as depth-tested scene geometry.
 
-## Bind A Scene Button
+For the complete asset, UI Builder, target-mode, Play draft, runtime-debugger, managed API, and current-limit contract,
+use [UI Toolkit and Events from C#](../Scripting/UiAndEvents.md).
 
-Assign a `UiButton` in the Inspector and make registration symmetric across disable and reload:
+## Build And Bind A Retained Control
+
+Managed controls use retained hierarchy, query, and event propagation. Keep callback registration symmetric across the
+controller lifecycle:
 
 ```csharp
 using Keire;
+using Keire.UI;
 
 namespace MyGame;
 
 [StableComponentId("ee3548b8-662a-4898-8db0-27b034d9f08a")]
 public sealed class ResumeButton : Behaviour
 {
-    [SerializeField, StableFieldId("3b98ad0f-347e-44a9-8c95-e773c60767cb")]
-    private UiButton? _button = null;
+    private readonly VisualElement _root = new();
+    private readonly Button _button = new() { Name = "resume", Text = "Resume" };
+
+    protected override void Awake() => _root.Add(_button);
 
     protected override void OnEnable() => Bind();
     protected override void OnDisable() => Unbind();
@@ -25,23 +33,22 @@ public sealed class ResumeButton : Behaviour
 
     private void Bind()
     {
-        if (_button is not null)
-            _button.Clicked += Resume;
+        _button.Clicked += Resume;
     }
 
     private void Unbind()
     {
-        if (_button is not null)
-            _button.Clicked -= Resume;
+        _button.Clicked -= Resume;
     }
 
     private void Resume() => Time.TimeScale = 1.0f;
 }
 ```
 
-Buttons can also be polled with `RuntimeUi.WasClicked`; use events or polling for one button, not both. `UiSlider`,
-`UiToggle`, `UiInputField`, and `UiScrollView` expose typed live values and per-frame events. `RuntimeUi.SetText` updates
-compatible scene text and returns `false` when the entity is invalid or incompatible.
+`Button`, `TextField`, `Toggle`, `Slider`, `ProgressBar`, `ScrollView`, `ListView`, `TreeView`, `DropdownField`,
+`Foldout`, and `TabView` expose typed retained state. `ChangeEvent<T>` follows the same capture/target/bubble event
+ordering. Data binding supports one-way, two-way, and one-time paths and retains the previous target value with an
+actionable `BindingDiagnostic` when a path or conversion fails.
 
 Menus should hold `Cursor.RequestVisible()` while open. Gameplay should hold `Cursor.RequestCapture()` while it owns
 look input. Dispose requests in `OnDisable` and `OnBeforeReload`; visible requests take precedence without destroying a

@@ -234,14 +234,108 @@ namespace Keire
 
     void RenderSystem::Submit(const SceneRenderRequest& request) { m_Impl->State->Submit(request); }
     void RenderSystem::Submit(SceneRenderRequest&& request) { m_Impl->State->Submit(std::move(request)); }
-    void RenderSystem::SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree)
+    void RenderSystem::SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree) { SubmitRuntimeUiTarget({.Tree = tree}); }
+
+    void RenderSystem::SubmitRuntimeUiTarget(RuntimeUiRenderSubmission submission)
     {
         auto& state = *m_Impl->State;
         state.RequireOwner("SubmitRuntimeUi");
         if (!state.FrameActive)
             throw std::logic_error("Runtime UI submissions are accepted only during an active render frame.");
-        if (tree)
-            state.PendingRuntimeUiTrees.push_back(tree);
+        if (!submission.Tree)
+            return;
+        if (submission.Root && !submission.Tree->Exists(submission.Root))
+            throw std::invalid_argument("Runtime UI submission root does not exist in the submitted tree.");
+        if (state.PendingRuntimeUiSubmissions.size() >= 256U)
+            throw std::length_error("Runtime UI submissions exceed the per-frame panel bound of 256.");
+
+        RenderBackend::RenderSurfaceToken surface;
+        switch (submission.Target)
+        {
+        case RuntimeUiRenderTarget::ScreenOverlay:
+            break;
+        case RuntimeUiRenderTarget::CameraOverlay:
+        {
+            if (!submission.View || !submission.View->Surface())
+                throw std::invalid_argument("Camera-overlay runtime UI requires its authored camera render view.");
+            if (!std::isfinite(submission.Viewport.X) || !std::isfinite(submission.Viewport.Y) ||
+                submission.Viewport.X <= 0.0F || submission.Viewport.Y <= 0.0F)
+            {
+                throw std::invalid_argument("Camera-overlay runtime UI requires a finite positive viewport.");
+            }
+            auto surfaceLease = std::static_pointer_cast<RenderBackend::RenderSurfaceState>(
+                RenderSystemInternalAccess::SurfaceLease(*submission.View->Surface()));
+            const auto owner =
+                surfaceLease ? surfaceLease->Owner.lock() : std::shared_ptr<RenderBackend::RenderSharedState>{};
+            if (owner.get() != &state)
+                throw std::invalid_argument("Camera-overlay runtime UI render view belongs to another renderer.");
+            surface = state.CaptureSurfaceToken(surfaceLease);
+            break;
+        }
+        case RuntimeUiRenderTarget::RenderTexture:
+            if (!submission.RenderTexture)
+                throw std::invalid_argument("Runtime UI RenderTexture targets require a non-empty logical target ID.");
+            if (!std::isfinite(submission.ReferenceResolution.X) || !std::isfinite(submission.ReferenceResolution.Y) ||
+                submission.ReferenceResolution.X < 1.0F || submission.ReferenceResolution.Y < 1.0F ||
+                submission.ReferenceResolution.X > 16384.0F || submission.ReferenceResolution.Y > 16384.0F)
+            {
+                throw std::invalid_argument(
+                    "Runtime UI RenderTexture reference resolution must be finite and within 1..16384 per axis.");
+            }
+            if (std::ranges::none_of(state.PendingRuntimeUiSubmissions,
+                                     [&submission](const auto& pending)
+                                     {
+                                         return pending.Submission.Target == RuntimeUiRenderTarget::RenderTexture &&
+                                                pending.Submission.RenderTexture == submission.RenderTexture;
+                                     }))
+            {
+                std::vector<AssetId> uniqueTargets;
+                for (const auto& pending : state.PendingRuntimeUiSubmissions)
+                {
+                    if (pending.Submission.Target != RuntimeUiRenderTarget::RenderTexture ||
+                        std::ranges::find(uniqueTargets, pending.Submission.RenderTexture) != uniqueTargets.end())
+                    {
+                        continue;
+                    }
+                    uniqueTargets.push_back(pending.Submission.RenderTexture);
+                }
+                if (uniqueTargets.size() >= 32U)
+                {
+                    throw std::length_error(
+                        "Runtime UI submissions exceed the per-frame RenderTexture target bound of 32.");
+                }
+            }
+            break;
+        case RuntimeUiRenderTarget::WorldSurface:
+        {
+            if (!submission.View || !submission.View->Surface())
+                throw std::invalid_argument("World-surface runtime UI requires a render view and surface.");
+            if (!Math::IsFinite(submission.World) || !std::isfinite(submission.Viewport.X) ||
+                !std::isfinite(submission.Viewport.Y) || submission.Viewport.X <= 0.0F ||
+                submission.Viewport.Y <= 0.0F || !std::isfinite(submission.ReferenceResolution.X) ||
+                !std::isfinite(submission.ReferenceResolution.Y) || submission.ReferenceResolution.X <= 0.0F ||
+                submission.ReferenceResolution.Y <= 0.0F || !std::isfinite(submission.Pivot.X) ||
+                !std::isfinite(submission.Pivot.Y) || !std::isfinite(submission.WorldUnitsPerPixel.X) ||
+                !std::isfinite(submission.WorldUnitsPerPixel.Y) || submission.WorldUnitsPerPixel.X <= 0.0F ||
+                submission.WorldUnitsPerPixel.Y <= 0.0F)
+            {
+                throw std::invalid_argument("World-surface runtime UI contains invalid projection values.");
+            }
+            auto surfaceLease = std::static_pointer_cast<RenderBackend::RenderSurfaceState>(
+                RenderSystemInternalAccess::SurfaceLease(*submission.View->Surface()));
+            const auto owner =
+                surfaceLease ? surfaceLease->Owner.lock() : std::shared_ptr<RenderBackend::RenderSharedState>{};
+            if (owner.get() != &state)
+                throw std::invalid_argument("World-surface runtime UI render view belongs to another renderer.");
+            if (submission.DepthTest && !surfaceLease->Specification.Depth)
+                throw std::invalid_argument("Depth-tested world-surface runtime UI requires a depth-enabled surface.");
+            surface = state.CaptureSurfaceToken(surfaceLease);
+            break;
+        }
+        }
+        state.PendingRuntimeUiSubmissions.push_back({.Submission = std::move(submission),
+                                                     .Surface = std::move(surface),
+                                                     .Sequence = state.NextRuntimeUiSubmissionSequence++});
     }
     void RenderSystem::RequestGpuVfxPipelineWarmup()
     {
@@ -262,6 +356,8 @@ namespace Keire
                 .TransparentPass = rendered,
                 .DynamicSpritePackets = rendered,
                 .TexturedSpritePackets = false,
+                .RuntimeUiWorldSurfaces = rendered,
+                .RuntimeUiRenderTextures = rendered,
                 .DynamicMeshPackets = rendered,
                 .SampledResolvedDepth = rendered,
                 .GpuDepthCollision = rendered,

@@ -335,6 +335,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             DrawPanelMenuItem(ui, m_VfxEffectPanel->Registration());
             DrawPanelMenuItem(ui, m_ShaderGraphPanel->Registration());
             DrawPanelMenuItem(ui, m_MaterialGraphPanel->Registration());
+            DrawPanelMenuItem(ui, m_UiBuilderPanel->Registration());
             DrawPanelMenuItem(ui, m_InputDebugger);
             DrawPanelMenuItem(ui, m_ProjectSettingsPanel->Registration());
             DrawPanelMenuItem(ui, m_LightingPanel->Registration());

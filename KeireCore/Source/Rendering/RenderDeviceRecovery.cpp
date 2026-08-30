@@ -237,6 +237,8 @@ namespace Keire::RenderBackend
         MeshCache.clear();
         SkinCache.clear();
         TextureCache.clear();
+        ReleaseRuntimeUiFontAtlas(true);
+        ReleaseRuntimeUiRenderTextureCache(true);
         LightingTextureCache.clear();
         LightingSetCache.clear();
         LightProbeVolumeCache.clear();
@@ -253,6 +255,8 @@ namespace Keire::RenderBackend
         SceneDepthPipeline = nullptr;
         ToneMapPipeline = nullptr;
         RuntimeUiPipeline = nullptr;
+        RuntimeUiCameraOverlayPipeline = nullptr;
+        RuntimeUiRenderTexturePipeline = nullptr;
         GpuOcclusionDepthPipelines.fill(nullptr);
         GpuOcclusionBuildBasePipeline = nullptr;
         GpuOcclusionReducePipeline = nullptr;
@@ -652,7 +656,14 @@ namespace Keire::RenderBackend
                 DeviceGeneration.store(*candidateGeneration, std::memory_order_release);
                 const auto recoveredGeneration = *candidateGeneration;
                 if (interrupted)
+                {
                     interrupted->DeviceGeneration = recoveredGeneration;
+                    QualifyRuntimeUiCameraPanels(*interrupted);
+                    QualifyRuntimeUiWorldPanels(*interrupted);
+                    QualifyRuntimeUiRenderTextures(*interrupted);
+                    QualifyRuntimeUiImageLeases(*interrupted);
+                    QualifyRuntimeUiFontLeases(*interrupted);
+                }
                 if (!interrupted && !CompleteDeviceRecoveryAfterRetry())
                 {
                     cleanupHealthyCandidate();

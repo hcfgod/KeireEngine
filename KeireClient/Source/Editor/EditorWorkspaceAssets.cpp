@@ -1046,6 +1046,8 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                     RequestOpenScene(created);
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenInputActions)
                     OpenInputActions(created);
+                else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenUiBuilder)
+                    OpenUiBuilder(created);
                 else if (completion->Context.FollowUp == KeireEditor::AssetOperationFollowUp::OpenExternal &&
                          m_AssetBrowserPanel)
                     m_AssetBrowserPanel->OpenAsset(created);

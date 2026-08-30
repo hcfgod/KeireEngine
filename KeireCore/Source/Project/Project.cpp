@@ -7,12 +7,14 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/BuildInfo.h"
+#include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/PlatformDirectories.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Project/StarterProjectUiInternal.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #include <nlohmann/json.hpp>
@@ -450,6 +452,7 @@ namespace Keire
                     root / "Assets/Scripts/Runtime/GameRoot.cs",
                     "using Keire;\n\nnamespace Game;\n\npublic sealed class GameRoot : Behaviour\n{\n"
                     "    protected override void Start() => Log.Info(\"Gameplay assembly loaded.\");\n}\n");
+                Detail::WriteStarterProjectUiScript(root);
 
                 constexpr std::string_view hlsl = R"(struct VertexInput
 {
@@ -544,7 +547,46 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 const auto materialBytes = std::as_bytes(std::span(materialSource.data(), materialSource.size()));
                 const auto material = database->CreateAsset("Materials/DefaultUnlit.keirematerial",
                                                             CreateMaterialAssetImporter(), materialBytes);
-                const auto sceneBytes = SceneAsset::Encode(SceneAsset::SampleDefinition(material));
+                const auto starterUiAssets = Detail::CreateStarterProjectUiAssets(*database);
+
+                auto sceneDefinition = SceneAsset::SampleDefinition(material);
+                SceneObjectDefinition starterUi{
+                    AssetId::Parse("a1b2c3d4-1000-4000-8000-000000000004"), {}, "Starter UI Document"};
+                starterUi.Components.push_back({UiDocumentComponent::StaticType(), 1, true,
+                                                Json{{"visualTree", starterUiAssets.VisualTree.ToString()},
+                                                     {"panelSettings", starterUiAssets.PanelSettings.ToString()},
+                                                     {"sortingOrder", 0},
+                                                     {"receivesInput", true}}
+                                                    .dump()});
+                starterUi.Components.push_back({ComponentTypeId(AssetId::Parse("b1b2d001-1000-4000-8000-000000000001")),
+                                                1, true,
+                                                Json{{"managedState", R"({"fields":[],"version":1})"}}.dump()});
+                sceneDefinition.Objects.push_back(std::move(starterUi));
+
+                SceneObjectDefinition worldUi{
+                    AssetId::Parse("a1b2c3d4-1000-4000-8000-000000000005"), {}, "Starter World UI"};
+                worldUi.Transform.Position = {0.0F, 2.0F, 3.0F};
+                worldUi.Components.push_back({UiDocumentComponent::StaticType(), 1, true,
+                                              Json{{"visualTree", starterUiAssets.WorldVisualTree.ToString()},
+                                                   {"panelSettings", starterUiAssets.WorldPanelSettings.ToString()},
+                                                   {"sortingOrder", 0},
+                                                   {"receivesInput", true}}
+                                                  .dump()});
+                worldUi.Components.push_back({ComponentTypeId(AssetId::Parse("b1b2d001-1000-4000-8000-000000000002")),
+                                              1, true, Json{{"managedState", R"({"fields":[],"version":1})"}}.dump()});
+                sceneDefinition.Objects.push_back(std::move(worldUi));
+
+                SceneObjectDefinition renderTextureUi{
+                    AssetId::Parse("a1b2c3d4-1000-4000-8000-000000000006"), {}, "Starter UI Render Target"};
+                renderTextureUi.Components.push_back(
+                    {UiDocumentComponent::StaticType(), 1, true,
+                     Json{{"visualTree", starterUiAssets.RenderTextureVisualTree.ToString()},
+                          {"panelSettings", starterUiAssets.RenderTexturePanelSettings.ToString()},
+                          {"sortingOrder", -10},
+                          {"receivesInput", false}}
+                         .dump()});
+                sceneDefinition.Objects.push_back(std::move(renderTextureUi));
+                const auto sceneBytes = SceneAsset::Encode(sceneDefinition);
                 descriptor.StartupScene =
                     database->CreateAsset("Scenes/SampleScene.keirescene", CreateSceneAssetImporter(), sceneBytes);
                 (void)database->ImportAll();

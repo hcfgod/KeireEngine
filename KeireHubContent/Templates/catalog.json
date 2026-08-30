@@ -36,7 +36,7 @@
       "id": "keire.3d-starter",
       "version": "1.0.0",
       "displayName": "3D Starter",
-      "description": "A practical 3D starting point with a camera, directional light, rendering settings, and an unlit shader.",
+      "description": "A practical 3D starting point with a camera, directional light, rendering settings, an unlit shader, and retained-mode UI Toolkit examples.",
       "category": "core",
       "tags": [
         "3D",
@@ -48,7 +48,7 @@
       "compatibleEditors": ">=0.1.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 5773,
+      "estimatedSizeBytes": 20961,
       "payloadRoot": "Payloads/Starter3D",
       "payloadFiles": [
         {
@@ -68,13 +68,123 @@
         },
         {
           "path": "Assets/Scenes/StarterScene.keirescene",
-          "sizeBytes": 2534,
-          "sha256": "6ca5bbbf27e722473ad543b62655002fdaf8c921a02a8184c06511ec9a837023"
+          "sizeBytes": 4934,
+          "sha256": "baca0a7f1993881e828cd1b65b276200ac2a4eeb9830f1f2027b698a1ee06c87"
         },
         {
           "path": "Assets/Scenes/StarterScene.keirescene.keiremeta",
-          "sizeBytes": 241,
-          "sha256": "c9aab4ce486914c9c2974cdfff7316aa026ea6355ff85c11cff7fe11dd3d9c58"
+          "sizeBytes": 551,
+          "sha256": "fc1be03217728ec60dc8c0e1bfc93cbd773a0f750b1fbbbed32daf082432a18c"
+        },
+        {
+          "path": "Assets/Scripts/Gameplay.keireasm",
+          "sizeBytes": 178,
+          "sha256": "fb90647b4d3651ea9e2c3d14956fc887f93c9cda923b4382114a064012923ed1"
+        },
+        {
+          "path": "Assets/Scripts/Gameplay.keireasm.keiremeta",
+          "sizeBytes": 227,
+          "sha256": "48ed9330a2366bf5303c38f9d9327e62e563c3c278ed12dcca58929199fcb3a2"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/StarterUi.cs",
+          "sizeBytes": 1999,
+          "sha256": "b4a40cff21d7a0c24587abf895fcdf540c86a00db7abcf2beb0c11b3e75cf89b"
+        },
+        {
+          "path": "Assets/Scripts/Runtime/StarterUi.cs.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "e4cfcf7cc9bdff08db048fd1932eebc6d6feaa86a52e81ec6a03554614c2f456"
+        },
+        {
+          "path": "Assets/UI/ScreenOverlay.keireuipanel",
+          "sizeBytes": 429,
+          "sha256": "4c9514bbd1977ca606e038bb05474e66fc0debdee49e6fbad9c696095384155c"
+        },
+        {
+          "path": "Assets/UI/ScreenOverlay.keireuipanel.keiremeta",
+          "sizeBytes": 251,
+          "sha256": "5ef1369a0a4d962bdd4523527dabb531863efeed29ebb8b4ad0cc45ce7f9e683"
+        },
+        {
+          "path": "Assets/UI/Starter.keirestyle",
+          "sizeBytes": 1128,
+          "sha256": "ae1e4ba667f90a48a604ec4bae2eb652b98f804e5a507a3b95f23d673ff57622"
+        },
+        {
+          "path": "Assets/UI/Starter.keirestyle.keiremeta",
+          "sizeBytes": 248,
+          "sha256": "95db031cd8dfae5b8eb4449a21937f14cea131b2a1820cf1618e58a477b3bbd4"
+        },
+        {
+          "path": "Assets/UI/StarterBindingExample.keireui",
+          "sizeBytes": 742,
+          "sha256": "439f42ccabb37667557b408d9b2366e56d7d09ad719a8d801a0229bf73eab04c"
+        },
+        {
+          "path": "Assets/UI/StarterBindingExample.keireui.keiremeta",
+          "sizeBytes": 286,
+          "sha256": "d1cfeb4ac87c826717de03728cb7874ff6ed9e2045dee5683e269ba3b48c517a"
+        },
+        {
+          "path": "Assets/UI/StarterCard.keireui",
+          "sizeBytes": 719,
+          "sha256": "5694df5a34cea7977e48429f482d625ba06a096ca2b4813f84a4011cef4f970b"
+        },
+        {
+          "path": "Assets/UI/StarterCard.keireui.keiremeta",
+          "sizeBytes": 286,
+          "sha256": "25f5a1b95a6933c2f7f311b1338cdfd6b548dcd2bb8f88850c02eaa596356d34"
+        },
+        {
+          "path": "Assets/UI/StarterHud.keireui",
+          "sizeBytes": 978,
+          "sha256": "7b77100c4d98659bd21d000df624983fb0bf441988dc11f35be1a861f3d7560d"
+        },
+        {
+          "path": "Assets/UI/StarterHud.keireui.keiremeta",
+          "sizeBytes": 338,
+          "sha256": "9a5deab7f30a0fd7397fe7e0660c7820e6fccac9a0615d3408ac55a8e9dbcd79"
+        },
+        {
+          "path": "Assets/UI/StarterRenderTexture.keireui",
+          "sizeBytes": 688,
+          "sha256": "a0676209d83833496db0bcdcbc05bf8a5535cd4e19d221527e35143aa1cea927"
+        },
+        {
+          "path": "Assets/UI/StarterRenderTexture.keireui.keiremeta",
+          "sizeBytes": 294,
+          "sha256": "aabb223b2ecb9d6151743c6db45aa40d44efbd49614b405799126af8bd010f7c"
+        },
+        {
+          "path": "Assets/UI/StarterRenderTexture.keireuipanel",
+          "sizeBytes": 430,
+          "sha256": "4eebae7b1a690b7114c59e5cb9f62c5d3b590731a370002fba39f6976a92b384"
+        },
+        {
+          "path": "Assets/UI/StarterRenderTexture.keireuipanel.keiremeta",
+          "sizeBytes": 251,
+          "sha256": "b5a1d0b871c8662c0255a9798c32c9baa6e74f89b1730fd2b54c011234c02471"
+        },
+        {
+          "path": "Assets/UI/WorldSurface.keireuipanel",
+          "sizeBytes": 425,
+          "sha256": "47534e6619b059d3a44cc292f2f3079eab3bb4ea82f49c92cb903e9c0d33d001"
+        },
+        {
+          "path": "Assets/UI/WorldSurface.keireuipanel.keiremeta",
+          "sizeBytes": 251,
+          "sha256": "82e84c86fc35e145cc916426fc4e13b58ad8b0ca27598427baedfba6b50a1620"
+        },
+        {
+          "path": "Assets/UI/WorldTerminal.keireui",
+          "sizeBytes": 849,
+          "sha256": "a925e97206721aae95c2daacb6da351af73dfe011d6d0b8c37444f0a5ab5383b"
+        },
+        {
+          "path": "Assets/UI/WorldTerminal.keireui.keiremeta",
+          "sizeBytes": 294,
+          "sha256": "cea2a3474187c23026331f695e4ea0a11d01ea15b17b1d8acb9a46aac251dec4"
         },
         {
           "path": "ProjectSettings/Rendering.keiresettings",
@@ -83,8 +193,8 @@
         },
         {
           "path": "README.md",
-          "sizeBytes": 119,
-          "sha256": "20fd83c8ddd221fe5ab6c76685e96f12ecbfec335cf9a2f8a1bb154f1ac74abd"
+          "sizeBytes": 1090,
+          "sha256": "baba3f0f4db02d36243b927bd36bd5c8f042cb17a89a0c202f25c57eba63a382"
         }
       ],
       "defaultProjectConfiguration": {
@@ -93,7 +203,12 @@
       "starterContent": [
         "Assets/Shaders/DefaultUnlit.keireshader",
         "Assets/Shaders/StarterUnlit.hlsl",
-        "Assets/Scenes/StarterScene.keirescene"
+        "Assets/Scenes/StarterScene.keirescene",
+        "Assets/Scripts/Runtime/StarterUi.cs",
+        "Assets/UI/StarterHud.keireui",
+        "Assets/UI/StarterBindingExample.keireui",
+        "Assets/UI/StarterRenderTexture.keireui",
+        "Assets/UI/WorldTerminal.keireui"
       ],
       "requiredPackages": [],
       "recommendedPackages": [],
@@ -119,7 +234,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25049788,
+      "estimatedSizeBytes": 25039723,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -525,17 +640,17 @@
         {
           "path": "Assets/Scenes/GpuOcclusionStress.keirescene.keiremeta",
           "sizeBytes": 351,
-          "sha256": "5eac5364e4d34a7ef693cea5f52e5a9e75ea960f99f934e66d74cbb8db6b978d"
+          "sha256": "829fe4e608fcd5f4c025d53f970340fd04a244fa4c485d372054ffef360aecae"
         },
         {
           "path": "Assets/Scenes/SampleScene.keirescene",
-          "sizeBytes": 39808,
-          "sha256": "889fe5bfc2330f57f9fe605fcf930691abf2816a9080652d8a5b8840008550e6"
+          "sizeBytes": 27893,
+          "sha256": "5eab82c2ba89b8821187119e86c86dcb1c3d4bfac3b7dbd170f59a655e8996ae"
         },
         {
           "path": "Assets/Scenes/SampleScene.keirescene.keiremeta",
           "sizeBytes": 217,
-          "sha256": "bc197e28f31c424889293a7ce891bb8ee6a9c9ba68b1dacf7323b38ca71b688d"
+          "sha256": "fbe85333d216c9fc5113e26369b9014f0cb1bcef2d39cef2d18e2536b53157b7"
         },
         {
           "path": "Assets/Scenes/SandboxShowcase.keirescene",
@@ -545,7 +660,7 @@
         {
           "path": "Assets/Scenes/SandboxShowcase.keirescene.keiremeta",
           "sizeBytes": 217,
-          "sha256": "fee47eabdc41f0eaad125c9f667f164ca0bce803a74d2079a3e2c776e7ddcbdf"
+          "sha256": "13737810f1611c5b7be020a14d208a94618904c622821ef1aea5e5d06383ee8e"
         },
         {
           "path": "Assets/Scenes/TestScene.keirescene",
@@ -555,7 +670,7 @@
         {
           "path": "Assets/Scenes/TestScene.keirescene.keiremeta",
           "sizeBytes": 217,
-          "sha256": "6a9cafccd6cf2ad3d0f6571063c14a7a4200573a1eebbabb71b6bd5baa54b132"
+          "sha256": "1c1d4f306b645c125e252221661a2e392e5ce6dafb1c83b8b3b6552a70871e62"
         },
         {
           "path": "Assets/Scripts/Gameplay.keireasm",
@@ -629,8 +744,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs",
-          "sizeBytes": 3873,
-          "sha256": "82f73a1ef48edc3d4f028c23e13d2eb9cecfeace47919a5bc9a46701daaa9b1f"
+          "sizeBytes": 3033,
+          "sha256": "3aa03812575d425d193b626de7e569a30c1412609c4934d14f5310e31fa96565"
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs.keiremeta",
@@ -736,6 +851,36 @@
           "path": "Assets/Textures/texture_roughness.png.keiremeta",
           "sizeBytes": 553,
           "sha256": "cc69367b9547e685583003319b131f257a2d26918b11087d0dcc1aa8782e9413"
+        },
+        {
+          "path": "Assets/UI/SandboxMenu.keirestyle",
+          "sizeBytes": 718,
+          "sha256": "bfce732b033c0f62e2a99fe128047a171160c47ab5b961767f9ff3cea7a1f8d6"
+        },
+        {
+          "path": "Assets/UI/SandboxMenu.keirestyle.keiremeta",
+          "sizeBytes": 248,
+          "sha256": "ec02028302b19f4e5366d5aa671e5d9c8bd9ac957836133d8a1746c6f9c57563"
+        },
+        {
+          "path": "Assets/UI/SandboxMenu.keireui",
+          "sizeBytes": 748,
+          "sha256": "48efa7eaf3b1572abd2230a09fa5fede4bcf80bf87e9828889b8af6c97c6308e"
+        },
+        {
+          "path": "Assets/UI/SandboxMenu.keireui.keiremeta",
+          "sizeBytes": 294,
+          "sha256": "37774f3ae63e7246c69da24c367051b34108c2aa1ee1787d9fddf103456b1b6c"
+        },
+        {
+          "path": "Assets/UI/ScreenOverlay.keireuipanel",
+          "sizeBytes": 431,
+          "sha256": "b85a54a2db3d6b37f5b50c917d32d099990790223d460ceecf94cb2814323f20"
+        },
+        {
+          "path": "Assets/UI/ScreenOverlay.keireuipanel.keiremeta",
+          "sizeBytes": 251,
+          "sha256": "ce24074c9d4a1abb09e09ef05f6efa29d91bd5f8c01b9bee96134cb092415c69"
         },
         {
           "path": "Assets/Vfx/ArcaneNova.keirevfx",

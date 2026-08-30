@@ -19,6 +19,7 @@ namespace KeireEditor
         AudioMixer,
         PhysicsMaterial,
         VfxEffect,
+        UiDocument,
         MaterialGraph,
         ShaderGraph,
         MaterialFunction,

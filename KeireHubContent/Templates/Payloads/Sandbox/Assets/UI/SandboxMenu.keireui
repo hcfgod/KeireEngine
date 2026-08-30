@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Sandbox Menu">
+  <style src="6a100001-1111-4000-8000-000000000001"/>
+  <VisualElement id="6a110001-1111-4000-8000-000000000001" name="sandbox-menu" class="screen">
+    <VisualElement id="6a110001-1111-4000-8000-000000000002" name="menu-card" class="menu-card">
+      <Label id="6a110001-1111-4000-8000-000000000003" name="title" class="title" text="MISSION CONTROL"/>
+      <Label id="6a110001-1111-4000-8000-000000000004" name="subtitle" class="subtitle" text="SYSTEMS READY"/>
+      <Button id="6a110001-1111-4000-8000-000000000005" name="primary-action" class="primary" text="CONTINUE" accessibility-label="Close mission control"/>
+    </VisualElement>
+  </VisualElement>
+</ui>

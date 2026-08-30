@@ -14,6 +14,10 @@
 
 namespace Keire::RenderBackend
 {
+    RenderFramePacket::RenderFramePacket() = default;
+
+    RenderFramePacket::~RenderFramePacket() = default;
+
     namespace
     {
         constexpr std::size_t MaximumImGuiTextureSnapshotBytes = 64U * 1024U * 1024U;

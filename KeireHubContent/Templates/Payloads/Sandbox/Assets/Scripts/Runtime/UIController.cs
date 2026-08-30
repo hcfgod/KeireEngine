@@ -11,50 +11,35 @@ public sealed class UIController : Behaviour
     public static bool IsAnyUiVisible => s_VisibleControllerCount > 0;
 
     [SerializeField] private Entity? uiPanel;
-    [SerializeField] private UiButton? uiButton = null;
     [SerializeField] private KeireEvent uiOpened = new();
     [SerializeField] private KeireEvent uiClosed = new();
 
     [SerializeField] private AudioClip? uiAudioClip;
 
-    private UiButton? _subscribedButton;
     private IDisposable? _cursorVisibility;
     private bool _eventsBound;
     private bool _reportedVisible;
 
     protected override void OnEnable()
     {
-        BindButton();
         BindUiEvents();
         ApplyUiVisibility(uiPanel is { IsValid: true, Active: true });
     }
 
-    private void UIButtonClicked()
-    {
-        Debug.Log("Button Clicked");
-        ToggleUi();
-
-        if (uiAudioClip is not null)
-            Audio.Play(Entity, uiAudioClip);
-    }
-
     protected override void OnDisable()
     {
-        UnbindButton();
         UnbindUiEvents();
         ApplyUiVisibility(false);
     }
 
     protected override void OnBeforeReload()
     {
-        UnbindButton();
         UnbindUiEvents();
         ApplyUiVisibility(false);
     }
 
     protected override void OnAfterReload()
     {
-        BindButton();
         BindUiEvents();
         ApplyUiVisibility(uiPanel is { IsValid: true, Active: true });
     }
@@ -134,20 +119,4 @@ public sealed class UIController : Behaviour
         _cursorVisibility = null;
     }
 
-    private void BindButton()
-    {
-        if (ReferenceEquals(_subscribedButton, uiButton))
-            return;
-        UnbindButton();
-        _subscribedButton = uiButton;
-        if (_subscribedButton is not null)
-            _subscribedButton.Clicked += UIButtonClicked;
-    }
-
-    private void UnbindButton()
-    {
-        if (_subscribedButton is not null)
-            _subscribedButton.Clicked -= UIButtonClicked;
-        _subscribedButton = null;
-    }
 }

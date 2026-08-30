@@ -4,7 +4,7 @@
 #include "Keire/ECS/Components/JointComponents.h"
 #include "Keire/ECS/Components/LightProbeVolumeComponent.h"
 #include "Keire/ECS/Components/ReflectionProbeComponent.h"
-#include "Keire/ECS/Components/RuntimeUiComponents.h"
+#include "Keire/ECS/Components/UiDocumentComponent.h"
 
 #include <Coral/String.hpp>
 #include <algorithm>
@@ -34,28 +34,8 @@ namespace Keire::Detail
                 return CreateDistanceJointComponentRegistration();
             if (type == SpringJointComponent::StaticType())
                 return CreateSpringJointComponentRegistration();
-            if (type == CanvasComponent::StaticType())
-                return CreateCanvasComponentRegistration();
-            if (type == RectTransformComponent::StaticType())
-                return CreateRectTransformComponentRegistration();
-            if (type == UiTextComponent::StaticType())
-                return CreateUiTextComponentRegistration();
-            if (type == UiImageComponent::StaticType())
-                return CreateUiImageComponentRegistration();
-            if (type == UiButtonComponent::StaticType())
-                return CreateUiButtonComponentRegistration();
-            if (type == UiLayoutComponent::StaticType())
-                return CreateUiLayoutComponentRegistration();
-            if (type == UiSliderComponent::StaticType())
-                return CreateUiSliderComponentRegistration();
-            if (type == UiToggleComponent::StaticType())
-                return CreateUiToggleComponentRegistration();
-            if (type == UiInputFieldComponent::StaticType())
-                return CreateUiInputFieldComponentRegistration();
-            if (type == UiScrollViewComponent::StaticType())
-                return CreateUiScrollViewComponentRegistration();
-            if (type == UiAccessibilityComponent::StaticType())
-                return CreateUiAccessibilityComponentRegistration();
+            if (type == UiDocumentComponent::StaticType())
+                return CreateUiDocumentComponentRegistration();
             return std::nullopt;
         }
 

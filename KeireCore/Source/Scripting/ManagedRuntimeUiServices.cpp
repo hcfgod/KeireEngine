@@ -1,162 +1,33 @@
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 
-#include "Keire/ECS/Components/RuntimeUiComponents.h"
-#include "Keire/ECS/Entity.h"
-#include "Keire/Scenes/Scene.h"
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 
 namespace Keire::Detail
 {
     namespace
     {
-        [[nodiscard]] Entity Find(const Ref<Scene>& scene, const AssetId entity)
+        [[nodiscard]] ManagedUiDocumentElement Convert(const ScenePresentationUiDocumentElement& element) noexcept
         {
-            return scene ? scene->FindEntity(EntityId(entity)) : Entity{};
+            return {.DocumentGeneration = element.DocumentGeneration,
+                    .Element = element.Element,
+                    .StableIdHigh = element.StableId.High(),
+                    .StableIdLow = element.StableId.Low(),
+                    .Type = static_cast<ManagedUiDocumentElementType>(element.Type)};
+        }
+
+        [[nodiscard]] ScenePresentationUiDocumentFlag Convert(const ManagedUiDocumentFlag property) noexcept
+        {
+            return static_cast<ScenePresentationUiDocumentFlag>(property);
         }
     } // namespace
 
-    std::optional<float> ReadManagedUiScalar(const Ref<Scene>& scene, const AssetId entity,
-                                             const ManagedUiScalarProperty property) noexcept
+    std::optional<ManagedUiDocumentElement> ManagedUiDocumentRoot(const Ref<ScenePresentationRuntime>& presentation,
+                                                                  const AssetId document) noexcept
     {
         try
         {
-            const auto target = Find(scene, entity);
-            const auto slider = target ? target.GetComponent<UiSliderComponent>() : Ref<UiSliderComponent>{};
-            if (!slider)
-                return std::nullopt;
-            switch (property)
-            {
-            case ManagedUiScalarProperty::Minimum:
-                return slider->Minimum();
-            case ManagedUiScalarProperty::Maximum:
-                return slider->Maximum();
-            case ManagedUiScalarProperty::Value:
-                return slider->Value();
-            }
-        }
-        catch (...)
-        {
-        }
-        return std::nullopt;
-    }
-
-    bool SetManagedUiScalar(const Ref<Scene>& scene, const AssetId entity, const ManagedUiScalarProperty property,
-                            const float value) noexcept
-    {
-        try
-        {
-            const auto target = Find(scene, entity);
-            const auto slider = target ? target.GetComponent<UiSliderComponent>() : Ref<UiSliderComponent>{};
-            if (!slider)
-                return false;
-            switch (property)
-            {
-            case ManagedUiScalarProperty::Minimum:
-                slider->SetRange(value, slider->Maximum());
-                break;
-            case ManagedUiScalarProperty::Maximum:
-                slider->SetRange(slider->Minimum(), value);
-                break;
-            case ManagedUiScalarProperty::Value:
-                slider->SetValue(value);
-                break;
-            }
-            return true;
-        }
-        catch (...)
-        {
-            return false;
-        }
-    }
-
-    std::optional<bool> ReadManagedUiFlag(const Ref<Scene>& scene, const Ref<ScenePresentationRuntime>& presentation,
-                                          const AssetId entity, const ManagedUiFlagProperty property) noexcept
-    {
-        try
-        {
-            const auto id = EntityId(entity);
-            const auto target = Find(scene, entity);
-            if (!target)
-                return std::nullopt;
-            if (property == ManagedUiFlagProperty::Focused)
-                return presentation && presentation->FocusedUiEntity() == id;
-            if (const auto slider = target.GetComponent<UiSliderComponent>())
-                return property == ManagedUiFlagProperty::Interactable ? std::optional<bool>(slider->Interactable())
-                                                                       : std::nullopt;
-            if (const auto toggle = target.GetComponent<UiToggleComponent>())
-                return property == ManagedUiFlagProperty::Checked ? std::optional<bool>(toggle->IsOn())
-                                                                  : std::optional<bool>(toggle->Interactable());
-            if (const auto input = target.GetComponent<UiInputFieldComponent>())
-                return property == ManagedUiFlagProperty::Interactable ? std::optional<bool>(input->Interactable())
-                                                                       : std::nullopt;
-            if (const auto scroll = target.GetComponent<UiScrollViewComponent>())
-                return property == ManagedUiFlagProperty::Interactable ? std::optional<bool>(scroll->Interactable())
-                                                                       : std::nullopt;
-        }
-        catch (...)
-        {
-        }
-        return std::nullopt;
-    }
-
-    bool SetManagedUiFlag(const Ref<Scene>& scene, const Ref<ScenePresentationRuntime>& presentation,
-                          const AssetId entity, const ManagedUiFlagProperty property, const bool value) noexcept
-    {
-        try
-        {
-            const auto target = Find(scene, entity);
-            if (!target)
-                return false;
-            if (property == ManagedUiFlagProperty::Focused)
-                return value && presentation && presentation->SetFocus(target.Id());
-            if (const auto slider = target.GetComponent<UiSliderComponent>())
-            {
-                if (property != ManagedUiFlagProperty::Interactable)
-                    return false;
-                slider->SetInteractable(value);
-                return true;
-            }
-            if (const auto toggle = target.GetComponent<UiToggleComponent>())
-            {
-                if (property == ManagedUiFlagProperty::Checked)
-                    toggle->SetIsOn(value);
-                else if (property == ManagedUiFlagProperty::Interactable)
-                    toggle->SetInteractable(value);
-                else
-                    return false;
-                return true;
-            }
-            if (const auto input = target.GetComponent<UiInputFieldComponent>())
-            {
-                if (property != ManagedUiFlagProperty::Interactable)
-                    return false;
-                input->SetInteractable(value);
-                return true;
-            }
-            if (const auto scroll = target.GetComponent<UiScrollViewComponent>())
-            {
-                if (property != ManagedUiFlagProperty::Interactable)
-                    return false;
-                scroll->SetInteractable(value);
-                return true;
-            }
-        }
-        catch (...)
-        {
-        }
-        return false;
-    }
-
-    std::optional<Vector2> ReadManagedUiVector(const Ref<Scene>& scene, const AssetId entity,
-                                               const ManagedUiVectorProperty property) noexcept
-    {
-        try
-        {
-            const auto target = Find(scene, entity);
-            const auto scroll = target ? target.GetComponent<UiScrollViewComponent>() : Ref<UiScrollViewComponent>{};
-            if (!scroll)
-                return std::nullopt;
-            return property == ManagedUiVectorProperty::ScrollOffset ? scroll->Offset() : scroll->ContentSize();
+            const auto element = presentation ? presentation->UiDocumentRoot(EntityId(document)) : std::nullopt;
+            return element ? std::optional(Convert(*element)) : std::nullopt;
         }
         catch (...)
         {
@@ -164,34 +35,15 @@ namespace Keire::Detail
         }
     }
 
-    bool SetManagedUiVector(const Ref<Scene>& scene, const AssetId entity, const ManagedUiVectorProperty property,
-                            const Vector2 value) noexcept
+    std::optional<ManagedUiDocumentElement>
+    FindManagedUiDocumentElement(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                 const AssetId stableId) noexcept
     {
         try
         {
-            const auto target = Find(scene, entity);
-            const auto scroll = target ? target.GetComponent<UiScrollViewComponent>() : Ref<UiScrollViewComponent>{};
-            if (!scroll)
-                return false;
-            if (property == ManagedUiVectorProperty::ScrollOffset)
-                scroll->SetOffset(value);
-            else
-                scroll->SetContentSize(value);
-            return true;
-        }
-        catch (...)
-        {
-            return false;
-        }
-    }
-
-    std::optional<std::string> ReadManagedUiInputText(const Ref<Scene>& scene, const AssetId entity) noexcept
-    {
-        try
-        {
-            const auto target = Find(scene, entity);
-            const auto input = target ? target.GetComponent<UiInputFieldComponent>() : Ref<UiInputFieldComponent>{};
-            return input ? std::optional<std::string>(input->Text()) : std::nullopt;
+            const auto element =
+                presentation ? presentation->FindUiDocumentElement(EntityId(document), stableId) : std::nullopt;
+            return element ? std::optional(Convert(*element)) : std::nullopt;
         }
         catch (...)
         {
@@ -199,45 +51,91 @@ namespace Keire::Detail
         }
     }
 
-    bool SetManagedUiInputText(const Ref<Scene>& scene, const AssetId entity, const std::string_view text) noexcept
+    std::optional<ManagedUiDocumentElement>
+    FindManagedUiDocumentElement(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                 const std::string_view name) noexcept
     {
         try
         {
-            const auto target = Find(scene, entity);
-            const auto input = target ? target.GetComponent<UiInputFieldComponent>() : Ref<UiInputFieldComponent>{};
-            if (!input)
-                return false;
-            input->SetText(std::string(text));
-            return true;
+            const auto element =
+                presentation ? presentation->FindUiDocumentElement(EntityId(document), name) : std::nullopt;
+            return element ? std::optional(Convert(*element)) : std::nullopt;
         }
         catch (...)
         {
-            return false;
+            return std::nullopt;
         }
     }
 
-    bool ConsumeManagedUiEvent(const Ref<ScenePresentationRuntime>& presentation, const AssetId entity,
-                               const RuntimeUiEventType type) noexcept
+    bool ManagedUiDocumentElementAlive(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                       const std::uint64_t documentGeneration, const std::uint64_t element) noexcept
     {
-        try
-        {
-            return presentation && presentation->ConsumeUiEvent(EntityId(entity), type);
-        }
-        catch (...)
-        {
-            return false;
-        }
+        return presentation && presentation->UiDocumentElementAlive(EntityId(document), documentGeneration, element);
     }
 
-    bool FocusManagedUi(const Ref<ScenePresentationRuntime>& presentation, const AssetId entity) noexcept
+    std::optional<std::string> ReadManagedUiDocumentElementText(const Ref<ScenePresentationRuntime>& presentation,
+                                                                const AssetId document,
+                                                                const std::uint64_t documentGeneration,
+                                                                const std::uint64_t element) noexcept
     {
-        try
-        {
-            return presentation && presentation->SetFocus(EntityId(entity));
-        }
-        catch (...)
-        {
-            return false;
-        }
+        return presentation ? presentation->ReadUiDocumentElementText(EntityId(document), documentGeneration, element)
+                            : std::nullopt;
+    }
+
+    bool SetManagedUiDocumentElementText(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                         const std::uint64_t documentGeneration, const std::uint64_t element,
+                                         const std::string_view text) noexcept
+    {
+        return presentation &&
+               presentation->SetUiDocumentElementText(EntityId(document), documentGeneration, element, text);
+    }
+
+    std::optional<float> ReadManagedUiDocumentElementValue(const Ref<ScenePresentationRuntime>& presentation,
+                                                           const AssetId document,
+                                                           const std::uint64_t documentGeneration,
+                                                           const std::uint64_t element) noexcept
+    {
+        return presentation ? presentation->ReadUiDocumentElementValue(EntityId(document), documentGeneration, element)
+                            : std::nullopt;
+    }
+
+    bool SetManagedUiDocumentElementValue(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                          const std::uint64_t documentGeneration, const std::uint64_t element,
+                                          const float value) noexcept
+    {
+        return presentation &&
+               presentation->SetUiDocumentElementValue(EntityId(document), documentGeneration, element, value);
+    }
+
+    std::optional<bool> ReadManagedUiDocumentElementFlag(const Ref<ScenePresentationRuntime>& presentation,
+                                                         const AssetId document, const std::uint64_t documentGeneration,
+                                                         const std::uint64_t element,
+                                                         const ManagedUiDocumentFlag property) noexcept
+    {
+        return presentation ? presentation->ReadUiDocumentElementFlag(EntityId(document), documentGeneration, element,
+                                                                      Convert(property))
+                            : std::nullopt;
+    }
+
+    bool SetManagedUiDocumentElementFlag(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                         const std::uint64_t documentGeneration, const std::uint64_t element,
+                                         const ManagedUiDocumentFlag property, const bool value) noexcept
+    {
+        return presentation && presentation->SetUiDocumentElementFlag(EntityId(document), documentGeneration, element,
+                                                                      Convert(property), value);
+    }
+
+    bool ConsumeManagedUiDocumentElementEvent(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                              const std::uint64_t documentGeneration, const std::uint64_t element,
+                                              const RuntimeUiEventType type) noexcept
+    {
+        return presentation &&
+               presentation->ConsumeUiDocumentElementEvent(EntityId(document), documentGeneration, element, type);
+    }
+
+    bool FocusManagedUiDocumentElement(const Ref<ScenePresentationRuntime>& presentation, const AssetId document,
+                                       const std::uint64_t documentGeneration, const std::uint64_t element) noexcept
+    {
+        return presentation && presentation->FocusUiDocumentElement(EntityId(document), documentGeneration, element);
     }
 } // namespace Keire::Detail

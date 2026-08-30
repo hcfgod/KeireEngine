@@ -508,8 +508,11 @@ namespace Keire
             if (m_Impl->PlayState != ScenePlayState::Faulted)
                 m_Impl->Invoke("VFX", [&] { m_Impl->SynchronizeVfx(deltaSeconds); });
             if (m_Impl->Presentation && m_Impl->PlayState != ScenePlayState::Faulted)
+            {
                 m_Impl->Presentation->Synchronize(m_Impl->Runtime, m_Impl->PresentationWidth,
                                                   m_Impl->PresentationHeight, true, m_Impl->SafeArea);
+                m_Impl->Presentation->AdvanceUi(std::max(deltaSeconds, 0.0F));
+            }
         }
     }
 

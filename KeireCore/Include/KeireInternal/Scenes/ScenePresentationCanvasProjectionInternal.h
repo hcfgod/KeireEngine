@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Keire/Scenes/ScenePresentationRuntime.h"
+#include "Keire/Ui/UiToolkit.h"
 
 #include <array>
 #include <map>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace Keire::Detail
@@ -19,7 +21,21 @@ namespace Keire::Detail
         Vector2 ReferenceResolution{1920.0F, 1080.0F};
         Vector2 Pivot{0.5F, 0.5F};
         Vector2 Viewport;
-        float WorldUnitsPerPixel = 0.01F;
+        Vector2 WorldUnitsPerPixel{0.01F, 0.01F};
+        std::int32_t SortingOrder = 0;
+        bool ToolkitDocument = false;
+        UiPanelTarget ToolkitTarget = UiPanelTarget::ScreenOverlay;
+        AssetId RenderTexture;
+        bool DepthTest = false;
+        bool ReceivesInput = true;
+    };
+
+    struct UiDocumentPanelProjection final
+    {
+        EntityId Entity;
+        RuntimeUiElementId Root;
+        UiPanelSettingsDefinition Settings;
+        bool ReceivesInput = true;
     };
 
     [[nodiscard]] std::optional<Vector2> MapCanvasLayoutToViewport(const ProjectedCanvasState& canvas,
@@ -46,7 +62,8 @@ namespace Keire::Detail
         void Clear() noexcept;
         void Assign(RuntimeUiElementId node, RuntimeUiElementId canvasRoot);
         void Rebuild(const Ref<Scene>& scene, const std::map<EntityId, RuntimeUiElementId>& uiNodes,
-                     float viewportWidth, float viewportHeight, const RenderCamera* viewportCamera);
+                     std::span<const UiDocumentPanelProjection> documents, float viewportWidth, float viewportHeight,
+                     const RenderCamera* viewportCamera);
 
         [[nodiscard]] std::optional<ProjectedCanvasHit> ResolveHit(const RuntimeUiTree& tree, float x,
                                                                    float y) const noexcept;
@@ -56,7 +73,10 @@ namespace Keire::Detail
         [[nodiscard]] std::optional<ScenePresentationUiGeometry>
         UiGeometry(EntityId entity, const RuntimeUiTree& tree,
                    const std::map<EntityId, RuntimeUiElementId>& uiNodes) const noexcept;
-        void Draw(const RuntimeUiTree& tree, UiFrame& ui, float offsetX, float offsetY) const;
+        [[nodiscard]] std::vector<RuntimeUiRenderSubmission> RenderSubmissions(const Ref<RuntimeUiTree>& tree,
+                                                                               const Ref<RenderView>& view) const;
+        void Draw(const RuntimeUiTree& tree, UiFrame& ui, float offsetX, float offsetY, bool includeOverlay,
+                  bool includeWorld) const;
 
       private:
         std::map<std::uint64_t, RuntimeUiElementId> m_NodeCanvases;

@@ -144,13 +144,21 @@ namespace KeireEditor
         }
     }
 
-    SceneUiRectHandleEdit CalculateSceneUiRectHandleEdit(
-        const SceneUiRectHandle handle, const std::span<const Keire::Vector2, 4> projectedCorners,
-        const Keire::Vector2 pointerDelta, const Keire::Vector2 anchoredPosition, const Keire::Vector2 sizeDelta,
-        const Keire::Vector2 referenceResolution, const bool canvasRoot)
+    Keire::Vector2 EffectiveSceneUiWorldPanelSize(const Keire::Vector2 basePhysicalSize,
+                                                  const Keire::Vector3 localScale) noexcept
     {
-        SceneUiRectHandleEdit result{anchoredPosition, sizeDelta, referenceResolution};
-        if (handle == SceneUiRectHandle::None)
+        return {basePhysicalSize.X * std::abs(localScale.X), basePhysicalSize.Y * std::abs(localScale.Y)};
+    }
+
+    SceneUiWorldPanelHandleEdit
+    CalculateSceneUiWorldPanelHandleEdit(const SceneUiRectHandle handle,
+                                         const std::span<const Keire::Vector2, 4> projectedCorners,
+                                         const Keire::Vector2 pointerDelta, const Keire::Vector3 initialLocalScale,
+                                         const Keire::Vector2 basePhysicalSize, const bool constrainAspect) noexcept
+    {
+        SceneUiWorldPanelHandleEdit result{initialLocalScale,
+                                           EffectiveSceneUiWorldPanelSize(basePhysicalSize, initialLocalScale)};
+        if (handle == SceneUiRectHandle::None || handle == SceneUiRectHandle::Center)
             return result;
         const Keire::Vector2 horizontal{projectedCorners[1].X - projectedCorners[0].X,
                                         projectedCorners[1].Y - projectedCorners[0].Y};
@@ -163,27 +171,36 @@ namespace KeireEditor
             pointerDelta.X * horizontal.X / horizontalLength + pointerDelta.Y * horizontal.Y / horizontalLength;
         const float verticalPixels =
             pointerDelta.X * vertical.X / verticalLength + pointerDelta.Y * vertical.Y / verticalLength;
-        if (handle == SceneUiRectHandle::Center)
-        {
-            result.AnchoredPosition.X += horizontalPixels / horizontalLength * referenceResolution.X;
-            result.AnchoredPosition.Y += verticalPixels / verticalLength * referenceResolution.Y;
-            return result;
-        }
         const bool right = handle == SceneUiRectHandle::TopRight || handle == SceneUiRectHandle::BottomRight;
         const bool bottom = handle == SceneUiRectHandle::BottomRight || handle == SceneUiRectHandle::BottomLeft;
-        const float widthDelta = horizontalPixels / horizontalLength * referenceResolution.X * (right ? 1.0F : -1.0F);
-        const float heightDelta = verticalPixels / verticalLength * referenceResolution.Y * (bottom ? 1.0F : -1.0F);
-        if (canvasRoot)
+        float horizontalRatio =
+            std::max(0.01F, (horizontalLength + horizontalPixels * (right ? 1.0F : -1.0F)) / horizontalLength);
+        float verticalRatio =
+            std::max(0.01F, (verticalLength + verticalPixels * (bottom ? 1.0F : -1.0F)) / verticalLength);
+        if (constrainAspect)
         {
-            result.ReferenceResolution.X = std::max(1.0F, referenceResolution.X + widthDelta);
-            result.ReferenceResolution.Y = std::max(1.0F, referenceResolution.Y + heightDelta);
-            return result;
+            const float ratio =
+                std::abs(horizontalRatio - 1.0F) >= std::abs(verticalRatio - 1.0F) ? horizontalRatio : verticalRatio;
+            horizontalRatio = ratio;
+            verticalRatio = ratio;
         }
-        result.SizeDelta.X = std::max(1.0F, sizeDelta.X + widthDelta);
-        result.SizeDelta.Y = std::max(1.0F, sizeDelta.Y + heightDelta);
-        result.AnchoredPosition.X += widthDelta * (right ? 0.5F : -0.5F);
-        result.AnchoredPosition.Y += heightDelta * (bottom ? 0.5F : -0.5F);
+        result.LocalScale.X = initialLocalScale.X * horizontalRatio;
+        result.LocalScale.Y = initialLocalScale.Y * verticalRatio;
+        result.EffectivePhysicalSize = EffectiveSceneUiWorldPanelSize(basePhysicalSize, result.LocalScale);
         return result;
+    }
+
+    SceneUiDocumentAuthoringRoute
+    ResolveSceneUiDocumentAuthoringRoute(const Keire::UiDocumentComponent& component,
+                                         const std::optional<Keire::UiPanelSettingsDefinition> settings) noexcept
+    {
+        if (!component.VisualTree())
+            return SceneUiDocumentAuthoringRoute::None;
+        if (component.PanelSettings() && !settings)
+            return SceneUiDocumentAuthoringRoute::None;
+        const auto target = settings ? settings->Target : Keire::UiPanelTarget::ScreenOverlay;
+        return target == Keire::UiPanelTarget::WorldSurface ? SceneUiDocumentAuthoringRoute::WorldSurfaceGizmo
+                                                            : SceneUiDocumentAuthoringRoute::FocusUiBuilder;
     }
 
     Keire::UiPosition StableNodeGraphCanvas::ToScreen(const Keire::Vector2 position,

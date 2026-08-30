@@ -1,7 +1,12 @@
 #include "Keire/Ui/RuntimeUi.h"
 
+#include "KeireInternal/Ui/RuntimeUiDiagnosticsInternal.h"
+#include "KeireInternal/Ui/RuntimeUiLayoutInternal.h"
+#include "KeireInternal/Ui/RuntimeUiStyleInternal.h"
+
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <deque>
 #include <limits>
@@ -19,106 +24,15 @@ namespace Keire
 
         [[nodiscard]] bool Finite(const float value) noexcept { return std::isfinite(value); }
 
-        void ValidateInsets(const RuntimeUiInsets& value)
-        {
-            if (!Finite(value.Left) || !Finite(value.Top) || !Finite(value.Right) || !Finite(value.Bottom) ||
-                value.Left < 0.0F || value.Top < 0.0F || value.Right < 0.0F || value.Bottom < 0.0F)
-                throw std::invalid_argument("Runtime UI insets must be finite and non-negative.");
-        }
-
-        void ValidateStyle(const RuntimeUiStyle& style)
-        {
-            const float values[] = {
-                style.X,
-                style.Y,
-                style.Width,
-                style.Height,
-                style.AnchorMinimum.X,
-                style.AnchorMinimum.Y,
-                style.AnchorMaximum.X,
-                style.AnchorMaximum.Y,
-                style.Pivot.X,
-                style.Pivot.Y,
-                style.AnchoredPosition.X,
-                style.AnchoredPosition.Y,
-                style.SizeDelta.X,
-                style.SizeDelta.Y,
-                style.LocalScale.X,
-                style.LocalScale.Y,
-                style.MinimumWidth,
-                style.MinimumHeight,
-                style.MaximumWidth,
-                style.MaximumHeight,
-                style.FlexGrow,
-                style.Gap,
-                style.BorderWidth,
-                style.CornerRadius,
-                style.Opacity,
-                style.FontSize,
-                style.GridCellSize.X,
-                style.GridCellSize.Y,
-                style.ContentOffset.X,
-                style.ContentOffset.Y,
-            };
-            if (!std::ranges::all_of(values, Finite) || style.Width < 0.0F || style.Height < 0.0F ||
-                style.AnchorMinimum.X < 0.0F || style.AnchorMinimum.Y < 0.0F || style.AnchorMaximum.X > 1.0F ||
-                style.AnchorMaximum.Y > 1.0F || style.AnchorMinimum.X > style.AnchorMaximum.X ||
-                style.AnchorMinimum.Y > style.AnchorMaximum.Y || style.Pivot.X < 0.0F || style.Pivot.X > 1.0F ||
-                style.Pivot.Y < 0.0F || style.Pivot.Y > 1.0F || style.LocalScale.X <= 0.0F ||
-                style.LocalScale.Y <= 0.0F || style.GridCellSize.X < 0.0F || style.GridCellSize.Y < 0.0F ||
-                style.MinimumWidth < 0.0F || style.MinimumHeight < 0.0F || style.MaximumWidth < style.MinimumWidth ||
-                style.MaximumHeight < style.MinimumHeight || style.FlexGrow < 0.0F || style.Gap < 0.0F ||
-                style.BorderWidth < 0.0F || style.CornerRadius < 0.0F || style.Opacity < 0.0F || style.Opacity > 1.0F ||
-                style.FontSize <= 0.0F || style.ContentOffset.X < 0.0F || style.ContentOffset.Y < 0.0F ||
-                style.NavigationOrder < 0)
-                throw std::invalid_argument("Runtime UI style contains invalid dimensions.");
-            ValidateInsets(style.Margin);
-            ValidateInsets(style.Padding);
-        }
-
-        void ValidateControl(const RuntimeUiControlState& control)
-        {
-            if (!Finite(control.Minimum) || !Finite(control.Maximum) || !Finite(control.Value) ||
-                !Finite(control.ContentSize.X) || !Finite(control.ContentSize.Y) ||
-                control.Minimum >= control.Maximum || control.Value < control.Minimum ||
-                control.Value > control.Maximum || control.ContentSize.X < 0.0F || control.ContentSize.Y < 0.0F)
-                throw std::invalid_argument("Runtime UI control state is invalid.");
-        }
-
-        [[nodiscard]] Color WithOpacity(Color color, const float opacity) noexcept
-        {
-            color.Alpha *= opacity;
-            return color;
-        }
     } // namespace
-
-    bool RuntimeUiRect::Contains(const float x, const float y) const noexcept
-    {
-        return !Empty() && x >= X && y >= Y && x <= X + Width && y <= Y + Height;
-    }
-
-    RuntimeUiRect RuntimeUiRect::Intersect(const RuntimeUiRect other) const noexcept
-    {
-        const auto left = std::max(X, other.X);
-        const auto top = std::max(Y, other.Y);
-        const auto right = std::min(X + Width, other.X + other.Width);
-        const auto bottom = std::min(Y + Height, other.Y + other.Height);
-        return {left, top, std::max(0.0F, right - left), std::max(0.0F, bottom - top)};
-    }
 
     class RuntimeUiTree::Impl final
     {
       public:
-        struct Node final
-        {
-            std::uint32_t Generation = 1;
-            bool Alive = false;
-            RuntimeUiElementState State;
-            std::vector<RuntimeUiElementId> Children;
-        };
+        using Node = Detail::RuntimeUiTreeNode;
 
         Impl(const std::size_t maximumElements, const std::size_t maximumEvents)
-            : MaximumElements(maximumElements), MaximumEvents(maximumEvents)
+            : MaximumElements(maximumElements), MaximumEvents(maximumEvents), Diagnostics(maximumEvents)
         {
             if (maximumElements == 0 || maximumElements > 1'000'000 || maximumEvents == 0 || maximumEvents > 1'000'000)
                 throw std::invalid_argument("Runtime UI capacity is invalid.");
@@ -164,6 +78,40 @@ namespace Keire
                 return;
             }
             Events.push_back(event);
+            std::vector<RuntimeUiElementId> route;
+            auto current = event.Target;
+            while (const auto index = Index(current))
+            {
+                route.push_back(current);
+                current = Nodes[*index].State.Parent;
+            }
+            Diagnostics.RecordEvent(event, route);
+        }
+
+        void MarkDirty(const std::size_t index, const RuntimeUiDirtyReason reason)
+        {
+            auto current = std::optional(index);
+            while (current)
+            {
+                auto& node = Nodes[*current];
+                const bool resetReason = !node.Dirty;
+                Diagnostics.MarkDirty(MakeId(*current), *current == index ? reason : RuntimeUiDirtyReason::Descendant,
+                                      resetReason);
+                if (!node.Dirty)
+                {
+                    node.Dirty = true;
+                    ++DirtyElements;
+                }
+                current = Index(node.State.Parent);
+            }
+            LayoutDirty = true;
+            ++TreeGeneration;
+        }
+
+        [[nodiscard]] Vector2 MeasureIntrinsic(const std::size_t index, const RuntimeUiRect available,
+                                               const float scale) const
+        {
+            return Detail::MeasureRuntimeUiIntrinsic(Nodes, index, available, scale);
         }
 
         void LayoutNode(const std::size_t index, RuntimeUiRect available, const RuntimeUiRect inheritedClip,
@@ -171,6 +119,7 @@ namespace Keire
         {
             auto& node = Nodes[index];
             auto& state = node.State;
+            state.LayoutScale = scale;
             if (!state.Visible)
                 return;
 
@@ -193,25 +142,51 @@ namespace Keire
                 }
                 else
                 {
-                    rect.X = available.X + style.X * scale;
-                    rect.Y = available.Y + style.Y * scale;
-                    rect.Width = style.Width > 0.0F ? style.Width * scale : available.Width - style.X * scale;
-                    rect.Height = style.Height > 0.0F ? style.Height * scale : available.Height - style.Y * scale;
+                    const float offsetX =
+                        Detail::ResolveRuntimeUiPercent(style.XPercent, available.Width, style.X * scale);
+                    const float offsetY =
+                        Detail::ResolveRuntimeUiPercent(style.YPercent, available.Height, style.Y * scale);
+                    rect.X = available.X + offsetX;
+                    rect.Y = available.Y + offsetY;
+                    rect.Width = style.WidthPercent >= 0.0F
+                                     ? style.WidthPercent * available.Width
+                                     : (style.Width > 0.0F ? style.Width * scale : available.Width - offsetX);
+                    rect.Height = style.HeightPercent >= 0.0F
+                                      ? style.HeightPercent * available.Height
+                                      : (style.Height > 0.0F ? style.Height * scale : available.Height - offsetY);
                 }
             }
             else
             {
-                if (!widthControlled && style.Width > 0.0F)
-                    rect.Width = style.Width * scale;
-                if (!heightControlled && style.Height > 0.0F)
-                    rect.Height = style.Height * scale;
+                if (!widthControlled)
+                {
+                    if (style.WidthPercent >= 0.0F)
+                        rect.Width = style.WidthPercent * available.Width;
+                    else if (style.Width > 0.0F)
+                        rect.Width = style.Width * scale;
+                }
+                if (!heightControlled)
+                {
+                    if (style.HeightPercent >= 0.0F)
+                        rect.Height = style.HeightPercent * available.Height;
+                    else if (style.Height > 0.0F)
+                        rect.Height = style.Height * scale;
+                }
             }
             rect.X += style.Margin.Left * scale;
             rect.Y += style.Margin.Top * scale;
             rect.Width = std::max(0.0F, rect.Width - (style.Margin.Left + style.Margin.Right) * scale);
             rect.Height = std::max(0.0F, rect.Height - (style.Margin.Top + style.Margin.Bottom) * scale);
-            rect.Width = std::clamp(rect.Width, style.MinimumWidth * scale, style.MaximumWidth * scale);
-            rect.Height = std::clamp(rect.Height, style.MinimumHeight * scale, style.MaximumHeight * scale);
+            const float minimumWidth =
+                Detail::ResolveRuntimeUiPercent(style.MinimumWidthPercent, available.Width, style.MinimumWidth * scale);
+            const float minimumHeight = Detail::ResolveRuntimeUiPercent(style.MinimumHeightPercent, available.Height,
+                                                                        style.MinimumHeight * scale);
+            const float maximumWidth =
+                Detail::ResolveRuntimeUiPercent(style.MaximumWidthPercent, available.Width, style.MaximumWidth * scale);
+            const float maximumHeight = Detail::ResolveRuntimeUiPercent(style.MaximumHeightPercent, available.Height,
+                                                                        style.MaximumHeight * scale);
+            rect.Width = std::clamp(rect.Width, minimumWidth, std::max(minimumWidth, maximumWidth));
+            rect.Height = std::clamp(rect.Height, minimumHeight, std::max(minimumHeight, maximumHeight));
             const auto scaledWidth = rect.Width * style.LocalScale.X;
             const auto scaledHeight = rect.Height * style.LocalScale.Y;
             rect.X += (rect.Width - scaledWidth) * style.Pivot.X;
@@ -228,7 +203,7 @@ namespace Keire
                 ++InteractableElements;
 
             HitElements.push_back(MakeId(index));
-            EmitDraw(index);
+            EmitDraw(index, scale);
 
             RuntimeUiRect content{
                 rect.X + style.Padding.Left * scale,
@@ -249,11 +224,177 @@ namespace Keire
             const bool vertical =
                 state.Type == RuntimeUiElementType::VerticalLayout || state.Type == RuntimeUiElementType::ScrollView;
             const bool grid = state.Type == RuntimeUiElementType::GridLayout;
+            auto orderedChildren = node.Children;
+            if (style.ReverseChildren)
+                std::ranges::reverse(orderedChildren);
+            if ((horizontal || vertical) && style.Wrap != RuntimeUiWrapMode::NoWrap)
+            {
+                struct WrapItem final
+                {
+                    std::size_t Index = 0;
+                    float Main = 0.0F;
+                    float Cross = 0.0F;
+                    float MainMargin = 0.0F;
+                    float CrossMargin = 0.0F;
+                };
+                struct WrapLine final
+                {
+                    std::vector<WrapItem> Items;
+                    float Main = 0.0F;
+                    float Cross = 0.0F;
+                };
+
+                const float mainCapacity = horizontal ? content.Width : content.Height;
+                const float crossCapacity = horizontal ? content.Height : content.Width;
+                const float authoredGap = style.Gap * scale;
+                std::vector<WrapLine> lines(1);
+                for (const auto childId : orderedChildren)
+                {
+                    const auto childIndex = Index(childId);
+                    if (!childIndex || !Nodes[*childIndex].State.Visible ||
+                        Nodes[*childIndex].State.Style.Position == RuntimeUiPositionMode::Absolute)
+                        continue;
+                    const auto& childStyle = Nodes[*childIndex].State.Style;
+                    const auto intrinsic = MeasureIntrinsic(*childIndex, content, scale);
+                    WrapItem item;
+                    item.Index = *childIndex;
+                    item.Main = horizontal ? Detail::ResolveRuntimeUiPercent(
+                                                 childStyle.WidthPercent, content.Width,
+                                                 childStyle.Width > 0.0F ? childStyle.Width * scale : intrinsic.X)
+                                           : Detail::ResolveRuntimeUiPercent(
+                                                 childStyle.HeightPercent, content.Height,
+                                                 childStyle.Height > 0.0F ? childStyle.Height * scale : intrinsic.Y);
+                    item.Cross = horizontal ? Detail::ResolveRuntimeUiPercent(
+                                                  childStyle.HeightPercent, content.Height,
+                                                  childStyle.Height > 0.0F ? childStyle.Height * scale : intrinsic.Y)
+                                            : Detail::ResolveRuntimeUiPercent(
+                                                  childStyle.WidthPercent, content.Width,
+                                                  childStyle.Width > 0.0F ? childStyle.Width * scale : intrinsic.X);
+                    item.MainMargin = (horizontal ? childStyle.Margin.Left + childStyle.Margin.Right
+                                                  : childStyle.Margin.Top + childStyle.Margin.Bottom) *
+                                      scale;
+                    item.CrossMargin = (horizontal ? childStyle.Margin.Top + childStyle.Margin.Bottom
+                                                   : childStyle.Margin.Left + childStyle.Margin.Right) *
+                                       scale;
+                    auto& line = lines.back();
+                    const float separator = line.Items.empty() ? 0.0F : authoredGap;
+                    if (!line.Items.empty() && line.Main + separator + item.Main + item.MainMargin > mainCapacity)
+                        lines.push_back({});
+                    auto& target = lines.back();
+                    if (!target.Items.empty())
+                        target.Main += authoredGap;
+                    target.Main += item.Main + item.MainMargin;
+                    target.Cross = std::max(target.Cross, item.Cross + item.CrossMargin);
+                    target.Items.push_back(item);
+                }
+                if (lines.size() == 1 && lines.front().Items.empty())
+                    lines.clear();
+                if (style.Wrap == RuntimeUiWrapMode::WrapReverse)
+                    std::ranges::reverse(lines);
+
+                float crossCursor = horizontal ? content.Y : content.X;
+                for (const auto& line : lines)
+                {
+                    float grow = 0.0F;
+                    float shrinkWeight = 0.0F;
+                    for (const auto& item : line.Items)
+                    {
+                        const auto& childStyle = Nodes[item.Index].State.Style;
+                        grow += childStyle.FlexGrow;
+                        shrinkWeight += item.Main * childStyle.FlexShrink;
+                    }
+                    const float free = std::max(0.0F, mainCapacity - line.Main);
+                    const float overflow = std::max(0.0F, line.Main - mainCapacity);
+                    const float unclaimed = grow > 0.0F ? 0.0F : free;
+                    float lineGap = authoredGap;
+                    float mainCursor = horizontal ? content.X : content.Y;
+                    switch (style.JustifyContent)
+                    {
+                    case RuntimeUiJustification::Center:
+                        mainCursor += unclaimed * 0.5F;
+                        break;
+                    case RuntimeUiJustification::End:
+                        mainCursor += unclaimed;
+                        break;
+                    case RuntimeUiJustification::SpaceBetween:
+                        if (line.Items.size() > 1)
+                            lineGap += unclaimed / static_cast<float>(line.Items.size() - 1);
+                        break;
+                    case RuntimeUiJustification::SpaceAround:
+                        if (!line.Items.empty())
+                        {
+                            const float share = unclaimed / static_cast<float>(line.Items.size());
+                            mainCursor += share * 0.5F;
+                            lineGap += share;
+                        }
+                        break;
+                    case RuntimeUiJustification::SpaceEvenly:
+                        if (!line.Items.empty())
+                        {
+                            const float share = unclaimed / static_cast<float>(line.Items.size() + 1);
+                            mainCursor += share;
+                            lineGap += share;
+                        }
+                        break;
+                    case RuntimeUiJustification::Start:
+                        break;
+                    }
+
+                    for (const auto& item : line.Items)
+                    {
+                        const auto& childStyle = Nodes[item.Index].State.Style;
+                        const float expanded = grow > 0.0F ? free * childStyle.FlexGrow / grow : 0.0F;
+                        const float reduced =
+                            shrinkWeight > 0.0F ? overflow * item.Main * childStyle.FlexShrink / shrinkWeight : 0.0F;
+                        const float minimum =
+                            horizontal
+                                ? Detail::ResolveRuntimeUiPercent(childStyle.MinimumWidthPercent, content.Width,
+                                                                  childStyle.MinimumWidth * scale)
+                                : Detail::ResolveRuntimeUiPercent(childStyle.MinimumHeightPercent, content.Height,
+                                                                  childStyle.MinimumHeight * scale);
+                        const float main = std::max(minimum, item.Main + expanded - reduced);
+                        const auto alignment = childStyle.HasAlignSelf ? childStyle.AlignSelf
+                                                                       : (horizontal ? style.ChildVerticalAlignment
+                                                                                     : style.ChildHorizontalAlignment);
+                        float cross = item.Cross;
+                        if (alignment == RuntimeUiAlignment::Stretch || cross <= 0.0F)
+                            cross = std::max(0.0F, line.Cross - item.CrossMargin);
+                        float crossOffset = 0.0F;
+                        if (alignment == RuntimeUiAlignment::Center)
+                            crossOffset = (line.Cross - cross - item.CrossMargin) * 0.5F;
+                        else if (alignment == RuntimeUiAlignment::End)
+                            crossOffset = line.Cross - cross - item.CrossMargin;
+                        RuntimeUiRect childAvailable;
+                        if (horizontal)
+                            childAvailable = {mainCursor, crossCursor + crossOffset, main, cross};
+                        else
+                            childAvailable = {crossCursor + crossOffset, mainCursor, cross, main};
+                        LayoutNode(item.Index, childAvailable, childClip, scale, true, true);
+                        mainCursor += main + item.MainMargin + lineGap;
+                    }
+                    crossCursor += std::min(line.Cross, crossCapacity) + authoredGap;
+                }
+
+                for (const auto childId : orderedChildren)
+                {
+                    const auto childIndex = Index(childId);
+                    if (childIndex && Nodes[*childIndex].State.Visible &&
+                        Nodes[*childIndex].State.Style.Position == RuntimeUiPositionMode::Absolute)
+                        LayoutNode(*childIndex, content, childClip, scale);
+                }
+                if (style.ClipChildren)
+                    Draws.push_back({.Type = RuntimeUiDrawType::PopClip,
+                                     .Element = MakeId(index),
+                                     .Rect = state.ClipRect,
+                                     .ClipRect = state.ClipRect});
+                return;
+            }
             float cursor = horizontal ? content.X : content.Y;
             std::size_t flowingChildren = 0;
             float fixedSize = 0.0F;
             float flex = 0.0F;
-            for (const auto childId : node.Children)
+            float shrinkWeight = 0.0F;
+            for (const auto childId : orderedChildren)
             {
                 const auto childIndex = Index(childId);
                 if (!childIndex || !Nodes[*childIndex].State.Visible || grid ||
@@ -261,9 +402,18 @@ namespace Keire
                     continue;
                 ++flowingChildren;
                 const auto& childStyle = Nodes[*childIndex].State.Style;
-                fixedSize += (horizontal ? childStyle.Width + childStyle.Margin.Left + childStyle.Margin.Right
-                                         : childStyle.Height + childStyle.Margin.Top + childStyle.Margin.Bottom) *
-                             scale;
+                const auto intrinsic = MeasureIntrinsic(*childIndex, content, scale);
+                const float authored =
+                    horizontal ? Detail::ResolveRuntimeUiPercent(childStyle.WidthPercent, content.Width,
+                                                                 childStyle.Width > 0.0F ? childStyle.Width * scale
+                                                                                         : intrinsic.X)
+                               : Detail::ResolveRuntimeUiPercent(childStyle.HeightPercent, content.Height,
+                                                                 childStyle.Height > 0.0F ? childStyle.Height * scale
+                                                                                          : intrinsic.Y);
+                fixedSize += authored + (horizontal ? childStyle.Margin.Left + childStyle.Margin.Right
+                                                    : childStyle.Margin.Top + childStyle.Margin.Bottom) *
+                                            scale;
+                shrinkWeight += authored * childStyle.FlexShrink;
                 auto childFlex = childStyle.FlexGrow;
                 if ((horizontal && style.ForceExpandWidth) || (vertical && style.ForceExpandHeight))
                     childFlex = std::max(childFlex, 1.0F);
@@ -273,9 +423,43 @@ namespace Keire
                 fixedSize += static_cast<float>(flowingChildren - 1) * style.Gap * scale;
             const float availableFlow = horizontal ? content.Width : content.Height;
             const float flexibleSpace = std::max(0.0F, availableFlow - fixedSize);
+            const float overflow = std::max(0.0F, fixedSize - availableFlow);
+            float effectiveGap = style.Gap * scale;
+            const float unclaimed = flex > 0.0F ? 0.0F : flexibleSpace;
+            switch (style.JustifyContent)
+            {
+            case RuntimeUiJustification::Center:
+                cursor += unclaimed * 0.5F;
+                break;
+            case RuntimeUiJustification::End:
+                cursor += unclaimed;
+                break;
+            case RuntimeUiJustification::SpaceBetween:
+                if (flowingChildren > 1)
+                    effectiveGap += unclaimed / static_cast<float>(flowingChildren - 1);
+                break;
+            case RuntimeUiJustification::SpaceAround:
+                if (flowingChildren > 0)
+                {
+                    const float share = unclaimed / static_cast<float>(flowingChildren);
+                    cursor += share * 0.5F;
+                    effectiveGap += share;
+                }
+                break;
+            case RuntimeUiJustification::SpaceEvenly:
+                if (flowingChildren > 0)
+                {
+                    const float share = unclaimed / static_cast<float>(flowingChildren + 1);
+                    cursor += share;
+                    effectiveGap += share;
+                }
+                break;
+            case RuntimeUiJustification::Start:
+                break;
+            }
 
             std::size_t flowIndex = 0;
-            for (const auto childId : node.Children)
+            for (const auto childId : orderedChildren)
             {
                 const auto childIndex = Index(childId);
                 if (!childIndex || !Nodes[*childIndex].State.Visible)
@@ -302,12 +486,26 @@ namespace Keire
                 }
                 else if (childStyle.Position != RuntimeUiPositionMode::Absolute && (horizontal || vertical))
                 {
-                    const float authored = (horizontal ? childStyle.Width : childStyle.Height) * scale;
+                    const auto intrinsic = MeasureIntrinsic(*childIndex, content, scale);
+                    const float authored =
+                        horizontal ? Detail::ResolveRuntimeUiPercent(childStyle.WidthPercent, content.Width,
+                                                                     childStyle.Width > 0.0F ? childStyle.Width * scale
+                                                                                             : intrinsic.X)
+                                   : Detail::ResolveRuntimeUiPercent(
+                                         childStyle.HeightPercent, content.Height,
+                                         childStyle.Height > 0.0F ? childStyle.Height * scale : intrinsic.Y);
                     auto childFlex = childStyle.FlexGrow;
                     if ((horizontal && style.ForceExpandWidth) || (vertical && style.ForceExpandHeight))
                         childFlex = std::max(childFlex, 1.0F);
                     const float flexible = flex > 0.0F ? flexibleSpace * (childFlex / flex) : 0.0F;
-                    const float extent = authored + flexible;
+                    const float shrink =
+                        shrinkWeight > 0.0F ? overflow * (authored * childStyle.FlexShrink / shrinkWeight) : 0.0F;
+                    const float minimum =
+                        horizontal ? Detail::ResolveRuntimeUiPercent(childStyle.MinimumWidthPercent, content.Width,
+                                                                     childStyle.MinimumWidth * scale)
+                                   : Detail::ResolveRuntimeUiPercent(childStyle.MinimumHeightPercent, content.Height,
+                                                                     childStyle.MinimumHeight * scale);
+                    const float extent = std::max(minimum, authored + flexible - shrink);
                     if (horizontal)
                     {
                         childAvailable.X = cursor;
@@ -315,17 +513,20 @@ namespace Keire
                         childWidthControlled = true;
                         if (style.ControlChildHeight || style.ForceExpandHeight)
                             childHeightControlled = true;
-                        else if (childStyle.Height > 0.0F)
+                        else
                         {
-                            childAvailable.Height = std::min(content.Height, childStyle.Height * scale);
+                            childAvailable.Height =
+                                std::min(content.Height,
+                                         Detail::ResolveRuntimeUiPercent(
+                                             childStyle.HeightPercent, content.Height,
+                                             childStyle.Height > 0.0F ? childStyle.Height * scale : intrinsic.Y));
                             if (style.ChildVerticalAlignment == RuntimeUiAlignment::Center)
                                 childAvailable.Y += (content.Height - childAvailable.Height) * 0.5F;
                             else if (style.ChildVerticalAlignment == RuntimeUiAlignment::End)
                                 childAvailable.Y += content.Height - childAvailable.Height;
                             childHeightControlled = true;
                         }
-                        cursor +=
-                            extent + style.Gap * scale + (childStyle.Margin.Left + childStyle.Margin.Right) * scale;
+                        cursor += extent + effectiveGap + (childStyle.Margin.Left + childStyle.Margin.Right) * scale;
                     }
                     else
                     {
@@ -334,17 +535,19 @@ namespace Keire
                         childHeightControlled = true;
                         if (style.ControlChildWidth || style.ForceExpandWidth)
                             childWidthControlled = true;
-                        else if (childStyle.Width > 0.0F)
+                        else
                         {
-                            childAvailable.Width = std::min(content.Width, childStyle.Width * scale);
+                            childAvailable.Width = std::min(
+                                content.Width, Detail::ResolveRuntimeUiPercent(
+                                                   childStyle.WidthPercent, content.Width,
+                                                   childStyle.Width > 0.0F ? childStyle.Width * scale : intrinsic.X));
                             if (style.ChildHorizontalAlignment == RuntimeUiAlignment::Center)
                                 childAvailable.X += (content.Width - childAvailable.Width) * 0.5F;
                             else if (style.ChildHorizontalAlignment == RuntimeUiAlignment::End)
                                 childAvailable.X += content.Width - childAvailable.Width;
                             childWidthControlled = true;
                         }
-                        cursor +=
-                            extent + style.Gap * scale + (childStyle.Margin.Top + childStyle.Margin.Bottom) * scale;
+                        cursor += extent + effectiveGap + (childStyle.Margin.Top + childStyle.Margin.Bottom) * scale;
                     }
                 }
                 LayoutNode(*childIndex, childAvailable, childClip, scale, childWidthControlled, childHeightControlled);
@@ -357,33 +560,45 @@ namespace Keire
                                  .ClipRect = state.ClipRect});
         }
 
-        void EmitDraw(const std::size_t index)
+        void EmitDraw(const std::size_t index, const float scale)
         {
             const auto& state = Nodes[index].State;
             const auto id = MakeId(index);
             auto background = state.Style.Background;
+            auto backgroundGradient = state.Style.BackgroundGradient;
             if (!state.Enabled && state.Style.DisabledBackground.Alpha > 0.0F)
+            {
                 background = state.Style.DisabledBackground;
+                backgroundGradient = {};
+            }
             else if (state.Pressed && state.Style.PressedBackground.Alpha > 0.0F)
+            {
                 background = state.Style.PressedBackground;
+                backgroundGradient = {};
+            }
             else if ((state.Hovered || state.Focused) && state.Style.HoverBackground.Alpha > 0.0F)
+            {
                 background = state.Style.HoverBackground;
-            if (background.Alpha > 0.0F)
-                Draws.push_back({.Type = RuntimeUiDrawType::Quad,
-                                 .Element = id,
-                                 .Rect = state.Rect,
-                                 .ClipRect = state.ClipRect,
-                                 .ColorValue = WithOpacity(background, state.Style.Opacity),
-                                 .BorderColor = WithOpacity(state.Style.Border, state.Style.Opacity),
-                                 .CornerRadius = state.Style.CornerRadius,
-                                 .BorderWidth = state.Style.BorderWidth});
+                backgroundGradient = {};
+            }
+            if (background.Alpha > 0.0F || backgroundGradient.Kind != RuntimeUiGradientKind::None)
+                Draws.push_back(
+                    {.Type = RuntimeUiDrawType::Quad,
+                     .Element = id,
+                     .Rect = state.Rect,
+                     .ClipRect = state.ClipRect,
+                     .ColorValue = Detail::ApplyRuntimeUiOpacity(background, state.Style.Opacity),
+                     .BorderColor = Detail::ApplyRuntimeUiOpacity(state.Style.Border, state.Style.Opacity),
+                     .BackgroundGradient = Detail::ApplyRuntimeUiOpacity(backgroundGradient, state.Style.Opacity),
+                     .CornerRadius = state.Style.CornerRadius,
+                     .BorderWidth = state.Style.BorderWidth});
             if (state.Type == RuntimeUiElementType::Slider)
             {
                 const float normalized = std::clamp((state.Control.Value - state.Control.Minimum) /
                                                         (state.Control.Maximum - state.Control.Minimum),
                                                     0.0F, 1.0F);
                 const float position = state.Control.Reversed ? 1.0F - normalized : normalized;
-                const float inset = std::min(6.0F * LastScale, std::min(state.Rect.Width, state.Rect.Height) * 0.25F);
+                const float inset = std::min(6.0F * scale, std::min(state.Rect.Width, state.Rect.Height) * 0.25F);
                 RuntimeUiRect fill = state.Rect;
                 RuntimeUiRect handle = state.Rect;
                 if (state.Control.Vertical)
@@ -409,88 +624,101 @@ namespace Keire
                     handle = {x - inset, state.Rect.Y + inset * 0.5F, inset * 2.0F,
                               std::max(0.0F, state.Rect.Height - inset)};
                 }
-                Draws.push_back({.Type = RuntimeUiDrawType::Quad,
-                                 .Element = id,
-                                 .Rect = fill,
-                                 .ClipRect = state.ClipRect,
-                                 .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
-                                 .CornerRadius = state.Style.CornerRadius});
-                Draws.push_back({.Type = RuntimeUiDrawType::Quad,
-                                 .Element = id,
-                                 .Rect = handle,
-                                 .ClipRect = state.ClipRect,
-                                 .ColorValue = WithOpacity(Color{0.94F, 0.98F, 1.0F, 1.0F}, state.Style.Opacity),
-                                 .CornerRadius = state.Style.CornerRadius});
+                Draws.push_back(
+                    {.Type = RuntimeUiDrawType::Quad,
+                     .Element = id,
+                     .Rect = fill,
+                     .ClipRect = state.ClipRect,
+                     .ColorValue = Detail::ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                     .CornerRadius = state.Style.CornerRadius});
+                Draws.push_back(
+                    {.Type = RuntimeUiDrawType::Quad,
+                     .Element = id,
+                     .Rect = handle,
+                     .ClipRect = state.ClipRect,
+                     .ColorValue = Detail::ApplyRuntimeUiOpacity(Color{0.94F, 0.98F, 1.0F, 1.0F}, state.Style.Opacity),
+                     .CornerRadius = state.Style.CornerRadius});
             }
             else if (state.Type == RuntimeUiElementType::Toggle && state.Control.Checked)
             {
-                const float inset = std::min(7.0F * LastScale, std::min(state.Rect.Width, state.Rect.Height) * 0.3F);
-                Draws.push_back({.Type = RuntimeUiDrawType::Quad,
-                                 .Element = id,
-                                 .Rect = {state.Rect.X + inset, state.Rect.Y + inset,
-                                          std::max(0.0F, state.Rect.Width - inset * 2.0F),
-                                          std::max(0.0F, state.Rect.Height - inset * 2.0F)},
-                                 .ClipRect = state.ClipRect,
-                                 .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
-                                 .CornerRadius = std::max(0.0F, state.Style.CornerRadius - inset * 0.5F)});
+                const float inset = std::min(7.0F * scale, std::min(state.Rect.Width, state.Rect.Height) * 0.3F);
+                const float indicatorSize = std::min(22.0F * scale, std::max(0.0F, state.Rect.Height - inset * 2.0F));
+                Draws.push_back(
+                    {.Type = RuntimeUiDrawType::Quad,
+                     .Element = id,
+                     .Rect = {state.Rect.X + state.Rect.Width - inset - indicatorSize,
+                              state.Rect.Y + (state.Rect.Height - indicatorSize) * 0.5F, indicatorSize, indicatorSize},
+                     .ClipRect = state.ClipRect,
+                     .ColorValue = Detail::ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                     .CornerRadius = std::min(state.Style.CornerRadius, indicatorSize * 0.5F)});
             }
             else if (state.Type == RuntimeUiElementType::ScrollView)
             {
-                const float contentWidth = state.Control.ContentSize.X * LastScale;
-                const float contentHeight = state.Control.ContentSize.Y * LastScale;
+                const float contentWidth = state.Control.ContentSize.X * scale;
+                const float contentHeight = state.Control.ContentSize.Y * scale;
                 const float widthOverflow = std::max(0.0F, contentWidth - state.Rect.Width);
                 const float heightOverflow = std::max(0.0F, contentHeight - state.Rect.Height);
                 if (heightOverflow > 0.0F)
                 {
                     const float thumbHeight =
-                        std::max(12.0F * LastScale, state.Rect.Height * state.Rect.Height / contentHeight);
+                        std::max(12.0F * scale, state.Rect.Height * state.Rect.Height / contentHeight);
                     const float track = std::max(0.0F, state.Rect.Height - thumbHeight);
-                    const float fraction =
-                        std::clamp(state.Style.ContentOffset.Y * LastScale / heightOverflow, 0.0F, 1.0F);
-                    Draws.push_back({.Type = RuntimeUiDrawType::Quad,
-                                     .Element = id,
-                                     .Rect = {state.Rect.X + state.Rect.Width - 5.0F * LastScale,
-                                              state.Rect.Y + track * fraction, 4.0F * LastScale, thumbHeight},
-                                     .ClipRect = state.ClipRect,
-                                     .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
-                                     .CornerRadius = 2.0F * LastScale});
+                    const float fraction = std::clamp(state.Style.ContentOffset.Y * scale / heightOverflow, 0.0F, 1.0F);
+                    Draws.push_back(
+                        {.Type = RuntimeUiDrawType::Quad,
+                         .Element = id,
+                         .Rect = {state.Rect.X + state.Rect.Width - 5.0F * scale, state.Rect.Y + track * fraction,
+                                  4.0F * scale, thumbHeight},
+                         .ClipRect = state.ClipRect,
+                         .ColorValue = Detail::ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                         .CornerRadius = 2.0F * scale});
                 }
                 if (widthOverflow > 0.0F)
                 {
                     const float thumbWidth =
-                        std::max(12.0F * LastScale, state.Rect.Width * state.Rect.Width / contentWidth);
+                        std::max(12.0F * scale, state.Rect.Width * state.Rect.Width / contentWidth);
                     const float track = std::max(0.0F, state.Rect.Width - thumbWidth);
-                    const float fraction =
-                        std::clamp(state.Style.ContentOffset.X * LastScale / widthOverflow, 0.0F, 1.0F);
+                    const float fraction = std::clamp(state.Style.ContentOffset.X * scale / widthOverflow, 0.0F, 1.0F);
                     Draws.push_back(
                         {.Type = RuntimeUiDrawType::Quad,
                          .Element = id,
-                         .Rect = {state.Rect.X + track * fraction, state.Rect.Y + state.Rect.Height - 5.0F * LastScale,
-                                  thumbWidth, 4.0F * LastScale},
+                         .Rect = {state.Rect.X + track * fraction, state.Rect.Y + state.Rect.Height - 5.0F * scale,
+                                  thumbWidth, 4.0F * scale},
                          .ClipRect = state.ClipRect,
-                         .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
-                         .CornerRadius = 2.0F * LastScale});
+                         .ColorValue = Detail::ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                         .CornerRadius = 2.0F * scale});
                 }
             }
             if (state.Content.Image)
-                Draws.push_back({.Type = RuntimeUiDrawType::Image,
-                                 .Element = id,
-                                 .Rect = state.Rect,
-                                 .ClipRect = state.ClipRect,
-                                 .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
-                                 .Asset = state.Content.Image,
-                                 .CornerRadius = state.Style.CornerRadius});
+                Draws.push_back(
+                    {.Type = RuntimeUiDrawType::Image,
+                     .Element = id,
+                     .Rect = state.Rect,
+                     .ClipRect = state.ClipRect,
+                     .ColorValue = Detail::ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                     .Asset = state.Content.Image,
+                     .CornerRadius = state.Style.CornerRadius});
+            else if (state.Content.RenderTexture)
+                Draws.push_back(
+                    {.Type = RuntimeUiDrawType::Image,
+                     .Element = id,
+                     .Rect = state.Rect,
+                     .ClipRect = state.ClipRect,
+                     .ColorValue = Detail::ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                     .RenderTexture = state.Content.RenderTexture,
+                     .CornerRadius = state.Style.CornerRadius});
             if (!state.Content.Text.empty())
-                Draws.push_back({.Type = RuntimeUiDrawType::Text,
-                                 .Element = id,
-                                 .Rect = state.Rect,
-                                 .ClipRect = state.ClipRect,
-                                 .ColorValue = WithOpacity(state.Style.Foreground, state.Style.Opacity),
-                                 .Asset = state.Content.Font,
-                                 .Text = state.Content.Text,
-                                 .FontSize = state.Style.FontSize * LastScale,
-                                 .HorizontalAlignment = state.Style.HorizontalAlignment,
-                                 .VerticalAlignment = state.Style.VerticalAlignment});
+                Draws.push_back(
+                    {.Type = RuntimeUiDrawType::Text,
+                     .Element = id,
+                     .Rect = state.Rect,
+                     .ClipRect = state.ClipRect,
+                     .ColorValue = Detail::ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                     .Asset = state.Content.Font,
+                     .Text = state.Content.Text,
+                     .FontSize = state.Style.FontSize * scale,
+                     .HorizontalAlignment = state.Style.HorizontalAlignment,
+                     .VerticalAlignment = state.Style.VerticalAlignment});
         }
 
         void ClearPointerOwnership(const RuntimeUiElementId element) noexcept
@@ -504,6 +732,7 @@ namespace Keire
 
         std::size_t MaximumElements;
         std::size_t MaximumEvents;
+        Detail::RuntimeUiDiagnostics Diagnostics;
         std::vector<Node> Nodes;
         std::vector<std::size_t> Free;
         std::vector<RuntimeUiDrawCommand> Draws;
@@ -513,11 +742,21 @@ namespace Keire
         std::array<RuntimeUiElementId, 3> Pressed;
         RuntimeUiElementId Focused;
         std::uint64_t TreeGeneration = 1;
+        std::uint64_t LayoutPasses = 0;
+        std::uint64_t ReusedLayoutPasses = 0;
+        std::size_t DirtyElements = 0;
         std::size_t VisibleElements = 0;
         std::size_t InteractableElements = 0;
         std::size_t ClippedElements = 0;
         std::size_t DroppedEvents = 0;
         float LastScale = 1.0F;
+        float LastViewportWidth = 0.0F;
+        float LastViewportHeight = 0.0F;
+        RuntimeUiInsets LastSafeArea;
+        RuntimeUiCanvasSettings LastCanvasSettings;
+        float LastLayoutMilliseconds = 0.0F;
+        bool LayoutDirty = true;
+        bool HasLayout = false;
     };
 
     RuntimeUiTree::RuntimeUiTree(const std::size_t maximumElements, const std::size_t maximumEvents)
@@ -544,7 +783,13 @@ namespace Keire
         }
         auto& node = m_Impl->Nodes[index];
         node.Alive = true;
+        node.Dirty = false;
+        node.HasStyle = false;
         node.State = {.Type = type, .Parent = parent};
+        node.TransitionStartStyle = {};
+        node.TargetStyle = {};
+        node.ActiveTransitions.clear();
+        node.RootCanvasSettings.reset();
         node.State.Interactable = type == RuntimeUiElementType::Button || type == RuntimeUiElementType::Slider ||
                                   type == RuntimeUiElementType::Toggle || type == RuntimeUiElementType::InputField ||
                                   type == RuntimeUiElementType::ScrollView;
@@ -561,6 +806,7 @@ namespace Keire
             }
             m_Impl->Nodes[*parentIndex].Children.push_back(id);
         }
+        m_Impl->MarkDirty(index, RuntimeUiDirtyReason::Hierarchy);
         return id;
     }
 
@@ -574,7 +820,15 @@ namespace Keire
             (void)Destroy(child);
         const auto parent = m_Impl->Nodes[*index].State.Parent;
         if (const auto parentIndex = m_Impl->Index(parent))
+        {
             std::erase(m_Impl->Nodes[*parentIndex].Children, element);
+            m_Impl->MarkDirty(*parentIndex, RuntimeUiDirtyReason::Hierarchy);
+        }
+        else
+        {
+            m_Impl->LayoutDirty = true;
+            ++m_Impl->TreeGeneration;
+        }
         if (m_Impl->Focused == element)
             m_Impl->Focused = {};
         if (m_Impl->Hovered == element)
@@ -583,9 +837,16 @@ namespace Keire
             if (pressed == element)
                 pressed = {};
         auto& node = m_Impl->Nodes[*index];
+        m_Impl->Diagnostics.Forget(element);
         node.Alive = false;
+        node.Dirty = false;
+        node.HasStyle = false;
         node.State = {};
+        node.TransitionStartStyle = {};
+        node.TargetStyle = {};
+        node.ActiveTransitions.clear();
         node.Children.clear();
+        node.RootCanvasSettings.reset();
         ++node.Generation;
         if (node.Generation == 0)
             node.Generation = 1;
@@ -598,8 +859,13 @@ namespace Keire
         for (auto& node : m_Impl->Nodes)
         {
             node.Alive = false;
+            node.HasStyle = false;
             node.State = {};
+            node.TransitionStartStyle = {};
+            node.TargetStyle = {};
+            node.ActiveTransitions.clear();
             node.Children.clear();
+            node.RootCanvasSettings.reset();
             ++node.Generation;
             if (node.Generation == 0)
                 node.Generation = 1;
@@ -610,9 +876,13 @@ namespace Keire
         m_Impl->Draws.clear();
         m_Impl->HitElements.clear();
         m_Impl->Events.clear();
+        m_Impl->Diagnostics.Clear();
         m_Impl->Focused = {};
         m_Impl->Hovered = {};
         m_Impl->Pressed.fill({});
+        m_Impl->DirtyElements = 0;
+        m_Impl->LayoutDirty = true;
+        m_Impl->HasLayout = false;
         ++m_Impl->TreeGeneration;
     }
 
@@ -632,17 +902,49 @@ namespace Keire
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
+        if (m_Impl->Nodes[*index].State.Type == type)
+            return true;
         m_Impl->Nodes[*index].State.Type = type;
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Style);
         return true;
     }
 
     bool RuntimeUiTree::SetStyle(const RuntimeUiElementId element, RuntimeUiStyle style)
     {
-        ValidateStyle(style);
+        Detail::ValidateRuntimeUiStyle(style);
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
-        m_Impl->Nodes[*index].State.Style = style;
+        auto& node = m_Impl->Nodes[*index];
+        if (node.HasStyle && node.TargetStyle == style)
+            return true;
+        if (!node.HasStyle)
+        {
+            node.State.Style = style;
+            node.TargetStyle = std::move(style);
+            node.TransitionStartStyle = node.State.Style;
+            node.ActiveTransitions.clear();
+            node.HasStyle = true;
+            m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Style);
+            return true;
+        }
+
+        const auto current = node.State.Style;
+        node.State.Style = style;
+        node.TransitionStartStyle = current;
+        node.TargetStyle = std::move(style);
+        node.ActiveTransitions.clear();
+        for (const auto property : Detail::RuntimeUiTransitionProperties())
+        {
+            const auto duration = Detail::RuntimeUiTransitionDuration(node.TargetStyle, property);
+            if (!duration || *duration <= 0.0F ||
+                !Detail::CanInterpolateRuntimeUiProperty(property, current, node.TargetStyle) ||
+                Detail::RuntimeUiPropertyEqual(property, current, node.TargetStyle))
+                continue;
+            Detail::InterpolateRuntimeUiProperty(node.State.Style, current, node.TargetStyle, property, 0.0F);
+            node.ActiveTransitions.push_back({property, 0.0F, *duration});
+        }
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Style);
         return true;
     }
 
@@ -650,19 +952,25 @@ namespace Keire
     {
         const auto index = m_Impl->Index(element);
         if (!index || content.Text.size() > 1'048'576 || content.AccessibilityLabel.size() > 16'384 ||
-            content.AccessibilityHint.size() > 16'384)
+            content.AccessibilityHint.size() > 16'384 || (content.Image && content.RenderTexture))
             return false;
+        if (m_Impl->Nodes[*index].State.Content == content)
+            return true;
         m_Impl->Nodes[*index].State.Content = std::move(content);
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Content);
         return true;
     }
 
     bool RuntimeUiTree::SetControl(const RuntimeUiElementId element, const RuntimeUiControlState control)
     {
-        ValidateControl(control);
+        Detail::ValidateRuntimeUiControl(control);
         const auto index = m_Impl->Index(element);
         if (!index)
             return false;
+        if (m_Impl->Nodes[*index].State.Control == control)
+            return true;
         m_Impl->Nodes[*index].State.Control = control;
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Control);
         return true;
     }
 
@@ -672,6 +980,8 @@ namespace Keire
         if (!index)
             return false;
         auto& state = m_Impl->Nodes[*index].State;
+        if (state.Visible == visible)
+            return true;
         state.Visible = visible;
         if (!visible)
         {
@@ -679,6 +989,7 @@ namespace Keire
             state.Pressed = false;
             m_Impl->ClearPointerOwnership(element);
         }
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Visibility);
         return true;
     }
 
@@ -688,6 +999,8 @@ namespace Keire
         if (!index)
             return false;
         auto& state = m_Impl->Nodes[*index].State;
+        if (state.Enabled == enabled)
+            return true;
         state.Enabled = enabled;
         if (!enabled)
         {
@@ -695,6 +1008,7 @@ namespace Keire
             state.Pressed = false;
             m_Impl->ClearPointerOwnership(element);
         }
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Interaction);
         return true;
     }
 
@@ -704,6 +1018,8 @@ namespace Keire
         if (!index)
             return false;
         auto& state = m_Impl->Nodes[*index].State;
+        if (state.Interactable == interactable)
+            return true;
         state.Interactable = interactable;
         if (!interactable)
         {
@@ -711,6 +1027,7 @@ namespace Keire
             state.Pressed = false;
             m_Impl->ClearPointerOwnership(element);
         }
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Interaction);
         return true;
     }
 
@@ -721,11 +1038,34 @@ namespace Keire
         if (!index || (parent && !parentIndex) || parent == element || (parent && m_Impl->IsAncestor(element, parent)))
             return false;
         const auto oldParent = m_Impl->Nodes[*index].State.Parent;
+        if (oldParent == parent)
+            return true;
         if (const auto oldParentIndex = m_Impl->Index(oldParent))
+        {
             std::erase(m_Impl->Nodes[*oldParentIndex].Children, element);
+            m_Impl->MarkDirty(*oldParentIndex, RuntimeUiDirtyReason::Hierarchy);
+        }
         m_Impl->Nodes[*index].State.Parent = parent;
+        if (parent)
+            m_Impl->Nodes[*index].RootCanvasSettings.reset();
         if (parentIndex)
             m_Impl->Nodes[*parentIndex].Children.push_back(element);
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Hierarchy);
+        return true;
+    }
+
+    bool RuntimeUiTree::SetRootCanvasSettings(const RuntimeUiElementId root,
+                                              std::optional<RuntimeUiCanvasSettings> settings)
+    {
+        if (settings)
+            Detail::ValidateRuntimeUiCanvasSettings(*settings);
+        const auto index = m_Impl->Index(root);
+        if (!index || m_Impl->Nodes[*index].State.Parent)
+            return false;
+        if (m_Impl->Nodes[*index].RootCanvasSettings == settings)
+            return true;
+        m_Impl->Nodes[*index].RootCanvasSettings = std::move(settings);
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::LayoutSettings);
         return true;
     }
 
@@ -735,42 +1075,64 @@ namespace Keire
         return index ? m_Impl->Nodes[*index].Children : std::vector<RuntimeUiElementId>{};
     }
 
+    bool RuntimeUiTree::AdvanceTransitions(const float deltaSeconds)
+    {
+        if (!Finite(deltaSeconds) || deltaSeconds < 0.0F)
+            throw std::invalid_argument("Runtime UI transition delta must be finite and non-negative.");
+        if (deltaSeconds == 0.0F)
+            return false;
+
+        bool changed = false;
+        for (std::size_t index = 0; index < m_Impl->Nodes.size(); ++index)
+        {
+            auto& node = m_Impl->Nodes[index];
+            if (!node.Alive || node.ActiveTransitions.empty())
+                continue;
+            auto next = node.State.Style;
+            for (auto& transition : node.ActiveTransitions)
+            {
+                transition.ElapsedSeconds =
+                    std::min(transition.DurationSeconds, transition.ElapsedSeconds + deltaSeconds);
+                const float alpha = transition.ElapsedSeconds / transition.DurationSeconds;
+                Detail::InterpolateRuntimeUiProperty(next, node.TransitionStartStyle, node.TargetStyle,
+                                                     transition.Property, alpha);
+            }
+            std::erase_if(node.ActiveTransitions, [](const Impl::Node::ActiveTransition& transition)
+                          { return transition.ElapsedSeconds >= transition.DurationSeconds; });
+            if (next == node.State.Style)
+                continue;
+            node.State.Style = std::move(next);
+            m_Impl->MarkDirty(index, RuntimeUiDirtyReason::Transition);
+            changed = true;
+        }
+        return changed;
+    }
+
     void RuntimeUiTree::Layout(const float viewportWidth, const float viewportHeight, const RuntimeUiInsets safeArea,
                                const RuntimeUiCanvasSettings settings)
     {
-        if (!Finite(viewportWidth) || !Finite(viewportHeight) || viewportWidth <= 0.0F || viewportHeight <= 0.0F ||
-            !Finite(settings.ReferenceWidth) || !Finite(settings.ReferenceHeight) || settings.ReferenceWidth <= 0.0F ||
-            settings.ReferenceHeight <= 0.0F || !Finite(settings.MatchWidthOrHeight) ||
-            settings.MatchWidthOrHeight < 0.0F || settings.MatchWidthOrHeight > 1.0F ||
-            !Finite(settings.AccessibilityScale) || settings.AccessibilityScale < 0.5F ||
-            settings.AccessibilityScale > 3.0F)
-            throw std::invalid_argument("Runtime UI viewport or canvas settings are invalid.");
-        ValidateInsets(safeArea);
+        if (!Finite(viewportWidth) || !Finite(viewportHeight) || viewportWidth <= 0.0F || viewportHeight <= 0.0F)
+            throw std::invalid_argument("Runtime UI viewport is invalid.");
+        Detail::ValidateRuntimeUiCanvasSettings(settings);
+        Detail::ValidateRuntimeUiInsets(safeArea);
 
-        float scale = 1.0F;
-        if (settings.ScaleMode == RuntimeUiScaleMode::ScaleWithViewport)
+        if (m_Impl->HasLayout && !m_Impl->LayoutDirty && m_Impl->LastViewportWidth == viewportWidth &&
+            m_Impl->LastViewportHeight == viewportHeight && m_Impl->LastSafeArea == safeArea &&
+            m_Impl->LastCanvasSettings == settings)
         {
-            const auto widthScale = viewportWidth / settings.ReferenceWidth;
-            const auto heightScale = viewportHeight / settings.ReferenceHeight;
-            scale = std::exp(std::log(widthScale) * (1.0F - settings.MatchWidthOrHeight) +
-                             std::log(heightScale) * settings.MatchWidthOrHeight);
+            ++m_Impl->ReusedLayoutPasses;
+            m_Impl->LastLayoutMilliseconds = 0.0F;
+            return;
         }
-        scale *= settings.AccessibilityScale;
-        m_Impl->LastScale = scale;
+        const auto layoutStarted = std::chrono::steady_clock::now();
+
+        m_Impl->LastScale = Detail::ResolveRuntimeUiScale(viewportWidth, viewportHeight, settings);
         m_Impl->Draws.clear();
         m_Impl->HitElements.clear();
         m_Impl->VisibleElements = 0;
         m_Impl->InteractableElements = 0;
         m_Impl->ClippedElements = 0;
         RuntimeUiRect viewport{0.0F, 0.0F, viewportWidth, viewportHeight};
-        RuntimeUiRect root = viewport;
-        if (settings.RespectSafeArea)
-        {
-            root.X += safeArea.Left;
-            root.Y += safeArea.Top;
-            root.Width = std::max(0.0F, root.Width - safeArea.Left - safeArea.Right);
-            root.Height = std::max(0.0F, root.Height - safeArea.Top - safeArea.Bottom);
-        }
         std::vector<std::size_t> roots;
         for (std::size_t index = 0; index < m_Impl->Nodes.size(); ++index)
             if (m_Impl->Nodes[index].Alive && !m_Impl->Nodes[index].State.Parent)
@@ -779,7 +1141,23 @@ namespace Keire
             roots, [this](const std::size_t left, const std::size_t right)
             { return m_Impl->Nodes[left].State.Style.SortingOrder < m_Impl->Nodes[right].State.Style.SortingOrder; });
         for (const auto index : roots)
-            m_Impl->LayoutNode(index, root, viewport, scale);
+        {
+            const auto& canvas = m_Impl->Nodes[index].RootCanvasSettings.value_or(settings);
+            m_Impl->LayoutNode(index, Detail::ResolveRuntimeUiRoot(viewport, safeArea, canvas), viewport,
+                               Detail::ResolveRuntimeUiScale(viewportWidth, viewportHeight, canvas));
+        }
+        for (auto& node : m_Impl->Nodes)
+            node.Dirty = false;
+        m_Impl->DirtyElements = 0;
+        m_Impl->LayoutDirty = false;
+        m_Impl->HasLayout = true;
+        m_Impl->LastViewportWidth = viewportWidth;
+        m_Impl->LastViewportHeight = viewportHeight;
+        m_Impl->LastSafeArea = safeArea;
+        m_Impl->LastCanvasSettings = settings;
+        ++m_Impl->LayoutPasses;
+        m_Impl->LastLayoutMilliseconds =
+            std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - layoutStarted).count();
     }
 
     std::span<const RuntimeUiDrawCommand> RuntimeUiTree::DrawCommands() const noexcept { return m_Impl->Draws; }
@@ -844,6 +1222,7 @@ namespace Keire
         if (const auto old = m_Impl->Index(m_Impl->Hovered))
         {
             m_Impl->Nodes[*old].State.Hovered = false;
+            m_Impl->MarkDirty(*old, RuntimeUiDirtyReason::Interaction);
             m_Impl->Queue(
                 {.Type = RuntimeUiEventType::PointerExit, .Target = m_Impl->Hovered, .PointerX = x, .PointerY = y});
         }
@@ -851,6 +1230,7 @@ namespace Keire
         if (const auto current = m_Impl->Index(hit))
         {
             m_Impl->Nodes[*current].State.Hovered = true;
+            m_Impl->MarkDirty(*current, RuntimeUiDirtyReason::Interaction);
             m_Impl->Queue({.Type = RuntimeUiEventType::PointerEnter, .Target = hit, .PointerX = x, .PointerY = y});
         }
     }
@@ -860,6 +1240,7 @@ namespace Keire
         if (const auto old = m_Impl->Index(m_Impl->Hovered))
         {
             m_Impl->Nodes[*old].State.Hovered = false;
+            m_Impl->MarkDirty(*old, RuntimeUiDirtyReason::Interaction);
             m_Impl->Queue({.Type = RuntimeUiEventType::PointerExit, .Target = m_Impl->Hovered});
         }
         m_Impl->Hovered = {};
@@ -890,11 +1271,15 @@ namespace Keire
         if (pressed)
         {
             if (const auto previous = m_Impl->Index(pressedElement); previous && pressedElement != target)
+            {
                 m_Impl->Nodes[*previous].State.Pressed = pressedByAnotherButton(pressedElement);
+                m_Impl->MarkDirty(*previous, RuntimeUiDirtyReason::Interaction);
+            }
             pressedElement = target;
             if (const auto index = m_Impl->Index(target))
             {
                 m_Impl->Nodes[*index].State.Pressed = true;
+                m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Interaction);
                 (void)SetFocus(target);
                 m_Impl->Queue({.Type = RuntimeUiEventType::PointerDown,
                                .Target = target,
@@ -912,6 +1297,7 @@ namespace Keire
         {
             handled = true;
             m_Impl->Nodes[*index].State.Pressed = pressedByAnotherButton(released);
+            m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Interaction);
             m_Impl->Queue({.Type = RuntimeUiEventType::PointerUp,
                            .Target = released,
                            .PointerX = x,
@@ -938,6 +1324,7 @@ namespace Keire
             return false;
         m_Impl->Nodes[*index].State.Pressed = std::ranges::any_of(
             m_Impl->Pressed, [released](const RuntimeUiElementId candidate) { return candidate == released; });
+        m_Impl->MarkDirty(*index, RuntimeUiDirtyReason::Interaction);
         try
         {
             m_Impl->Queue({.Type = RuntimeUiEventType::PointerUp, .Target = released, .Button = button});
@@ -1007,18 +1394,31 @@ namespace Keire
         if (const auto old = m_Impl->Index(m_Impl->Focused))
         {
             m_Impl->Nodes[*old].State.Focused = false;
+            m_Impl->MarkDirty(*old, RuntimeUiDirtyReason::Interaction);
             m_Impl->Queue({.Type = RuntimeUiEventType::Blur, .Target = m_Impl->Focused});
         }
         m_Impl->Focused = element;
         if (next)
         {
             m_Impl->Nodes[*next].State.Focused = true;
+            m_Impl->MarkDirty(*next, RuntimeUiDirtyReason::Interaction);
             m_Impl->Queue({.Type = RuntimeUiEventType::Focus, .Target = element});
         }
         return true;
     }
 
     RuntimeUiElementId RuntimeUiTree::Focus() const noexcept { return m_Impl->Focused; }
+
+    bool RuntimeUiTree::DispatchEvent(RuntimeUiEvent event)
+    {
+        if (!m_Impl->Index(event.Target) || event.Type > RuntimeUiEventType::TextChanged ||
+            event.Button > RuntimeUiPointerButton::Middle || !std::isfinite(event.PointerX) ||
+            !std::isfinite(event.PointerY))
+            return false;
+        const auto previous = m_Impl->Events.size();
+        m_Impl->Queue(std::move(event));
+        return m_Impl->Events.size() > previous;
+    }
 
     bool RuntimeUiTree::PollEvent(RuntimeUiEvent& event)
     {
@@ -1050,6 +1450,23 @@ namespace Keire
         m_Impl->Events.assign(events.begin(), events.end());
     }
 
+    RuntimeUiDirtyReason RuntimeUiTree::DirtyReasons(const RuntimeUiElementId element) const noexcept
+    {
+        return m_Impl->Index(element) ? m_Impl->Diagnostics.DirtyReasons(element) : RuntimeUiDirtyReason::None;
+    }
+
+    std::vector<RuntimeUiEventRouteEntry> RuntimeUiTree::EventRouteHistory() const
+    {
+        return m_Impl->Diagnostics.EventRouteHistory();
+    }
+
+    void RuntimeUiTree::ReportStylePass(const float milliseconds) { m_Impl->Diagnostics.ReportStylePass(milliseconds); }
+
+    void RuntimeUiTree::ReportRepaintPass(const float milliseconds)
+    {
+        m_Impl->Diagnostics.ReportRepaintPass(milliseconds);
+    }
+
     RuntimeUiStatistics RuntimeUiTree::Statistics() const noexcept
     {
         RuntimeUiStatistics result;
@@ -1073,7 +1490,12 @@ namespace Keire
         result.ClippedElements = m_Impl->ClippedElements;
         result.PendingEvents = m_Impl->Events.size();
         result.DroppedEvents = m_Impl->DroppedEvents;
+        result.DirtyElements = m_Impl->DirtyElements;
+        result.LayoutPasses = m_Impl->LayoutPasses;
+        result.ReusedLayoutPasses = m_Impl->ReusedLayoutPasses;
+        result.LayoutMilliseconds = m_Impl->LastLayoutMilliseconds;
         result.Scale = m_Impl->LastScale;
+        m_Impl->Diagnostics.Populate(result);
         return result;
     }
 } // namespace Keire

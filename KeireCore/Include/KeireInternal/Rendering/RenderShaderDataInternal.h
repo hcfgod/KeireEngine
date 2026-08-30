@@ -50,11 +50,12 @@ namespace Keire::RenderBackend
 
     struct RuntimeUiVertex final
     {
-        Vector2 Position;
+        Vector3 Position;
         Color ColorValue;
+        Vector2 UV;
     };
 
-    static_assert(sizeof(RuntimeUiVertex) == sizeof(float) * 6);
+    static_assert(sizeof(RuntimeUiVertex) == sizeof(float) * 9);
 
     [[nodiscard]] constexpr bool SupportsComputeSkinning(const std::string_view driver,
                                                          const SkinningMethod method) noexcept

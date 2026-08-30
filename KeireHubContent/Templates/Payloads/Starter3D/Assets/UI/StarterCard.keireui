@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Starter Card Template">
+  <style src="b1b20001-1000-4000-8000-000000000001"/>
+  <VisualElement id="b1b2c3d4-1000-4000-8000-000000000201" name="card" class="starter-card">
+    <Slot id="b1b2c3d4-1000-4000-8000-000000000202" name="header">
+      <Label id="b1b2c3d4-1000-4000-8000-000000000203" name="fallback-title" class="starter-title" text="Starter"/>
+    </Slot>
+    <Slot id="b1b2c3d4-1000-4000-8000-000000000204" name="content">
+      <Label id="b1b2c3d4-1000-4000-8000-000000000205" name="fallback-copy" class="starter-copy" text="Ready"/>
+    </Slot>
+    <Slot id="b1b2c3d4-1000-4000-8000-000000000206" name="actions"/>
+  </VisualElement>
+</ui>

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "target": "ScreenOverlay",
+  "scaleMode": "ScaleWithViewport",
+  "referenceWidth": 1920.0,
+  "referenceHeight": 1080.0,
+  "matchWidthOrHeight": 0.5,
+  "sortingOrder": 0,
+  "camera": "00000000-0000-0000-0000-000000000000",
+  "renderTexture": "00000000-0000-0000-0000-000000000000",
+  "respectSafeArea": true,
+  "worldWidth": 1.92,
+  "worldHeight": 1.08,
+  "pixelsPerUnit": 1000.0,
+  "depthTest": false
+}

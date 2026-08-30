@@ -270,6 +270,9 @@ namespace KeireEditor
                 case AssetBrowserOpenAction::VfxEffect:
                     editor.OpenAssetBrowserVfxEffect(record.Id);
                     break;
+                case AssetBrowserOpenAction::UiDocument:
+                    editor.OpenAssetBrowserUiDocument(record.Id);
+                    break;
                 case AssetBrowserOpenAction::Material:
                     editor.OpenAssetBrowserMaterial(record.Id);
                     break;
@@ -419,6 +422,8 @@ namespace KeireEditor
                 RequestNamedCreate(NamedCreateKind::PhysicsMaterial, "PhysicsMaterial");
             if (ui.MenuItem("VFX Effect"))
                 RequestNamedCreate(NamedCreateKind::VfxEffect, "VfxEffect");
+            if (ui.MenuItem("UI Document"))
+                RequestNamedCreate(NamedCreateKind::UiDocument, "NewUiDocument");
             if (ui.MenuItem("Material Graph"))
             {
                 MaterialGraphCreation.Begin(Selection.empty() ? Keire::AssetId{} : Selection.back(),

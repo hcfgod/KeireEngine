@@ -304,7 +304,7 @@ namespace Keire::RenderBackend
             throw std::logic_error("A render frame is already active.");
         FrameActive = true;
         PendingSceneRequests.clear();
-        PendingRuntimeUiTrees.clear();
+        PendingRuntimeUiSubmissions.clear();
         PendingUiSurfaceTextureBindings.clear();
         CaptureRequests.clear();
         CaptureRuntimeUiCommands.clear();
@@ -418,7 +418,7 @@ namespace Keire::RenderBackend
         FrameActive = false;
         CpuPreparation.CancelFrame();
         PendingSceneRequests.clear();
-        PendingRuntimeUiTrees.clear();
+        PendingRuntimeUiSubmissions.clear();
         PendingUiSurfaceTextureBindings.clear();
         CaptureRequests.clear();
         CaptureRuntimeUiCommands.clear();

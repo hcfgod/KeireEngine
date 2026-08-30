@@ -26,7 +26,18 @@ namespace KeireEditor
 
     [[nodiscard]] constexpr bool CompositesRuntimeGameUi(const EditorViewportTarget target) noexcept
     {
-        return target == EditorViewportTarget::Scene || target == EditorViewportTarget::Game;
+        return target == EditorViewportTarget::Game;
+    }
+
+    [[nodiscard]] constexpr bool RoutesRuntimeGameUiInput(const EditorViewportTarget target) noexcept
+    {
+        return target == EditorViewportTarget::Game;
+    }
+
+    [[nodiscard]] constexpr bool SubmitsRuntimeUiToSceneRenderer(const Keire::RuntimeUiRenderTarget target) noexcept
+    {
+        return target == Keire::RuntimeUiRenderTarget::WorldSurface ||
+               target == Keire::RuntimeUiRenderTarget::RenderTexture;
     }
 
     class ProjectSettingsDocument;
@@ -64,6 +75,7 @@ namespace KeireEditor
         virtual void RevealSceneViewportScenes() = 0;
         virtual void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target) = 0;
         virtual void RecordSceneViewportUndo(std::string_view name) = 0;
+        virtual void OpenSceneViewportUiDocument(Keire::AssetId asset) = 0;
         virtual void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) = 0;
         virtual void SetSceneViewportSelection(std::span<const Keire::EntityId> entities, bool additive) = 0;
         [[nodiscard]] virtual std::optional<Keire::UiItemRect>
@@ -128,6 +140,7 @@ namespace KeireEditor
         virtual void CommitInspectorMaterial() = 0;
         virtual void OpenInspectorInputActions(Keire::AssetId asset) = 0;
         virtual void OpenInspectorMaterialGraph(Keire::AssetId asset) = 0;
+        virtual void OpenInspectorUiDocument(Keire::AssetId asset) = 0;
         virtual void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) = 0;
         virtual void PersistInspectorMaterialParameterCollection(Keire::AssetId asset,
                                                                  std::span<const std::byte> bytes) = 0;
@@ -311,10 +324,6 @@ namespace KeireEditor
                                              const Keire::Ref<Keire::Component>& component,
                                              const Keire::ComponentRegistration& registration,
                                              SceneDocument& sceneDocument, const Keire::Ref<Keire::Scene>& scene);
-        void DrawRectTransformAnchorPreset(Keire::UiFrame& ui, const Keire::Entity& entity,
-                                           const Keire::ComponentRegistration& registration,
-                                           SceneDocument& sceneDocument, const Keire::UiThemeDefinition& theme,
-                                           std::span<const Keire::AssetId> editTargets, bool multiEditing);
 
         IInspectorController& m_Controller;
         std::unique_ptr<AssetInspectorPanel> m_AssetInspector;

@@ -48,6 +48,7 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserAudioMixer(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPhysicsMaterial(std::string_view name) = 0;
         virtual bool CreateAssetBrowserVfxEffect(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserUiDocument(std::string_view name) = 0;
         virtual bool CreateAssetBrowserMaterialGraph(std::string_view name, Keire::AssetId shader) = 0;
         virtual bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) = 0;
         virtual bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) = 0;
@@ -68,6 +69,7 @@ namespace KeireEditor
         virtual void OpenAssetBrowserAnimationGraph(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserAudioMixer(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserVfxEffect(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserUiDocument(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserMaterial(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserMaterialGraph(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserMaterialInstance(Keire::AssetId asset) = 0;

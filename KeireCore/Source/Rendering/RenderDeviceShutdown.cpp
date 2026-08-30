@@ -68,7 +68,7 @@ namespace Keire::RenderBackend
                     surface->PublishSurfacePropertiesSnapshot();
                 }
                 PendingSceneRequests.clear();
-                PendingRuntimeUiTrees.clear();
+                PendingRuntimeUiSubmissions.clear();
                 PendingUiSurfaceTextureBindings.clear();
                 PendingUiTextureRetirements.clear();
                 CaptureRequests.clear();
@@ -172,7 +172,7 @@ namespace Keire::RenderBackend
             }
             InFlight.clear();
             PendingSceneRequests.clear();
-            PendingRuntimeUiTrees.clear();
+            PendingRuntimeUiSubmissions.clear();
             PendingUiSurfaceTextureBindings.clear();
             PendingUiTextureRetirements.clear();
             CaptureRequests.clear();
@@ -180,6 +180,10 @@ namespace Keire::RenderBackend
             ActiveFrame.reset();
             for (auto& pipelines : Pipelines)
             {
+                if (pipelines.RuntimeUiWorldOverlay)
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.RuntimeUiWorldOverlay);
+                if (pipelines.RuntimeUiWorldDepth)
+                    SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.RuntimeUiWorldDepth);
                 if (pipelines.GpuVfxMesh)
                     SDL_ReleaseGPUGraphicsPipeline(Device, pipelines.GpuVfxMesh);
                 if (pipelines.GpuVfxRibbon)
@@ -214,6 +218,8 @@ namespace Keire::RenderBackend
                 ReleaseTextureResources(entry.Resources);
             }
             TextureCache.clear();
+            ReleaseRuntimeUiFontAtlas(abandon);
+            ReleaseRuntimeUiRenderTextureCache(abandon);
             for (auto& [id, entry] : LightingTextureCache)
             {
                 (void)id;
@@ -287,6 +293,10 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);
             ToneMapPipeline = nullptr;
             if (const auto pipeline = std::exchange(RuntimeUiPipeline, nullptr))
+                SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+            if (const auto pipeline = std::exchange(RuntimeUiCameraOverlayPipeline, nullptr))
+                SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
+            if (const auto pipeline = std::exchange(RuntimeUiRenderTexturePipeline, nullptr))
                 SDL_ReleaseGPUGraphicsPipeline(Device, pipeline);
             ReleaseMeshResources(ErrorMesh);
             ReleaseMeshResources(DefaultMesh);

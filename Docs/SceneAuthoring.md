@@ -106,14 +106,12 @@ pointer
 motion while vertical motion retains Unity's pitch convention. Game view renders the deterministic active scene Camera
 from the runtime clone during Play. Scene-camera state stays below `Library/Editor` and never dirties source content.
 
-Canvas defaults to **Screen Space Overlay** for compatibility. **Screen Space Camera** follows its selected Camera (or
-the active presentation Camera when none is assigned), remains fitted to the viewport, and is hidden when its authored
-plane distance lies outside that Camera's clip range. **World Space** uses the Canvas entity Transform,
-reference resolution, and world-units-per-pixel scale to define a plane. Scene view projects that plane through the
-editor camera, picks it with the matching ray-to-plane transform, and shows direct corner/center handles for undoable
-Canvas and Rect Transform edits. World canvases behind the current camera are neither drawn nor hit-tested. This first
-authoring slice does not test runtime UI against scene depth, so geometry cannot yet occlude a world Canvas; the Canvas
-Inspector reports that limitation rather than exposing an inactive depth option.
+Scene UI uses one `UIDocument` component referencing `.keireui` visual-tree and `.keireuipanel` presentation assets.
+Screen and camera overlays appear only in Game/Play/runtime and UI Builder; they never paint over or intercept the 3D
+Scene viewport. Selecting either target focuses its Builder document. World-surface documents use the entity Transform
+plus their authored physical size and pixels-per-unit scale. Scene view projects and ray-picks the panel, exposes
+undoable transform-scale resize handles, and submits the panel as depth-tested world geometry. Canvas, Rect Transform,
+and the retired scene-control IDs remain reserved solely so import can reject old scenes with an exact diagnostic.
 
 Closing the editor cancels queued catalog refreshes instead of forcing pending background import work to finish;
 already-saved scene and material sources remain durable and refresh on the next launch. See

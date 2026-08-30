@@ -132,22 +132,56 @@ TEST_CASE("occlusion visibility quick toggle replaces hierarchical depth without
     CHECK(controller.Settings().ShowOcclusionMetadata);
 }
 
-TEST_CASE("world Canvas and Rect Transform handles preserve the opposite projected edge")
+TEST_CASE("UI Document authoring routes only world surfaces to Scene gizmos")
+{
+    Keire::UiDocumentComponent document;
+    CHECK(KeireEditor::ResolveSceneUiDocumentAuthoringRoute(document, {}) ==
+          KeireEditor::SceneUiDocumentAuthoringRoute::None);
+
+    document.SetVisualTree(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000231"));
+    CHECK(KeireEditor::ResolveSceneUiDocumentAuthoringRoute(document, {}) ==
+          KeireEditor::SceneUiDocumentAuthoringRoute::FocusUiBuilder);
+
+    document.SetPanelSettings(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000232"));
+    CHECK(KeireEditor::ResolveSceneUiDocumentAuthoringRoute(document, {}) ==
+          KeireEditor::SceneUiDocumentAuthoringRoute::None);
+    Keire::UiPanelSettingsDefinition settings;
+    settings.Target = Keire::UiPanelTarget::ScreenOverlay;
+    CHECK(KeireEditor::ResolveSceneUiDocumentAuthoringRoute(document, settings) ==
+          KeireEditor::SceneUiDocumentAuthoringRoute::FocusUiBuilder);
+    settings.Target = Keire::UiPanelTarget::CameraOverlay;
+    CHECK(KeireEditor::ResolveSceneUiDocumentAuthoringRoute(document, settings) ==
+          KeireEditor::SceneUiDocumentAuthoringRoute::FocusUiBuilder);
+    settings.Target = Keire::UiPanelTarget::RenderTexture;
+    CHECK(KeireEditor::ResolveSceneUiDocumentAuthoringRoute(document, settings) ==
+          KeireEditor::SceneUiDocumentAuthoringRoute::FocusUiBuilder);
+    settings.Target = Keire::UiPanelTarget::WorldSurface;
+    CHECK(KeireEditor::ResolveSceneUiDocumentAuthoringRoute(document, settings) ==
+          KeireEditor::SceneUiDocumentAuthoringRoute::WorldSurfaceGizmo);
+}
+
+TEST_CASE("world UI Document corner handles resize transform scale without changing depth")
 {
     const std::array corners{Keire::Vector2{100.0F, 50.0F}, Keire::Vector2{300.0F, 50.0F},
                              Keire::Vector2{300.0F, 150.0F}, Keire::Vector2{100.0F, 150.0F}};
-    const auto resized = KeireEditor::CalculateSceneUiRectHandleEdit(KeireEditor::SceneUiRectHandle::BottomRight,
-                                                                     corners, {20.0F, 10.0F}, {10.0F, 20.0F},
-                                                                     {200.0F, 100.0F}, {200.0F, 100.0F}, false);
-    CHECK(resized.SizeDelta == Keire::Vector2{220.0F, 110.0F});
-    CHECK(resized.AnchoredPosition == Keire::Vector2{20.0F, 25.0F});
+    const Keire::Vector2 basePhysicalSize{1.92F, 1.08F};
+    const auto resized =
+        KeireEditor::CalculateSceneUiWorldPanelHandleEdit(KeireEditor::SceneUiRectHandle::BottomRight, corners,
+                                                          {20.0F, 20.0F}, {2.0F, 3.0F, 4.0F}, basePhysicalSize, false);
+    CHECK(resized.LocalScale.X == doctest::Approx(2.2F));
+    CHECK(resized.LocalScale.Y == doctest::Approx(3.6F));
+    CHECK(resized.LocalScale.Z == doctest::Approx(4.0F));
+    CHECK(resized.EffectivePhysicalSize.X == doctest::Approx(1.92F * 2.2F));
+    CHECK(resized.EffectivePhysicalSize.Y == doctest::Approx(1.08F * 3.6F));
 
-    const auto moved =
-        KeireEditor::CalculateSceneUiRectHandleEdit(KeireEditor::SceneUiRectHandle::Center, corners, {20.0F, -10.0F},
-                                                    {10.0F, 20.0F}, {200.0F, 100.0F}, {200.0F, 100.0F}, false);
-    CHECK(moved.AnchoredPosition == Keire::Vector2{30.0F, 10.0F});
+    const auto constrained =
+        KeireEditor::CalculateSceneUiWorldPanelHandleEdit(KeireEditor::SceneUiRectHandle::BottomRight, corners,
+                                                          {20.0F, 20.0F}, {2.0F, 3.0F, 4.0F}, basePhysicalSize, true);
+    CHECK(constrained.LocalScale.X == doctest::Approx(2.4F));
+    CHECK(constrained.LocalScale.Y == doctest::Approx(3.6F));
+    CHECK(constrained.LocalScale.Z == doctest::Approx(4.0F));
 
-    const auto canvas = KeireEditor::CalculateSceneUiRectHandleEdit(KeireEditor::SceneUiRectHandle::TopLeft, corners,
-                                                                    {-20.0F, -10.0F}, {}, {}, {200.0F, 100.0F}, true);
-    CHECK(canvas.ReferenceResolution == Keire::Vector2{220.0F, 110.0F});
+    const auto negative = KeireEditor::EffectiveSceneUiWorldPanelSize(basePhysicalSize, {-2.0F, 3.0F, -4.0F});
+    CHECK(negative.X == doctest::Approx(3.84F));
+    CHECK(negative.Y == doctest::Approx(3.24F));
 }

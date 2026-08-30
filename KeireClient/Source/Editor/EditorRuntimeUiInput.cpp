@@ -98,10 +98,7 @@ namespace KeireEditor
             }
         }
         const auto hit = [&](const Keire::Ref<Keire::ScenePresentationRuntime>& presentation)
-        {
-            const auto tree = presentation ? presentation->Ui() : Keire::Ref<Keire::RuntimeUiTree>{};
-            return tree && tree->HitTest(localX, localY);
-        };
+        { return RuntimeUiPresentationHitTest(presentation, localX, localY); };
         const auto routeMove = [&]
         {
             std::vector<Keire::Ref<Keire::ScenePresentationRuntime>> captures;
@@ -199,6 +196,12 @@ namespace KeireEditor
                 ui.CapturePointerWheel();
             routeMove();
         }
+    }
+
+    bool RuntimeUiPresentationHitTest(const Keire::Ref<Keire::ScenePresentationRuntime>& presentation, const float x,
+                                      const float y) noexcept
+    {
+        return presentation && static_cast<bool>(presentation->HitTestUiEntity(x, y));
     }
 
     Keire::Ref<Keire::ScenePresentationRuntime>

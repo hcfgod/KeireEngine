@@ -34,106 +34,163 @@ namespace Keire::Detail
             return size;
         }
 
-        [[nodiscard]] std::uint8_t GetScalar(const std::uint64_t high, const std::uint64_t low,
-                                             const std::uint8_t property, float* value) noexcept
+        [[nodiscard]] std::uint8_t ResolveDocumentRoot(const std::uint64_t high, const std::uint64_t low,
+                                                       ManagedUiDocumentElement* value) noexcept
         {
-            if (!ActiveServices || !value || property > static_cast<std::uint8_t>(ManagedUiScalarProperty::Value))
+            if (!ActiveServices || !value)
                 return 0;
-            const auto result =
-                ActiveServices->ReadManagedUiScalar(AssetId(high, low), static_cast<ManagedUiScalarProperty>(property));
+            const auto result = ActiveServices->ManagedUiDocumentRoot(AssetId(high, low));
             if (!result)
                 return 0;
             *value = *result;
             return 1;
         }
 
-        [[nodiscard]] std::uint8_t SetScalar(const std::uint64_t high, const std::uint64_t low,
-                                             const std::uint8_t property, const float value) noexcept
+        [[nodiscard]] std::uint8_t ResolveDocumentElementById(const std::uint64_t high, const std::uint64_t low,
+                                                              const std::uint64_t stableHigh,
+                                                              const std::uint64_t stableLow,
+                                                              ManagedUiDocumentElement* value) noexcept
         {
-            return ActiveServices && property <= static_cast<std::uint8_t>(ManagedUiScalarProperty::Value) &&
-                           ActiveServices->SetManagedUiScalar(AssetId(high, low),
-                                                              static_cast<ManagedUiScalarProperty>(property), value)
+            if (!ActiveServices || !value)
+                return 0;
+            const auto result =
+                ActiveServices->FindManagedUiDocumentElement(AssetId(high, low), AssetId(stableHigh, stableLow));
+            if (!result)
+                return 0;
+            *value = *result;
+            return 1;
+        }
+
+        [[nodiscard]] std::uint8_t ResolveDocumentElementByName(const std::uint64_t high, const std::uint64_t low,
+                                                                const Coral::String name,
+                                                                ManagedUiDocumentElement* value) noexcept
+        {
+            try
+            {
+                if (!ActiveServices || !value)
+                    return 0;
+                const auto result =
+                    ActiveServices->FindManagedUiDocumentElement(AssetId(high, low), static_cast<std::string>(name));
+                if (!result)
+                    return 0;
+                *value = *result;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t DocumentElementAlive(const std::uint64_t high, const std::uint64_t low,
+                                                        const std::uint64_t generation,
+                                                        const std::uint64_t element) noexcept
+        {
+            return ActiveServices &&
+                           ActiveServices->ManagedUiDocumentElementAlive(AssetId(high, low), generation, element)
                        ? 1
                        : 0;
         }
 
-        [[nodiscard]] std::uint8_t GetFlag(const std::uint64_t high, const std::uint64_t low,
-                                           const std::uint8_t property, std::uint8_t* value) noexcept
+        [[nodiscard]] int GetDocumentElementText(const std::uint64_t high, const std::uint64_t low,
+                                                 const std::uint64_t generation, const std::uint64_t element,
+                                                 std::uint8_t* destination, const int capacity) noexcept
         {
-            if (!ActiveServices || !value || property > static_cast<std::uint8_t>(ManagedUiFlagProperty::Focused))
+            if (!ActiveServices)
+                return -1;
+            const auto value =
+                ActiveServices->ReadManagedUiDocumentElementText(AssetId(high, low), generation, element);
+            return value ? CopyText(*value, destination, capacity) : -1;
+        }
+
+        [[nodiscard]] std::uint8_t SetDocumentElementText(const std::uint64_t high, const std::uint64_t low,
+                                                          const std::uint64_t generation, const std::uint64_t element,
+                                                          const Coral::String text) noexcept
+        {
+            try
+            {
+                return ActiveServices && ActiveServices->SetManagedUiDocumentElementText(
+                                             AssetId(high, low), generation, element, static_cast<std::string>(text))
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t GetDocumentElementValue(const std::uint64_t high, const std::uint64_t low,
+                                                           const std::uint64_t generation, const std::uint64_t element,
+                                                           float* value) noexcept
+        {
+            if (!ActiveServices || !value)
                 return 0;
             const auto result =
-                ActiveServices->ReadManagedUiFlag(AssetId(high, low), static_cast<ManagedUiFlagProperty>(property));
+                ActiveServices->ReadManagedUiDocumentElementValue(AssetId(high, low), generation, element);
+            if (!result)
+                return 0;
+            *value = *result;
+            return 1;
+        }
+
+        [[nodiscard]] std::uint8_t SetDocumentElementValue(const std::uint64_t high, const std::uint64_t low,
+                                                           const std::uint64_t generation, const std::uint64_t element,
+                                                           const float value) noexcept
+        {
+            return ActiveServices && ActiveServices->SetManagedUiDocumentElementValue(AssetId(high, low), generation,
+                                                                                      element, value)
+                       ? 1
+                       : 0;
+        }
+
+        [[nodiscard]] std::uint8_t GetDocumentElementFlag(const std::uint64_t high, const std::uint64_t low,
+                                                          const std::uint64_t generation, const std::uint64_t element,
+                                                          const std::uint8_t property, std::uint8_t* value) noexcept
+        {
+            if (!ActiveServices || !value || property > static_cast<std::uint8_t>(ManagedUiDocumentFlag::Enabled))
+                return 0;
+            const auto result = ActiveServices->ReadManagedUiDocumentElementFlag(
+                AssetId(high, low), generation, element, static_cast<ManagedUiDocumentFlag>(property));
             if (!result)
                 return 0;
             *value = *result ? 1 : 0;
             return 1;
         }
 
-        [[nodiscard]] std::uint8_t SetFlag(const std::uint64_t high, const std::uint64_t low,
-                                           const std::uint8_t property, const std::uint8_t value) noexcept
+        [[nodiscard]] std::uint8_t SetDocumentElementFlag(const std::uint64_t high, const std::uint64_t low,
+                                                          const std::uint64_t generation, const std::uint64_t element,
+                                                          const std::uint8_t property,
+                                                          const std::uint8_t value) noexcept
         {
-            return ActiveServices && property <= static_cast<std::uint8_t>(ManagedUiFlagProperty::Focused) &&
-                           ActiveServices->SetManagedUiFlag(AssetId(high, low),
-                                                            static_cast<ManagedUiFlagProperty>(property), value != 0)
+            return ActiveServices && property <= static_cast<std::uint8_t>(ManagedUiDocumentFlag::Enabled) &&
+                           ActiveServices->SetManagedUiDocumentElementFlag(AssetId(high, low), generation, element,
+                                                                           static_cast<ManagedUiDocumentFlag>(property),
+                                                                           value != 0)
                        ? 1
                        : 0;
         }
 
-        [[nodiscard]] std::uint8_t GetVector(const std::uint64_t high, const std::uint64_t low,
-                                             const std::uint8_t property, Vector2* value) noexcept
-        {
-            if (!ActiveServices || !value || property > static_cast<std::uint8_t>(ManagedUiVectorProperty::ContentSize))
-                return 0;
-            const auto result =
-                ActiveServices->ReadManagedUiVector(AssetId(high, low), static_cast<ManagedUiVectorProperty>(property));
-            if (!result)
-                return 0;
-            *value = *result;
-            return 1;
-        }
-
-        [[nodiscard]] std::uint8_t SetVector(const std::uint64_t high, const std::uint64_t low,
-                                             const std::uint8_t property, const Vector2 value) noexcept
-        {
-            return ActiveServices && property <= static_cast<std::uint8_t>(ManagedUiVectorProperty::ContentSize) &&
-                           ActiveServices->SetManagedUiVector(AssetId(high, low),
-                                                              static_cast<ManagedUiVectorProperty>(property), value)
-                       ? 1
-                       : 0;
-        }
-
-        [[nodiscard]] int GetInputText(const std::uint64_t high, const std::uint64_t low, std::uint8_t* destination,
-                                       const int capacity) noexcept
-        {
-            if (!ActiveServices)
-                return CopyText({}, destination, capacity);
-            const auto value = ActiveServices->ReadManagedUiInputText(AssetId(high, low));
-            return value ? CopyText(*value, destination, capacity) : -1;
-        }
-
-        [[nodiscard]] std::uint8_t SetInputText(const std::uint64_t high, const std::uint64_t low,
-                                                const Coral::String text) noexcept
-        {
-            return ActiveServices &&
-                           ActiveServices->SetManagedUiInputText(AssetId(high, low), static_cast<std::string>(text))
-                       ? 1
-                       : 0;
-        }
-
-        [[nodiscard]] std::uint8_t ConsumeEvent(const std::uint64_t high, const std::uint64_t low,
-                                                const std::uint8_t type) noexcept
+        [[nodiscard]] std::uint8_t ConsumeDocumentElementEvent(const std::uint64_t high, const std::uint64_t low,
+                                                               const std::uint64_t generation,
+                                                               const std::uint64_t element,
+                                                               const std::uint8_t type) noexcept
         {
             return ActiveServices && type <= static_cast<std::uint8_t>(RuntimeUiEventType::TextChanged) &&
-                           ActiveServices->ConsumeManagedUiEvent(AssetId(high, low),
-                                                                 static_cast<RuntimeUiEventType>(type))
+                           ActiveServices->ConsumeManagedUiDocumentElementEvent(AssetId(high, low), generation, element,
+                                                                                static_cast<RuntimeUiEventType>(type))
                        ? 1
                        : 0;
         }
 
-        [[nodiscard]] std::uint8_t Focus(const std::uint64_t high, const std::uint64_t low) noexcept
+        [[nodiscard]] std::uint8_t FocusDocumentElement(const std::uint64_t high, const std::uint64_t low,
+                                                        const std::uint64_t generation,
+                                                        const std::uint64_t element) noexcept
         {
-            return ActiveServices && ActiveServices->FocusManagedUi(AssetId(high, low)) ? 1 : 0;
+            return ActiveServices &&
+                           ActiveServices->FocusManagedUiDocumentElement(AssetId(high, low), generation, element)
+                       ? 1
+                       : 0;
         }
     } // namespace
 
@@ -146,15 +203,29 @@ namespace Keire::Detail
 
     void RegisterManagedRuntimeUi(Coral::ManagedAssembly& assembly)
     {
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetScalarIcall", reinterpret_cast<void*>(&GetScalar));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetScalarIcall", reinterpret_cast<void*>(&SetScalar));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetFlagIcall", reinterpret_cast<void*>(&GetFlag));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetFlagIcall", reinterpret_cast<void*>(&SetFlag));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetVectorIcall", reinterpret_cast<void*>(&GetVector));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetVectorIcall", reinterpret_cast<void*>(&SetVector));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetInputTextIcall", reinterpret_cast<void*>(&GetInputText));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetInputTextIcall", reinterpret_cast<void*>(&SetInputText));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "ConsumeEventIcall", reinterpret_cast<void*>(&ConsumeEvent));
-        assembly.AddInternalCall("Keire.NativeRuntimeUi", "FocusIcall", reinterpret_cast<void*>(&Focus));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "ResolveDocumentRootIcall",
+                                 reinterpret_cast<void*>(&ResolveDocumentRoot));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "ResolveDocumentElementByIdIcall",
+                                 reinterpret_cast<void*>(&ResolveDocumentElementById));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "ResolveDocumentElementByNameIcall",
+                                 reinterpret_cast<void*>(&ResolveDocumentElementByName));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "DocumentElementAliveIcall",
+                                 reinterpret_cast<void*>(&DocumentElementAlive));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetDocumentElementTextIcall",
+                                 reinterpret_cast<void*>(&GetDocumentElementText));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetDocumentElementTextIcall",
+                                 reinterpret_cast<void*>(&SetDocumentElementText));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetDocumentElementValueIcall",
+                                 reinterpret_cast<void*>(&GetDocumentElementValue));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetDocumentElementValueIcall",
+                                 reinterpret_cast<void*>(&SetDocumentElementValue));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetDocumentElementFlagIcall",
+                                 reinterpret_cast<void*>(&GetDocumentElementFlag));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetDocumentElementFlagIcall",
+                                 reinterpret_cast<void*>(&SetDocumentElementFlag));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "ConsumeDocumentElementEventIcall",
+                                 reinterpret_cast<void*>(&ConsumeDocumentElementEvent));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "FocusDocumentElementIcall",
+                                 reinterpret_cast<void*>(&FocusDocumentElement));
     }
 } // namespace Keire::Detail

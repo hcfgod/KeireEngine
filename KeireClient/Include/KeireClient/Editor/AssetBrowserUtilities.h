@@ -90,6 +90,7 @@ namespace KeireEditor
         AnimationGraph,
         AudioMixer,
         VfxEffect,
+        UiDocument,
         Material,
         MaterialGraph,
         MaterialInstance,

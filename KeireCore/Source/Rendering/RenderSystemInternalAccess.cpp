@@ -736,9 +736,23 @@ namespace Keire
     std::size_t RenderSystemInternalAccess::RuntimeUiCommandCount(const RenderSystem& renderer) noexcept
     {
         std::size_t count = renderer.m_Impl->State->CaptureRuntimeUiCommands.size();
-        for (const auto& tree : renderer.m_Impl->State->PendingRuntimeUiTrees)
-            if (tree)
-                count += tree->DrawCommands().size();
+        for (const auto& pending : renderer.m_Impl->State->PendingRuntimeUiSubmissions)
+        {
+            const auto& submission = pending.Submission;
+            if (!submission.Tree)
+                continue;
+            for (const auto& command : submission.Tree->DrawCommands())
+            {
+                auto element = command.Element;
+                while (submission.Root && element && element != submission.Root)
+                {
+                    const auto state = submission.Tree->State(element);
+                    element = state ? state->Parent : RuntimeUiElementId{};
+                }
+                if (!submission.Root || element == submission.Root)
+                    ++count;
+            }
+        }
         return count;
     }
 

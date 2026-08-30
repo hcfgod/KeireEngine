@@ -220,6 +220,22 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         else
             camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
         m_RenderView->SetCamera(camera);
+        if (assetSystem)
+        {
+            if (!m_UiPresentation)
+            {
+                m_UiPresentation =
+                    Keire::CreateRef<Keire::ScenePresentationRuntime>(assetSystem, Keire::Ref<Keire::AudioSystem>{});
+            }
+            m_UiPresentation->Synchronize(activeScene, size.Width, size.Height, false, {}, &camera);
+            m_UiPresentation->AdvanceUi(
+                static_cast<float>(std::max(m_Controller.SceneViewportTime().UnscaledDeltaTime().Seconds(), 0.0)));
+            for (auto submission : m_UiPresentation->UiRenderSubmissions(m_RenderView))
+            {
+                if (KeireEditor::SubmitsRuntimeUiToSceneRenderer(submission.Target))
+                    renderer->SubmitRuntimeUiTarget(std::move(submission));
+            }
+        }
         const auto renderSurface = m_RenderView->Surface();
         renderSurface->SetOcclusionDebugView(m_Gizmos->Settings().OcclusionDebugView,
                                              m_Gizmos->Settings().OcclusionDebugMip);
@@ -246,38 +262,33 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     }
     m_ViewportRect = imageRect;
     m_LastCamera = camera;
-    if (hasScene && assetSystem)
+    if (hasScene && assetSystem && m_RenderView && m_UiPresentation)
     {
-        if (!m_UiPresentation)
+        if (KeireEditor::RoutesRuntimeGameUiInput(KeireEditor::EditorViewportTarget::Scene))
         {
-            m_UiPresentation =
-                Keire::CreateRef<Keire::ScenePresentationRuntime>(assetSystem, Keire::Ref<Keire::AudioSystem>{});
-        }
-        m_UiPresentation->Synchronize(activeScene, size.Width, size.Height, false, {}, &camera);
-        if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Scene))
-            m_UiPresentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
-        const auto pointer = ui.PointerState();
-        const float localX = pointer.Position.X - imageRect.Minimum.X;
-        const float localY = pointer.Position.Y - imageRect.Minimum.Y;
-        m_UiPresentation->PointerMove(localX, localY);
-        if (imageState.Hovered)
-        {
-            const auto uiEntity = m_UiPresentation->HitTestUiEntity(localX, localY);
-            const auto canvasEntity =
-                uiEntity ? Keire::EntityId{} : m_UiPresentation->HitTestCanvasEntity(localX, localY);
-            if (pointer.LeftPressed)
+            const auto pointer = ui.PointerState();
+            const float localX = pointer.Position.X - imageRect.Minimum.X;
+            const float localY = pointer.Position.Y - imageRect.Minimum.Y;
+            m_UiPresentation->PointerMove(localX, localY);
+            if (imageState.Hovered)
             {
-                m_UiPresentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
-                const auto selectedUiEntity = uiEntity ? uiEntity : canvasEntity;
-                if (selectedUiEntity)
-                    m_Controller.SetSceneViewportSelection(std::span<const Keire::EntityId>(&selectedUiEntity, 1),
-                                                           false);
+                const auto uiEntity = m_UiPresentation->HitTestUiEntity(localX, localY);
+                const auto canvasEntity =
+                    uiEntity ? Keire::EntityId{} : m_UiPresentation->HitTestCanvasEntity(localX, localY);
+                if (pointer.LeftPressed)
+                {
+                    m_UiPresentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, true);
+                    const auto selectedUiEntity = uiEntity ? uiEntity : canvasEntity;
+                    if (selectedUiEntity)
+                        m_Controller.SetSceneViewportSelection(std::span<const Keire::EntityId>(&selectedUiEntity, 1),
+                                                               false);
+                }
+                if (uiEntity || canvasEntity)
+                    imageState.Hovered = false;
             }
-            if (uiEntity || canvasEntity)
-                imageState.Hovered = false;
+            if (pointer.LeftReleased)
+                m_UiPresentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, false);
         }
-        if (pointer.LeftReleased)
-            m_UiPresentation->PointerButton(localX, localY, Keire::RuntimeUiPointerButton::Primary, false);
     }
     else if (m_UiPresentation)
     {
@@ -524,10 +535,20 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             selectionBeforePointer.assign(selected.begin(), selected.end());
         }
         const auto selections = document.Selections();
+        const KeireEditor::SceneGizmoController::UiPanelSettingsResolver resolveUiPanelSettings =
+            [assetSystem](const Keire::AssetId asset) -> std::optional<Keire::UiPanelSettingsDefinition>
+        {
+            if (!assetSystem || !asset)
+                return std::nullopt;
+            const auto loaded =
+                assetSystem->Load<Keire::UiPanelSettingsAsset>(asset, Keire::AssetPriority::High).TryGetLoaded();
+            return loaded ? std::optional{loaded->Definition()} : std::nullopt;
+        };
         const auto gizmo = m_Gizmos->UpdateAndDraw(
             ui, renderScene, Keire::EntityId(document.Selection()), camera, imageRect, allowManipulation,
             pointerBlocked, [this](const std::string_view name) { m_Controller.RecordSceneViewportUndo(name); },
-            resolveMeshBounds, selections, m_UiPresentation.Get());
+            resolveMeshBounds, selections, m_UiPresentation.Get(), resolveUiPanelSettings,
+            [this](const Keire::AssetId asset) { m_Controller.OpenSceneViewportUiDocument(asset); });
         if (gizmo.SelectionActivated)
             m_Controller.SelectSceneViewportEntity(gizmo.Selection.Value(), ui.ControlDown());
         if (imageState.Hovered && !pointerBlocked && pointer.LeftPressed)

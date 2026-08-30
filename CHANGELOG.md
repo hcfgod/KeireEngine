@@ -5,7 +5,34 @@ versions.
 
 ## Unreleased
 
+### Added
+
+- Added the retained Kéire UI Toolkit foundation: deterministic `.keireui` visual trees, `.keirestyle` cascading
+  styles, `.keireuipanel` presentation settings, one `UIDocument` scene component, the managed `Keire.UI` visual
+  element/control/event/binding surface, explicit custom-control registration, and a dockable UI Builder/Debugger.
+- Added screen-overlay, camera-overlay, render-texture, and transformed world-surface panel contracts. Screen and camera
+  documents no longer paint over or intercept the Scene viewport; world documents retain physical sizing and ray-to-UV
+  projection data.
+- Added generation-checked managed `UIDocument` queries for source-backed elements, live Builder/Debugger inspection,
+  template/slot authoring, virtualized collections, frame-owned image leases, deterministic UI performance gates, and
+  screen/world examples in starter and showcase projects.
+- Added transactional UI Builder hierarchy reparenting and clipboard remapping, registered custom-control discovery,
+  binding and stylesheet rule authoring, retained resolution/DPI/safe-area/pseudo-state previews, Match Game View,
+  unsaved Play Mode draft previews, local generation-safe runtime picking and diagnostics, template-aware previews,
+  and a pan/zoom visual canvas with drag/drop placement plus direct move and resize gestures.
+- Added bounded retained-style transitions, linear/radial gradients, rounded UI geometry, and frame/device-owned logical
+  render targets with deterministic producer ordering, cycle rejection, and live producer/consumer starter examples.
+- Added a bounded high-resolution printable-ASCII vector fallback glyph atlas with immutable per-frame font leases,
+  device-recovery rebuilds, deterministic nested clipping, and truthful retained-UI vertex, batch, atlas, and repaint
+  diagnostics.
+
 ### Changed
+
+- World-surface UI input now projects the Editor camera ray into panel UV space before choosing a presentation, so
+  focus, typing, submit, and button activation use the same path in Edit and Play Mode.
+- Retired Canvas/Rect Transform scene authoring in favor of UI documents. Legacy UI component IDs remain reserved, and
+  scene import rejects their use with the exact entity/component identity before project state changes. Their old
+  managed component and programmatic runtime wrappers are no longer public API.
 
 - The Editor now uses unthrottled immediate presentation while packaged players retain their configured VSync policy,
   and profiler captures expose frame-admission waits, render-queue delay, outstanding frames, and queue high-water
@@ -23,6 +50,12 @@ versions.
 
 ### Fixed
 
+- `[SerializeReference]` now propagates identity-preserving graph metadata through array, `List<T>`, and
+  `Dictionary<TKey, TValue>` descendants, enabling Inspector type selection and cycle-safe graph editing for
+  polymorphic collection elements.
+- Managed asset discovery now uses the exact successfully loaded candidate assembly/type allowlist and publishes an
+  immutable generation-stamped catalog, preventing stale load-context types from replacing the last-good Inspector
+  metadata after a failed reload.
 - Windows install journals and verified cleanup now retry transient antivirus and file-filter interference during
   handle-anchored mutation while permanent errors still fail immediately.
 - Managed reloads now capture bounded, stable, SHA-256-identified assembly snapshots before asking Coral to load them

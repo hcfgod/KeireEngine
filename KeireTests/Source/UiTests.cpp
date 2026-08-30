@@ -181,6 +181,13 @@ namespace
                     CHECK(ImGui::GetStyle().WindowPadding.y == doctest::Approx(4.0F));
                 }
                 CHECK(ImGui::GetStyle().WindowPadding.x == doctest::Approx(originalPadding.x));
+                const auto originalWindowRounding = ImGui::GetStyle().WindowRounding;
+                {
+                    const auto rounding = ui.PushStyleVariable(Keire::UiStyleVariable::WindowRounding, 6.0F);
+                    CHECK(rounding);
+                    CHECK(ImGui::GetStyle().WindowRounding == doctest::Approx(6.0F));
+                }
+                CHECK(ImGui::GetStyle().WindowRounding == doctest::Approx(originalWindowRounding));
                 CHECK_THROWS_AS((void)ui.PushStyleColor(static_cast<Keire::UiStyleColorRole>(255), {}),
                                 std::invalid_argument);
                 CHECK_THROWS_AS((void)ui.PushStyleVariable(Keire::UiStyleVariable::WindowPadding, 1.0F),

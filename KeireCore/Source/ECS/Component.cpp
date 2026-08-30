@@ -13,11 +13,12 @@
 #include "Keire/ECS/Components/PointLightComponent.h"
 #include "Keire/ECS/Components/ReflectionProbeComponent.h"
 #include "Keire/ECS/Components/RigidBodyComponent.h"
-#include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/SpotLightComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/ECS/Entity.h"
+#include "KeireInternal/ECS/RetiredUiComponentTypesInternal.h"
 #include "KeireInternal/SceneState.h"
 
 #include <algorithm>
@@ -307,6 +308,8 @@ namespace Keire
     void ComponentRegistry::Register(ComponentRegistration registration)
     {
         m_Impl->RequireOwner("Register");
+        if (IsReservedType(registration.Type))
+            throw std::invalid_argument("Component type ID is permanently reserved and cannot be registered.");
         ValidateComponentRegistration(registration);
         const auto [_, inserted] = m_Impl->Registrations.emplace(registration.Type, std::move(registration));
         if (!inserted)
@@ -324,12 +327,16 @@ namespace Keire
         {
             if (!type || !removed.insert(type).second)
                 throw std::invalid_argument("Component registration removal set is invalid.");
+            if (IsReservedType(type))
+                throw std::invalid_argument("A permanently reserved component type ID cannot be replaced or removed.");
             replacement.erase(type);
         }
 
         std::unordered_set<ComponentTypeId> inserted;
         for (const auto& registration : registrations)
         {
+            if (IsReservedType(registration.Type))
+                throw std::invalid_argument("A permanently reserved component type ID cannot be replaced or removed.");
             ValidateComponentRegistration(registration);
             if (!inserted.insert(registration.Type).second)
                 throw std::invalid_argument("Component registration batch contains a duplicate stable type ID.");
@@ -346,6 +353,11 @@ namespace Keire
     bool ComponentRegistry::Contains(const ComponentTypeId type) const noexcept
     {
         return m_Impl->Registrations.contains(type);
+    }
+
+    bool ComponentRegistry::IsReservedType(const ComponentTypeId type) noexcept
+    {
+        return Detail::FindRetiredUiComponentType(type) != nullptr;
     }
 
     std::uint64_t ComponentRegistry::Revision() const noexcept
@@ -395,17 +407,7 @@ namespace Keire
         result->Register(CreateAudioReverbZoneComponentRegistration());
         result->Register(CreateAudioListenerComponentRegistration());
         result->Register(CreateVfxEmitterComponentRegistration());
-        result->Register(CreateCanvasComponentRegistration());
-        result->Register(CreateRectTransformComponentRegistration());
-        result->Register(CreateUiTextComponentRegistration());
-        result->Register(CreateUiImageComponentRegistration());
-        result->Register(CreateUiButtonComponentRegistration());
-        result->Register(CreateUiLayoutComponentRegistration());
-        result->Register(CreateUiSliderComponentRegistration());
-        result->Register(CreateUiToggleComponentRegistration());
-        result->Register(CreateUiInputFieldComponentRegistration());
-        result->Register(CreateUiScrollViewComponentRegistration());
-        result->Register(CreateUiAccessibilityComponentRegistration());
+        result->Register(CreateUiDocumentComponentRegistration());
         return result;
     }
 } // namespace Keire

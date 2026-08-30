@@ -12,12 +12,12 @@
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/UiBuilderInspector.h"
 #include "KeireClient/Editor/VfxEmitterInspector.h"
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
-#include "Keire/ECS/Components/RuntimeUiComponents.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/Rendering/ShaderGraph.h"
 
@@ -1049,8 +1049,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     const auto componentKey = registration->Type.ToString() + "." + std::to_string(ordinal);
                     auto& expanded = expansion(componentKey);
                     const auto cardId = "ComponentCard##" + componentKey;
-                    const bool rectTransform = registration->Type == Keire::RectTransformComponent::StaticType();
-                    const float anchorPickerHeight = rectTransform ? 64.0F : 0.0F;
+                    const float anchorPickerHeight = 0.0F;
                     std::size_t groupRows = 0;
                     std::size_t headerRows = 0;
                     std::size_t additionalTextRows = 0;
@@ -1083,14 +1082,15 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             : 0.0F;
                     const float proceduralDiagnosticsHeight =
                         registration->Type == Keire::AnimatorComponent::StaticType() ? 138.0F : 0.0F;
+                    const float uiDocumentActionsHeight = UiDocumentInspectorActionsHeight(component);
                     const float cardHeight =
-                        expanded
-                            ? std::max(115.0F, 80.0F + anchorPickerHeight +
-                                                   static_cast<float>(registration->Properties.size()) * 34.0F +
-                                                   static_cast<float>(groupRows + headerRows) * 22.0F +
-                                                   static_cast<float>(additionalTextRows) * 20.0F + vfxInspectorHeight +
-                                                   audioSetupHeight + proceduralDiagnosticsHeight)
-                            : 38.0F;
+                        expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
+                                                        static_cast<float>(registration->Properties.size()) * 34.0F +
+                                                        static_cast<float>(groupRows + headerRows) * 22.0F +
+                                                        static_cast<float>(additionalTextRows) * 20.0F +
+                                                        vfxInspectorHeight + audioSetupHeight +
+                                                        proceduralDiagnosticsHeight + uiDocumentActionsHeight)
+                                 : 38.0F;
                     if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                     {
                         const bool removed = drawComponentHeader(component, *registration, expanded, registration->Name,
@@ -1122,9 +1122,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 ui.TextColored(theme.Warning, animator->RuntimeDiagnostic());
                             ui.Separator();
                         }
-                        if (rectTransform)
-                            DrawRectTransformAnchorPreset(ui, entity, *registration, sceneDocument, theme, editTargets,
-                                                          multiEditing);
+                        DrawUiDocumentInspectorActions(ui, component, m_Controller, theme);
                         std::string activeGroup;
                         Keire::ComponentPropertyBag values;
                         bool serialized = false;
@@ -1445,6 +1443,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 (void)ui.InputTextWithHint("##ComponentSearch", "Search scripts and components", m_ComponentSearch);
                 for (const auto& registration : scene->Components()->Registrations())
                 {
+                    if (IsRetiredSceneUiComponent(registration.Type))
+                        continue;
                     if (!ContainsCaseInsensitive(registration.Name, m_ComponentSearch) &&
                         !ContainsCaseInsensitive(registration.Category, m_ComponentSearch))
                         continue;

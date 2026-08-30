@@ -1307,7 +1307,7 @@ namespace Keire::RenderBackend
                         {
                             depth.texture = surface.ActiveWorkset().Depth;
                             depth.load_op = SDL_GPU_LOADOP_LOAD;
-                            depth.store_op = finalChunk ? SDL_GPU_STOREOP_DONT_CARE : SDL_GPU_STOREOP_STORE;
+                            depth.store_op = SDL_GPU_STOREOP_STORE;
                             depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
                             depth.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
                             depthPointer = &depth;
@@ -1335,6 +1335,7 @@ namespace Keire::RenderBackend
                 if (frameGraphPass == SceneFrameGraph.ToneMap)
                 {
                     const auto started = std::chrono::steady_clock::now();
+                    RecordRuntimeUiWorldPanels(commands, surface);
                     RecordToneMap(commands, surface);
                     Statistics.ToneMapMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
@@ -1342,6 +1343,7 @@ namespace Keire::RenderBackend
                 }
                 if (frameGraphPass == SceneFrameGraph.Overlays)
                 {
+                    RecordRuntimeUiCameraPanels(commands, surface);
                     if (request != requests.end())
                         RecordGpuOcclusionDebug(commands, surface, request->Packet, preparedOcclusion);
                 }

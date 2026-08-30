@@ -277,14 +277,13 @@ namespace Keire
             std::scoped_lock lock(ManagedAssetMutex);
             PendingManagedAssetLoads.clear();
             ManagedAssetSources.clear();
+            ManagedAssetRuntimeDiagnostics.clear();
         }
         Instances.clear();
         ActiveTypes.clear();
         CandidateTypes.clear();
-        ActiveManagedAssetTypes.clear();
-        CandidateManagedAssetTypes.clear();
-        ActiveManagedAssetDiagnostics.clear();
-        CandidateManagedAssetDiagnostics.clear();
+        ActiveManagedAssetCatalog.reset();
+        CandidateManagedAssetCatalog.reset();
         ActiveManagedAssetRuntimeTypes.clear();
         CandidateManagedAssetRuntimeTypes.clear();
         ActiveNativeRuntimeType = nullptr;

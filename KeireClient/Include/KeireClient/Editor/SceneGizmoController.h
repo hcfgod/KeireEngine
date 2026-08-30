@@ -5,9 +5,11 @@
 #include "Keire/Core.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -41,17 +43,29 @@ namespace KeireEditor
         Center
     };
 
-    struct SceneUiRectHandleEdit
+    struct SceneUiWorldPanelHandleEdit
     {
-        Keire::Vector2 AnchoredPosition;
-        Keire::Vector2 SizeDelta;
-        Keire::Vector2 ReferenceResolution;
+        Keire::Vector3 LocalScale{1.0F, 1.0F, 1.0F};
+        Keire::Vector2 EffectivePhysicalSize;
     };
 
-    [[nodiscard]] SceneUiRectHandleEdit
-    CalculateSceneUiRectHandleEdit(SceneUiRectHandle handle, std::span<const Keire::Vector2, 4> projectedCorners,
-                                   Keire::Vector2 pointerDelta, Keire::Vector2 anchoredPosition,
-                                   Keire::Vector2 sizeDelta, Keire::Vector2 referenceResolution, bool canvasRoot);
+    [[nodiscard]] SceneUiWorldPanelHandleEdit
+    CalculateSceneUiWorldPanelHandleEdit(SceneUiRectHandle handle, std::span<const Keire::Vector2, 4> projectedCorners,
+                                         Keire::Vector2 pointerDelta, Keire::Vector3 initialLocalScale,
+                                         Keire::Vector2 basePhysicalSize, bool constrainAspect) noexcept;
+    [[nodiscard]] Keire::Vector2 EffectiveSceneUiWorldPanelSize(Keire::Vector2 basePhysicalSize,
+                                                                Keire::Vector3 localScale) noexcept;
+
+    enum class SceneUiDocumentAuthoringRoute : std::uint8_t
+    {
+        None,
+        FocusUiBuilder,
+        WorldSurfaceGizmo
+    };
+
+    [[nodiscard]] SceneUiDocumentAuthoringRoute
+    ResolveSceneUiDocumentAuthoringRoute(const Keire::UiDocumentComponent& component,
+                                         std::optional<Keire::UiPanelSettingsDefinition> settings) noexcept;
 
     struct SceneTransformTarget
     {
@@ -111,6 +125,8 @@ namespace KeireEditor
         };
 
         using BeginUndo = std::function<void(std::string_view)>;
+        using UiPanelSettingsResolver = std::function<std::optional<Keire::UiPanelSettingsDefinition>(Keire::AssetId)>;
+        using OpenUiDocument = std::function<void(Keire::AssetId)>;
 
         [[nodiscard]] Keire::UiItemRect DrawOverlayToolbar(Keire::UiFrame& ui, Keire::UiItemRect viewport,
                                                            std::uint32_t occlusionPyramidMipCount = 0);
@@ -120,7 +136,9 @@ namespace KeireEditor
                                                      bool pointerBlocked, const BeginUndo& beginUndo,
                                                      const MeshBoundsResolver& resolveMeshBounds = {},
                                                      std::span<const Keire::AssetId> selections = {},
-                                                     const Keire::ScenePresentationRuntime* presentation = nullptr);
+                                                     const Keire::ScenePresentationRuntime* presentation = nullptr,
+                                                     const UiPanelSettingsResolver& resolveUiPanelSettings = {},
+                                                     const OpenUiDocument& openUiDocument = {});
 
         void Load(const std::filesystem::path& projectRoot);
         void Save(const std::filesystem::path& projectRoot) const noexcept;
@@ -199,13 +217,11 @@ namespace KeireEditor
             bool UndoRecorded = false;
         };
 
-        struct UiRectDragState
+        struct UiWorldPanelDragState
         {
-            Keire::Ref<Keire::RectTransformComponent> RectTransform;
-            Keire::Ref<Keire::CanvasComponent> Canvas;
-            Keire::Vector2 InitialAnchoredPosition;
-            Keire::Vector2 InitialSizeDelta;
-            Keire::Vector2 InitialReferenceResolution;
+            Keire::Ref<Keire::TransformComponent> Transform;
+            Keire::Vector3 InitialLocalScale{1.0F, 1.0F, 1.0F};
+            Keire::Vector2 BasePhysicalSize;
             Keire::UiPosition StartPointer;
             std::array<Keire::Vector2, 4> InitialCorners{};
             SceneUiRectHandle Handle = SceneUiRectHandle::None;
@@ -215,7 +231,11 @@ namespace KeireEditor
         SceneToolSettings m_Settings;
         DragState m_Drag;
         ColliderDragState m_ColliderDrag;
-        UiRectDragState m_UiRectDrag;
+        UiWorldPanelDragState m_UiWorldPanelDrag;
+        Keire::EntityId m_RoutedUiDocument;
+        Keire::AssetId m_RoutedUiVisualTree;
+        Keire::AssetId m_RoutedUiPanelSettings;
+        SceneUiDocumentAuthoringRoute m_RoutedUiDocumentRoute = SceneUiDocumentAuthoringRoute::None;
         SceneTool m_Tool = SceneTool::Translate;
     };
 } // namespace KeireEditor

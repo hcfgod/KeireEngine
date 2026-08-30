@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Starter Render Texture Producer">
+  <style src="b1b20001-1000-4000-8000-000000000001"/>
+  <VisualElement id="b1b2c3d4-1000-4000-8000-000000000501" name="render-target" class="starter-render-target">
+    <Label id="b1b2c3d4-1000-4000-8000-000000000502" name="render-target-title" class="starter-title" text="Live UI Render Target"/>
+    <ProgressBar id="b1b2c3d4-1000-4000-8000-000000000503" name="render-target-progress" minimum="0" maximum="1" value="0.75"/>
+    <Label id="b1b2c3d4-1000-4000-8000-000000000504" name="render-target-copy" class="starter-copy" text="Sampled by the world panel"/>
+  </VisualElement>
+</ui>

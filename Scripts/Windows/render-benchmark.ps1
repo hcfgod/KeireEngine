@@ -98,7 +98,8 @@ try {
     }
 
     Remove-Item -LiteralPath $contentRoot, $sampleRoot -Recurse -Force -ErrorAction SilentlyContinue
-    Copy-WindowsTrackedTree -RepositoryRoot $Root -RelativeSource "Samples/KeireSandbox" -Destination $sampleRoot
+    Copy-WindowsTrackedTree -RepositoryRoot $Root -RelativeSource "Samples/KeireSandbox" -Destination $sampleRoot `
+        -AdditionalRelativeFiles (Get-WindowsKeireSandboxUiPackageFiles)
     $buildScenes = Join-Path $Root "Samples\KeireSandbox\ProjectSettings\BuildScenes.keiresettings"
     if (-not (Test-Path -LiteralPath $buildScenes -PathType Leaf)) {
         throw "Render benchmark requires ProjectSettings/BuildScenes.keiresettings."

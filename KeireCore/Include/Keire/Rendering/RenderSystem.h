@@ -6,6 +6,7 @@
 #include "Keire/Math/Math.h"
 #include "Keire/Ref.h"
 #include "Keire/Rendering/FrameGraphSnapshot.h"
+#include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Vfx/VfxSystem.h"
 
 #include <compare>
@@ -26,7 +27,6 @@ namespace Keire
     class JobSystem;
     class AssetSystem;
     class Scene;
-    class RuntimeUiTree;
     class Window;
     class WindowSystem;
 
@@ -303,6 +303,32 @@ namespace Keire
         std::unique_ptr<Impl> m_Impl;
     };
 
+    enum class RuntimeUiRenderTarget : std::uint8_t
+    {
+        ScreenOverlay,
+        CameraOverlay,
+        RenderTexture,
+        WorldSurface
+    };
+
+    /// Target-aware retained UI submission. The renderer copies commands beneath Root into the accepted immutable
+    /// frame packet; neither the tree nor element handles are retained by render-thread work.
+    struct RuntimeUiRenderSubmission
+    {
+        Ref<RuntimeUiTree> Tree;
+        RuntimeUiElementId Root;
+        RuntimeUiRenderTarget Target = RuntimeUiRenderTarget::ScreenOverlay;
+        Ref<RenderView> View;
+        Matrix4 World;
+        Vector2 Viewport;
+        Vector2 ReferenceResolution{1920.0F, 1080.0F};
+        Vector2 Pivot{0.5F, 0.5F};
+        Vector2 WorldUnitsPerPixel{0.001F, 0.001F};
+        AssetId RenderTexture;
+        std::int32_t SortingOrder = 0;
+        bool DepthTest = true;
+    };
+
     struct SceneRenderContribution
     {
         Ref<Keire::Scene> Scene;
@@ -337,6 +363,8 @@ namespace Keire
         bool TransparentPass = false;
         bool DynamicSpritePackets = false;
         bool TexturedSpritePackets = false;
+        bool RuntimeUiWorldSurfaces = false;
+        bool RuntimeUiRenderTextures = false;
         bool DynamicMeshPackets = false;
         bool SampledResolvedDepth = false;
         // GPU particle simulation can collide with sampled scene depth.
@@ -477,6 +505,8 @@ namespace Keire
         float GpuOcclusionPyramidRecordingMilliseconds = 0.0F;
         /// CPU time spent recording culling/compaction dispatches; this is not GPU execution time.
         float GpuOcclusionCullingRecordingMilliseconds = 0.0F;
+        /// Last completed frame's retained-mode UI work. The renderer publishes this immutable value snapshot.
+        RuntimeUiRendererStatistics RuntimeUiRenderer;
     };
 
     class KEIRE_API RenderSystem final : public RefCounted
@@ -493,6 +523,9 @@ namespace Keire
         void Submit(SceneRenderRequest&& request);
         /// Appends one presentation tree to this frame's runtime overlay. Later calls draw above earlier calls.
         void SubmitRuntimeUi(const Ref<RuntimeUiTree>& tree);
+        /// Submits a root-filtered UI target. RenderTexture uses a renderer-owned logical offscreen target keyed by
+        /// RenderTexture and remains separate from the screen overlay.
+        void SubmitRuntimeUiTarget(RuntimeUiRenderSubmission submission);
         void RequestGpuVfxPipelineWarmup();
 
         [[nodiscard]] RenderMode Mode() const noexcept;

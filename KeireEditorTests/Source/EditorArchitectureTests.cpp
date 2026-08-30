@@ -203,12 +203,6 @@ namespace
 
 } // namespace
 
-TEST_CASE("runtime UI is composited into Scene and Game views")
-{
-    CHECK(KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Scene));
-    CHECK(KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game));
-}
-
 TEST_CASE("asset browser folder snapshots avoid steady-state filesystem traversal")
 {
     const auto root = std::filesystem::temp_directory_path() / "Keire-AssetBrowserFolderCache-Test";

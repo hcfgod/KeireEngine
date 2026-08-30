@@ -11,7 +11,9 @@
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
+#include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
+#include "KeireInternal/ECS/RetiredUiComponentTypesInternal.h"
 
 #include <nlohmann/json.hpp>
 
@@ -38,7 +40,54 @@ namespace Keire
         constexpr std::size_t MaximumComponentDataBytes = 4ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
-        constexpr std::uint32_t SceneAssetImporterVersion = 7;
+        constexpr std::uint32_t SceneAssetImporterVersion = 8;
+
+        [[nodiscard]] std::string_view LegacyUiComponentName(const ComponentTypeId type) noexcept
+        {
+            const auto* retired = Detail::FindRetiredUiComponentType(type);
+            return retired ? retired->Name : std::string_view{};
+        }
+
+        void ValidateNoLegacyUiComponent(const SceneObjectDefinition& object, const SceneComponentDefinition& component)
+        {
+            const auto componentName = LegacyUiComponentName(component.Type);
+            if (componentName.empty())
+                return;
+            throw std::invalid_argument("Scene entity '" + object.Name + "' (" + object.Id.ToString() +
+                                        ") contains retired legacy component '" + std::string(componentName) + "' (" +
+                                        component.Type.ToString() +
+                                        "). Recreate this UI as a UI Document that references .keireui and "
+                                        ".keireuipanel assets.");
+        }
+
+        void ValidateNoLegacySceneUi(const SceneDefinition& definition)
+        {
+            for (const auto& object : definition.Objects)
+                for (const auto& component : object.Components)
+                    ValidateNoLegacyUiComponent(object, component);
+
+            const auto validateOverrides = [&definition](const std::vector<PrefabOverrideDefinition>& overrides)
+            {
+                for (const auto& override : overrides)
+                {
+                    if (override.AddedComponent)
+                    {
+                        const auto found =
+                            std::ranges::find(definition.Objects, override.Object, &SceneObjectDefinition::Id);
+                        const SceneObjectDefinition fallback{.Id = override.Object, .Name = "Prefab override"};
+                        ValidateNoLegacyUiComponent(found == definition.Objects.end() ? fallback : *found,
+                                                    *override.AddedComponent);
+                    }
+                    if (override.AddedObject)
+                        for (const auto& component : override.AddedObject->Components)
+                            ValidateNoLegacyUiComponent(*override.AddedObject, component);
+                }
+            };
+
+            validateOverrides(definition.PrefabOverrides);
+            for (const auto& instance : definition.PrefabInstances)
+                validateOverrides(instance.Overrides);
+        }
 
         [[nodiscard]] const Json* FindMember(const Json& value, const std::string_view canonical,
                                              const std::string_view alternate = {})
@@ -232,6 +281,11 @@ namespace Keire
                         throw std::invalid_argument("VFX parameter overrides must be serialized as text.");
                     CollectVfxParameterOverrideDependencies(overrides->get_ref<const std::string&>(), dependencies);
                 }
+            }
+            else if (component.Type == UiDocumentComponent::StaticType())
+            {
+                CollectSerializedAsset(data, "visualTree", dependencies);
+                CollectSerializedAsset(data, "panelSettings", dependencies);
             }
             CollectManagedStateDependencies(context, data, dependencies);
         }
@@ -1145,6 +1199,7 @@ namespace Keire
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
             const auto parsed = SceneAsset::Decode(bytes);
+            ValidateNoLegacySceneUi(parsed->Definition());
             AssetImportOutput output;
             output.Bytes = SceneAsset::Encode(parsed->Definition());
             output.AssetDependencies = AuthoredDependencies(context, parsed->Definition());

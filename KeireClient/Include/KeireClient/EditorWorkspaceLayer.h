@@ -14,6 +14,7 @@
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/RiggingStudioPanel.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
+#include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInput.h"
@@ -79,6 +80,10 @@ namespace KeireEditor
     class ScenePlayChangeTracker;
     class ScenePlayChangesPanel;
     class SceneTransitionCoordinator;
+    class UiBuilderDocument;
+    class UiBuilderLiveDraftSession;
+    class UiBuilderPanel;
+    class UiBuilderStyleSheetDocument;
     class ViewportAssetDropRouter;
 } // namespace KeireEditor
 
@@ -98,6 +103,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::IVfxEffectPanelController,
                                    private KeireEditor::IMaterialGraphPanelController,
                                    private KeireEditor::IShaderGraphPanelController,
+                                   private KeireEditor::IUiBuilderController,
                                    private KeireEditor::IProjectSettingsController,
                                    private KeireEditor::ILightingPanelController,
                                    private KeireEditor::IAssetBrowserController,
@@ -197,6 +203,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RevealSceneViewportScenes() override;
     void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target) override;
     void RecordSceneViewportUndo(std::string_view name) override;
+    void OpenSceneViewportUiDocument(Keire::AssetId asset) override;
     void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) override;
     void SetSceneViewportSelection(std::span<const Keire::EntityId> entities, bool additive) override;
     [[nodiscard]] std::optional<Keire::UiItemRect>
@@ -259,6 +266,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserAudioMixer(std::string_view name) override;
     bool CreateAssetBrowserPhysicsMaterial(std::string_view name) override;
     bool CreateAssetBrowserVfxEffect(std::string_view name) override;
+    bool CreateAssetBrowserUiDocument(std::string_view name) override;
     bool CreateAssetBrowserMaterialGraph(std::string_view name, Keire::AssetId shader) override;
     bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) override;
     bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) override;
@@ -279,6 +287,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenAssetBrowserAnimationGraph(Keire::AssetId asset) override;
     void OpenAssetBrowserAudioMixer(Keire::AssetId asset) override;
     void OpenAssetBrowserVfxEffect(Keire::AssetId asset) override;
+    void OpenAssetBrowserUiDocument(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterial(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterialGraph(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterialInstance(Keire::AssetId asset) override;
@@ -288,6 +297,23 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenAssetBrowserScene(Keire::AssetId asset) override;
     [[nodiscard]] bool PrepareAssetBrowserExternalOpen(Keire::AssetId asset) override;
     void CopyAssetBrowserText(std::string_view value) override;
+    [[nodiscard]] KeireEditor::UiBuilderDocument& UiBuilderState() noexcept override;
+    [[nodiscard]] const Keire::UiThemeDefinition& UiBuilderTheme() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::AssetSystem> UiBuilderAssets() const noexcept override;
+    [[nodiscard]] std::optional<Keire::UiSize> UiBuilderGameViewSize() const noexcept override;
+    [[nodiscard]] KeireEditor::UiBuilderStyleSheetDocument& UiBuilderStyleSheetState() noexcept override;
+    void ActivateUiBuilderHistory() noexcept override;
+    void ActivateUiBuilderStyleSheetHistory() noexcept override;
+    void OpenUiBuilderStyleSheet(Keire::AssetId asset) override;
+    void SaveUiBuilderDocument() override;
+    void ReloadUiBuilderDocument() override;
+    void SaveUiBuilderStyleSheet() override;
+    void ReloadUiBuilderStyleSheet() override;
+    void ReportUiBuilderError(std::string message) noexcept override;
+    [[nodiscard]] KeireEditor::UiBuilderLiveDebugCapture CaptureUiBuilderLiveDebug(Keire::AssetId visualTree) override;
+    void SetUiBuilderLivePicking(Keire::AssetId visualTree, bool enabled) noexcept override;
+    [[nodiscard]] std::optional<Keire::AssetId> ConsumeUiBuilderLivePick(Keire::AssetId visualTree) noexcept override;
+    void SynchronizeUiBuilderLiveDraft() noexcept;
     [[nodiscard]] KeireEditor::SceneDocument& InspectorSceneDocument() noexcept override;
     [[nodiscard]] KeireEditor::InputActionsDocument& InspectorInputDocument() noexcept override;
     [[nodiscard]] KeireEditor::MaterialDocument& InspectorMaterialDocument() noexcept override;
@@ -317,6 +343,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void CommitInspectorMaterial() override;
     void OpenInspectorInputActions(Keire::AssetId asset) override;
     void OpenInspectorMaterialGraph(Keire::AssetId asset) override;
+    void OpenInspectorUiDocument(Keire::AssetId asset) override;
     void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void PersistInspectorMaterialParameterCollection(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void PersistInspectorProceduralMotionProfile(Keire::AssetId asset, std::span<const std::byte> bytes) override;
@@ -494,6 +521,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool CreateAnimationGraph(std::string_view name = "NewAnimatorController");
     [[nodiscard]] bool CreateProceduralMotionProfile(std::string_view name = "NewProceduralMotionProfile");
     void OpenAnimationGraph(Keire::AssetId asset);
+    void OpenUiBuilder(Keire::AssetId asset);
+    [[nodiscard]] bool
+    TryPickUiBuilderLiveElement(std::span<const Keire::Ref<Keire::ScenePresentationRuntime>> presentations,
+                                const Keire::UiItemRect& viewport, const Keire::UiPointerState& pointer) noexcept;
     void SaveAnimationGraph();
     void OpenAudioMixer(Keire::AssetId asset);
     void SaveAudioMixer();
@@ -647,24 +678,35 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                            std::uint32_t spawnCount) noexcept override;
     [[nodiscard]] bool SetManagedVfxParameter(Keire::AssetId entity,
                                               const Keire::VfxParameterOverride& value) noexcept override;
-    [[nodiscard]] bool SetManagedUiText(Keire::AssetId entity, std::string_view text) noexcept override;
-    [[nodiscard]] bool ConsumeManagedUiClick(Keire::AssetId entity) noexcept override;
-    [[nodiscard]] std::optional<float> ReadManagedUiScalar(Keire::AssetId entity,
-                                                           Keire::ManagedUiScalarProperty property) noexcept override;
-    [[nodiscard]] bool SetManagedUiScalar(Keire::AssetId entity, Keire::ManagedUiScalarProperty property,
-                                          float value) noexcept override;
-    [[nodiscard]] std::optional<bool> ReadManagedUiFlag(Keire::AssetId entity,
-                                                        Keire::ManagedUiFlagProperty property) noexcept override;
-    [[nodiscard]] bool SetManagedUiFlag(Keire::AssetId entity, Keire::ManagedUiFlagProperty property,
-                                        bool value) noexcept override;
-    [[nodiscard]] std::optional<Keire::Vector2>
-    ReadManagedUiVector(Keire::AssetId entity, Keire::ManagedUiVectorProperty property) noexcept override;
-    [[nodiscard]] bool SetManagedUiVector(Keire::AssetId entity, Keire::ManagedUiVectorProperty property,
-                                          Keire::Vector2 value) noexcept override;
-    [[nodiscard]] std::optional<std::string> ReadManagedUiInputText(Keire::AssetId entity) noexcept override;
-    [[nodiscard]] bool SetManagedUiInputText(Keire::AssetId entity, std::string_view text) noexcept override;
-    [[nodiscard]] bool ConsumeManagedUiEvent(Keire::AssetId entity, Keire::RuntimeUiEventType type) noexcept override;
-    [[nodiscard]] bool FocusManagedUi(Keire::AssetId entity) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedUiDocumentElement>
+    ManagedUiDocumentRoot(Keire::AssetId document) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedUiDocumentElement>
+    FindManagedUiDocumentElement(Keire::AssetId document, Keire::AssetId stableId) noexcept override;
+    [[nodiscard]] std::optional<Keire::ManagedUiDocumentElement>
+    FindManagedUiDocumentElement(Keire::AssetId document, std::string_view name) noexcept override;
+    [[nodiscard]] bool ManagedUiDocumentElementAlive(Keire::AssetId document, std::uint64_t documentGeneration,
+                                                     std::uint64_t element) noexcept override;
+    [[nodiscard]] std::optional<std::string> ReadManagedUiDocumentElementText(Keire::AssetId document,
+                                                                              std::uint64_t documentGeneration,
+                                                                              std::uint64_t element) noexcept override;
+    [[nodiscard]] bool SetManagedUiDocumentElementText(Keire::AssetId document, std::uint64_t documentGeneration,
+                                                       std::uint64_t element, std::string_view text) noexcept override;
+    [[nodiscard]] std::optional<float> ReadManagedUiDocumentElementValue(Keire::AssetId document,
+                                                                         std::uint64_t documentGeneration,
+                                                                         std::uint64_t element) noexcept override;
+    [[nodiscard]] bool SetManagedUiDocumentElementValue(Keire::AssetId document, std::uint64_t documentGeneration,
+                                                        std::uint64_t element, float value) noexcept override;
+    [[nodiscard]] std::optional<bool>
+    ReadManagedUiDocumentElementFlag(Keire::AssetId document, std::uint64_t documentGeneration, std::uint64_t element,
+                                     Keire::ManagedUiDocumentFlag property) noexcept override;
+    [[nodiscard]] bool SetManagedUiDocumentElementFlag(Keire::AssetId document, std::uint64_t documentGeneration,
+                                                       std::uint64_t element, Keire::ManagedUiDocumentFlag property,
+                                                       bool value) noexcept override;
+    [[nodiscard]] bool ConsumeManagedUiDocumentElementEvent(Keire::AssetId document, std::uint64_t documentGeneration,
+                                                            std::uint64_t element,
+                                                            Keire::RuntimeUiEventType type) noexcept override;
+    [[nodiscard]] bool FocusManagedUiDocumentElement(Keire::AssetId document, std::uint64_t documentGeneration,
+                                                     std::uint64_t element) noexcept override;
     [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId entity = {}) const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
@@ -762,6 +804,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     KeireEditor::MaterialGraphDocument* m_MaterialGraphDocument = nullptr;
     KeireEditor::ProjectSettingsDocument* m_ProjectSettingsDocument = nullptr;
     KeireEditor::MaterialDocument* m_MaterialDocument = nullptr;
+    std::unique_ptr<KeireEditor::UiBuilderDocument> m_UiBuilderDocument;
+    std::unique_ptr<KeireEditor::UiBuilderStyleSheetDocument> m_UiBuilderStyleSheetDocument;
+    std::unique_ptr<KeireEditor::UiBuilderLiveDraftSession> m_UiBuilderLiveDraft;
     std::unique_ptr<KeireEditor::EditorDocumentWorkspaceCoordinator> m_DocumentCoordinator;
     std::unique_ptr<KeireEditor::EditorCommandRouter> m_CommandRouter;
     std::unique_ptr<KeireEditor::EditorWorkspaceLifecycleCoordinator> m_LifecycleCoordinator;
@@ -777,6 +822,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::VfxEffectPanel> m_VfxEffectPanel;
     std::unique_ptr<KeireEditor::ShaderGraphPanel> m_ShaderGraphPanel;
     std::unique_ptr<KeireEditor::MaterialGraphPanel> m_MaterialGraphPanel;
+    std::unique_ptr<KeireEditor::UiBuilderPanel> m_UiBuilderPanel;
     std::unique_ptr<KeireEditor::ProjectSettingsPanel> m_ProjectSettingsPanel;
     std::unique_ptr<KeireEditor::LightingPanel> m_LightingPanel;
     std::unique_ptr<KeireEditor::PackageManagerPanel> m_PackageManagerPanel;
@@ -807,6 +853,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     KeireEditor::ManagedRuntimeDiagnosticsBridge m_ManagedRuntimeDiagnostics;
     Keire::WeakRef<Keire::ScriptSystem> m_ManagedRuntimeDiagnosticSource;
     std::uint64_t m_AssetRecordRevision = 0;
+    std::uint64_t m_UiBuilderDocumentRevision = 0;
+    std::uint64_t m_UiBuilderStyleSheetRevision = 0;
+    std::string m_UiBuilderLiveDraftDiagnostic;
     bool m_ManagedIdeWorkspaceOpened = false;
     Keire::AssetId m_SelectedAsset;
     std::filesystem::path m_ExecutablePath;
@@ -866,6 +915,10 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_GameViewportInputActive = false;
     bool m_GameViewportCaptureSuspended = false;
     KeireEditor::RuntimeUiPointerRoutingState m_GameRuntimeUiPointer;
+    Keire::AssetId m_UiBuilderLivePickVisualTree;
+    std::optional<Keire::AssetId> m_UiBuilderLivePickedElement;
+    std::uint64_t m_UiBuilderLiveDebugSequence = 0;
+    bool m_UiBuilderLivePicking = false;
     std::uint32_t m_SuppressManagedLookFrames = 0;
     std::vector<Keire::InputActionSubscription> m_InputSubscriptions;
     std::vector<Keire::InputCaptureOverride> m_InputCaptureOverrides;

@@ -1418,6 +1418,8 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             if (m_GameEditPresentation)
             {
                 m_GameEditPresentation->Synchronize(scene, size.Width, size.Height, false);
+                m_GameEditPresentation->AdvanceUi(
+                    static_cast<float>(std::max(Owner().GetTime().UnscaledDeltaTime().Seconds(), 0.0)));
                 presentations.push_back(m_GameEditPresentation);
             }
         }
@@ -1427,9 +1429,11 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                 presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
         const auto runtimeUiRouting =
             KeireEditor::ResolveRuntimeGameUiRouting(playActive, !presentations.empty(), m_GameViewportInputActive);
+        const bool uiBuilderPickIntercepted = TryPickUiBuilderLiveElement(presentations, imageRect, ui.PointerState());
         if (runtimeUiRouting.Pointer)
         {
-            KeireEditor::RouteRuntimeUiPointer(ui, presentations, imageRect, m_GameRuntimeUiPointer);
+            if (!uiBuilderPickIntercepted)
+                KeireEditor::RouteRuntimeUiPointer(ui, presentations, imageRect, m_GameRuntimeUiPointer);
             if (runtimeUiRouting.Keyboard)
                 KeireEditor::RouteRuntimeUiKeyboard(ui,
                                                     KeireEditor::SelectRuntimeUiKeyboardPresentation(

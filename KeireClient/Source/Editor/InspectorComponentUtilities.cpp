@@ -130,4 +130,9 @@ namespace KeireEditor
                (property != "collisionMesh" || shape == Keire::ColliderShape::ConvexMesh ||
                 shape == Keire::ColliderShape::TriangleMesh);
     }
+
+    bool IsRetiredSceneUiComponent(const Keire::ComponentTypeId type) noexcept
+    {
+        return Keire::ComponentRegistry::IsReservedType(type);
+    }
 } // namespace KeireEditor

@@ -28,6 +28,7 @@ namespace Keire
         void SetTheme(UiTheme theme);
         [[nodiscard]] UiTheme Theme() const noexcept;
         void EndFrame();
+        void CancelFrame() noexcept;
         void Shutdown() noexcept;
         [[nodiscard]] UiCaptureState Capture() const noexcept;
 

@@ -708,46 +708,6 @@ namespace Keire
                                       VfxColorRange{minimum, maximum});
     }
 
-    [[nodiscard]] std::uint8_t ScriptSystem::Impl::RuntimeSetUiText(const std::uint64_t world,
-                                                                    const std::uint64_t entityHigh,
-                                                                    const std::uint64_t entityLow,
-                                                                    const Coral::String text) noexcept
-    {
-        if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
-            return 0;
-        try
-        {
-            const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
-            return entity && CurrentRuntime->Specification.RuntimeServices->SetManagedUiText(
-                                 entity.Id().Value(), static_cast<std::string>(text))
-                       ? 1
-                       : 0;
-        }
-        catch (...)
-        {
-            return 0;
-        }
-    }
-
-    [[nodiscard]] std::uint8_t ScriptSystem::Impl::RuntimeConsumeUiClick(const std::uint64_t world,
-                                                                         const std::uint64_t entityHigh,
-                                                                         const std::uint64_t entityLow) noexcept
-    {
-        if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
-            return 0;
-        try
-        {
-            const auto entity = ResolveRuntimeEntity(world, entityHigh, entityLow);
-            return entity && CurrentRuntime->Specification.RuntimeServices->ConsumeManagedUiClick(entity.Id().Value())
-                       ? 1
-                       : 0;
-        }
-        catch (...)
-        {
-            return 0;
-        }
-    }
-
     [[nodiscard]] std::uint8_t ScriptSystem::Impl::RuntimeRaycast(const std::uint64_t world, const Vector3 origin,
                                                                   const Vector3 direction, const float maximumDistance,
                                                                   const std::uint32_t mask,

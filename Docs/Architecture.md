@@ -898,17 +898,43 @@ Configuration examples, application-facing workflows, storage details, and troub
 
 ## Scene Presentation Runtime
 
-`ScenePresentationRuntime` is the per-Play-session boundary for retained runtime UI and scene audio. It maps stable
-scene entity IDs to generation-safe UI nodes and audio voices, synchronizes component changes after managed `Update`,
-and clears every node, event, asset handle, and voice during scene replacement or Play Mode teardown. Editor Play Mode
-and cooked runtime use the same synchronization and input path.
+`ScenePresentationRuntime` is the per-session boundary for retained UI Toolkit documents and scene audio. A scene owns
+only `UIDocumentComponent` references; visual hierarchy (`.keireui`), cascading style (`.keirestyle`), and presentation
+policy (`.keireuipanel`) remain versioned assets. Candidate document revisions are completely loaded and instantiated
+before replacing the last-good tree. Stable element IDs map generation-safe runtime nodes back to their owning scene
+entity without exposing scene, asset-system, or GPU pointers to the public UI model.
 
-The retained tree owns layout, ordered focus, hit testing, clipping, batching metadata, and bounded events. Sliders,
-toggles, input fields, and scroll views store authoritative values in scene components; pointer, wheel, UTF-8 text,
-keyboard, and gamepad input update those components and emit typed presentation events. Editor Play Mode and packaged
-players route through the same interaction state machine. `UiFrame` adapts draw commands to the SDL_GPU-backed
-application UI pass; managed control handles reach the presentation runtime only through bounded Coral internal calls
-and `IScriptRuntimeServices`, never through native pointers.
+The retained tree owns dirty style/layout/geometry propagation, ordered focus, hit testing, nested clipping, bounded
+events, and immutable draw-command capture. Screen and camera panels are submitted only to Game/Play/runtime output;
+the Scene viewport cannot composite or intercept them. Render-texture panels select explicit offscreen targets.
+World-surface panels retain physical dimensions, pixels-per-unit, transform, and depth policy; presentation maps input
+rays through panel UV and renderer submission treats the panel as scene content. Additive scenes retain deterministic
+document order and dispatch pointer input from the topmost document backward until handled.
+
+Accepted render frames copy UI values, immutable text geometry, and logical texture and surface leases. No frame packet
+borrows a visual element, scene pointer, native surface, or mutable draw list. Every lease is qualified by frame slot
+and device generation; device loss invalidates the GPU realization and the retry rebuilds it from retained CPU assets.
+The first production font slice uses one deterministic, fixed 95-character printable-ASCII fallback atlas rasterized
+at high resolution from the embedded scalable font so large and world-surface text remains filtered rather than
+pixel-stretched. Authored
+font IDs remain in immutable draw commands, but the renderer deliberately resolves every text run to that fallback
+atlas until custom font rasterization exists. Unicode shaping, bidirectional layout, ligatures, and script-specific
+fallback are not implemented yet. Unsupported code points render the fallback glyph. Nested clip
+intersections are resolved into immutable commands before capture, so atlas geometry is clipped deterministically on
+screen, render-texture, and world targets. Renderer statistics truthfully report glyph-atlas occupancy and bytes;
+ordinary UI images remain independent texture leases and therefore do not count as an image atlas.
+Editor Play Mode and packaged players share the same synchronization, input, capture, recovery, and teardown paths.
+Managed custom controls are published from an explicit successfully-loaded assembly allowlist, and failed managed
+generations retain the previous immutable type catalog.
+
+`UiBuilderDocument` and `UiBuilderStyleSheetDocument` own validated authoring definitions, generation counters,
+dirty state, explicit persistence, and independent undo histories. `UiBuilderPanel` translates hierarchy, preview,
+Inspector, binding, selector, source, and debugger interactions into those document operations. Its preview settings
+are transient and never mutate `UiPanelSettingsAsset`. During Play Mode, `UiBuilderLiveDraftSession` publishes only
+the active dirty visual tree as a development asset, remembers the imported baseline, and either commits after an
+explicit Save or restores that baseline on document switch, reload, workspace shutdown, or Play teardown. Live
+debugging consumes immutable, generation-stamped scene-presentation and renderer-statistics snapshots; unavailable
+providers remain explicitly unavailable, and picking never exposes mutable runtime nodes to editor code.
 
 Editor material authoring has three deliberate workflows. `MaterialDocument` and `MaterialInspectorPanel` own compact
 Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the authoritative OpenPBR/slab surface

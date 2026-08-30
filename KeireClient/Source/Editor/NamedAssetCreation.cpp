@@ -28,6 +28,8 @@ namespace KeireEditor
             return "physics material";
         case NamedAssetCreationKind::VfxEffect:
             return "VFX effect";
+        case NamedAssetCreationKind::UiDocument:
+            return "UI document";
         case NamedAssetCreationKind::MaterialGraph:
             return "material graph";
         case NamedAssetCreationKind::ShaderGraph:

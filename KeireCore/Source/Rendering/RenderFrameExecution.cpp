@@ -16,6 +16,43 @@ namespace Keire::RenderBackend
 {
     namespace
     {
+        [[nodiscard]] bool RuntimeUiCommandWithin(const RuntimeUiTree& tree, const RuntimeUiElementId root,
+                                                  RuntimeUiElementId element) noexcept
+        {
+            if (!root)
+                return true;
+            try
+            {
+                while (element)
+                {
+                    if (element == root)
+                        return true;
+                    const auto state = tree.State(element);
+                    element = state ? state->Parent : RuntimeUiElementId{};
+                }
+            }
+            catch (...)
+            {
+            }
+            return false;
+        }
+
+        [[nodiscard]] std::vector<RuntimeUiDrawCommand>
+        CopyRuntimeUiCommands(const RuntimeUiRenderSubmission& submission)
+        {
+            std::vector<RuntimeUiDrawCommand> result;
+            if (!submission.Tree)
+                return result;
+            const auto commands = submission.Tree->DrawCommands();
+            result.reserve(commands.size());
+            for (const auto& command : commands)
+            {
+                if (RuntimeUiCommandWithin(*submission.Tree, submission.Root, command.Element))
+                    result.push_back(command);
+            }
+            return result;
+        }
+
         void PublishIdleGpuOcclusionSurface(RenderSurfaceState& surface) noexcept
         {
             auto& diagnostics = surface.GpuOcclusionDiagnostics;
@@ -73,20 +110,84 @@ namespace Keire::RenderBackend
                     RecordVfxSnapshotSignatureForTest(frame, false);
 #endif
 
-                    for (const auto& tree : PendingRuntimeUiTrees)
+                    std::size_t runtimeUiDrawCommandCount = 0;
+                    for (const auto& pending : PendingRuntimeUiSubmissions)
                     {
-                        if (!tree)
+                        const auto& submission = pending.Submission;
+                        if (!submission.Tree)
                             continue;
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
                         RuntimeUiCaptureEnumerationCount.fetch_add(1U, std::memory_order_relaxed);
 #endif
-                        const auto commands = tree->DrawCommands();
-                        if (commands.size() > maximumRuntimeUiDrawCommands - CaptureRuntimeUiCommands.size())
+                        auto commands = CopyRuntimeUiCommands(submission);
+                        if (commands.size() > maximumRuntimeUiDrawCommands - runtimeUiDrawCommandCount)
                             throw std::length_error("Runtime UI submissions exceed the per-frame draw-command bound.");
-                        CaptureRuntimeUiCommands.insert(CaptureRuntimeUiCommands.end(), commands.begin(),
-                                                        commands.end());
+                        runtimeUiDrawCommandCount += commands.size();
+                        if (submission.Target == RuntimeUiRenderTarget::RenderTexture)
+                        {
+                            const auto existing =
+                                std::ranges::find(frame->RuntimeUiRenderTextures, submission.RenderTexture,
+                                                  &CapturedRuntimeUiRenderTexture::Target);
+                            if (existing != frame->RuntimeUiRenderTextures.end() &&
+                                existing->ReferenceResolution != submission.ReferenceResolution)
+                            {
+                                throw std::invalid_argument(
+                                    "Same-frame runtime UI RenderTexture submissions must use one reference "
+                                    "resolution per logical target ID.");
+                            }
+                            frame->RuntimeUiRenderTextures.push_back(
+                                {.Commands = std::move(commands),
+                                 .Target = submission.RenderTexture,
+                                 .ReferenceResolution = submission.ReferenceResolution,
+                                 .SortingOrder = submission.SortingOrder,
+                                 .Sequence = pending.Sequence});
+                            continue;
+                        }
+                        if (submission.Target == RuntimeUiRenderTarget::WorldSurface)
+                        {
+                            const auto surface = ResolveSurface(pending.Surface);
+                            if (!surface)
+                            {
+                                throw std::logic_error(
+                                    "A world-surface runtime UI surface epoch expired during frame capture.");
+                            }
+                            const auto camera = submission.View->Camera();
+                            if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection))
+                                throw std::invalid_argument("World-surface runtime UI camera is invalid.");
+                            frame->RuntimeUiWorldPanels.push_back(
+                                {.Commands = std::move(commands),
+                                 .Surface = pending.Surface,
+                                 .World = submission.World,
+                                 .ViewProjection = Math::Multiply(camera.Projection, camera.View),
+                                 .Viewport = submission.Viewport,
+                                 .ReferenceResolution = submission.ReferenceResolution,
+                                 .Pivot = submission.Pivot,
+                                 .WorldUnitsPerPixel = submission.WorldUnitsPerPixel,
+                                 .SortingOrder = submission.SortingOrder,
+                                 .Sequence = pending.Sequence,
+                                 .DepthTest = submission.DepthTest});
+                            continue;
+                        }
+                        if (submission.Target == RuntimeUiRenderTarget::CameraOverlay)
+                        {
+                            if (!ResolveSurface(pending.Surface))
+                            {
+                                throw std::logic_error(
+                                    "A camera-overlay runtime UI surface epoch expired during frame capture.");
+                            }
+                            frame->RuntimeUiCameraPanels.push_back({.Commands = std::move(commands),
+                                                                    .Surface = pending.Surface,
+                                                                    .Viewport = submission.Viewport,
+                                                                    .SortingOrder = submission.SortingOrder,
+                                                                    .Sequence = pending.Sequence});
+                            continue;
+                        }
+                        CaptureRuntimeUiCommands.insert(CaptureRuntimeUiCommands.end(),
+                                                        std::make_move_iterator(commands.begin()),
+                                                        std::make_move_iterator(commands.end()));
                     }
                     frame->RuntimeUiCommands = std::move(CaptureRuntimeUiCommands);
+                    CaptureRuntimeUiImageLeases(*frame);
                     frame->Surfaces = CaptureLiveSurfaceTokens();
                     if (PresentationSurfaceId)
                     {
@@ -145,20 +246,25 @@ namespace Keire::RenderBackend
                     frame->CapturedStatistics.OwnerUpdateMilliseconds = frame->Timeline.OwnerUpdateMilliseconds;
                     frame->CapturedStatistics.FrameCaptureMilliseconds = frame->Timeline.CaptureMilliseconds;
                     frame->DeviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
+                    QualifyRuntimeUiCameraPanels(*frame);
+                    QualifyRuntimeUiWorldPanels(*frame);
+                    QualifyRuntimeUiRenderTextures(*frame);
+                    QualifyRuntimeUiImageLeases(*frame);
+                    QualifyRuntimeUiFontLeases(*frame);
                 });
         }
         catch (...)
         {
             CpuPreparation.CancelFrame();
             PendingSceneRequests.clear();
-            PendingRuntimeUiTrees.clear();
+            PendingRuntimeUiSubmissions.clear();
             PendingUiSurfaceTextureBindings.clear();
             CaptureRequests.clear();
             CaptureRuntimeUiCommands.clear();
             throw;
         }
         PendingSceneRequests.clear();
-        PendingRuntimeUiTrees.clear();
+        PendingRuntimeUiSubmissions.clear();
         PendingUiSurfaceTextureBindings.clear();
         PendingUiTextureRetirements.clear();
     }
@@ -320,6 +426,7 @@ namespace Keire::RenderBackend
         Statistics.GpuOcclusionDepthPassMilliseconds = 0.0F;
         Statistics.GpuOcclusionPyramidRecordingMilliseconds = 0.0F;
         Statistics.GpuOcclusionCullingRecordingMilliseconds = 0.0F;
+        Statistics.RuntimeUiRenderer = {};
         // Editor UI is built after BeginFrame but before execution. Retain the finalized previous-frame workload until
         // this point so diagnostics never mistake a reset aggregate for the frame that actually reached the GPU.
         Statistics.GpuOcclusionStaticMeshCandidates = 0;
@@ -366,6 +473,8 @@ namespace Keire::RenderBackend
 
         try
         {
+            PrepareRuntimeUiRenderTextures(*frame);
+            PrepareRuntimeUiTextureBindings(*frame);
             const auto publicationWriterIndex = static_cast<std::size_t>(frame->FrameSlot) + 1U;
             for (const auto& request : frame->Requests)
             {
@@ -391,6 +500,7 @@ namespace Keire::RenderBackend
 #endif
 
             const auto recordingStarted = std::chrono::steady_clock::now();
+            RecordRuntimeUiRenderTextures(surfaceCommands);
             for (const auto& request : frame->Requests)
             {
                 const auto surface = ResolveSurface(request.Surface);
@@ -499,6 +609,7 @@ namespace Keire::RenderBackend
             if (!submittedFence)
                 throw std::runtime_error("SDL_SubmitGPUCommandBufferAndAcquireFence failed: " + LastSdlError());
             gpuWorkSubmitted = true;
+            PublishRuntimeUiRenderTextures(*frame);
             if (resolvedEditorUi)
                 resolvedEditorUi->CommitGpuTextures(EditorUiTextures, frame->DeviceGeneration);
             Statistics.GpuSubmissionMilliseconds =
@@ -529,6 +640,8 @@ namespace Keire::RenderBackend
             FrameTransientBuffers.clear();
             FrameUploadTransfers.clear();
             FrameGpuOcclusionReadbacks.clear();
+            PreparedRuntimeUiTextures.clear();
+            FrameRuntimeUiRenderTextureTargets.clear();
             GpuSubmissionSerial = ActiveGpuSubmissionSerial;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
@@ -704,6 +817,8 @@ namespace Keire::RenderBackend
             FrameActive = false;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
+            PreparedRuntimeUiTextures.clear();
+            FrameRuntimeUiRenderTextureTargets.clear();
             ActiveFrame.reset();
             throw;
         }
@@ -773,7 +888,7 @@ namespace Keire::RenderBackend
             Device = nullptr;
         }
         PendingSceneRequests.clear();
-        PendingRuntimeUiTrees.clear();
+        PendingRuntimeUiSubmissions.clear();
         PendingUiSurfaceTextureBindings.clear();
         CaptureRequests.clear();
         CaptureRuntimeUiCommands.clear();

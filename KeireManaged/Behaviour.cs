@@ -222,7 +222,6 @@ public abstract class Behaviour : Component
         }, true);
     public void RuntimeUpdate(float deltaSeconds)
     {
-        RuntimeUiButton.DispatchNativeClicks();
         InvokeWithContext(
             () =>
             {

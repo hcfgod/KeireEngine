@@ -262,24 +262,38 @@ namespace Keire
         AssetId Entity;
     };
 
-    enum class ManagedUiScalarProperty : std::uint8_t
+    enum class ManagedUiDocumentElementType : std::uint8_t
     {
-        Minimum,
-        Maximum,
-        Value
+        Canvas,
+        Panel,
+        Text,
+        Image,
+        Button,
+        HorizontalLayout,
+        VerticalLayout,
+        Spacer,
+        GridLayout,
+        Slider,
+        Toggle,
+        InputField,
+        ScrollView
     };
 
-    enum class ManagedUiFlagProperty : std::uint8_t
+    enum class ManagedUiDocumentFlag : std::uint8_t
     {
         Interactable,
         Checked,
-        Focused
+        Focused,
+        Enabled
     };
 
-    enum class ManagedUiVectorProperty : std::uint8_t
+    struct ManagedUiDocumentElement
     {
-        ScrollOffset,
-        ContentSize
+        std::uint64_t DocumentGeneration = 0;
+        std::uint64_t Element = 0;
+        std::uint64_t StableIdHigh = 0;
+        std::uint64_t StableIdLow = 0;
+        ManagedUiDocumentElementType Type = ManagedUiDocumentElementType::Panel;
     };
 
     enum class ManagedRenderingComponent : std::uint8_t
@@ -556,36 +570,63 @@ namespace Keire
         {
             return false;
         }
-        [[nodiscard]] virtual bool SetManagedUiText(AssetId, std::string_view) noexcept { return false; }
-        [[nodiscard]] virtual bool ConsumeManagedUiClick(AssetId) noexcept { return false; }
-        [[nodiscard]] virtual std::optional<float> ReadManagedUiScalar(AssetId, ManagedUiScalarProperty) noexcept
+        [[nodiscard]] virtual std::optional<ManagedUiDocumentElement> ManagedUiDocumentRoot(AssetId) noexcept
         {
             return std::nullopt;
         }
-        [[nodiscard]] virtual bool SetManagedUiScalar(AssetId, ManagedUiScalarProperty, float) noexcept
+        [[nodiscard]] virtual std::optional<ManagedUiDocumentElement> FindManagedUiDocumentElement(AssetId,
+                                                                                                   AssetId) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual std::optional<ManagedUiDocumentElement>
+        FindManagedUiDocumentElement(AssetId, std::string_view) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool ManagedUiDocumentElementAlive(AssetId, std::uint64_t, std::uint64_t) noexcept
         {
             return false;
         }
-        [[nodiscard]] virtual std::optional<bool> ReadManagedUiFlag(AssetId, ManagedUiFlagProperty) noexcept
+        [[nodiscard]] virtual std::optional<std::string> ReadManagedUiDocumentElementText(AssetId, std::uint64_t,
+                                                                                          std::uint64_t) noexcept
         {
             return std::nullopt;
         }
-        [[nodiscard]] virtual bool SetManagedUiFlag(AssetId, ManagedUiFlagProperty, bool) noexcept { return false; }
-        [[nodiscard]] virtual std::optional<Vector2> ReadManagedUiVector(AssetId, ManagedUiVectorProperty) noexcept
-        {
-            return std::nullopt;
-        }
-        [[nodiscard]] virtual bool SetManagedUiVector(AssetId, ManagedUiVectorProperty, Vector2) noexcept
+        [[nodiscard]] virtual bool SetManagedUiDocumentElementText(AssetId, std::uint64_t, std::uint64_t,
+                                                                   std::string_view) noexcept
         {
             return false;
         }
-        [[nodiscard]] virtual std::optional<std::string> ReadManagedUiInputText(AssetId) noexcept
+        [[nodiscard]] virtual std::optional<float> ReadManagedUiDocumentElementValue(AssetId, std::uint64_t,
+                                                                                     std::uint64_t) noexcept
         {
             return std::nullopt;
         }
-        [[nodiscard]] virtual bool SetManagedUiInputText(AssetId, std::string_view) noexcept { return false; }
-        [[nodiscard]] virtual bool ConsumeManagedUiEvent(AssetId, RuntimeUiEventType) noexcept { return false; }
-        [[nodiscard]] virtual bool FocusManagedUi(AssetId) noexcept { return false; }
+        [[nodiscard]] virtual bool SetManagedUiDocumentElementValue(AssetId, std::uint64_t, std::uint64_t,
+                                                                    float) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<bool>
+        ReadManagedUiDocumentElementFlag(AssetId, std::uint64_t, std::uint64_t, ManagedUiDocumentFlag) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool SetManagedUiDocumentElementFlag(AssetId, std::uint64_t, std::uint64_t,
+                                                                   ManagedUiDocumentFlag, bool) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool ConsumeManagedUiDocumentElementEvent(AssetId, std::uint64_t, std::uint64_t,
+                                                                        RuntimeUiEventType) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual bool FocusManagedUiDocumentElement(AssetId, std::uint64_t, std::uint64_t) noexcept
+        {
+            return false;
+        }
         [[nodiscard]] virtual std::optional<float> ReadManagedRenderingScalar(AssetId, ManagedRenderingComponent,
                                                                               ManagedRenderingScalarProperty) noexcept
         {
@@ -916,6 +957,14 @@ namespace Keire
         auto operator<=>(const ManagedAssetTypeDiagnostic&) const = default;
     };
 
+    struct ManagedAssetTypeCatalog
+    {
+        std::uint64_t Generation = 0;
+        std::vector<ManagedAssetTypeDescriptor> Types;
+        std::vector<ManagedAssetTypeDiagnostic> Diagnostics;
+        bool operator==(const ManagedAssetTypeCatalog&) const = default;
+    };
+
     class KEIRE_API ManagedBehaviourInstanceId final
     {
       public:
@@ -972,6 +1021,7 @@ namespace Keire
         void CancelReload();
         [[nodiscard]] ManagedReloadStatus ReloadStatus() const;
         [[nodiscard]] std::vector<ManagedBehaviourTypeDescriptor> BehaviourTypes() const;
+        [[nodiscard]] ManagedAssetTypeCatalog ManagedAssetCatalog() const;
         [[nodiscard]] std::vector<ManagedAssetTypeDescriptor> ManagedAssetTypes() const;
         [[nodiscard]] std::vector<ManagedAssetTypeDiagnostic> ManagedAssetTypeDiagnostics() const;
         [[nodiscard]] ManagedBehaviourInstanceId CreateBehaviour(std::string typeName, std::uint64_t world,

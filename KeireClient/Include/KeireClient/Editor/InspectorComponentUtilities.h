@@ -34,4 +34,5 @@ namespace KeireEditor
     ResolveComponentOrderPayload(std::span<const Keire::Ref<Keire::Component>> components,
                                  Keire::EntityId expectedEntity, const ComponentOrderPayload& payload) noexcept;
     [[nodiscard]] bool ColliderPropertyVisible(Keire::ColliderShape shape, std::string_view property) noexcept;
+    [[nodiscard]] bool IsRetiredSceneUiComponent(Keire::ComponentTypeId type) noexcept;
 } // namespace KeireEditor

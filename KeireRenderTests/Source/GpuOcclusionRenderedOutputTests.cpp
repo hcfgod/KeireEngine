@@ -873,7 +873,8 @@ TEST_CASE("independent render surfaces submit in queue order and survive final-f
     specification.Assets.DevelopmentCatalog = assets.Catalog;
     {
         Keire::Application application(std::move(specification));
-        (void)application.PushLayer(std::make_unique<MultiSurfaceCaptureLayer>(assets.Mesh, assets.Material, results));
+        (void)application.PushLayer(
+            std::make_unique<MultiSurfaceCaptureLayer>(assets.Mesh, assets.LegacyMaterial, results));
         REQUIRE(application.Run() == 0);
     }
     for (const auto& frame : results->Frames)
@@ -1149,7 +1150,7 @@ TEST_CASE("active legacy partial fallback surfaces publish aggregate and profile
         Keire::Application application(std::move(specification));
         (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
             assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
-            GpuOcclusionCaptureScenario::PartialFallback, SurfaceSize, SurfaceSize, assets.Material));
+            GpuOcclusionCaptureScenario::PartialFallback, SurfaceSize, SurfaceSize, assets.LegacyMaterial));
         REQUIRE(application.Run() == 0);
     }
 
@@ -1342,7 +1343,7 @@ TEST_CASE("forced GPU occlusion reports legacy shader fallback while preserving 
     {
         Keire::Application application(std::move(specification));
         (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
-            assets.CubeMesh, assets.Material, Keire::GpuOcclusionMode::Forced, results,
+            assets.CubeMesh, assets.LegacyMaterial, Keire::GpuOcclusionMode::Forced, results,
             GpuOcclusionCaptureScenario::TerminalFallback));
         REQUIRE(application.Run() == 0);
     }

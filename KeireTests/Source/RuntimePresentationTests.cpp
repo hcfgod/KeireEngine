@@ -1,6 +1,7 @@
 #include "Keire/Core.h"
 
 #include "KeireInternal/Audio/AudioImportBackend.h"
+#include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 
 #include <doctest/doctest.h>
 
@@ -18,6 +19,19 @@
 
 namespace
 {
+    class PresentationUiBindingSource final : public Keire::UiDocumentBindingSource
+    {
+      public:
+        [[nodiscard]] std::any Read(const std::string_view path) const override
+        {
+            if (path == "Session.Status")
+                return Status;
+            throw std::runtime_error("Unknown presentation UI binding path.");
+        }
+
+        std::string Status = "Bound";
+    };
+
     class TemporaryPresentationProject final
     {
       public:
@@ -324,260 +338,333 @@ TEST_CASE("retained buttons render their hover pressed and disabled visual state
     CHECK(tree->DrawCommands().front().ColorValue.Red == doctest::Approx(style.DisabledBackground.Red));
 }
 
-TEST_CASE("scene runtime UI controls synchronize native values and emit typed interaction events")
+TEST_CASE("cooked scene UI documents resolve authored controls after asynchronous dependency readiness")
 {
-    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
-    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    TemporaryPresentationProject project;
+    const auto visualTreeImporter = Keire::CreateUiVisualTreeAssetImporter();
+    const auto panelImporter = Keire::CreateUiPanelSettingsAssetImporter();
+    Keire::AssetDatabaseSpecification databaseSpecification;
+    databaseSpecification.ProjectRoot = project.Root;
+    databaseSpecification.Importers = {visualTreeImporter, panelImporter};
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
+
+    const auto buttonId = Keire::AssetId::Parse("50524553-454e-5470-8000-000000000001");
+    const std::string documentSource = "<ui schemaVersion=\"1\" name=\"CookedLookup\">\n"
+                                       "  <Button id=\"" +
+                                       buttonId.ToString() +
+                                       "\" name=\"continue\" text=\"Continue\" style=\"width: 120; height: 48\"/>\n"
+                                       "</ui>\n";
+    const auto visualTree =
+        database->CreateAsset("UI/CookedLookup.keireui", visualTreeImporter,
+                              std::as_bytes(std::span(documentSource.data(), documentSource.size())));
+    Keire::UiPanelSettingsDefinition panelDefinition;
+    panelDefinition.Target = Keire::UiPanelTarget::ScreenOverlay;
+    const auto panelSource = Keire::UiPanelSettingsAsset::Encode(panelDefinition);
+    const auto panel = database->CreateAsset("UI/CookedLookup.keireuipanel", panelImporter, panelSource);
+
+    Keire::AssetBuildProfile profile;
+    profile.Strict = true;
+    profile.Roots = {visualTree, panel};
+    const auto cooked = Keire::AssetCooker::Cook(*database, profile, project.Root / "CookedLookup");
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Cooked;
+    assetSpecification.WorkerCount = 1;
+    assetSpecification.Mounts.push_back({cooked.CatalogPath});
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    assetSpecification.Decoders.push_back(Keire::CreateUiPanelSettingsAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
-                                                Keire::SceneAsset::EmptyDefinition("Runtime UI controls"));
-    auto canvas = scene->CreateEntity("Canvas");
-    const auto canvasComponent = canvas.AddComponent<Keire::CanvasComponent>();
-    REQUIRE(canvasComponent);
-    canvasComponent->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
-
-    const auto control = [&](const std::string_view name, const Keire::Vector2 position, const Keire::Vector2 size)
-    {
-        auto entity = scene->CreateEntity(std::string(name), canvas);
-        const auto rect = entity.AddComponent<Keire::RectTransformComponent>();
-        if (!rect)
-            throw std::runtime_error("Runtime UI test control has no Rect Transform.");
-        rect->SetAnchorMinimum({});
-        rect->SetAnchorMaximum({});
-        rect->SetPivot({});
-        rect->SetAnchoredPosition(position);
-        rect->SetSizeDelta(size);
-        return entity;
-    };
-
-    auto sliderEntity = control("Slider", {10.0F, 10.0F}, {100.0F, 20.0F});
-    const auto slider = sliderEntity.AddComponent<Keire::UiSliderComponent>();
-    REQUIRE(slider);
-    slider->SetRange(0.0F, 100.0F);
-    auto toggleEntity = control("Toggle", {10.0F, 45.0F}, {30.0F, 30.0F});
-    const auto toggle = toggleEntity.AddComponent<Keire::UiToggleComponent>();
-    REQUIRE(toggle);
-    auto inputEntity = control("Input", {10.0F, 90.0F}, {120.0F, 30.0F});
-    const auto input = inputEntity.AddComponent<Keire::UiInputFieldComponent>();
-    REQUIRE(input);
-    auto scrollEntity = control("Scroll", {160.0F, 10.0F}, {100.0F, 100.0F});
-    const auto scroll = scrollEntity.AddComponent<Keire::UiScrollViewComponent>();
-    REQUIRE(scroll);
-    scroll->SetContentSize({100.0F, 300.0F});
+                                                Keire::SceneAsset::EmptyDefinition("Cooked UI lookup"));
+    auto entity = scene->CreateEntity("Cooked UI Document");
+    const auto document = entity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(document);
+    document->SetVisualTree(visualTree);
+    document->SetPanelSettings(panel);
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
 
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
-    presentation->PointerButton(85.0F, 20.0F, Keire::RuntimeUiPointerButton::Primary, true);
-    presentation->PointerButton(85.0F, 20.0F, Keire::RuntimeUiPointerButton::Primary, false);
-    CHECK(slider->Value() == doctest::Approx(75.0F));
-    CHECK(presentation->ConsumeUiEvent(sliderEntity.Id(), Keire::RuntimeUiEventType::ValueChanged));
-
-    presentation->PointerButton(20.0F, 55.0F, Keire::RuntimeUiPointerButton::Primary, true);
-    presentation->PointerButton(20.0F, 55.0F, Keire::RuntimeUiPointerButton::Primary, false);
-    CHECK(toggle->IsOn());
-    CHECK(presentation->ConsumeUiEvent(toggleEntity.Id(), Keire::RuntimeUiEventType::ValueChanged));
-
-    presentation->PointerButton(20.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, true);
-    presentation->PointerButton(20.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, false);
-    CHECK(presentation->TextInputFocused());
-    CHECK(presentation->FocusedUiEntity() == inputEntity.Id());
-    presentation->TextInput("Astra");
-    CHECK(input->Text() == "Astra");
-    CHECK(presentation->ConsumeUiEvent(inputEntity.Id(), Keire::RuntimeUiEventType::TextChanged));
-    CHECK(presentation->KeyInput(Keire::RuntimeUiKey::Enter));
-    CHECK(presentation->ConsumeUiEvent(inputEntity.Id(), Keire::RuntimeUiEventType::Submit));
-
-    presentation->PointerWheel(180.0F, 30.0F, 0.0F, -1.0F);
-    CHECK(scroll->Offset().Y == doctest::Approx(scroll->Sensitivity()));
-    CHECK(presentation->ConsumeUiEvent(scrollEntity.Id(), Keire::RuntimeUiEventType::ValueChanged));
+    CHECK_FALSE(presentation->FindUiDocumentElement(entity.Id(), buttonId));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    std::optional<Keire::ScenePresentationUiDocumentElement> button;
+    while (!button && std::chrono::steady_clock::now() < deadline)
+    {
+        (void)assets->PumpCompletions();
+        presentation->Synchronize(scene, 320.0F, 180.0F, true);
+        button = presentation->FindUiDocumentElement(entity.Id(), buttonId);
+        if (!button)
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE(button);
+    CHECK(button->StableId == buttonId);
+    CHECK(button->Type == Keire::RuntimeUiElementType::Button);
 
     presentation->Clear();
     scene->Close();
     assets->Close();
 }
 
-TEST_CASE("Canvas schema two preserves overlay defaults and round trips world presentation fields")
+TEST_CASE("scene UI document template reload keeps the last good expanded tree")
 {
-    const auto registration = Keire::CreateCanvasComponentRegistration();
-    CHECK(registration.SchemaVersion == 2);
-    REQUIRE(registration.Migrate);
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const Keire::AssetId documentId(0x50524553454e5460ULL, 1);
+    const Keire::AssetId templateId(0x50524553454e5460ULL, 2);
+    const Keire::AssetId missingId(0x50524553454e5460ULL, 3);
 
-    const auto migrated = registration.Migrate({}, 1);
-    auto legacy = Keire::CreateRef<Keire::CanvasComponent>();
-    registration.Deserialize(*legacy, migrated, registration.SchemaVersion);
-    CHECK(legacy->RenderMode() == Keire::CanvasRenderMode::ScreenSpaceOverlay);
-    CHECK_FALSE(legacy->RenderCameraEntity());
-    CHECK(legacy->PlaneDistance() == doctest::Approx(1.0F));
-    CHECK(legacy->WorldUnitsPerPixel() == doctest::Approx(0.01F));
+    Keire::UiVisualTreeDefinition templateTree;
+    templateTree.Name = "RuntimeTemplate";
+    templateTree.Root.StableId = Keire::AssetId(0x50524553454e5460ULL, 4);
+    templateTree.Root.Type = Keire::UiVisualElementType::Label;
+    templateTree.Root.Name = "template-label";
+    templateTree.Root.Attributes = {{"text", "Loaded template"}};
+    REQUIRE(assets->PublishDevelopmentAsset(templateId, Keire::CreateRef<Keire::UiVisualTreeAsset>(templateTree)));
+    Keire::UiVisualTreeDefinition documentTree;
+    documentTree.Name = "RuntimeTemplateDocument";
+    documentTree.Root.StableId = Keire::AssetId(0x50524553454e5460ULL, 5);
+    documentTree.Root.Type = Keire::UiVisualElementType::TemplateContainer;
+    documentTree.Root.Template = templateId;
+    REQUIRE(assets->PublishDevelopmentAsset(documentId, Keire::CreateRef<Keire::UiVisualTreeAsset>(documentTree)));
 
-    const auto camera = Keire::EntityId::Generate();
-    auto source = Keire::CreateRef<Keire::CanvasComponent>();
-    source->SetRenderMode(Keire::CanvasRenderMode::WorldSpace);
-    source->SetRenderCameraEntity(camera);
-    source->SetPlaneDistance(4.0F);
-    source->SetWorldUnitsPerPixel(0.025F);
-    source->SetReferenceResolution({800.0F, 450.0F});
-
-    auto restored = Keire::CreateRef<Keire::CanvasComponent>();
-    registration.Deserialize(*restored, registration.Serialize(*source), registration.SchemaVersion);
-    CHECK(restored->RenderMode() == Keire::CanvasRenderMode::WorldSpace);
-    CHECK(restored->RenderCameraEntity() == camera);
-    CHECK(restored->PlaneDistance() == doctest::Approx(4.0F));
-    CHECK(restored->WorldUnitsPerPixel() == doctest::Approx(0.025F));
-    CHECK(restored->ReferenceResolution() == Keire::Vector2{800.0F, 450.0F});
-    CHECK_THROWS_AS(source->SetWorldUnitsPerPixel(0.0F), std::invalid_argument);
-    CHECK_THROWS_AS(source->SetPlaneDistance(std::numeric_limits<float>::infinity()), std::invalid_argument);
-}
-
-TEST_CASE("world-space Canvas projection and ray input share the same current camera plane")
-{
-    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
-    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
-    auto scene =
-        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("World Canvas"));
-    auto canvasEntity = scene->CreateEntity("Canvas");
-    const auto canvas = canvasEntity.AddComponent<Keire::CanvasComponent>();
-    REQUIRE(canvas);
-    canvas->SetRenderMode(Keire::CanvasRenderMode::WorldSpace);
-    canvas->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
-    canvas->SetReferenceResolution({200.0F, 100.0F});
-    canvas->SetWorldUnitsPerPixel(0.01F);
-    const auto canvasTransform = canvasEntity.GetComponent<Keire::TransformComponent>();
-    REQUIRE(canvasTransform);
-    canvasTransform->SetLocalPosition({0.0F, 0.0F, 5.0F});
-
-    auto buttonEntity = scene->CreateEntity("Button", canvasEntity);
-    const auto rect = buttonEntity.AddComponent<Keire::RectTransformComponent>();
-    REQUIRE(rect);
-    rect->SetAnchorMinimum({0.0F, 0.0F});
-    rect->SetAnchorMaximum({1.0F, 1.0F});
-    rect->SetSizeDelta({});
-    REQUIRE(buttonEntity.AddComponent<Keire::UiButtonComponent>());
-
-    Keire::RenderCamera camera;
-    camera.View = {};
-    camera.Projection = Keire::Math::Perspective(60.0F, 2.0F, 0.1F, 100.0F);
-    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
-
-    const auto canvasGeometry = presentation->CanvasGeometry(canvasEntity.Id());
-    REQUIRE(canvasGeometry);
-    CHECK(canvasGeometry->Visible);
-    CHECK(canvasGeometry->RenderMode == Keire::CanvasRenderMode::WorldSpace);
-    const auto buttonGeometry = presentation->UiGeometry(buttonEntity.Id());
-    REQUIRE(buttonGeometry);
-    CHECK(buttonGeometry->Visible);
-    CHECK(presentation->HitTestUiEntity(200.0F, 100.0F) == buttonEntity.Id());
-    CHECK(presentation->HitTestCanvasEntity(200.0F, 100.0F) == canvasEntity.Id());
-    CHECK_FALSE(presentation->HitTestUiEntity(5.0F, 5.0F));
-
-    CHECK(presentation->PointerButton(200.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, true));
-    CHECK(presentation->PointerButton(200.0F, 100.0F, Keire::RuntimeUiPointerButton::Primary, false));
-    CHECK(presentation->ConsumeClick(buttonEntity.Id()));
-
-    canvasTransform->SetLocalPosition({0.0F, 0.0F, -5.0F});
-    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
-    REQUIRE(presentation->CanvasGeometry(canvasEntity.Id()));
-    CHECK_FALSE(presentation->CanvasGeometry(canvasEntity.Id())->Visible);
-    CHECK_FALSE(presentation->HitTestCanvasEntity(200.0F, 100.0F));
-
-    canvas->SetRenderMode(Keire::CanvasRenderMode::ScreenSpaceCamera);
-    canvas->SetPlaneDistance(0.05F);
-    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
-    REQUIRE(presentation->CanvasGeometry(canvasEntity.Id()));
-    CHECK_FALSE(presentation->CanvasGeometry(canvasEntity.Id())->Visible);
-    canvas->SetPlaneDistance(1.0F);
-    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
-    REQUIRE(presentation->CanvasGeometry(canvasEntity.Id()));
-    CHECK(presentation->CanvasGeometry(canvasEntity.Id())->Visible);
-    CHECK(presentation->HitTestUiEntity(200.0F, 100.0F) == buttonEntity.Id());
-
-    scene->Close();
-    assets->Close();
-}
-
-TEST_CASE("captured world-space slider drags keep using their Canvas projection outside the control")
-{
-    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
     auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
-                                                Keire::SceneAsset::EmptyDefinition("Captured world slider"));
-    auto canvasEntity = scene->CreateEntity("Canvas");
-    const auto canvas = canvasEntity.AddComponent<Keire::CanvasComponent>();
-    REQUIRE(canvas);
-    canvas->SetRenderMode(Keire::CanvasRenderMode::WorldSpace);
-    canvas->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
-    canvas->SetReferenceResolution({200.0F, 100.0F});
-    canvas->SetWorldUnitsPerPixel(0.01F);
-    const auto canvasTransform = canvasEntity.GetComponent<Keire::TransformComponent>();
-    REQUIRE(canvasTransform);
-    canvasTransform->SetLocalPosition({0.0F, 0.0F, 5.0F});
+                                                Keire::SceneAsset::EmptyDefinition("Runtime template reload"));
+    auto entity = scene->CreateEntity("Templated document");
+    const auto document = entity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(document);
+    document->SetVisualTree(documentId);
+    presentation->Synchronize(scene, 320.0F, 180.0F, false);
+    CHECK(presentation->Ui()->Statistics().Elements == 2);
+    REQUIRE(presentation->UiDocumentDebugSnapshot(entity.Id()));
+    const auto lastGoodLabel = presentation->FindUiDocumentElement(entity.Id(), "template-label");
+    REQUIRE(lastGoodLabel);
 
-    auto sliderEntity = scene->CreateEntity("Slider", canvasEntity);
-    const auto rect = sliderEntity.AddComponent<Keire::RectTransformComponent>();
-    REQUIRE(rect);
-    rect->SetAnchorMinimum({0.5F, 0.5F});
-    rect->SetAnchorMaximum({0.5F, 0.5F});
-    rect->SetPivot({0.5F, 0.5F});
-    rect->SetSizeDelta({80.0F, 20.0F});
-    const auto slider = sliderEntity.AddComponent<Keire::UiSliderComponent>();
-    REQUIRE(slider);
-    slider->SetRange(0.0F, 100.0F);
+    auto cyclicTemplate = templateTree;
+    cyclicTemplate.Root.Type = Keire::UiVisualElementType::TemplateContainer;
+    cyclicTemplate.Root.Name = "cyclic-template";
+    cyclicTemplate.Root.Attributes.clear();
+    cyclicTemplate.Root.Template = templateId;
+    REQUIRE(assets->PublishDevelopmentAsset(templateId, Keire::CreateRef<Keire::UiVisualTreeAsset>(cyclicTemplate)));
+    presentation->Synchronize(scene, 320.0F, 180.0F, false);
+    CHECK(presentation->Ui()->Statistics().Elements == 2);
+    REQUIRE(presentation->UiDocumentDebugSnapshot(entity.Id()));
+    CHECK(presentation->UiDocumentElementAlive(entity.Id(), lastGoodLabel->DocumentGeneration, lastGoodLabel->Element));
+    CHECK(presentation->FindUiDocumentElement(entity.Id(), "template-label")->DocumentGeneration ==
+          lastGoodLabel->DocumentGeneration);
 
-    Keire::RenderCamera camera;
-    camera.View = {};
-    camera.Projection = Keire::Math::Perspective(60.0F, 2.0F, 0.1F, 100.0F);
-    presentation->Synchronize(scene, 400.0F, 200.0F, false, {}, &camera);
+    auto missingDocument = documentTree;
+    missingDocument.Root.Template = missingId;
+    REQUIRE(assets->PublishDevelopmentAsset(documentId, Keire::CreateRef<Keire::UiVisualTreeAsset>(missingDocument)));
+    presentation->Synchronize(scene, 320.0F, 180.0F, false);
+    CHECK(presentation->Ui()->Statistics().Elements == 2);
+    REQUIRE(presentation->UiDocumentDebugSnapshot(entity.Id()));
+    CHECK(presentation->UiDocumentElementAlive(entity.Id(), lastGoodLabel->DocumentGeneration, lastGoodLabel->Element));
+    CHECK(presentation->FindUiDocumentElement(entity.Id(), "template-label")->DocumentGeneration ==
+          lastGoodLabel->DocumentGeneration);
 
-    const auto sliderGeometry = presentation->UiGeometry(sliderEntity.Id());
-    const auto canvasGeometry = presentation->CanvasGeometry(canvasEntity.Id());
-    REQUIRE(sliderGeometry);
-    REQUIRE(canvasGeometry);
-    const auto sliderCenter =
-        Keire::Vector2{(sliderGeometry->ViewportCorners[0].X + sliderGeometry->ViewportCorners[2].X) * 0.5F,
-                       (sliderGeometry->ViewportCorners[0].Y + sliderGeometry->ViewportCorners[2].Y) * 0.5F};
-    const float canvasRight = std::max({canvasGeometry->ViewportCorners[0].X, canvasGeometry->ViewportCorners[1].X,
-                                        canvasGeometry->ViewportCorners[2].X, canvasGeometry->ViewportCorners[3].X});
-    const Keire::Vector2 outsideCanvas{canvasRight + 1.0F, sliderCenter.Y};
-    REQUIRE(presentation->HitTestUiEntity(sliderCenter.X, sliderCenter.Y) == sliderEntity.Id());
-    REQUIRE_FALSE(presentation->HitTestCanvasEntity(outsideCanvas.X, outsideCanvas.Y));
-
-    CHECK(presentation->PointerButton(sliderCenter.X, sliderCenter.Y, Keire::RuntimeUiPointerButton::Primary, true));
-    CHECK(slider->Value() == doctest::Approx(50.0F));
-    presentation->PointerMove(outsideCanvas.X, outsideCanvas.Y);
-    CHECK(slider->Value() == doctest::Approx(100.0F));
-    CHECK(presentation->PointerButton(outsideCanvas.X, outsideCanvas.Y, Keire::RuntimeUiPointerButton::Primary, false));
-
+    presentation->Clear();
     scene->Close();
     assets->Close();
 }
 
-TEST_CASE("runtime UI control components reject invalid state without partial mutation and round-trip properties")
+TEST_CASE("camera-overlay UI documents resolve their exact authored camera without viewport fallback")
 {
-    auto slider = Keire::CreateRef<Keire::UiSliderComponent>();
-    slider->SetStep(0.5F);
-    CHECK_THROWS_AS(slider->SetRange(0.0F, 0.25F), std::invalid_argument);
-    CHECK(slider->Minimum() == 0.0F);
-    CHECK(slider->Maximum() == 1.0F);
-    CHECK(slider->Step() == 0.5F);
-    CHECK_THROWS_AS(slider->SetValue(std::numeric_limits<float>::quiet_NaN()), std::invalid_argument);
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    assetSpecification.Decoders.push_back(Keire::CreateUiPanelSettingsAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const Keire::AssetId documentId(0x50524553454e5465ULL, 1);
+    const Keire::AssetId panelId(0x50524553454e5465ULL, 2);
 
-    auto input = Keire::CreateRef<Keire::UiInputFieldComponent>();
-    input->SetContentType(Keire::UiInputContentType::Integer);
-    input->SetText("-42");
-    CHECK_THROWS_AS(input->SetText("4.2"), std::invalid_argument);
-    CHECK(input->Text() == "-42");
-    CHECK_THROWS_AS(input->SetCharacterLimit(2), std::invalid_argument);
+    Keire::UiVisualTreeDefinition definition;
+    definition.Name = "CameraOverlay";
+    definition.Root.StableId = Keire::AssetId(0x50524553454e5465ULL, 3);
+    definition.Root.InlineStyles = {{"width", "320"}, {"height", "180"}};
+    REQUIRE(assets->PublishDevelopmentAsset(documentId, Keire::CreateRef<Keire::UiVisualTreeAsset>(definition)));
 
-    const auto registration = Keire::CreateUiInputFieldComponentRegistration();
-    const auto encoded = registration.Serialize(*input);
-    const auto decoded = registration.Factory();
-    REQUIRE(decoded);
-    CHECK_NOTHROW(registration.Deserialize(*decoded, encoded, registration.SchemaVersion));
-    const auto& decodedInput = dynamic_cast<const Keire::UiInputFieldComponent&>(*decoded);
-    CHECK(decodedInput.Text() == "-42");
-    CHECK(decodedInput.ContentType() == Keire::UiInputContentType::Integer);
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Authored UI camera"));
+    auto primaryCamera = scene->CreateEntity("Primary camera");
+    REQUIRE(primaryCamera.AddComponent<Keire::CameraComponent>());
+    auto authoredCamera = scene->CreateEntity("Authored camera");
+    const auto authoredCameraComponent = authoredCamera.AddComponent<Keire::CameraComponent>();
+    REQUIRE(authoredCameraComponent);
+    authoredCameraComponent->SetPrimary(false);
 
-    auto scroll = Keire::CreateRef<Keire::UiScrollViewComponent>();
-    CHECK_THROWS_AS(scroll->SetOffset({-1.0F, 0.0F}), std::invalid_argument);
-    CHECK(scroll->Offset() == Keire::Vector2{});
+    Keire::UiPanelSettingsDefinition panel;
+    panel.Target = Keire::UiPanelTarget::CameraOverlay;
+    panel.Camera = authoredCamera.Id().Value();
+    panel.DepthTest = false;
+    REQUIRE(assets->PublishDevelopmentAsset(panelId, Keire::CreateRef<Keire::UiPanelSettingsAsset>(panel)));
+    auto documentEntity = scene->CreateEntity("Camera document");
+    const auto document = documentEntity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(document);
+    document->SetVisualTree(documentId);
+    document->SetPanelSettings(panelId);
+
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    Keire::RenderCamera editorViewportCamera;
+    presentation->Synchronize(scene, 320.0F, 180.0F, false, {}, &editorViewportCamera);
+    const auto visible = presentation->CanvasGeometry(documentEntity.Id());
+    REQUIRE(visible);
+    CHECK(visible->Visible);
+
+    REQUIRE(scene->DestroyEntity(authoredCamera.Id()));
+    presentation->Synchronize(scene, 320.0F, 180.0F, false, {}, &editorViewportCamera);
+    const auto missing = presentation->CanvasGeometry(documentEntity.Id());
+    REQUIRE(missing);
+    CHECK_FALSE(missing->Visible);
+
+    presentation->Clear();
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("scene UI document handles query mutate deliver events and reject stale generations")
+{
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const Keire::AssetId documentId(0x50524553454e5470ULL, 1);
+    const Keire::AssetId rootId(0x50524553454e5470ULL, 2);
+    const Keire::AssetId buttonId(0x50524553454e5470ULL, 3);
+    const Keire::AssetId sliderId(0x50524553454e5470ULL, 4);
+
+    Keire::UiVisualTreeDefinition definition;
+    definition.Name = "ManagedDocumentBridge";
+    definition.Root.StableId = rootId;
+    definition.Root.InlineStyles = {{"width", "200"}, {"height", "100"}, {"flex-direction", "column"}};
+    Keire::UiVisualElementDefinition button;
+    button.StableId = buttonId;
+    button.Type = Keire::UiVisualElementType::Button;
+    button.Name = "launch";
+    button.Attributes = {{"text", "Launch"}};
+    button.InlineStyles = {{"width", "100"}, {"height", "40"}, {"background-color", "#336699"}};
+    Keire::UiVisualElementDefinition slider;
+    slider.StableId = sliderId;
+    slider.Type = Keire::UiVisualElementType::Slider;
+    slider.Name = "volume";
+    slider.Attributes = {{"minimum", "0"}, {"maximum", "100"}, {"value", "25"}};
+    slider.InlineStyles = {{"width", "100"}, {"height", "20"}};
+    definition.Root.Children = {button, slider};
+    REQUIRE(assets->PublishDevelopmentAsset(documentId, Keire::CreateRef<Keire::UiVisualTreeAsset>(definition)));
+
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Managed document bridge"));
+    auto entity = scene->CreateEntity("Document");
+    const auto component = entity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(component);
+    component->SetVisualTree(documentId);
+    auto editPresentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    auto playPresentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    editPresentation->Synchronize(scene, 320.0F, 180.0F, false);
+    playPresentation->Synchronize(scene, 320.0F, 180.0F, true);
+
+    const auto root = playPresentation->UiDocumentRoot(entity.Id());
+    const auto namedButton = playPresentation->FindUiDocumentElement(entity.Id(), "launch");
+    const auto stableButton = playPresentation->FindUiDocumentElement(entity.Id(), buttonId);
+    const auto volume = playPresentation->FindUiDocumentElement(entity.Id(), "volume");
+    REQUIRE(root);
+    REQUIRE(namedButton);
+    REQUIRE(stableButton);
+    REQUIRE(volume);
+    const auto managedButton =
+        Keire::Detail::FindManagedUiDocumentElement(playPresentation, entity.Id().Value(), "launch");
+    REQUIRE(managedButton);
+    CHECK(managedButton->DocumentGeneration == namedButton->DocumentGeneration);
+    CHECK(managedButton->Element == namedButton->Element);
+    CHECK(managedButton->StableIdHigh == buttonId.High());
+    CHECK(managedButton->StableIdLow == buttonId.Low());
+    CHECK(managedButton->Type == Keire::ManagedUiDocumentElementType::Button);
+    CHECK(namedButton->Element == stableButton->Element);
+    CHECK(namedButton->StableId == buttonId);
+    CHECK(namedButton->Type == Keire::RuntimeUiElementType::Button);
+
+    CHECK(playPresentation->ReadUiDocumentElementText(entity.Id(), namedButton->DocumentGeneration,
+                                                      namedButton->Element) == "Launch");
+    CHECK(playPresentation->SetUiDocumentElementText(entity.Id(), namedButton->DocumentGeneration, namedButton->Element,
+                                                     "Continue"));
+    CHECK(playPresentation->ReadUiDocumentElementText(entity.Id(), namedButton->DocumentGeneration,
+                                                      namedButton->Element) == "Continue");
+    CHECK(editPresentation->ReadUiDocumentElementText(
+              entity.Id(), editPresentation->UiDocumentRoot(entity.Id())->DocumentGeneration,
+              editPresentation->FindUiDocumentElement(entity.Id(), buttonId)->Element) == "Launch");
+
+    CHECK(playPresentation->ReadUiDocumentElementValue(entity.Id(), volume->DocumentGeneration, volume->Element) ==
+          doctest::Approx(25.0F));
+    CHECK(playPresentation->SetUiDocumentElementValue(entity.Id(), volume->DocumentGeneration, volume->Element, 72.5F));
+    CHECK(playPresentation->ReadUiDocumentElementValue(entity.Id(), volume->DocumentGeneration, volume->Element) ==
+          doctest::Approx(72.5F));
+    CHECK(playPresentation->SetUiDocumentElementFlag(entity.Id(), namedButton->DocumentGeneration, namedButton->Element,
+                                                     Keire::ScenePresentationUiDocumentFlag::Enabled, false));
+    CHECK(playPresentation->ReadUiDocumentElementFlag(entity.Id(), namedButton->DocumentGeneration,
+                                                      namedButton->Element,
+                                                      Keire::ScenePresentationUiDocumentFlag::Enabled) == false);
+    CHECK(playPresentation->SetUiDocumentElementFlag(entity.Id(), namedButton->DocumentGeneration, namedButton->Element,
+                                                     Keire::ScenePresentationUiDocumentFlag::Enabled, true));
+    CHECK(playPresentation->FocusUiDocumentElement(entity.Id(), namedButton->DocumentGeneration, namedButton->Element));
+    CHECK(playPresentation->ReadUiDocumentElementFlag(entity.Id(), namedButton->DocumentGeneration,
+                                                      namedButton->Element,
+                                                      Keire::ScenePresentationUiDocumentFlag::Focused) == true);
+
+    auto pending = playPresentation->Ui()->PendingEvents();
+    const auto buttonRuntime = std::ranges::find_if(playPresentation->Ui()->DrawCommands(),
+                                                    [namedButton](const Keire::RuntimeUiDrawCommand& command)
+                                                    { return command.Element.Value() == namedButton->Element; });
+    REQUIRE(buttonRuntime != playPresentation->Ui()->DrawCommands().end());
+    pending.push_back({.Type = Keire::RuntimeUiEventType::Click, .Target = buttonRuntime->Element});
+    pending.push_back({.Type = Keire::RuntimeUiEventType::ValueChanged, .Target = buttonRuntime->Element});
+    playPresentation->Ui()->ReplacePendingEvents(pending);
+    const auto debugSnapshot = playPresentation->UiDocumentDebugSnapshot(entity.Id());
+    REQUIRE(debugSnapshot);
+    CHECK(debugSnapshot->Document == entity.Id());
+    CHECK(debugSnapshot->VisualTree == documentId);
+    CHECK(debugSnapshot->DocumentGeneration == namedButton->DocumentGeneration);
+    CHECK(debugSnapshot->Elements.size() == 3);
+    CHECK(debugSnapshot->Focused == buttonId);
+    CHECK(debugSnapshot->PendingTargetEvents.size() >= 2);
+    const auto debugButton =
+        std::ranges::find(debugSnapshot->Elements, buttonId, &Keire::ScenePresentationUiDocumentDebugElement::StableId);
+    REQUIRE(debugButton != debugSnapshot->Elements.end());
+    CHECK(debugButton->State.Content.Text == "Continue");
+    const auto debugHit =
+        playPresentation->HitTestUiDocument(buttonRuntime->Rect.X + 1.0F, buttonRuntime->Rect.Y + 1.0F);
+    REQUIRE(debugHit);
+    CHECK(debugHit->Document == entity.Id());
+    CHECK(debugHit->StableId == buttonId);
+    CHECK(debugHit->DocumentGeneration == namedButton->DocumentGeneration);
+    CHECK(playPresentation->ConsumeUiDocumentElementEvent(entity.Id(), namedButton->DocumentGeneration,
+                                                          namedButton->Element, Keire::RuntimeUiEventType::Click));
+    CHECK(playPresentation->ConsumeUiDocumentElementEvent(
+        entity.Id(), namedButton->DocumentGeneration, namedButton->Element, Keire::RuntimeUiEventType::ValueChanged));
+    CHECK_FALSE(playPresentation->ConsumeUiDocumentElementEvent(
+        entity.Id(), namedButton->DocumentGeneration, namedButton->Element, Keire::RuntimeUiEventType::Click));
+
+    auto reloaded = definition;
+    reloaded.Root.Children[0].Attributes = {{"text", "Reloaded"}};
+    REQUIRE(assets->PublishDevelopmentAsset(documentId, Keire::CreateRef<Keire::UiVisualTreeAsset>(reloaded)));
+    playPresentation->Synchronize(scene, 320.0F, 180.0F, true);
+    const auto reloadedButton = playPresentation->FindUiDocumentElement(entity.Id(), buttonId);
+    REQUIRE(reloadedButton);
+    CHECK(reloadedButton->DocumentGeneration != namedButton->DocumentGeneration);
+    CHECK_FALSE(
+        playPresentation->UiDocumentElementAlive(entity.Id(), namedButton->DocumentGeneration, namedButton->Element));
+    CHECK(playPresentation->ReadUiDocumentElementText(entity.Id(), reloadedButton->DocumentGeneration,
+                                                      reloadedButton->Element) == "Reloaded");
+
+    REQUIRE(scene->DestroyEntity(entity.Id()));
+    playPresentation->Synchronize(scene, 320.0F, 180.0F, true);
+    CHECK_FALSE(playPresentation->UiDocumentElementAlive(entity.Id(), reloadedButton->DocumentGeneration,
+                                                         reloadedButton->Element));
+
+    editPresentation->Clear();
+    playPresentation->Clear();
+    scene->Close();
+    assets->Close();
 }
 
 TEST_CASE("audio clip assets round-trip deterministic PCM payloads")
@@ -679,59 +766,6 @@ TEST_CASE("scene runtime presentation ignores unchanged viewport assignments")
     CHECK(presentation->Statistics().SynchronizationCount == 2);
     session->SetPresentationViewport(1280.0F, 720.0F);
     CHECK(presentation->Statistics().SynchronizationCount == 2);
-}
-
-TEST_CASE("scene presentation clear discards UI events deferred during filtered consumption")
-{
-    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
-    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
-    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
-                                                Keire::SceneAsset::EmptyDefinition("Presentation UI"));
-    auto canvas = scene->CreateEntity("Canvas");
-    const auto canvasComponent = canvas.AddComponent<Keire::CanvasComponent>();
-    REQUIRE(canvasComponent);
-    canvasComponent->SetScaleMode(Keire::CanvasScaleMode::ConstantPixels);
-
-    auto first = scene->CreateEntity("First", canvas);
-    const auto firstRect = first.AddComponent<Keire::RectTransformComponent>();
-    REQUIRE(firstRect);
-    firstRect->SetAnchorMinimum({});
-    firstRect->SetAnchorMaximum({});
-    firstRect->SetPivot({});
-    firstRect->SetAnchoredPosition({10.0F, 10.0F});
-    firstRect->SetSizeDelta({100.0F, 50.0F});
-    REQUIRE(first.AddComponent<Keire::UiButtonComponent>());
-
-    auto second = scene->CreateEntity("Second", canvas);
-    const auto secondRect = second.AddComponent<Keire::RectTransformComponent>();
-    REQUIRE(secondRect);
-    secondRect->SetAnchorMinimum({});
-    secondRect->SetAnchorMaximum({});
-    secondRect->SetPivot({});
-    secondRect->SetAnchoredPosition({140.0F, 10.0F});
-    secondRect->SetSizeDelta({100.0F, 50.0F});
-    REQUIRE(second.AddComponent<Keire::UiButtonComponent>());
-
-    presentation->Synchronize(scene, 320.0F, 180.0F, false);
-    presentation->PointerMove(25.0F, 25.0F);
-    presentation->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, true);
-    presentation->PointerButton(25.0F, 25.0F, Keire::RuntimeUiPointerButton::Primary, false);
-    CHECK_FALSE(presentation->ConsumeClick(second.Id()));
-    const auto checkpoint = presentation->CaptureCheckpoint();
-    CHECK(checkpoint.FocusedEntity == first.Id());
-    CHECK_FALSE(checkpoint.PendingUiEvents.empty());
-    CHECK(presentation->ConsumeClick(first.Id()));
-    CHECK(presentation->SetFocus(second.Id()));
-    presentation->RestoreCheckpoint(checkpoint);
-    CHECK(presentation->CaptureCheckpoint().FocusedEntity == first.Id());
-    CHECK(presentation->ConsumeClick(first.Id()));
-
-    presentation->Clear();
-    Keire::RuntimeUiEvent event;
-    CHECK_FALSE(presentation->PollUiEvent(event));
-
-    scene->Close();
-    assets->Close();
 }
 
 TEST_CASE("scene presentation treats automatic and manual audio playback as edge-triggered requests")
@@ -963,4 +997,126 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     scene->Close();
     assets->Close();
     audio->Close();
+}
+
+TEST_CASE("scene UI documents bind source data dispatch callbacks and recascade interaction states")
+{
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    assetSpecification.Decoders.push_back(Keire::CreateUiStyleSheetAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const auto documentId = Keire::AssetId::Generate();
+    const auto stylesId = Keire::AssetId::Generate();
+    const auto rootId = Keire::AssetId::Generate();
+    const auto statusId = Keire::AssetId::Generate();
+    const auto toggleId = Keire::AssetId::Generate();
+    Keire::UiVisualTreeDefinition definition;
+    definition.Name = "SourceBackedSceneDocument";
+    definition.StyleSheets = {stylesId};
+    definition.Root.StableId = rootId;
+    definition.Root.Name = "root";
+    definition.Root.InlineStyles = {{"width", "240"}, {"height", "120"}, {"flex-direction", "column"}};
+    Keire::UiVisualElementDefinition status;
+    status.StableId = statusId;
+    status.Type = Keire::UiVisualElementType::Label;
+    status.Name = "status";
+    status.Bindings = {{"text", "Session.Status", "OneWay"}};
+    status.InlineStyles = {{"width", "200"}, {"height", "30"}};
+    Keire::UiVisualElementDefinition toggle;
+    toggle.StableId = toggleId;
+    toggle.Type = Keire::UiVisualElementType::Toggle;
+    toggle.Name = "toggle";
+    toggle.InlineStyles = {{"width", "200"}, {"height", "60"}};
+    definition.Root.Children = {status, toggle};
+    Keire::UiStyleSheetDefinition styleDefinition;
+    styleDefinition.Rules = {{.Selector = "#toggle",
+                              .Parts = {{.Name = "toggle"}},
+                              .Specificity = 100,
+                              .Properties = {{"background-color", "#000000ff"},
+                                             {"transition-property", "background-color"},
+                                             {"transition-duration", "500ms"}}},
+                             {.Selector = "#toggle:hover",
+                              .Parts = {{.Name = "toggle", .States = Keire::UiStylePseudoState::Hover}},
+                              .Specificity = 110,
+                              .Properties = {{"background-color", "#ffffffff"}}},
+                             {.Selector = "#toggle:checked",
+                              .Parts = {{.Name = "toggle", .States = Keire::UiStylePseudoState::Checked}},
+                              .Specificity = 110,
+                              .Properties = {{"border-color", "#00ff00ff"}, {"border-width", "2"}}}};
+    REQUIRE(assets->PublishDevelopmentAsset(documentId, Keire::CreateRef<Keire::UiVisualTreeAsset>(definition)));
+    REQUIRE(assets->PublishDevelopmentAsset(stylesId, Keire::CreateRef<Keire::UiStyleSheetAsset>(styleDefinition)));
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Source-backed UI"));
+    auto entity = scene->CreateEntity("Document");
+    const auto component = entity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(component);
+    component->SetVisualTree(documentId);
+    const auto presentation =
+        Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    const auto bindingSource = Keire::CreateRef<PresentationUiBindingSource>();
+    presentation->SetUiDocumentBindingSource(entity.Id(), bindingSource);
+    presentation->AdvanceUi(0.0F);
+    const auto statusElement = presentation->FindUiDocumentElement(entity.Id(), statusId);
+    const auto toggleElement = presentation->FindUiDocumentElement(entity.Id(), toggleId);
+    REQUIRE(statusElement);
+    REQUIRE(toggleElement);
+    CHECK(presentation->ReadUiDocumentElementText(entity.Id(), statusElement->DocumentGeneration,
+                                                  statusElement->Element) == "Bound");
+    const auto visual =
+        Keire::DynamicRefCast<Keire::Ui::Toggle>(presentation->UiDocumentVisualElement(entity.Id(), toggleId));
+    REQUIRE(visual);
+    std::vector<std::string> route;
+    const auto rootVisual = presentation->UiDocumentVisualElement(entity.Id(), rootId);
+    REQUIRE(rootVisual);
+    (void)rootVisual->RegisterCallback<Keire::Ui::ClickEvent>(
+        [&route](Keire::Ui::ClickEvent&) { route.push_back("root-trickle"); }, Keire::Ui::TrickleDown::Yes);
+    const auto prevention = visual->RegisterCallback<Keire::Ui::ClickEvent>(
+        [&route](Keire::Ui::ClickEvent& event)
+        {
+            route.push_back("toggle-target");
+            event.PreventDefault();
+        });
+    const auto snapshot = presentation->UiDocumentDebugSnapshot(entity.Id());
+    REQUIRE(snapshot);
+    const auto toggleDebug =
+        std::ranges::find(snapshot->Elements, toggleId, &Keire::ScenePresentationUiDocumentDebugElement::StableId);
+    REQUIRE(toggleDebug != snapshot->Elements.end());
+    const float x = toggleDebug->State.Rect.X + toggleDebug->State.Rect.Width * 0.5F;
+    const float y = toggleDebug->State.Rect.Y + toggleDebug->State.Rect.Height * 0.5F;
+    presentation->PointerMove(x, y);
+    presentation->AdvanceUi(0.5F);
+    const auto hovered = presentation->UiDocumentDebugSnapshot(entity.Id());
+    REQUIRE(hovered);
+    const auto hoveredToggle =
+        std::ranges::find(hovered->Elements, toggleId, &Keire::ScenePresentationUiDocumentDebugElement::StableId);
+    REQUIRE(hoveredToggle != hovered->Elements.end());
+    CHECK(hoveredToggle->State.Hovered);
+    CHECK(hoveredToggle->State.Style.Background.Red == doctest::Approx(1.0F));
+    REQUIRE(presentation->PointerButton(x, y, Keire::RuntimeUiPointerButton::Primary, true));
+    REQUIRE(presentation->PointerButton(x, y, Keire::RuntimeUiPointerButton::Primary, false));
+    CHECK(route == std::vector<std::string>{"root-trickle", "toggle-target"});
+    CHECK_FALSE(presentation
+                    ->ReadUiDocumentElementFlag(entity.Id(), toggleElement->DocumentGeneration, toggleElement->Element,
+                                                Keire::ScenePresentationUiDocumentFlag::Checked)
+                    .value_or(true));
+    REQUIRE(visual->UnregisterCallback(prevention));
+    route.clear();
+    REQUIRE(presentation->PointerButton(x, y, Keire::RuntimeUiPointerButton::Primary, true));
+    REQUIRE(presentation->PointerButton(x, y, Keire::RuntimeUiPointerButton::Primary, false));
+    CHECK(presentation
+              ->ReadUiDocumentElementFlag(entity.Id(), toggleElement->DocumentGeneration, toggleElement->Element,
+                                          Keire::ScenePresentationUiDocumentFlag::Checked)
+              .value_or(false));
+    presentation->AdvanceUi(0.0F);
+    const auto checked = presentation->UiDocumentDebugSnapshot(entity.Id());
+    REQUIRE(checked);
+    const auto checkedToggle =
+        std::ranges::find(checked->Elements, toggleId, &Keire::ScenePresentationUiDocumentDebugElement::StableId);
+    REQUIRE(checkedToggle != checked->Elements.end());
+    CHECK(checkedToggle->State.Style.Border.Green == doctest::Approx(1.0F));
+    presentation->Clear();
+    scene->Close();
+    assets->Close();
 }

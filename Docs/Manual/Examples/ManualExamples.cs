@@ -90,8 +90,10 @@ public sealed class MovementTuning : ScriptableObject
 [StableComponentId("ee3548b8-662a-4898-8db0-27b034d9f08a")]
 public sealed class ResumeButton : Behaviour
 {
-    [SerializeField, StableFieldId("3b98ad0f-347e-44a9-8c95-e773c60767cb")]
-    private UiButton? _button = null;
+    private readonly Keire.UI.VisualElement _root = new();
+    private readonly Keire.UI.Button _button = new() { Name = "resume", Text = "Resume" };
+
+    protected override void Awake() => _root.Add(_button);
 
     protected override void OnEnable() => Bind();
     protected override void OnDisable() => Unbind();
@@ -100,14 +102,12 @@ public sealed class ResumeButton : Behaviour
 
     private void Bind()
     {
-        if (_button is not null)
-            _button.Clicked += Resume;
+        _button.Clicked += Resume;
     }
 
     private void Unbind()
     {
-        if (_button is not null)
-            _button.Clicked -= Resume;
+        _button.Clicked -= Resume;
     }
 
     private void Resume() => Time.TimeScale = 1.0f;

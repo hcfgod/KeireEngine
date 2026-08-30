@@ -100,5 +100,6 @@ and asset-reference records are read by the legacy state reader and normalize to
 
 Kéire exposes concrete managed classes for every native registry entry: `Transform`, `Camera`, directional/point/spot
 lights, reflection/light probes, `MeshRenderer`, `Animator`, `Collider`, `RigidBody`, `CharacterController`, fixed,
-hinge, distance, and spring joints, `AudioSource`, `AudioListener`, `AudioReverbZone`, `VfxEmitter`, `Canvas`,
-`RectTransform`, and all `Ui*` scene controls. Use the component instance for entity-scoped operations.
+hinge, distance, and spring joints, `AudioSource`, `AudioListener`, `AudioReverbZone`, `VfxEmitter`, and
+`Keire.UI.UIDocument`. Use the component instance for entity-scoped operations. Retired Canvas/Rect Transform component
+IDs are reserved for exact import diagnostics and are not an authoring API.

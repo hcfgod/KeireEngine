@@ -469,7 +469,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
         std::ofstream stream(root / "SupportScripts/ReloadBehaviourBase.cs", std::ios::binary | std::ios::trunc);
         stream << "using Keire; namespace Game.Support; "
                   "public abstract class ReloadBehaviourBase : Behaviour { "
-                  "protected float ReloadBonus => 1.0f; }\n";
+                  "protected float ReloadBonus => 1.0f; } "
+                  "[CreateAssetMenu(\"Gameplay/Support Library\", \"SupportLibrary\")] "
+                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-00000000018f\")] "
+                  "public sealed class SupportLibrary : ScriptableObject { public string Label = string.Empty; }\n";
     }
     {
         std::ofstream stream(root / "Scripts/Player.cs", std::ios::binary | std::ios::trunc);
@@ -477,6 +480,16 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "[System.Serializable, StableSerializedTypeId(\"73616e64-626f-4078-8000-000000000095\")] "
                   "public sealed class PlayerGraphNode { public string Name = string.Empty; "
                   "public PlayerGraphNode? Next; public Dictionary<string, PlayerGraphNode?> Links = new(); } "
+                  "public interface IPlayerOperation { } "
+                  "[SerializableType, StableSerializedTypeId(\"73616e64-626f-4078-8000-00000000009a\")] "
+                  "public sealed class PlayerMultiply : IPlayerOperation { public float Factor = 2.0f; } "
+                  "[SerializableType, StableSerializedTypeId(\"73616e64-626f-4078-8000-00000000009b\")] "
+                  "public sealed class PlayerAdd : IPlayerOperation { public float Offset = 1.0f; } "
+                  "[CreateAssetMenu(\"Feature Gallery/Feature Graph Library\", \"FeatureGraphLibrary\")] "
+                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-00000000018e\")] "
+                  "public sealed class FeatureGraphLibrary : ScriptableObject { "
+                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000018d\")] "
+                  "public List<IPlayerOperation> Operations = new(); } "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000097\")] "
                   "public sealed class PlayerDependency : Behaviour { } "
                   "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
@@ -514,6 +527,12 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                   "public Dictionary<string, List<int[]>> Inventory = new(); "
                   "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-000000000094\")] "
                   "public PlayerGraphNode? Graph = null; "
+                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009c\")] "
+                  "public List<IPlayerOperation> Operations = new(); "
+                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009d\")] "
+                  "public IPlayerOperation[] OperationArray = []; "
+                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009e\")] "
+                  "public Dictionary<string, IPlayerOperation> OperationMap = new(); "
                   "protected override void Awake() { Speed += ReloadBonus; } "
                   "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
                   "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
@@ -626,11 +645,13 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     INFO(buildDiagnostic);
     REQUIRE(buildStatus.State == Keire::ManagedBuildState::Succeeded);
     const auto assembly = buildStatus.ActiveAssemblyDirectory / "ReloadGameplay.dll";
+    const auto supportAssembly = buildStatus.ActiveAssemblyDirectory / "ReloadSupport.dll";
     REQUIRE(std::filesystem::is_regular_file(assembly));
-    REQUIRE(std::filesystem::is_regular_file(buildStatus.ActiveAssemblyDirectory / "ReloadSupport.dll"));
+    REQUIRE(std::filesystem::is_regular_file(supportAssembly));
+    const std::vector reloadAssemblies{supportAssembly, assembly};
 
     Keire::ManagedReloadRequest request;
-    request.Assemblies = {assembly};
+    request.Assemblies = reloadAssemblies;
     request.ManagedApiAssembly = buildStatus.ManagedApiAssembly;
     request.State = {{42, "Game.Player", {{"speed", "7.5"}, {"target", "entity:123"}}}};
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
@@ -652,18 +673,36 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     INFO(scripts->ReloadStatus().Diagnostic);
     REQUIRE(prepared);
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Prepared);
-    CHECK(scripts->ReloadStatus().AvailableTypes ==
-          std::vector<std::string>{"Game.Player", "Game.PlayerDependency", "Game.ReloadFailureProbe"});
+    CHECK(scripts->ReloadStatus().AvailableTypes == std::vector<std::string>{"Game.Player", "Game.PlayerDependency",
+                                                                             "Game.ReloadFailureProbe",
+                                                                             "Game.Support.ReloadBehaviourBase"});
     CHECK(scripts->ReloadStatus().RetainedState == request.State);
     scripts->CommitReload();
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Active);
     CHECK(scripts->ReloadStatus().Generation == 1);
-    const auto managedAssetTypes = scripts->ManagedAssetTypes();
+    const auto managedAssetCatalog = scripts->ManagedAssetCatalog();
+    CHECK(managedAssetCatalog.Generation == 1);
+    const auto& managedAssetTypes = managedAssetCatalog.Types;
     CHECK_FALSE(std::ranges::any_of(managedAssetTypes, [](const Keire::ManagedAssetTypeDescriptor& descriptor)
                                     { return descriptor.FullName.starts_with("Keire."); }));
     const auto playerTuning = std::ranges::find(managedAssetTypes, std::string("Game.PlayerTuning"),
                                                 &Keire::ManagedAssetTypeDescriptor::FullName);
     REQUIRE(playerTuning != managedAssetTypes.end());
+    const auto supportLibrary = std::ranges::find(managedAssetTypes, std::string("Game.Support.SupportLibrary"),
+                                                  &Keire::ManagedAssetTypeDescriptor::FullName);
+    REQUIRE(supportLibrary != managedAssetTypes.end());
+    const auto featureGraphLibrary = std::ranges::find(managedAssetTypes, std::string("Game.FeatureGraphLibrary"),
+                                                       &Keire::ManagedAssetTypeDescriptor::FullName);
+    REQUIRE(featureGraphLibrary != managedAssetTypes.end());
+    CHECK(supportLibrary->MenuPath == "Gameplay/Support Library");
+    CHECK(featureGraphLibrary->MenuPath == "Feature Gallery/Feature Graph Library");
+    REQUIRE(featureGraphLibrary->Properties.size() == 1);
+    CHECK(featureGraphLibrary->Properties.front().Kind == Keire::ManagedAssetPropertyKind::List);
+    CHECK(featureGraphLibrary->Properties.front().ReferenceGraph);
+    REQUIRE(featureGraphLibrary->Properties.front().Children.size() == 1);
+    CHECK(featureGraphLibrary->Properties.front().Children.front().ReferenceTypeChoices ==
+          std::vector<Keire::ManagedTypeId>{Keire::ManagedTypeId::Parse("73616e64-626f-4078-8000-00000000009b"),
+                                            Keire::ManagedTypeId::Parse("73616e64-626f-4078-8000-00000000009a")});
     CHECK(playerTuning->MenuPath == "Gameplay/Player Tuning");
     REQUIRE(playerTuning->Properties.size() == 5);
     CHECK(playerTuning->Properties[0].Kind == Keire::ManagedAssetPropertyKind::Scalar);
@@ -759,6 +798,40 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(graphProperty->ReferenceGraph->Root.ReferenceTypeChoices.front() ==
           Keire::ManagedTypeId::Parse("73616e64-626f-4078-8000-000000000095"));
 
+    const auto expectedOperationTypes =
+        std::vector<Keire::ManagedTypeId>{Keire::ManagedTypeId::Parse("73616e64-626f-4078-8000-00000000009b"),
+                                          Keire::ManagedTypeId::Parse("73616e64-626f-4078-8000-00000000009a")};
+    const auto operationsProperty =
+        std::ranges::find(registration->Properties, std::string("Operations"), &Keire::ComponentProperty::Key);
+    REQUIRE(operationsProperty != registration->Properties.end());
+    CHECK(operationsProperty->Kind == Keire::ComponentPropertyKind::ManagedReferenceGraph);
+    REQUIRE(operationsProperty->ReferenceGraph);
+    CHECK(operationsProperty->ReferenceGraph->Root.ReferenceGraph);
+    CHECK(operationsProperty->ReferenceGraph->Root.Kind == Keire::ManagedAssetPropertyKind::List);
+    REQUIRE(operationsProperty->ReferenceGraph->Root.Children.size() == 1);
+    CHECK(operationsProperty->ReferenceGraph->Root.Children.front().ReferenceGraph);
+    CHECK(operationsProperty->ReferenceGraph->Root.Children.front().ReferenceTypeChoices == expectedOperationTypes);
+
+    const auto operationArrayProperty =
+        std::ranges::find(registration->Properties, std::string("OperationArray"), &Keire::ComponentProperty::Key);
+    REQUIRE(operationArrayProperty != registration->Properties.end());
+    REQUIRE(operationArrayProperty->ReferenceGraph);
+    CHECK(operationArrayProperty->ReferenceGraph->Root.ReferenceGraph);
+    CHECK(operationArrayProperty->ReferenceGraph->Root.Kind == Keire::ManagedAssetPropertyKind::Array);
+    REQUIRE(operationArrayProperty->ReferenceGraph->Root.Children.size() == 1);
+    CHECK(operationArrayProperty->ReferenceGraph->Root.Children.front().ReferenceGraph);
+    CHECK(operationArrayProperty->ReferenceGraph->Root.Children.front().ReferenceTypeChoices == expectedOperationTypes);
+
+    const auto operationMapProperty =
+        std::ranges::find(registration->Properties, std::string("OperationMap"), &Keire::ComponentProperty::Key);
+    REQUIRE(operationMapProperty != registration->Properties.end());
+    REQUIRE(operationMapProperty->ReferenceGraph);
+    CHECK(operationMapProperty->ReferenceGraph->Root.ReferenceGraph);
+    CHECK(operationMapProperty->ReferenceGraph->Root.Kind == Keire::ManagedAssetPropertyKind::Dictionary);
+    REQUIRE(operationMapProperty->ReferenceGraph->Root.Children.size() == 2);
+    CHECK(operationMapProperty->ReferenceGraph->Root.Children[1].ReferenceGraph);
+    CHECK(operationMapProperty->ReferenceGraph->Root.Children[1].ReferenceTypeChoices == expectedOperationTypes);
+
     const auto graphComponent = registration->Factory();
     REQUIRE(graphComponent);
     auto graphValues = registration->Serialize(*graphComponent);
@@ -788,7 +861,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     REQUIRE(authoredObjectTable->is_object());
     CHECK(authoredObjectTable->at("Version") == 2);
     REQUIRE(authoredObjectTable->at("Roots").is_array());
-    CHECK(authoredObjectTable->at("Roots").size() == 1);
+    CHECK(authoredObjectTable->at("Roots").size() == 4);
 
     auto invalidGraphValues = authoredValues;
     auto danglingGraph = authoredProjection;
@@ -888,6 +961,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     INFO(play->Diagnostic().Message);
     REQUIRE(play->State() == Keire::ScenePlayState::Playing);
     REQUIRE(play->RuntimeScene());
+    CHECK(scripts->ManagedAssetCatalog() == managedAssetCatalog);
     auto runtimeEntity = play->RuntimeScene()->FindEntity(scriptedEntity.Id());
     REQUIRE(runtimeEntity);
     const auto runtimeComponent = runtimeEntity.GetComponent(componentType);
@@ -999,6 +1073,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK_FALSE(scriptedEntity.HasComponent<Keire::AudioSourceComponent>());
     CHECK_FALSE(editingScene->Dirty());
     play->Stop();
+    CHECK(scripts->ManagedAssetCatalog() == managedAssetCatalog);
     CHECK(std::get<double>(registration->Serialize(*editingComponent).at("Speed")) == doctest::Approx(5.0));
     editingScene->Close();
 
@@ -1036,10 +1111,13 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
 
     // A successful reload must not reuse MethodInfo objects cached for an equal full name in the retiring load
     // context. No failed/cancelled reload is allowed to clear that cache on the test's behalf.
-    request.Assemblies = {assembly};
+    request.Assemblies = reloadAssemblies;
     REQUIRE(scripts->PrepareReload(request));
     CHECK_NOTHROW(scripts->CommitReload());
     CHECK(scripts->ReloadStatus().Generation == 2);
+    const auto secondCatalog = scripts->ManagedAssetCatalog();
+    CHECK(secondCatalog.Generation == 2);
+    CHECK(secondCatalog.Types == managedAssetCatalog.Types);
 
     const auto invalidAssembly = root / "Invalid.dll";
     {
@@ -1047,22 +1125,32 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
         stream << "not a managed assembly";
     }
     request.Assemblies = {invalidAssembly};
-    CHECK_FALSE(scripts->PrepareReload(request));
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        CAPTURE(attempt);
+        CHECK_FALSE(scripts->PrepareReload(request));
+        CHECK(scripts->ReloadStatus().Generation == 2);
+        CHECK(scripts->ManagedAssetCatalog() == secondCatalog);
+    }
     const auto invalidDiagnostic = scripts->ReloadStatus().Diagnostic;
     CHECK(invalidDiagnostic.find("Coral status ") != std::string::npos);
     CHECK(invalidDiagnostic.find("snapshot path='") != std::string::npos);
     CHECK(invalidDiagnostic.find("sha256=") != std::string::npos);
     CHECK(invalidDiagnostic.find("Managed exception:") != std::string::npos);
     CHECK(invalidDiagnostic.find("last-good generation remains active") != std::string::npos);
-    CHECK(scripts->ReloadStatus().Generation == 2);
 
     request.Assemblies = {host / "Missing.dll"};
-    CHECK_FALSE(scripts->PrepareReload(request));
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        CAPTURE(attempt);
+        CHECK_FALSE(scripts->PrepareReload(request));
+        CHECK(scripts->ReloadStatus().Generation == 2);
+        CHECK(scripts->ManagedAssetCatalog() == secondCatalog);
+    }
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Failed);
-    CHECK(scripts->ReloadStatus().Generation == 2);
     CHECK_FALSE(scripts->ReloadStatus().Diagnostic.empty());
 
-    request.Assemblies = {assembly};
+    request.Assemblies = reloadAssemblies;
     REQUIRE(scripts->PrepareReload(request));
     std::string rejection;
     std::thread wrongThread(
@@ -1082,6 +1170,8 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Prepared);
     CHECK_NOTHROW(scripts->CommitReload());
     CHECK(scripts->ReloadStatus().Generation == 3);
+    const auto thirdCatalog = scripts->ManagedAssetCatalog();
+    CHECK(thirdCatalog.Generation == 3);
     CHECK(scripts->DestroyBehaviour(instance));
     CHECK_FALSE(scripts->DestroyBehaviour(instance));
     REQUIRE(scripts->PrepareReload(request));
@@ -1091,7 +1181,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     const auto failureProbe = scripts->CreateBehaviour("Game.ReloadFailureProbe", 7,
                                                        Keire::AssetId::Parse("00000000-0000-0000-0000-000000000043"));
     REQUIRE(failureProbe);
-    request.Assemblies = {assembly};
+    request.Assemblies = reloadAssemblies;
     REQUIRE(scripts->PrepareReload(request));
     std::string migrationFailure;
     try
@@ -1106,6 +1196,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(migrationFailure.find("intentional after-reload failure") == std::string::npos);
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Failed);
     CHECK(scripts->ReloadStatus().Generation == 3);
+    CHECK(scripts->ManagedAssetCatalog() == thirdCatalog);
     CHECK(scripts->DestroyBehaviour(failureProbe));
     REQUIRE(scripts->PrepareReload(request));
     scripts->CancelReload();

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "target": "WorldSurface",
+  "scaleMode": "ScaleWithViewport",
+  "referenceWidth": 960.0,
+  "referenceHeight": 540.0,
+  "matchWidthOrHeight": 0.5,
+  "sortingOrder": 0,
+  "camera": "00000000-0000-0000-0000-000000000000",
+  "renderTexture": "00000000-0000-0000-0000-000000000000",
+  "respectSafeArea": false,
+  "worldWidth": 1.92,
+  "worldHeight": 1.08,
+  "pixelsPerUnit": 500.0,
+  "depthTest": true
+}

@@ -45,9 +45,10 @@ first enabled update. Destruction commits after the current update loop.
 | Physics | `Collider`, `RigidBody`, `CharacterController`, `FixedJoint`, `HingeJoint`, `DistanceJoint`, `SpringJoint` |
 | Audio | `AudioSource`, `AudioListener`, `AudioReverbZone` |
 | VFX | `VfxEmitter` |
-| Scene UI | `Canvas`, `RectTransform`, `UiText`, `UiImage`, `UiButton`, `UiLayout`, `UiSlider`, `UiToggle`, `UiInputField`, `UiScrollView`, `UiAccessibility` |
+| Scene UI | `Keire.UI.UIDocument` plus `VisualTreeAsset`, `StyleSheet`, and `PanelSettings` |
 
-Programmatic overlay UI uses `RuntimeUiText`, `RuntimeUiImage`, `RuntimeUiButton`, and the other `RuntimeUi*` names.
+Managed retained trees use `Keire.UI.VisualElement`, the control family, `UQueryBuilder<T>`, events, binding, and
+explicit `[UxmlElement]` / `[UxmlAttribute]` custom-control registration.
 
 ## Assets
 
@@ -91,8 +92,10 @@ Entity-scoped audio, animation, VFX, rendering, UI, and physics operations belon
 `Range`, `Min`, `Max`, `InspectorStep`, `Multiline`, `InspectorName`, `Header`, `Tooltip`, `Group`, `ReadOnly`,
 `HideInInspector`, `ExecutionOrder`, and `RequireComponent`.
 
-Use standard `[Serializable]` for supported nested values. `[SerializedField]`, `[SerializeReference]`, dictionaries,
-multidimensional/jagged arrays, and nested collection containers are not supported in 0.4.0.
+Use `[Serializable]` for supported by-value nested data. A field-only `[SerializeReference]` graph supports stable-ID
+polymorphic concrete types, cycles, sharing, exact dictionaries, exact lists, and recursively nested one-dimensional
+arrays within the documented limits. Multidimensional arrays and unstable/custom dictionary-key contracts remain
+unsupported and reject the candidate generation without replacing the previous valid state.
 
 ## Source Files
 
@@ -104,8 +107,8 @@ multidimensional/jagged arrays, and nested collection containers are not support
 | [`NativeAssets.cs`](../../KeireManaged/NativeAssets.cs) | Direct native asset types |
 | [`RuntimeApi.cs`](../../KeireManaged/RuntimeApi.cs) | Physics, animation, audio, VFX components/services |
 | [`Rendering.cs`](../../KeireManaged/Rendering.cs) | Cameras, renderers, lights, dynamic materials |
-| [`RuntimeUiControls.cs`](../../KeireManaged/RuntimeUiControls.cs) | Scene UI components |
-| [`RuntimeUi.cs`](../../KeireManaged/RuntimeUi.cs) | Programmatic `RuntimeUi*` overlays |
+| [`UiToolkit.cs`](../../KeireManaged/UiToolkit.cs) | UI documents, visual trees, events, queries, binding, custom elements |
+| [`UiToolkitControls.cs`](../../KeireManaged/UiToolkitControls.cs) | Retained UI Toolkit controls and virtualization |
 | [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) | Scenes and render settings |
 | [`Jobs.cs`](../../KeireManaged/Jobs.cs) | Managed jobs |
 | [`RuntimeAssets.cs`](../../KeireManaged/RuntimeAssets.cs) | Asset load operations |

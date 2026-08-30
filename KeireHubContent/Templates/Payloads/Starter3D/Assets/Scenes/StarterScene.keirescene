@@ -77,6 +77,92 @@
         }
       ],
       "parent": null
+    },
+    {
+      "id": "a1b2c3d4-1000-4000-8000-000000000004",
+      "name": "Starter UI Document",
+      "active": true,
+      "layer": 0,
+      "components": [
+        {
+          "type": "4b454952-4555-4944-4f43-554d454e5401",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "visualTree": "b1b20001-1000-4000-8000-000000000003",
+            "panelSettings": "b1b20001-1000-4000-8000-000000000005",
+            "sortingOrder": 0,
+            "receivesInput": true
+          }
+        },
+        {
+          "type": "b1b2d001-1000-4000-8000-000000000001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ],
+      "parent": null
+    },
+    {
+      "id": "a1b2c3d4-1000-4000-8000-000000000005",
+      "name": "Starter World UI",
+      "active": true,
+      "layer": 0,
+      "components": [
+        {
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "position": [0.0, 2.0, 3.0],
+            "rotation": [0.0, 0.0, 0.0, 1.0],
+            "scale": [1.0, 1.0, 1.0]
+          }
+        },
+        {
+          "type": "4b454952-4555-4944-4f43-554d454e5401",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "visualTree": "b1b20001-1000-4000-8000-000000000006",
+            "panelSettings": "b1b20001-1000-4000-8000-000000000007",
+            "sortingOrder": 0,
+            "receivesInput": true
+          }
+        },
+        {
+          "type": "b1b2d001-1000-4000-8000-000000000002",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ],
+      "parent": null
+    },
+    {
+      "id": "a1b2c3d4-1000-4000-8000-000000000006",
+      "name": "Starter UI Render Target",
+      "active": true,
+      "layer": 0,
+      "components": [
+        {
+          "type": "4b454952-4555-4944-4f43-554d454e5401",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "visualTree": "b1b20001-1000-4000-8000-000000000008",
+            "panelSettings": "b1b20001-1000-4000-8000-000000000009",
+            "sortingOrder": -10,
+            "receivesInput": false
+          }
+        }
+      ],
+      "parent": null
     }
   ],
   "prefabInstances": [],

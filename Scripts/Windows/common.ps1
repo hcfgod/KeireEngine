@@ -610,7 +610,12 @@ function ConvertTo-MacroPrefix {
 }
 
 function Copy-WindowsTrackedTree {
-    param([string]$RepositoryRoot, [string]$RelativeSource, [string]$Destination)
+    param(
+        [string]$RepositoryRoot,
+        [string]$RelativeSource,
+        [string]$Destination,
+        [string[]]$AdditionalRelativeFiles = @()
+    )
 
     if (-not (Test-GitRepository $RepositoryRoot)) {
         throw "Tracked package copies require a Git working tree: $RepositoryRoot"
@@ -623,6 +628,32 @@ function Copy-WindowsTrackedTree {
 
     New-Item -ItemType Directory -Force $Destination | Out-Null
     $prefix = $RelativeSource.TrimEnd('/', '\') + "/"
+    $sourceRoot = [IO.Path]::GetFullPath((Join-Path $RepositoryRoot $RelativeSource)).TrimEnd('\')
+    $sourcePrefix = "$sourceRoot\"
+    foreach ($relativeFile in $AdditionalRelativeFiles) {
+        if ([string]::IsNullOrWhiteSpace($relativeFile) -or [IO.Path]::IsPathRooted($relativeFile)) {
+            throw "Additional package file paths must be non-empty relative paths: $relativeFile"
+        }
+        $normalizedRelative = $relativeFile.Replace('/', '\').TrimStart('\')
+        $source = [IO.Path]::GetFullPath((Join-Path $sourceRoot $normalizedRelative))
+        if (-not $source.StartsWith($sourcePrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "Additional package file escaped '$RelativeSource': $relativeFile"
+        }
+
+        $current = $sourceRoot
+        foreach ($component in @($normalizedRelative -split '\\' | Where-Object { $_ })) {
+            $current = Join-Path $current $component
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+            if (-not $item -or (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+                throw "Additional package file contains a missing or redirected component: $relativeFile"
+            }
+        }
+        if ((Get-Item -LiteralPath $source -Force).PSIsContainer) {
+            throw "Additional package path must name an ordinary file: $relativeFile"
+        }
+        $trackedFiles += $prefix + $relativeFile.Replace('\', '/')
+    }
+    $trackedFiles = @($trackedFiles | Sort-Object -Unique)
     $copied = 0
     foreach ($trackedFile in $trackedFiles) {
         if (-not $trackedFile.StartsWith($prefix, [StringComparison]::Ordinal)) {
@@ -638,6 +669,17 @@ function Copy-WindowsTrackedTree {
         ++$copied
     }
     if ($copied -eq 0) { throw "No present tracked files were found for package source '$RelativeSource'." }
+}
+
+function Get-WindowsKeireSandboxUiPackageFiles {
+    @(
+        "Assets/UI/SandboxMenu.keirestyle",
+        "Assets/UI/SandboxMenu.keirestyle.keiremeta",
+        "Assets/UI/SandboxMenu.keireui",
+        "Assets/UI/SandboxMenu.keireui.keiremeta",
+        "Assets/UI/ScreenOverlay.keireuipanel",
+        "Assets/UI/ScreenOverlay.keireuipanel.keiremeta"
+    )
 }
 
 function Test-WindowsGeneratedPackagePath {
@@ -718,7 +760,13 @@ function Get-WindowsRequiredPackagePaths {
         "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll", "bin\Managed\Keire.Managed.dll", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
         "include\$Namespace\Api.h", "include\$Namespace\Application.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "include\$Namespace\EntryPoint.h", "include\$Namespace\Event.h", "include\$Namespace\Layer.h", "include\$Namespace\Ref.h", "include\$Namespace\Undo.h",
-        "include\$Namespace\Time.h", "include\$Namespace\Math\Math.h", "include\$Namespace\ECS\Component.h", "include\$Namespace\ECS\Entity.h", "include\$Namespace\ECS\Components\TransformComponent.h", "include\$Namespace\ECS\Components\DirectionalLightComponent.h", "include\$Namespace\ECS\Components\AudioComponents.h", "include\$Namespace\ECS\Components\RuntimeUiComponents.h", "include\$Namespace\ECS\Components\CameraComponent.h", "include\$Namespace\ECS\Components\MeshRendererComponent.h", "include\$Namespace\Rendering\RenderSystem.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Assets\RenderingAssets.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial",
+        "include\$Namespace\Time.h", "include\$Namespace\Math\Math.h", "include\$Namespace\ECS\Component.h", "include\$Namespace\ECS\Entity.h", "include\$Namespace\ECS\Components\TransformComponent.h", "include\$Namespace\ECS\Components\DirectionalLightComponent.h", "include\$Namespace\ECS\Components\AudioComponents.h", "include\$Namespace\ECS\Components\UiDocumentComponent.h", "include\$Namespace\Ui\UiToolkit.h", "include\$Namespace\ECS\Components\CameraComponent.h", "include\$Namespace\ECS\Components\MeshRendererComponent.h", "include\$Namespace\Rendering\RenderSystem.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Assets\RenderingAssets.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial",
+        "samples\KeireSandbox\Assets\UI\SandboxMenu.keirestyle",
+        "samples\KeireSandbox\Assets\UI\SandboxMenu.keirestyle.keiremeta",
+        "samples\KeireSandbox\Assets\UI\SandboxMenu.keireui",
+        "samples\KeireSandbox\Assets\UI\SandboxMenu.keireui.keiremeta",
+        "samples\KeireSandbox\Assets\UI\ScreenOverlay.keireuipanel",
+        "samples\KeireSandbox\Assets\UI\ScreenOverlay.keireuipanel.keiremeta",
         "third-party\licenses\spdlog-LICENSE.txt",
         "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
         "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt", "third-party\licenses\assimp-LICENSE.txt", "third-party\licenses\assimp-zlib-LICENSE.txt", "third-party\licenses\stb-LICENSE.txt", "third-party\licenses\Jolt-LICENSE.txt", "third-party\licenses\Recast-LICENSE.txt", "third-party\licenses\miniaudio-LICENSE.txt",
@@ -913,7 +961,11 @@ function Get-WindowsRequiredEditorPackagePaths {
         "content\Fonts\SOURCES.md",
         "bin\libsodium.dll", "third-party\licenses\libsodium-LICENSE.txt",
         "samples\KeireSandbox\ProjectSettings\Project.keireproject",
-        "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "Docs\PlayerBuilds.md", "README.md",
+        "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene",
+        "samples\KeireSandbox\Assets\UI\SandboxMenu.keirestyle",
+        "samples\KeireSandbox\Assets\UI\SandboxMenu.keireui",
+        "samples\KeireSandbox\Assets\UI\ScreenOverlay.keireuipanel",
+        "Docs\PlayerBuilds.md", "README.md",
         "CHANGELOG.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json",
         "Config\SourceModules.premake.lua", "editor-package.json", "Launch-KeireEditor.cmd"
     ) + @($licenses)

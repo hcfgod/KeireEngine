@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "target": "RenderTexture",
+  "scaleMode": "ScaleWithViewport",
+  "referenceWidth": 1024.0,
+  "referenceHeight": 1024.0,
+  "matchWidthOrHeight": 0.5,
+  "sortingOrder": -10,
+  "camera": "00000000-0000-0000-0000-000000000000",
+  "renderTexture": "b1b2c3d4-1000-4000-8000-0000000000ff",
+  "respectSafeArea": false,
+  "worldWidth": 1.0,
+  "worldHeight": 1.0,
+  "pixelsPerUnit": 1024.0,
+  "depthTest": false
+}

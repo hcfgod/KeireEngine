@@ -8,6 +8,8 @@ var tests = new (string Name, Action Run)[]
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
     ("Inspector attributes validate production editing metadata", InspectorAttributeContract),
     ("ScriptableObject authoring discovers and hydrates Unity-style public fields", ScriptableObjectAuthoringContract),
+    ("Managed metadata allowlists isolate Feature Graph catalogs across concurrent failures",
+     ManagedMetadataAllowlistContract),
     ("VFX range setters expose every supported type", VfxRangeSettersExposeEverySupportedType),
     ("Runtime asset operations preserve typed diagnostics and explicit leases", RuntimeAssetHandleContract),
     ("Character Controller uses the native stable component contract", CharacterControllerStableContract),
@@ -21,8 +23,8 @@ var tests = new (string Name, Action Run)[]
     ("Managed physics shape queries validate and preserve native results", ManagedPhysicsQueryContract),
     ("Managed input devices rebinding persistence and rumble preserve native contracts", ManagedInputDeviceContract),
     ("Managed input actions and direct controls expose Unity-style lifecycle contracts", ManagedInputActionContract),
-    ("Native UI button dispatch advances with the player clock", NativeUiButtonDispatchClockContract),
-    ("Native runtime UI controls preserve values text focus and events", NativeRuntimeUiControlContract),
+    ("UI Documents query and mutate source-backed native elements safely", NativeUiDocumentBridgeContract),
+    ("UI Toolkit visual trees query propagate bind and virtualize deterministically", UiToolkitTests.Run),
     ("Managed rendering objects preserve camera lights materials and shader overrides", ManagedRenderingContract),
     ("Managed scene loads and render settings preserve native world transactions", ManagedWorldContract),
     ("Managed jobs execute delegates and publish terminal states", ManagedJobExecutionContract),
@@ -94,13 +96,21 @@ static void UnityShapedObjectApiContract()
                                                         !type.IsAbstract &&
                                                         type.IsDefined(typeof(Keire.StableComponentIdAttribute), false))
         .ToArray();
-    Assert(nativeComponents.Length == 31,
-           $"Every one of the 31 native registry entries needs a concrete managed component; found {nativeComponents.Length}.");
-    Assert(typeof(Keire.Canvas).GetProperty(nameof(Keire.Canvas.ReferenceResolution)) is { CanRead: true, CanWrite: true } &&
-               typeof(Keire.RectTransform).GetProperty(nameof(Keire.RectTransform.AnchorMinimum)) is { CanRead: true, CanWrite: true } &&
-               typeof(Keire.UiText).GetProperty(nameof(Keire.UiText.Text)) is { CanRead: true, CanWrite: true } &&
-               typeof(Keire.UiAccessibility).GetProperty(nameof(Keire.UiAccessibility.Label)) is { CanRead: true, CanWrite: true },
-           "Scene UI component objects must expose their native authoring properties directly.");
+    Assert(nativeComponents.Length == 21,
+           $"Every authorable native registry entry needs a concrete managed component; found {nativeComponents.Length}.");
+    Assert(typeof(Keire.UI.UIDocument).GetProperty(nameof(Keire.UI.UIDocument.VisualTreeAsset)) is
+               { CanRead: true, CanWrite: true } &&
+               typeof(Keire.UI.UIDocument).GetProperty(nameof(Keire.UI.UIDocument.PanelSettings)) is
+               { CanRead: true, CanWrite: true },
+           "UI Toolkit documents must expose visual-tree and panel-settings assets as one native component.");
+    string[] retiredUiTypes =
+    [
+        "Keire.Canvas", "Keire.RectTransform", "Keire.UiText", "Keire.UiImage", "Keire.UiButton",
+        "Keire.UiLayout", "Keire.UiSlider", "Keire.UiToggle", "Keire.UiInputField", "Keire.UiScrollView",
+        "Keire.UiAccessibility", "Keire.RuntimeCanvas", "Keire.RuntimeUi"
+    ];
+    Assert(retiredUiTypes.All(name => typeof(Keire.Component).Assembly.GetType(name, throwOnError: false) is not { IsPublic: true }),
+           "Retired Canvas and runtime UI authoring types must not remain in the public managed API.");
 
     Keire.Entity canonical = Keire.Entity.FromId(73, new Keire.EntityId(11, 12))!;
     Assert(ReferenceEquals(canonical, Keire.Entity.FromId(73, new Keire.EntityId(11, 12))),
@@ -265,6 +275,75 @@ static void ScriptableObjectAuthoringContract()
                 .Any(type => type.GetProperty("fullName").GetString() == eventBehaviourName),
            "Built-in event listener collections must remain owned by the event Inspector instead of being " +
            "rediscovered as generic nested Behaviour graphs.");
+}
+
+static void ManagedMetadataAllowlistContract()
+{
+    string assemblyName = typeof(FeatureGraphLibrary).Assembly.GetName().Name ??
+                          throw new InvalidOperationException("Managed metadata test assembly has no stable name.");
+    string[] allowedTypes =
+    [
+        typeof(FeatureGraphLibrary).FullName!, typeof(FeatureGraphAdd).FullName!,
+        typeof(FeatureGraphMultiply).FullName!
+    ];
+    string request = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1,
+        assemblies = new[] { new { name = assemblyName, types = allowedTypes } },
+    });
+    string missingTypeRequest = System.Text.Json.JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1,
+        assemblies = new[] { new { name = assemblyName, types = new[] { "Game.MissingFeatureGraphLibrary" } } },
+    });
+
+    try
+    {
+        string expected = Keire.ManagedAssetMetadata.Export(request);
+        using System.Text.Json.JsonDocument document = System.Text.Json.JsonDocument.Parse(expected);
+        System.Text.Json.JsonElement[] publishedTypes =
+            document.RootElement.GetProperty("types").EnumerateArray().ToArray();
+        Assert(publishedTypes.Length == 1 &&
+                   publishedTypes[0].GetProperty("fullName").GetString() == typeof(FeatureGraphLibrary).FullName,
+               "Explicit managed metadata allowlists must exclude ambient ScriptableObject types.");
+        System.Text.Json.JsonElement operations = publishedTypes[0].GetProperty("properties").EnumerateArray()
+            .Single(property => property.GetProperty("name").GetString() == nameof(FeatureGraphLibrary.Operations));
+        string[] choices = operations.GetProperty("children")[0].GetProperty("referenceTypeChoices")
+            .EnumerateArray().Select(value => value.GetString()!).ToArray();
+        Assert(operations.GetProperty("referenceGraph").GetBoolean() && choices.Length == 2 &&
+                   choices.Contains("73616e64-626f-4078-8000-00000000c111", StringComparer.Ordinal) &&
+                   choices.Contains("73616e64-626f-4078-8000-00000000c112", StringComparer.Ordinal),
+               "Feature Graph libraries must retain registered polymorphic choices in Edit and Play catalogs.");
+
+        string[] concurrent = new string[16];
+        Parallel.For(0, concurrent.Length,
+                     index => concurrent[index] = Keire.ManagedAssetMetadata.Export(request));
+        Assert(concurrent.All(value => value == expected),
+               "Concurrent discovery from one committed allowlist must publish deterministic bytes.");
+
+        Task<bool>[] mixedAttempts = Enumerable.Range(0, 16).Select(index => Task.Run(() =>
+        {
+            if ((index & 1) == 0)
+                return Keire.ManagedAssetMetadata.Export(request) == expected;
+            try
+            {
+                _ = Keire.ManagedAssetMetadata.Export(missingTypeRequest);
+                return false;
+            }
+            catch (InvalidOperationException)
+            {
+                return true;
+            }
+        })).ToArray();
+        Task.WaitAll(mixedAttempts);
+        Assert(mixedAttempts.All(attempt => attempt.Result) &&
+                   Keire.ManagedAssetMetadata.Export(request) == expected,
+               "Repeated failed discovery must not poison a successfully loaded metadata allowlist.");
+    }
+    finally
+    {
+        _ = Keire.ManagedAssetMetadata.Export();
+    }
 }
 
 static unsafe void RuntimeFoundationContract()
@@ -559,76 +638,61 @@ static unsafe void ManagedInputActionContract()
     }
 }
 
-static unsafe void NativeUiButtonDispatchClockContract()
+static unsafe void NativeUiDocumentBridgeContract()
 {
-    NativeUiDispatchFixture.Install();
-    var button = new Keire.RuntimeUiButton(new Keire.Entity(17, new Keire.EntityId(23, 29)));
-    int clicks = 0;
-    Action clicked = () => ++clicks;
-    button.Clicked += clicked;
-    try
-    {
-        NativeUiDispatchFixture.QueueClick();
-        Keire.RuntimeUiButton.DispatchNativeClicks();
-        Assert(clicks == 1, "The first native click must be dispatched.");
-
-        NativeUiDispatchFixture.QueueClick();
-        Keire.RuntimeUiButton.DispatchNativeClicks();
-        Assert(clicks == 1, "A button dispatch must run at most once for the same player frame clock value.");
-
-        NativeUiDispatchFixture.AdvanceFrame();
-        Keire.RuntimeUiButton.DispatchNativeClicks();
-        Assert(clicks == 2, "Advancing the player frame clock must make the next native click dispatchable.");
-    }
-    finally
-    {
-        button.Clicked -= clicked;
-        NativeUiDispatchFixture.Uninstall();
-    }
-}
-
-static unsafe void NativeRuntimeUiControlContract()
-{
-    NativeRuntimeUiFixture.Install();
+    NativeUiDocumentFixture.Install();
     var entity = new Keire.Entity(17, new Keire.EntityId(23, 29));
+    var document = new Keire.UI.UIDocument(entity);
     try
     {
-        var slider = new Keire.UiSlider(entity);
-        Assert(slider.Minimum == 0.0f && slider.Maximum == 100.0f && slider.Value == 25.0f,
-               "Slider ranges and values must be read from the native scene component.");
-        slider.Value = 72.5f;
-        Assert(NativeRuntimeUiFixture.ScalarProperty == Keire.NativeUiScalarProperty.Value &&
-                   MathF.Abs(NativeRuntimeUiFixture.ScalarValue - 72.5f) < 0.0001f,
-               "Slider writes must preserve the native scalar property and value.");
-        Assert(slider.ChangedThisFrame && !slider.ChangedThisFrame,
-               "Typed UI events must be consumed exactly once.");
+        Keire.UI.RuntimeVisualElement root = document.RootVisualElement ??
+            throw new InvalidOperationException("The live UI Document root was not resolved.");
+        Keire.UI.RuntimeVisualElement named = document.Q("launch") ??
+            throw new InvalidOperationException("The named source-backed element was not resolved.");
+        Keire.UI.RuntimeVisualElement stable = document.Q(NativeUiDocumentFixture.ButtonId) ??
+            throw new InvalidOperationException("The stable-ID source-backed element was not resolved.");
 
-        var toggle = new Keire.UiToggle(entity);
-        Assert(!toggle.IsOn && toggle.Interactable, "Toggle state and interactability must use native flags.");
-        toggle.IsOn = true;
-        Assert(NativeRuntimeUiFixture.FlagProperty == Keire.NativeUiFlagProperty.Checked &&
-                   NativeRuntimeUiFixture.FlagValue,
-               "Toggle writes must preserve the checked flag.");
+        Assert(root.Type == Keire.UI.RuntimeVisualElementType.Panel && named.Type == Keire.UI.RuntimeVisualElementType.Button,
+               "Document queries must preserve the native retained element types.");
+        Assert(named.StableId == NativeUiDocumentFixture.ButtonId && stable.StableId == named.StableId,
+               "Name and stable-ID queries must resolve the same authored element.");
+        Assert(named.Text == "Launch" && MathF.Abs(named.Value - 25.0f) < 0.0001f,
+               "Document elements must read source-backed text and values.");
+        named.Text = "Continue";
+        named.Value = 72.5f;
+        named.Checked = true;
+        named.Interactable = false;
+        named.Enabled = false;
+        Assert(NativeUiDocumentFixture.Text == "Continue" &&
+                   MathF.Abs(NativeUiDocumentFixture.Value - 72.5f) < 0.0001f &&
+                   NativeUiDocumentFixture.Checked && !NativeUiDocumentFixture.Interactable &&
+                   !NativeUiDocumentFixture.Enabled,
+               "Document element mutations must reach the live native retained tree.");
+        named.Enabled = true;
+        named.Interactable = true;
+        named.Focus();
+        Assert(named.HasFocus, "Document element focus must round-trip through the native presentation.");
+        Assert(named.ClickedThisFrame && !named.ClickedThisFrame,
+               "Document click events must be delivered exactly once.");
+        Assert(named.ChangedThisFrame && !named.ChangedThisFrame,
+               "Document change events must be delivered exactly once.");
 
-        var input = new Keire.UiInputField(entity);
-        Assert(input.Text == "Astra Ω", "Input text must round-trip through the UTF-8 native ABI.");
-        input.Text = "Nightglass";
-        input.Focus();
-        Assert(NativeRuntimeUiFixture.InputTextSet && NativeRuntimeUiFixture.Focused,
-               "Input text writes and focus requests must reach native services.");
-
-        var scroll = new Keire.UiScrollView(entity);
-        Assert(scroll.Offset == new Keire.Vector2(4.0f, 8.0f) &&
-                   scroll.ContentSize == new Keire.Vector2(1920.0f, 1080.0f),
-               "Scroll offset and content extents must preserve native vectors.");
-        scroll.Offset = new Keire.Vector2(10.0f, 20.0f);
-        Assert(NativeRuntimeUiFixture.VectorProperty == Keire.NativeUiVectorProperty.ScrollOffset &&
-                   NativeRuntimeUiFixture.VectorValue == new Keire.Vector2(10.0f, 20.0f),
-               "Scroll writes must preserve the native vector property and value.");
+        NativeUiDocumentFixture.FailReload();
+        Assert(named.IsAlive && named.Text == "Continue",
+               "A failed UI Document reload must preserve the last-good element generation.");
+        NativeUiDocumentFixture.CommitReload();
+        Assert(!named.IsAlive, "A successful UI Document reload must invalidate stale element handles.");
+        AssertThrows<InvalidOperationException>(() => _ = named.Text,
+            "A stale UI Document element must fail safely instead of reading a replacement generation.");
+        Assert(document.Q("launch")?.IsAlive == true,
+               "A successful reload must publish a fresh queryable generation.");
+        NativeUiDocumentFixture.Destroy();
+        Assert(document.RootVisualElement is null,
+               "A destroyed UI Document must stop exposing a native retained root.");
     }
     finally
     {
-        NativeRuntimeUiFixture.Uninstall();
+        NativeUiDocumentFixture.Uninstall();
     }
 }
 
@@ -1757,157 +1821,122 @@ file static unsafe class NativeFoundationFixture
     }
 }
 
-file static unsafe class NativeUiDispatchFixture
+file static unsafe class NativeUiDocumentFixture
 {
-    private static double s_Elapsed = 1.0;
-    private static int s_PendingClicks;
+    private static ulong s_generation;
+    private static bool s_alive;
+    private static bool s_focused;
+    private static bool s_clickPending;
+    private static bool s_changePending;
 
-    public static void Install()
+    internal static readonly Keire.AssetId ButtonId = new(301, 401);
+    internal static string Text { get; private set; } = string.Empty;
+    internal static float Value { get; private set; }
+    internal static bool Checked { get; private set; }
+    internal static bool Interactable { get; private set; }
+    internal static bool Enabled { get; private set; }
+
+    internal static void Install()
     {
-        s_Elapsed = 1.0;
-        s_PendingClicks = 0;
-        Keire.NativeRuntime.ElapsedTimeIcall = &ElapsedTime;
-        Keire.NativeRuntime.ConsumeUiClickIcall = &ConsumeUiClick;
+        s_generation = 41;
+        s_alive = true;
+        s_focused = false;
+        s_clickPending = true;
+        s_changePending = true;
+        Text = "Launch";
+        Value = 25.0f;
+        Checked = false;
+        Interactable = true;
+        Enabled = true;
+        Keire.NativeRuntimeUi.ResolveDocumentRootIcall = &ResolveRoot;
+        Keire.NativeRuntimeUi.ResolveDocumentElementByIdIcall = &ResolveById;
+        Keire.NativeRuntimeUi.ResolveDocumentElementByNameIcall = &ResolveByName;
+        Keire.NativeRuntimeUi.DocumentElementAliveIcall = &Alive;
+        Keire.NativeRuntimeUi.GetDocumentElementTextIcall = &GetText;
+        Keire.NativeRuntimeUi.SetDocumentElementTextIcall = &SetText;
+        Keire.NativeRuntimeUi.GetDocumentElementValueIcall = &GetValue;
+        Keire.NativeRuntimeUi.SetDocumentElementValueIcall = &SetValue;
+        Keire.NativeRuntimeUi.GetDocumentElementFlagIcall = &GetFlag;
+        Keire.NativeRuntimeUi.SetDocumentElementFlagIcall = &SetFlag;
+        Keire.NativeRuntimeUi.ConsumeDocumentElementEventIcall = &ConsumeEvent;
+        Keire.NativeRuntimeUi.FocusDocumentElementIcall = &Focus;
     }
 
-    public static void QueueClick() => ++s_PendingClicks;
-
-    public static void AdvanceFrame() => s_Elapsed += 1.0;
-
-    public static void Uninstall()
+    internal static void Uninstall()
     {
-        Keire.NativeRuntime.ElapsedTimeIcall = null;
-        Keire.NativeRuntime.ConsumeUiClickIcall = null;
-        s_PendingClicks = 0;
+        Keire.NativeRuntimeUi.ResolveDocumentRootIcall = null;
+        Keire.NativeRuntimeUi.ResolveDocumentElementByIdIcall = null;
+        Keire.NativeRuntimeUi.ResolveDocumentElementByNameIcall = null;
+        Keire.NativeRuntimeUi.DocumentElementAliveIcall = null;
+        Keire.NativeRuntimeUi.GetDocumentElementTextIcall = null;
+        Keire.NativeRuntimeUi.SetDocumentElementTextIcall = null;
+        Keire.NativeRuntimeUi.GetDocumentElementValueIcall = null;
+        Keire.NativeRuntimeUi.SetDocumentElementValueIcall = null;
+        Keire.NativeRuntimeUi.GetDocumentElementFlagIcall = null;
+        Keire.NativeRuntimeUi.SetDocumentElementFlagIcall = null;
+        Keire.NativeRuntimeUi.ConsumeDocumentElementEventIcall = null;
+        Keire.NativeRuntimeUi.FocusDocumentElementIcall = null;
     }
 
-    [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static double ElapsedTime() => s_Elapsed;
+    internal static void FailReload() { }
+    internal static void CommitReload() { ++s_generation; Text = "Reloaded"; }
+    internal static void Destroy() => s_alive = false;
+
+    private static bool IsDocument(ulong high, ulong low) => high == 23 && low == 29 && s_alive;
+
+    private static Keire.NativeUiDocumentElement Element(ulong element, Keire.AssetId stableId,
+                                                         Keire.NativeUiDocumentElementType type) => new()
+    {
+        DocumentGeneration = s_generation,
+        Element = element,
+        StableIdHigh = stableId.High,
+        StableIdLow = stableId.Low,
+        Type = type
+    };
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte ConsumeUiClick(ulong world, ulong entityHigh, ulong entityLow)
+    private static byte ResolveRoot(ulong high, ulong low, Keire.NativeUiDocumentElement* result)
     {
-        if (world != 17 || entityHigh != 23 || entityLow != 29 || s_PendingClicks == 0)
+        if (!IsDocument(high, low) || result == null)
             return 0;
-        --s_PendingClicks;
-        return 1;
-    }
-}
-
-file static unsafe class NativeRuntimeUiFixture
-{
-    private static bool s_eventPending;
-
-    public static Keire.NativeUiScalarProperty ScalarProperty { get; private set; }
-    public static float ScalarValue { get; private set; }
-    public static Keire.NativeUiFlagProperty FlagProperty { get; private set; }
-    public static bool FlagValue { get; private set; }
-    public static Keire.NativeUiVectorProperty VectorProperty { get; private set; }
-    public static Keire.Vector2 VectorValue { get; private set; }
-    public static bool InputTextSet { get; private set; }
-    public static bool Focused { get; private set; }
-
-    public static void Install()
-    {
-        ScalarProperty = default;
-        ScalarValue = 0.0f;
-        FlagProperty = default;
-        FlagValue = false;
-        VectorProperty = default;
-        VectorValue = default;
-        InputTextSet = false;
-        Focused = false;
-        s_eventPending = true;
-        Keire.NativeRuntimeUi.GetScalarIcall = &GetScalar;
-        Keire.NativeRuntimeUi.SetScalarIcall = &SetScalar;
-        Keire.NativeRuntimeUi.GetFlagIcall = &GetFlag;
-        Keire.NativeRuntimeUi.SetFlagIcall = &SetFlag;
-        Keire.NativeRuntimeUi.GetVectorIcall = &GetVector;
-        Keire.NativeRuntimeUi.SetVectorIcall = &SetVector;
-        Keire.NativeRuntimeUi.GetInputTextIcall = &GetInputText;
-        Keire.NativeRuntimeUi.SetInputTextIcall = &SetInputText;
-        Keire.NativeRuntimeUi.ConsumeEventIcall = &ConsumeEvent;
-        Keire.NativeRuntimeUi.FocusIcall = &Focus;
-    }
-
-    public static void Uninstall()
-    {
-        Keire.NativeRuntimeUi.GetScalarIcall = null;
-        Keire.NativeRuntimeUi.SetScalarIcall = null;
-        Keire.NativeRuntimeUi.GetFlagIcall = null;
-        Keire.NativeRuntimeUi.SetFlagIcall = null;
-        Keire.NativeRuntimeUi.GetVectorIcall = null;
-        Keire.NativeRuntimeUi.SetVectorIcall = null;
-        Keire.NativeRuntimeUi.GetInputTextIcall = null;
-        Keire.NativeRuntimeUi.SetInputTextIcall = null;
-        Keire.NativeRuntimeUi.ConsumeEventIcall = null;
-        Keire.NativeRuntimeUi.FocusIcall = null;
-    }
-
-    [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte GetScalar(ulong high, ulong low, byte property, float* value)
-    {
-        if (high != 23 || low != 29 || value == null)
-            return 0;
-        *value = (Keire.NativeUiScalarProperty)property switch
-        {
-            Keire.NativeUiScalarProperty.Minimum => 0.0f,
-            Keire.NativeUiScalarProperty.Maximum => 100.0f,
-            _ => 25.0f
-        };
+        *result = Element(100, new Keire.AssetId(300, 400), Keire.NativeUiDocumentElementType.Panel);
         return 1;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte SetScalar(ulong high, ulong low, byte property, float value)
+    private static byte ResolveById(ulong high, ulong low, ulong stableHigh, ulong stableLow,
+                                    Keire.NativeUiDocumentElement* result)
     {
-        ScalarProperty = (Keire.NativeUiScalarProperty)property;
-        ScalarValue = value;
-        return high == 23 && low == 29 ? (byte)1 : (byte)0;
-    }
-
-    [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte GetFlag(ulong high, ulong low, byte property, byte* value)
-    {
-        if (high != 23 || low != 29 || value == null)
+        if (!IsDocument(high, low) || result == null || stableHigh != ButtonId.High || stableLow != ButtonId.Low)
             return 0;
-        *value = (Keire.NativeUiFlagProperty)property == Keire.NativeUiFlagProperty.Interactable ? (byte)1 : (byte)0;
+        *result = Element(101, ButtonId, Keire.NativeUiDocumentElementType.Button);
         return 1;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte SetFlag(ulong high, ulong low, byte property, byte value)
+    private static byte ResolveByName(ulong high, ulong low, Keire.NativeString name,
+                                      Keire.NativeUiDocumentElement* result)
     {
-        FlagProperty = (Keire.NativeUiFlagProperty)property;
-        FlagValue = value != 0;
-        return high == 23 && low == 29 ? (byte)1 : (byte)0;
-    }
-
-    [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte GetVector(ulong high, ulong low, byte property, Keire.Vector2* value)
-    {
-        if (high != 23 || low != 29 || value == null)
+        if (!IsDocument(high, low) || result == null)
             return 0;
-        *value = (Keire.NativeUiVectorProperty)property == Keire.NativeUiVectorProperty.ScrollOffset
-            ? new Keire.Vector2(4.0f, 8.0f)
-            : new Keire.Vector2(1920.0f, 1080.0f);
+        IntPtr data = *(IntPtr*)&name;
+        if (!string.Equals(System.Runtime.InteropServices.Marshal.PtrToStringAuto(data), "launch",
+                           StringComparison.Ordinal))
+            return 0;
+        *result = Element(101, ButtonId, Keire.NativeUiDocumentElementType.Button);
         return 1;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte SetVector(ulong high, ulong low, byte property, Keire.Vector2 value)
-    {
-        VectorProperty = (Keire.NativeUiVectorProperty)property;
-        VectorValue = value;
-        return high == 23 && low == 29 ? (byte)1 : (byte)0;
-    }
+    private static byte Alive(ulong high, ulong low, ulong generation, ulong element) =>
+        IsDocument(high, low) && generation == s_generation && element is 100 or 101 ? (byte)1 : (byte)0;
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static int GetInputText(ulong high, ulong low, byte* destination, int capacity)
+    private static int GetText(ulong high, ulong low, ulong generation, ulong element, byte* destination, int capacity)
     {
-        if (high != 23 || low != 29)
+        if (AliveValue(high, low, generation, element) == 0)
             return -1;
-        byte[] bytes = System.Text.Encoding.UTF8.GetBytes("Astra Ω");
+        byte[] bytes = System.Text.Encoding.UTF8.GetBytes(Text);
         if (destination == null || capacity == 0)
             return bytes.Length;
         if (capacity < bytes.Length)
@@ -1918,27 +1947,93 @@ file static unsafe class NativeRuntimeUiFixture
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte SetInputText(ulong high, ulong low, Keire.NativeString value)
+    private static byte SetText(ulong high, ulong low, ulong generation, ulong element, Keire.NativeString value)
     {
-        InputTextSet = true;
-        return high == 23 && low == 29 ? (byte)1 : (byte)0;
-    }
-
-    [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte ConsumeEvent(ulong high, ulong low, byte type)
-    {
-        if (high != 23 || low != 29 || type != (byte)Keire.NativeUiEventType.ValueChanged || !s_eventPending)
+        if (AliveValue(high, low, generation, element) == 0)
             return 0;
-        s_eventPending = false;
+        IntPtr data = *(IntPtr*)&value;
+        Text = System.Runtime.InteropServices.Marshal.PtrToStringAuto(data) ?? string.Empty;
         return 1;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte Focus(ulong high, ulong low)
+    private static byte GetValue(ulong high, ulong low, ulong generation, ulong element, float* value)
     {
-        Focused = high == 23 && low == 29;
-        return Focused ? (byte)1 : (byte)0;
+        if (AliveValue(high, low, generation, element) == 0 || value == null)
+            return 0;
+        *value = Value;
+        return 1;
     }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetValue(ulong high, ulong low, ulong generation, ulong element, float value)
+    {
+        if (AliveValue(high, low, generation, element) == 0)
+            return 0;
+        Value = value;
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte GetFlag(ulong high, ulong low, ulong generation, ulong element, byte property, byte* value)
+    {
+        if (AliveValue(high, low, generation, element) == 0 || value == null)
+            return 0;
+        *value = (Keire.NativeUiDocumentFlag)property switch
+        {
+            Keire.NativeUiDocumentFlag.Interactable => Interactable ? (byte)1 : (byte)0,
+            Keire.NativeUiDocumentFlag.Checked => Checked ? (byte)1 : (byte)0,
+            Keire.NativeUiDocumentFlag.Focused => s_focused ? (byte)1 : (byte)0,
+            _ => Enabled ? (byte)1 : (byte)0
+        };
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetFlag(ulong high, ulong low, ulong generation, ulong element, byte property, byte value)
+    {
+        if (AliveValue(high, low, generation, element) == 0)
+            return 0;
+        bool enabled = value != 0;
+        switch ((Keire.NativeUiDocumentFlag)property)
+        {
+        case Keire.NativeUiDocumentFlag.Interactable: Interactable = enabled; break;
+        case Keire.NativeUiDocumentFlag.Checked: Checked = enabled; break;
+        case Keire.NativeUiDocumentFlag.Focused: s_focused = enabled; break;
+        case Keire.NativeUiDocumentFlag.Enabled: Enabled = enabled; break;
+        }
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte ConsumeEvent(ulong high, ulong low, ulong generation, ulong element, byte type)
+    {
+        if (AliveValue(high, low, generation, element) == 0)
+            return 0;
+        if ((Keire.NativeUiEventType)type == Keire.NativeUiEventType.Click && s_clickPending)
+        {
+            s_clickPending = false;
+            return 1;
+        }
+        if ((Keire.NativeUiEventType)type == Keire.NativeUiEventType.ValueChanged && s_changePending)
+        {
+            s_changePending = false;
+            return 1;
+        }
+        return 0;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte Focus(ulong high, ulong low, ulong generation, ulong element)
+    {
+        if (AliveValue(high, low, generation, element) == 0)
+            return 0;
+        s_focused = true;
+        return 1;
+    }
+
+    private static byte AliveValue(ulong high, ulong low, ulong generation, ulong element) =>
+        IsDocument(high, low) && generation == s_generation && element is 100 or 101 ? (byte)1 : (byte)0;
 }
 
 file static unsafe class NativeRenderingFixture
@@ -2231,6 +2326,31 @@ file sealed class ManagedRuntimeAssetProbe : Keire.ScriptableObject;
 file sealed class ScriptableObjectAuthoringProbe : Keire.ScriptableObject
 {
     public int Value = 0;
+}
+
+internal interface IFeatureGraphOperation;
+
+[Keire.SerializableType]
+[Keire.StableSerializedTypeId("73616e64-626f-4078-8000-00000000c111")]
+internal sealed class FeatureGraphAdd : IFeatureGraphOperation
+{
+    public float Offset = 1.0f;
+}
+
+[Keire.SerializableType]
+[Keire.StableSerializedTypeId("73616e64-626f-4078-8000-00000000c112")]
+internal sealed class FeatureGraphMultiply : IFeatureGraphOperation
+{
+    public float Factor = 2.0f;
+}
+
+[Keire.StableAssetTypeId("73616e64-626f-4078-8000-00000000c110")]
+[Keire.CreateAssetMenu("Feature Gallery/Feature Graph Library", "FeatureGraphLibrary")]
+internal sealed class FeatureGraphLibrary : Keire.ScriptableObject
+{
+    [Keire.SerializeReference]
+    [Keire.StableFieldId("73616e64-626f-4078-8000-00000000c113")]
+    public List<IFeatureGraphOperation> Operations = [];
 }
 
 [Keire.StableAssetTypeId("73616e64-626f-4078-8000-00000000c002")]

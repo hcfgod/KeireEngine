@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "Gameplay",
+  "rootNamespace": "Game",
+  "classification": "runtime",
+  "sourceRoots": [
+    "Assets/Scripts/Runtime"
+  ],
+  "references": []
+}

@@ -23,11 +23,10 @@
 #include "KeireInternal/Rendering/RenderShaderDataInternal.h"
 #include "KeireInternal/Rendering/RenderStatisticsInternal.h"
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
+#include "KeireInternal/Rendering/RuntimeUiRenderTargetInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 #include "KeireInternal/Rendering/VfxVisibilityPlanInternal.h"
-
 #include <SDL3/SDL.h>
-
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -53,7 +52,6 @@
 #include <vector>
 
 struct ImDrawData;
-
 namespace Keire::Detail
 {
     class UiContextAccess;
@@ -66,7 +64,6 @@ namespace Keire::RenderBackend
         const char* error = SDL_GetError();
         return error && *error ? std::string(error) : std::string("SDL did not provide a diagnostic");
     }
-
     [[nodiscard]] inline bool ValidColor(const Color color) noexcept
     {
         const auto valid = [](const float value) { return std::isfinite(value) && value >= 0.0F && value <= 1.0F; };
@@ -843,6 +840,8 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* GpuVfx = nullptr;
         SDL_GPUGraphicsPipeline* GpuVfxRibbon = nullptr;
         SDL_GPUGraphicsPipeline* GpuVfxMesh = nullptr;
+        SDL_GPUGraphicsPipeline* RuntimeUiWorldDepth = nullptr;
+        SDL_GPUGraphicsPipeline* RuntimeUiWorldOverlay = nullptr;
     };
 
     struct alignas(16) VfxGpuCustomInstructionRecord final
@@ -1068,13 +1067,11 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* GpuOcclusionVisibleInstances = nullptr;
         SDL_GPUBuffer* GpuOcclusionIndirectArguments = nullptr;
     };
-
     struct PreparedSceneDrawLists final
     {
         PreparedSceneDrawList Opaque;
         PreparedSceneDrawList Transparent;
     };
-
     struct PreparedGpuOccluderBatch final
     {
         std::uint32_t SceneBatchIndex = 0;
@@ -1082,7 +1079,6 @@ namespace Keire::RenderBackend
         std::uint32_t InstanceCount = 0;
         SDL_GPUCullMode CullMode = SDL_GPU_CULLMODE_NONE;
     };
-
     struct PreparedGpuOcclusion final
     {
         GpuOcclusionFrameResources* Resources = nullptr;
@@ -1099,7 +1095,6 @@ namespace Keire::RenderBackend
         bool Enabled = false;
         bool DebugBoundsPrepared = false;
     };
-
     struct PreparedCpuVfxBatch final
     {
         std::uint32_t FirstVertex = 0;
@@ -1114,7 +1109,6 @@ namespace Keire::RenderBackend
                    SurfaceParameters == surfaceParameters;
         }
     };
-
     inline void AppendPreparedCpuVfxBatch(std::vector<PreparedCpuVfxBatch>& batches, const std::uint32_t firstVertex,
                                           const std::uint32_t vertexCount, const SDL_GPUTextureSamplerBinding texture,
                                           const std::array<float, 4>& surfaceParameters)
@@ -1187,7 +1181,6 @@ namespace Keire::RenderBackend
         [[nodiscard]] GpuTextureResources CreateTextureResources(const Texture2DAsset& asset);
         [[nodiscard]] GpuTextureResources CreateLightingTextureResources(const LightingTextureArrayAsset& asset);
         [[nodiscard]] GpuMeshResources CreateMeshResources(const MeshAsset& mesh);
-
         void CollectCompletedFrames();
         void CollectCompletedFrames(bool waitForAny);
         void PublishGpuOcclusionReadbackStatistics();
@@ -1197,6 +1190,15 @@ namespace Keire::RenderBackend
         void QueueUiTextureRetirements(std::span<const std::uintptr_t> logicalTextureIds);
         void Submit(SceneRenderRequest request);
         void CapturePendingSceneRequest(PendingSceneRequest request, std::uint64_t acceptedFrameId);
+        void CaptureRuntimeUiImageLeases(RenderFramePacket& frame);
+        void PrepareRuntimeUiTextureBindings(const RenderFramePacket& frame);
+        void PrepareRuntimeUiFontAtlas(const RenderFramePacket& frame);
+        void ReleaseRuntimeUiFontAtlas(bool abandon) noexcept;
+        [[nodiscard]] SDL_GPUTextureSamplerBinding RuntimeUiTextureBinding(AssetId asset) const;
+        void PrepareRuntimeUiRenderTextures(const RenderFramePacket& frame);
+        void RecordRuntimeUiRenderTextures(std::vector<SDL_GPUCommandBuffer*>& frameCommands);
+        void PublishRuntimeUiRenderTextures(const RenderFramePacket& frame) noexcept;
+        void ReleaseRuntimeUiRenderTextureCache(bool abandon) noexcept;
         [[nodiscard]] const GpuMeshResources& ResolveMesh(AssetId id);
         [[nodiscard]] const GpuTextureResources& ResolveTexture(AssetId id);
         [[nodiscard]] const GpuTextureResources& ResolveLightingTexture(AssetId id, bool cubeArray = false,
@@ -1227,7 +1229,6 @@ namespace Keire::RenderBackend
                                              const SceneRenderPacket& packet, const PreparedGpuOcclusion& occlusion);
         void ReleaseGpuVfxWorld(GpuVfxWorldResources& resources) noexcept;
         void ReleaseGpuVfxFrameResources(GpuVfxFrameResources& resources) noexcept;
-
         [[nodiscard]] PreparedSceneDrawLists PrepareSceneDrawLists(SDL_GPUCommandBuffer* commands,
                                                                    RenderSurfaceState& surface,
                                                                    const SceneRenderPacket& packet);
@@ -1270,7 +1271,12 @@ namespace Keire::RenderBackend
         void RecordSurface(SDL_GPUCommandBuffer*& commands, RenderSurfaceState& surface,
                            std::vector<SDL_GPUCommandBuffer*>& frameCommands);
         void RecordSwapchain(SDL_GPUCommandBuffer*& commands, ImDrawData* drawData);
-        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateRuntimeUiPipeline();
+        [[nodiscard]] SDL_GPUGraphicsPipeline*
+        CreateRuntimeUiPipeline(bool worldSurface = false, bool depthTest = false,
+                                SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1,
+                                SDL_GPUTextureFormat targetFormat = SDL_GPU_TEXTUREFORMAT_INVALID);
+        void RecordRuntimeUiCameraPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
+        void RecordRuntimeUiWorldPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void EndFrame(ImDrawData* drawData);
         void ExecuteFrame(const std::shared_ptr<RenderFramePacket>& frame);
         void ExecuteAcceptedFrame(const std::shared_ptr<RenderFramePacket>& frame) noexcept;
@@ -1371,6 +1377,8 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
         SDL_GPUGraphicsPipeline* RuntimeUiPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* RuntimeUiCameraOverlayPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* RuntimeUiRenderTexturePipeline = nullptr;
         std::array<SDL_GPUGraphicsPipeline*, 3> GpuOcclusionDepthPipelines{};
         SDL_GPUComputePipeline* GpuOcclusionBuildBasePipeline = nullptr;
         SDL_GPUComputePipeline* GpuOcclusionReducePipeline = nullptr;
@@ -1409,6 +1417,10 @@ namespace Keire::RenderBackend
         std::unordered_map<AssetId, GpuMeshEntry> MeshCache;
         std::unordered_map<AssetId, GpuSkinEntry> SkinCache;
         std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
+        std::vector<PreparedRuntimeUiTextureBinding> PreparedRuntimeUiTextures;
+        RuntimeUiFontAtlasCacheEntry RuntimeUiFontAtlas;
+        std::vector<RuntimeUiRenderTextureCacheEntry> RuntimeUiRenderTextureCache;
+        std::vector<AssetId> FrameRuntimeUiRenderTextureTargets;
         std::unordered_map<AssetId, GpuLightingTextureEntry> LightingTextureCache;
         std::unordered_map<AssetId, AssetHandle<LightingSetAsset>> LightingSetCache;
         std::unordered_map<AssetId, AssetHandle<LightProbeVolumeAsset>> LightProbeVolumeCache;
@@ -1420,7 +1432,8 @@ namespace Keire::RenderBackend
         std::vector<RenderPipelineSet> Pipelines;
         std::vector<RenderSurfaceRegistryEntry> Surfaces;
         std::optional<std::uint64_t> PresentationSurfaceId;
-        std::vector<Ref<RuntimeUiTree>> PendingRuntimeUiTrees;
+        std::vector<PendingRuntimeUiSubmission> PendingRuntimeUiSubmissions;
+        std::uint64_t NextRuntimeUiSubmissionSequence = 1;
         std::vector<PendingSceneRequest> PendingSceneRequests;
         std::vector<CapturedSurfaceTextureBinding> PendingUiSurfaceTextureBindings;
         std::vector<std::uintptr_t> PendingUiTextureRetirements;
