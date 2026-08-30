@@ -591,7 +591,7 @@ public sealed class BattlefieldRuntimeTour : Behaviour
                     Priority = JobPriority.Low,
                     Class = JobClass.Compute
                 });
-            using CancellationTokenRegistration registration = LifetimeToken.Register(_scanJob.Cancel);
+            using CancellationTokenRegistration registration = LifetimeToken.Register(() => _scanJob.Cancel());
             await _scanJob.Completion;
             ++_completedScans;
             PlayerPreferences.SetInt("SyntyWar.CompletedScans", _completedScans);

@@ -50,6 +50,9 @@ versions.
 
 ### Fixed
 
+- Packaged-project IDE workspaces now target .NET 10/C# 14 when referencing the packaged `Keire.Managed` assembly,
+  eliminating stale .NET 8 reference conflicts and misleading delegate diagnostics. Source checkouts retain their
+  dedicated .NET 8 design-time facade.
 - UI Builder previews now discard non-finite or zero-area custom-control draw commands before clipping, so data-bound
   documents with controls awaiting runtime data remain editable instead of reaching invalid renderer clip rectangles.
 - Model sidecar resolution now permits normalized parent segments when the resolved file remains inside the project

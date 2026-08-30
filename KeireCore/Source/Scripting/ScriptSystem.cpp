@@ -272,12 +272,15 @@ namespace Keire
                 ideManagedApiProject = designTimeProject;
             }
         }
+        const bool usesManagedApiDesignTimeProject = !ideManagedApiProject.empty();
+        const std::string_view ideTargetFramework = usesManagedApiDesignTimeProject ? "net8.0" : "net10.0";
+        const std::string_view ideLanguageVersion = usesManagedApiDesignTimeProject ? "12.0" : "14.0";
         for (const auto& assembly : request.Assemblies)
         {
             const auto project = m_Impl->ProjectRoot / (assembly.Definition.Name + ".csproj");
             (void)Detail::WriteTextFileAtomicallyIfChanged(
                 project, GenerateProject(assembly, names, m_Impl->ProjectRoot, m_Impl->ProjectRoot, ideManagedApi,
-                                         ideManagedApiProject, "net8.0", "12.0"));
+                                         ideManagedApiProject, ideTargetFramework, ideLanguageVersion));
             result.Projects.push_back(project);
         }
         (void)Detail::WriteTextFileAtomicallyIfChanged(
