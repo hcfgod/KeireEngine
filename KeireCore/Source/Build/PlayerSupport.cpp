@@ -201,7 +201,7 @@ namespace Keire::Detail
             const auto filename = CaseFoldedPath(path.filename());
             for (const auto& candidate : files)
             {
-                const auto separator = candidate.find_last_of('/');
+                const auto separator = candidate.find_last_of("/\\");
                 const auto candidateFilename =
                     separator == std::string::npos ? std::string_view(candidate) : std::string_view(candidate).substr(separator + 1);
                 if (candidateFilename == filename)
