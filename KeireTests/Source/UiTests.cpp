@@ -324,6 +324,31 @@ namespace
                                    {0.35F, 0.65F, 1.0F, 1.0F});
             }
 
+            ui.SetNextWindowSize({240.0F, 220.0F});
+            if (auto window = ui.BeginWindow("Headless Code Editor"); window)
+            {
+                const auto availableWidth = ui.ContentAvailable().Width;
+                if (m_CodeEditorState.Highlights.empty())
+                {
+                    m_CodeEditorState.Highlights.push_back({0U, 7U, Keire::UiColor{0.45F, 0.75F, 1.0F, 1.0F}});
+                }
+                ImGui::SetKeyboardFocusHere();
+                (void)ui.InputCodeEditor("Source", m_CodeEditorText, m_CodeEditorState, Keire::UiSize{0.0F, 160.0F});
+                CHECK(ui.LastItemRect().Size().Width == doctest::Approx(availableWidth).epsilon(0.01));
+                CHECK(GImGui->InputTextLineIndex.Offsets.Size > 1);
+                const auto* input = ImGui::GetInputTextState(ImGui::GetItemID());
+                if (input)
+                {
+                    CHECK((input->Flags & ImGuiInputTextFlags_WordWrap) != 0);
+                    CHECK(input->Scroll.x == doctest::Approx(0.0F));
+                    CHECK(input->LineCount > 1);
+                }
+                else
+                {
+                    CHECK(m_UiFrames == 0);
+                }
+            }
+
             std::thread worker(
                 [&ui, this]
                 {
@@ -348,6 +373,10 @@ namespace
         bool& m_StaleRejected;
         std::atomic<bool>& m_ThreadRejected;
         Keire::UiFrame* m_PreviousFrame = nullptr;
+        std::string m_CodeEditorText =
+            "element very-long-attribute=\"This source line intentionally exceeds the narrow editor width so wrapping "
+            "remains visible and testable without horizontal clipping.\"";
+        Keire::UiCodeEditorState m_CodeEditorState;
         int m_UiFrames = 0;
     };
 

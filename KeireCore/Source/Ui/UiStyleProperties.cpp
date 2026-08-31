@@ -92,9 +92,9 @@ namespace Keire
             UiStylePropertyDescriptor{
                 "language", "Language", Category::Typography, Kind::String, "und", {}, true, false, true, 2},
             UiStylePropertyDescriptor{"text-align", "Horizontal Alignment", Category::Typography, Kind::Keyword,
-                                      "start", "start|center|end|stretch", true},
+                                      "start", "start|left|center|right|end|stretch", true},
             UiStylePropertyDescriptor{"vertical-align", "Vertical Alignment", Category::Typography, Kind::Keyword,
-                                      "start", "start|center|end|stretch", true},
+                                      "start", "start|top|center|bottom|end|stretch", true},
             UiStylePropertyDescriptor{"background-color",
                                       "Background Color",
                                       Category::Background,

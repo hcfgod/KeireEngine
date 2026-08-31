@@ -5,6 +5,11 @@ versions.
 
 ## Unreleased
 
+- Fixed UI Builder XML and CSS syntax colors rendering as detached highlight bars or escaping above and below the
+  editor, made source editors consume their full pane width, wrapped long source lines, and stopped mouse multi-click
+  selection from unexpectedly scrolling or selecting offset text in the source viewport. CSS-style `left`, `right`,
+  `top`, and `bottom` alignment aliases are now validated, completed, and applied consistently, and keyword-value
+  completion is available directly inside CSS declarations.
 - UI Builder inspector properties now update the retained preview immediately with continuous undo, while XML and CSS
   source workspaces provide resizable panes, syntax-aware highlighting, cursor documentation, and completion lists.
 - Fixed UI source drafts being replaced when their editor lost focus, accepted valid unchanged source, made disk reverts

@@ -1124,6 +1124,36 @@ opac
     CHECK(editor.Source().find("var(--accent)") != std::string::npos);
     REQUIRE(editor.Format());
     CHECK(editor.Source().find("  color: var(--accent);") != std::string::npos);
+
+    for (const auto& descriptor : Keire::UiStylePropertyDescriptors())
+    {
+        if (descriptor.ValueKind != Keire::UiStyleValueKind::Keyword)
+            continue;
+        editor.SetSource("@keire-style 2;\nButton { " + std::string(descriptor.Name) + ": ; }\n");
+        const auto valueOffset = editor.Source().find(": ;") + 2U;
+        const auto keywordCompletions = editor.Completions(valueOffset);
+        std::size_t cursor = 0;
+        while (cursor < descriptor.Keywords.size())
+        {
+            const auto end = descriptor.Keywords.find('|', cursor);
+            const auto keyword = descriptor.Keywords.substr(cursor, end - cursor);
+            CAPTURE(descriptor.Name);
+            CAPTURE(keyword);
+            CHECK(std::ranges::find(keywordCompletions, keyword, &KeireEditor::UiStyleSourceCompletion::Label) !=
+                  keywordCompletions.end());
+            if (end == std::string_view::npos)
+                break;
+            cursor = end + 1U;
+        }
+    }
+
+    editor.SetSource("@keire-style 2;\nButton { text-align:le; }\n");
+    const auto alignmentOffset = editor.Source().find("le;") + 2U;
+    const auto alignmentCompletions = editor.Completions(alignmentOffset);
+    const auto left = std::ranges::find(alignmentCompletions, "left", &KeireEditor::UiStyleSourceCompletion::Label);
+    REQUIRE(left != alignmentCompletions.end());
+    REQUIRE(editor.ApplyCompletion(alignmentOffset, *left));
+    CHECK(editor.Source().find("text-align:left;") != std::string::npos);
 }
 
 TEST_CASE("UI markup source editor provides syntax tokens documentation and completion")

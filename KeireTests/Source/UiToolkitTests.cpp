@@ -258,6 +258,10 @@ TEST_CASE("UI style property descriptors expose one stable authoring and runtime
     CHECK(fontFamily->MinimumSchemaVersion == 2U);
     CHECK(Keire::FindUiStylePropertyDescriptor("not-a-style-property") == nullptr);
 
+    CHECK_NOTHROW(Keire::ValidateUiStylePropertyValue("text-align", "left", 1));
+    CHECK_NOTHROW(Keire::ValidateUiStylePropertyValue("text-align", "right", 1));
+    CHECK_NOTHROW(Keire::ValidateUiStylePropertyValue("vertical-align", "top", 1));
+    CHECK_NOTHROW(Keire::ValidateUiStylePropertyValue("vertical-align", "bottom", 1));
     CHECK_NOTHROW(Keire::ValidateUiStylePropertyValue("background-image",
                                                       "linear-gradient(180deg, #000000ff 0%, #ffffffff 100%)", 1));
     CHECK_THROWS_WITH_AS(
@@ -271,6 +275,58 @@ Label { font-family: asset(10000000-0000-0000-0000-000000000030); }
 )css";
     CHECK_THROWS_WITH_AS((void)Keire::UiStyleSheetAsset::ParseSource(AsBytes(invalidV1)),
                          doctest::Contains("schema v2"), std::invalid_argument);
+}
+
+TEST_CASE("Every registered UI keyword parses through stylesheet and inline XML runtime paths")
+{
+    constexpr std::string_view plainDocument = R"xml(<ui schemaVersion="1" name="KeywordStyleSheet">
+  <Label id="42000000-0000-0000-0000-000000000010" name="subject" text="Keyword"/>
+</ui>)xml";
+
+    for (const auto& descriptor : Keire::UiStylePropertyDescriptors())
+    {
+        if (descriptor.ValueKind != Keire::UiStyleValueKind::Keyword)
+            continue;
+
+        std::size_t cursor = 0;
+        while (cursor < descriptor.Keywords.size())
+        {
+            const auto end = descriptor.Keywords.find('|', cursor);
+            const auto keyword = descriptor.Keywords.substr(cursor, end - cursor);
+            CAPTURE(descriptor.Name);
+            CAPTURE(keyword);
+            CHECK_NOTHROW(Keire::ValidateUiStylePropertyValue(descriptor.Name, keyword, 2));
+
+            const auto inlineSource =
+                std::string("<ui schemaVersion=\"1\" name=\"KeywordInline\"><Label id=\"42000000-0000-0000-0000-"
+                            "000000000011\" name=\"subject\" text=\"Keyword\" style=\"") +
+                std::string(descriptor.Name) + ": " + std::string(keyword) + ";\"/></ui>";
+            CHECK_NOTHROW(
+                [&]
+                {
+                    const auto tree = Keire::CreateRef<Keire::UiVisualTreeAsset>(
+                        Keire::UiVisualTreeAsset::ParseSource(AsBytes(inlineSource)));
+                    (void)Keire::CreateRef<Keire::UiDocument>(tree);
+                }());
+
+            const auto styleSource =
+                "@keire-style 2;\nLabel { " + std::string(descriptor.Name) + ": " + std::string(keyword) + "; }\n";
+            CHECK_NOTHROW(
+                [&]
+                {
+                    const auto tree = Keire::CreateRef<Keire::UiVisualTreeAsset>(
+                        Keire::UiVisualTreeAsset::ParseSource(AsBytes(plainDocument)));
+                    const auto style = Keire::CreateRef<Keire::UiStyleSheetAsset>(
+                        Keire::UiStyleSheetAsset::ParseSource(AsBytes(styleSource)));
+                    (void)Keire::CreateRef<Keire::UiDocument>(
+                        tree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{style});
+                }());
+
+            if (end == std::string_view::npos)
+                break;
+            cursor = end + 1U;
+        }
+    }
 }
 
 TEST_CASE("UI font faces and families import with bounded typed dependencies")
@@ -1088,6 +1144,8 @@ TEST_CASE("UI document maps text alignment and safely renders collapsed slider r
   <VisualElement id="42000000-0000-0000-0000-000000000001" name="root" style="width: 640px; height: 360px;">
     <Label id="42000000-0000-0000-0000-000000000002" name="label" text="Centered" style="width: 240px; height: 40px; text-align: center; vertical-align: end;"/>
     <Slider id="42000000-0000-0000-0000-000000000003" name="slider" minimum="5" maximum="5" value="5" style="width: 280px; height: 32px; background-color: #25364aff; color: #4da3ffff;"/>
+    <Label id="42000000-0000-0000-0000-000000000004" name="css-aliases" text="Aliases" style="width: 240px; height: 40px; text-align: left; vertical-align: bottom;"/>
+    <Label id="42000000-0000-0000-0000-000000000005" name="css-aliases-reverse" text="Aliases" style="width: 240px; height: 40px; text-align: right; vertical-align: top;"/>
   </VisualElement>
 </ui>)xml";
     const auto tree =
@@ -1103,6 +1161,20 @@ TEST_CASE("UI document maps text alignment and safely renders collapsed slider r
     REQUIRE(labelState);
     CHECK(labelState->Style.HorizontalAlignment == Keire::RuntimeUiAlignment::Center);
     CHECK(labelState->Style.VerticalAlignment == Keire::RuntimeUiAlignment::End);
+
+    const auto aliases = document->Find("css-aliases");
+    REQUIRE(aliases);
+    const auto aliasState = document->Tree()->State(*aliases);
+    REQUIRE(aliasState);
+    CHECK(aliasState->Style.HorizontalAlignment == Keire::RuntimeUiAlignment::Start);
+    CHECK(aliasState->Style.VerticalAlignment == Keire::RuntimeUiAlignment::End);
+
+    const auto reverseAliases = document->Find("css-aliases-reverse");
+    REQUIRE(reverseAliases);
+    const auto reverseAliasState = document->Tree()->State(*reverseAliases);
+    REQUIRE(reverseAliasState);
+    CHECK(reverseAliasState->Style.HorizontalAlignment == Keire::RuntimeUiAlignment::End);
+    CHECK(reverseAliasState->Style.VerticalAlignment == Keire::RuntimeUiAlignment::Start);
 
     for (const auto& command : document->Tree()->DrawCommands())
     {

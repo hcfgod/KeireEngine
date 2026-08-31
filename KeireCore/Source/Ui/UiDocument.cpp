@@ -316,11 +316,11 @@ namespace Keire
 
         [[nodiscard]] RuntimeUiAlignment ParseAlignment(const std::string_view value)
         {
-            if (value == "start" || value == "flex-start")
+            if (value == "start" || value == "flex-start" || value == "left" || value == "top")
                 return RuntimeUiAlignment::Start;
             if (value == "center")
                 return RuntimeUiAlignment::Center;
-            if (value == "end" || value == "flex-end")
+            if (value == "end" || value == "flex-end" || value == "right" || value == "bottom")
                 return RuntimeUiAlignment::End;
             if (value == "stretch")
                 return RuntimeUiAlignment::Stretch;

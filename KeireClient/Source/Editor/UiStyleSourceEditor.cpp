@@ -43,6 +43,21 @@ namespace KeireEditor
             const auto end = value.find_last_not_of(" \t\r\n");
             return value.substr(begin, end - begin + 1U);
         }
+
+        [[nodiscard]] std::vector<std::string_view> Keywords(const std::string_view values)
+        {
+            std::vector<std::string_view> result;
+            std::size_t cursor = 0;
+            while (cursor < values.size())
+            {
+                const auto end = values.find('|', cursor);
+                result.push_back(values.substr(cursor, end - cursor));
+                if (end == std::string_view::npos)
+                    break;
+                cursor = end + 1U;
+            }
+            return result;
+        }
     } // namespace
 
     void UiStyleSourceEditor::SetSource(std::string source)
@@ -122,6 +137,34 @@ namespace KeireEditor
         auto begin = cursor;
         while (begin > 0U && IdentifierCharacter(m_Source[begin - 1U]))
             --begin;
+
+        const auto declarationStart = cursor == 0U ? std::string::npos : m_Source.find_last_of("{;", cursor - 1U);
+        if (declarationStart != std::string::npos)
+        {
+            const auto separator = m_Source.find(':', declarationStart + 1U);
+            if (separator != std::string::npos && separator < cursor)
+            {
+                const auto property =
+                    Trim(std::string_view(m_Source).substr(declarationStart + 1U, separator - declarationStart - 1U));
+                const auto* descriptor = Keire::FindUiStylePropertyDescriptor(property);
+                if (descriptor && descriptor->ValueKind == Keire::UiStyleValueKind::Keyword)
+                {
+                    const auto prefix = Lower(m_Source.substr(begin, cursor - begin));
+                    std::vector<UiStyleSourceCompletion> result;
+                    for (const auto keyword : Keywords(descriptor->Keywords))
+                    {
+                        if (!prefix.empty() && !Lower(std::string(keyword)).starts_with(prefix))
+                            continue;
+                        result.push_back({std::string(keyword), std::string(keyword),
+                                          "Valid value for `" + std::string(descriptor->Name) + "`."});
+                        if (result.size() >= maximum)
+                            break;
+                    }
+                    return result;
+                }
+            }
+        }
+
         if (begin > 0U && m_Source[begin - 1U] == ':')
             --begin;
         const auto prefix = Lower(m_Source.substr(begin, cursor - begin));
@@ -167,7 +210,7 @@ namespace KeireEditor
         auto begin = cursor;
         while (begin > 0U && IdentifierCharacter(m_Source[begin - 1U]))
             --begin;
-        if (begin > 0U && m_Source[begin - 1U] == ':')
+        if (completion.Insertion.starts_with(':') && begin > 0U && m_Source[begin - 1U] == ':')
             --begin;
         if (completion.Insertion.empty())
             return false;

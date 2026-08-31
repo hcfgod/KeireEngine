@@ -5,9 +5,13 @@
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cfloat>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace Keire
 {
@@ -29,63 +33,198 @@ namespace Keire
             state.CursorOffset = static_cast<std::size_t>(std::max(data->CursorPos, 0));
             state.SelectionBegin = static_cast<std::size_t>(std::max(data->SelectionStart, 0));
             state.SelectionEnd = static_cast<std::size_t>(std::max(data->SelectionEnd, 0));
+            if (data->Ctx->IO.MouseClickedCount[0] >= 2)
+            {
+                if (auto* input = ImGui::GetInputTextState(data->ID))
+                    input->CursorFollow = false;
+            }
             return 0;
         }
 
-        [[nodiscard]] ImU32 EncodeColor(const UiColor color, const float alphaScale = 1.0F) noexcept
+        [[nodiscard]] ImU32 EncodeColor(const UiColor color) noexcept
         {
             return IM_COL32(static_cast<int>(std::clamp(color.Red, 0.0F, 1.0F) * 255.0F),
                             static_cast<int>(std::clamp(color.Green, 0.0F, 1.0F) * 255.0F),
                             static_cast<int>(std::clamp(color.Blue, 0.0F, 1.0F) * 255.0F),
-                            static_cast<int>(std::clamp(color.Alpha * alphaScale, 0.0F, 1.0F) * 255.0F));
+                            static_cast<int>(std::clamp(color.Alpha, 0.0F, 1.0F) * 255.0F));
         }
 
-        void DrawCodeEditorHighlights(const std::string_view value, UiCodeEditorState& state, const ImVec2 minimum,
-                                      const ImVec2 maximum)
+        [[nodiscard]] ImGuiWindow* FindCodeEditorChild(ImGuiWindow& parent, const ImGuiID id) noexcept
         {
-            if (state.Highlights.empty() || maximum.x <= minimum.x || maximum.y <= minimum.y)
-                return;
-            const auto id = ImGui::GetItemID();
-            if (const auto* input = ImGui::GetInputTextState(id))
+            for (int index = parent.DC.ChildWindows.Size - 1; index >= 0; --index)
             {
-                state.ScrollX = input->Scroll.x;
-                state.ScrollY = input->Scroll.y;
+                auto* child = parent.DC.ChildWindows[index];
+                if (child && child->ChildId == id)
+                    return child;
+            }
+            return nullptr;
+        }
+
+        struct CodeEditorSelection final
+        {
+            std::size_t Begin = 0;
+            std::size_t End = 0;
+        };
+
+        [[nodiscard]] bool IsCodeWordCharacter(const char character) noexcept
+        {
+            return std::isalnum(static_cast<unsigned char>(character)) != 0 || character == '_' || character == '-';
+        }
+
+        [[nodiscard]] std::optional<CodeEditorSelection>
+        SelectionAtMouse(const std::string_view value, const ImGuiTextIndex& lineIndex, const ImVec2 origin,
+                         const ImVec2 mousePosition, const int clickCount)
+        {
+            if (value.empty() || lineIndex.Offsets.empty())
+                return std::nullopt;
+
+            auto& context = *GImGui;
+            const auto requestedLine =
+                static_cast<int>(std::clamp(std::floor((mousePosition.y - origin.y) / context.FontSize), 0.0F,
+                                            static_cast<float>(lineIndex.Offsets.Size - 1)));
+            const auto* textBegin = value.data();
+            const auto lineBeginOffset = static_cast<std::size_t>(lineIndex.Offsets[requestedLine]);
+            auto lineEndOffset = requestedLine + 1 < lineIndex.Offsets.Size
+                                     ? static_cast<std::size_t>(lineIndex.Offsets[requestedLine + 1])
+                                     : static_cast<std::size_t>(lineIndex.EndOffset);
+            lineEndOffset = std::min(lineEndOffset, value.size());
+            if (lineEndOffset > lineBeginOffset && value[lineEndOffset - 1U] == '\n')
+                --lineEndOffset;
+            const auto* lineBegin = textBegin + std::min(lineBeginOffset, value.size());
+            const auto* lineEnd = textBegin + std::max(lineBeginOffset, lineEndOffset);
+
+            const float requestedX = std::max(0.0F, mousePosition.x - origin.x);
+            const auto* character = lineBegin;
+            float x = 0.0F;
+            while (character < lineEnd && *character != '\n')
+            {
+                unsigned int codePoint = 0;
+                const auto length = std::max(1, ImTextCharFromUtf8(&codePoint, character, lineEnd));
+                const auto* next = std::min(character + length, lineEnd);
+                const float width = ImGui::CalcTextSize(character, next, false).x;
+                if (requestedX < x + width * 0.5F)
+                    break;
+                x += width;
+                character = next;
             }
 
-            auto* drawList = ImGui::GetWindowDrawList();
-            const auto padding = ImGui::GetStyle().FramePadding;
-            const float lineHeight = ImGui::GetTextLineHeight();
-            const ImVec2 origin{minimum.x + padding.x - state.ScrollX, minimum.y + padding.y - state.ScrollY};
-            drawList->PushClipRect(minimum, maximum, true);
-            for (const auto& highlight : state.Highlights)
+            auto offset = static_cast<std::size_t>(character - textBegin);
+            if (clickCount < 2)
+                return CodeEditorSelection{offset, offset};
+            if (((clickCount - 2) % 2) != 0)
             {
-                if (highlight.Length == 0U || highlight.Offset >= value.size())
+                const auto logicalBegin = offset == 0U ? 0U : value.rfind('\n', offset - 1U) + 1U;
+                const auto newline = value.find('\n', offset);
+                return CodeEditorSelection{logicalBegin,
+                                           newline == std::string_view::npos ? value.size() : newline + 1U};
+            }
+
+            if (offset == value.size() || (offset < value.size() && !IsCodeWordCharacter(value[offset])))
+            {
+                if (offset > 0U && IsCodeWordCharacter(value[offset - 1U]))
+                    --offset;
+                else
+                    return CodeEditorSelection{offset, std::min(offset + 1U, value.size())};
+            }
+            auto begin = offset;
+            while (begin > 0U && IsCodeWordCharacter(value[begin - 1U]))
+                --begin;
+            auto end = offset;
+            while (end < value.size() && IsCodeWordCharacter(value[end]))
+                ++end;
+            return CodeEditorSelection{begin, end};
+        }
+
+        [[nodiscard]] float DrawCodeEditorTextSegment(ImDrawList& drawList, ImFont& font, const float fontSize,
+                                                      const ImVec2 position, const ImU32 color, const char* begin,
+                                                      const char* end, const ImVec4& clipRectangle)
+        {
+            if (begin >= end)
+                return 0.0F;
+            drawList.AddText(&font, fontSize, position, color, begin, end, 0.0F, &clipRectangle);
+            return ImGui::CalcTextSize(begin, end, false).x;
+        }
+
+        void DrawCodeEditorText(const std::string_view value, UiCodeEditorState& state, const ImGuiID id,
+                                ImGuiWindow& parent, const ImVec2 frameMinimum, const ImVec2 frameMaximum,
+                                const ImU32 defaultTextColor)
+        {
+            auto* child = FindCodeEditorChild(parent, id);
+            if (!child || value.empty())
+                return;
+
+            if (const auto* input = ImGui::GetInputTextState(id))
+                state.ScrollX = input->Scroll.x;
+            else
+                state.ScrollX = 0.0F;
+            state.ScrollY = child->Scroll.y;
+
+            auto& context = *GImGui;
+            const auto& lineIndex = context.InputTextLineIndex;
+            if (lineIndex.Offsets.empty())
+                return;
+
+            std::vector<UiCodeEditorState::Highlight> highlights = state.Highlights;
+            std::ranges::sort(highlights,
+                              [](const auto& left, const auto& right) { return left.Offset < right.Offset; });
+
+            auto* drawList = child->DrawList;
+            const auto padding = ImGui::GetStyle().FramePadding;
+            // InputTextEx performs hit testing from the child's cursor start, which includes window decoration,
+            // rounding, and scrolling. Reusing that exact origin keeps painted tokens under the mouse cursor.
+            const ImVec2 origin{child->DC.CursorStartPos.x + padding.x - state.ScrollX,
+                                child->DC.CursorStartPos.y + padding.y};
+            ImRect frameClip(frameMinimum, frameMaximum);
+            frameClip.ClipWith(child->ClipRect);
+            if (frameClip.IsInverted())
+                return;
+            const auto clip = frameClip.ToVec4();
+            const auto* textBegin = value.data();
+            const auto textLength = value.size();
+            drawList->PushClipRect(frameClip.Min, frameClip.Max, true);
+            for (int line = 0; line < lineIndex.Offsets.Size; ++line)
+            {
+                const float y = origin.y + static_cast<float>(line) * context.FontSize;
+                if (y + context.FontSize < frameClip.Min.y)
                     continue;
-                const auto end = std::min(value.size(), highlight.Offset + highlight.Length);
-                auto cursor = highlight.Offset;
-                while (cursor < end)
+                if (y >= frameClip.Max.y)
+                    break;
+
+                const auto lineBegin = static_cast<std::size_t>(lineIndex.Offsets[line]);
+                auto lineEnd = line + 1 < lineIndex.Offsets.Size ? static_cast<std::size_t>(lineIndex.Offsets[line + 1])
+                                                                 : static_cast<std::size_t>(lineIndex.EndOffset);
+                lineEnd = std::min(lineEnd, textLength);
+                if (lineEnd > lineBegin && value[lineEnd - 1U] == '\n')
+                    --lineEnd;
+                if (lineBegin >= lineEnd || lineBegin >= textLength)
+                    continue;
+
+                auto cursor = lineBegin;
+                float x = origin.x;
+                for (const auto& highlight : highlights)
                 {
-                    const auto lineBegin = cursor == 0U ? 0U : value.rfind('\n', cursor - 1U) + 1U;
-                    const auto lineEnd = std::min(end, value.find('\n', cursor));
-                    const auto line =
-                        static_cast<std::size_t>(std::ranges::count(value.begin(), value.begin() + lineBegin, '\n'));
-                    const auto prefix = value.substr(lineBegin, cursor - lineBegin);
-                    const auto token = value.substr(cursor, lineEnd - cursor);
-                    const float x = origin.x + ImGui::CalcTextSize(prefix.data(), prefix.data() + prefix.size()).x;
-                    const float y = origin.y + static_cast<float>(line) * lineHeight;
-                    const float width =
-                        std::max(1.0F, ImGui::CalcTextSize(token.data(), token.data() + token.size()).x);
-                    if (y + lineHeight >= minimum.y && y <= maximum.y)
-                    {
-                        drawList->AddRectFilled({x, y}, {x + width, y + lineHeight},
-                                                EncodeColor(highlight.Color, 0.14F), 2.0F);
-                        drawList->AddLine({x, y + lineHeight - 1.0F}, {x + width, y + lineHeight - 1.0F},
-                                          EncodeColor(highlight.Color, 0.9F), 1.0F);
-                    }
-                    if (lineEnd >= end)
+                    if (highlight.Length == 0U)
+                        continue;
+                    if (highlight.Offset >= lineEnd)
                         break;
-                    cursor = lineEnd + 1U;
+                    const auto highlightEnd = std::min(
+                        textLength, highlight.Offset + std::min(highlight.Length, textLength - highlight.Offset));
+                    if (highlightEnd <= cursor || highlightEnd <= lineBegin)
+                        continue;
+
+                    const auto tokenBegin = std::max(cursor, std::max(lineBegin, highlight.Offset));
+                    const auto tokenEnd = std::min(lineEnd, highlightEnd);
+                    x += DrawCodeEditorTextSegment(*drawList, *context.Font, context.FontSize, {x, y}, defaultTextColor,
+                                                   textBegin + cursor, textBegin + tokenBegin, clip);
+                    x += DrawCodeEditorTextSegment(*drawList, *context.Font, context.FontSize, {x, y},
+                                                   EncodeColor(highlight.Color), textBegin + tokenBegin,
+                                                   textBegin + tokenEnd, clip);
+                    cursor = tokenEnd;
+                    if (cursor >= lineEnd)
+                        break;
                 }
+                (void)DrawCodeEditorTextSegment(*drawList, *context.Font, context.FontSize, {x, y}, defaultTextColor,
+                                                textBegin + cursor, textBegin + lineEnd, clip);
             }
             drawList->PopClipRect();
         }
@@ -93,14 +232,77 @@ namespace Keire
         [[nodiscard]] bool InputCodeEditorImpl(const std::string_view label, std::string& value,
                                                UiCodeEditorState& state, const ImVec2 size)
         {
-            const std::string safeLabel(label);
-            const auto flags = ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackAlways;
+            std::string safeLabel = "##";
+            safeLabel.append(label);
+            const auto id = ImGui::GetID(safeLabel.c_str());
+            auto* parent = ImGui::GetCurrentWindow();
+            const auto defaultTextColor = ImGui::GetColorU32(ImGuiCol_Text);
+            auto& io = ImGui::GetIO();
+            const auto frameMinimum = ImGui::GetCursorScreenPos();
+            const float frameWidth = size.x == 0.0F ? ImGui::GetContentRegionAvail().x : size.x;
+            const ImRect expectedFrame(frameMinimum, {frameMinimum.x + frameWidth, frameMinimum.y + size.y});
+            const bool originalMouseClicked = io.MouseClicked[0];
+            const auto originalClickCount = io.MouseClickedCount[0];
+            const float previousScrollY = state.ScrollY;
+            const bool replaceClick = originalMouseClicked && expectedFrame.Contains(io.MousePos);
+            if (replaceClick)
+            {
+                const auto& style = ImGui::GetStyle();
+                const ImVec2 origin{frameMinimum.x + style.FramePadding.x - state.ScrollX,
+                                    frameMinimum.y + style.FramePadding.y - previousScrollY};
+                if (const auto selection =
+                        SelectionAtMouse(value, GImGui->InputTextLineIndex, origin, io.MousePos, originalClickCount))
+                {
+                    state.CursorOffset = selection->End;
+                    state.SelectionBegin = selection->Begin;
+                    state.SelectionEnd = selection->End;
+                    state.RequestCursor = true;
+                }
+                ImGui::SetKeyboardFocusHere();
+                io.MouseClicked[0] = false;
+            }
+            const bool requestedCursor = state.RequestCursor;
+            const auto flags =
+                ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackAlways | ImGuiInputTextFlags_WordWrap;
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{});
             const auto edited =
-                ImGui::InputTextMultiline(safeLabel.c_str(), &value, size, flags, UpdateCodeEditorState, &state);
+                ImGui::InputTextMultiline(safeLabel.c_str(), &value, {size.x == 0.0F ? -FLT_MIN : size.x, size.y},
+                                          flags, UpdateCodeEditorState, &state);
+            ImGui::PopStyleColor();
+            io.MouseClicked[0] = originalMouseClicked;
+            io.MouseClickedCount[0] = originalClickCount;
+            if (requestedCursor)
+            {
+                if (auto* input = ImGui::GetInputTextState(id))
+                {
+                    input->CursorFollow = false;
+                    input->CursorCenterY = false;
+                }
+            }
+            if (replaceClick)
+            {
+                auto* child = FindCodeEditorChild(*parent, id);
+                if (auto* input = ImGui::GetInputTextState(id))
+                {
+                    input->CursorFollow = false;
+                    input->CursorCenterY = false;
+                    input->CursorAnimReset();
+                }
+                if (child)
+                {
+                    child->Scroll.y = previousScrollY;
+                    child->ScrollTarget.y = FLT_MAX;
+                    child->ScrollTargetCenterRatio.y = 0.0F;
+                }
+            }
             state.CursorOffset = std::min(state.CursorOffset, value.size());
             state.SelectionBegin = std::min(state.SelectionBegin, value.size());
             state.SelectionEnd = std::min(state.SelectionEnd, value.size());
-            DrawCodeEditorHighlights(value, state, ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+            if (ImGui::IsItemVisible())
+            {
+                DrawCodeEditorText(value, state, id, *parent, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
+                                   defaultTextColor);
+            }
             return edited;
         }
     } // namespace
