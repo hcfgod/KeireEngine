@@ -204,7 +204,7 @@ namespace Keire::Detail
                 const auto separator = candidate.find_last_of("/\\");
                 const auto candidateFilename =
                     separator == std::string::npos ? std::string_view(candidate) : std::string_view(candidate).substr(separator + 1);
-                if (candidateFilename == filename)
+                if (candidateFilename == filename || candidate.find(filename) != std::string::npos)
                 {
                     diagnostic = " (the manifest instead contains '" + candidate + "')";
                     break;
@@ -267,7 +267,7 @@ namespace Keire::Detail
 
                 RequireFile(logicalFiles, executable, manifest.Platform);
                 RequireFile(logicalFiles, nativeRoot / NethostName(manifest.Platform), manifest.Platform);
-                if (manifest.Platform == PlayerPlatform::Windows)
+                if (manifest.Platform == PlayerPlatform::Windows && manifest.SchemaVersion >= 2)
                 {
                     for (const auto filename : RequiredWindowsRuntimeFiles)
                         RequireFile(logicalFiles, nativeRoot / filename, manifest.Platform);
@@ -536,7 +536,7 @@ namespace Keire::Detail
 
     void ValidatePlayerSupportManifest(const PlayerSupportManifest& manifest)
     {
-        if (manifest.SchemaVersion != PlayerSupportManifestSchemaVersion ||
+        if (manifest.SchemaVersion == 0 || manifest.SchemaVersion > PlayerSupportManifestSchemaVersion ||
             manifest.PlayerAbi != PlayerBuildAbiVersion || !IsSafeComponent(manifest.Id) ||
             !IsSafeComponent(manifest.EngineVersion) || manifest.ModuleFingerprint.empty() || manifest.Variants.empty())
             throw std::invalid_argument("Player support manifest identity is invalid or incompatible.");

@@ -728,7 +728,10 @@ namespace KeireHub
     {
         if (!RequireOwnerThread("take completion"))
             return std::nullopt;
-        return std::exchange(m_Completion, std::nullopt);
+        auto completion = std::exchange(m_Completion, std::nullopt);
+        if (completion)
+            PublishOperation({});
+        return completion;
     }
 
     std::shared_ptr<const std::vector<EditorInstallationHealthSnapshot>>

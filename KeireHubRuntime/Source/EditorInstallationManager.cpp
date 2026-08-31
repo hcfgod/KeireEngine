@@ -1070,7 +1070,7 @@ namespace KeireHub
         if (const auto inactive = GuardInactive(*installation); !inactive)
             return HubResult<EditorManagedOperationPlan>::Failure(inactive.Error());
 
-        auto inspection = Inspect(installationId);
+        auto inspection = Verify(installationId);
         if (!inspection)
             return HubResult<EditorManagedOperationPlan>::Failure(inspection.Error());
         if (const auto inactive = GuardInactive(*installation, inspection.Value().Activity); !inactive)

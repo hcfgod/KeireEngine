@@ -9,7 +9,7 @@
 
 namespace Keire::Detail
 {
-    inline constexpr std::uint32_t PlayerSupportManifestSchemaVersion = 1;
+    inline constexpr std::uint32_t PlayerSupportManifestSchemaVersion = 2;
     inline constexpr std::uint32_t PlayerBuildAbiVersion = 1;
 
     struct PlayerSupportVariant

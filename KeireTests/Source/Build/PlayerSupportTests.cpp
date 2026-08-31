@@ -303,6 +303,13 @@ TEST_CASE("Windows player support manifests require app-local VC runtime files")
     auto caseInsensitiveRuntime = WindowsManifest();
     caseInsensitiveRuntime.Files[2].Path = "development/msvcp140.dll";
     CHECK_NOTHROW(Keire::Detail::ValidatePlayerSupportManifest(caseInsensitiveRuntime));
+
+    auto legacyManifest = WindowsManifest();
+    legacyManifest.SchemaVersion = 1;
+    std::erase_if(legacyManifest.Files, [](const auto& file)
+                  { return Keire::Detail::PathToUtf8(file.Path).find("VCRUNTIME140") != std::string::npos ||
+                           Keire::Detail::PathToUtf8(file.Path).find("MSVCP140") != std::string::npos; });
+    CHECK_NOTHROW(Keire::Detail::ValidatePlayerSupportManifest(legacyManifest));
 }
 
 TEST_CASE("Player support manifests reject unexpected executables and misplaced createdump")
