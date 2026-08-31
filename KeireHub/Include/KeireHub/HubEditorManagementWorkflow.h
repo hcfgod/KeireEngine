@@ -33,6 +33,7 @@ namespace KeireHub
     {
         EditorInstallation Installation;
         EditorInstallationActivity Activity;
+        EditorInstallationManagerSpecification::VerificationProgress ReportVerificationProgress;
     };
 
     struct HubEditorManagementServices final
@@ -76,6 +77,10 @@ namespace KeireHub
         HubEditorManagementOperation Operation = HubEditorManagementOperation::None;
         HubEditorManagementState State = HubEditorManagementState::Idle;
         std::string InstallationId;
+        std::uint64_t VerifiedFiles = 0;
+        std::uint64_t TotalFiles = 0;
+        std::uint64_t VerifiedBytes = 0;
+        std::uint64_t TotalBytes = 0;
         std::optional<HubError> Failure;
 
         [[nodiscard]] bool IsRunning() const noexcept { return State == HubEditorManagementState::Running; }
@@ -139,6 +144,9 @@ namespace KeireHub
         [[nodiscard]] HubStatus ValidateCurrentTarget() const;
         [[nodiscard]] EditorInstallationActivity Activity(const EditorInstallation& installation) const;
         void PublishOperation(HubEditorManagementOperationSnapshot snapshot);
+        void PublishVerificationProgress(std::uint64_t operationId, const std::string& installationId,
+                                         std::uint64_t verifiedFiles, std::uint64_t totalFiles,
+                                         std::uint64_t verifiedBytes, std::uint64_t totalBytes);
         void PublishFailure(HubError error);
         void QueueLicenseRefresh(std::shared_ptr<const std::vector<EditorInstallation>> installations);
         void StartLicenseRefresh();

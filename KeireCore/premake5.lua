@@ -67,7 +67,7 @@ local function ConfigureCoreArchive(target, pchSource, sourceFiles, macSources, 
             "../Build/Generated"
         }
 
-        defines { "KEIRE_BUILDING_LIBRARY", "DT_POLYREF64" }
+        defines { "KEIRE_BUILDING_LIBRARY", "DT_POLYREF64", "FRIBIDI_LIB_STATIC" }
         dependson { CoreGeneratedContentTarget }
 
         if macSources ~= nil then
@@ -100,6 +100,8 @@ local function ConfigureCoreArchive(target, pchSource, sourceFiles, macSources, 
             DependencyManifest.JoltInclude,
             DependencyManifest.RecastInclude,
             DependencyManifest.MiniaudioInclude,
+            DependencyManifest.TypographyInclude,
+            DependencyManifest.FreeTypeInclude,
             DependencyManifest.CoralInclude,
             DependencyManifest.SDL3Include
         }

@@ -16,7 +16,9 @@ namespace Keire::Detail
         {
             RuntimeUiTransitionProperty Property = RuntimeUiTransitionProperty::Opacity;
             float ElapsedSeconds = 0.0F;
+            float DelaySeconds = 0.0F;
             float DurationSeconds = 0.0F;
+            RuntimeUiTransitionEasing Easing = RuntimeUiTransitionEasing::Linear;
         };
 
         std::uint32_t Generation = 1;

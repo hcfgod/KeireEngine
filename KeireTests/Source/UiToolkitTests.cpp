@@ -2,10 +2,18 @@
 
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Ui/UiElements.h"
+#include "Keire/Ui/UiFontAssets.h"
+#include "Keire/Ui/UiStyleProperties.h"
 #include "Keire/Ui/UiToolkit.h"
+#include "KeireInternal/Rendering/RuntimeUiFontAtlasInternal.h"
+#include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <span>
 #include <string_view>
 #include <unordered_map>
@@ -145,6 +153,294 @@ TEST_CASE("UI stylesheet parses selectors and round trips authoring source")
     CHECK(Keire::UiStyleSheetAsset::Decode(cooked)->Definition() == definition);
     const auto source = Keire::UiStyleSheetAsset::EncodeSource(definition);
     CHECK(Keire::UiStyleSheetAsset::ParseSource(source) == definition);
+}
+
+TEST_CASE("UI stylesheet root tokens match only the visual document root")
+{
+    constexpr std::string_view rootSource = R"css(@keire-style 2;
+:root {
+  --panel-width: 777px;
+  width: var(--panel-width);
+}
+)css";
+    const auto definition = Keire::UiStyleSheetAsset::ParseSource(AsBytes(rootSource));
+    REQUIRE(definition.Rules.size() == 1U);
+    REQUIRE(definition.Rules.front().Parts.size() == 1U);
+    CHECK((static_cast<std::uint16_t>(definition.Rules.front().Parts.front().States) &
+           static_cast<std::uint16_t>(Keire::UiStylePseudoState::Root)) != 0U);
+
+    const auto visualTree =
+        Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(AsBytes(DocumentSource)));
+    const auto styleSheet = Keire::CreateRef<Keire::UiStyleSheetAsset>(definition);
+    const auto document = Keire::CreateRef<Keire::UiDocument>(
+        visualTree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{styleSheet});
+    const auto root = document->Find("root");
+    const auto title = document->Find("title");
+    REQUIRE(root);
+    REQUIRE(title);
+    const auto rootState = document->Tree()->State(*root);
+    const auto titleState = document->Tree()->State(*title);
+    REQUIRE(rootState);
+    REQUIRE(titleState);
+    CHECK(rootState->Style.Width == doctest::Approx(777.0F));
+    CHECK(titleState->Style.Width != doctest::Approx(777.0F));
+    CHECK_THROWS_AS(document->SetPseudoState(*title, Keire::UiStylePseudoState::Root, true), std::invalid_argument);
+}
+
+TEST_CASE("UI stylesheet v2 media rules are deterministic, responsive, and dependency-aware")
+{
+    constexpr std::string_view responsiveSource = R"css(@keire-style 2;
+
+Button.primary {
+  background-color: #3366ccff;
+}
+
+@media (min-width: 640px) and (orientation: landscape) and (pointer: fine) {
+  Button.primary {
+    background-color: #ff3300ff;
+    --hero-image: asset(10000000-0000-0000-0000-000000000020);
+  }
+}
+)css";
+    const auto definition = Keire::UiStyleSheetAsset::ParseSource(AsBytes(responsiveSource));
+    CHECK(definition.SchemaVersion == 2);
+    REQUIRE(definition.Rules.size() == 2);
+    REQUIRE(definition.Rules[1].Media);
+    CHECK(definition.Rules[1].Media->MinimumWidth == doctest::Approx(640.0F));
+    CHECK(definition.Rules[1].Media->Orientation == Keire::UiStyleOrientation::Landscape);
+
+    const auto cooked = Keire::UiStyleSheetAsset::Encode(definition);
+    CHECK(Keire::UiStyleSheetAsset::Decode(cooked)->Definition() == definition);
+    CHECK(Keire::UiStyleSheetAsset::ParseSource(Keire::UiStyleSheetAsset::EncodeSource(definition)) == definition);
+
+    const auto importer = Keire::CreateUiStyleSheetAssetImporter();
+    CHECK(importer.Version == 2);
+    REQUIRE(importer.ContextualImport);
+    const auto imported = importer.ContextualImport({}, AsBytes(responsiveSource));
+    REQUIRE(imported.AssetDependencies.size() == 1);
+    CHECK(imported.AssetDependencies.front() == Id("10000000-0000-0000-0000-000000000020"));
+
+    const auto visualTree =
+        Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(AsBytes(DocumentSource)));
+    const auto styleSheet = Keire::CreateRef<Keire::UiStyleSheetAsset>(definition);
+    const auto document = Keire::CreateRef<Keire::UiDocument>(
+        visualTree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{styleSheet});
+    const auto play = document->Find("play");
+    REQUIRE(play);
+
+    CHECK(document->SetStyleEvaluationContext(
+        {.Width = 320.0F, .Height = 640.0F, .Dpi = 96.0F, .Pointer = Keire::UiStylePointerPrecision::Fine}));
+    auto state = document->Tree()->State(*play);
+    REQUIRE(state);
+    CHECK(state->Style.Background.Blue == doctest::Approx(0.8F));
+
+    CHECK(document->SetStyleEvaluationContext(
+        {.Width = 1280.0F, .Height = 720.0F, .Dpi = 96.0F, .Pointer = Keire::UiStylePointerPrecision::Fine}));
+    state = document->Tree()->State(*play);
+    REQUIRE(state);
+    CHECK(state->Style.Background.Red == doctest::Approx(1.0F));
+    CHECK(state->Style.Background.Green == doctest::Approx(0.2F));
+    CHECK_FALSE(document->SetStyleEvaluationContext(
+        {.Width = 1280.0F, .Height = 720.0F, .Dpi = 96.0F, .Pointer = Keire::UiStylePointerPrecision::Fine}));
+}
+
+TEST_CASE("UI style property descriptors expose one stable authoring and runtime registry")
+{
+    const auto properties = Keire::UiStylePropertyDescriptors();
+    CHECK(properties.size() >= 40);
+    const auto* width = Keire::FindUiStylePropertyDescriptor("width");
+    REQUIRE(width);
+    CHECK(width->ValueKind == Keire::UiStyleValueKind::Length);
+    CHECK(width->Animatable);
+    CHECK(width->MinimumSchemaVersion == 1U);
+    const auto* fontFamily = Keire::FindUiStylePropertyDescriptor("font-family");
+    REQUIRE(fontFamily);
+    CHECK(fontFamily->MinimumSchemaVersion == 2U);
+    CHECK(Keire::FindUiStylePropertyDescriptor("not-a-style-property") == nullptr);
+
+    CHECK_NOTHROW(Keire::ValidateUiStylePropertyValue("background-image",
+                                                      "linear-gradient(180deg, #000000ff 0%, #ffffffff 100%)", 1));
+    CHECK_THROWS_WITH_AS(
+        Keire::ValidateUiStylePropertyValue("font-family", "asset(10000000-0000-0000-0000-000000000030)", 1),
+        doctest::Contains("schema v2"), std::invalid_argument);
+    CHECK_THROWS_WITH_AS(Keire::ValidateUiStylePropertyValue("color", "not-a-color", 1), doctest::Contains("color"),
+                         std::invalid_argument);
+
+    constexpr std::string_view invalidV1 = R"css(@keire-style 1;
+Label { font-family: asset(10000000-0000-0000-0000-000000000030); }
+)css";
+    CHECK_THROWS_WITH_AS((void)Keire::UiStyleSheetAsset::ParseSource(AsBytes(invalidV1)),
+                         doctest::Contains("schema v2"), std::invalid_argument);
+}
+
+TEST_CASE("UI font faces and families import with bounded typed dependencies")
+{
+    std::vector<std::byte> font(12);
+    font[0] = std::byte{0x00};
+    font[1] = std::byte{0x01};
+    font[2] = std::byte{0x00};
+    font[3] = std::byte{0x00};
+    Keire::UiFontFaceAsset::Validate(font);
+    const auto faceImporter = Keire::CreateUiFontFaceAssetImporter();
+    CHECK(faceImporter.Extensions == std::vector<std::string>{".ttf", ".otf", ".ttc"});
+    CHECK(faceImporter.Import(font) == font);
+    font[0] = std::byte{0xff};
+    CHECK_THROWS_WITH_AS(Keire::UiFontFaceAsset::Validate(font), doctest::Contains("signature"), std::invalid_argument);
+
+    Keire::UiFontFamilyDefinition definition;
+    definition.Name = "Inter UI";
+    definition.Faces = {
+        {.Face = Id("10000000-0000-0000-0000-000000000030"), .Weight = 400},
+        {.Face = Id("10000000-0000-0000-0000-000000000031"), .Weight = 700, .Style = Keire::UiFontStyle::Italic}};
+    definition.FallbackFamilies = {Id("10000000-0000-0000-0000-000000000032")};
+    const auto encoded = Keire::UiFontFamilyAsset::Encode(definition);
+    CHECK(Keire::UiFontFamilyAsset::Decode(encoded)->Definition() == definition);
+    const auto familyImporter = Keire::CreateUiFontFamilyAssetImporter();
+    REQUIRE(familyImporter.ContextualImport);
+    const auto imported = familyImporter.ContextualImport({}, encoded);
+    CHECK(imported.AssetDependencies == std::vector<Keire::AssetId>{Id("10000000-0000-0000-0000-000000000030"),
+                                                                    Id("10000000-0000-0000-0000-000000000031"),
+                                                                    Id("10000000-0000-0000-0000-000000000032")});
+}
+
+TEST_CASE("Runtime UI text shaping is Unicode aware bounded and generation cached")
+{
+    Keire::Detail::RuntimeUiTextLayoutRequest fallback;
+    fallback.Text = "English عربي Hebrew עברית Devanagari नमस्ते CJK 你好";
+    fallback.Language = "und";
+    fallback.FontSize = 18.0F;
+    fallback.AvailableWidth = 180.0F;
+    fallback.MaximumLines = 2;
+    fallback.Overflow = Keire::RuntimeUiTextOverflow::Ellipsis;
+    const auto analyzed = Keire::Detail::BuildRuntimeUiTextLayout(fallback);
+    CHECK(analyzed.UsedFontFallback);
+    CHECK_FALSE(analyzed.Glyphs.empty());
+    CHECK(analyzed.Lines.size() == 2U);
+    CHECK(analyzed.Truncated);
+    CHECK(std::ranges::any_of(analyzed.Glyphs, &Keire::Detail::RuntimeUiTextGlyph::RightToLeft));
+    CHECK(analyzed.Width <= doctest::Approx(fallback.AvailableWidth).epsilon(0.25));
+
+    Keire::Detail::RuntimeUiTextLayoutRequest invalid = fallback;
+    const std::string invalidUtf8{"\xc0\xaf", 2};
+    invalid.Text = invalidUtf8;
+    CHECK_THROWS_WITH_AS((void)Keire::Detail::BuildRuntimeUiTextLayout(invalid), doctest::Contains("UTF-8"),
+                         std::invalid_argument);
+
+    const auto fontPath = std::filesystem::current_path() / "KeireHubContent" / "Fonts" / "Inter-Variable.ttf";
+    REQUIRE(std::filesystem::is_regular_file(fontPath));
+    std::ifstream stream(fontPath, std::ios::binary);
+    std::vector<char> source((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    REQUIRE_FALSE(source.empty());
+    std::vector<std::byte> font(source.size());
+    (void)std::memcpy(font.data(), source.data(), source.size());
+
+    Keire::Detail::RuntimeUiTextLayoutRequest shaped;
+    shaped.FontBytes = font;
+    shaped.FontGeneration = 42U;
+    shaped.Text = "office AV مرحبا";
+    shaped.Language = "en";
+    shaped.FontSize = 20.0F;
+    shaped.AvailableWidth = 600.0F;
+    CHECK(Keire::Detail::CountRuntimeUiMissingGlyphs(font, 0U, "Kéire UI") == 0U);
+    CHECK(Keire::Detail::CountRuntimeUiMissingGlyphs(font, 0U, "你好") > 0U);
+    const auto direct = Keire::Detail::BuildRuntimeUiTextLayout(shaped);
+    CHECK_FALSE(direct.UsedFontFallback);
+    CHECK(direct.Ascender > 0.0F);
+    CHECK(direct.LineHeight > 0.0F);
+    CHECK(direct.Width > 0.0F);
+
+    auto truncatedRequest = shaped;
+    truncatedRequest.Text = "A production-ready international interface wraps and truncates predictably.";
+    truncatedRequest.AvailableWidth = 120.0F;
+    truncatedRequest.MaximumLines = 1;
+    truncatedRequest.Overflow = Keire::RuntimeUiTextOverflow::Ellipsis;
+    const auto truncated = Keire::Detail::BuildRuntimeUiTextLayout(truncatedRequest);
+    REQUIRE(truncated.Truncated);
+    REQUIRE(truncated.Lines.size() == 1U);
+    REQUIRE_FALSE(truncated.Glyphs.empty());
+    CHECK(truncated.Glyphs.back().Codepoint == U'\u2026');
+    CHECK(truncated.Glyphs.back().Glyph != 0U);
+
+    std::vector<std::uint32_t> glyphs;
+    for (const auto& glyph : direct.Glyphs)
+        if (glyph.Codepoint != U'\n')
+            glyphs.push_back(glyph.Glyph);
+    std::ranges::sort(glyphs);
+    const auto duplicate = std::ranges::unique(glyphs);
+    glyphs.erase(duplicate.begin(), duplicate.end());
+    const auto atlas = Keire::RenderBackend::BuildRuntimeUiGlyphAtlas(font, 0U, glyphs, 99U);
+    REQUIRE(atlas);
+    CHECK(atlas->Generation == 99U);
+    CHECK(atlas->Glyphs.size() >= glyphs.size());
+    CHECK_FALSE(atlas->Pixels.empty());
+    for (const auto glyph : glyphs)
+        CHECK(Keire::RenderBackend::FindRuntimeUiGlyph(*atlas, glyph) != nullptr);
+
+    Keire::Detail::RuntimeUiTextLayoutCache cache(2U, 256U);
+    const auto first = cache.Resolve(shaped);
+    const auto second = cache.Resolve(shaped);
+    CHECK(first == second);
+    CHECK(cache.Statistics().Hits == 1U);
+    CHECK(cache.Statistics().Misses == 1U);
+    cache.InvalidateFontGeneration(43U);
+    CHECK(cache.Statistics().Entries == 0U);
+}
+
+TEST_CASE("Runtime UI text uses per-glyph fallback faces and bounded multi-page atlases")
+{
+    const auto readFont = [](const std::filesystem::path& path)
+    {
+        REQUIRE(std::filesystem::is_regular_file(path));
+        std::ifstream stream(path, std::ios::binary);
+        std::vector<char> source((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+        REQUIRE_FALSE(source.empty());
+        std::vector<std::byte> result(source.size());
+        (void)std::memcpy(result.data(), source.data(), source.size());
+        return result;
+    };
+    const auto fonts = std::filesystem::current_path() / "KeireHubContent" / "Fonts";
+    const auto symbols = readFont(fonts / "MaterialSymbolsRounded-Subset.ttf");
+    const auto inter = readFont(fonts / "Inter-Variable.ttf");
+    const std::string closeIcon{"\xee\x97\x8d", 3U}; // Material Symbols U+E5CD.
+    REQUIRE(Keire::Detail::CountRuntimeUiMissingGlyphs(symbols, 0U, closeIcon) == 0U);
+    REQUIRE(Keire::Detail::CountRuntimeUiMissingGlyphs(symbols, 0U, "A") > 0U);
+
+    const std::array fallbackFaces{
+        Keire::Detail::RuntimeUiTextFace{.FontBytes = inter, .FontGeneration = 202U, .CollectionIndex = 0U}};
+    Keire::Detail::RuntimeUiTextLayoutRequest request;
+    request.FontBytes = symbols;
+    request.FontGeneration = 101U;
+    request.FallbackFaces = fallbackFaces;
+    const auto mixedText = closeIcon + "A";
+    request.Text = mixedText;
+    request.FontSize = 24.0F;
+    request.AvailableWidth = 400.0F;
+    const auto mixed = Keire::Detail::BuildRuntimeUiTextLayout(request);
+    REQUIRE(mixed.UsedFontFallback);
+    REQUIRE(mixed.Glyphs.size() >= 2U);
+    CHECK(std::ranges::any_of(mixed.Glyphs, [](const auto& glyph) { return glyph.FaceIndex == 0U; }));
+    CHECK(std::ranges::any_of(mixed.Glyphs, [](const auto& glyph) { return glyph.FaceIndex == 1U; }));
+
+    std::vector<std::uint32_t> glyphs(4095U);
+    for (std::uint32_t index = 0; index < glyphs.size(); ++index)
+        glyphs[index] = index + 1U;
+    const auto pages = Keire::RenderBackend::BuildRuntimeUiGlyphAtlasPages(inter, 0U, glyphs, 303U);
+    REQUIRE(pages.size() > 1U);
+    REQUIRE(pages.size() <= 8U);
+    std::size_t mappedGlyphs = 0U;
+    for (std::size_t pageIndex = 0; pageIndex < pages.size(); ++pageIndex)
+    {
+        REQUIRE(pages[pageIndex]);
+        CHECK(pages[pageIndex]->PageIndex == pageIndex);
+        CHECK(pages[pageIndex]->Generation == 303U);
+        CHECK(pages[pageIndex]->Width == 1024U);
+        CHECK(pages[pageIndex]->Height <= 2048U);
+        CHECK_FALSE(pages[pageIndex]->Pixels.empty());
+        mappedGlyphs += pages[pageIndex]->ShapedGlyphs.size();
+    }
+    CHECK(mappedGlyphs > 1000U);
+    CHECK_THROWS_WITH_AS((void)Keire::RenderBackend::BuildRuntimeUiGlyphAtlas(inter, 0U, glyphs, 303U),
+                         doctest::Contains("multiple atlas pages"), std::length_error);
 }
 
 TEST_CASE("UI document instantiates, queries, styles, lays out, and dispatches events")
@@ -586,6 +882,76 @@ TEST_CASE("UI documents parse bounded gradients and lower immutable draw values"
                          doctest::Contains("offsets must be sorted"), std::runtime_error);
 }
 
+TEST_CASE("UI style v2 effects lower into immutable draw packets and transformed hit testing")
+{
+    constexpr std::string_view source = R"xml(<ui schemaVersion="1" name="StyleV2">
+  <Button id="43000000-0000-0000-0000-000000000010" name="card" text="Production UI"/>
+</ui>)xml";
+    constexpr std::string_view styles = R"css(@keire-style 2;
+#card {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 100px;
+  height: 50px;
+  background-color: #102030ff;
+  background-image: asset(10000000-0000-0000-0000-000000000040);
+  background-tint: #80c0ffff;
+  background-slice: 8px 10px 12px 14px;
+  border-left-width: 2px;
+  border-left-color: #ff0000ff;
+  border-top-right-radius: 12px;
+  box-shadow: 4px 6px 8px 1px #00000080;
+  text-shadow: 1px 2px 2px #000000ff;
+  translate: 200px 0px;
+  font-family: asset(10000000-0000-0000-0000-000000000041);
+  font-weight: 700;
+  font-style: italic;
+  line-height: 24px;
+  letter-spacing: 1px;
+  word-spacing: 2px;
+  white-space: nowrap;
+  max-lines: 1;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+)css";
+    const auto visualTree =
+        Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(AsBytes(source)));
+    const auto styleSheet =
+        Keire::CreateRef<Keire::UiStyleSheetAsset>(Keire::UiStyleSheetAsset::ParseSource(AsBytes(styles)));
+    const auto document = Keire::CreateRef<Keire::UiDocument>(
+        visualTree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{styleSheet});
+    const auto card = document->Find("card");
+    REQUIRE(card);
+    const auto state = document->Tree()->State(*card);
+    REQUIRE(state);
+    CHECK(state->Style.BackgroundImage == Id("10000000-0000-0000-0000-000000000040"));
+    CHECK(state->Style.FontFamily == Id("10000000-0000-0000-0000-000000000041"));
+    CHECK(state->Style.BorderWidths.Left == doctest::Approx(2.0F));
+    CHECK(state->Style.CornerRadii.TopRight == doctest::Approx(12.0F));
+    CHECK(state->Style.BoxShadowCount == 1);
+    CHECK(state->Style.TextShadowCount == 1);
+    CHECK(state->Style.FontWeight == 700);
+    CHECK(state->Style.FontSlant == Keire::RuntimeUiFontSlant::Italic);
+    CHECK(state->Style.TextOverflow == Keire::RuntimeUiTextOverflow::Ellipsis);
+    CHECK(state->Style.TextDirection == Keire::RuntimeUiTextDirection::RightToLeft);
+
+    document->Tree()->Layout(400.0F, 200.0F);
+    const auto laidOutState = document->Tree()->State(*card);
+    REQUIRE(laidOutState);
+    const auto image = std::ranges::find(document->Tree()->DrawCommands(), state->Style.BackgroundImage,
+                                         &Keire::RuntimeUiDrawCommand::Asset);
+    REQUIRE(image != document->Tree()->DrawCommands().end());
+    CHECK(image->ImageSlice.Left == doctest::Approx(14.0F * laidOutState->LayoutScale));
+    CHECK(image->Translation.X == doctest::Approx(200.0F * laidOutState->LayoutScale));
+    const auto transformedCenterX = laidOutState->Rect.X + laidOutState->Rect.Width * 0.5F + image->Translation.X;
+    const auto transformedCenterY = laidOutState->Rect.Y + laidOutState->Rect.Height * 0.5F + image->Translation.Y;
+    CHECK(document->Tree()->HitTest(transformedCenterX, transformedCenterY) == card);
+    CHECK_FALSE(document->Tree()->HitTest(laidOutState->Rect.X + laidOutState->Rect.Width * 0.5F,
+                                          laidOutState->Rect.Y + laidOutState->Rect.Height * 0.5F));
+}
+
 TEST_CASE("UI visual tree importer publishes image and font dependencies but not logical render targets")
 {
     constexpr std::string_view source = R"xml(<ui schemaVersion="1" name="Dependencies">
@@ -628,21 +994,15 @@ TEST_CASE("UI visual tree importer publishes image and font dependencies but not
                          doctest::Contains("both an asset image and logical render texture"), std::invalid_argument);
 }
 
-TEST_CASE("UI document construction rolls back shared-tree nodes when style resolution fails")
+TEST_CASE("UI stylesheet rejection leaves the shared tree unchanged before document construction")
 {
-    const auto visualTree =
-        Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(AsBytes(DocumentSource)));
     constexpr std::string_view invalidStyle = R"css(@keire-style 1;
 VisualElement { unsupported-production-property: 1; }
 )css";
-    const auto styleSheet =
-        Keire::CreateRef<Keire::UiStyleSheetAsset>(Keire::UiStyleSheetAsset::ParseSource(AsBytes(invalidStyle)));
     const auto shared = Keire::CreateRef<Keire::RuntimeUiTree>();
     const auto host = shared->Create(Keire::RuntimeUiElementType::Canvas);
-    CHECK_THROWS_WITH_AS(
-        (void)Keire::CreateRef<Keire::UiDocument>(
-            visualTree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{styleSheet}, shared, host),
-        doctest::Contains("unsupported runtime property"), std::runtime_error);
+    CHECK_THROWS_WITH_AS((void)Keire::UiStyleSheetAsset::ParseSource(AsBytes(invalidStyle)),
+                         doctest::Contains("unsupported property"), std::invalid_argument);
     CHECK(shared->Exists(host));
     CHECK(shared->Children(host).empty());
     CHECK(shared->Statistics().Elements == 1);
@@ -1002,6 +1362,8 @@ TEST_CASE("Built-in registry exposes all retained UI Toolkit asset types")
     CHECK(std::ranges::count_if(importers, [](const auto& value) { return value.Name == "Keire.UiStyleSheet"; }) == 1);
     CHECK(std::ranges::count_if(importers, [](const auto& value) { return value.Name == "Keire.UiPanelSettings"; }) ==
           1);
+    CHECK(std::ranges::count_if(importers, [](const auto& value) { return value.Name == "Keire.UiFontFace"; }) == 1);
+    CHECK(std::ranges::count_if(importers, [](const auto& value) { return value.Name == "Keire.UiFontFamily"; }) == 1);
 
     const auto decoders = Keire::CreateBuiltinAssetDecoders();
     CHECK(std::ranges::count(decoders, Keire::UiVisualTreeAsset::StaticType(),
@@ -1009,5 +1371,9 @@ TEST_CASE("Built-in registry exposes all retained UI Toolkit asset types")
     CHECK(std::ranges::count(decoders, Keire::UiStyleSheetAsset::StaticType(),
                              &Keire::AssetDecoderRegistration::Type) == 1);
     CHECK(std::ranges::count(decoders, Keire::UiPanelSettingsAsset::StaticType(),
+                             &Keire::AssetDecoderRegistration::Type) == 1);
+    CHECK(std::ranges::count(decoders, Keire::UiFontFaceAsset::StaticType(), &Keire::AssetDecoderRegistration::Type) ==
+          1);
+    CHECK(std::ranges::count(decoders, Keire::UiFontFamilyAsset::StaticType(),
                              &Keire::AssetDecoderRegistration::Type) == 1);
 }

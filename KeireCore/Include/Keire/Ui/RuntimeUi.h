@@ -194,6 +194,88 @@ namespace Keire
         [[nodiscard]] bool operator==(const RuntimeUiGradient&) const = default;
     };
 
+    enum class RuntimeUiBackgroundFit : std::uint8_t
+    {
+        Stretch,
+        Contain,
+        Cover,
+        None
+    };
+
+    enum class RuntimeUiBackgroundRepeat : std::uint8_t
+    {
+        NoRepeat,
+        Repeat,
+        RepeatX,
+        RepeatY
+    };
+
+    enum class RuntimeUiFontSlant : std::uint8_t
+    {
+        Normal,
+        Italic,
+        Oblique
+    };
+
+    enum class RuntimeUiTextWrap : std::uint8_t
+    {
+        Normal,
+        NoWrap
+    };
+
+    enum class RuntimeUiTextOverflow : std::uint8_t
+    {
+        Clip,
+        Ellipsis
+    };
+
+    enum class RuntimeUiTextDirection : std::uint8_t
+    {
+        Automatic,
+        LeftToRight,
+        RightToLeft
+    };
+
+    enum class RuntimeUiTransitionEasing : std::uint8_t
+    {
+        Linear,
+        Ease,
+        EaseIn,
+        EaseOut,
+        EaseInOut
+    };
+
+    struct RuntimeUiCornerRadii
+    {
+        float TopLeft = 0.0F;
+        float TopRight = 0.0F;
+        float BottomRight = 0.0F;
+        float BottomLeft = 0.0F;
+
+        [[nodiscard]] bool operator==(const RuntimeUiCornerRadii&) const = default;
+    };
+
+    struct RuntimeUiBorderColors
+    {
+        Color Left{0.0F, 0.0F, 0.0F, 0.0F};
+        Color Top{0.0F, 0.0F, 0.0F, 0.0F};
+        Color Right{0.0F, 0.0F, 0.0F, 0.0F};
+        Color Bottom{0.0F, 0.0F, 0.0F, 0.0F};
+
+        [[nodiscard]] bool operator==(const RuntimeUiBorderColors&) const = default;
+    };
+
+    struct RuntimeUiShadow
+    {
+        Vector2 Offset;
+        float BlurRadius = 0.0F;
+        float SpreadRadius = 0.0F;
+        Color ColorValue{0.0F, 0.0F, 0.0F, 0.0F};
+        bool Inset = false;
+
+        [[nodiscard]] bool operator==(const RuntimeUiShadow&) const = default;
+    };
+
     enum class RuntimeUiTransitionProperty : std::uint8_t
     {
         All,
@@ -258,8 +340,37 @@ namespace Keire
         Color Border{0.0F, 0.0F, 0.0F, 0.0F};
         float BorderWidth = 0.0F;
         float CornerRadius = 0.0F;
+        RuntimeUiInsets BorderWidths;
+        RuntimeUiBorderColors BorderColors;
+        RuntimeUiCornerRadii CornerRadii;
+        std::array<RuntimeUiShadow, 4> BoxShadows{};
+        std::array<RuntimeUiShadow, 2> TextShadows{};
+        std::uint8_t BoxShadowCount = 0;
+        std::uint8_t TextShadowCount = 0;
+        AssetId BackgroundImage;
+        Color BackgroundTint{1.0F, 1.0F, 1.0F, 1.0F};
+        RuntimeUiBackgroundFit BackgroundFit = RuntimeUiBackgroundFit::Stretch;
+        RuntimeUiBackgroundRepeat BackgroundRepeat = RuntimeUiBackgroundRepeat::NoRepeat;
+        Vector2 BackgroundPosition{0.5F, 0.5F};
+        RuntimeUiInsets BackgroundSlice;
+        AssetId AlphaMask;
+        Vector2 Translation;
+        Vector2 TransformScale{1.0F, 1.0F};
+        float RotationDegrees = 0.0F;
+        Vector2 TransformOrigin{0.5F, 0.5F};
         float Opacity = 1.0F;
+        AssetId FontFamily;
+        std::uint16_t FontWeight = 400;
+        RuntimeUiFontSlant FontSlant = RuntimeUiFontSlant::Normal;
         float FontSize = 16.0F;
+        float LineHeight = 0.0F;
+        float LetterSpacing = 0.0F;
+        float WordSpacing = 0.0F;
+        RuntimeUiTextWrap TextWrap = RuntimeUiTextWrap::Normal;
+        RuntimeUiTextOverflow TextOverflow = RuntimeUiTextOverflow::Clip;
+        RuntimeUiTextDirection TextDirection = RuntimeUiTextDirection::Automatic;
+        std::string Language = "und";
+        std::uint16_t MaximumLines = 0;
         Vector2 GridCellSize{160.0F, 48.0F};
         Vector2 ContentOffset;
         bool ControlChildWidth = true;
@@ -271,8 +382,12 @@ namespace Keire
         std::int32_t NavigationOrder = 0;
         std::array<RuntimeUiTransitionProperty, 8> TransitionProperties{};
         std::array<float, 8> TransitionDurations{};
+        std::array<float, 8> TransitionDelays{};
+        std::array<RuntimeUiTransitionEasing, 8> TransitionEasings{};
         std::uint8_t TransitionPropertyCount = 0;
         std::uint8_t TransitionDurationCount = 0;
+        std::uint8_t TransitionDelayCount = 0;
+        std::uint8_t TransitionEasingCount = 0;
 
         [[nodiscard]] bool operator==(const RuntimeUiStyle&) const = default;
     };
@@ -374,6 +489,27 @@ namespace Keire
         PopClip
     };
 
+    struct RuntimeUiPreparedTextGlyph
+    {
+        AssetId FontBinding;
+        Vector2 UvMinimum;
+        Vector2 UvMaximum;
+        Vector2 Position;
+        Vector2 Offset;
+        Vector2 Size;
+
+        [[nodiscard]] bool operator==(const RuntimeUiPreparedTextGlyph&) const = default;
+    };
+
+    struct RuntimeUiPreparedTextLine
+    {
+        std::size_t FirstGlyph = 0;
+        std::size_t GlyphCount = 0;
+        float Width = 0.0F;
+
+        [[nodiscard]] bool operator==(const RuntimeUiPreparedTextLine&) const = default;
+    };
+
     struct RuntimeUiDrawCommand
     {
         RuntimeUiDrawType Type = RuntimeUiDrawType::Quad;
@@ -382,15 +518,44 @@ namespace Keire
         RuntimeUiRect ClipRect;
         Color ColorValue{1.0F, 1.0F, 1.0F, 1.0F};
         Color BorderColor{0.0F, 0.0F, 0.0F, 0.0F};
+        RuntimeUiInsets BorderWidths;
+        RuntimeUiBorderColors BorderColors;
+        RuntimeUiCornerRadii CornerRadii;
+        std::array<RuntimeUiShadow, 4> Shadows{};
+        std::uint8_t ShadowCount = 0;
         RuntimeUiGradient BackgroundGradient;
         AssetId Asset;
         AssetId RenderTexture;
+        AssetId AlphaMask;
         std::string Text;
         float FontSize = 16.0F;
+        float LineHeight = 0.0F;
+        float LetterSpacing = 0.0F;
+        float WordSpacing = 0.0F;
+        RuntimeUiTextWrap TextWrap = RuntimeUiTextWrap::Normal;
+        RuntimeUiTextOverflow TextOverflow = RuntimeUiTextOverflow::Clip;
+        RuntimeUiTextDirection TextDirection = RuntimeUiTextDirection::Automatic;
+        std::string Language = "und";
+        std::uint16_t MaximumLines = 0;
+        std::uint16_t FontWeight = 400;
+        RuntimeUiFontSlant FontSlant = RuntimeUiFontSlant::Normal;
         float CornerRadius = 0.0F;
         float BorderWidth = 0.0F;
+        Vector2 Translation;
+        Vector2 TransformScale{1.0F, 1.0F};
+        float RotationDegrees = 0.0F;
+        Vector2 TransformOrigin{0.5F, 0.5F};
+        RuntimeUiInsets ImageSlice;
+        RuntimeUiBackgroundFit ImageFit = RuntimeUiBackgroundFit::Stretch;
+        RuntimeUiBackgroundRepeat ImageRepeat = RuntimeUiBackgroundRepeat::NoRepeat;
+        Vector2 ImagePosition{0.5F, 0.5F};
         RuntimeUiAlignment HorizontalAlignment = RuntimeUiAlignment::Start;
         RuntimeUiAlignment VerticalAlignment = RuntimeUiAlignment::Start;
+        AssetId PreparedFontBinding;
+        std::vector<RuntimeUiPreparedTextGlyph> PreparedTextGlyphs;
+        std::vector<RuntimeUiPreparedTextLine> PreparedTextLines;
+        float PreparedTextWidth = 0.0F;
+        float PreparedTextHeight = 0.0F;
     };
 
     struct RuntimeUiStatistics

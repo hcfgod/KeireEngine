@@ -6,6 +6,10 @@ namespace KeireSandbox;
 [ExecutionOrder(-200)]
 public sealed class FirstPersonCamera : Behaviour
 {
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000138")]
+    [Tooltip("Input Actions asset used by the Sandbox player.")]
+    private InputActionAsset? _inputActions;
+
     [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000031")]
     [Range(0.5, 12.0), Tooltip("Maximum character movement speed in metres per second.")]
     private float _movementSpeed = 6.5f;
@@ -124,6 +128,11 @@ public sealed class FirstPersonCamera : Behaviour
     private bool _captureEnabled = true;
 
     private IDisposable? _cursorCapture;
+    private InputActionContext? _inputContext;
+    private InputAction? _escapeAction;
+    private InputAction? _jumpAction;
+    private InputAction? _moveAction;
+    private InputAction? _sprintAction;
     private bool _uiVisible;
     private bool _acceptsInput;
     private bool _sprinting;
@@ -148,6 +157,7 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void OnEnable()
     {
+        EnableInput();
         ResolveCharacter();
         DetachCameraFromMotor();
         SubscribeUiVisibility();
@@ -158,6 +168,7 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void OnDisable()
     {
+        DisableInput();
         RestoreFootGrounding();
         UnsubscribeUiVisibility();
         ReleaseCapture();
@@ -167,6 +178,7 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void OnBeforeReload()
     {
+        DisableInput();
         RestoreFootGrounding();
         UnsubscribeUiVisibility();
         ReleaseCapture();
@@ -174,6 +186,7 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void OnAfterReload()
     {
+        EnableInput();
         ResolveCharacter();
         DetachCameraFromMotor();
         SubscribeUiVisibility();
@@ -183,15 +196,15 @@ public sealed class FirstPersonCamera : Behaviour
 
     protected override void Update()
     {
-        if (!_uiVisible && !Cursor.VisibilityRequested && Input.Pressed("Escape"))
+        if (!_uiVisible && !Cursor.VisibilityRequested && _escapeAction?.WasPressedThisFrame == true)
             SetCaptureEnabled(!_captureEnabled);
 
         _acceptsInput = _captureEnabled && !_uiVisible && !Cursor.VisibilityRequested;
-        _moveInput = _acceptsInput ? Input.Axis2D("Move") : default;
+        _moveInput = _acceptsInput ? _moveAction?.ReadValue<Vector2>() ?? default : default;
         if (_moveInput.LengthSquared > 1.0f)
             _moveInput = _moveInput.Normalized;
-        _sprinting = _acceptsInput && Input.Held("Sprint");
-        if (_acceptsInput && Input.Pressed("Jump"))
+        _sprinting = _acceptsInput && _sprintAction?.IsPressed == true;
+        if (_acceptsInput && _jumpAction?.WasPressedThisFrame == true)
         {
             _jumpBufferRemaining = MathF.Max(0.0f, _jumpBufferTime);
             BeginAirbornePresentation();
@@ -428,6 +441,30 @@ public sealed class FirstPersonCamera : Behaviour
     {
         _cursorCapture?.Dispose();
         _cursorCapture = null;
+    }
+
+    private void EnableInput()
+    {
+        DisableInput();
+        if (_inputActions is not { IsValid: true })
+            throw new InvalidOperationException($"{nameof(FirstPersonCamera)} requires an Input Actions asset.");
+
+        _inputContext = _inputActions.CreateContext();
+        _escapeAction = _inputContext.FindAction("Player/Escape");
+        _jumpAction = _inputContext.FindAction("Player/Jump");
+        _moveAction = _inputContext.FindAction("Player/Move");
+        _sprintAction = _inputContext.FindAction("Player/Sprint");
+        _inputContext.Enable();
+    }
+
+    private void DisableInput()
+    {
+        _inputContext?.Dispose();
+        _inputContext = null;
+        _escapeAction = null;
+        _jumpAction = null;
+        _moveAction = null;
+        _sprintAction = null;
     }
 
     private void PreserveLegacyOrbitSettings()

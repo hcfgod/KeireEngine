@@ -914,27 +914,36 @@ document order and dispatch pointer input from the topmost document backward unt
 Accepted render frames copy UI values, immutable text geometry, and logical texture and surface leases. No frame packet
 borrows a visual element, scene pointer, native surface, or mutable draw list. Every lease is qualified by frame slot
 and device generation; device loss invalidates the GPU realization and the retry rebuilds it from retained CPU assets.
-The first production font slice uses one deterministic, fixed 95-character printable-ASCII fallback atlas rasterized
-at high resolution from the embedded scalable font so large and world-surface text remains filtered rather than
-pixel-stretched. Authored
-font IDs remain in immutable draw commands, but the renderer deliberately resolves every text run to that fallback
-atlas until custom font rasterization exists. Unicode shaping, bidirectional layout, ligatures, and script-specific
-fallback are not implemented yet. Unsupported code points render the fallback glyph. Nested clip
-intersections are resolved into immutable commands before capture, so atlas geometry is clipped deterministically on
-screen, render-texture, and world targets. Renderer statistics truthfully report glyph-atlas occupancy and bytes;
-ordinary UI images remain independent texture leases and therefore do not count as an image atlas.
+Imported font faces are rasterized with FreeType and shaped with HarfBuzz after FriBidi direction resolution;
+libunibreak supplies Unicode line opportunities. Font family/face generations, text, language, direction, style, and
+available width form the bounded measurement-cache key. CPU font bytes and atlas data remain recoverable while GPU
+atlas realizations are device-generation qualified; recovery abandons old-device pages and recreates them for the
+retried immutable frame. Ordered fallback faces are selected per glyph run, and each shaped glyph records its exact
+face index. Each face uses at most eight deterministic atlas pages; immutable geometry batches and logical leases bind
+the exact face/page pair, so mixed-script labels and recovery retries cannot sample another page or device generation.
+A deterministic high-resolution 95-character atlas remains the no-family/unavailable-face
+fallback. Nested clip intersections are resolved into immutable commands before capture, so text and image geometry
+are clipped deterministically on screen, render-texture, and world targets. Renderer statistics truthfully report
+glyph-atlas occupancy and bytes; ordinary UI images remain independent texture leases and therefore do not count as an
+image atlas.
 Editor Play Mode and packaged players share the same synchronization, input, capture, recovery, and teardown paths.
 Managed custom controls are published from an explicit successfully-loaded assembly allowlist, and failed managed
 generations retain the previous immutable type catalog.
 
-`UiBuilderDocument` and `UiBuilderStyleSheetDocument` own validated authoring definitions, generation counters,
-dirty state, explicit persistence, and independent undo histories. `UiBuilderPanel` translates hierarchy, preview,
-Inspector, binding, selector, source, and debugger interactions into those document operations. Its preview settings
-are transient and never mutate `UiPanelSettingsAsset`. During Play Mode, `UiBuilderLiveDraftSession` publishes only
-the active dirty visual tree as a development asset, remembers the imported baseline, and either commits after an
-explicit Save or restores that baseline on document switch, reload, workspace shutdown, or Play teardown. Live
-debugging consumes immutable, generation-stamped scene-presentation and renderer-statistics snapshots; unavailable
-providers remain explicitly unavailable, and picking never exposes mutable runtime nodes to editor code.
+`UiBuilderDocument` and `UiBuilderStyleSheetDocument` own validated authoring definitions, generation counters, dirty
+state, explicit persistence, and independent undo histories. `UiBuilderPanel` translates Design, Styles, and Debug
+interactions into those document operations. Style Studio reads one shared property registry, keeps a lossless source
+draft, publishes only valid development revisions, preserves the last valid preview during parse errors, and rejects
+silent overwrites when the baseline file hash changes. Schema-v1 styles retain source until a v2-only declaration or
+responsive rule advances them one-way. The source model provides syntax spans, completion and documentation from the
+runtime property registry, brace/rule navigation, formatting, and case-aware search/replace. Conflict-safe Save As is
+confined to a new ordinary Assets path. Project-wide token renames validate every candidate, present file/line previews,
+recheck baseline bytes at confirmation, and use atomic writes with rollback. Preview device settings are transient and never mutate
+`UiPanelSettingsAsset`. During Play Mode, `UiBuilderLiveDraftSession` publishes only active valid drafts, remembers the
+imported baseline, and either commits after an explicit Save or restores that baseline on document switch, reload,
+workspace shutdown, or Play teardown. Live debugging consumes immutable, generation-stamped scene-presentation and
+renderer-statistics snapshots; unavailable providers remain explicitly unavailable, and picking never exposes mutable
+runtime nodes to editor code.
 
 Editor material authoring has three deliberate workflows. `MaterialDocument` and `MaterialInspectorPanel` own compact
 Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the authoritative OpenPBR/slab surface

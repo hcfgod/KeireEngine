@@ -45,6 +45,8 @@ namespace KeireEditor::Detail
             return controller.CreateAssetBrowserUiDocument(name);
         case NamedAssetCreationKind::UiStyleSheet:
             return controller.CreateAssetBrowserUiStyleSheet(name);
+        case NamedAssetCreationKind::UiFontFamily:
+            return controller.CreateAssetBrowserUiFontFamily(name, variantBase);
         case NamedAssetCreationKind::MaterialGraph:
             return controller.CreateAssetBrowserMaterialGraph(name, materialShader);
         case NamedAssetCreationKind::ShaderGraph:

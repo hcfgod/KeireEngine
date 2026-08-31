@@ -234,7 +234,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25039723,
+      "estimatedSizeBytes": 25045959,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -580,7 +580,7 @@
         {
           "path": "Assets/Meshes/Idle.fbx.keiremeta",
           "sizeBytes": 535,
-          "sha256": "8cb40003e3ec5a7ed5fae96cb0406f3a617c5024cc74098126a14e6298e6c636"
+          "sha256": "a3701c99febe6b7b7da62f17cd9331cc5b51b16251e859faa13c7fa98f91b083"
         },
         {
           "path": "Assets/Meshes/T-Pose.fbx",
@@ -590,7 +590,7 @@
         {
           "path": "Assets/Meshes/T-Pose.fbx.keiremeta",
           "sizeBytes": 619,
-          "sha256": "9d6470c225191b68b597e8a2b65ca87e8a60dea40a210029a7ab2f0b6030e5ca"
+          "sha256": "ed06243831cd30cab27e6583172700d144d75ff8bdccbb86b9749357e0f22f55"
         },
         {
           "path": "Assets/Meshes/TexturedPyramid.obj",
@@ -600,7 +600,7 @@
         {
           "path": "Assets/Meshes/TexturedPyramid.obj.keiremeta",
           "sizeBytes": 263,
-          "sha256": "17781cd61e5b1fc562b84ec7fe9ce07d094ce2e7023755540bd62141193508ba"
+          "sha256": "4ba6ca3cdb45cd483452bb9bfbdb0d29b8c9ff08e07269c607ddf84450934647"
         },
         {
           "path": "Assets/NewAnimatorController.keireanimgraph",
@@ -644,8 +644,8 @@
         },
         {
           "path": "Assets/Scenes/SampleScene.keirescene",
-          "sizeBytes": 27893,
-          "sha256": "5eab82c2ba89b8821187119e86c86dcb1c3d4bfac3b7dbd170f59a655e8996ae"
+          "sizeBytes": 28169,
+          "sha256": "ab7e0e194751bad4cabbaaa69e04f05d72875d40a5d205a89871773863294d4b"
         },
         {
           "path": "Assets/Scenes/SampleScene.keirescene.keiremeta",
@@ -694,8 +694,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs",
-          "sizeBytes": 15939,
-          "sha256": "2396d142102f764673197dc0adcc49cdb6c6ea73e433b3bfa1ec5fe0e0d74c5c"
+          "sizeBytes": 17304,
+          "sha256": "a78bd7bb38240946fe9d87d30ca4bdbfae74d42d99a7ea8cd7da4ded8dd9cf4a"
         },
         {
           "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs.keiremeta",
@@ -704,8 +704,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs",
-          "sizeBytes": 3316,
-          "sha256": "6b36f603d247b2b63f3e395329591b342853174777e9ca166096530eb7d61821"
+          "sizeBytes": 4342,
+          "sha256": "688dcca75287b5af4c06871f97800ae266e5b2c480bd11349147746176234e22"
         },
         {
           "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs.keiremeta",
@@ -744,8 +744,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs",
-          "sizeBytes": 3033,
-          "sha256": "3aa03812575d425d193b626de7e569a30c1412609c4934d14f5310e31fa96565"
+          "sizeBytes": 4044,
+          "sha256": "444373d6c41a8c9f9cac9d06e190b621235a4e4a3caf9a449e325b500d2cd25d"
         },
         {
           "path": "Assets/Scripts/Runtime/UIController.cs.keiremeta",
@@ -754,8 +754,8 @@
         },
         {
           "path": "Assets/Scripts/Runtime/WeaponController.cs",
-          "sizeBytes": 6225,
-          "sha256": "21c4712c086f7112721baa276edb01a229a8c29c0059007e64dd66cea2f7228d"
+          "sizeBytes": 8783,
+          "sha256": "293848f0b1143923ebcfa9ecbab4c9a5312416849d19074c57023ab08ab23f1a"
         },
         {
           "path": "Assets/Scripts/Runtime/WeaponController.cs.keiremeta",
@@ -860,7 +860,7 @@
         {
           "path": "Assets/UI/SandboxMenu.keirestyle.keiremeta",
           "sizeBytes": 248,
-          "sha256": "ec02028302b19f4e5366d5aa671e5d9c8bd9ac957836133d8a1746c6f9c57563"
+          "sha256": "d7f8f60c7d1f84562aea9e8de3f968b83f6b00befad9119fbaffba0bd215ad1a"
         },
         {
           "path": "Assets/UI/SandboxMenu.keireui",
@@ -930,7 +930,7 @@
         {
           "path": "Assets/Vfx/Meshes/ArcaneSigil.gltf.keiremeta",
           "sizeBytes": 263,
-          "sha256": "92c83c0ec95d5ef99bd2c23af03c7db31274eb7d8bb08fda0bc98cddca45db4e"
+          "sha256": "07f1cca36167a4eab608921a3f547318bb1bed6463658dfe87f030294f887440"
         },
         {
           "path": "Assets/Vfx/Meshes/EmberShard.gltf",
@@ -940,7 +940,7 @@
         {
           "path": "Assets/Vfx/Meshes/EmberShard.gltf.keiremeta",
           "sizeBytes": 263,
-          "sha256": "dd2fd8c147197213e838e9015e0ab8c4a9c337135911b83f945ddf7d0fd028be"
+          "sha256": "95fb287b4af6a0ed012b7f485381d5ed302778e1392cf73512ae20383c4b4bfe"
         },
         {
           "path": "Assets/Vfx/PlasmaLance.keirematerial",

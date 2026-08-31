@@ -83,6 +83,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
                 break;
             case Phase::TransientPanels:
                 m_UiBuilderLiveDraft->Close();
+                m_UiBuilderStyleSheetSaveDialog.Reset();
                 m_InputActionsPanel->ResetTransientState();
                 m_UiBuilderPanel->ResetTransientState();
                 m_AudioMixerPanel->StopTransientPreview();

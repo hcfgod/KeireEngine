@@ -23,9 +23,11 @@
 #include "KeireInternal/Rendering/RenderShaderDataInternal.h"
 #include "KeireInternal/Rendering/RenderStatisticsInternal.h"
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
+#include "KeireInternal/Rendering/RuntimeUiFontCacheInternal.h"
 #include "KeireInternal/Rendering/RuntimeUiRenderTargetInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 #include "KeireInternal/Rendering/VfxVisibilityPlanInternal.h"
+#include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <array>
@@ -1418,7 +1420,9 @@ namespace Keire::RenderBackend
         std::unordered_map<AssetId, GpuSkinEntry> SkinCache;
         std::unordered_map<AssetId, GpuTextureEntry> TextureCache;
         std::vector<PreparedRuntimeUiTextureBinding> PreparedRuntimeUiTextures;
-        RuntimeUiFontAtlasCacheEntry RuntimeUiFontAtlas;
+        std::vector<RuntimeUiFontAtlasCacheEntry> RuntimeUiFontAtlases;
+        std::vector<RuntimeUiFontCpuCacheEntry> RuntimeUiFontCpuCache;
+        Detail::RuntimeUiTextLayoutCache RuntimeUiTextLayouts{512U, 131'072U};
         std::vector<RuntimeUiRenderTextureCacheEntry> RuntimeUiRenderTextureCache;
         std::vector<AssetId> FrameRuntimeUiRenderTextureTargets;
         std::unordered_map<AssetId, GpuLightingTextureEntry> LightingTextureCache;

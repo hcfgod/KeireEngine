@@ -4,6 +4,7 @@
 #include "Keire/Log.h"
 
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <zstd.h>
 
@@ -332,7 +333,7 @@ namespace Keire
                 throw std::runtime_error("Asset exceeds the configured maximum size.");
             std::ifstream stream(entry.PackPath, std::ios::binary);
             if (!stream)
-                throw std::runtime_error("Could not open asset pack: " + entry.PackPath.string());
+                throw std::runtime_error("Could not open asset pack: " + Detail::PathToUtf8(entry.PackPath));
             Detail::ValidatePackHeader(stream, entry.PackPath);
             std::vector<std::byte> decoded(static_cast<std::size_t>(entry.UncompressedBytes));
             if (entry.Pages.empty())
@@ -625,7 +626,7 @@ namespace Keire
             {
                 std::ifstream stream(entry.PackPath, std::ios::binary);
                 if (!stream)
-                    throw std::runtime_error("Could not open asset pack: " + entry.PackPath.string());
+                    throw std::runtime_error("Could not open asset pack: " + Detail::PathToUtf8(entry.PackPath));
                 Detail::ValidatePackHeader(stream, entry.PackPath);
             }
             std::error_code error;

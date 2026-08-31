@@ -168,6 +168,14 @@ namespace Keire
         }
     };
 
+    struct UiCodeEditorState
+    {
+        std::size_t CursorOffset = 0;
+        std::size_t SelectionBegin = 0;
+        std::size_t SelectionEnd = 0;
+        bool RequestCursor = false;
+    };
+
     struct UiPointerState
     {
         UiPosition Position;
@@ -622,6 +630,8 @@ namespace Keire
         [[nodiscard]] bool InputText(std::string_view label, std::string& value, bool selectAllOnFocus = false);
         [[nodiscard]] bool InputTextMultiline(std::string_view label, std::string& value,
                                               std::uint32_t visibleLines = 4);
+        [[nodiscard]] bool InputCodeEditor(std::string_view label, std::string& value, UiCodeEditorState& state,
+                                           std::uint32_t visibleLines = 24);
         [[nodiscard]] bool InputPassword(std::string_view label, std::string& value);
         [[nodiscard]] bool InputTextWithHint(std::string_view label, std::string_view hint, std::string& value);
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);

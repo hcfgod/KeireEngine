@@ -153,6 +153,10 @@ function LinkKeireCore()
             DependencyManifest.AssimpZlibDebugLibrary,
             DependencyManifest.JoltDebugLibrary,
             DependencyManifest.MiniaudioDebugLibrary,
+            DependencyManifest.HarfBuzzDebugLibrary,
+            DependencyManifest.FreeTypeDebugLibrary,
+            DependencyManifest.FriBidiDebugLibrary,
+            DependencyManifest.LibunibreakDebugLibrary,
             DependencyManifest.CoralDebugLibrary
         }
         LinkDependencies(DependencyManifest.RecastDebugLibraries)
@@ -164,6 +168,10 @@ function LinkKeireCore()
             DependencyManifest.AssimpZlibReleaseLibrary,
             DependencyManifest.JoltReleaseLibrary,
             DependencyManifest.MiniaudioReleaseLibrary,
+            DependencyManifest.HarfBuzzReleaseLibrary,
+            DependencyManifest.FreeTypeReleaseLibrary,
+            DependencyManifest.FriBidiReleaseLibrary,
+            DependencyManifest.LibunibreakReleaseLibrary,
             DependencyManifest.CoralReleaseLibrary
         }
         LinkDependencies(DependencyManifest.RecastReleaseLibraries)

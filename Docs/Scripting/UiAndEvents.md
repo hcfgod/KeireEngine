@@ -34,7 +34,9 @@ A `.keireui` document opens with these working authoring surfaces:
   binding declarations.
 - Linked stylesheet management plus selector/declaration add, edit, and remove operations. Create a **UI Style Sheet**
   from the Project panel, then link it with the typed searchable asset picker or by dragging the asset onto that picker.
-  Style edits have their own undo/redo history and explicit Save/Reload boundary.
+  Style edits have their own undo/redo history and explicit Save/Reload boundary. Select **Styles** for the visual
+  three-pane Style Studio; see [Visual Style Studio](../UiStyleStudio.md) for responsive rules, design tokens, source
+  drafts, font families, and v1/v2 migration.
 - A retained-tree preview with resolution presets or a custom size, landscape/portrait orientation, **Match Game
   View**, DPI/reference scaling, safe-area visualization, zoom/pan, rulers, guides, and live pseudo-state toggles.
 
@@ -208,10 +210,11 @@ Rebinding realizes only the bounded range rather than instantiating the complete
 
 ## Styles, Transitions, And Render Targets
 
-Style sheets support inherited variables, bounded linear and radial gradients, rounded borders, nested clipping, and
-pseudo-state transitions. A document may animate at most eight supported properties per element; durations are finite,
-clamped to 60 seconds, and advance only through the document's explicit update. An unchanged document performs no
-style, layout, or geometry recomputation after warm-up.
+Style sheets support inherited variables, responsive media conditions, bounded linear and radial gradients,
+asset-backed backgrounds, per-edge borders, per-corner radii, shadow stacks, transforms, masks, nested clipping,
+international typography, and pseudo-state transitions. A document may animate at most eight supported properties per
+element; durations are finite, clamped to 60 seconds, and advance only through the document's explicit update. An
+unchanged document performs no style, layout, or geometry recomputation after warm-up.
 
 A render-texture panel publishes to the logical ID in its `.keireuipanel`. An `Image` consumes that output with the
 separate `render-texture` markup attribute:
@@ -237,18 +240,22 @@ CPU data, so a pre-loss texture or render-target handle cannot be consumed by th
 
 ## Current Limits
 
-The current renderer uses a deterministic 95-character printable-ASCII fallback glyph atlas. Custom font
-rasterization, Unicode shaping, bidirectional layout, ligatures, script-specific fallback, localization, and platform
-screen-reader adapters remain follow-up work. Unsupported code points render the fallback glyph. Images use individual
-immutable frame leases rather than a shared image atlas, so the Debugger reports image-atlas occupancy as zero.
+Imported `.ttf`, `.otf`, and `.ttc` faces and `.keirefont` families use FreeType, HarfBuzz, FriBidi, and libunibreak
+for rasterization, shaping, bidirectional ordering, and Unicode line breaking. Font/layout caches are bounded and
+generation keyed; the printable-ASCII atlas remains the deterministic fallback when no family is assigned or a face is
+unavailable. A font family evaluates its ordered fallback families when the primary face has missing glyphs, choosing
+the single face that provides the best complete-command coverage. Per-glyph mixed-face runs, multi-page glyph-atlas
+packing, localization-database authoring, color emoji, and platform screen-reader adapters remain follow-up work.
+Images use individual immutable frame leases rather than a shared image atlas, so the Debugger reports image-atlas
+occupancy as zero.
 
 UI Toolkit authors project content only; the Kéire Editor shell remains on its existing immediate-mode UI. Kéire does
 not import Unity UXML/USS files, and the clean break deliberately provides no automatic Canvas/Rect Transform
 converter.
 
-The Project panel creates `.keireui` documents and `.keirestyle` style sheets directly. The focused stylesheet editor
-opens an existing linked `.keirestyle`. Panel Settings assets must still come from a starter/example asset or another
-valid project-source workflow; preview controls are not a substitute for persistent Panel Settings authoring.
+The Project panel creates `.keireui` documents, `.keirestyle` style sheets, and `.keirefont` families directly. Style
+Studio opens an existing linked `.keirestyle`. Panel Settings assets must still come from a starter/example asset or
+another valid project-source workflow; preview controls are not a substitute for persistent Panel Settings authoring.
 
 ## Legacy Scene UI
 

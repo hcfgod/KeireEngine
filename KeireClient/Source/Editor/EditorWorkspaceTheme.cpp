@@ -77,7 +77,7 @@ void EditorWorkspaceLayer::DrawEmptyState(Keire::UiFrame& ui, const std::string_
 void EditorWorkspaceLayer::DrawPanelMenuItem(Keire::UiFrame& ui, Keire::UiPanelRegistration& panel)
 {
     if (ui.MenuItem(panel.Title(), panel.Visible()))
-        panel.SetVisible(!panel.Visible());
+        panel.RequestFocus();
 }
 
 void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& workspace)
@@ -89,6 +89,21 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
         {
             if (ui.MenuItem("New Scene", false, m_CommandRouter->Available(KeireEditor::EditorCommand::NewScene)))
                 (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::NewScene);
+            if (auto openScene = ui.BeginMenu("Open Scene", static_cast<bool>(m_AssetDatabase)); openScene)
+            {
+                bool foundScene = false;
+                for (const auto& asset : m_AssetRecords)
+                {
+                    if (asset.RelativePath.extension() != ".keirescene")
+                        continue;
+                    foundScene = true;
+                    if (ui.MenuItem(Keire::Detail::PathToUtf8(asset.RelativePath),
+                                    asset.Id == m_SceneDocument->Asset()))
+                        RequestOpenScene(asset.Id);
+                }
+                if (!foundScene)
+                    (void)ui.MenuItem("No scene assets found", false, false);
+            }
             if (ui.MenuItem("Save Scene", false, m_CommandRouter->Available(KeireEditor::EditorCommand::SaveScene)))
                 (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveScene);
             if (ui.MenuItem("Save Scene As...", false,
@@ -253,7 +268,11 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             if (ui.MenuItem("Delete...", false, editable))
                 OpenDialog(Dialog::DeleteLayout);
             if (ui.MenuItem("Reset to Default"))
+            {
                 workspace.ResetFactoryLayout();
+                m_Notice = "The factory layout will be restored on the next frame.";
+                m_NoticeColor = m_Theme.Success;
+            }
             ui.Separator();
             if (ui.MenuItem("Import..."))
                 workspace.ShowImportLayoutDialog();
@@ -269,8 +288,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
                     RequestTheme(workspace, theme.Id);
             }
             ui.Separator();
-            if (ui.MenuItem("Theme Editor", m_ThemeEditor.Visible()))
-                m_ThemeEditor.SetVisible(!m_ThemeEditor.Visible());
+            DrawPanelMenuItem(ui, m_ThemeEditor);
             if (ui.MenuItem("Import..."))
                 workspace.ShowImportThemeDialog();
             if (ui.MenuItem("Export..."))
@@ -315,10 +333,7 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
         if (auto window = ui.BeginMenu("Window"); window)
         {
             if (auto packageManagement = ui.BeginMenu("Package Management"); packageManagement)
-            {
-                if (ui.MenuItem("Package Manager", m_PackageManagerPanel->Registration().Visible()))
-                    m_PackageManagerPanel->Registration().SetVisible(!m_PackageManagerPanel->Registration().Visible());
-            }
+                DrawPanelMenuItem(ui, m_PackageManagerPanel->Registration());
             ui.Separator();
             DrawPanelMenuItem(ui, m_SceneViewportPanel->Registration());
             DrawPanelMenuItem(ui, m_Game);

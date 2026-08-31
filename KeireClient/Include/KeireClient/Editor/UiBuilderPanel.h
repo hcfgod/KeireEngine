@@ -4,7 +4,10 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/UiBuilderDocument.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
+#include "KeireClient/Editor/UiStyleSourceEditor.h"
+#include "KeireClient/Editor/UiStyleTokenRefactor.h"
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -14,6 +17,13 @@
 
 namespace KeireEditor
 {
+    enum class UiBuilderWorkspaceMode : std::uint8_t
+    {
+        Design,
+        Styles,
+        Debug
+    };
+
     class IUiBuilderController
     {
       public:
@@ -31,7 +41,11 @@ namespace KeireEditor
         virtual void SaveUiBuilderDocument() = 0;
         virtual void ReloadUiBuilderDocument() = 0;
         virtual void SaveUiBuilderStyleSheet() = 0;
+        virtual void RequestSaveUiBuilderStyleSheetAs() = 0;
         virtual void ReloadUiBuilderStyleSheet() = 0;
+        [[nodiscard]] virtual UiStyleTokenRefactorPreview
+        PreviewUiBuilderTokenRefactor(std::string_view currentName, std::string_view replacementName) = 0;
+        virtual void ApplyUiBuilderTokenRefactor(const UiStyleTokenRefactorPreview& preview) = 0;
         virtual void ReportUiBuilderError(std::string message) noexcept = 0;
         [[nodiscard]] virtual UiBuilderLiveDebugCapture CaptureUiBuilderLiveDebug(Keire::AssetId visualTree) = 0;
         virtual void SetUiBuilderLivePicking(Keire::AssetId visualTree, bool enabled) noexcept = 0;
@@ -77,6 +91,9 @@ namespace KeireEditor
                                std::vector<const Keire::UiVisualTreeAsset*>& identities) const;
         void DrawInspector(Keire::UiFrame& ui);
         void DrawStyleSheets(Keire::UiFrame& ui);
+        void DrawStyleProperties(Keire::UiFrame& ui);
+        void DrawStyleComputed(Keire::UiFrame& ui);
+        void DrawStyleSource(Keire::UiFrame& ui);
         void DrawDebugger(Keire::UiFrame& ui);
         void DrawSource(Keire::UiFrame& ui);
         void RefreshPreviewSnapshot();
@@ -111,11 +128,41 @@ namespace KeireEditor
         std::string m_InlineStyleDraft;
         AssetPicker m_StyleSheetPicker;
         Keire::AssetId m_StyleSheetDraft;
+        AssetPicker m_StyleValueAssetPicker;
+        Keire::AssetId m_StyleValueAssetDraft;
         Keire::AssetId m_StyleRuleAsset;
         std::uint64_t m_StyleRuleGeneration = 0;
         std::optional<std::size_t> m_StyleRuleSelection;
         std::string m_StyleSelectorDraft;
+        std::string m_StyleSelectorTypeDraft;
+        std::string m_StyleSelectorNameDraft;
+        std::string m_StyleSelectorClassesDraft;
+        Keire::UiStyleCombinator m_StyleSelectorCombinator = Keire::UiStyleCombinator::None;
+        Keire::UiStylePseudoState m_StyleSelectorStates = Keire::UiStylePseudoState::None;
         std::string m_StyleDeclarationsDraft;
+        std::string m_StyleRuleSearch;
+        std::string m_StylePropertySearch;
+        std::string m_StyleSourceDraft;
+        UiStyleSourceEditor m_StyleSourceEditor;
+        Keire::UiCodeEditorState m_StyleSourceEditorState;
+        std::string m_StyleSourceFind;
+        std::string m_StyleSourceReplace;
+        std::vector<UiStyleSourceMatch> m_StyleSourceMatches;
+        std::size_t m_StyleSourceMatch = 0;
+        std::string m_StyleExternalComparison;
+        std::string m_StyleTokenSearch;
+        std::string m_StyleTokenSelection;
+        std::string m_StyleTokenNameDraft;
+        std::string m_StyleTokenValueDraft;
+        std::optional<UiStyleTokenRefactorPreview> m_StyleTokenRefactorPreview;
+        bool m_StyleTokenRefactorConfirmed = false;
+        bool m_StyleSourceFindCaseSensitive = false;
+        std::string m_NewStyleProperty;
+        std::string m_NewStyleValue;
+        std::uint64_t m_StyleSourceGeneration = 0;
+        std::chrono::steady_clock::time_point m_StyleSourceEditTime{};
+        bool m_StyleSourceParsePending = false;
+        bool m_StyleEditInline = false;
         std::string m_TemplateDraft;
         std::string m_SlotDraft;
         std::string m_NewTemplateDraft;
@@ -127,6 +174,7 @@ namespace KeireEditor
         std::string m_Message;
         UiBuilderClipboard m_Clipboard;
         CanvasGestureState m_CanvasGesture;
+        UiBuilderWorkspaceMode m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
         bool m_SourceEditing = false;
         bool m_LivePicking = false;
     };

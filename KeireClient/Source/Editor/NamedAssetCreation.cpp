@@ -32,6 +32,8 @@ namespace KeireEditor
             return "UI document";
         case NamedAssetCreationKind::UiStyleSheet:
             return "UI style sheet";
+        case NamedAssetCreationKind::UiFontFamily:
+            return "UI font family";
         case NamedAssetCreationKind::MaterialGraph:
             return "material graph";
         case NamedAssetCreationKind::ShaderGraph:

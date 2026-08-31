@@ -91,7 +91,7 @@ namespace KeireEditor
 
     void ConsolePanel::Attach(Keire::UiWorkspace& workspace)
     {
-        m_Registration = workspace.RegisterPanel({"editor.console", "Console"});
+        m_Registration = workspace.RegisterPanel({"editor.console", "Console", false});
     }
 
     void ConsolePanel::Add(std::string category, std::string message, const Keire::UiColor color,

@@ -429,6 +429,17 @@ namespace KeireEditor
                 RequestNamedCreate(NamedCreateKind::UiDocument, "NewUiDocument");
             if (ui.MenuItem("UI Style Sheet"))
                 RequestNamedCreate(NamedCreateKind::UiStyleSheet, "NewUiStyleSheet");
+            const auto selectedFontFace = Selection.size() == 1 ? editor.AssetBrowserDatabase()->Find(Selection.front())
+                                                                : std::optional<Keire::AssetSourceRecord>{};
+            const bool canCreateFontFamily =
+                selectedFontFace && selectedFontFace->Type == Keire::UiFontFaceAsset::StaticType();
+            if (ui.MenuItem("UI Font Family from Selected Face", false, canCreateFontFamily))
+            {
+                PendingVariantBase = selectedFontFace->Id;
+                RequestNamedCreate(NamedCreateKind::UiFontFamily, "NewUiFontFamily");
+            }
+            if (!canCreateFontFamily && ui.LastItemState().Hovered)
+                ui.SetTooltip("Select one imported .ttf, .otf, or .ttc font face first.", {.Delayed = true});
             if (ui.MenuItem("Material Graph"))
             {
                 MaterialGraphCreation.Begin(Selection.empty() ? Keire::AssetId{} : Selection.back(),

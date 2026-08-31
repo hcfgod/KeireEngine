@@ -109,6 +109,7 @@ namespace KeireEditor
     {
         Keire::RuntimeUiStatistics Statistics;
         std::optional<Keire::RuntimeUiElementState> SelectedState;
+        std::vector<Keire::UiResolvedStyleSelectorTrace> SelectedStyleTrace;
         std::vector<Keire::RuntimeUiDrawCommand> DrawCommands;
         std::vector<UiBuilderPreviewElement> Elements;
         std::size_t LinkedStyleSheets = 0;
@@ -281,6 +282,9 @@ namespace KeireEditor
         [[nodiscard]] Keire::AssetId AddTemplate(Keire::AssetId parent, Keire::AssetId visualTree);
         [[nodiscard]] Keire::AssetId AddSlot(Keire::AssetId parent, std::string slot);
         [[nodiscard]] bool SetClasses(std::span<const Keire::AssetId> elements, std::vector<std::string> classes);
+        [[nodiscard]] bool SetInlineStyleProperty(std::span<const Keire::AssetId> elements, std::string_view name,
+                                                  std::string_view value);
+        [[nodiscard]] bool RemoveInlineStyleProperty(std::span<const Keire::AssetId> elements, std::string_view name);
         [[nodiscard]] bool SetTemplate(Keire::AssetId element, Keire::AssetId visualTree);
         [[nodiscard]] bool SetSlot(Keire::AssetId element, std::string slot);
         [[nodiscard]] bool SetBindings(Keire::AssetId element, std::vector<Keire::UiBindingDefinition> bindings);

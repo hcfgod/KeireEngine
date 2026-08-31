@@ -18,6 +18,20 @@ versions.
 
 ### Added
 
+- Added Visual Style Studio with Design/Styles/Debug modes, searchable and reorderable linked rules, visual selector
+  and responsive-condition builders, categorized property controls, computed cascade provenance, inline override
+  editing, design-token promotion/rename/search/usage counts, color-token previews, visual two-stop gradient editing,
+  independent undo, explicit draft persistence, and bounded local-versus-disk conflict comparison.
+- Added `.keirestyle` schema v2 with v1-preserving one-way migration, width/height/aspect/DPI/orientation/input/reduced-
+  motion media conditions, typed font/image/mask references, per-edge borders, per-corner radii, shadow stacks,
+  nine-slice backgrounds, transforms, expanded transitions, and a shared property registry used by import and runtime.
+- Added imported `.ttf`, `.otf`, and `.ttc` UI Font Face assets plus `.keirefont` weight/style families, FreeType
+  rasterization, HarfBuzz shaping, FriBidi direction resolution, libunibreak wrapping, bounded generation-keyed text
+  caches, per-glyph ordered family fallback, bounded multi-page atlases, exact face/page geometry batches, frame-owned
+  atlas leases, and device-recovery-safe GPU atlas rebuilding.
+- Added the Style Source workspace's cursor-aware completion, hover documentation, matching-brace and rule navigation,
+  case-aware find/replace, deterministic formatting, conflict-safe Save As, and confirmed project-wide token-refactor
+  previews with stale-source rejection and atomic rollback.
 - Added the retained Kéire UI Toolkit foundation: deterministic `.keireui` visual trees, `.keirestyle` cascading
   styles, `.keireuipanel` presentation settings, one `UIDocument` scene component, the managed `Keire.UI` visual
   element/control/event/binding surface, explicit custom-control registration, and a dockable UI Builder/Debugger.

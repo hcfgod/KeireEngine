@@ -55,11 +55,11 @@ namespace KeireEditor
     {
         if (!playActive || !dirty || !assets || !assets->IsOpen() || !asset || documentGeneration == 0)
         {
-            Close();
+            CloseDocument();
             return;
         }
         if (m_Applied && (m_Assets != assets || m_Asset != asset))
-            Close();
+            CloseDocument();
         if (m_Applied && m_Asset == asset && m_DocumentGeneration == documentGeneration)
             return;
 
@@ -109,7 +109,85 @@ namespace KeireEditor
             ClearState();
     }
 
+    void UiBuilderLiveDraftSession::SynchronizeStyle(Keire::Ref<Keire::AssetSystem> assets, const Keire::AssetId asset,
+                                                     const std::uint64_t documentGeneration, const bool dirty,
+                                                     const bool sourceValid,
+                                                     const Keire::UiStyleSheetDefinition& definition) noexcept
+    {
+        if (!dirty || !assets || !assets->IsOpen() || !asset || documentGeneration == 0)
+        {
+            CloseStyle();
+            return;
+        }
+        if (!sourceValid)
+            return;
+        if (m_StyleApplied && (m_StyleAssets != assets || m_StyleAsset != asset))
+            CloseStyle();
+        if (m_StyleApplied && m_StyleAsset == asset && m_StyleDocumentGeneration == documentGeneration)
+            return;
+        try
+        {
+            Keire::UiStyleSheetAsset::Validate(definition);
+            if (!m_StyleApplied)
+            {
+                const auto baseline = assets->Load<Keire::UiStyleSheetAsset>(asset, Keire::AssetPriority::High);
+                const auto loaded = baseline.TryGetLoaded();
+                if (!loaded)
+                {
+                    m_Diagnostic = "Live style preview is waiting for the imported style sheet.";
+                    return;
+                }
+                m_StyleAssets = std::move(assets);
+                m_StyleAsset = asset;
+                m_StyleBaseline = loaded->Definition();
+            }
+            if (!PublishStyle(definition))
+                return;
+            m_StyleDocumentGeneration = documentGeneration;
+            m_StyleApplied = true;
+            m_Diagnostic.clear();
+        }
+        catch (const std::exception& error)
+        {
+            m_Diagnostic = std::string("Live style draft was rejected: ") + error.what();
+        }
+        catch (...)
+        {
+            m_Diagnostic = "Live style draft was rejected by an unknown failure.";
+        }
+    }
+
+    void UiBuilderLiveDraftSession::CommitStyle(Keire::Ref<Keire::AssetSystem> assets, const Keire::AssetId asset,
+                                                const Keire::UiStyleSheetDefinition& definition) noexcept
+    {
+        if (!asset || !assets || !assets->IsOpen())
+        {
+            ClearStyleState();
+            return;
+        }
+        if (!m_StyleApplied || m_StyleAsset != asset || m_StyleAssets != assets)
+            return;
+        if (PublishStyle(definition))
+            ClearStyleState();
+    }
+
+    void UiBuilderLiveDraftSession::CloseStyle() noexcept
+    {
+        bool reverted = true;
+        if (m_StyleApplied && m_StyleAssets && m_StyleAssets->IsOpen() && m_StyleAsset && m_StyleBaseline)
+            reverted = PublishStyle(*m_StyleBaseline);
+        ClearStyleState();
+        if (reverted)
+            m_Diagnostic.clear();
+    }
+
     void UiBuilderLiveDraftSession::Close() noexcept
+    {
+        CloseDocument();
+        CloseStyle();
+    }
+
+    void UiBuilderLiveDraftSession::CloseDocument() noexcept
     {
         bool reverted = true;
         if (m_Applied && m_Assets && m_Assets->IsOpen() && m_Asset && m_Baseline)
@@ -126,6 +204,15 @@ namespace KeireEditor
         m_Baseline.reset();
         m_DocumentGeneration = 0;
         m_Applied = false;
+    }
+
+    void UiBuilderLiveDraftSession::ClearStyleState() noexcept
+    {
+        m_StyleAssets.Reset();
+        m_StyleAsset = {};
+        m_StyleBaseline.reset();
+        m_StyleDocumentGeneration = 0;
+        m_StyleApplied = false;
     }
 
     bool UiBuilderLiveDraftSession::Publish(const Keire::UiVisualTreeDefinition& definition) noexcept
@@ -149,6 +236,32 @@ namespace KeireEditor
         catch (...)
         {
             m_Diagnostic = "Live Play UI draft publication failed with an unknown error.";
+        }
+        return false;
+    }
+
+    bool UiBuilderLiveDraftSession::PublishStyle(const Keire::UiStyleSheetDefinition& definition) noexcept
+    {
+        try
+        {
+            if (!m_StyleAssets || !m_StyleAssets->IsOpen() || !m_StyleAsset)
+                return false;
+            if (!m_StyleAssets->PublishDevelopmentAsset(m_StyleAsset,
+                                                        Keire::CreateRef<Keire::UiStyleSheetAsset>(definition)))
+            {
+                m_Diagnostic = "Live style draft publication is waiting for the current asset load to finish.";
+                return false;
+            }
+            m_Diagnostic.clear();
+            return true;
+        }
+        catch (const std::exception& error)
+        {
+            m_Diagnostic = std::string("Live style draft publication failed: ") + error.what();
+        }
+        catch (...)
+        {
+            m_Diagnostic = "Live style draft publication failed with an unknown error.";
         }
         return false;
     }

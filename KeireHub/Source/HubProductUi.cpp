@@ -1156,6 +1156,10 @@ namespace KeireHub
         auto& settings = *m_EditedSettings;
         PageHeader(ui, m_Tokens, "Settings", "Hub preferences are versioned, validated, and written atomically.");
 
+        auto settingsBody = ui.BeginChild("SettingsBody", {0.0F, 0.0F}, false);
+        if (!settingsBody)
+            return;
+
         ui.TextColored(m_Tokens.PrimaryText, "General");
         constexpr std::array pageLabels{std::string_view("Home"),     std::string_view("Projects"),
                                         std::string_view("Installs"), std::string_view("Templates"),
@@ -1179,6 +1183,7 @@ namespace KeireHub
         }
         (void)ui.Checkbox("Keep Hub running after editor launch", settings.KeepRunningAfterEditorLaunch);
         (void)ui.Checkbox("Close to system tray", settings.CloseToTray);
+        (void)ui.Checkbox("Reduce motion and animations", settings.ReducedMotion);
         (void)ui.Checkbox("Check for updates", settings.CheckForUpdates);
 
         ui.Spacing();

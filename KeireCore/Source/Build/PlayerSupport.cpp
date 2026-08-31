@@ -193,9 +193,25 @@ namespace Keire::Detail
         void RequireFile(const std::unordered_set<std::string>& files, const std::filesystem::path& path,
                          const PlayerPlatform platform)
         {
-            if (!files.contains(LogicalPathKey(path, platform)))
-                throw std::invalid_argument("Player support manifest runtime closure is missing a required file: " +
-                                            PathToUtf8(path));
+            const auto required = LogicalPathKey(path, platform);
+            if (files.contains(required))
+                return;
+
+            std::string diagnostic;
+            const auto filename = CaseFoldedPath(path.filename());
+            for (const auto& candidate : files)
+            {
+                const auto separator = candidate.find_last_of('/');
+                const auto candidateFilename =
+                    separator == std::string::npos ? std::string_view(candidate) : std::string_view(candidate).substr(separator + 1);
+                if (candidateFilename == filename)
+                {
+                    diagnostic = " (the manifest instead contains '" + candidate + "')";
+                    break;
+                }
+            }
+            throw std::invalid_argument("Player support manifest runtime closure is missing a required file: " +
+                                        PathToUtf8(path) + diagnostic);
         }
 
         void ValidateRuntimeClosure(const PlayerSupportManifest& manifest)

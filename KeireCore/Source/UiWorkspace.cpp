@@ -223,16 +223,16 @@ namespace Keire
         [[nodiscard]] UiThemeDefinition ClassicTheme()
         {
             UiThemeDefinition theme;
-            theme.Canvas = {0.0F, 0.0F, 0.0F, 0.85F};
-            theme.Panel = {0.20F, 0.20F, 0.20F, 1.0F};
-            theme.RaisedPanel = {0.35F, 0.40F, 0.61F, 1.0F};
-            theme.Border = {0.50F, 0.50F, 0.50F, 0.50F};
-            theme.Text = {0.90F, 0.90F, 0.90F, 1.0F};
-            theme.MutedText = {0.60F, 0.60F, 0.60F, 1.0F};
-            theme.Accent = {0.40F, 0.40F, 0.90F, 1.0F};
-            theme.AccentHovered = {0.45F, 0.48F, 0.80F, 1.0F};
-            theme.AccentActive = {0.35F, 0.40F, 0.72F, 1.0F};
-            theme.Selection = {0.40F, 0.40F, 0.90F, 0.35F};
+            theme.Canvas = {0.06F, 0.06F, 0.07F, 1.0F};
+            theme.Panel = {0.14F, 0.14F, 0.16F, 1.0F};
+            theme.RaisedPanel = {0.22F, 0.23F, 0.28F, 1.0F};
+            theme.Border = {0.48F, 0.50F, 0.56F, 1.0F};
+            theme.Text = {0.96F, 0.96F, 0.97F, 1.0F};
+            theme.MutedText = {0.74F, 0.75F, 0.79F, 1.0F};
+            theme.Accent = {0.34F, 0.56F, 0.96F, 1.0F};
+            theme.AccentHovered = {0.45F, 0.66F, 1.0F, 1.0F};
+            theme.AccentActive = {0.25F, 0.47F, 0.88F, 1.0F};
+            theme.Selection = {0.34F, 0.56F, 0.96F, 0.42F};
             return theme;
         }
 

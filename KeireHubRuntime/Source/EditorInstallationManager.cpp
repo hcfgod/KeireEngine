@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <set>
@@ -138,7 +139,7 @@ namespace KeireHub
 
         [[nodiscard]] EditorInstallationHealthSnapshot
         InspectInstallation(const EditorInstallation& installation, const EditorInstallationManagerSpecification& spec,
-                            const EditorInstallationActivity activity)
+                            const EditorInstallationActivity activity, const bool verifyContent)
         {
             EditorInstallationHealthSnapshot snapshot{.Installation = installation, .Activity = activity};
             std::error_code error;
@@ -281,10 +282,50 @@ namespace KeireHub
             }
 
             std::set<std::string, std::less<>> damagedPaths;
+            std::uint64_t totalFiles = 0;
+            std::uint64_t totalBytes = 0;
+            const auto includeInTotal = [&](const std::uint64_t size)
+            {
+                ++totalFiles;
+                totalBytes = size > std::numeric_limits<std::uint64_t>::max() - totalBytes
+                                 ? std::numeric_limits<std::uint64_t>::max()
+                                 : totalBytes + size;
+            };
+            if (receiptVerified)
+            {
+                for (const auto& installedPackage : snapshot.Installation.InstalledPackages)
+                {
+                    for (const auto& file : installedPackage.Files)
+                        includeInTotal(file.SizeBytes);
+                }
+            }
+            else
+            {
+                for (const auto& file : package.Files)
+                    includeInTotal(file.SizeBytes);
+            }
+            std::uint64_t processedFiles = 0;
+            std::uint64_t processedBytes = 0;
+            const auto reportProgress = [&]
+            {
+                if (verifyContent && spec.ReportVerificationProgress)
+                {
+                    spec.ReportVerificationProgress(processedFiles, totalFiles, processedBytes, totalBytes);
+                }
+            };
+            reportProgress();
             const auto verifyFile = [&](const std::filesystem::path& relative, const std::uint64_t expectedSize,
                                         const std::string& expectedDigest,
                                         const std::optional<std::uint32_t> expectedMode)
             {
+                const auto finishFile = [&]
+                {
+                    ++processedFiles;
+                    processedBytes = expectedSize > std::numeric_limits<std::uint64_t>::max() - processedBytes
+                                         ? std::numeric_limits<std::uint64_t>::max()
+                                         : processedBytes + expectedSize;
+                    reportProgress();
+                };
                 const auto key = Detail::NormalizedEditorPathKey(relative);
                 const auto path = installation.Root / relative;
                 std::error_code fileError;
@@ -294,6 +335,7 @@ namespace KeireHub
                     AddIssue(snapshot, EditorInstallationIssueCode::MissingFile, relative,
                              "A declared installation file is missing.");
                     damagedPaths.insert(key);
+                    finishFile();
                     return;
                 }
                 if (!IsConfinedRegularFile(installation.Root, relative))
@@ -301,6 +343,7 @@ namespace KeireHub
                     AddIssue(snapshot, EditorInstallationIssueCode::UnsafeFile, relative,
                              "A declared installation file is not a confined regular file.");
                     damagedPaths.insert(key);
+                    finishFile();
                     return;
                 }
                 const auto size = std::filesystem::file_size(path, fileError);
@@ -309,15 +352,20 @@ namespace KeireHub
                     AddIssue(snapshot, EditorInstallationIssueCode::FileSizeMismatch, relative,
                              "A declared installation file has the wrong size.");
                     damagedPaths.insert(key);
+                    finishFile();
                     return;
                 }
-                auto digest = Detail::Sha256File(path, expectedSize);
-                if (!digest || digest.Value() != expectedDigest)
+                if (verifyContent)
                 {
-                    AddIssue(snapshot, EditorInstallationIssueCode::FileDigestMismatch, relative,
-                             "A declared installation file failed integrity verification.");
-                    damagedPaths.insert(key);
-                    return;
+                    auto digest = Detail::Sha256File(path, expectedSize);
+                    if (!digest || digest.Value() != expectedDigest)
+                    {
+                        AddIssue(snapshot, EditorInstallationIssueCode::FileDigestMismatch, relative,
+                                 "A declared installation file failed integrity verification.");
+                        damagedPaths.insert(key);
+                        finishFile();
+                        return;
+                    }
                 }
 #if !defined(_WIN32)
                 if (expectedMode)
@@ -334,14 +382,19 @@ namespace KeireHub
                         AddIssue(snapshot, EditorInstallationIssueCode::FileModeMismatch, relative,
                                  "A declared installation file has unsafe permissions.");
                         damagedPaths.insert(key);
+                        finishFile();
                         return;
                     }
                 }
 #else
                 static_cast<void>(expectedMode);
 #endif
-                ++snapshot.VerifiedFileCount;
-                snapshot.VerifiedBytes += expectedSize;
+                if (verifyContent)
+                {
+                    ++snapshot.VerifiedFileCount;
+                    snapshot.VerifiedBytes += expectedSize;
+                }
+                finishFile();
             };
             if (receiptVerified)
             {
@@ -372,9 +425,12 @@ namespace KeireHub
             const bool incompatible =
                 std::ranges::any_of(snapshot.Issues, [](const auto& issue)
                                     { return issue.Code == EditorInstallationIssueCode::HostIncompatible; });
-            snapshot.Health = hasDamage      ? InstallationHealth::Damaged
-                              : incompatible ? InstallationHealth::VerificationRequired
-                                             : InstallationHealth::Healthy;
+            snapshot.Health = hasDamage       ? InstallationHealth::Damaged
+                              : incompatible  ? InstallationHealth::VerificationRequired
+                              : verifyContent ? InstallationHealth::Healthy
+                              : installation.Health == InstallationHealth::Healthy
+                                  ? InstallationHealth::Healthy
+                                  : InstallationHealth::VerificationRequired;
             snapshot.Installation.Health = snapshot.Health;
             return snapshot;
         }
@@ -489,8 +545,8 @@ namespace KeireHub
     {
         if (const auto host = ValidateInspectionHost(specification); !host)
             return HubResult<EditorInstallationHealthSnapshot>::Failure(host.Error());
-        return HubResult<EditorInstallationHealthSnapshot>::Success(
-            InspectInstallation(installation, specification, ProbeSnapshotActivity(installation, specification)));
+        return HubResult<EditorInstallationHealthSnapshot>::Success(InspectInstallation(
+            installation, specification, ProbeSnapshotActivity(installation, specification), false));
     }
 
     HubResult<EditorInstallationHealthSnapshot>
@@ -503,7 +559,7 @@ namespace KeireHub
         if (const auto inactive = GuardSnapshotInactive(installation, activity); !inactive)
             return HubResult<EditorInstallationHealthSnapshot>::Failure(inactive.Error());
         return HubResult<EditorInstallationHealthSnapshot>::Success(
-            InspectInstallation(installation, specification, activity));
+            InspectInstallation(installation, specification, activity, true));
     }
 
     HubResult<EditorManagedOperationPlan> PrepareManagedEditorOperationSnapshot(
@@ -528,7 +584,7 @@ namespace KeireHub
         }
 
         auto inspection =
-            InspectInstallation(installation, specification, ProbeSnapshotActivity(installation, specification));
+            InspectInstallation(installation, specification, ProbeSnapshotActivity(installation, specification), true);
         if (const auto inactive = GuardSnapshotInactive(installation, inspection.Activity); !inactive)
             return HubResult<EditorManagedOperationPlan>::Failure(inactive.Error());
         if (operation == EditorManagedOperation::Remove && inspection.Health != InstallationHealth::Healthy)
@@ -826,7 +882,7 @@ namespace KeireHub
         const auto installations = m_Registry.Snapshot();
         snapshots.reserve(installations->size());
         for (const auto& installation : *installations)
-            snapshots.push_back(InspectInstallation(installation, m_Specification, ProbeActivity(installation)));
+            snapshots.push_back(InspectInstallation(installation, m_Specification, ProbeActivity(installation), true));
         m_Snapshot = std::make_shared<const std::vector<EditorInstallationHealthSnapshot>>(std::move(snapshots));
         return HubStatus::Success();
     }
@@ -843,7 +899,7 @@ namespace KeireHub
                  .AffectedItem = installationId});
         }
         return HubResult<EditorInstallationHealthSnapshot>::Success(
-            InspectInstallation(*installation, m_Specification, ProbeActivity(*installation)));
+            InspectInstallation(*installation, m_Specification, ProbeActivity(*installation), false));
     }
 
     HubResult<EditorInstallationHealthSnapshot>
@@ -861,7 +917,7 @@ namespace KeireHub
         if (const auto inactive = GuardInactive(*installation, activity); !inactive)
             return HubResult<EditorInstallationHealthSnapshot>::Failure(inactive.Error());
         return HubResult<EditorInstallationHealthSnapshot>::Success(
-            InspectInstallation(*installation, m_Specification, activity));
+            InspectInstallation(*installation, m_Specification, activity, true));
     }
 
     HubStatus EditorInstallationManager::RemoveExternalRegistration(const std::string& installationId,

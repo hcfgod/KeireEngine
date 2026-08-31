@@ -18,7 +18,10 @@ $OutputArchitecture = Get-ArchitectureOutputName $Architecture
 $Ninja = Get-NinjaExecutable
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
 $Bridge = Join-Path $Root "Scripts\Dependencies\CMakeLists.txt"
-$bridgeHash = (Get-FileHash -Algorithm SHA256 $Bridge).Hash.ToLowerInvariant()
+$bridgeFiles = @($Bridge, (Join-Path $Root "Scripts\Dependencies\RunAndCapture.cmake"))
+$bridgeHash = ($bridgeFiles | ForEach-Object {
+        (Get-FileHash -Algorithm SHA256 $_).Hash.ToLowerInvariant()
+    }) -join ":"
 $WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "dependencies"
 try {
 
@@ -47,8 +50,10 @@ function Get-LockedDependencySource {
             Remove-KeireGeneratedDirectory -RepositoryRoot $sourceContainerRoot -AllowedRoot $sourceBase `
                 -Path $temporary -Description "temporary dependency source"
         }
-        & git clone --quiet --filter=blob:none --no-checkout $Url $temporary
+        & git -c core.longpaths=true clone --quiet --filter=blob:none --no-checkout $Url $temporary
         if ($LASTEXITCODE -ne 0) { throw "Could not clone $Name." }
+        & git -C $temporary config core.longpaths true
+        if ($LASTEXITCODE -ne 0) { throw "Could not enable long paths for $Name." }
         & git -C $temporary fetch --quiet --depth 1 origin $Commit
         if ($LASTEXITCODE -ne 0) { throw "Could not fetch locked $Name commit $Commit." }
         & git -C $temporary checkout --quiet --detach $Commit
@@ -207,6 +212,10 @@ function Get-PatchedAssimpSource {
 $joltSource = Get-LockedDependencySource "jolt" $Lock.JOLT_URL $Lock.JOLT_COMMIT
 $recastSource = Get-LockedDependencySource "recast" $Lock.RECAST_URL $Lock.RECAST_COMMIT
 $miniaudioSource = Get-LockedDependencySource "miniaudio" $Lock.MINIAUDIO_URL $Lock.MINIAUDIO_COMMIT
+$freetypeSource = Get-LockedDependencySource "freetype" $Lock.FREETYPE_URL $Lock.FREETYPE_COMMIT
+$harfbuzzSource = Get-LockedDependencySource "harfbuzz" $Lock.HARFBUZZ_URL $Lock.HARFBUZZ_COMMIT
+$fribidiSource = Get-LockedDependencySource "fribidi" $Lock.FRIBIDI_URL $Lock.FRIBIDI_COMMIT
+$libunibreakSource = Get-LockedDependencySource "libunibreak" $Lock.LIBUNIBREAK_URL $Lock.LIBUNIBREAK_COMMIT
 $sodiumSource = Get-LockedDependencySource "libsodium" $Lock.LIBSODIUM_URL $Lock.LIBSODIUM_COMMIT
 $assimpSource = Join-Path $Root "Vendor\assimp"
 $assimpHead = ([string](& git -C $assimpSource rev-parse HEAD)).Trim()
@@ -279,7 +288,8 @@ function Assert-SdlInputBackends {
 }
 
 $key = @($Lock.SDL_COMMIT, $Lock.ASSIMP_COMMIT, $Lock.JOLT_COMMIT, $Lock.RECAST_COMMIT,
-    $Lock.MINIAUDIO_COMMIT, $Lock.LIBSODIUM_COMMIT, $sourceLayoutIdentity, $Architecture, $Toolset, $compiler, $bridgeHash,
+    $Lock.MINIAUDIO_COMMIT, $Lock.FREETYPE_COMMIT, $Lock.HARFBUZZ_COMMIT, $Lock.FRIBIDI_COMMIT,
+    $Lock.LIBUNIBREAK_COMMIT, $Lock.LIBSODIUM_COMMIT, $sourceLayoutIdentity, $Architecture, $Toolset, $compiler, $bridgeHash,
     ($options -join ";")) -join "|"
 $base = Join-Path $Root "Build\Dependencies\windows-$OutputArchitecture-$Toolset"
 $zlibDebugName = if ($Toolset -eq "msc") { "zlibstaticd.lib" } else { "zlibstatic.lib" }
@@ -343,6 +353,11 @@ foreach ($configuration in @("Debug", "Release")) {
     $detourCrowdLibrary = Join-Path $install "lib\DetourCrowd$recastSuffix.lib"
     $detourTileCacheLibrary = Join-Path $install "lib\DetourTileCache$recastSuffix.lib"
     $miniaudioLibrary = Join-Path $install "lib\miniaudio.lib"
+    $freetypeLibraryName = if ($configuration -eq "Debug") { "freetyped.lib" } else { "freetype.lib" }
+    $freetypeLibrary = Join-Path $install "lib\$freetypeLibraryName"
+    $harfbuzzLibrary = Join-Path $install "lib\harfbuzz.lib"
+    $fribidiLibrary = Join-Path $install "lib\fribidi.lib"
+    $libunibreakLibrary = Join-Path $install "lib\unibreak.lib"
     $zlibName = if ($configuration -eq "Debug") { "lib\$zlibDebugName" } else { "lib\zlibstatic.lib" }
     $zlibLibrary = Join-Path $install $zlibName
     $sodiumRuntime = Join-Path $install "bin\libsodium.dll"
@@ -351,7 +366,9 @@ foreach ($configuration in @("Debug", "Release")) {
     $valid = -not $Force -and (Test-Path $library) -and (Test-Path $assimpLibrary) -and
         (Test-Path $joltLibrary) -and (Test-Path $recastLibrary) -and (Test-Path $detourLibrary) -and
         (Test-Path $detourCrowdLibrary) -and (Test-Path $detourTileCacheLibrary) -and
-        (Test-Path $miniaudioLibrary) -and (Test-Path $sodiumRuntime) -and (Test-Path $sodiumLicense) -and
+        (Test-Path $miniaudioLibrary) -and (Test-Path $freetypeLibrary) -and (Test-Path $harfbuzzLibrary) -and
+        (Test-Path $fribidiLibrary) -and (Test-Path $libunibreakLibrary) -and
+        (Test-Path $sodiumRuntime) -and (Test-Path $sodiumLicense) -and
         (Test-Path $zlibLibrary) -and (Test-Path $stamp) -and
         ((Get-Content $stamp -Raw).Trim() -eq "$key|$configuration")
     if ($valid) {
@@ -374,6 +391,8 @@ foreach ($configuration in @("Debug", "Release")) {
         "-DKEIRE_SDL_SOURCE=$(Join-Path $Root 'Vendor\SDL')" `
         "-DKEIRE_ASSIMP_SOURCE=$assimpPatchedSource" "-DKEIRE_JOLT_SOURCE=$joltSource" `
         "-DKEIRE_RECAST_SOURCE=$recastSource" "-DKEIRE_MINIAUDIO_SOURCE=$miniaudioSource" `
+        "-DKEIRE_FREETYPE_SOURCE=$freetypeSource" "-DKEIRE_HARFBUZZ_SOURCE=$harfbuzzSource" `
+        "-DKEIRE_FRIBIDI_SOURCE=$fribidiSource" "-DKEIRE_LIBUNIBREAK_SOURCE=$libunibreakSource" `
         "-DCMAKE_BUILD_TYPE=$configuration" `
         "-DCMAKE_INSTALL_PREFIX=$install" @options
     if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency configuration failed." }
@@ -385,9 +404,15 @@ foreach ($configuration in @("Debug", "Release")) {
         -not (Test-Path -LiteralPath $joltLibrary) -or -not (Test-Path -LiteralPath $recastLibrary) -or
         -not (Test-Path -LiteralPath $detourLibrary) -or -not (Test-Path -LiteralPath $detourCrowdLibrary) -or
         -not (Test-Path -LiteralPath $detourTileCacheLibrary) -or -not (Test-Path -LiteralPath $miniaudioLibrary) -or
+        -not (Test-Path -LiteralPath $freetypeLibrary) -or -not (Test-Path -LiteralPath $harfbuzzLibrary) -or
+        -not (Test-Path -LiteralPath $fribidiLibrary) -or -not (Test-Path -LiteralPath $libunibreakLibrary) -or
         -not (Test-Path -LiteralPath $zlibLibrary) -or -not (Test-Path -LiteralPath $sodiumRuntime) -or
         -not (Test-Path -LiteralPath $sodiumLicense) -or
         -not (Test-Path -LiteralPath (Join-Path $install "include\assimp\Importer.hpp")) -or
+        -not (Test-Path -LiteralPath (Join-Path $install "include\freetype2\ft2build.h")) -or
+        -not (Test-Path -LiteralPath (Join-Path $install "include\harfbuzz\hb.h")) -or
+        -not (Test-Path -LiteralPath (Join-Path $install "include\fribidi\fribidi.h")) -or
+        -not (Test-Path -LiteralPath (Join-Path $install "include\unibreak\linebreak.h")) -or
         -not (Test-Path -LiteralPath (Join-Path $install "include\SDL3\SDL.h")) -or
         -not (Test-Path -LiteralPath (Join-Path $install "cmake\SDL3Config.cmake"))) {
         throw "Native $configuration dependency install is incomplete."
@@ -481,6 +506,10 @@ DependencyManifest = {
     JoltCommit = "$($Lock.JOLT_COMMIT)",
     RecastCommit = "$($Lock.RECAST_COMMIT)",
     MiniaudioCommit = "$($Lock.MINIAUDIO_COMMIT)",
+    FreeTypeCommit = "$($Lock.FREETYPE_COMMIT)",
+    HarfBuzzCommit = "$($Lock.HARFBUZZ_COMMIT)",
+    FriBidiCommit = "$($Lock.FRIBIDI_COMMIT)",
+    LibunibreakCommit = "$($Lock.LIBUNIBREAK_COMMIT)",
     SodiumCommit = "$($Lock.LIBSODIUM_COMMIT)",
     CoralCommit = "$($coralDebug.Commit)",
     CoralPatchDigest = "$($coralDebug.PatchDigest)",
@@ -509,6 +538,16 @@ DependencyManifest = {
     MiniaudioInclude = "$debugInstall/include/miniaudio",
     MiniaudioDebugLibrary = "$debugInstall/lib/miniaudio.lib",
     MiniaudioReleaseLibrary = "$releaseInstall/lib/miniaudio.lib",
+    TypographyInclude = "$debugInstall/include",
+    FreeTypeInclude = "$debugInstall/include/freetype2",
+    FreeTypeDebugLibrary = "$debugInstall/lib/freetyped.lib",
+    FreeTypeReleaseLibrary = "$releaseInstall/lib/freetype.lib",
+    HarfBuzzDebugLibrary = "$debugInstall/lib/harfbuzz.lib",
+    HarfBuzzReleaseLibrary = "$releaseInstall/lib/harfbuzz.lib",
+    FriBidiDebugLibrary = "$debugInstall/lib/fribidi.lib",
+    FriBidiReleaseLibrary = "$releaseInstall/lib/fribidi.lib",
+    LibunibreakDebugLibrary = "$debugInstall/lib/unibreak.lib",
+    LibunibreakReleaseLibrary = "$releaseInstall/lib/unibreak.lib",
     SodiumDebugRuntime = "$debugInstall/bin/libsodium.dll",
     SodiumReleaseRuntime = "$releaseInstall/bin/libsodium.dll",
     SodiumLicense = "$releaseInstall/share/licenses/libsodium/LICENSE",

@@ -1,14 +1,18 @@
 #include "Keire/Ui/UiToolkit.h"
 
+#include "Keire/Ui/UiStyleProperties.h"
+
 #include "Keire/Assets/AssetPipeline.h"
 
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
@@ -509,6 +513,8 @@ namespace Keire
                 return UiStylePseudoState::Disabled;
             if (value == "checked")
                 return UiStylePseudoState::Checked;
+            if (value == "root")
+                return UiStylePseudoState::Root;
             throw std::runtime_error("UI stylesheet contains an unsupported pseudo-state.");
         }
 
@@ -646,12 +652,305 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] const char* ToString(const UiStyleOrientation value) noexcept
+        {
+            switch (value)
+            {
+            case UiStyleOrientation::Any:
+                return "any";
+            case UiStyleOrientation::Landscape:
+                return "landscape";
+            case UiStyleOrientation::Portrait:
+                return "portrait";
+            }
+            return "any";
+        }
+
+        [[nodiscard]] const char* ToString(const UiStylePointerPrecision value) noexcept
+        {
+            switch (value)
+            {
+            case UiStylePointerPrecision::Any:
+                return "any";
+            case UiStylePointerPrecision::Fine:
+                return "fine";
+            case UiStylePointerPrecision::Coarse:
+                return "coarse";
+            case UiStylePointerPrecision::None:
+                return "none";
+            }
+            return "any";
+        }
+
+        [[nodiscard]] const char* ToString(const UiStyleNavigationMode value) noexcept
+        {
+            switch (value)
+            {
+            case UiStyleNavigationMode::Any:
+                return "any";
+            case UiStyleNavigationMode::Pointer:
+                return "pointer";
+            case UiStyleNavigationMode::Keyboard:
+                return "keyboard";
+            case UiStyleNavigationMode::Gamepad:
+                return "gamepad";
+            }
+            return "any";
+        }
+
+        [[nodiscard]] float ParseMediaScalar(std::string value, const std::string_view suffix,
+                                             const std::string_view property)
+        {
+            value = Trim(value);
+            if (!suffix.empty() && value.ends_with(suffix))
+                value.resize(value.size() - suffix.size());
+            float result = 0.0F;
+            const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
+            if (error != std::errc{} || end != value.data() + value.size() || !std::isfinite(result) || result < 0.0F)
+                throw std::runtime_error("UI stylesheet media condition '" + std::string(property) +
+                                         "' requires a non-negative finite value.");
+            return result;
+        }
+
+        [[nodiscard]] float ParseMediaRatio(const std::string_view value, const std::string_view property)
+        {
+            const auto separator = value.find('/');
+            if (separator == std::string_view::npos)
+                return ParseMediaScalar(std::string(value), {}, property);
+            const auto numerator = ParseMediaScalar(std::string(value.substr(0, separator)), {}, property);
+            const auto denominator = ParseMediaScalar(std::string(value.substr(separator + 1)), {}, property);
+            if (denominator <= 0.0F)
+                throw std::runtime_error("UI stylesheet media aspect-ratio denominator must be positive.");
+            return numerator / denominator;
+        }
+
+        [[nodiscard]] UiStyleMediaCondition ParseMediaCondition(const std::string_view source)
+        {
+            UiStyleMediaCondition result;
+            std::unordered_set<std::string> names;
+            std::size_t cursor = 0;
+            while (cursor < source.size())
+            {
+                cursor = source.find_first_not_of(" \t\r\n", cursor);
+                if (cursor == std::string_view::npos)
+                    break;
+                if (source[cursor] != '(')
+                    throw std::runtime_error(
+                        "UI stylesheet media conditions must be parenthesized and joined by 'and'.");
+                const auto close = source.find(')', cursor + 1);
+                if (close == std::string_view::npos)
+                    throw std::runtime_error("UI stylesheet contains an unterminated media condition.");
+                const auto condition = Trim(source.substr(cursor + 1, close - cursor - 1));
+                const auto colon = condition.find(':');
+                if (colon == std::string::npos)
+                    throw std::runtime_error("UI stylesheet media condition is missing ':'.");
+                const auto name = Trim(std::string_view(condition).substr(0, colon));
+                const auto value = Trim(std::string_view(condition).substr(colon + 1));
+                if (name.empty() || value.empty() || !names.insert(name).second)
+                    throw std::runtime_error("UI stylesheet media condition is empty or duplicated.");
+
+                if (name == "min-width")
+                    result.MinimumWidth = ParseMediaScalar(value, "px", name);
+                else if (name == "max-width")
+                    result.MaximumWidth = ParseMediaScalar(value, "px", name);
+                else if (name == "min-height")
+                    result.MinimumHeight = ParseMediaScalar(value, "px", name);
+                else if (name == "max-height")
+                    result.MaximumHeight = ParseMediaScalar(value, "px", name);
+                else if (name == "min-aspect-ratio")
+                    result.MinimumAspectRatio = ParseMediaRatio(value, name);
+                else if (name == "max-aspect-ratio")
+                    result.MaximumAspectRatio = ParseMediaRatio(value, name);
+                else if (name == "min-dpi")
+                    result.MinimumDpi = ParseMediaScalar(value, "dpi", name);
+                else if (name == "max-dpi")
+                    result.MaximumDpi = ParseMediaScalar(value, "dpi", name);
+                else if (name == "orientation")
+                {
+                    if (value == "landscape")
+                        result.Orientation = UiStyleOrientation::Landscape;
+                    else if (value == "portrait")
+                        result.Orientation = UiStyleOrientation::Portrait;
+                    else
+                        throw std::runtime_error("UI stylesheet media orientation must be landscape or portrait.");
+                }
+                else if (name == "pointer")
+                {
+                    if (value == "fine")
+                        result.Pointer = UiStylePointerPrecision::Fine;
+                    else if (value == "coarse")
+                        result.Pointer = UiStylePointerPrecision::Coarse;
+                    else if (value == "none")
+                        result.Pointer = UiStylePointerPrecision::None;
+                    else
+                        throw std::runtime_error("UI stylesheet media pointer must be fine, coarse, or none.");
+                }
+                else if (name == "navigation")
+                {
+                    if (value == "pointer")
+                        result.Navigation = UiStyleNavigationMode::Pointer;
+                    else if (value == "keyboard")
+                        result.Navigation = UiStyleNavigationMode::Keyboard;
+                    else if (value == "gamepad")
+                        result.Navigation = UiStyleNavigationMode::Gamepad;
+                    else
+                        throw std::runtime_error(
+                            "UI stylesheet media navigation must be pointer, keyboard, or gamepad.");
+                }
+                else if (name == "prefers-reduced-motion")
+                {
+                    if (value == "reduce")
+                        result.ReducedMotion = true;
+                    else if (value == "no-preference")
+                        result.ReducedMotion = false;
+                    else
+                        throw std::runtime_error(
+                            "UI stylesheet reduced-motion preference must be reduce or no-preference.");
+                }
+                else
+                    throw std::runtime_error("UI stylesheet contains an unsupported media condition: " + name);
+
+                cursor = source.find_first_not_of(" \t\r\n", close + 1);
+                if (cursor == std::string_view::npos)
+                    break;
+                if (source.substr(cursor, 3) != "and" ||
+                    (cursor + 3 < source.size() && !std::isspace(static_cast<unsigned char>(source[cursor + 3])) &&
+                     source[cursor + 3] != '('))
+                    throw std::runtime_error("UI stylesheet media conditions must be joined by 'and'.");
+                cursor += 3;
+            }
+            if (result.Empty())
+                throw std::runtime_error("UI stylesheet media block requires at least one condition.");
+            return result;
+        }
+
+        [[nodiscard]] std::string EncodeMediaCondition(const UiStyleMediaCondition& condition)
+        {
+            std::vector<std::string> values;
+            const auto scalar =
+                [&values](const std::string_view name, const std::optional<float> value, const std::string_view suffix)
+            {
+                if (value)
+                {
+                    std::array<char, 32> storage{};
+                    const auto [end, error] = std::to_chars(storage.data(), storage.data() + storage.size(), *value,
+                                                            std::chars_format::general);
+                    if (error != std::errc{})
+                        throw std::runtime_error("UI stylesheet media value could not be encoded.");
+                    values.push_back("(" + std::string(name) + ": " + std::string(storage.data(), end) +
+                                     std::string(suffix) + ")");
+                }
+            };
+            scalar("min-width", condition.MinimumWidth, "px");
+            scalar("max-width", condition.MaximumWidth, "px");
+            scalar("min-height", condition.MinimumHeight, "px");
+            scalar("max-height", condition.MaximumHeight, "px");
+            scalar("min-aspect-ratio", condition.MinimumAspectRatio, {});
+            scalar("max-aspect-ratio", condition.MaximumAspectRatio, {});
+            scalar("min-dpi", condition.MinimumDpi, "dpi");
+            scalar("max-dpi", condition.MaximumDpi, "dpi");
+            if (condition.Orientation != UiStyleOrientation::Any)
+                values.push_back("(orientation: " + std::string(ToString(condition.Orientation)) + ")");
+            if (condition.Pointer != UiStylePointerPrecision::Any)
+                values.push_back("(pointer: " + std::string(ToString(condition.Pointer)) + ")");
+            if (condition.Navigation != UiStyleNavigationMode::Any)
+                values.push_back("(navigation: " + std::string(ToString(condition.Navigation)) + ")");
+            if (condition.ReducedMotion)
+                values.push_back(std::string("(prefers-reduced-motion: ") +
+                                 (*condition.ReducedMotion ? "reduce)" : "no-preference)"));
+            std::string result;
+            for (const auto& value : values)
+            {
+                if (!result.empty())
+                    result += " and ";
+                result += value;
+            }
+            return result;
+        }
+
+        [[nodiscard]] Json EncodeMediaConditionJson(const UiStyleMediaCondition& condition)
+        {
+            Json result = Json::object();
+            const auto optional = [&result](const char* name, const std::optional<float> value)
+            {
+                if (value)
+                    result[name] = *value;
+            };
+            optional("minimumWidth", condition.MinimumWidth);
+            optional("maximumWidth", condition.MaximumWidth);
+            optional("minimumHeight", condition.MinimumHeight);
+            optional("maximumHeight", condition.MaximumHeight);
+            optional("minimumAspectRatio", condition.MinimumAspectRatio);
+            optional("maximumAspectRatio", condition.MaximumAspectRatio);
+            optional("minimumDpi", condition.MinimumDpi);
+            optional("maximumDpi", condition.MaximumDpi);
+            result["orientation"] = static_cast<std::uint8_t>(condition.Orientation);
+            result["pointer"] = static_cast<std::uint8_t>(condition.Pointer);
+            result["navigation"] = static_cast<std::uint8_t>(condition.Navigation);
+            if (condition.ReducedMotion)
+                result["reducedMotion"] = *condition.ReducedMotion;
+            return result;
+        }
+
+        [[nodiscard]] UiStyleMediaCondition DecodeMediaConditionJson(const Json& source)
+        {
+            UiStyleMediaCondition result;
+            const auto optional = [&source](const char* name) -> std::optional<float>
+            {
+                const auto found = source.find(name);
+                return found == source.end() ? std::nullopt : std::optional(found->get<float>());
+            };
+            result.MinimumWidth = optional("minimumWidth");
+            result.MaximumWidth = optional("maximumWidth");
+            result.MinimumHeight = optional("minimumHeight");
+            result.MaximumHeight = optional("maximumHeight");
+            result.MinimumAspectRatio = optional("minimumAspectRatio");
+            result.MaximumAspectRatio = optional("maximumAspectRatio");
+            result.MinimumDpi = optional("minimumDpi");
+            result.MaximumDpi = optional("maximumDpi");
+            result.Orientation = static_cast<UiStyleOrientation>(source.value("orientation", std::uint8_t{}));
+            result.Pointer = static_cast<UiStylePointerPrecision>(source.value("pointer", std::uint8_t{}));
+            result.Navigation = static_cast<UiStyleNavigationMode>(source.value("navigation", std::uint8_t{}));
+            if (const auto found = source.find("reducedMotion"); found != source.end())
+                result.ReducedMotion = found->get<bool>();
+            return result;
+        }
+
         template <typename Callback>
         void VisitElements(const UiVisualElementDefinition& element, const std::size_t depth, Callback&& callback)
         {
             callback(element, depth);
             for (const auto& child : element.Children)
                 VisitElements(child, depth + 1, callback);
+        }
+
+        [[nodiscard]] std::vector<AssetId> UiStyleAssetDependencies(const UiStyleSheetDefinition& definition)
+        {
+            std::vector<AssetId> result;
+            for (const auto& rule : definition.Rules)
+            {
+                for (const auto& property : rule.Properties)
+                {
+                    std::size_t cursor = 0;
+                    while ((cursor = property.Value.find("asset(", cursor)) != std::string::npos)
+                    {
+                        const auto close = property.Value.find(')', cursor + 6);
+                        if (close == std::string::npos)
+                            throw std::runtime_error("UI stylesheet asset reference is missing ')'.");
+                        const auto identifier =
+                            Trim(std::string_view(property.Value).substr(cursor + 6, close - (cursor + 6)));
+                        const auto asset = AssetId::Parse(identifier);
+                        if (!asset)
+                            throw std::runtime_error("UI stylesheet asset reference requires a non-zero asset ID.");
+                        result.push_back(asset);
+                        cursor = close + 1;
+                    }
+                }
+            }
+            std::ranges::sort(result);
+            const auto unique = std::ranges::unique(result);
+            result.erase(unique.begin(), unique.end());
+            return result;
         }
 
         [[nodiscard]] std::size_t VisualTreeResidentBytes(const UiVisualTreeDefinition& definition)
@@ -673,60 +972,6 @@ namespace Keire
                                   result += value.Property.size() + value.Path.size() + value.Mode.size();
                           });
             return result;
-        }
-
-        [[nodiscard]] const char* ToString(const UiPanelTarget value) noexcept
-        {
-            switch (value)
-            {
-            case UiPanelTarget::ScreenOverlay:
-                return "ScreenOverlay";
-            case UiPanelTarget::CameraOverlay:
-                return "CameraOverlay";
-            case UiPanelTarget::RenderTexture:
-                return "RenderTexture";
-            case UiPanelTarget::WorldSurface:
-                return "WorldSurface";
-            }
-            return "ScreenOverlay";
-        }
-
-        [[nodiscard]] UiPanelTarget ParsePanelTarget(const std::string_view value)
-        {
-            if (value == "ScreenOverlay")
-                return UiPanelTarget::ScreenOverlay;
-            if (value == "CameraOverlay")
-                return UiPanelTarget::CameraOverlay;
-            if (value == "RenderTexture")
-                return UiPanelTarget::RenderTexture;
-            if (value == "WorldSurface")
-                return UiPanelTarget::WorldSurface;
-            throw std::runtime_error("UI panel settings contain an unsupported target.");
-        }
-
-        [[nodiscard]] const char* ToString(const RuntimeUiScaleMode value) noexcept
-        {
-            switch (value)
-            {
-            case RuntimeUiScaleMode::ConstantPixels:
-                return "ConstantPixels";
-            case RuntimeUiScaleMode::ScaleWithViewport:
-                return "ScaleWithViewport";
-            case RuntimeUiScaleMode::ConstantPhysicalSize:
-                return "ConstantPhysicalSize";
-            }
-            return "ScaleWithViewport";
-        }
-
-        [[nodiscard]] RuntimeUiScaleMode ParseScaleMode(const std::string_view value)
-        {
-            if (value == "ConstantPixels")
-                return RuntimeUiScaleMode::ConstantPixels;
-            if (value == "ScaleWithViewport")
-                return RuntimeUiScaleMode::ScaleWithViewport;
-            if (value == "ConstantPhysicalSize")
-                return RuntimeUiScaleMode::ConstantPhysicalSize;
-            throw std::runtime_error("UI panel settings contain an unsupported scale mode.");
         }
 
         [[nodiscard]] Json ParseJson(const std::span<const std::byte> bytes, const std::string_view kind)
@@ -959,31 +1204,78 @@ namespace Keire
         if (bytes.size() > MaximumUiDocumentBytes)
             throw std::runtime_error("UI stylesheet exceeds the 16 MiB safety limit.");
         auto source = RemoveCssComments(Text(bytes));
-        constexpr std::string_view Header = "@keire-style 1;";
         const auto first = source.find_first_not_of(" \t\r\n");
-        if (first == std::string::npos || std::string_view(source).substr(first, Header.size()) != Header)
-            throw std::runtime_error("UI stylesheet must begin with '@keire-style 1;'.");
-        std::size_t cursor = first + Header.size();
         UiStyleSheetDefinition result;
-        while (cursor < source.size())
+        constexpr std::string_view HeaderPrefix = "@keire-style ";
+        if (first == std::string::npos || !std::string_view(source).substr(first).starts_with(HeaderPrefix))
+            throw std::runtime_error("UI stylesheet must begin with '@keire-style 1;' or '@keire-style 2;'.");
+        const auto versionStart = first + HeaderPrefix.size();
+        const auto headerEnd = source.find(';', versionStart);
+        if (headerEnd == std::string::npos)
+            throw std::runtime_error("UI stylesheet version header is unterminated.");
+        const auto version = Trim(std::string_view(source).substr(versionStart, headerEnd - versionStart));
+        if (version == "1")
+            result.SchemaVersion = 1;
+        else if (version == "2")
+            result.SchemaVersion = 2;
+        else
+            throw std::runtime_error("UI stylesheet source has an unsupported schema version.");
+
+        const auto matchingBrace = [&source](const std::size_t open, const std::size_t end)
         {
-            const auto open = source.find('{', cursor);
-            if (open == std::string::npos)
+            std::size_t depth = 0;
+            for (std::size_t cursor = open; cursor < end; ++cursor)
             {
-                if (!Trim(std::string_view(source).substr(cursor)).empty())
-                    throw std::runtime_error("UI stylesheet contains text outside a rule.");
-                break;
+                if (source[cursor] == '{')
+                    ++depth;
+                else if (source[cursor] == '}' && --depth == 0)
+                    return cursor;
             }
-            auto rule = ParseSelector(source.substr(cursor, open - cursor));
-            const auto close = source.find('}', open + 1);
-            if (close == std::string::npos)
-                throw std::runtime_error("UI stylesheet contains an unterminated rule.");
-            if (source.find('{', open + 1) < close)
-                throw std::runtime_error("UI stylesheet does not support nested rules.");
-            rule.Properties = ParseDeclarations(std::string_view(source).substr(open + 1, close - open - 1));
-            result.Rules.push_back(std::move(rule));
-            cursor = close + 1;
-        }
+            return std::string::npos;
+        };
+        std::function<void(std::size_t, std::size_t, std::optional<UiStyleMediaCondition>)> parseBlock;
+        parseBlock =
+            [&](std::size_t cursor, const std::size_t end, const std::optional<UiStyleMediaCondition> inheritedMedia)
+        {
+            while (cursor < end)
+            {
+                cursor = source.find_first_not_of(" \t\r\n", cursor);
+                if (cursor == std::string::npos || cursor >= end)
+                    break;
+                const auto open = source.find('{', cursor);
+                if (open == std::string::npos || open >= end)
+                {
+                    if (!Trim(std::string_view(source).substr(cursor, end - cursor)).empty())
+                        throw std::runtime_error("UI stylesheet contains text outside a rule.");
+                    break;
+                }
+                const auto close = matchingBrace(open, end);
+                if (close == std::string::npos)
+                    throw std::runtime_error("UI stylesheet contains an unterminated rule or media block.");
+                const auto heading = Trim(std::string_view(source).substr(cursor, open - cursor));
+                if (std::string_view(heading).starts_with("@media"))
+                {
+                    if (result.SchemaVersion < 2)
+                        throw std::runtime_error("Responsive @media rules require '@keire-style 2;'.");
+                    if (inheritedMedia)
+                        throw std::runtime_error("UI stylesheet media blocks cannot be nested.");
+                    const auto conditionText =
+                        Trim(std::string_view(heading).substr(std::string_view("@media").size()));
+                    parseBlock(open + 1, close, ParseMediaCondition(conditionText));
+                }
+                else
+                {
+                    if (source.find('{', open + 1) < close)
+                        throw std::runtime_error("UI stylesheet rules cannot contain nested blocks.");
+                    auto rule = ParseSelector(heading);
+                    rule.Properties = ParseDeclarations(std::string_view(source).substr(open + 1, close - open - 1));
+                    rule.Media = inheritedMedia;
+                    result.Rules.push_back(std::move(rule));
+                }
+                cursor = close + 1;
+            }
+        };
+        parseBlock(headerEnd + 1, source.size(), std::nullopt);
         Validate(result);
         return result;
     }
@@ -991,9 +1283,10 @@ namespace Keire
     Ref<UiStyleSheetAsset> UiStyleSheetAsset::Decode(const std::span<const std::byte> bytes)
     {
         const auto document = ParseJson(bytes, "UI stylesheet asset");
-        if (!document.is_object() || document.value("schemaVersion", 0) != 1)
+        if (!document.is_object() || document.value("schemaVersion", 0) < 1 || document.value("schemaVersion", 0) > 2)
             throw std::runtime_error("UI stylesheet asset has an unsupported schema.");
         UiStyleSheetDefinition definition;
+        definition.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
         for (const auto& sourceRule : document.at("rules"))
         {
             UiStyleRuleDefinition rule;
@@ -1002,6 +1295,8 @@ namespace Keire
             for (const auto& sourcePart : sourceRule.at("parts"))
                 rule.Parts.push_back(DecodeSelectorPart(sourcePart));
             rule.Properties = DecodeNamedValues(sourceRule.at("properties"));
+            if (const auto media = sourceRule.find("media"); media != sourceRule.end())
+                rule.Media = DecodeMediaConditionJson(*media);
             definition.Rules.push_back(std::move(rule));
         }
         return CreateRef<UiStyleSheetAsset>(std::move(definition));
@@ -1020,27 +1315,40 @@ namespace Keire
                              {"specificity", rule.Specificity},
                              {"parts", std::move(parts)},
                              {"properties", EncodeNamedValues(rule.Properties)}});
+            if (rule.Media)
+                rules.back()["media"] = EncodeMediaConditionJson(*rule.Media);
         }
-        return Bytes(Json{{"schemaVersion", 1}, {"rules", std::move(rules)}}.dump(2) + '\n');
+        return Bytes(Json{{"schemaVersion", definition.SchemaVersion}, {"rules", std::move(rules)}}.dump(2) + '\n');
     }
 
     std::vector<std::byte> UiStyleSheetAsset::EncodeSource(const UiStyleSheetDefinition& definition)
     {
         Validate(definition);
-        std::string result = "@keire-style 1;\n\n";
+        std::string result = "@keire-style " + std::to_string(definition.SchemaVersion) + ";\n\n";
         for (const auto& rule : definition.Rules)
         {
-            result += rule.Selector + "\n{\n";
+            const bool media = rule.Media.has_value();
+            if (media)
+                result += "@media " + EncodeMediaCondition(*rule.Media) + "\n{\n  ";
+            result += rule.Selector + "\n" + (media ? "  " : "") + "{\n";
             for (const auto& property : rule.Properties)
-                result += "  " + property.Name + ": " + property.Value + ";\n";
-            result += "}\n\n";
+                result += std::string(media ? "    " : "  ") + property.Name + ": " + property.Value + ";\n";
+            result += std::string(media ? "  }\n}\n\n" : "}\n\n");
         }
         return Bytes(result);
     }
 
+    std::string EncodeUiStyleMediaCondition(const UiStyleMediaCondition& condition)
+    {
+        if (condition.Empty())
+            throw std::invalid_argument("A responsive UI style rule requires at least one condition.");
+        return EncodeMediaCondition(condition);
+    }
+
     void UiStyleSheetAsset::Validate(const UiStyleSheetDefinition& definition)
     {
-        if (definition.SchemaVersion != 1 || definition.Rules.size() > MaximumUiStyleRules)
+        if ((definition.SchemaVersion != 1 && definition.SchemaVersion != 2) ||
+            definition.Rules.size() > MaximumUiStyleRules)
             throw std::invalid_argument("UI stylesheet schema or rule count is invalid.");
         std::size_t properties = 0;
         std::size_t stringBytes = 0;
@@ -1049,6 +1357,24 @@ namespace Keire
             if (rule.Selector.empty() || rule.Selector.size() > 1'024 || rule.Parts.empty() || rule.Parts.size() > 32 ||
                 rule.Specificity > 100'000 || rule.Properties.empty() || rule.Properties.size() > 256)
                 throw std::invalid_argument("UI stylesheet rule is empty or exceeds a safety limit.");
+            if (rule.Media)
+            {
+                if (definition.SchemaVersion < 2 || rule.Media->Empty())
+                    throw std::invalid_argument("UI stylesheet media rules require schema v2 and a condition.");
+                const auto finite = [](const std::optional<float> value)
+                { return !value || (std::isfinite(*value) && *value >= 0.0F); };
+                if (!finite(rule.Media->MinimumWidth) || !finite(rule.Media->MaximumWidth) ||
+                    !finite(rule.Media->MinimumHeight) || !finite(rule.Media->MaximumHeight) ||
+                    !finite(rule.Media->MinimumAspectRatio) || !finite(rule.Media->MaximumAspectRatio) ||
+                    !finite(rule.Media->MinimumDpi) || !finite(rule.Media->MaximumDpi) ||
+                    static_cast<std::uint8_t>(rule.Media->Orientation) >
+                        static_cast<std::uint8_t>(UiStyleOrientation::Portrait) ||
+                    static_cast<std::uint8_t>(rule.Media->Pointer) >
+                        static_cast<std::uint8_t>(UiStylePointerPrecision::None) ||
+                    static_cast<std::uint8_t>(rule.Media->Navigation) >
+                        static_cast<std::uint8_t>(UiStyleNavigationMode::Gamepad))
+                    throw std::invalid_argument("UI stylesheet media condition is invalid.");
+            }
             std::unordered_set<std::string> propertyNames;
             for (std::size_t index = 0; index < rule.Parts.size(); ++index)
             {
@@ -1059,7 +1385,7 @@ namespace Keire
                     static_cast<std::uint16_t>(part.States) >
                         static_cast<std::uint16_t>(UiStylePseudoState::Hover | UiStylePseudoState::Active |
                                                    UiStylePseudoState::Focus | UiStylePseudoState::Disabled |
-                                                   UiStylePseudoState::Checked))
+                                                   UiStylePseudoState::Checked | UiStylePseudoState::Root))
                     throw std::invalid_argument("UI stylesheet selector part is invalid.");
                 stringBytes += part.Type.size() + part.Name.size();
                 for (const auto& className : part.Classes)
@@ -1074,6 +1400,7 @@ namespace Keire
                 if (property.Name.empty() || property.Name.size() > 128 || property.Value.empty() ||
                     property.Value.size() > 65'536 || !propertyNames.insert(property.Name).second)
                     throw std::invalid_argument("UI stylesheet property is empty, duplicated, or too large.");
+                ValidateUiStylePropertyValue(property.Name, property.Value, definition.SchemaVersion);
                 stringBytes += property.Name.size() + property.Value.size();
             }
             properties += rule.Properties.size();
@@ -1081,85 +1408,6 @@ namespace Keire
         }
         if (properties > MaximumUiStyleProperties || stringBytes > MaximumUiDocumentBytes)
             throw std::invalid_argument("UI stylesheet exceeds the property or string-data safety limit.");
-    }
-
-    UiPanelSettingsAsset::UiPanelSettingsAsset(UiPanelSettingsDefinition definition)
-        : m_Definition(std::move(definition))
-    {
-        Validate(m_Definition);
-    }
-
-    RuntimeUiCanvasSettings UiPanelSettingsAsset::CanvasSettings() const noexcept
-    {
-        return {m_Definition.ReferenceWidth,
-                m_Definition.ReferenceHeight,
-                m_Definition.ScaleMode,
-                m_Definition.MatchWidthOrHeight,
-                1.0F,
-                m_Definition.RespectSafeArea};
-    }
-
-    Ref<UiPanelSettingsAsset> UiPanelSettingsAsset::Decode(const std::span<const std::byte> bytes)
-    {
-        const auto document = ParseJson(bytes, "UI panel settings asset");
-        if (!document.is_object() || document.value("schemaVersion", 0) != 1)
-            throw std::runtime_error("UI panel settings asset has an unsupported schema.");
-        UiPanelSettingsDefinition definition;
-        definition.Target = ParsePanelTarget(document.at("target").get<std::string>());
-        definition.ScaleMode = ParseScaleMode(document.at("scaleMode").get<std::string>());
-        definition.ReferenceWidth = document.at("referenceWidth").get<float>();
-        definition.ReferenceHeight = document.at("referenceHeight").get<float>();
-        definition.MatchWidthOrHeight = document.at("matchWidthOrHeight").get<float>();
-        definition.SortingOrder = document.value("sortingOrder", 0);
-        definition.Camera =
-            AssetId::Parse(document.value("camera", std::string("00000000-0000-0000-0000-000000000000")));
-        definition.RenderTexture =
-            AssetId::Parse(document.value("renderTexture", std::string("00000000-0000-0000-0000-000000000000")));
-        definition.RespectSafeArea = document.value("respectSafeArea", true);
-        definition.WorldWidth = document.value("worldWidth", 1.92F);
-        definition.WorldHeight = document.value("worldHeight", 1.08F);
-        definition.PixelsPerUnit = document.value("pixelsPerUnit", 1000.0F);
-        definition.DepthTest = document.value("depthTest", true);
-        return CreateRef<UiPanelSettingsAsset>(definition);
-    }
-
-    std::vector<std::byte> UiPanelSettingsAsset::Encode(const UiPanelSettingsDefinition& definition)
-    {
-        Validate(definition);
-        const Json document{{"schemaVersion", 1},
-                            {"target", ToString(definition.Target)},
-                            {"scaleMode", ToString(definition.ScaleMode)},
-                            {"referenceWidth", definition.ReferenceWidth},
-                            {"referenceHeight", definition.ReferenceHeight},
-                            {"matchWidthOrHeight", definition.MatchWidthOrHeight},
-                            {"sortingOrder", definition.SortingOrder},
-                            {"camera", definition.Camera.ToString()},
-                            {"renderTexture", definition.RenderTexture.ToString()},
-                            {"respectSafeArea", definition.RespectSafeArea},
-                            {"worldWidth", definition.WorldWidth},
-                            {"worldHeight", definition.WorldHeight},
-                            {"pixelsPerUnit", definition.PixelsPerUnit},
-                            {"depthTest", definition.DepthTest}};
-        return Bytes(document.dump(2) + '\n');
-    }
-
-    void UiPanelSettingsAsset::Validate(const UiPanelSettingsDefinition& definition)
-    {
-        if (definition.SchemaVersion != 1 || !std::isfinite(definition.ReferenceWidth) ||
-            !std::isfinite(definition.ReferenceHeight) || !std::isfinite(definition.MatchWidthOrHeight) ||
-            !std::isfinite(definition.WorldWidth) || !std::isfinite(definition.WorldHeight) ||
-            !std::isfinite(definition.PixelsPerUnit) || definition.ReferenceWidth <= 0.0F ||
-            definition.ReferenceHeight <= 0.0F || definition.ReferenceWidth > 65'536.0F ||
-            definition.ReferenceHeight > 65'536.0F || definition.MatchWidthOrHeight < 0.0F ||
-            definition.MatchWidthOrHeight > 1.0F || definition.SortingOrder < -32'768 ||
-            definition.SortingOrder > 32'767 || definition.WorldWidth <= 0.0F || definition.WorldHeight <= 0.0F ||
-            definition.WorldWidth > 10'000.0F || definition.WorldHeight > 10'000.0F ||
-            definition.PixelsPerUnit <= 0.0F || definition.PixelsPerUnit > 100'000.0F ||
-            (definition.Target == UiPanelTarget::RenderTexture && !definition.RenderTexture) ||
-            (definition.Target != UiPanelTarget::RenderTexture && definition.RenderTexture) ||
-            (definition.Target == UiPanelTarget::CameraOverlay && !definition.Camera) ||
-            (definition.Target != UiPanelTarget::CameraOverlay && definition.Camera))
-            throw std::invalid_argument("UI panel settings contain an invalid target or dimensions.");
     }
 
     AssetImporterRegistration CreateUiVisualTreeAssetImporter()
@@ -1193,22 +1441,16 @@ namespace Keire
 
     AssetImporterRegistration CreateUiStyleSheetAssetImporter()
     {
-        return {"Keire.UiStyleSheet",
-                1,
-                UiStyleSheetAsset::StaticType(),
-                {".keirestyle"},
-                [](const std::span<const std::byte> bytes)
-                { return UiStyleSheetAsset::Encode(UiStyleSheetAsset::ParseSource(bytes)); }};
-    }
-
-    AssetImporterRegistration CreateUiPanelSettingsAssetImporter()
-    {
-        return {"Keire.UiPanelSettings",
-                1,
-                UiPanelSettingsAsset::StaticType(),
-                {".keireuipanel"},
-                [](const std::span<const std::byte> bytes)
-                { return UiPanelSettingsAsset::Encode(UiPanelSettingsAsset::Decode(bytes)->Definition()); }};
+        AssetImporterRegistration result{"Keire.UiStyleSheet", 2, UiStyleSheetAsset::StaticType(), {".keirestyle"}};
+        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        {
+            const auto definition = UiStyleSheetAsset::ParseSource(bytes);
+            AssetImportOutput output;
+            output.Bytes = UiStyleSheetAsset::Encode(definition);
+            output.AssetDependencies = UiStyleAssetDependencies(definition);
+            return output;
+        };
+        return result;
     }
 
     AssetDecoderRegistration CreateUiVisualTreeAssetDecoder()
@@ -1223,10 +1465,4 @@ namespace Keire
                 [](const std::span<const std::byte> bytes) -> Ref<Asset> { return UiStyleSheetAsset::Decode(bytes); }};
     }
 
-    AssetDecoderRegistration CreateUiPanelSettingsAssetDecoder()
-    {
-        return {UiPanelSettingsAsset::StaticType(), CreateRef<UiPanelSettingsAsset>(),
-                [](const std::span<const std::byte> bytes) -> Ref<Asset>
-                { return UiPanelSettingsAsset::Decode(bytes); }};
-    }
 } // namespace Keire

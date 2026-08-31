@@ -50,6 +50,7 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserVfxEffect(std::string_view name) = 0;
         virtual bool CreateAssetBrowserUiDocument(std::string_view name) = 0;
         virtual bool CreateAssetBrowserUiStyleSheet(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserUiFontFamily(std::string_view name, Keire::AssetId face) = 0;
         virtual bool CreateAssetBrowserMaterialGraph(std::string_view name, Keire::AssetId shader) = 0;
         virtual bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) = 0;
         virtual bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) = 0;

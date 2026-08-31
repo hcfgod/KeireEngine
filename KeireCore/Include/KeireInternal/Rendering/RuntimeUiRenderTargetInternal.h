@@ -31,8 +31,11 @@ namespace Keire::RenderBackend
 
     struct RuntimeUiFontAtlasCacheEntry final
     {
+        AssetId Font;
         SDL_GPUTexture* Texture = nullptr;
         std::uint32_t DeviceGeneration = 0;
+        std::uint64_t AtlasGeneration = 0;
+        std::uint64_t LastUsedFrame = 0;
         std::uint64_t BuildCount = 0;
     };
 
@@ -40,6 +43,13 @@ namespace Keire::RenderBackend
                                                            const std::uint32_t deviceGeneration) noexcept
     {
         return cache.Texture && cache.DeviceGeneration == deviceGeneration;
+    }
+
+    [[nodiscard]] inline bool RuntimeUiFontAtlasCacheValid(const RuntimeUiFontAtlasCacheEntry& cache,
+                                                           const std::uint32_t deviceGeneration,
+                                                           const std::uint64_t atlasGeneration) noexcept
+    {
+        return RuntimeUiFontAtlasCacheValid(cache, deviceGeneration) && cache.AtlasGeneration == atlasGeneration;
     }
 
 } // namespace Keire::RenderBackend

@@ -134,7 +134,7 @@ namespace KeireEditor
 
     void PackageManagerPanel::Attach(Keire::UiWorkspace& workspace)
     {
-        m_Registration = workspace.RegisterPanel({"editor.package-manager", "Package Manager", true});
+        m_Registration = workspace.RegisterPanel({"editor.package-manager", "Package Manager", false});
     }
 
     void PackageManagerPanel::Initialize(const std::filesystem::path& projectRoot,

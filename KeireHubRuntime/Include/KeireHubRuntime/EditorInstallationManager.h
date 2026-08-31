@@ -102,11 +102,14 @@ namespace KeireHub
     {
         using ActivityProbe = std::function<EditorInstallationActivity(const EditorInstallation&)>;
         using EntrypointActivityProbe = std::function<EditorEntrypointActivity(const std::filesystem::path&)>;
+        using VerificationProgress = std::function<void(std::uint64_t verifiedFiles, std::uint64_t totalFiles,
+                                                        std::uint64_t verifiedBytes, std::uint64_t totalBytes)>;
 
         std::string HostPlatform;
         std::string HostArchitecture;
         ActivityProbe ProbeActivity;
         EntrypointActivityProbe ProbeEntrypointActivity;
+        VerificationProgress ReportVerificationProgress;
     };
 
     struct ManagedEditorPackageRequest final

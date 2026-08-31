@@ -73,9 +73,9 @@ Kéire already includes substantial, integrated engine and authoring foundations
   Inspector fields with validated sliders, bounds, drag steps,
   multiline text, custom labels, headers, and read-only presentation, lifecycle callbacks, hot reload, gameplay APIs,
   diagnostics, packaged CoreCLR publication, and retained UI Toolkit documents with separated visual-tree, stylesheet,
-  and panel assets, UI Builder authoring, screen/camera/render-texture/world targets, managed controls and bindings,
-  focus/navigation, and mouse/keyboard/gamepad routing, plus per-slot dynamic materials and global Material Parameter
-  Collection controls.
+  and panel assets, visual Style Studio authoring, responsive rules and design tokens, international font shaping,
+  screen/camera/render-texture/world targets, managed controls and bindings, focus/navigation, and
+  mouse/keyboard/gamepad routing, plus per-slot dynamic materials and global Material Parameter Collection controls.
 - Focused native and managed tests, sanitizer configurations, source-budget enforcement, reproducible dependency locks,
   SDK consumers, distribution validation, signed catalog support, and native installer workflows.
 

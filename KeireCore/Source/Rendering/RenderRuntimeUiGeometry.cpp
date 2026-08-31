@@ -1,8 +1,10 @@
 #include "KeireInternal/Rendering/RuntimeUiFontAtlasInternal.h"
 #include "KeireInternal/Rendering/RuntimeUiGeometryInternal.h"
+#include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <string>
@@ -15,6 +17,17 @@ namespace Keire::RenderBackend
         constexpr std::size_t MaximumRuntimeUiVertices = 1'000'000;
         constexpr std::size_t MaximumRuntimeUiTextBytes = 4096;
         constexpr std::size_t StyledGridSegments = 12;
+
+        [[nodiscard]] bool HasRuntimeUiTransform(const RuntimeUiDrawCommand& command) noexcept
+        {
+            return command.Translation != Vector2{} || command.TransformScale != Vector2{1.0F, 1.0F} ||
+                   command.RotationDegrees != 0.0F;
+        }
+
+        [[nodiscard]] RuntimeUiRect LocalRuntimeUiClip(const RuntimeUiDrawCommand& command) noexcept
+        {
+            return HasRuntimeUiTransform(command) ? command.Rect : command.Rect.Intersect(command.ClipRect);
+        }
 
         [[nodiscard]] Color InterpolateColor(const Color first, const Color second, const float amount) noexcept
         {
@@ -94,9 +107,53 @@ namespace Keire::RenderBackend
             return {(position.X - rectangle.X) / rectangle.Width, (position.Y - rectangle.Y) / rectangle.Height};
         }
 
+        [[nodiscard]] float EffectiveRadius(const RuntimeUiDrawCommand& command) noexcept
+        {
+            return std::max({command.CornerRadius, command.CornerRadii.TopLeft, command.CornerRadii.TopRight,
+                             command.CornerRadii.BottomRight, command.CornerRadii.BottomLeft});
+        }
+
+        [[nodiscard]] float RoundedCoverage(const RuntimeUiDrawCommand& command, const Vector2 position) noexcept
+        {
+            const auto& rectangle = command.Rect;
+            if (!rectangle.Contains(position.X, position.Y))
+                return 0.0F;
+            const float maximum = std::min(rectangle.Width, rectangle.Height) * 0.5F;
+            const auto corner = [&](const float centerX, const float centerY, const float radius)
+            {
+                const float bounded = std::clamp(radius, 0.0F, maximum);
+                if (bounded <= 0.0F)
+                    return 1.0F;
+                const float x = position.X - centerX;
+                const float y = position.Y - centerY;
+                return std::clamp(bounded + 0.5F - std::sqrt(x * x + y * y), 0.0F, 1.0F);
+            };
+            const float topLeft =
+                command.CornerRadii.TopLeft > 0.0F ? command.CornerRadii.TopLeft : command.CornerRadius;
+            const float topRight =
+                command.CornerRadii.TopRight > 0.0F ? command.CornerRadii.TopRight : command.CornerRadius;
+            const float bottomRight =
+                command.CornerRadii.BottomRight > 0.0F ? command.CornerRadii.BottomRight : command.CornerRadius;
+            const float bottomLeft =
+                command.CornerRadii.BottomLeft > 0.0F ? command.CornerRadii.BottomLeft : command.CornerRadius;
+            if (position.X < rectangle.X + topLeft && position.Y < rectangle.Y + topLeft)
+                return corner(rectangle.X + topLeft, rectangle.Y + topLeft, topLeft);
+            if (position.X > rectangle.X + rectangle.Width - topRight && position.Y < rectangle.Y + topRight)
+                return corner(rectangle.X + rectangle.Width - topRight, rectangle.Y + topRight, topRight);
+            if (position.X > rectangle.X + rectangle.Width - bottomRight &&
+                position.Y > rectangle.Y + rectangle.Height - bottomRight)
+            {
+                return corner(rectangle.X + rectangle.Width - bottomRight, rectangle.Y + rectangle.Height - bottomRight,
+                              bottomRight);
+            }
+            if (position.X < rectangle.X + bottomLeft && position.Y > rectangle.Y + rectangle.Height - bottomLeft)
+                return corner(rectangle.X + bottomLeft, rectangle.Y + rectangle.Height - bottomLeft, bottomLeft);
+            return 1.0F;
+        }
+
         [[nodiscard]] float BorderCoverage(const RuntimeUiDrawCommand& command, const Vector2 position) noexcept
         {
-            const float outer = RuntimeUiRoundedCoverage(command.Rect, command.CornerRadius, position);
+            const float outer = RoundedCoverage(command, position);
             const float thickness = std::min(command.BorderWidth, std::min(command.Rect.Width, command.Rect.Height));
             const RuntimeUiRect inner{command.Rect.X + thickness, command.Rect.Y + thickness,
                                       std::max(0.0F, command.Rect.Width - thickness * 2.0F),
@@ -113,12 +170,12 @@ namespace Keire::RenderBackend
         {
             if (command.Rect.Empty())
                 return;
-            const auto clipped = command.Rect.Intersect(command.ClipRect);
+            const auto clipped = LocalRuntimeUiClip(command);
             if (clipped.Empty())
                 return;
             const bool gradient = !image && !border && command.BackgroundGradient.Kind != RuntimeUiGradientKind::None;
             const float radius =
-                std::clamp(command.CornerRadius, 0.0F, std::min(command.Rect.Width, command.Rect.Height) * 0.5F);
+                std::clamp(EffectiveRadius(command), 0.0F, std::min(command.Rect.Width, command.Rect.Height) * 0.5F);
             const auto horizontal = StyledAxis(clipped.X, clipped.X + clipped.Width, command.Rect.X,
                                                command.Rect.X + command.Rect.Width, radius, gradient);
             const auto vertical = StyledAxis(clipped.Y, clipped.Y + clipped.Height, command.Rect.Y,
@@ -139,9 +196,8 @@ namespace Keire::RenderBackend
                         Color color = gradient ? EvaluateRuntimeUiGradient(command.BackgroundGradient, normalized)
                                       : border ? command.BorderColor
                                                : command.ColorValue;
-                        const float coverage = border
-                                                   ? BorderCoverage(command, positions[index])
-                                                   : RuntimeUiRoundedCoverage(command.Rect, radius, positions[index]);
+                        const float coverage = border ? BorderCoverage(command, positions[index])
+                                                      : RoundedCoverage(command, positions[index]);
                         color.Alpha *= coverage;
                         vertices[index] = {
                             {positions[index].X, positions[index].Y, 0.0F}, color, image ? normalized : Vector2{}};
@@ -154,12 +210,44 @@ namespace Keire::RenderBackend
 
         void AppendRuntimeUiImage(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
         {
-            if (command.CornerRadius > 0.0F)
+            const bool sliced = command.ImageSlice.Left > 0.0F || command.ImageSlice.Top > 0.0F ||
+                                command.ImageSlice.Right > 0.0F || command.ImageSlice.Bottom > 0.0F;
+            if (sliced)
+            {
+                const float left = std::clamp(command.ImageSlice.Left, 0.0F, command.Rect.Width * 0.5F);
+                const float top = std::clamp(command.ImageSlice.Top, 0.0F, command.Rect.Height * 0.5F);
+                const float right = std::clamp(command.ImageSlice.Right, 0.0F, command.Rect.Width * 0.5F);
+                const float bottom = std::clamp(command.ImageSlice.Bottom, 0.0F, command.Rect.Height * 0.5F);
+                const std::array x{command.Rect.X, command.Rect.X + left, command.Rect.X + command.Rect.Width - right,
+                                   command.Rect.X + command.Rect.Width};
+                const std::array y{command.Rect.Y, command.Rect.Y + top, command.Rect.Y + command.Rect.Height - bottom,
+                                   command.Rect.Y + command.Rect.Height};
+                const std::array u{0.0F, left / command.Rect.Width, 1.0F - right / command.Rect.Width, 1.0F};
+                const std::array v{0.0F, top / command.Rect.Height, 1.0F - bottom / command.Rect.Height, 1.0F};
+                for (std::size_t row = 0; row < 3; ++row)
+                    for (std::size_t column = 0; column < 3; ++column)
+                    {
+                        const RuntimeUiRect tile{x[column], y[row], x[column + 1] - x[column], y[row + 1] - y[row]};
+                        const auto clipped = tile.Intersect(LocalRuntimeUiClip(command));
+                        if (clipped.Empty())
+                            continue;
+                        const Vector2 uvMinimum{u[column] +
+                                                    (u[column + 1] - u[column]) * ((clipped.X - tile.X) / tile.Width),
+                                                v[row] + (v[row + 1] - v[row]) * ((clipped.Y - tile.Y) / tile.Height)};
+                        const Vector2 uvMaximum{u[column] + (u[column + 1] - u[column]) *
+                                                                ((clipped.X + clipped.Width - tile.X) / tile.Width),
+                                                v[row] + (v[row + 1] - v[row]) *
+                                                             ((clipped.Y + clipped.Height - tile.Y) / tile.Height)};
+                        AppendRuntimeUiRectangle(output, clipped, command.ColorValue, uvMinimum, uvMaximum);
+                    }
+                return;
+            }
+            if (EffectiveRadius(command) > 0.0F)
             {
                 AppendStyledRectangle(output, command, true, false);
                 return;
             }
-            const auto clipped = command.Rect.Intersect(command.ClipRect);
+            const auto clipped = LocalRuntimeUiClip(command);
             if (clipped.Empty())
                 return;
             const Vector2 uvMinimum{(clipped.X - command.Rect.X) / command.Rect.Width,
@@ -171,6 +259,26 @@ namespace Keire::RenderBackend
 
         void AppendRuntimeUiBorder(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
         {
+            const bool perEdge = command.BorderWidths.Left > 0.0F || command.BorderWidths.Top > 0.0F ||
+                                 command.BorderWidths.Right > 0.0F || command.BorderWidths.Bottom > 0.0F;
+            if (perEdge)
+            {
+                const auto append = [&](const RuntimeUiRect rectangle, const Color color)
+                { AppendRuntimeUiRectangle(output, rectangle.Intersect(LocalRuntimeUiClip(command)), color); };
+                append({command.Rect.X, command.Rect.Y, command.Rect.Width, command.BorderWidths.Top},
+                       command.BorderColors.Top);
+                append({command.Rect.X, command.Rect.Y + command.Rect.Height - command.BorderWidths.Bottom,
+                        command.Rect.Width, command.BorderWidths.Bottom},
+                       command.BorderColors.Bottom);
+                append({command.Rect.X, command.Rect.Y + command.BorderWidths.Top, command.BorderWidths.Left,
+                        std::max(0.0F, command.Rect.Height - command.BorderWidths.Top - command.BorderWidths.Bottom)},
+                       command.BorderColors.Left);
+                append({command.Rect.X + command.Rect.Width - command.BorderWidths.Right,
+                        command.Rect.Y + command.BorderWidths.Top, command.BorderWidths.Right,
+                        std::max(0.0F, command.Rect.Height - command.BorderWidths.Top - command.BorderWidths.Bottom)},
+                       command.BorderColors.Right);
+                return;
+            }
             const float thickness = std::min(command.BorderWidth, std::min(command.Rect.Width, command.Rect.Height));
             if (thickness <= 0.0F || command.BorderColor.Alpha <= 0.0F)
                 return;
@@ -180,7 +288,9 @@ namespace Keire::RenderBackend
                 return;
             }
             const auto append = [&](const RuntimeUiRect rectangle)
-            { AppendRuntimeUiRectangle(output, rectangle.Intersect(command.ClipRect), command.BorderColor); };
+            {
+                AppendRuntimeUiRectangle(output, rectangle.Intersect(LocalRuntimeUiClip(command)), command.BorderColor);
+            };
             append({command.Rect.X, command.Rect.Y, command.Rect.Width, thickness});
             append({command.Rect.X, command.Rect.Y + command.Rect.Height - thickness, command.Rect.Width, thickness});
             append({command.Rect.X, command.Rect.Y + thickness, thickness,
@@ -189,76 +299,195 @@ namespace Keire::RenderBackend
                     std::max(0.0F, command.Rect.Height - thickness * 2.0F)});
         }
 
-        void AppendRuntimeUiText(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
+        void AppendRuntimeUiBoxShadows(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command)
+        {
+            for (std::size_t index = 0; index < command.ShadowCount; ++index)
+            {
+                const auto& shadow = command.Shadows[index];
+                if (shadow.Inset || shadow.ColorValue.Alpha <= 0.0F)
+                    continue;
+                const auto layers = static_cast<std::size_t>(
+                    std::clamp(static_cast<float>(std::ceil(shadow.BlurRadius / 4.0F)), 1.0F, 8.0F));
+                for (std::size_t layer = layers; layer > 0; --layer)
+                {
+                    const float blur = shadow.BlurRadius * static_cast<float>(layer) / static_cast<float>(layers);
+                    const float expansion = shadow.SpreadRadius + blur;
+                    RuntimeUiDrawCommand candidate = command;
+                    candidate.Rect = {command.Rect.X + shadow.Offset.X - expansion,
+                                      command.Rect.Y + shadow.Offset.Y - expansion,
+                                      command.Rect.Width + expansion * 2.0F, command.Rect.Height + expansion * 2.0F};
+                    candidate.ColorValue = shadow.ColorValue;
+                    candidate.ColorValue.Alpha /= static_cast<float>(layers);
+                    candidate.BackgroundGradient = {};
+                    candidate.BorderWidth = 0.0F;
+                    candidate.BorderWidths = {};
+                    candidate.ShadowCount = 0;
+                    candidate.CornerRadius += expansion;
+                    AppendStyledRectangle(output, candidate, false, false);
+                }
+            }
+        }
+
+        void TransformRuntimeUiVertices(std::span<RuntimeUiVertex> vertices, const RuntimeUiDrawCommand& command)
+        {
+            if (vertices.empty() || (command.Translation == Vector2{} &&
+                                     command.TransformScale == Vector2{1.0F, 1.0F} && command.RotationDegrees == 0.0F))
+                return;
+            const Vector2 origin{command.Rect.X + command.Rect.Width * command.TransformOrigin.X,
+                                 command.Rect.Y + command.Rect.Height * command.TransformOrigin.Y};
+            const float radians = command.RotationDegrees * std::numbers::pi_v<float> / 180.0F;
+            const float cosine = std::cos(radians);
+            const float sine = std::sin(radians);
+            for (auto& vertex : vertices)
+            {
+                const float x = (vertex.Position.X - origin.X) * command.TransformScale.X;
+                const float y = (vertex.Position.Y - origin.Y) * command.TransformScale.Y;
+                vertex.Position.X = origin.X + x * cosine - y * sine + command.Translation.X;
+                vertex.Position.Y = origin.Y + x * sine + y * cosine + command.Translation.Y;
+            }
+        }
+
+        void AppendRuntimeUiText(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command,
+                                 const AssetId preparedBinding = {}, const std::size_t preparedFirst = 0U,
+                                 const std::size_t preparedCount = (std::numeric_limits<std::size_t>::max)())
         {
             if (command.Text.empty() || command.FontSize <= 0.0F || command.ColorValue.Alpha <= 0.0F ||
                 output.size() >= MaximumRuntimeUiVertices)
                 return;
+            if (command.PreparedFontBinding && !command.PreparedTextGlyphs.empty() &&
+                !command.PreparedTextLines.empty())
+            {
+                float originY = command.Rect.Y;
+                if (command.VerticalAlignment == RuntimeUiAlignment::Center)
+                    originY += (command.Rect.Height - command.PreparedTextHeight) * 0.5F;
+                else if (command.VerticalAlignment == RuntimeUiAlignment::End)
+                    originY += command.Rect.Height - command.PreparedTextHeight;
+                for (const auto& line : command.PreparedTextLines)
+                {
+                    float lineOriginX = command.Rect.X;
+                    if (command.HorizontalAlignment == RuntimeUiAlignment::Center)
+                        lineOriginX += (command.Rect.Width - line.Width) * 0.5F;
+                    else if (command.HorizontalAlignment == RuntimeUiAlignment::End)
+                        lineOriginX += command.Rect.Width - line.Width;
+                    const auto end = std::min(command.PreparedTextGlyphs.size(), line.FirstGlyph + line.GlyphCount);
+                    for (std::size_t index = line.FirstGlyph; index < end; ++index)
+                    {
+                        if (output.size() > MaximumRuntimeUiVertices - 6U)
+                            return;
+                        const auto& glyph = command.PreparedTextGlyphs[index];
+                        if (index < preparedFirst || index - preparedFirst >= preparedCount ||
+                            (preparedBinding && glyph.FontBinding != preparedBinding))
+                            continue;
+                        const RuntimeUiRect rectangle{lineOriginX + glyph.Position.X + glyph.Offset.X,
+                                                      originY + glyph.Position.Y + glyph.Offset.Y, glyph.Size.X,
+                                                      glyph.Size.Y};
+                        if (rectangle.Empty())
+                            continue;
+                        const auto clipped = rectangle.Intersect(LocalRuntimeUiClip(command));
+                        if (clipped.Empty())
+                            continue;
+                        const Vector2 uvMinimum{glyph.UvMinimum.X + (glyph.UvMaximum.X - glyph.UvMinimum.X) *
+                                                                        ((clipped.X - rectangle.X) / rectangle.Width),
+                                                glyph.UvMinimum.Y + (glyph.UvMaximum.Y - glyph.UvMinimum.Y) *
+                                                                        ((clipped.Y - rectangle.Y) / rectangle.Height)};
+                        const Vector2 uvMaximum{
+                            glyph.UvMinimum.X + (glyph.UvMaximum.X - glyph.UvMinimum.X) *
+                                                    ((clipped.X + clipped.Width - rectangle.X) / rectangle.Width),
+                            glyph.UvMinimum.Y + (glyph.UvMaximum.Y - glyph.UvMinimum.Y) *
+                                                    ((clipped.Y + clipped.Height - rectangle.Y) / rectangle.Height)};
+                        AppendRuntimeUiRectangle(output, clipped, command.ColorValue, uvMinimum, uvMaximum);
+                    }
+                }
+                return;
+            }
             const std::string_view text(command.Text.data(), std::min(command.Text.size(), MaximumRuntimeUiTextBytes));
             const float scale = command.FontSize / 12.0F;
-            const float lineHeight = 16.0F * scale;
-            float width = 0.0F;
-            float lineWidth = 0.0F;
-            std::size_t lineCount = 1U;
-            for (const auto byte : text)
-            {
-                if (byte == '\n')
-                {
-                    width = std::max(width, lineWidth);
-                    lineWidth = 0.0F;
-                    ++lineCount;
-                }
-                else if ((static_cast<std::uint8_t>(byte) & 0xc0U) != 0x80U)
-                {
-                    lineWidth += RuntimeUiFallbackGlyph(static_cast<std::uint8_t>(byte)).Advance * scale;
-                }
-            }
-            width = std::max(width, lineWidth);
-            const float height = static_cast<float>(lineCount) * lineHeight;
+            static thread_local Keire::Detail::RuntimeUiTextLayoutCache textLayouts(512U, 131'072U);
+            const auto layout = textLayouts.Resolve({.Text = text,
+                                                     .Language = command.Language,
+                                                     .Direction = command.TextDirection,
+                                                     .Wrap = command.TextWrap,
+                                                     .Overflow = command.TextOverflow,
+                                                     .FontSize = command.FontSize,
+                                                     .AvailableWidth = command.Rect.Width,
+                                                     .AuthoredLineHeight = command.LineHeight,
+                                                     .LetterSpacing = command.LetterSpacing,
+                                                     .WordSpacing = command.WordSpacing,
+                                                     .MaximumLines = command.MaximumLines,
+                                                     .Weight = command.FontWeight,
+                                                     .Slant = command.FontSlant});
             float originX = command.Rect.X;
             float originY = command.Rect.Y;
-            if (command.HorizontalAlignment == RuntimeUiAlignment::Center)
-                originX += (command.Rect.Width - width) * 0.5F;
-            else if (command.HorizontalAlignment == RuntimeUiAlignment::End)
-                originX += command.Rect.Width - width;
             if (command.VerticalAlignment == RuntimeUiAlignment::Center)
-                originY += (command.Rect.Height - height) * 0.5F;
+                originY += (command.Rect.Height - layout->Height) * 0.5F;
             else if (command.VerticalAlignment == RuntimeUiAlignment::End)
-                originY += command.Rect.Height - height;
+                originY += command.Rect.Height - layout->Height;
 
-            float penX = originX;
-            float penY = originY;
-            for (const auto byte : text)
+            for (const auto& line : layout->Lines)
             {
-                if (output.size() > MaximumRuntimeUiVertices - 6U)
-                    return;
-                if (byte == '\n')
+                float lineOriginX = originX;
+                if (command.HorizontalAlignment == RuntimeUiAlignment::Center)
+                    lineOriginX += (command.Rect.Width - line.Width) * 0.5F;
+                else if (command.HorizontalAlignment == RuntimeUiAlignment::End)
+                    lineOriginX += command.Rect.Width - line.Width;
+                const auto end = std::min(layout->Glyphs.size(), line.FirstGlyph + line.GlyphCount);
+                for (std::size_t index = line.FirstGlyph; index < end; ++index)
                 {
-                    penX = originX;
-                    penY += lineHeight;
-                    continue;
+                    if (output.size() > MaximumRuntimeUiVertices - 6U)
+                        return;
+                    const auto& placement = layout->Glyphs[index];
+                    if (placement.Codepoint == U'\n')
+                        continue;
+                    const auto character = placement.Codepoint <= RuntimeUiLastFallbackGlyph
+                                               ? static_cast<std::uint8_t>(placement.Codepoint)
+                                               : static_cast<std::uint8_t>('?');
+                    const auto& glyph = RuntimeUiFallbackGlyph(character);
+                    const RuntimeUiRect rectangle{lineOriginX + placement.X + placement.OffsetX +
+                                                      glyph.Offset.X * scale,
+                                                  originY + placement.Y + placement.OffsetY + glyph.Offset.Y * scale,
+                                                  glyph.Width * scale, glyph.Height * scale};
+                    const auto clipped = rectangle.Intersect(LocalRuntimeUiClip(command));
+                    if (!clipped.Empty())
+                    {
+                        const Vector2 uvMinimum{glyph.UvMinimum.X + (glyph.UvMaximum.X - glyph.UvMinimum.X) *
+                                                                        ((clipped.X - rectangle.X) / rectangle.Width),
+                                                glyph.UvMinimum.Y + (glyph.UvMaximum.Y - glyph.UvMinimum.Y) *
+                                                                        ((clipped.Y - rectangle.Y) / rectangle.Height)};
+                        const Vector2 uvMaximum{
+                            glyph.UvMinimum.X + (glyph.UvMaximum.X - glyph.UvMinimum.X) *
+                                                    ((clipped.X + clipped.Width - rectangle.X) / rectangle.Width),
+                            glyph.UvMinimum.Y + (glyph.UvMaximum.Y - glyph.UvMinimum.Y) *
+                                                    ((clipped.Y + clipped.Height - rectangle.Y) / rectangle.Height)};
+                        AppendRuntimeUiRectangle(output, clipped, command.ColorValue, uvMinimum, uvMaximum);
+                    }
                 }
-                const auto character = static_cast<std::uint8_t>(byte);
-                if ((character & 0xc0U) == 0x80U)
+            }
+        }
+
+        void AppendRuntimeUiTextShadows(std::vector<RuntimeUiVertex>& output, const RuntimeUiDrawCommand& command,
+                                        const AssetId preparedBinding = {}, const std::size_t preparedFirst = 0U,
+                                        const std::size_t preparedCount = (std::numeric_limits<std::size_t>::max)())
+        {
+            for (std::size_t index = 0; index < command.ShadowCount; ++index)
+            {
+                const auto& shadow = command.Shadows[index];
+                if (shadow.Inset || shadow.ColorValue.Alpha <= 0.0F)
                     continue;
-                const auto& glyph = RuntimeUiFallbackGlyph(character);
-                const RuntimeUiRect rectangle{penX + glyph.Offset.X * scale, penY + glyph.Offset.Y * scale,
-                                              glyph.Width * scale, glyph.Height * scale};
-                const auto clipped = rectangle.Intersect(command.ClipRect);
-                if (!clipped.Empty())
+                const auto layers = static_cast<std::size_t>(
+                    std::clamp(static_cast<float>(std::ceil(shadow.BlurRadius / 2.0F)), 1.0F, 8.0F));
+                for (std::size_t layer = 0; layer < layers; ++layer)
                 {
-                    const Vector2 uvMinimum{glyph.UvMinimum.X + (glyph.UvMaximum.X - glyph.UvMinimum.X) *
-                                                                    ((clipped.X - rectangle.X) / rectangle.Width),
-                                            glyph.UvMinimum.Y + (glyph.UvMaximum.Y - glyph.UvMinimum.Y) *
-                                                                    ((clipped.Y - rectangle.Y) / rectangle.Height)};
-                    const Vector2 uvMaximum{
-                        glyph.UvMinimum.X + (glyph.UvMaximum.X - glyph.UvMinimum.X) *
-                                                ((clipped.X + clipped.Width - rectangle.X) / rectangle.Width),
-                        glyph.UvMinimum.Y + (glyph.UvMaximum.Y - glyph.UvMinimum.Y) *
-                                                ((clipped.Y + clipped.Height - rectangle.Y) / rectangle.Height)};
-                    AppendRuntimeUiRectangle(output, clipped, command.ColorValue, uvMinimum, uvMaximum);
+                    const float angle =
+                        static_cast<float>(layer) * 2.0F * std::numbers::pi_v<float> / static_cast<float>(layers);
+                    const float radius = shadow.BlurRadius * 0.5F + shadow.SpreadRadius;
+                    RuntimeUiDrawCommand candidate = command;
+                    candidate.Rect.X += shadow.Offset.X + std::cos(angle) * radius;
+                    candidate.Rect.Y += shadow.Offset.Y + std::sin(angle) * radius;
+                    candidate.ColorValue = shadow.ColorValue;
+                    candidate.ColorValue.Alpha /= static_cast<float>(layers);
+                    candidate.ShadowCount = 0;
+                    AppendRuntimeUiText(output, candidate, preparedBinding, preparedFirst, preparedCount);
                 }
-                penX += glyph.Advance * scale;
             }
         }
 
@@ -335,40 +564,81 @@ namespace Keire::RenderBackend
     {
         RuntimeUiGeometry result;
         result.Vertices.reserve(std::min<std::size_t>(commands.size() * 12U, MaximumRuntimeUiVertices));
-        for (const auto& run : BuildRuntimeUiTextureRuns(commands))
+        const auto appendBatch = [&result](const AssetId asset, const RuntimeUiRect clip, const std::size_t first)
         {
-            const auto firstVertex = result.Vertices.size();
-            const auto end = std::min(commands.size(), run.FirstCommand + run.CommandCount);
-            for (std::size_t index = run.FirstCommand; index < end; ++index)
+            const auto count = result.Vertices.size() - first;
+            if (count == 0U)
+                return;
+            if (!result.Batches.empty() && result.Batches.back().Asset == asset &&
+                result.Batches.back().ClipRect == clip &&
+                static_cast<std::size_t>(result.Batches.back().FirstVertex) + result.Batches.back().VertexCount ==
+                    first)
             {
-                if (result.Vertices.size() >= MaximumRuntimeUiVertices)
-                    break;
-                const auto& command = commands[index];
-                switch (command.Type)
-                {
-                case RuntimeUiDrawType::Quad:
-                    if (command.CornerRadius > 0.0F || command.BackgroundGradient.Kind != RuntimeUiGradientKind::None)
-                        AppendStyledRectangle(result.Vertices, command, false, false);
-                    else
-                        AppendRuntimeUiRectangle(result.Vertices, command.Rect.Intersect(command.ClipRect),
-                                                 command.ColorValue);
-                    AppendRuntimeUiBorder(result.Vertices, command);
-                    break;
-                case RuntimeUiDrawType::Image:
-                    AppendRuntimeUiImage(result.Vertices, command);
-                    break;
-                case RuntimeUiDrawType::Text:
-                    AppendRuntimeUiText(result.Vertices, command);
-                    break;
-                case RuntimeUiDrawType::PushClip:
-                case RuntimeUiDrawType::PopClip:
-                    break;
-                }
+                result.Batches.back().VertexCount += static_cast<std::uint32_t>(count);
+                return;
             }
-            const auto vertexCount = result.Vertices.size() - firstVertex;
-            if (vertexCount != 0U)
-                result.Batches.push_back({run.Asset, run.ClipRect, static_cast<std::uint32_t>(firstVertex),
-                                          static_cast<std::uint32_t>(vertexCount)});
+            result.Batches.push_back(
+                {asset, clip, static_cast<std::uint32_t>(first), static_cast<std::uint32_t>(count)});
+        };
+        for (const auto& command : commands)
+        {
+            if (result.Vertices.size() >= MaximumRuntimeUiVertices || !IsRuntimeUiDrawable(command))
+                continue;
+            if (command.Type == RuntimeUiDrawType::Text && command.PreparedFontBinding &&
+                !command.PreparedTextGlyphs.empty())
+            {
+                std::size_t runBegin = 0U;
+                while (runBegin < command.PreparedTextGlyphs.size())
+                {
+                    const auto binding = command.PreparedTextGlyphs[runBegin].FontBinding
+                                             ? command.PreparedTextGlyphs[runBegin].FontBinding
+                                             : command.PreparedFontBinding;
+                    auto runEnd = runBegin + 1U;
+                    while (runEnd < command.PreparedTextGlyphs.size())
+                    {
+                        const auto candidate = command.PreparedTextGlyphs[runEnd].FontBinding
+                                                   ? command.PreparedTextGlyphs[runEnd].FontBinding
+                                                   : command.PreparedFontBinding;
+                        if (candidate != binding)
+                            break;
+                        ++runEnd;
+                    }
+                    const auto first = result.Vertices.size();
+                    AppendRuntimeUiTextShadows(result.Vertices, command, binding, runBegin, runEnd - runBegin);
+                    AppendRuntimeUiText(result.Vertices, command, binding, runBegin, runEnd - runBegin);
+                    TransformRuntimeUiVertices(
+                        std::span(result.Vertices).subspan(first, result.Vertices.size() - first), command);
+                    appendBatch(binding, command.ClipRect, first);
+                    runBegin = runEnd;
+                }
+                continue;
+            }
+            const auto first = result.Vertices.size();
+            switch (command.Type)
+            {
+            case RuntimeUiDrawType::Quad:
+                AppendRuntimeUiBoxShadows(result.Vertices, command);
+                if (EffectiveRadius(command) > 0.0F || command.BackgroundGradient.Kind != RuntimeUiGradientKind::None)
+                    AppendStyledRectangle(result.Vertices, command, false, false);
+                else
+                    AppendRuntimeUiRectangle(result.Vertices, command.Rect.Intersect(command.ClipRect),
+                                             command.ColorValue);
+                AppendRuntimeUiBorder(result.Vertices, command);
+                break;
+            case RuntimeUiDrawType::Image:
+                AppendRuntimeUiImage(result.Vertices, command);
+                break;
+            case RuntimeUiDrawType::Text:
+                AppendRuntimeUiTextShadows(result.Vertices, command);
+                AppendRuntimeUiText(result.Vertices, command);
+                break;
+            case RuntimeUiDrawType::PushClip:
+            case RuntimeUiDrawType::PopClip:
+                break;
+            }
+            TransformRuntimeUiVertices(std::span(result.Vertices).subspan(first, result.Vertices.size() - first),
+                                       command);
+            appendBatch(RuntimeUiTextureAsset(command), command.ClipRect, first);
         }
         return result;
     }

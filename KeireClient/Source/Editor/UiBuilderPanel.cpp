@@ -270,11 +270,27 @@ namespace KeireEditor
         m_InlineStyleDraft.clear();
         m_StyleSheetPicker.Clear();
         m_StyleSheetDraft = {};
+        m_StyleValueAssetPicker.Clear();
+        m_StyleValueAssetDraft = {};
         m_StyleRuleAsset = {};
         m_StyleRuleGeneration = 0;
         m_StyleRuleSelection.reset();
         m_StyleSelectorDraft.clear();
         m_StyleDeclarationsDraft.clear();
+        m_StyleRuleSearch.clear();
+        m_StylePropertySearch.clear();
+        m_StyleSourceDraft.clear();
+        m_StyleExternalComparison.clear();
+        m_StyleTokenSearch.clear();
+        m_StyleTokenSelection.clear();
+        m_StyleTokenNameDraft.clear();
+        m_StyleTokenValueDraft.clear();
+        m_NewStyleProperty.clear();
+        m_NewStyleValue.clear();
+        m_StyleSourceGeneration = 0;
+        m_StyleSourceEditTime = {};
+        m_StyleSourceParsePending = false;
+        m_StyleEditInline = false;
         m_TemplateDraft.clear();
         m_SlotDraft.clear();
         m_NewTemplateDraft.clear();
@@ -284,6 +300,7 @@ namespace KeireEditor
         m_BindingModeDraft = "OneWay";
         m_SourceDraft.clear();
         m_CanvasGesture = {};
+        m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
         m_SourceEditing = false;
         m_LivePicking = false;
     }
@@ -414,13 +431,34 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, m_Message);
         ui.Separator();
 
+        if (ui.Button(m_WorkspaceMode == UiBuilderWorkspaceMode::Design ? "Design  •##UiBuilderDesignMode"
+                                                                        : "Design##UiBuilderDesignMode"))
+            m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
+        ui.SameLine();
+        if (ui.Button(m_WorkspaceMode == UiBuilderWorkspaceMode::Styles ? "Styles  •##UiBuilderStylesMode"
+                                                                        : "Styles##UiBuilderStylesMode"))
+            m_WorkspaceMode = UiBuilderWorkspaceMode::Styles;
+        ui.SameLine();
+        if (ui.Button(m_WorkspaceMode == UiBuilderWorkspaceMode::Debug ? "Debug  •##UiBuilderDebugMode"
+                                                                       : "Debug##UiBuilderDebugMode"))
+            m_WorkspaceMode = UiBuilderWorkspaceMode::Debug;
+        ui.SameLine();
+        ui.TextColored(theme.MutedText, m_WorkspaceMode == UiBuilderWorkspaceMode::Styles
+                                            ? "Visual Style Studio — live draft, explicit save"
+                                        : m_WorkspaceMode == UiBuilderWorkspaceMode::Debug
+                                            ? "Runtime picking, cascade, layout, and performance"
+                                            : "Visual hierarchy and retained layout authoring");
+        ui.Separator();
+
         const auto available = ui.ContentAvailable();
         const float leftWidth = std::clamp(available.Width * 0.20F, 210.0F, 300.0F);
         const float rightWidth = std::clamp(available.Width * 0.25F, 260.0F, 380.0F);
         const float centerWidth = std::max(260.0F, available.Width - leftWidth - rightWidth - 16.0F);
         if (auto left = ui.BeginChild("UiBuilderLeft", {leftWidth, 0.0F}, true); left)
         {
-            if (auto tabs = ui.BeginTabBar("UiBuilderLeftTabs"); tabs)
+            if (m_WorkspaceMode == UiBuilderWorkspaceMode::Styles)
+                DrawStyleSheets(ui);
+            else if (auto tabs = ui.BeginTabBar("UiBuilderLeftTabs"); tabs)
             {
                 if (auto hierarchy = ui.BeginTabItem("Hierarchy"); hierarchy)
                     DrawHierarchy(ui);
@@ -434,12 +472,22 @@ namespace KeireEditor
         ui.SameLine();
         if (auto right = ui.BeginChild("UiBuilderRight", {rightWidth, 0.0F}, true); right)
         {
-            if (auto tabs = ui.BeginTabBar("UiBuilderRightTabs"); tabs)
+            if (m_WorkspaceMode == UiBuilderWorkspaceMode::Styles)
+            {
+                if (auto tabs = ui.BeginTabBar("UiBuilderStyleRightTabs"); tabs)
+                {
+                    if (auto properties = ui.BeginTabItem("Properties"); properties)
+                        DrawStyleProperties(ui);
+                    if (auto computed = ui.BeginTabItem("Computed"); computed)
+                        DrawStyleComputed(ui);
+                    if (auto source = ui.BeginTabItem("Source"); source)
+                        DrawStyleSource(ui);
+                }
+            }
+            else if (auto tabs = ui.BeginTabBar("UiBuilderRightTabs"); tabs)
             {
                 if (auto inspector = ui.BeginTabItem("Inspector"); inspector)
                     DrawInspector(ui);
-                if (auto styles = ui.BeginTabItem("Style Sheets"); styles)
-                    DrawStyleSheets(ui);
                 if (auto debugger = ui.BeginTabItem("Debugger"); debugger)
                     DrawDebugger(ui);
                 if (auto source = ui.BeginTabItem("Source"); source)

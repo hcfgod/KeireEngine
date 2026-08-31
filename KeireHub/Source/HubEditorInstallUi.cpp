@@ -237,6 +237,11 @@ namespace KeireHub
         auto catalog = ui.BeginPopupModal("Install Editor Catalog", nullptr, HubModalWindowOptions(), false);
         if (!catalog)
             return;
+        if (ui.Shortcut({.Key = Keire::UiKey::Escape, .Global = true}))
+        {
+            ui.CloseCurrentPopup();
+            return;
+        }
 
         DrawHubModalHeader(ui, m_Tokens, "Install Kéire Editor",
                            "Choose a verified editor release, then configure its location and components.",
@@ -268,7 +273,8 @@ namespace KeireHub
             m_EditorCatalogChannel.clear();
         }
 
-        if (auto list = ui.BeginChild("EditorVersionCatalog", {0.0F, 490.0F}, true); list)
+        const auto listHeight = std::max(ui.ContentAvailable().Height - 50.0F, 140.0F);
+        if (auto list = ui.BeginChild("EditorVersionCatalog", {0.0F, listHeight}, true); list)
         {
             std::size_t visibleEditors = 0;
             if (snapshot.AvailableEditors)
@@ -286,7 +292,7 @@ namespace KeireHub
                     }
                     ++visibleEditors;
                     auto id = ui.PushId(editor.PackageId + "@" + editor.Version);
-                    if (auto card = ui.BeginChild("AvailableEditor", {0.0F, 126.0F}, true); card)
+                    if (auto card = ui.BeginChild("AvailableEditor", {0.0F, 154.0F}, true); card)
                     {
                         const bool activeInstall =
                             HasActiveEditorInstall(snapshot.Tasks, editor.PackageId, editor.Version);

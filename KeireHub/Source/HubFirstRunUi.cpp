@@ -65,7 +65,8 @@ namespace KeireHub
                     settings.DefaultEditorRoot = PathFromUtf8(editorRoot);
                 ui.TextColoredWrapped(m_Tokens.MutedText,
                                       "Only roots you choose are considered for discovery. The Hub never scans an "
-                                      "entire disk or network share automatically.");
+                                      "entire disk or network share automatically. Missing folders are created when "
+                                      "you continue.");
             }
             else if (m_FirstRunStep == 2)
             {

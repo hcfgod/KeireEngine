@@ -591,6 +591,14 @@ namespace Keire::RenderBackend
         auto state = VfxPipelineWarmupState.load(std::memory_order_acquire);
         if (state == GpuVfxPipelineWarmupState::NotStarted)
         {
+            if (RenderThread.joinable())
+            {
+                // The first submitted VFX frame is allowed to finish without effects, then the render thread warms
+                // the pipelines from its queue. This guarantees that a cold driver cache cannot hold the first
+                // visible application frame hostage for tens of seconds.
+                StartGpuVfxPipelineWarmup();
+                return false;
+            }
             auto expected = GpuVfxPipelineWarmupState::NotStarted;
             if (VfxPipelineWarmupState.compare_exchange_strong(expected, GpuVfxPipelineWarmupState::Compiling,
                                                                std::memory_order_acq_rel))

@@ -10,6 +10,10 @@ namespace KeireSandbox;
 [ExecutionOrder(30)]
 public sealed class FpsVfxShowcase : Behaviour
 {
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000051")]
+    [Tooltip("Input Actions asset used to fire the Sandbox VFX showcase.")]
+    private InputActionAsset? _inputActions;
+
     // VfxEffect.keirevfx: "Energy Color".
     private static readonly AssetId EnergyColor =
         new(0xeda50d666ff044de, 0xa8e8481e82a7a6c8);
@@ -32,6 +36,8 @@ public sealed class FpsVfxShowcase : Behaviour
     private float _heat;
 
     private VfxEmitter _emitter = null!;
+    private InputActionContext? _inputContext;
+    private InputAction? _fireAction;
 
     protected override void Awake()
     {
@@ -41,13 +47,30 @@ public sealed class FpsVfxShowcase : Behaviour
             throw new InvalidOperationException($"{nameof(FpsVfxShowcase)} requires a VFX Emitter on the same Entity.");
     }
 
+    protected override void OnEnable()
+    {
+        DisableInput();
+        if (_inputActions is not { IsValid: true })
+            throw new InvalidOperationException($"{nameof(FpsVfxShowcase)} requires an Input Actions asset.");
+
+        _inputContext = _inputActions.CreateContext();
+        _fireAction = _inputContext.FindAction("Player/Fire");
+        _inputContext.Enable();
+    }
+
+    protected override void OnDisable() => DisableInput();
+
+    protected override void OnBeforeReload() => DisableInput();
+
+    protected override void OnAfterReload() => OnEnable();
+
     protected override void Update()
     {
         float deltaTime = Time.DeltaTime;
         if (deltaTime <= 0.0f || !_emitter.IsValid)
             return;
 
-        bool firing = Input.Held("Fire");
+        bool firing = _fireAction?.IsPressed == true;
         float targetHeat = firing ? 1.0f : 0.0f;
         float heatBlend = 1.0f - MathF.Exp(-(firing ? 10.0f : 5.0f) * deltaTime);
         _heat += (targetHeat - _heat) * heatBlend;
@@ -68,7 +91,7 @@ public sealed class FpsVfxShowcase : Behaviour
         }
 
         _fireAccumulator = MathF.Min(_fireAccumulator + deltaTime, FireInterval * 2.0f);
-        if (Input.Pressed("Fire"))
+        if (_fireAction?.WasPressedThisFrame == true)
             _fireAccumulator = FireInterval;
         while (_fireAccumulator >= FireInterval)
         {
@@ -76,6 +99,13 @@ public sealed class FpsVfxShowcase : Behaviour
                 break;
             _fireAccumulator -= FireInterval;
         }
+    }
+
+    private void DisableInput()
+    {
+        _inputContext?.Dispose();
+        _inputContext = null;
+        _fireAction = null;
     }
 
     private static Color Lerp(Color from, Color to, float amount)

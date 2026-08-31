@@ -56,6 +56,7 @@ TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows 
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ScriptableObjectScript) == "C# ScriptableObject class");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::UiDocument) == "UI document");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::UiStyleSheet) == "UI style sheet");
+    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::UiFontFamily) == "UI font family");
 }
 
 TEST_CASE("managed script creation stays in the selected folder and extends runtime source coverage")

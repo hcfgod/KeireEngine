@@ -268,6 +268,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserVfxEffect(std::string_view name) override;
     bool CreateAssetBrowserUiDocument(std::string_view name) override;
     bool CreateAssetBrowserUiStyleSheet(std::string_view name) override;
+    bool CreateAssetBrowserUiFontFamily(std::string_view name, Keire::AssetId face) override;
     bool CreateAssetBrowserMaterialGraph(std::string_view name, Keire::AssetId shader) override;
     bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) override;
     bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) override;
@@ -312,7 +313,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveUiBuilderDocument() override;
     void ReloadUiBuilderDocument() override;
     void SaveUiBuilderStyleSheet() override;
+    void RequestSaveUiBuilderStyleSheetAs() override;
     void ReloadUiBuilderStyleSheet() override;
+    [[nodiscard]] KeireEditor::UiStyleTokenRefactorPreview
+    PreviewUiBuilderTokenRefactor(std::string_view currentName, std::string_view replacementName) override;
+    void ApplyUiBuilderTokenRefactor(const KeireEditor::UiStyleTokenRefactorPreview& preview) override;
     void ReportUiBuilderError(std::string message) noexcept override;
     [[nodiscard]] KeireEditor::UiBuilderLiveDebugCapture CaptureUiBuilderLiveDebug(Keire::AssetId visualTree) override;
     void SetUiBuilderLivePicking(Keire::AssetId visualTree, bool enabled) noexcept override;
@@ -733,6 +738,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SaveScene();
     void SaveSceneAs();
     void CompleteSaveSceneAs();
+    void CompleteSaveUiBuilderStyleSheetAs();
     void CompleteAssetBrowserPackage();
     void RequestCloseScene();
     void CloseScene();
@@ -812,6 +818,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::UiBuilderDocument> m_UiBuilderDocument;
     std::unique_ptr<KeireEditor::UiBuilderStyleSheetDocument> m_UiBuilderStyleSheetDocument;
     std::unique_ptr<KeireEditor::UiBuilderLiveDraftSession> m_UiBuilderLiveDraft;
+    Keire::Ref<Keire::SaveFileDialogOperation> m_UiBuilderStyleSheetSaveDialog;
     std::unique_ptr<KeireEditor::EditorDocumentWorkspaceCoordinator> m_DocumentCoordinator;
     std::unique_ptr<KeireEditor::EditorCommandRouter> m_CommandRouter;
     std::unique_ptr<KeireEditor::EditorWorkspaceLifecycleCoordinator> m_LifecycleCoordinator;

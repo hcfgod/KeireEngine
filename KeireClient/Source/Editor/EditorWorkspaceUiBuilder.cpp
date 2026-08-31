@@ -9,6 +9,8 @@
 #include "KeireClient/Editor/UiBuilderLiveDraft.h"
 #include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
+#include "KeireClient/Editor/UiStyleTokenRefactor.h"
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 
 #include <algorithm>
@@ -131,11 +133,18 @@ bool EditorWorkspaceLayer::CreateAssetBrowserUiStyleSheet(const std::string_view
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A UI style sheet with that name already exists in this folder.");
 
-        constexpr std::string_view templateSource = R"(@keire-style 1;
+        constexpr std::string_view templateSource = R"(@keire-style 2;
+
+:root {
+  --surface: #151922ff;
+  --content: #f5f7ffff;
+}
 
 .root {
   width: 100%;
   height: 100%;
+  background-color: var(--surface);
+  color: var(--content);
 }
 )";
         const auto bytes = std::as_bytes(std::span(templateSource));
@@ -149,6 +158,41 @@ bool EditorWorkspaceLayer::CreateAssetBrowserUiStyleSheet(const std::string_view
     catch (const std::exception& error)
     {
         SetAssetError(std::string("UI style sheet creation failed: ") + error.what());
+        return false;
+    }
+}
+
+bool EditorWorkspaceLayer::CreateAssetBrowserUiFontFamily(const std::string_view name, const Keire::AssetId face)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        return false;
+    try
+    {
+        if (m_AssetOperations->Busy())
+            (void)m_AssetOperations->PreemptBackgroundImports();
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
+            throw std::invalid_argument("UI font family name must be one non-empty path component.");
+        const auto faceRecord = m_AssetDatabase->Find(face);
+        if (!faceRecord || faceRecord->Type != Keire::UiFontFaceAsset::StaticType())
+            throw std::invalid_argument("UI font family creation requires one imported font face.");
+        const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
+        const auto destination = directory / (std::string(name) + ".keirefont");
+        if (m_AssetDatabase->Find(destination))
+            throw std::runtime_error("A UI font family with that name already exists in this folder.");
+
+        Keire::UiFontFamilyDefinition definition;
+        definition.Name = std::string(name);
+        definition.Faces.push_back({.Face = face});
+        m_AssetOperations->QueueCreateAsset(destination, Keire::UiFontFamilyAsset::Encode(definition), {},
+                                            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
+                                             .UndoName = "Create UI Font Family",
+                                             .Reason = "ui-font-family-creation"});
+        m_AssetStatus = "Creating " + destination.generic_string() + ".";
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        SetAssetError(std::string("UI font family creation failed: ") + error.what());
         return false;
     }
 }
@@ -318,6 +362,8 @@ void EditorWorkspaceLayer::OpenUiBuilderStyleSheet(const Keire::AssetId asset)
     }
     if (m_UiBuilderStyleSheetDocument->Dirty() && m_UiBuilderStyleSheetDocument->Asset() != asset)
         throw std::runtime_error("Save or revert the current UI style sheet before opening another one.");
+    if (m_UiBuilderStyleSheetDocument->Asset() != asset)
+        m_UiBuilderLiveDraft->CloseStyle();
 
     const auto& specification = m_AssetDatabase->Specification();
     const auto source = specification.ProjectRoot / specification.SourceDirectory / record->RelativePath;
@@ -364,10 +410,105 @@ void EditorWorkspaceLayer::SaveUiBuilderStyleSheet()
     if (!m_AssetDatabase || !m_UiBuilderStyleSheetDocument->Asset())
         return;
     m_UiBuilderStyleSheetDocument->Save();
+    m_UiBuilderLiveDraft->CommitStyle(Owner().Assets(), m_UiBuilderStyleSheetDocument->Asset(),
+                                      m_UiBuilderStyleSheetDocument->Definition());
     ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
 }
 
-void EditorWorkspaceLayer::ReloadUiBuilderStyleSheet() { m_UiBuilderStyleSheetDocument->ReloadFromSource(true); }
+void EditorWorkspaceLayer::RequestSaveUiBuilderStyleSheetAs()
+{
+    if (!m_AssetDatabase || !m_UiBuilderStyleSheetDocument->Asset() || m_UiBuilderStyleSheetSaveDialog)
+        return;
+    const auto source = m_UiBuilderStyleSheetDocument->SourcePath();
+    Keire::SaveFileDialogSpecification dialog;
+    dialog.Title = "Save UI Style Sheet As";
+    dialog.DefaultLocation = source.parent_path();
+    dialog.DefaultName = source.stem().string() + " Copy.keirestyle";
+    dialog.FilterName = "Kéire UI Style Sheet";
+    dialog.Extension = "keirestyle";
+    m_UiBuilderStyleSheetSaveDialog = Owner().Windows()->ShowSaveFileDialog(Owner().MainWindow()->Id(), dialog);
+    m_UiBuilderPanel->SetMessage("Choose a new style sheet path under this project's Assets directory.");
+}
+
+void EditorWorkspaceLayer::CompleteSaveUiBuilderStyleSheetAs()
+{
+    if (!m_UiBuilderStyleSheetSaveDialog ||
+        m_UiBuilderStyleSheetSaveDialog->Status() == Keire::SaveFileDialogStatus::Pending)
+    {
+        return;
+    }
+    auto operation = std::exchange(m_UiBuilderStyleSheetSaveDialog, {});
+    if (operation->Status() == Keire::SaveFileDialogStatus::Cancelled)
+        return;
+    if (operation->Status() == Keire::SaveFileDialogStatus::Failed)
+    {
+        m_UiBuilderPanel->SetMessage("Style Save As dialog failed: " + operation->Diagnostic());
+        return;
+    }
+
+    try
+    {
+        auto destination = operation->SelectedPath();
+        if (destination.extension() != ".keirestyle")
+            destination += ".keirestyle";
+        const auto& specification = m_AssetDatabase->Specification();
+        const auto assets =
+            Keire::Detail::CanonicalExistingPath(specification.ProjectRoot / specification.SourceDirectory);
+        const auto absoluteDestination = std::filesystem::absolute(destination).lexically_normal();
+        const auto relative = absoluteDestination.lexically_relative(assets);
+        if (relative.empty() || relative.is_absolute() ||
+            relative.native().starts_with(std::filesystem::path("..").native()) || relative.filename().empty())
+        {
+            throw std::invalid_argument("Style Save As must remain inside the project's Assets directory.");
+        }
+        const auto safeDestination = Keire::Detail::ResolveConfinedPath(assets, relative);
+        m_UiBuilderStyleSheetDocument->SaveAs(safeDestination);
+        ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+        m_UiBuilderPanel->SetMessage("Saved a conflict-safe style copy to " + relative.generic_string() +
+                                     "; the externally changed original remains untouched.");
+    }
+    catch (const std::exception& error)
+    {
+        ReportError("UI Builder", std::string("Style Save As failed: ") + error.what());
+    }
+}
+
+KeireEditor::UiStyleTokenRefactorPreview
+EditorWorkspaceLayer::PreviewUiBuilderTokenRefactor(const std::string_view currentName,
+                                                    const std::string_view replacementName)
+{
+    if (!m_AssetDatabase)
+        throw std::logic_error("Open a project before previewing a UI token refactor.");
+    if (m_UiBuilderStyleSheetDocument->Dirty())
+        throw std::logic_error("Save or reload the current style draft before a project-wide token refactor.");
+    std::vector<KeireEditor::UiStyleTokenRefactorInput> inputs;
+    inputs.reserve(m_AssetRecords.size());
+    for (const auto& record : m_AssetRecords)
+        inputs.push_back({record.Id, record.Type, record.RelativePath});
+    const auto& specification = m_AssetDatabase->Specification();
+    return KeireEditor::BuildUiStyleTokenRefactorPreview(specification.ProjectRoot / specification.SourceDirectory,
+                                                         inputs, currentName, replacementName);
+}
+
+void EditorWorkspaceLayer::ApplyUiBuilderTokenRefactor(const KeireEditor::UiStyleTokenRefactorPreview& preview)
+{
+    if (!m_AssetDatabase)
+        throw std::logic_error("Open a project before applying a UI token refactor.");
+    if (m_UiBuilderStyleSheetDocument->Dirty())
+        throw std::logic_error("Save or reload the current style draft before a project-wide token refactor.");
+    KeireEditor::ApplyUiStyleTokenRefactor(preview);
+    m_UiBuilderLiveDraft->CloseStyle();
+    m_UiBuilderStyleSheetDocument->ReloadFromSource(true);
+    ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+    m_UiBuilderPanel->SetMessage("Renamed " + preview.CurrentName + " to " + preview.ReplacementName + " across " +
+                                 std::to_string(preview.Changes.size()) + " UI asset(s).");
+}
+
+void EditorWorkspaceLayer::ReloadUiBuilderStyleSheet()
+{
+    m_UiBuilderLiveDraft->CloseStyle();
+    m_UiBuilderStyleSheetDocument->ReloadFromSource(true);
+}
 
 void EditorWorkspaceLayer::SynchronizeUiBuilderLiveDraft() noexcept
 {
@@ -378,6 +519,10 @@ void EditorWorkspaceLayer::SynchronizeUiBuilderLiveDraft() noexcept
     m_UiBuilderLiveDraft->Synchronize(Owner().Assets(), playActive, m_UiBuilderDocument->Asset(),
                                       m_UiBuilderDocument->Generation(), m_UiBuilderDocument->Dirty(),
                                       m_UiBuilderDocument->Definition());
+    m_UiBuilderLiveDraft->SynchronizeStyle(
+        Owner().Assets(), m_UiBuilderStyleSheetDocument->Asset(), m_UiBuilderStyleSheetDocument->Generation(),
+        m_UiBuilderStyleSheetDocument->Dirty(), m_UiBuilderStyleSheetDocument->SourceValid(),
+        m_UiBuilderStyleSheetDocument->Definition());
     if (m_UiBuilderLiveDraftDiagnostic == m_UiBuilderLiveDraft->Diagnostic())
         return;
     m_UiBuilderLiveDraftDiagnostic = m_UiBuilderLiveDraft->Diagnostic();

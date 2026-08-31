@@ -327,6 +327,10 @@ namespace KeireEditor
             return "UI Document";
         if (extension == ".keirestyle")
             return "UI Style Sheet";
+        if (extension == ".keirefont")
+            return "UI Font Family";
+        if (extension == ".ttf" || extension == ".otf" || extension == ".ttc")
+            return "UI Font Face";
         if (extension == ".keiredata")
             return "Managed Data";
         if (extension == ".keireprefab")

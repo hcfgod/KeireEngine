@@ -3,12 +3,35 @@
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
 
 namespace Keire
 {
+    namespace
+    {
+        int UpdateCodeEditorState(ImGuiInputTextCallbackData* data)
+        {
+            auto& state = *static_cast<UiCodeEditorState*>(data->UserData);
+            if (state.RequestCursor)
+            {
+                data->CursorPos =
+                    static_cast<int>(std::min(state.CursorOffset, static_cast<std::size_t>(data->BufTextLen)));
+                data->SelectionStart =
+                    static_cast<int>(std::min(state.SelectionBegin, static_cast<std::size_t>(data->BufTextLen)));
+                data->SelectionEnd =
+                    static_cast<int>(std::min(state.SelectionEnd, static_cast<std::size_t>(data->BufTextLen)));
+                state.RequestCursor = false;
+            }
+            state.CursorOffset = static_cast<std::size_t>(std::max(data->CursorPos, 0));
+            state.SelectionBegin = static_cast<std::size_t>(std::max(data->SelectionStart, 0));
+            state.SelectionEnd = static_cast<std::size_t>(std::max(data->SelectionEnd, 0));
+            return 0;
+        }
+    } // namespace
+
     bool UiFrame::SliderFloat(std::string_view label, float& value, const float minimum, const float maximum)
     {
         RequireActive("SliderFloat");
@@ -78,5 +101,22 @@ namespace Keire
         const std::string safeLabel(label);
         const auto height = ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(visibleLines);
         return ImGui::InputTextMultiline(safeLabel.c_str(), &value, {0.0F, height});
+    }
+
+    bool UiFrame::InputCodeEditor(const std::string_view label, std::string& value, UiCodeEditorState& state,
+                                  const std::uint32_t visibleLines)
+    {
+        RequireActive("InputCodeEditor");
+        if (label.empty() || visibleLines < 8 || visibleLines > 64)
+            throw std::invalid_argument("InputCodeEditor requires a label and 8..64 visible lines.");
+        const std::string safeLabel(label);
+        const auto height = ImGui::GetTextLineHeightWithSpacing() * static_cast<float>(visibleLines);
+        const auto flags = ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackAlways;
+        const auto edited =
+            ImGui::InputTextMultiline(safeLabel.c_str(), &value, {0.0F, height}, flags, UpdateCodeEditorState, &state);
+        state.CursorOffset = std::min(state.CursorOffset, value.size());
+        state.SelectionBegin = std::min(state.SelectionBegin, value.size());
+        state.SelectionEnd = std::min(state.SelectionEnd, value.size());
+        return edited;
     }
 } // namespace Keire

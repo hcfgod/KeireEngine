@@ -35,6 +35,7 @@ namespace Keire::Detail
                          std::vector<UiDocumentPanelProjection>& projections, std::set<EntityId>& seenUi);
         void EndSynchronization(std::map<EntityId, RuntimeUiElementId>& uiNodes,
                                 std::map<std::uint64_t, EntityId>& nodeEntities);
+        void SetStyleEvaluationContext(float viewportWidth, float viewportHeight, float dpi = 96.0F);
         void Clear(std::map<EntityId, RuntimeUiElementId>& uiNodes,
                    std::map<std::uint64_t, EntityId>& nodeEntities) noexcept;
 

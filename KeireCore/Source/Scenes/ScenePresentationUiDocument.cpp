@@ -347,6 +347,22 @@ namespace Keire::Detail
         }
     }
 
+    void ScenePresentationUiDocumentStore::SetStyleEvaluationContext(const float viewportWidth,
+                                                                     const float viewportHeight, const float dpi)
+    {
+        const UiStyleEvaluationContext context{.Width = viewportWidth,
+                                               .Height = viewportHeight,
+                                               .Dpi = dpi,
+                                               .Pointer = UiStylePointerPrecision::Fine,
+                                               .Navigation = UiStyleNavigationMode::Pointer};
+        for (auto& [entity, state] : m_Impl->Documents)
+        {
+            (void)entity;
+            if (state.Instance)
+                (void)state.Instance->SetStyleEvaluationContext(context);
+        }
+    }
+
     void ScenePresentationUiDocumentStore::Clear(std::map<EntityId, RuntimeUiElementId>& uiNodes,
                                                  std::map<std::uint64_t, EntityId>& nodeEntities) noexcept
     {

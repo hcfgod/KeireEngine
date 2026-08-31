@@ -19,6 +19,14 @@ recast_url="$(config_value "$ROOT/Config/Dependencies.lock" RECAST_URL)"
 recast_commit="$(config_value "$ROOT/Config/Dependencies.lock" RECAST_COMMIT)"
 miniaudio_url="$(config_value "$ROOT/Config/Dependencies.lock" MINIAUDIO_URL)"
 miniaudio_commit="$(config_value "$ROOT/Config/Dependencies.lock" MINIAUDIO_COMMIT)"
+freetype_url="$(config_value "$ROOT/Config/Dependencies.lock" FREETYPE_URL)"
+freetype_commit="$(config_value "$ROOT/Config/Dependencies.lock" FREETYPE_COMMIT)"
+harfbuzz_url="$(config_value "$ROOT/Config/Dependencies.lock" HARFBUZZ_URL)"
+harfbuzz_commit="$(config_value "$ROOT/Config/Dependencies.lock" HARFBUZZ_COMMIT)"
+fribidi_url="$(config_value "$ROOT/Config/Dependencies.lock" FRIBIDI_URL)"
+fribidi_commit="$(config_value "$ROOT/Config/Dependencies.lock" FRIBIDI_COMMIT)"
+libunibreak_url="$(config_value "$ROOT/Config/Dependencies.lock" LIBUNIBREAK_URL)"
+libunibreak_commit="$(config_value "$ROOT/Config/Dependencies.lock" LIBUNIBREAK_COMMIT)"
 libsodium_url="$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_URL)"
 libsodium_commit="$(config_value "$ROOT/Config/Dependencies.lock" LIBSODIUM_COMMIT)"
 macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
@@ -187,12 +195,21 @@ locked_source() {
 jolt_source="$(locked_source jolt "$jolt_url" "$jolt_commit")"
 recast_source="$(locked_source recast "$recast_url" "$recast_commit")"
 miniaudio_source="$(locked_source miniaudio "$miniaudio_url" "$miniaudio_commit")"
+freetype_source="$(locked_source freetype "$freetype_url" "$freetype_commit")"
+harfbuzz_source="$(locked_source harfbuzz "$harfbuzz_url" "$harfbuzz_commit")"
+fribidi_source="$(locked_source fribidi "$fribidi_url" "$fribidi_commit")"
+libunibreak_source="$(locked_source libunibreak "$libunibreak_url" "$libunibreak_commit")"
 libsodium_source="$(locked_source libsodium "$libsodium_url" "$libsodium_commit")"
 assimp_patched_source="$(prepare_patched_assimp_source)"
 if [[ "$toolset" == clang ]]; then export CC=clang CXX=clang++; else export CC=gcc CXX=g++; fi
 compiler="$($CXX --version | head -n 1)"
 bridge="$ROOT/Scripts/Dependencies/CMakeLists.txt"
-if command -v sha256sum >/dev/null 2>&1; then bridge_hash="$(sha256sum "$bridge" | awk '{print $1}')"; else bridge_hash="$(shasum -a 256 "$bridge" | awk '{print $1}')"; fi
+bridge_capture="$ROOT/Scripts/Dependencies/RunAndCapture.cmake"
+if command -v sha256sum >/dev/null 2>&1; then
+  bridge_hash="$(sha256sum "$bridge" "$bridge_capture" | sha256sum | awk '{print $1}')"
+else
+  bridge_hash="$(shasum -a 256 "$bridge" "$bridge_capture" | shasum -a 256 | awk '{print $1}')"
+fi
 options=(-DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
   -DSDL_AUDIO=OFF -DSDL_CAMERA=OFF -DSDL_JOYSTICK=ON -DSDL_HAPTIC=ON -DSDL_HIDAPI=ON
   -DSDL_HIDAPI_JOYSTICK=ON -DSDL_HIDAPI_LIBUSB=OFF -DSDL_VIRTUAL_JOYSTICK=ON -DSDL_SENSOR=OFF
@@ -222,7 +239,7 @@ if [[ "$platform" == Mac ]]; then
   options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture"
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 fi
-key="$sdl_commit|$assimp_commit|$assimp_patch_digest|$jolt_commit|$recast_commit|$miniaudio_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
+key="$sdl_commit|$assimp_commit|$assimp_patch_digest|$jolt_commit|$recast_commit|$miniaudio_commit|$freetype_commit|$harfbuzz_commit|$fribidi_commit|$libunibreak_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
 base="$ROOT/Build/Dependencies/$system-$output_arch-$toolset"
 
 validate_sdl_input_backends() {
@@ -266,7 +283,7 @@ validate_sdl_input_backends() {
 }
 
 for configuration in Debug Release; do
-  build="$base/$configuration"; install="$build/install"; library="$install/lib/libSDL3.a"; assimp_library="$install/lib/libassimp.a"; zlib_library="$install/lib/libzlibstatic.a"; jolt_library="$install/lib/libJolt.a"; miniaudio_library="$install/lib/libminiaudio.a"; stamp="$build/keire-dependency.stamp"
+  build="$base/$configuration"; install="$build/install"; library="$install/lib/libSDL3.a"; assimp_library="$install/lib/libassimp.a"; zlib_library="$install/lib/libzlibstatic.a"; jolt_library="$install/lib/libJolt.a"; miniaudio_library="$install/lib/libminiaudio.a"; freetype_library="$install/lib/libfreetype.a"; harfbuzz_library="$install/lib/libharfbuzz.a"; fribidi_library="$install/lib/libfribidi.a"; libunibreak_library="$install/lib/libunibreak.a"; stamp="$build/keire-dependency.stamp"
   sodium_runtime="$install/lib/libsodium.so"; [[ "$platform" == Mac ]] && sodium_runtime="$install/lib/libsodium.dylib"
   sodium_license="$install/share/licenses/libsodium/LICENSE"
   recast_suffix=""; [[ "$configuration" == Debug ]] && recast_suffix="-d"
@@ -277,6 +294,8 @@ for configuration in Debug Release; do
   if [[ "$force" != 1 && -f "$library" && -f "$assimp_library" && -f "$zlib_library" &&
         -f "$jolt_library" && -f "$recast_library" && -f "$detour_library" &&
         -f "$crowd_library" && -f "$tile_cache_library" && -f "$miniaudio_library" &&
+        -f "$freetype_library" && -f "$harfbuzz_library" && -f "$fribidi_library" &&
+        -f "$libunibreak_library" &&
         -f "$sodium_runtime" && -f "$sodium_license" &&
         -f "$stamp" && "$(tr -d '\r\n' < "$stamp")" == "$key|$configuration" ]]; then
     validate_sdl_input_backends "$build" "$configuration"
@@ -286,7 +305,7 @@ for configuration in Debug Release; do
   [[ "$build" == "$base/Debug" || "$build" == "$base/Release" ]] || { printf 'Refusing to replace dependency cache outside %s.\n' "$base" >&2; exit 1; }
   rm -rf "$build"
   mkdir -p "$build"
-  cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$assimp_patched_source" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
+  cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$assimp_patched_source" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DKEIRE_FREETYPE_SOURCE="$freetype_source" -DKEIRE_HARFBUZZ_SOURCE="$harfbuzz_source" -DKEIRE_FRIBIDI_SOURCE="$fribidi_source" -DKEIRE_LIBUNIBREAK_SOURCE="$libunibreak_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
   cmake --build "$build" --target install --parallel "$(build_parallel_jobs)"
   validate_sdl_input_backends "$build" "$configuration"
   sodium_build="$build/libsodium"
@@ -311,8 +330,12 @@ for configuration in Debug Release; do
   [[ -f "$library" && -f "$assimp_library" && -f "$zlib_library" && -f "$jolt_library" &&
      -f "$recast_library" && -f "$detour_library" && -f "$crowd_library" &&
      -f "$tile_cache_library" && -f "$miniaudio_library" && -f "$sodium_runtime" &&
+     -f "$freetype_library" && -f "$harfbuzz_library" && -f "$fribidi_library" &&
+     -f "$libunibreak_library" &&
      -f "$sodium_license" &&
      -f "$install/include/assimp/Importer.hpp" && -f "$install/include/SDL3/SDL.h" &&
+     -f "$install/include/freetype2/ft2build.h" && -f "$install/include/harfbuzz/hb.h" &&
+     -f "$install/include/fribidi/fribidi.h" && -f "$install/include/unibreak/linebreak.h" &&
      -f "$install/cmake/SDL3Config.cmake" ]] || { printf 'Native %s install is incomplete.\n' "$configuration" >&2; exit 1; }
   printf '%s\n' "$key|$configuration" > "$stamp"
 done
@@ -393,6 +416,10 @@ DependencyManifest = {
     JoltCommit = "$jolt_commit",
     RecastCommit = "$recast_commit",
     MiniaudioCommit = "$miniaudio_commit",
+    FreeTypeCommit = "$freetype_commit",
+    HarfBuzzCommit = "$harfbuzz_commit",
+    FriBidiCommit = "$fribidi_commit",
+    LibunibreakCommit = "$libunibreak_commit",
     SodiumCommit = "$libsodium_commit",
     CoralCommit = "$coral_commit",
     CoralPatchDigest = "$coral_patch_digest",
@@ -421,6 +448,16 @@ DependencyManifest = {
     MiniaudioInclude = "$debug_install/include/miniaudio",
     MiniaudioDebugLibrary = "$debug_install/lib/libminiaudio.a",
     MiniaudioReleaseLibrary = "$release_install/lib/libminiaudio.a",
+    TypographyInclude = "$debug_install/include",
+    FreeTypeInclude = "$debug_install/include/freetype2",
+    FreeTypeDebugLibrary = "$debug_install/lib/libfreetype.a",
+    FreeTypeReleaseLibrary = "$release_install/lib/libfreetype.a",
+    HarfBuzzDebugLibrary = "$debug_install/lib/libharfbuzz.a",
+    HarfBuzzReleaseLibrary = "$release_install/lib/libharfbuzz.a",
+    FriBidiDebugLibrary = "$debug_install/lib/libfribidi.a",
+    FriBidiReleaseLibrary = "$release_install/lib/libfribidi.a",
+    LibunibreakDebugLibrary = "$debug_install/lib/libunibreak.a",
+    LibunibreakReleaseLibrary = "$release_install/lib/libunibreak.a",
     SodiumDebugRuntime = "$debug_install/lib/libsodium.$sodium_extension",
     SodiumReleaseRuntime = "$release_install/lib/libsodium.$sodium_extension",
     SodiumLicense = "$release_install/share/licenses/libsodium/LICENSE",

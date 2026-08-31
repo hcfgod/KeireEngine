@@ -121,6 +121,11 @@ TEST_CASE("Packaged content manifest exposes only existing learning and resource
     REQUIRE(sandbox != manager.Snapshot()->Learn.end());
     REQUIRE(sandbox->LocalFile);
     CHECK(*sandbox->LocalFile == std::filesystem::weakly_canonical(root / "Samples/KeireSandbox/README.md"));
+    const auto audio = std::ranges::find(manager.Snapshot()->Learn, "audio",
+                                         [](const auto& item) -> const std::string& { return item.Metadata.Id; });
+    REQUIRE(audio != manager.Snapshot()->Learn.end());
+    REQUIRE(audio->LocalFile);
+    CHECK(*audio->LocalFile == std::filesystem::weakly_canonical(root / "Docs/AudioProduction.md"));
 }
 
 TEST_CASE("License catalog aggregates and groups actual Hub and package license files")

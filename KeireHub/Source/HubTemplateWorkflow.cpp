@@ -258,7 +258,7 @@ namespace KeireHub
                 TemplateCreateRequest creation;
                 creation.TemplateId = request.TemplateId;
                 creation.ProjectName = request.ProjectName;
-                creation.Destination = request.ParentDirectory / request.ProjectName;
+                creation.Destination = request.ParentDirectory / Keire::Detail::PathFromUtf8(request.ProjectName);
                 creation.EditorVersion = std::move(parsedVersion).Value();
                 creation.EditorMinimumProjectSchema = request.MinimumProjectSchema;
                 creation.EditorMaximumProjectSchema = request.MaximumProjectSchema;
@@ -349,7 +349,7 @@ namespace KeireHub
         TemplateCreateRequest request;
         request.TemplateId = std::string(templateId);
         request.ProjectName = std::move(projectName);
-        request.Destination = parentDirectory / request.ProjectName;
+        request.Destination = parentDirectory / Keire::Detail::PathFromUtf8(request.ProjectName);
         request.EditorVersion = std::move(parsedVersion).Value();
         request.EditorMinimumProjectSchema = minimumProjectSchema;
         request.EditorMaximumProjectSchema = maximumProjectSchema;

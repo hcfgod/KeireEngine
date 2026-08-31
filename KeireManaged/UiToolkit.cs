@@ -269,6 +269,19 @@ public enum Justify : byte { FlexStart, Center, FlexEnd, SpaceBetween, SpaceArou
 public enum Align : byte { Auto, FlexStart, Center, FlexEnd, Stretch }
 public enum Overflow : byte { Visible, Hidden, Scroll }
 public enum NavigationDirection : byte { Previous, Next, Left, Right, Up, Down }
+public enum BackgroundFit : byte { Stretch, Contain, Cover, None }
+public enum BackgroundRepeat : byte { NoRepeat, Repeat, RepeatX, RepeatY }
+public enum FontSlant : byte { Normal, Italic, Oblique }
+public enum TextWrap : byte { Normal, NoWrap }
+public enum TextOverflow : byte { Clip, Ellipsis }
+public enum TextDirection : byte { Automatic, LeftToRight, RightToLeft }
+public enum TransitionEasing : byte { Linear, Ease, EaseIn, EaseOut, EaseInOut }
+
+public readonly record struct StyleEdges<T>(T Left, T Top, T Right, T Bottom);
+public readonly record struct StyleCorners<T>(T TopLeft, T TopRight, T BottomRight, T BottomLeft);
+public readonly record struct BoxShadow(Keire.Vector2 Offset, float BlurRadius, float SpreadRadius,
+                                        Keire.Color Color, bool Inset = false);
+public sealed class FontFamily : Keire.Asset;
 
 public sealed class Style
 {
@@ -292,6 +305,36 @@ public sealed class Style
     public float Opacity { get; set; } = 1.0f;
     public Keire.Color Color { get; set; } = Keire.Color.White;
     public Keire.Color BackgroundColor { get; set; } = new(0.0f, 0.0f, 0.0f, 0.0f);
+    public Keire.Texture? BackgroundImage { get; set; }
+    public Keire.Color BackgroundTint { get; set; } = Keire.Color.White;
+    public BackgroundFit BackgroundFit { get; set; } = BackgroundFit.Stretch;
+    public BackgroundRepeat BackgroundRepeat { get; set; }
+    public Keire.Vector2 BackgroundPosition { get; set; } = new(0.5f, 0.5f);
+    public StyleEdges<float> BackgroundSlice { get; set; }
+    public StyleEdges<float> BorderWidths { get; set; }
+    public StyleEdges<Keire.Color> BorderColors { get; set; }
+    public StyleCorners<float> BorderRadii { get; set; }
+    public IReadOnlyList<BoxShadow> BoxShadows { get; set; } = [];
+    public IReadOnlyList<BoxShadow> TextShadows { get; set; } = [];
+    public Keire.Texture? AlphaMask { get; set; }
+    public Keire.Vector2 Translate { get; set; }
+    public Keire.Vector2 Scale { get; set; } = new(1.0f, 1.0f);
+    public float RotationDegrees { get; set; }
+    public Keire.Vector2 TransformOrigin { get; set; } = new(0.5f, 0.5f);
+    public FontFamily? FontFamily { get; set; }
+    public ushort FontWeight { get; set; } = 400;
+    public FontSlant FontSlant { get; set; }
+    public float FontSize { get; set; } = 16.0f;
+    public float? LineHeight { get; set; }
+    public float LetterSpacing { get; set; }
+    public float WordSpacing { get; set; }
+    public TextWrap TextWrap { get; set; }
+    public TextOverflow TextOverflow { get; set; }
+    public TextDirection TextDirection { get; set; }
+    public string Language { get; set; } = "und";
+    public ushort MaximumLines { get; set; }
+    public IReadOnlyList<float> TransitionDelays { get; set; } = [];
+    public IReadOnlyList<TransitionEasing> TransitionEasings { get; set; } = [];
 }
 
 public abstract class EventBase

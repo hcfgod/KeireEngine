@@ -703,6 +703,11 @@ namespace KeireEditor
         auto runtime = Keire::CreateRef<Keire::UiDocument>(
             visualTree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>(styleSheets.begin(), styleSheets.end()),
             std::move(templateResolver));
+        (void)runtime->SetStyleEvaluationContext({.Width = static_cast<float>(settings.Width),
+                                                  .Height = static_cast<float>(settings.Height),
+                                                  .Dpi = settings.Dpi,
+                                                  .Pointer = Keire::UiStylePointerPrecision::Fine,
+                                                  .Navigation = Keire::UiStyleNavigationMode::Pointer});
         if (const auto selectedRuntime = runtime->Find(selected))
         {
             constexpr std::array states{Keire::UiStylePseudoState::Hover, Keire::UiStylePseudoState::Active,
@@ -731,6 +736,7 @@ namespace KeireEditor
             found != result.Elements.end())
         {
             result.SelectedState = found->State;
+            result.SelectedStyleTrace = runtime->ResolvedStyleTrace(found->RuntimeId);
         }
         return result;
     }
@@ -1204,6 +1210,45 @@ namespace KeireEditor
             }
         }
         return found && Edit(elements.size() == 1 ? "Edit UI classes" : "Edit shared UI classes", std::move(candidate));
+    }
+
+    bool UiBuilderDocument::SetInlineStyleProperty(const std::span<const Keire::AssetId> elements,
+                                                   const std::string_view name, const std::string_view value)
+    {
+        if (elements.empty() || name.empty() || value.empty())
+            return false;
+        auto candidate = m_Definition;
+        bool found = false;
+        for (const auto element : elements)
+        {
+            if (auto* definition = FindElement(candidate.Root, element))
+            {
+                SetInlineStyle(definition->InlineStyles, name, std::string(value));
+                found = true;
+            }
+        }
+        return found && Edit(elements.size() == 1 ? "Edit UI inline style" : "Edit shared UI inline style",
+                             std::move(candidate));
+    }
+
+    bool UiBuilderDocument::RemoveInlineStyleProperty(const std::span<const Keire::AssetId> elements,
+                                                      const std::string_view name)
+    {
+        if (elements.empty() || name.empty())
+            return false;
+        auto candidate = m_Definition;
+        bool removed = false;
+        for (const auto element : elements)
+        {
+            if (auto* definition = FindElement(candidate.Root, element))
+            {
+                removed = std::erase_if(definition->InlineStyles,
+                                        [name](const auto& property) { return property.Name == name; }) > 0 ||
+                          removed;
+            }
+        }
+        return removed && Edit(elements.size() == 1 ? "Remove UI inline style" : "Remove shared UI inline style",
+                               std::move(candidate));
     }
 
     bool UiBuilderDocument::SetTemplate(const Keire::AssetId element, const Keire::AssetId visualTree)

@@ -15,38 +15,47 @@ public sealed class UIController : Behaviour
     [SerializeField] private KeireEvent uiClosed = new();
 
     [SerializeField] private AudioClip? uiAudioClip;
+    [SerializeField, StableFieldId("3f100613-b2cc-4dc0-a7b2-216428d75ae1")]
+    [Tooltip("Input Actions asset used to toggle the Sandbox UI.")]
+    private InputActionAsset? _inputActions;
 
     private IDisposable? _cursorVisibility;
+    private InputActionContext? _inputContext;
+    private InputAction? _toggleUiAction;
     private bool _eventsBound;
     private bool _reportedVisible;
 
     protected override void OnEnable()
     {
+        EnableInput();
         BindUiEvents();
         ApplyUiVisibility(uiPanel is { IsValid: true, Active: true });
     }
 
     protected override void OnDisable()
     {
+        DisableInput();
         UnbindUiEvents();
         ApplyUiVisibility(false);
     }
 
     protected override void OnBeforeReload()
     {
+        DisableInput();
         UnbindUiEvents();
         ApplyUiVisibility(false);
     }
 
     protected override void OnAfterReload()
     {
+        EnableInput();
         BindUiEvents();
         ApplyUiVisibility(uiPanel is { IsValid: true, Active: true });
     }
 
     protected override void Update()
     {
-        if (Input.Pressed("ToggleUI"))
+        if (_toggleUiAction?.WasPressedThisFrame == true)
             ToggleUi();
     }
 
@@ -67,6 +76,8 @@ public sealed class UIController : Behaviour
             uiOpened.Invoke();
         else
             uiClosed.Invoke();
+        if (uiAudioClip is { IsValid: true })
+            Audio.Play(Entity, uiAudioClip);
     }
 
     private void BindUiEvents()
@@ -117,6 +128,24 @@ public sealed class UIController : Behaviour
     {
         _cursorVisibility?.Dispose();
         _cursorVisibility = null;
+    }
+
+    private void EnableInput()
+    {
+        DisableInput();
+        if (_inputActions is not { IsValid: true })
+            throw new InvalidOperationException($"{nameof(UIController)} requires an Input Actions asset.");
+
+        _inputContext = _inputActions.CreateContext();
+        _toggleUiAction = _inputContext.FindAction("Player/ToggleUI");
+        _inputContext.Enable();
+    }
+
+    private void DisableInput()
+    {
+        _inputContext?.Dispose();
+        _inputContext = null;
+        _toggleUiAction = null;
     }
 
 }

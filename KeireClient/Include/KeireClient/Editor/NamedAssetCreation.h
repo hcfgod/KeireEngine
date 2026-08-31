@@ -21,6 +21,7 @@ namespace KeireEditor
         VfxEffect,
         UiDocument,
         UiStyleSheet,
+        UiFontFamily,
         MaterialGraph,
         ShaderGraph,
         MaterialFunction,

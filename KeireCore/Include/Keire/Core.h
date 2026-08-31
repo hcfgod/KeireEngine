@@ -87,6 +87,8 @@
 #include "Keire/Ui.h"
 #include "Keire/Ui/RuntimeUi.h"
 #include "Keire/Ui/UiElements.h"
+#include "Keire/Ui/UiFontAssets.h"
+#include "Keire/Ui/UiStyleProperties.h"
 #include "Keire/Ui/UiToolkit.h"
 #include "Keire/UiWorkspace.h"
 #include "Keire/Undo.h"

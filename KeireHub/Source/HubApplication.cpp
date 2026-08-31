@@ -744,6 +744,24 @@ namespace
             if (!status)
                 SetError(status.Error().Message);
         }
+        void ResetCreateProjectDialog(std::string templateId, std::string editorId = {})
+        {
+            m_CreateTemplateId = templateId.empty() ? "keire.3d-starter" : std::move(templateId);
+            m_CreateEditorId = std::move(editorId);
+            m_CreateName = "NewProject";
+            m_CreateLocation = Keire::Detail::PathToUtf8(m_ProductSnapshot.Settings.DefaultProjectLocation);
+            m_CreateOpenAfterCreation = true;
+            m_RequestCreatePopup = true;
+        }
+        static void EnsureSettingsDirectory(const std::filesystem::path& path, const std::string_view label)
+        {
+            if (path.empty() || !path.is_absolute())
+                throw std::runtime_error(std::string(label) + " must be an absolute folder path.");
+            std::error_code error;
+            std::filesystem::create_directories(path, error);
+            if (error || !std::filesystem::is_directory(path))
+                throw std::runtime_error(std::string(label) + " could not be created or opened.");
+        }
         void LocateProject(const std::filesystem::path& selected)
         {
             if (!m_ProjectWorkflow || m_PendingLocateProjectId.empty())
@@ -764,7 +782,7 @@ namespace
                 switch (command.Type)
                 {
                 case KeireHub::HubProjectUiCommandType::NewProject:
-                    m_RequestCreatePopup = true;
+                    ResetCreateProjectDialog("keire.3d-starter");
                     break;
                 case KeireHub::HubProjectUiCommandType::AddProject:
                     m_RequestOpenPopup = true;
@@ -858,10 +876,7 @@ namespace
                 switch (command.Type)
                 {
                 case KeireHub::HubUiCommandType::CreateProjectFromTemplate:
-                    m_CreateTemplateId = command.ItemId;
-                    if (!command.Text.empty())
-                        m_CreateEditorId = command.Text;
-                    m_RequestCreatePopup = true;
+                    ResetCreateProjectDialog(command.ItemId, command.Text);
                     break;
                 case KeireHub::HubUiCommandType::AddProject:
                     m_RequestOpenPopup = true;
@@ -938,6 +953,8 @@ namespace
                 {
                     if (!m_Controller || !command.Settings)
                         throw std::logic_error("Hub settings are unavailable.");
+                    EnsureSettingsDirectory(command.Settings->DefaultProjectLocation, "The default project location");
+                    EnsureSettingsDirectory(command.Settings->DefaultEditorRoot, "The default editor root");
                     const bool packageTaskSettingsChanged =
                         (!m_PackageTasks && !m_Maintenance.Snapshot()->IsRunning()) ||
                         command.Settings->TemporaryRoot != m_PackageTaskTemporaryRoot ||

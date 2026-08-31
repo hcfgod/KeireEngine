@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 1,
-  "id": "6a100001-1111-4000-8000-000000000001",
-  "type": "4b454952-4555-4953-5459-4c4500000001",
-  "importer": "Keire.UiStyleSheet",
-  "importerVersion": 1,
   "dependencies": [],
+  "id": "6a100001-1111-4000-8000-000000000001",
+  "importSettings": {},
+  "importer": "Keire.UiStyleSheet",
+  "importerVersion": 2,
+  "schemaVersion": 1,
   "subAssets": [],
-  "importSettings": {}
+  "type": "4b454952-4555-4953-5459-4c4500000001"
 }

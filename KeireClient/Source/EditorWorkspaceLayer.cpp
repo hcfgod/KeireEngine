@@ -790,7 +790,6 @@ void EditorWorkspaceLayer::OnAttach()
         gameSurface.Name = "Game View";
         gameSurface.ClearColor = {0.10F, 0.12F, 0.16F, 1.0F};
         m_GameRenderView = renderer->CreateView(gameSurface);
-        renderer->RequestGpuVfxPipelineWarmup();
     }
     m_SceneViewportPanel->Initialize(Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{});
     if (const auto project = Owner().GetProject())
@@ -1056,6 +1055,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
                 break;
             case Phase::PendingFileDialogs:
                 CompleteSaveSceneAs();
+                CompleteSaveUiBuilderStyleSheetAs();
                 CompleteAssetBrowserPackage();
                 break;
             case Phase::ManagedRuntime:
@@ -1134,9 +1134,21 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
                                (ui.Shortcut({.Key = Keire::UiKey::Y, .Primary = true, .Global = true}) ||
                                 ui.Shortcut({.Key = Keire::UiKey::R, .Primary = true, .Global = true}));
     if (shiftRedo || alternateRedo)
-        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo);
+    {
+        if (!m_CommandRouter->Execute(KeireEditor::EditorCommand::Redo))
+        {
+            m_Notice = "There is nothing to redo in the active document.";
+            m_NoticeColor = m_Theme.MutedText;
+        }
+    }
     else if (undo)
-        (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::Undo);
+    {
+        if (!m_CommandRouter->Execute(KeireEditor::EditorCommand::Undo))
+        {
+            m_Notice = "There is nothing to undo in the active document.";
+            m_NoticeColor = m_Theme.MutedText;
+        }
+    }
     if (m_CommandRouter->Available(KeireEditor::EditorCommand::DuplicateSelection) &&
         m_ActiveUndoContext == m_SceneDocument->History() &&
         ui.Shortcut({.Key = Keire::UiKey::D, .Primary = true, .Global = true}))
@@ -1243,6 +1255,10 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
                 ReportError("Input", error.what());
             }
         }
+        else if (m_ProjectSettingsDocument->Dirty())
+        {
+            (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveProjectSettings);
+        }
         else if (m_VfxEffectDocument->Dirty() && m_VfxEffectPanel->Registration().Visible())
         {
             try
@@ -1256,7 +1272,13 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
             }
         }
         else
-            (void)m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveScene);
+        {
+            if (!m_CommandRouter->Execute(KeireEditor::EditorCommand::SaveScene))
+            {
+                m_Notice = "There are no unsaved changes in the active document.";
+                m_NoticeColor = m_Theme.MutedText;
+            }
+        }
     }
     const auto profiler = Owner().GetProfiler();
     auto& workspace = Owner().GetUiWorkspace();

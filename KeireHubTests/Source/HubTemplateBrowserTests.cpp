@@ -1,5 +1,6 @@
 #include "KeireHub/HubProjectCreationUi.h"
 #include "KeireHub/HubTemplateBrowser.h"
+#include "KeireHub/HubTemplateWorkflow.h"
 #include "KeireHubRuntime/TemplateManager.h"
 
 #include <KeireHubTests/TestSupport.h>
@@ -160,6 +161,22 @@ TEST_CASE("Project creation requests default to opening the created project and 
 
     request.OpenAfterCreation = false;
     CHECK_FALSE(request.OpenAfterCreation);
+}
+
+TEST_CASE("Hub template workflow preserves UTF-8 project names in Windows paths")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubTemplateWorkflow workflow(std::filesystem::current_path() / "Build/Bin/KeireHub.exe");
+    REQUIRE(workflow.Load());
+
+    const std::string projectName = "Kéire UX Audit";
+    const auto created = workflow.Create("keire.empty", projectName, temporary.Path(), "0.4.4", "windows", "x86_64", 1,
+                                         CurrentProjectSchemaVersion);
+    REQUIRE(created);
+
+    const auto expected = temporary.Path() / std::filesystem::path(std::u8string(u8"Kéire UX Audit"));
+    CHECK(created.Value().Root == expected);
+    CHECK(std::filesystem::is_regular_file(expected / "ProjectSettings/Project.keireproject"));
 }
 
 TEST_CASE("Template compatibility explains editor version schema platform and health failures")

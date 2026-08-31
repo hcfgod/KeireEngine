@@ -2,6 +2,8 @@
 #include "KeireClient/Editor/UiBuilderDocument.h"
 #include "KeireClient/Editor/UiBuilderLiveDraft.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
+#include "KeireClient/Editor/UiStyleSourceEditor.h"
+#include "KeireClient/Editor/UiStyleTokenRefactor.h"
 
 #include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/Ui/UiElements.h"
@@ -780,6 +782,45 @@ TEST_CASE("UI Builder live drafts replace matching Play documents and revert wit
     assets->Close();
 }
 
+TEST_CASE("UI Builder live style drafts retain the last valid preview and restore the imported baseline")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.Decoders.push_back(Keire::CreateUiStyleSheetAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(specification));
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000263");
+    const auto original =
+        Keire::UiStyleSheetAsset::ParseSource(AsBytes("@keire-style 1;\nLabel { color: #ffffffff; }\n"));
+    REQUIRE(assets->PublishDevelopmentAsset(asset, Keire::CreateRef<Keire::UiStyleSheetAsset>(original)));
+
+    auto draft = original;
+    draft.Rules.front().Properties.front().Value = "#33aaffff";
+    KeireEditor::UiBuilderLiveDraftSession liveDraft;
+    liveDraft.SynchronizeStyle(assets, asset, 2, true, true, draft);
+    REQUIRE(liveDraft.StyleActive());
+    REQUIRE(assets->Load<Keire::UiStyleSheetAsset>(asset).TryGetLoaded());
+    CHECK(assets->Load<Keire::UiStyleSheetAsset>(asset).TryGetLoaded()->Definition() == draft);
+
+    auto rejected = draft;
+    rejected.Rules.front().Properties.front().Value = "not-a-color";
+    liveDraft.SynchronizeStyle(assets, asset, 3, true, false, rejected);
+    REQUIRE(liveDraft.StyleActive());
+    CHECK(assets->Load<Keire::UiStyleSheetAsset>(asset).TryGetLoaded()->Definition() == draft);
+
+    liveDraft.CloseStyle();
+    liveDraft.CloseStyle();
+    CHECK_FALSE(liveDraft.StyleActive());
+    CHECK(assets->Load<Keire::UiStyleSheetAsset>(asset).TryGetLoaded()->Definition() == original);
+
+    liveDraft.SynchronizeStyle(assets, asset, 4, true, true, draft);
+    REQUIRE(liveDraft.StyleActive());
+    liveDraft.CommitStyle(assets, asset, draft);
+    CHECK_FALSE(liveDraft.StyleActive());
+    liveDraft.CloseStyle();
+    CHECK(assets->Load<Keire::UiStyleSheetAsset>(asset).TryGetLoaded()->Definition() == draft);
+    assets->Close();
+}
+
 TEST_CASE("UI Toolkit authoring assets publish immediately without waiting for an import catalog")
 {
     Keire::AssetSystemSpecification specification;
@@ -846,7 +887,8 @@ TEST_CASE("UI Builder style selector and declaration edits are transactional acr
     std::filesystem::create_directories(root, error);
     REQUIRE_FALSE(error);
     const auto source = root / "Hud.keirestyle";
-    constexpr std::string_view originalSource = "@keire-style 1;\nLabel { color: #ffffffff; }\n";
+    constexpr std::string_view originalSource =
+        "@keire-style 1;\n/* Preserve this authored note. */\nLabel { color: #ffffffff; }\n";
     Keire::Detail::WriteTextFileAtomically(source, originalSource);
     const auto original = Keire::UiStyleSheetAsset::ParseSource(AsBytes(originalSource));
     auto undoService = Keire::CreateRef<Keire::UndoService>();
@@ -884,5 +926,198 @@ TEST_CASE("UI Builder style selector and declaration edits are transactional acr
 
     document.Close();
     undoService->Close();
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("UI Builder style drafts preserve comments and keep the last valid preview on source errors")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-UiBuilderStyle-Draft-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root, error);
+    REQUIRE_FALSE(error);
+    const auto source = root / "Responsive.keirestyle";
+    constexpr std::string_view originalSource = R"css(@keire-style 2;
+
+/* Brand controls are shared with the pause menu. */
+.primary {
+  /* Keep this comment beside the authored value. */
+  color: #ffffffff;
+}
+)css";
+    Keire::Detail::WriteTextFileAtomically(source, originalSource);
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "UI Style Draft"});
+    KeireEditor::UiBuilderStyleSheetDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000263"),
+                  Keire::UiStyleSheetAsset::ParseSource(AsBytes(originalSource)), 1, source, undo);
+
+    REQUIRE(document.SetProperty(0, "color", "#3366ccff"));
+    CHECK(document.SourceText().find("Brand controls") != std::string::npos);
+    CHECK(document.SourceText().find("Keep this comment") != std::string::npos);
+    CHECK(document.SourceText().find("color: #3366ccff") != std::string::npos);
+    REQUIRE(document.SetSelector(0, "Button.primary:hover"));
+    CHECK(document.SourceText().find("Button.primary:hover") != std::string::npos);
+    CHECK(document.SourceText().find("Keep this comment") != std::string::npos);
+
+    const auto lastValid = Keire::UiStyleSheetAsset::Encode(document.Definition());
+    REQUIRE(document.ApplySourceDraft("@keire-style 2;\nButton { color: ;\n"));
+    CHECK_FALSE(document.SourceValid());
+    REQUIRE(document.SourceDiagnostic());
+    CHECK(document.SourceDiagnostic()->Line > 0);
+    CHECK(document.SourceDiagnostic()->Column > 0);
+    CHECK(Keire::UiStyleSheetAsset::Encode(document.Definition()) == lastValid);
+    CHECK_THROWS_WITH_AS(document.Save(), doctest::Contains("Repair"), std::logic_error);
+
+    REQUIRE(document.Undo());
+    CHECK(document.SourceValid());
+    CHECK(document.SourceText().find("Button.primary:hover") != std::string::npos);
+    document.Save();
+    CHECK_FALSE(document.ExternalConflict());
+    Keire::Detail::WriteTextFileAtomically(source, "@keire-style 2;\nLabel { opacity: 0.5; }\n");
+    CHECK(document.ExternalConflict());
+    const auto comparison = document.ExternalComparison();
+    CHECK(comparison.find("--- unsaved draft") != std::string::npos);
+    CHECK(comparison.find("+++ disk source") != std::string::npos);
+    CHECK(comparison.find("Button.primary:hover") != std::string::npos);
+    CHECK(comparison.find("+2 | Label { opacity: 0.5; }") != std::string::npos);
+    CHECK_THROWS_WITH_AS(document.Save(), doctest::Contains("changed on disk"), std::logic_error);
+    const auto conflictCopy = root / "Responsive Conflict Copy.keirestyle";
+    document.SaveAs(conflictCopy);
+    CHECK(document.ExternalConflict());
+    CHECK(Keire::Detail::ReadTextFile(source, Keire::MaximumUiDocumentBytes).find("opacity: 0.5") != std::string::npos);
+    CHECK(Keire::Detail::ReadTextFile(conflictCopy, Keire::MaximumUiDocumentBytes).find("Button.primary:hover") !=
+          std::string::npos);
+    CHECK_THROWS_WITH_AS(document.SaveAs(conflictCopy), doctest::Contains("will not overwrite"), std::invalid_argument);
+
+    document.Close();
+    undoService->Close();
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("UI style source editor provides navigation completion formatting and exact replacements")
+{
+    KeireEditor::UiStyleSourceEditor editor;
+    editor.SetSource(R"css(@keire-style 2;
+/* Preserve authored intent. */
+Button.primary:hover {
+color: var(--brand);
+opac
+}
+)css");
+    CHECK(editor.LineCount() == 7U);
+    CHECK(std::ranges::any_of(editor.Tokens(), [](const auto& token)
+                              { return token.Kind == KeireEditor::UiStyleSourceTokenKind::Comment; }));
+    REQUIRE(editor.GoToRule("Button.primary:hover"));
+    const auto ruleLocation = editor.CursorLocation();
+    CHECK(ruleLocation.Line == 3U);
+    const auto brace = editor.Source().find('{');
+    REQUIRE(brace != std::string::npos);
+    REQUIRE(editor.MatchingBrace(brace));
+    CHECK(editor.Source()[*editor.MatchingBrace(brace)] == '}');
+
+    const auto incomplete = editor.Source().find("opac") + 4U;
+    const auto completions = editor.Completions(incomplete);
+    const auto opacity = std::ranges::find(completions, "opacity", &KeireEditor::UiStyleSourceCompletion::Label);
+    REQUIRE(opacity != completions.end());
+    REQUIRE(editor.ApplyCompletion(incomplete, *opacity));
+    CHECK(editor.Source().find("opacity: ") != std::string::npos);
+    const auto property = editor.Source().find("opacity");
+    REQUIRE(editor.HoverDocumentation(property));
+    CHECK(editor.HoverDocumentation(property)->find("Default") != std::string::npos);
+    CHECK(editor.ReplaceAll("--brand", "--accent", true) == 1U);
+    CHECK(editor.Source().find("var(--accent)") != std::string::npos);
+    REQUIRE(editor.Format());
+    CHECK(editor.Source().find("  color: var(--accent);") != std::string::npos);
+}
+
+TEST_CASE("UI token refactors preview every source and reject stale previews before applying")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-UiTokenRefactor-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root, error);
+    REQUIRE_FALSE(error);
+    const auto stylePath = root / "Theme.keirestyle";
+    const auto documentPath = root / "Hud.keireui";
+    constexpr std::string_view styleSource = R"css(@keire-style 2;
+:root { --brand: #3366ccff; }
+.primary { color: var(--brand); background-color: var(--brand); }
+)css";
+    constexpr std::string_view documentSource = R"xml(<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="Hud">
+  <Label id="ed170000-0000-4000-8000-000000000291" name="title" style="color: var(--brand);"/>
+</ui>
+)xml";
+    Keire::Detail::WriteTextFileAtomically(stylePath, styleSource);
+    Keire::Detail::WriteTextFileAtomically(documentPath, documentSource);
+    const std::array inputs{
+        KeireEditor::UiStyleTokenRefactorInput{Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000292"),
+                                               Keire::UiStyleSheetAsset::StaticType(), "Theme.keirestyle"},
+        KeireEditor::UiStyleTokenRefactorInput{Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000293"),
+                                               Keire::UiVisualTreeAsset::StaticType(), "Hud.keireui"}};
+
+    const auto stale = KeireEditor::BuildUiStyleTokenRefactorPreview(root, inputs, "--brand", "--accent");
+    CHECK(stale.Changes.size() == 2U);
+    CHECK(stale.OccurrenceCount == 4U);
+    REQUIRE_FALSE(stale.Changes.front().Occurrences.empty());
+    CHECK(stale.Changes.front().Occurrences.front().Line > 0U);
+    CHECK_FALSE(stale.Changes.front().Occurrences.front().Preview.empty());
+    Keire::Detail::WriteTextFileAtomically(documentPath, std::string(documentSource) + "\n");
+    CHECK_THROWS_WITH_AS(KeireEditor::ApplyUiStyleTokenRefactor(stale), doctest::Contains("changed after preview"),
+                         std::runtime_error);
+    CHECK(Keire::Detail::ReadTextFile(stylePath, Keire::MaximumUiDocumentBytes).find("--brand") != std::string::npos);
+
+    const auto current = KeireEditor::BuildUiStyleTokenRefactorPreview(root, inputs, "--brand", "--accent");
+    KeireEditor::ApplyUiStyleTokenRefactor(current);
+    CHECK(Keire::Detail::ReadTextFile(stylePath, Keire::MaximumUiDocumentBytes).find("--brand") == std::string::npos);
+    CHECK(Keire::Detail::ReadTextFile(documentPath, Keire::MaximumUiDocumentBytes).find("--brand") ==
+          std::string::npos);
+    std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("UI Builder upgrades style schema only when a v2 property is authored")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-UiBuilderStyle-Schema-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root, error);
+    REQUIRE_FALSE(error);
+    const auto source = root / "Legacy.keirestyle";
+    constexpr std::string_view originalSource =
+        "@keire-style 1;\n/* Preserve this authored note. */\nLabel { color: #ffffffff; }\n";
+    Keire::Detail::WriteTextFileAtomically(source, originalSource);
+
+    KeireEditor::UiBuilderStyleSheetDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000264"),
+                  Keire::UiStyleSheetAsset::ParseSource(AsBytes(originalSource)), 1, source);
+    REQUIRE(document.SetProperty(0, "opacity", "0.75"));
+    REQUIRE(document.SourceText().find("Preserve this authored note") != std::string::npos);
+    CHECK(document.Definition().SchemaVersion == 1U);
+    REQUIRE(document.SetProperty(0, "font-family", "asset(10000000-0000-0000-0000-000000000030)"));
+    REQUIRE(document.SourceText().find("Preserve this authored note") != std::string::npos);
+    CHECK(document.Definition().SchemaVersion == 2U);
+    CHECK(document.SourceText().starts_with("@keire-style 2;"));
+    Keire::UiStyleMediaCondition media;
+    media.MaximumWidth = 960.0F;
+    media.Orientation = Keire::UiStyleOrientation::Portrait;
+    REQUIRE(document.SetMediaCondition(0, media));
+    CHECK(document.SourceText().find("@media (max-width: 960px) and (orientation: portrait)") != std::string::npos);
+    CHECK(document.SourceText().find("Preserve this authored note") != std::string::npos);
+    REQUIRE(document.DuplicateRule(0));
+    const auto duplicated = Keire::UiStyleSheetAsset::ParseSource(AsBytes(document.SourceText()));
+    REQUIRE(duplicated.Rules.size() == 2U);
+    CHECK(duplicated.Rules[0].Media == media);
+    CHECK(duplicated.Rules[1].Media == media);
+    REQUIRE(document.RemoveRule(1));
+    REQUIRE(document.SetMediaCondition(0, std::nullopt));
+    CHECK(document.SourceText().find("@media") == std::string::npos);
+    CHECK(document.SourceText().find("Preserve this authored note") != std::string::npos);
+    document.Save();
+    CHECK(Keire::UiStyleSheetAsset::ParseSource(
+              AsBytes(Keire::Detail::ReadTextFile(source, Keire::MaximumUiDocumentBytes)))
+              .SchemaVersion == 2U);
+
+    document.Close();
     std::filesystem::remove_all(root, error);
 }

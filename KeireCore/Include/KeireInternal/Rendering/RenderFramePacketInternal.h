@@ -2,6 +2,7 @@
 
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Ui/RuntimeUi.h"
+#include "Keire/Ui/UiFontAssets.h"
 #include "KeireInternal/Rendering/RuntimeUiFontAtlasInternal.h"
 
 #include <algorithm>
@@ -117,6 +118,8 @@ namespace Keire::RenderBackend
     {
         AssetId Font;
         std::shared_ptr<const RuntimeUiGlyphAtlasCpuData> Atlas;
+        AssetHandle<UiFontFamilyAsset> Family;
+        AssetHandle<UiFontFaceAsset> Face;
         std::uint32_t DeviceGeneration = 0;
         std::uint32_t FrameSlot = (std::numeric_limits<std::uint32_t>::max)();
     };
@@ -139,7 +142,9 @@ namespace Keire::RenderBackend
     {
         if (command.Type == RuntimeUiDrawType::Image)
             return command.RenderTexture ? command.RenderTexture : command.Asset;
-        return command.Type == RuntimeUiDrawType::Text ? RuntimeUiFontBindingId(command.Asset) : AssetId{};
+        return command.Type == RuntimeUiDrawType::Text
+                   ? (command.PreparedFontBinding ? command.PreparedFontBinding : RuntimeUiFontBindingId(command.Asset))
+                   : AssetId{};
     }
 
     [[nodiscard]] inline std::vector<RuntimeUiTextureRun>

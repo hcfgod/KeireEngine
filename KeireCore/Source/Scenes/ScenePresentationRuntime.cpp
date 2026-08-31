@@ -119,6 +119,7 @@ namespace Keire
             }
             if (ActiveSlider && !UiTree->Exists(ActiveSlider))
                 ActiveSlider = {};
+            UiDocuments.SetStyleEvaluationContext(viewportWidth, viewportHeight);
             UiTree->Layout(viewportWidth, viewportHeight, safeArea);
             CanvasProjection.Rebuild(scene, UiNodes, documentProjections, viewportWidth, viewportHeight,
                                      viewportCamera);

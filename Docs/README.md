@@ -122,6 +122,7 @@ All 84 published guides are listed below in the same groups used by the document
 | [Audio](Scripting/Audio.md) | Audio clips, source components, playback, mixers, buses, parameters, and status. |
 | [Animation](Scripting/Animation.md) | Graph playback, procedural locomotion intent/state/events, root motion, and IK. |
 | [UI and Events](Scripting/UiAndEvents.md) | UI Builder, retained documents/styles/panels, managed controls, binding, events, targets, and current limits. |
+| [Visual Style Studio](UiStyleStudio.md) | Visual stylesheet authoring, responsive rules, design tokens, v1/v2 migration, fonts, drafts, and conflicts. |
 | [Rendering and Materials](Scripting/RenderingAndMaterials.md) | Cameras, Mesh Renderers, lights, material slots, and bounded per-renderer shader overrides. |
 | [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md) | Runtime-world inspection, transactional player scene replacement, progress, cancellation, and transient render environments. |
 | [Async, Reload, and Diagnostics](Scripting/AsyncReloadAndDiagnostics.md) | Synchronization context, managed jobs, cancellation, hot reload, failure isolation, and troubleshooting. |

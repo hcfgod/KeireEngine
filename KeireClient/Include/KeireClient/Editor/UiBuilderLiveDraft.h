@@ -30,22 +30,37 @@ namespace KeireEditor
                          const Keire::UiVisualTreeDefinition& definition) noexcept;
         void Commit(Keire::Ref<Keire::AssetSystem> assets, Keire::AssetId asset,
                     const Keire::UiVisualTreeDefinition& definition) noexcept;
+        void SynchronizeStyle(Keire::Ref<Keire::AssetSystem> assets, Keire::AssetId asset,
+                              std::uint64_t documentGeneration, bool dirty, bool sourceValid,
+                              const Keire::UiStyleSheetDefinition& definition) noexcept;
+        void CommitStyle(Keire::Ref<Keire::AssetSystem> assets, Keire::AssetId asset,
+                         const Keire::UiStyleSheetDefinition& definition) noexcept;
+        void CloseStyle() noexcept;
         void Close() noexcept;
 
         [[nodiscard]] bool Active() const noexcept { return m_Applied; }
+        [[nodiscard]] bool StyleActive() const noexcept { return m_StyleApplied; }
         [[nodiscard]] Keire::AssetId Asset() const noexcept { return m_Asset; }
         [[nodiscard]] std::uint64_t DocumentGeneration() const noexcept { return m_DocumentGeneration; }
         [[nodiscard]] const std::string& Diagnostic() const noexcept { return m_Diagnostic; }
 
       private:
         void ClearState() noexcept;
+        void ClearStyleState() noexcept;
+        void CloseDocument() noexcept;
         [[nodiscard]] bool Publish(const Keire::UiVisualTreeDefinition& definition) noexcept;
+        [[nodiscard]] bool PublishStyle(const Keire::UiStyleSheetDefinition& definition) noexcept;
 
         Keire::Ref<Keire::AssetSystem> m_Assets;
         Keire::AssetId m_Asset;
         std::optional<Keire::UiVisualTreeDefinition> m_Baseline;
         std::uint64_t m_DocumentGeneration = 0;
         bool m_Applied = false;
+        Keire::Ref<Keire::AssetSystem> m_StyleAssets;
+        Keire::AssetId m_StyleAsset;
+        std::optional<Keire::UiStyleSheetDefinition> m_StyleBaseline;
+        std::uint64_t m_StyleDocumentGeneration = 0;
+        bool m_StyleApplied = false;
         std::string m_Diagnostic;
     };
 } // namespace KeireEditor

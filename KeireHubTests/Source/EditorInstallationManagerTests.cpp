@@ -225,6 +225,46 @@ TEST_CASE("Editor installation manager verifies schema-2 manifests inventory and
     CHECK(snapshot.Issues.empty());
 }
 
+TEST_CASE("Background editor inspection stays lightweight while explicit verification reports progress")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    auto installation = CreateInstallation(temporary.Path() / "Editor", "editor-a", InstallationOwnership::External);
+    installation.Health = InstallationHealth::VerificationRequired;
+
+    std::uint64_t verifiedFiles = 0;
+    std::uint64_t totalFiles = 0;
+    std::uint64_t verifiedBytes = 0;
+    std::uint64_t totalBytes = 0;
+    EditorInstallationManagerSpecification specification{
+        .HostPlatform = "windows",
+        .HostArchitecture = "x86_64",
+        .ProbeEntrypointActivity = [](const std::filesystem::path&) { return EditorEntrypointActivity::NotRunning; },
+        .ReportVerificationProgress =
+            [&](const std::uint64_t files, const std::uint64_t allFiles, const std::uint64_t bytes,
+                const std::uint64_t allBytes)
+        {
+            verifiedFiles = files;
+            totalFiles = allFiles;
+            verifiedBytes = bytes;
+            totalBytes = allBytes;
+        }};
+
+    const auto inspected = InspectEditorInstallationSnapshot(installation, specification);
+    REQUIRE(inspected);
+    CHECK(inspected.Value().Health == InstallationHealth::VerificationRequired);
+    CHECK(inspected.Value().VerifiedFileCount == 0);
+    CHECK(inspected.Value().VerifiedBytes == 0);
+    CHECK(totalFiles == 0);
+
+    const auto verified = VerifyEditorInstallationSnapshot(installation, specification);
+    REQUIRE(verified);
+    CHECK(verified.Value().Health == InstallationHealth::Healthy);
+    CHECK(verified.Value().VerifiedFileCount == 1);
+    CHECK(verifiedFiles == totalFiles);
+    CHECK(verifiedBytes == totalBytes);
+    CHECK(totalFiles == 1);
+}
+
 TEST_CASE("Managed editor package registration derives identity from the verified package and marker")
 {
     KeireHubTests::TemporaryDirectory temporary;

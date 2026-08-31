@@ -1202,7 +1202,7 @@ Assert-True ($runtimeAdditiveValidation.Contains('Additive runtime validation ti
               $runtimeCommandLine.Contains('--hidden-validation-window') -and
                $runtimeCommandLine.Contains('--validate-device-loss does not support --headless') -and
                $runtimeApplication.Contains('specification.Render.Mode = RenderMode::Rendered') -and
-               $runtimeApplication.Contains('Owner().Renderer()->RequestGpuVfxPipelineWarmup()') -and
+               -not $runtimeApplication.Contains('Owner().Renderer()->RequestGpuVfxPipelineWarmup()') -and
                $runtimeApplication.Contains('!hiddenValidationWindow') -and
               $editorPlayValidation.Contains('RecoveryAttemptCountForTest(*renderer)') -and
               $editorPlayValidation.Contains('ObserveOcclusionGameView') -and

@@ -68,7 +68,8 @@ namespace Keire
         Active = 1 << 1,
         Focus = 1 << 2,
         Disabled = 1 << 3,
-        Checked = 1 << 4
+        Checked = 1 << 4,
+        Root = 1 << 5
     };
 
     [[nodiscard]] constexpr UiStylePseudoState operator|(const UiStylePseudoState left,
@@ -132,12 +133,67 @@ namespace Keire
         [[nodiscard]] bool operator==(const UiStyleSelectorPart&) const = default;
     };
 
+    enum class UiStyleOrientation : std::uint8_t
+    {
+        Any,
+        Landscape,
+        Portrait
+    };
+
+    enum class UiStylePointerPrecision : std::uint8_t
+    {
+        Any,
+        Fine,
+        Coarse,
+        None
+    };
+
+    enum class UiStyleNavigationMode : std::uint8_t
+    {
+        Any,
+        Pointer,
+        Keyboard,
+        Gamepad
+    };
+
+    struct UiStyleMediaCondition
+    {
+        std::optional<float> MinimumWidth;
+        std::optional<float> MaximumWidth;
+        std::optional<float> MinimumHeight;
+        std::optional<float> MaximumHeight;
+        std::optional<float> MinimumAspectRatio;
+        std::optional<float> MaximumAspectRatio;
+        std::optional<float> MinimumDpi;
+        std::optional<float> MaximumDpi;
+        UiStyleOrientation Orientation = UiStyleOrientation::Any;
+        UiStylePointerPrecision Pointer = UiStylePointerPrecision::Any;
+        UiStyleNavigationMode Navigation = UiStyleNavigationMode::Any;
+        std::optional<bool> ReducedMotion;
+
+        [[nodiscard]] bool Empty() const noexcept;
+        [[nodiscard]] bool operator==(const UiStyleMediaCondition&) const = default;
+    };
+
+    struct UiStyleEvaluationContext
+    {
+        float Width = 1920.0F;
+        float Height = 1080.0F;
+        float Dpi = 96.0F;
+        UiStylePointerPrecision Pointer = UiStylePointerPrecision::Fine;
+        UiStyleNavigationMode Navigation = UiStyleNavigationMode::Pointer;
+        bool ReducedMotion = false;
+
+        [[nodiscard]] bool operator==(const UiStyleEvaluationContext&) const = default;
+    };
+
     struct UiStyleRuleDefinition
     {
         std::string Selector;
         std::vector<UiStyleSelectorPart> Parts;
         std::uint32_t Specificity = 0;
         std::vector<UiNamedValue> Properties;
+        std::optional<UiStyleMediaCondition> Media;
 
         [[nodiscard]] bool operator==(const UiStyleRuleDefinition&) const = default;
     };
@@ -149,6 +205,10 @@ namespace Keire
 
         [[nodiscard]] bool operator==(const UiStyleSheetDefinition&) const = default;
     };
+
+    [[nodiscard]] KEIRE_API bool MatchesUiStyleMediaCondition(const UiStyleMediaCondition& condition,
+                                                              const UiStyleEvaluationContext& context) noexcept;
+    [[nodiscard]] KEIRE_API std::string EncodeUiStyleMediaCondition(const UiStyleMediaCondition& condition);
 
     enum class UiPanelTarget : std::uint8_t
     {
@@ -327,6 +387,7 @@ namespace Keire
         [[nodiscard]] bool SynchronizeInteractionStates();
         [[nodiscard]] bool Advance(float deltaSeconds);
         void SetPseudoState(RuntimeUiElementId element, UiStylePseudoState state, bool enabled);
+        [[nodiscard]] bool SetStyleEvaluationContext(UiStyleEvaluationContext context);
         void RefreshStyles();
 
       private:

@@ -88,12 +88,14 @@ namespace KeireHub
             const auto activity = item.Activity;
             return {.HostPlatform = std::move(hostPlatform),
                     .HostArchitecture = std::move(hostArchitecture),
-                    .ProbeActivity = [installationId, activity](const EditorInstallation& installation)
+                    .ProbeActivity =
+                        [installationId, activity](const EditorInstallation& installation)
                     {
                         return installation.Id == installationId
                                    ? activity
                                    : EditorInstallationActivity{.Running = true, .HasActiveTask = true};
-                    }};
+                    },
+                    .ReportVerificationProgress = item.ReportVerificationProgress};
         }
 
         [[nodiscard]] HubEditorManagementServices DefaultServices()
@@ -617,12 +619,23 @@ namespace KeireHub
         product.EditorManagementBusy = operation->IsRunning();
         product.EditorManagementRefreshing =
             operation->IsRunning() && operation->Operation == HubEditorManagementOperation::Refresh;
+        const bool reportsProgress = operation->IsRunning() && operation->TotalFiles > 0;
+        const float operationProgress =
+            reportsProgress
+                ? static_cast<float>(
+                      operation->TotalBytes > 0
+                          ? static_cast<double>(operation->VerifiedBytes) / static_cast<double>(operation->TotalBytes)
+                          : static_cast<double>(operation->VerifiedFiles) / static_cast<double>(operation->TotalFiles))
+                : 0.0F;
+        const auto progressMessage = reportsProgress ? "Verified " + std::to_string(operation->VerifiedFiles) + " of " +
+                                                           std::to_string(operation->TotalFiles) + " declared files."
+                                                     : RunningMessage(operation->Operation);
         for (auto& editor : product.Editors)
         {
             editor.ManagementBusy =
                 operation->IsRunning() && (operation->Operation == HubEditorManagementOperation::Refresh ||
                                            editor.Id == operation->InstallationId);
-            editor.ManagementStatus = editor.ManagementBusy ? RunningMessage(operation->Operation) : std::string{};
+            editor.ManagementStatus = editor.ManagementBusy ? progressMessage : std::string{};
         }
         if (operation->OperationId == 0)
             return;
@@ -630,13 +643,32 @@ namespace KeireHub
         const auto taskId = "editor-management-" + std::to_string(operation->OperationId);
         std::erase_if(product.Tasks, [&](const HubTaskUiRecord& task) { return task.Id == taskId; });
         if (!operation->IsRunning())
+        {
+            if (operation->IsTerminal())
+            {
+                product.Tasks.push_back(
+                    {.Id = taskId,
+                     .Title = OperationTitle(operation->Operation),
+                     .Phase = operation->State == HubEditorManagementState::Completed ? "Completed" : "Needs attention",
+                     .Message =
+                         operation->Failure ? operation->Failure->Message : "Editor installation check completed.",
+                     .CurrentPackage = operation->InstallationId,
+                     .Progress = operation->State == HubEditorManagementState::Completed ? 1.0F : operationProgress,
+                     .BytesTransferred = operation->VerifiedBytes,
+                     .TotalBytes = operation->TotalBytes,
+                     .Active = false,
+                     .Retryable = false});
+            }
             return;
+        }
         product.Tasks.push_back({.Id = taskId,
                                  .Title = OperationTitle(operation->Operation),
-                                 .Phase = "Checking",
-                                 .Message = RunningMessage(operation->Operation),
+                                 .Phase = reportsProgress ? "Verifying files" : "Checking",
+                                 .Message = progressMessage,
                                  .CurrentPackage = operation->InstallationId,
-                                 .Progress = 0.0F,
+                                 .Progress = operationProgress,
+                                 .BytesTransferred = operation->VerifiedBytes,
+                                 .TotalBytes = operation->TotalBytes,
                                  .Active = true,
                                  .Retryable = false});
     }
@@ -771,7 +803,16 @@ namespace KeireHub
             auto verify = m_Services.Verify;
             auto refreshRegistration = m_Services.RefreshRegistration;
             auto authorize = m_Services.Authorize;
-            auto item = HubEditorManagementWorkItem{.Installation = *m_ActiveTarget, .Activity = activity};
+            auto item = HubEditorManagementWorkItem{
+                .Installation = *m_ActiveTarget,
+                .Activity = activity,
+                .ReportVerificationProgress = [this, operationId, installationId = command.ItemId](
+                                                  const std::uint64_t verifiedFiles, const std::uint64_t totalFiles,
+                                                  const std::uint64_t verifiedBytes, const std::uint64_t totalBytes)
+                {
+                    PublishVerificationProgress(operationId, installationId, verifiedFiles, totalFiles, verifiedBytes,
+                                                totalBytes);
+                }};
             auto installationId = item.Installation.Id;
             auto expectedRoot = command.Path;
             auto hostPlatform = m_HostPlatform;
@@ -912,6 +953,22 @@ namespace KeireHub
     {
         std::scoped_lock lock(m_OperationMutex);
         m_OperationSnapshot = std::make_shared<const HubEditorManagementOperationSnapshot>(std::move(snapshot));
+    }
+
+    void HubEditorManagementWorkflow::PublishVerificationProgress(
+        const std::uint64_t operationId, const std::string& installationId, const std::uint64_t verifiedFiles,
+        const std::uint64_t totalFiles, const std::uint64_t verifiedBytes, const std::uint64_t totalBytes)
+    {
+        std::scoped_lock lock(m_OperationMutex);
+        if (!m_OperationSnapshot->IsRunning() || m_OperationSnapshot->OperationId != operationId)
+            return;
+        auto updated = *m_OperationSnapshot;
+        updated.InstallationId = installationId;
+        updated.VerifiedFiles = verifiedFiles;
+        updated.TotalFiles = totalFiles;
+        updated.VerifiedBytes = verifiedBytes;
+        updated.TotalBytes = totalBytes;
+        m_OperationSnapshot = std::make_shared<const HubEditorManagementOperationSnapshot>(std::move(updated));
     }
 
     void HubEditorManagementWorkflow::PublishFailure(HubError error)

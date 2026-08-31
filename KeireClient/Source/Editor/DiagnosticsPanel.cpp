@@ -8,7 +8,7 @@ namespace KeireEditor
 {
     void DiagnosticsPanel::Attach(Keire::UiWorkspace& workspace)
     {
-        m_Registration = workspace.RegisterPanel({"editor.diagnostics", "Diagnostics"});
+        m_Registration = workspace.RegisterPanel({"editor.diagnostics", "Diagnostics", false});
     }
 
     void DiagnosticsPanel::Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme,

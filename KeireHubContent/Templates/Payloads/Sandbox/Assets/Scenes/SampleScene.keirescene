@@ -106,6 +106,7 @@
         },
         {
           "data": {
+            "_inputActions": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
             "managedState": "{\"fields\":[],\"version\":1}"
           },
           "enabled": true,
@@ -134,6 +135,7 @@
             "_groundStickSpeed": 2.0,
             "_invertHorizontal": false,
             "_invertVertical": false,
+            "_inputActions": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
             "_jumpBufferTime": 0.12,
             "_jumpHeight": 1.15,
             "_lookSensitivity": 1.0,
@@ -151,6 +153,7 @@
         },
         {
           "data": {
+            "_inputActions": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
             "managedState": "{\"fields\":[{\"Aliases\":[],\"Name\":\"uiPanel\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":8968286786875574750,\"Low\":11350882427125024393}}},{\"Aliases\":[],\"Name\":\"uiOpened\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiClosed\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"persistentCalls\":[]}},{\"Aliases\":[],\"Name\":\"uiAudioClip\",\"StableId\":\"\",\"Type\":\"\",\"Value\":{\"Id\":{\"High\":17595254351269544466,\"Low\":12566757923369154885}}}],\"version\":1}",
             "uiAudioClip": "f42ee69b-dc11-4212-ae66-17bff0be7945",
             "uiClosed": [],
@@ -221,6 +224,7 @@
         },
         {
           "data": {
+            "_inputActions": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
             "managedState": "{\"fields\":[],\"version\":1}"
           },
           "enabled": true,

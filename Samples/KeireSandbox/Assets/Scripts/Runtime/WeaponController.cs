@@ -6,11 +6,26 @@ namespace KeireSandbox;
 [ExecutionOrder(20)]
 public sealed class WeaponController : Behaviour
 {
+    [SerializeField, StableFieldId("73616e64-626f-4078-8000-000000000041")]
+    [Tooltip("Input Actions asset used by the Sandbox weapons.")]
+    private InputActionAsset? _inputActions;
+
     private readonly List<WeaponRuntime> _weapons = [];
     private readonly WeaponPresentationRig _presentation = new();
     private BallisticWorld? _ballistics;
     private int _activeWeapon;
     private float _elapsed;
+    private InputActionContext? _inputContext;
+    private InputAction? _aimAction;
+    private InputAction? _fireAction;
+    private InputAction? _fireModeAction;
+    private InputAction? _moveAction;
+    private InputAction? _nextWeaponAction;
+    private InputAction? _previousWeaponAction;
+    private InputAction? _reloadAction;
+    private InputAction? _weapon1Action;
+    private InputAction? _weapon2Action;
+    private InputAction? _weapon3Action;
 
     public static Vector3 CameraRecoil { get; private set; }
     public static WeaponHudModel Hud { get; } = new();
@@ -30,8 +45,17 @@ public sealed class WeaponController : Behaviour
         Hud.Apply(Current.Definition.DisplayName, Current.Snapshot);
     }
 
+    protected override void OnEnable() => EnableInput();
+
+    protected override void OnDisable() => DisableInput();
+
+    protected override void OnBeforeReload() => DisableInput();
+
+    protected override void OnAfterReload() => EnableInput();
+
     protected override void OnDestroy()
     {
+        DisableInput();
         foreach (WeaponRuntime weapon in _weapons)
             weapon.Shot -= OnShot;
         CameraRecoil = default;
@@ -44,33 +68,70 @@ public sealed class WeaponController : Behaviour
             return;
         _elapsed += deltaTime;
 
-        if (Input.Pressed("NextWeapon"))
+        if (_nextWeaponAction?.WasPressedThisFrame == true)
             Switch(1);
-        if (Input.Pressed("PreviousWeapon"))
+        if (_previousWeaponAction?.WasPressedThisFrame == true)
             Switch(-1);
-        if (Input.Pressed("Weapon1"))
+        if (_weapon1Action?.WasPressedThisFrame == true)
             Select(0);
-        if (Input.Pressed("Weapon2"))
+        if (_weapon2Action?.WasPressedThisFrame == true)
             Select(1);
-        if (Input.Pressed("Weapon3"))
+        if (_weapon3Action?.WasPressedThisFrame == true)
             Select(2);
 
         var command = new WeaponCommandFrame(
-            Input.Held("Fire"),
-            Input.Pressed("Fire"),
-            Input.Pressed("Reload"),
-            Input.Held("Aim"),
-            Input.Pressed("FireMode"));
+            _fireAction?.IsPressed == true,
+            _fireAction?.WasPressedThisFrame == true,
+            _reloadAction?.WasPressedThisFrame == true,
+            _aimAction?.IsPressed == true,
+            _fireModeAction?.WasPressedThisFrame == true);
         Vector3 origin = Entity.Transform.Position;
         Vector3 forward = Entity.Transform.Forward;
         Current.Tick(deltaTime, command, Entity, origin, forward);
         _ballistics?.Step(deltaTime);
-        _presentation.Step(Current.Definition.Recoil, deltaTime, Input.Axis2D("Move"), _elapsed);
+        _presentation.Step(
+            Current.Definition.Recoil, deltaTime, _moveAction?.ReadValue<Vector2>() ?? default, _elapsed);
         CameraRecoil = _presentation.Rotation;
         Hud.Apply(Current.Definition.DisplayName, Current.Snapshot);
     }
 
     private WeaponRuntime Current => _weapons[_activeWeapon];
+
+    private void EnableInput()
+    {
+        DisableInput();
+        if (_inputActions is not { IsValid: true })
+            throw new InvalidOperationException($"{nameof(WeaponController)} requires an Input Actions asset.");
+
+        _inputContext = _inputActions.CreateContext();
+        _aimAction = _inputContext.FindAction("Player/Aim");
+        _fireAction = _inputContext.FindAction("Player/Fire");
+        _fireModeAction = _inputContext.FindAction("Player/FireMode");
+        _moveAction = _inputContext.FindAction("Player/Move");
+        _nextWeaponAction = _inputContext.FindAction("Player/NextWeapon");
+        _previousWeaponAction = _inputContext.FindAction("Player/PreviousWeapon");
+        _reloadAction = _inputContext.FindAction("Player/Reload");
+        _weapon1Action = _inputContext.FindAction("Player/Weapon1");
+        _weapon2Action = _inputContext.FindAction("Player/Weapon2");
+        _weapon3Action = _inputContext.FindAction("Player/Weapon3");
+        _inputContext.Enable();
+    }
+
+    private void DisableInput()
+    {
+        _inputContext?.Dispose();
+        _inputContext = null;
+        _aimAction = null;
+        _fireAction = null;
+        _fireModeAction = null;
+        _moveAction = null;
+        _nextWeaponAction = null;
+        _previousWeaponAction = null;
+        _reloadAction = null;
+        _weapon1Action = null;
+        _weapon2Action = null;
+        _weapon3Action = null;
+    }
 
     private void OnShot(WeaponShot shot)
     {

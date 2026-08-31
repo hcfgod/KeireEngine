@@ -1,6 +1,7 @@
 #include "Keire/Ui/UiToolkit.h"
 
 #include "Keire/Ui/UiElements.h"
+#include "KeireInternal/Ui/RuntimeUiStyleParsingInternal.h"
 
 #include <algorithm>
 #include <cctype>
@@ -760,7 +761,14 @@ namespace Keire
             if (!std::ranges::all_of(part.Classes,
                                      [&](const auto& value) { return element.Visual->ClassListContains(value); }))
                 return false;
-            const auto required = static_cast<std::uint16_t>(part.States);
+            auto required = static_cast<std::uint16_t>(part.States);
+            const auto root = static_cast<std::uint16_t>(UiStylePseudoState::Root);
+            if ((required & root) != 0U)
+            {
+                if (element.Parent)
+                    return false;
+                required &= static_cast<std::uint16_t>(~root);
+            }
             const auto current = static_cast<std::uint16_t>(element.PseudoStates);
             return (required & current) == required;
         }
@@ -1084,6 +1092,8 @@ namespace Keire
         static void ApplyProperty(RuntimeUiStyle& style, RuntimeUiElementType& runtimeType, bool& visible,
                                   const std::string_view name, const std::string_view value)
         {
+            if (Detail::TryApplyRuntimeUiStyleV2Property(style, name, value))
+                return;
             if (name == "width")
                 ParseLength(value, style.Width, style.WidthPercent);
             else if (name == "height")
@@ -1228,6 +1238,8 @@ namespace Keire
                     for (const auto& rule : sheet->Definition().Rules)
                     {
                         ++order;
+                        if (rule.Media && !MatchesUiStyleMediaCondition(*rule.Media, StyleEvaluationContext))
+                            continue;
                         if (!Matches(element, rule))
                             continue;
                         std::size_t traceIndex = std::numeric_limits<std::size_t>::max();
@@ -1266,6 +1278,17 @@ namespace Keire
                     {
                         style.Foreground = parentState->Style.Foreground;
                         style.FontSize = parentState->Style.FontSize;
+                        style.FontFamily = parentState->Style.FontFamily;
+                        style.FontWeight = parentState->Style.FontWeight;
+                        style.FontSlant = parentState->Style.FontSlant;
+                        style.LineHeight = parentState->Style.LineHeight;
+                        style.LetterSpacing = parentState->Style.LetterSpacing;
+                        style.WordSpacing = parentState->Style.WordSpacing;
+                        style.TextWrap = parentState->Style.TextWrap;
+                        style.TextOverflow = parentState->Style.TextOverflow;
+                        style.TextDirection = parentState->Style.TextDirection;
+                        style.Language = parentState->Style.Language;
+                        style.MaximumLines = parentState->Style.MaximumLines;
                     }
                 }
                 for (const auto& [name, property] : cascade)
@@ -1300,6 +1323,7 @@ namespace Keire
         Ref<const UiVisualTreeAsset> VisualTree;
         std::vector<Ref<const UiStyleSheetAsset>> StyleSheets;
         Ref<RuntimeUiTree> Tree;
+        UiStyleEvaluationContext StyleEvaluationContext;
         Ref<Ui::VisualElement> VisualRoot;
         UiTemplateResolver TemplateResolver;
         Ref<UiDocumentBindingSource> BindingSource;
@@ -1442,13 +1466,26 @@ namespace Keire
                                     const bool enabled)
     {
         const auto found = m_Impl->RuntimeIndices.find(element.Value());
-        if (found == m_Impl->RuntimeIndices.end() || state == UiStylePseudoState::None)
+        if (found == m_Impl->RuntimeIndices.end() || state == UiStylePseudoState::None ||
+            state == UiStylePseudoState::Root)
             throw std::invalid_argument("UI pseudo-state target or state is invalid.");
         auto& values = m_Impl->Elements[found->second].PseudoStates;
         const auto current = static_cast<std::uint16_t>(values);
         const auto flag = static_cast<std::uint16_t>(state);
         values = static_cast<UiStylePseudoState>(enabled ? current | flag : current & ~flag);
         m_Impl->RefreshStyles();
+    }
+
+    bool UiDocument::SetStyleEvaluationContext(UiStyleEvaluationContext context)
+    {
+        if (!std::isfinite(context.Width) || context.Width <= 0.0F || !std::isfinite(context.Height) ||
+            context.Height <= 0.0F || !std::isfinite(context.Dpi) || context.Dpi <= 0.0F)
+            throw std::invalid_argument("UI style evaluation context dimensions and DPI must be finite and positive.");
+        if (m_Impl->StyleEvaluationContext == context)
+            return false;
+        m_Impl->StyleEvaluationContext = context;
+        m_Impl->RefreshStyles();
+        return true;
     }
 
     void UiDocument::RefreshStyles() { m_Impl->RefreshStyles(); }

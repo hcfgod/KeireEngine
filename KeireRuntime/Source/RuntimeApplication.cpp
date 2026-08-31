@@ -272,7 +272,6 @@ namespace
             surface.Height = std::max(pixels.Height, 1U);
             m_View = Owner().Renderer()->CreateView(surface);
             Keire::RenderSystemInternalAccess::SetPresentationSurface(*Owner().Renderer(), m_View->Surface());
-            Owner().Renderer()->RequestGpuVfxPipelineWarmup();
             m_EventSink = Keire::WindowSystemInternalAccess::AddEventSink(*Owner().Windows(), this, HandleNativeEvent);
             if (const auto input = Owner().Input())
             {

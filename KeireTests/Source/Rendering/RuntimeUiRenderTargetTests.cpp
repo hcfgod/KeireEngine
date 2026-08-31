@@ -532,6 +532,48 @@ TEST_CASE("Runtime UI text batches use deterministic font identities and nested 
     CHECK_FALSE(Keire::RenderBackend::RuntimeUiFontAtlasCacheValid(cache, 5U));
 }
 
+TEST_CASE("Runtime UI mixed-font geometry preserves contiguous face and atlas-page ordering")
+{
+    const auto firstPage = Keire::AssetId::Generate();
+    const auto secondPage = Keire::AssetId::Generate();
+    Keire::RuntimeUiDrawCommand text;
+    text.Type = Keire::RuntimeUiDrawType::Text;
+    text.Rect = {0.0F, 0.0F, 100.0F, 32.0F};
+    text.ClipRect = text.Rect;
+    text.Text = "ABA";
+    text.FontSize = 16.0F;
+    text.PreparedFontBinding = firstPage;
+    text.PreparedTextWidth = 30.0F;
+    text.PreparedTextHeight = 16.0F;
+    text.PreparedTextLines = {{0U, 3U, 30.0F}};
+    text.PreparedTextGlyphs = {
+        {.FontBinding = firstPage,
+         .UvMinimum = {0.0F, 0.0F},
+         .UvMaximum = {0.1F, 0.1F},
+         .Position = {0.0F, 0.0F},
+         .Size = {8.0F, 12.0F}},
+        {.FontBinding = secondPage,
+         .UvMinimum = {0.1F, 0.0F},
+         .UvMaximum = {0.2F, 0.1F},
+         .Position = {10.0F, 0.0F},
+         .Size = {8.0F, 12.0F}},
+        {.FontBinding = firstPage,
+         .UvMinimum = {0.2F, 0.0F},
+         .UvMaximum = {0.3F, 0.1F},
+         .Position = {20.0F, 0.0F},
+         .Size = {8.0F, 12.0F}},
+    };
+
+    const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&text, 1U));
+    REQUIRE(geometry.Batches.size() == 3U);
+    CHECK(geometry.Batches[0].Asset == firstPage);
+    CHECK(geometry.Batches[1].Asset == secondPage);
+    CHECK(geometry.Batches[2].Asset == firstPage);
+    CHECK(geometry.Batches[0].VertexCount == 6U);
+    CHECK(geometry.Batches[1].VertexCount == 6U);
+    CHECK(geometry.Batches[2].VertexCount == 6U);
+}
+
 TEST_CASE("Runtime UI nested clips split GPU scissor batches without changing texture order")
 {
     const auto texture = Keire::AssetId::Generate();
