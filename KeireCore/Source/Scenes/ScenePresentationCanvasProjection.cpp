@@ -475,7 +475,7 @@ namespace Keire::Detail
 
     void ScenePresentationCanvasProjection::Draw(const RuntimeUiTree& tree, UiFrame& ui, const float offsetX,
                                                  const float offsetY, const bool includeOverlay,
-                                                 const bool includeWorld) const
+                                                 const bool includeWorld, const Ref<RenderView>& overlayView) const
     {
         for (const auto& command : tree.DrawCommands())
         {
@@ -484,9 +484,26 @@ namespace Keire::Detail
             const auto projection = ForNode(command.Element);
             if (!projection || !projection->Geometry.Visible)
                 continue;
-            const bool world = projection->Geometry.RenderMode == CanvasRenderMode::WorldSpace;
+            const bool world = projection->ToolkitDocument
+                                   ? projection->ToolkitTarget == UiPanelTarget::WorldSurface
+                                   : projection->Geometry.RenderMode == CanvasRenderMode::WorldSpace;
             if ((world && !includeWorld) || (!world && !includeOverlay))
                 continue;
+            if (projection->ToolkitDocument && projection->ToolkitTarget == UiPanelTarget::RenderTexture)
+                continue;
+            const bool cameraOverlay = projection->ToolkitDocument
+                                           ? projection->ToolkitTarget == UiPanelTarget::CameraOverlay
+                                           : projection->Geometry.RenderMode == CanvasRenderMode::ScreenSpaceCamera;
+            if (cameraOverlay && overlayView)
+            {
+                const auto camera = overlayView->Camera();
+                if (!Math::IsFinite(camera.View) || !Math::IsFinite(camera.Projection) ||
+                    !MatricesApproximatelyEqual(projection->ViewProjection,
+                                                Math::Multiply(camera.Projection, camera.View)))
+                {
+                    continue;
+                }
+            }
             const auto clipped = command.Rect.Intersect(command.ClipRect);
             if (clipped.Empty())
                 continue;

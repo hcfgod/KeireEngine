@@ -129,6 +129,9 @@ namespace
     {
         std::size_t Worksets = 0;
         std::size_t FinalOutputs = 0;
+        bool ResizeRetainsPublishedOutput = false;
+        bool RapidResizeRetainsPublishedOutput = false;
+        bool ResizePublishesReplacement = false;
         bool ResizeEpochAliveWhileLeased = false;
         bool ResizeEpochRetiredAfterRelease = false;
         bool MinimizedEpochAliveWhileLeased = false;
@@ -297,7 +300,21 @@ namespace
                 m_Results.FinalOutputs = state->Resources.FinalOutputs.size();
                 m_ResizeEpochLease = state->Lifetime;
                 m_ResizeEpochLifetime = state->Lifetime;
+                REQUIRE(state->PublishedTexture.load(std::memory_order_acquire));
+                surface->RequestSize(47U, 39U);
+                const auto firstReplacement = std::static_pointer_cast<Keire::RenderBackend::RenderSurfaceState>(
+                    Keire::RenderSystemInternalAccess::SurfaceLease(*surface));
+                REQUIRE(firstReplacement);
+                m_Results.ResizeRetainsPublishedOutput =
+                    firstReplacement->PresentationFallbackLifetime.load(std::memory_order_acquire) == state->Lifetime;
                 surface->RequestSize(48U, 40U);
+                const auto replacement = std::static_pointer_cast<Keire::RenderBackend::RenderSurfaceState>(
+                    Keire::RenderSystemInternalAccess::SurfaceLease(*surface));
+                REQUIRE(replacement);
+                m_Results.RapidResizeRetainsPublishedOutput =
+                    replacement->PresentationFallbackLifetime.load(std::memory_order_acquire) ==
+                        firstReplacement->Lifetime &&
+                    firstReplacement->PresentationFallbackLifetime.load(std::memory_order_acquire) == state->Lifetime;
                 renderer->Submit({m_Scene, m_View});
                 break;
             }
@@ -310,6 +327,9 @@ namespace
                     Keire::RenderSystemInternalAccess::SurfaceLease(*surface));
                 REQUIRE(state);
                 REQUIRE(state->Lifetime);
+                m_Results.ResizePublishesReplacement =
+                    state->PublishedTexture.load(std::memory_order_acquire) != nullptr &&
+                    !state->PresentationFallbackLifetime.load(std::memory_order_acquire);
                 m_MinimizedEpochLease = state->Lifetime;
                 m_MinimizedEpochLifetime = state->Lifetime;
                 Keire::RenderSystemInternalAccess::RequestSurfaceSize(*surface, 0U, 0U);
@@ -317,7 +337,6 @@ namespace
             }
             case 3U:
                 renderer->Flush();
-                m_Results.ResizeEpochRetiredAfterRelease = m_ResizeEpochLifetime.expired();
                 m_Results.MinimizedEpochAliveWhileLeased = !m_MinimizedEpochLifetime.expired();
                 m_MinimizedEpochLease.reset();
                 Keire::RenderSystemInternalAccess::RequestSurfaceSize(*surface, 64U, 36U);
@@ -329,6 +348,7 @@ namespace
                 break;
             default:
                 renderer->Flush();
+                m_Results.ResizeEpochRetiredAfterRelease = m_ResizeEpochLifetime.expired();
                 m_Results.MinimizedEpochRetiredAfterRelease = m_MinimizedEpochLifetime.expired();
                 m_Results.Restored = surface->Available() && surface->Width() == 64U && surface->Height() == 36U;
                 m_Results.Timelines = renderer->RecentFrameTimelines();
@@ -691,6 +711,135 @@ namespace
         bool EpochRetiredAfterCompletion = false;
     };
 
+    struct ResizeFallbackPublicationRaceResults final
+    {
+        bool OldFrameBlocked = false;
+        bool ReplacementStartedUnpublished = false;
+        bool ImmediatePredecessorRetained = false;
+        bool OldFramePublishedAfterResize = false;
+        bool CaptureUsedPublishedPredecessor = false;
+        bool ReplacementPublished = false;
+        bool FallbackReleased = false;
+    };
+
+    class ResizeFallbackPublicationRaceLayer final : public Keire::Layer
+    {
+      public:
+        explicit ResizeFallbackPublicationRaceLayer(ResizeFallbackPublicationRaceResults& results)
+            : Layer("Resize fallback publication race"), m_Results(results)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(
+                Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Resize fallback publication race"));
+            m_View = Owner().Renderer()->CreateView(
+                {.Name = "Resize fallback publication race", .Width = 32U, .Height = 32U});
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            const auto renderer = Owner().Renderer();
+            const auto surface = m_View->Surface();
+            REQUIRE(renderer);
+            REQUIRE(surface);
+
+            switch (m_Phase++)
+            {
+            case 0U:
+                m_Predecessor = CurrentSurfaceState(*surface);
+                REQUIRE(m_Predecessor->PublishedTexture.load(std::memory_order_acquire) == nullptr);
+                Keire::RenderSystemInternalAccess::BlockNextAcceptedFrame(*renderer);
+                renderer->Submit({m_Scene, m_View});
+                break;
+            case 1U:
+            {
+                m_Results.OldFrameBlocked = Keire::RenderSystemInternalAccess::WaitForAcceptedFrameBlock(*renderer);
+                REQUIRE(m_Results.OldFrameBlocked);
+                REQUIRE(m_Predecessor->PublishedTexture.load(std::memory_order_acquire) == nullptr);
+                surface->RequestSize(48U, 40U);
+                const auto replacement = CurrentSurfaceState(*surface);
+                m_Results.ReplacementStartedUnpublished =
+                    replacement->PublishedTexture.load(std::memory_order_acquire) == nullptr;
+                m_Results.ImmediatePredecessorRetained = replacement->PresentationFallbackLifetime.load(
+                                                             std::memory_order_acquire) == m_Predecessor->Lifetime;
+                Keire::RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(*renderer);
+                renderer->Flush();
+                m_Results.OldFramePublishedAfterResize =
+                    m_Predecessor->PublishedTexture.load(std::memory_order_acquire) != nullptr;
+                m_DrawSurface = true;
+                break;
+            }
+            case 2U:
+                renderer->Flush();
+                renderer->Submit({m_Scene, m_View});
+                break;
+            default:
+            {
+                renderer->Flush();
+                const auto replacement = CurrentSurfaceState(*surface);
+                m_Results.ReplacementPublished =
+                    replacement->PublishedTexture.load(std::memory_order_acquire) != nullptr;
+                m_Results.FallbackReleased = !replacement->PresentationFallbackLifetime.load(std::memory_order_acquire);
+                Owner().RequestExit();
+                break;
+            }
+            }
+        }
+
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            if (!m_DrawSurface)
+                return;
+            m_DrawSurface = false;
+            const auto surface = m_View->Surface();
+            auto* const captured = Keire::RenderSystemInternalAccess::CaptureUiSurfaceTexture(*surface);
+            m_Results.CaptureUsedPublishedPredecessor =
+                captured && captured == m_Predecessor->PublishedTexture.load(std::memory_order_acquire);
+            auto window = ui.BeginWindow("Resize fallback publication race");
+            REQUIRE(window);
+            ui.Image(surface, {48.0F, 40.0F});
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (const auto renderer = Owner().Renderer())
+                Keire::RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(*renderer);
+            try
+            {
+                Owner().Renderer()->Flush();
+            }
+            catch (...)
+            {
+            }
+            if (m_Scene)
+                m_Scene->Close();
+            m_Predecessor.reset();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+      private:
+        [[nodiscard]] static std::shared_ptr<Keire::RenderBackend::RenderSurfaceState>
+        CurrentSurfaceState(const Keire::RenderSurface& surface)
+        {
+            auto state = std::static_pointer_cast<Keire::RenderBackend::RenderSurfaceState>(
+                Keire::RenderSystemInternalAccess::SurfaceLease(surface));
+            REQUIRE(state);
+            REQUIRE(state->Lifetime);
+            return state;
+        }
+
+        ResizeFallbackPublicationRaceResults& m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        std::shared_ptr<Keire::RenderBackend::RenderSurfaceState> m_Predecessor;
+        std::uint32_t m_Phase = 0U;
+        bool m_DrawSurface = false;
+    };
+
     class UiSurfaceAdmissionRaceLayer final : public Keire::Layer
     {
       public:
@@ -778,6 +927,10 @@ namespace
                 surface->RequestSize(48U, 40U);
                 m_Results.EpochAliveWhileTargetBlocked = !m_CapturedEpochLifetime.expired();
                 Keire::RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(*renderer);
+                break;
+            case 4U:
+                renderer->Flush();
+                renderer->Submit({m_Scene, m_View});
                 break;
             default:
                 renderer->Flush();
@@ -1320,6 +1473,9 @@ TEST_CASE("published surface epochs retain N worksets and N plus one outputs unt
         CHECK(application.Run() == 0);
         CHECK(results.Worksets == depth);
         CHECK(results.FinalOutputs == depth + 1U);
+        CHECK(results.ResizeRetainsPublishedOutput);
+        CHECK(results.RapidResizeRetainsPublishedOutput);
+        CHECK(results.ResizePublishesReplacement);
         CHECK(results.ResizeEpochAliveWhileLeased);
         CHECK(results.ResizeEpochRetiredAfterRelease);
         CHECK(results.MinimizedEpochAliveWhileLeased);
@@ -1392,6 +1548,27 @@ TEST_CASE("rendered UI captures a logical surface lease before admission rotates
     CHECK(results.Statistics.OutstandingFrames == 0U);
     REQUIRE(results.Timelines.size() >= 4U);
     CHECK(results.Timelines[2U].AdmissionWaitMilliseconds > 0.0F);
+}
+
+TEST_CASE("rendered UI preserves a predecessor that first publishes after a resize")
+{
+    ResizeFallbackPublicationRaceResults results;
+    auto specification = RenderTestSpecification();
+    specification.Render.MaximumFramesInFlight = 2U;
+    specification.Ui.Mode = Keire::UiMode::Rendered;
+    {
+        Keire::Application application(specification);
+        (void)application.PushLayer(std::make_unique<ResizeFallbackPublicationRaceLayer>(results));
+        CHECK(application.Run() == 0);
+    }
+
+    CHECK(results.OldFrameBlocked);
+    CHECK(results.ReplacementStartedUnpublished);
+    CHECK(results.ImmediatePredecessorRetained);
+    CHECK(results.OldFramePublishedAfterResize);
+    CHECK(results.CaptureUsedPublishedPredecessor);
+    CHECK(results.ReplacementPublished);
+    CHECK(results.FallbackReleased);
 }
 
 TEST_CASE("rendered UI failure releases its frame before layer teardown retires surfaces")

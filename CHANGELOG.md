@@ -5,6 +5,17 @@ versions.
 
 ## Unreleased
 
+- Fixed first-control placement on empty UI Builder documents, including undersized preview bounds, and made direct
+  canvas transforms persist exact parent-content-relative absolute geometry with modern resize grips and cursors.
+- Added the typed `UiCursorShape`/`UiFrame::SetCursorShape` UI facade so custom editor controls can request text, move,
+  resize, hand, and unavailable cursors without exposing Dear ImGui types.
+- Fixed split editor viewports flashing black during live resize by retaining the last published surface output until
+  the replacement epoch publishes, and corrected the Starter 3D UI typography and centered action layout.
+- UI Builder library controls now receive visible finite defaults, insert beside non-container selections, and report
+  failures without terminating the Editor; built-in and registered custom controls support canvas drag/drop placement.
+- Added Project-panel UI Style Sheet creation and typed searchable/drag-drop stylesheet linking in UI Builder, plus
+  deterministic rendering for collapsed slider and progress ranges.
+
 ### Added
 
 - Added the retained Kéire UI Toolkit foundation: deterministic `.keireui` visual trees, `.keirestyle` cascading

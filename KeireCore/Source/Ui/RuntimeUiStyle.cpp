@@ -109,7 +109,7 @@ namespace Keire::Detail
     void ValidateRuntimeUiControl(const RuntimeUiControlState& control)
     {
         if (!Finite(control.Minimum) || !Finite(control.Maximum) || !Finite(control.Value) ||
-            !Finite(control.ContentSize.X) || !Finite(control.ContentSize.Y) || control.Minimum >= control.Maximum ||
+            !Finite(control.ContentSize.X) || !Finite(control.ContentSize.Y) || control.Minimum > control.Maximum ||
             control.Value < control.Minimum || control.Value > control.Maximum || control.ContentSize.X < 0.0F ||
             control.ContentSize.Y < 0.0F || !Finite(control.ScrollSensitivity) || control.ScrollSensitivity <= 0.0F)
             throw std::invalid_argument("Runtime UI control state is invalid.");

@@ -233,6 +233,43 @@ namespace Keire
         ImGui::SetCursorScreenPos({position.X, position.Y});
     }
 
+    void UiFrame::SetCursorShape(const UiCursorShape shape)
+    {
+        (void)ContentAvailable();
+        switch (shape)
+        {
+        case UiCursorShape::Default:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Arrow);
+            break;
+        case UiCursorShape::TextInput:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_TextInput);
+            break;
+        case UiCursorShape::Move:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            break;
+        case UiCursorShape::ResizeHorizontal:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            break;
+        case UiCursorShape::ResizeVertical:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            break;
+        case UiCursorShape::ResizeNorthwestSoutheast:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
+            break;
+        case UiCursorShape::ResizeNortheastSouthwest:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNESW);
+            break;
+        case UiCursorShape::Hand:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            break;
+        case UiCursorShape::NotAllowed:
+            ImGui::SetMouseCursor(ImGuiMouseCursor_NotAllowed);
+            break;
+        default:
+            throw std::invalid_argument("UiFrame::SetCursorShape received an invalid cursor shape.");
+        }
+    }
+
     void UiFrame::SetNextItemWidth(const float width)
     {
         (void)ContentAvailable();

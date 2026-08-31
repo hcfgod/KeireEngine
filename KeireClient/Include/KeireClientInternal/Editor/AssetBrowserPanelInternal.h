@@ -273,6 +273,9 @@ namespace KeireEditor
                 case AssetBrowserOpenAction::UiDocument:
                     editor.OpenAssetBrowserUiDocument(record.Id);
                     break;
+                case AssetBrowserOpenAction::UiStyleSheet:
+                    editor.OpenAssetBrowserUiStyleSheet(record.Id);
+                    break;
                 case AssetBrowserOpenAction::Material:
                     editor.OpenAssetBrowserMaterial(record.Id);
                     break;
@@ -424,6 +427,8 @@ namespace KeireEditor
                 RequestNamedCreate(NamedCreateKind::VfxEffect, "VfxEffect");
             if (ui.MenuItem("UI Document"))
                 RequestNamedCreate(NamedCreateKind::UiDocument, "NewUiDocument");
+            if (ui.MenuItem("UI Style Sheet"))
+                RequestNamedCreate(NamedCreateKind::UiStyleSheet, "NewUiStyleSheet");
             if (ui.MenuItem("Material Graph"))
             {
                 MaterialGraphCreation.Begin(Selection.empty() ? Keire::AssetId{} : Selection.back(),

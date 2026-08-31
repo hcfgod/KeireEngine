@@ -209,6 +209,7 @@ namespace Keire::RenderBackend
             surface->Resources = {};
             surface->ResourcesAvailable.store(false, std::memory_order_release);
             surface->PublishedTexture.store(nullptr, std::memory_order_release);
+            surface->PresentationFallbackLifetime.store({}, std::memory_order_release);
             surface->PublishedDepthAvailable.store(false, std::memory_order_release);
             surface->Width = 0;
             surface->Height = 0;

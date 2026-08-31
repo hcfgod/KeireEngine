@@ -30,7 +30,6 @@ namespace Keire::Detail
   width: 100%;
   height: 100%;
   padding: 40px;
-  gap: 8px;
   flex-direction: column;
   align-items: start;
   justify-content: end;
@@ -41,6 +40,7 @@ namespace Keire::Detail
   padding: 20px;
   gap: 8px;
   flex-direction: column;
+  align-items: center;
   background-color: #101827e8;
   border-color: #4f6580ff;
   border-width: 1px;
@@ -48,21 +48,29 @@ namespace Keire::Detail
 }
 
 .starter-title {
-  height: 36px;
+  width: 100%;
+  height: 40px;
   color: #f3f8ffff;
-  font-size: 26px;
+  font-size: 32px;
+  text-align: center;
+  vertical-align: center;
 }
 
 .starter-copy {
-  height: 26px;
+  width: 100%;
+  height: 32px;
   color: #a7bdd8ff;
-  font-size: 16px;
+  font-size: 18px;
+  text-align: center;
+  vertical-align: center;
 }
 
 .starter-actions {
+  width: 100%;
   height: 48px;
   gap: 8px;
   flex-direction: row;
+  justify-content: center;
 }
 
 Button.primary {
@@ -70,7 +78,10 @@ Button.primary {
   height: 48px;
   background-color: #245f9eff;
   color: #ffffffff;
+  font-size: 18px;
   border-radius: 8px;
+  text-align: center;
+  vertical-align: center;
 }
 
 Button.primary:hover {

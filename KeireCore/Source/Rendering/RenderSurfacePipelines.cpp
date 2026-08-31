@@ -140,6 +140,64 @@ namespace
 
 namespace Keire::RenderBackend
 {
+    SDL_GPUTexture* RenderSharedState::CaptureUiSurfaceTexture(const std::shared_ptr<RenderSurfaceState>& surface)
+    {
+        RequireOwner("CaptureUiSurfaceTexture");
+        if (!FrameActive)
+            throw std::logic_error("Render-surface UI images may only be captured during an active frame.");
+        if (!surface)
+            throw std::invalid_argument("Render-surface UI capture requires a valid surface epoch.");
+
+        RenderSurfaceToken token;
+        SDL_GPUTexture* texture = nullptr;
+        {
+            std::scoped_lock lock(SurfaceMutex);
+            const auto current = std::ranges::find_if(Surfaces, [&surface](const RenderSurfaceRegistryEntry& entry)
+                                                      { return entry.Current && entry.State == surface; });
+            if (current == Surfaces.end() || !surface->Lifetime)
+                throw std::invalid_argument("Render surface epoch is no longer current for UI capture.");
+
+            auto presentation = surface;
+            for (std::size_t remaining = Surfaces.size() + 1U; presentation && remaining != 0U; --remaining)
+            {
+                texture = presentation->PublishedTexture.load(std::memory_order_acquire);
+                if (texture)
+                    break;
+
+                const auto fallbackLifetime =
+                    presentation->PresentationFallbackLifetime.load(std::memory_order_acquire);
+                if (!fallbackLifetime)
+                {
+                    // Publication and fallback release are serialized with SurfaceMutex. The second load also makes
+                    // this robust if a future publication path changes that implementation detail.
+                    texture = presentation->PublishedTexture.load(std::memory_order_acquire);
+                    break;
+                }
+                const auto fallback = std::ranges::find_if(
+                    Surfaces, [&fallbackLifetime](const RenderSurfaceRegistryEntry& entry)
+                    { return fallbackLifetime && entry.State && entry.State->Lifetime == fallbackLifetime; });
+                if (fallback == Surfaces.end() || fallback->State == presentation)
+                    break;
+                presentation = fallback->State;
+            }
+            if (!texture || !presentation->Lifetime)
+                return nullptr;
+            token = {presentation->Id, presentation->Epoch, presentation->Lifetime};
+        }
+
+        const auto textureIdentity = reinterpret_cast<std::uintptr_t>(texture);
+        const auto existing =
+            std::ranges::find_if(PendingUiSurfaceTextureBindings,
+                                 [&token, textureIdentity](const CapturedSurfaceTextureBinding& binding)
+                                 {
+                                     return binding.Surface.Id == token.Id && binding.Surface.Epoch == token.Epoch &&
+                                            binding.TextureIdentity == textureIdentity;
+                                 });
+        if (existing == PendingUiSurfaceTextureBindings.end())
+            PendingUiSurfaceTextureBindings.push_back({token, textureIdentity});
+        return texture;
+    }
+
     void RenderSharedState::CreateGeometryResources(const std::uint32_t resourceGeneration)
     {
         ShadowPipeline = CreateDepthPipeline(true);
@@ -652,6 +710,8 @@ namespace Keire::RenderBackend
     void RenderSharedState::RetireSurface(RenderSurfaceState& surface) noexcept
     {
         surface.ResourcesAvailable.store(false, std::memory_order_release);
+        surface.PublishedTexture.store(nullptr, std::memory_order_release);
+        surface.PresentationFallbackLifetime.store({}, std::memory_order_release);
         Retire(std::exchange(surface.Resources, {}));
         surface.Owner.reset();
         surface.Width = 0;
@@ -787,6 +847,7 @@ namespace Keire::RenderBackend
                 surface.HasOutput = false;
                 surface.SampledDepthValid = false;
                 surface.PublishedTexture.store(nullptr, std::memory_order_release);
+                surface.PresentationFallbackLifetime.store({}, std::memory_order_release);
                 surface.PublishedDepthAvailable.store(false, std::memory_order_release);
                 ++surface.Generation;
                 ResetGpuOcclusionSurfaceState(surface);

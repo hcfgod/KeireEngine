@@ -114,7 +114,51 @@ bool EditorWorkspaceLayer::CreateAssetBrowserUiDocument(const std::string_view n
     }
 }
 
+bool EditorWorkspaceLayer::CreateAssetBrowserUiStyleSheet(const std::string_view name)
+{
+    if (!m_AssetDatabase || !m_AssetOperations)
+        return false;
+    try
+    {
+        if (m_AssetOperations->Busy())
+            (void)m_AssetOperations->PreemptBackgroundImports();
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
+            throw std::invalid_argument("UI style sheet name must be one non-empty path component.");
+        const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
+        const auto destination = directory / (std::string(name) + ".keirestyle");
+        if (m_AssetDatabase->Find(destination))
+            throw std::runtime_error("A UI style sheet with that name already exists in this folder.");
+
+        constexpr std::string_view templateSource = R"(@keire-style 1;
+
+.root {
+  width: 100%;
+  height: 100%;
+}
+)";
+        const auto bytes = std::as_bytes(std::span(templateSource));
+        m_AssetOperations->QueueCreateAsset(destination, std::vector<std::byte>(bytes.begin(), bytes.end()), {},
+                                            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
+                                             .UndoName = "Create UI Style Sheet",
+                                             .Reason = "ui-style-sheet-creation"});
+        m_AssetStatus = "Creating " + destination.generic_string() + ".";
+        return true;
+    }
+    catch (const std::exception& error)
+    {
+        SetAssetError(std::string("UI style sheet creation failed: ") + error.what());
+        return false;
+    }
+}
+
 void EditorWorkspaceLayer::OpenAssetBrowserUiDocument(const Keire::AssetId asset) { OpenUiBuilder(asset); }
+
+void EditorWorkspaceLayer::OpenAssetBrowserUiStyleSheet(const Keire::AssetId asset)
+{
+    OpenUiBuilderStyleSheet(asset);
+    m_UiBuilderPanel->Registration().SetVisible(true);
+    m_UiBuilderPanel->Registration().RequestFocus();
+}
 
 void EditorWorkspaceLayer::OpenInspectorUiDocument(const Keire::AssetId asset) { OpenUiBuilder(asset); }
 
@@ -170,6 +214,17 @@ KeireEditor::UiBuilderDocument& EditorWorkspaceLayer::UiBuilderState() noexcept 
 const Keire::UiThemeDefinition& EditorWorkspaceLayer::UiBuilderTheme() const noexcept { return m_Theme; }
 
 Keire::Ref<Keire::AssetSystem> EditorWorkspaceLayer::UiBuilderAssets() const noexcept { return Owner().Assets(); }
+
+std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::UiBuilderAssetRecords() const noexcept
+{
+    return m_AssetRecords;
+}
+
+void EditorWorkspaceLayer::RevealUiBuilderAsset(const Keire::AssetId asset)
+{
+    if (m_AssetBrowserPanel && asset)
+        m_AssetBrowserPanel->RevealAsset(asset);
+}
 
 std::optional<Keire::UiSize> EditorWorkspaceLayer::UiBuilderGameViewSize() const noexcept
 {

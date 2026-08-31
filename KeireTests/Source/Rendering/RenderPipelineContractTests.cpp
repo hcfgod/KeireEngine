@@ -1182,6 +1182,45 @@ TEST_CASE("ImGui frame packets preserve finalized non-empty draw output")
     CHECK(renderView->CmdLists[0]->IdxBuffer.Data != finalized->CmdLists[0]->IdxBuffer.Data);
 }
 
+TEST_CASE("ImGui surface bindings remain empty until their logical epoch publishes an output")
+{
+    ImGuiContextScope contextScope;
+    constexpr ImTextureID capturedTexture = static_cast<ImTextureID>(0x1234U);
+    BeginImGuiPacketFrame(contextScope);
+    ImGui::GetForegroundDrawList()->AddImage(ImTextureRef(capturedTexture), {4.0F, 4.0F}, {28.0F, 28.0F});
+    ImGui::Render();
+
+    auto lifetime = std::make_shared<Keire::RenderBackend::RenderSurfaceEpochLease>(41U, 7U);
+    const std::array bindings{Keire::RenderBackend::CapturedSurfaceTextureBinding{
+        .Surface = {.Id = 41U, .Epoch = 7U, .Lifetime = lifetime},
+        .TextureIdentity = static_cast<std::uintptr_t>(capturedTexture)}};
+    const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), bindings);
+    REQUIRE(captured);
+
+    Keire::RenderBackend::ImGuiTextureCache cache;
+    bool unresolvedCalled = false;
+    const auto unresolved =
+        captured->ResolveForRender(cache, 2U,
+                                   [&unresolvedCalled, &lifetime](const Keire::RenderBackend::RenderSurfaceToken& token)
+                                   {
+                                       unresolvedCalled = true;
+                                       CHECK(token.Id == 41U);
+                                       CHECK(token.Epoch == 7U);
+                                       CHECK(token.Lifetime == lifetime);
+                                       return std::uintptr_t{0U};
+                                   });
+    REQUIRE(unresolved);
+    CHECK(unresolvedCalled);
+    CHECK_FALSE(DrawDataUsesTexture(*unresolved->Data(), capturedTexture));
+
+    constexpr ImTextureID publishedTexture = static_cast<ImTextureID>(0x5678U);
+    const auto published = captured->ResolveForRender(cache, 2U, [](const Keire::RenderBackend::RenderSurfaceToken&)
+                                                      { return static_cast<std::uintptr_t>(publishedTexture); });
+    REQUIRE(published);
+    CHECK(DrawDataUsesTexture(*published->Data(), publishedTexture));
+    CHECK_FALSE(DrawDataUsesTexture(*published->Data(), capturedTexture));
+}
+
 TEST_CASE("ImGui frame packets reject raw GPU textures borrowed pixels and arbitrary callbacks")
 {
     SUBCASE("raw GPU texture")

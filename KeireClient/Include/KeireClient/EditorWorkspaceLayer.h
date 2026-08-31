@@ -267,6 +267,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserPhysicsMaterial(std::string_view name) override;
     bool CreateAssetBrowserVfxEffect(std::string_view name) override;
     bool CreateAssetBrowserUiDocument(std::string_view name) override;
+    bool CreateAssetBrowserUiStyleSheet(std::string_view name) override;
     bool CreateAssetBrowserMaterialGraph(std::string_view name, Keire::AssetId shader) override;
     bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) override;
     bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) override;
@@ -288,6 +289,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenAssetBrowserAudioMixer(Keire::AssetId asset) override;
     void OpenAssetBrowserVfxEffect(Keire::AssetId asset) override;
     void OpenAssetBrowserUiDocument(Keire::AssetId asset) override;
+    void OpenAssetBrowserUiStyleSheet(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterial(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterialGraph(Keire::AssetId asset) override;
     void OpenAssetBrowserMaterialInstance(Keire::AssetId asset) override;
@@ -300,6 +302,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] KeireEditor::UiBuilderDocument& UiBuilderState() noexcept override;
     [[nodiscard]] const Keire::UiThemeDefinition& UiBuilderTheme() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> UiBuilderAssets() const noexcept override;
+    [[nodiscard]] std::span<const Keire::AssetSourceRecord> UiBuilderAssetRecords() const noexcept override;
+    void RevealUiBuilderAsset(Keire::AssetId asset) override;
     [[nodiscard]] std::optional<Keire::UiSize> UiBuilderGameViewSize() const noexcept override;
     [[nodiscard]] KeireEditor::UiBuilderStyleSheetDocument& UiBuilderStyleSheetState() noexcept override;
     void ActivateUiBuilderHistory() noexcept override;

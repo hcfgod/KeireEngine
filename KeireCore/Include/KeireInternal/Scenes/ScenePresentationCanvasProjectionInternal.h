@@ -77,7 +77,7 @@ namespace Keire::Detail
         [[nodiscard]] std::vector<RuntimeUiRenderSubmission> RenderSubmissions(const Ref<RuntimeUiTree>& tree,
                                                                                const Ref<RenderView>& view) const;
         void Draw(const RuntimeUiTree& tree, UiFrame& ui, float offsetX, float offsetY, bool includeOverlay,
-                  bool includeWorld) const;
+                  bool includeWorld, const Ref<RenderView>& overlayView = {}) const;
 
       private:
         std::map<std::uint64_t, RuntimeUiElementId> m_NodeCanvases;

@@ -1425,8 +1425,17 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         }
 
         if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game))
+        {
             for (const auto& presentation : presentations)
-                presentation->Draw(ui, imageRect.Minimum.X, imageRect.Minimum.Y);
+            {
+                for (auto submission : presentation->UiRenderSubmissions(m_GameRenderView))
+                {
+                    if (KeireEditor::SubmitsRuntimeUiToSceneRenderer(submission.Target))
+                        Owner().Renderer()->SubmitRuntimeUiTarget(std::move(submission));
+                }
+                presentation->DrawScreenUi(ui, m_GameRenderView, imageRect.Minimum.X, imageRect.Minimum.Y);
+            }
+        }
         const auto runtimeUiRouting =
             KeireEditor::ResolveRuntimeGameUiRouting(playActive, !presentations.empty(), m_GameViewportInputActive);
         const bool uiBuilderPickIntercepted = TryPickUiBuilderLiveElement(presentations, imageRect, ui.PointerState());

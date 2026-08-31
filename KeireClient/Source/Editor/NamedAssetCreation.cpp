@@ -30,6 +30,8 @@ namespace KeireEditor
             return "VFX effect";
         case NamedAssetCreationKind::UiDocument:
             return "UI document";
+        case NamedAssetCreationKind::UiStyleSheet:
+            return "UI style sheet";
         case NamedAssetCreationKind::MaterialGraph:
             return "material graph";
         case NamedAssetCreationKind::ShaderGraph:

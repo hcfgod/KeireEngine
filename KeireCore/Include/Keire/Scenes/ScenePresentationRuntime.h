@@ -284,6 +284,7 @@ namespace Keire
         [[nodiscard]] ScenePresentationRuntimeStatistics Statistics() const;
         void Draw(UiFrame& ui, float offsetX = 0.0F, float offsetY = 0.0F) const;
         void DrawScreenUi(UiFrame& ui, float offsetX = 0.0F, float offsetY = 0.0F) const;
+        void DrawScreenUi(UiFrame& ui, const Ref<RenderView>& view, float offsetX = 0.0F, float offsetY = 0.0F) const;
         void DrawWorldUi(UiFrame& ui, float offsetX = 0.0F, float offsetY = 0.0F) const;
 
       private:

@@ -132,70 +132,25 @@ namespace KeireEditor
             Keire::UiVisualElementType::Foldout,       Keire::UiVisualElementType::TabView,
             Keire::UiVisualElementType::Toolbar,       Keire::UiVisualElementType::Spacer};
 
-        [[nodiscard]] Keire::UiColor ToUiColor(const Keire::Color color) noexcept
+        [[nodiscard]] bool CanContainUiChildren(const Keire::UiVisualElementType type) noexcept
         {
-            return {color.Red, color.Green, color.Blue, color.Alpha};
+            using Type = Keire::UiVisualElementType;
+            return type == Type::VisualElement || type == Type::TemplateContainer || type == Type::ScrollView ||
+                   type == Type::ListView || type == Type::TreeView || type == Type::Foldout || type == Type::TabView ||
+                   type == Type::Toolbar || type == Type::Custom || type == Type::Slot;
         }
 
-        [[nodiscard]] Keire::UiItemRect TransformPreviewRect(const Keire::RuntimeUiRect rectangle,
-                                                             const Keire::UiPosition origin, const float scale) noexcept
+        [[nodiscard]] Keire::AssetId PreferredInsertionParent(const UiBuilderDocument& document) noexcept
         {
-            return {{origin.X + rectangle.X * scale, origin.Y + rectangle.Y * scale},
-                    {origin.X + (rectangle.X + rectangle.Width) * scale,
-                     origin.Y + (rectangle.Y + rectangle.Height) * scale}};
-        }
-
-        [[nodiscard]] bool IsPositiveFinite(const Keire::UiItemRect rectangle) noexcept
-        {
-            return std::isfinite(rectangle.Minimum.X) && std::isfinite(rectangle.Minimum.Y) &&
-                   std::isfinite(rectangle.Maximum.X) && std::isfinite(rectangle.Maximum.Y) &&
-                   rectangle.Maximum.X > rectangle.Minimum.X && rectangle.Maximum.Y > rectangle.Minimum.Y;
-        }
-
-        [[nodiscard]] float RulerStep(const float rasterScale) noexcept
-        {
-            const float logicalTarget = 72.0F / std::max(rasterScale, 0.001F);
-            const float magnitude = std::pow(10.0F, std::floor(std::log10(logicalTarget)));
-            const float normalized = logicalTarget / magnitude;
-            return (normalized <= 2.0F ? 2.0F : normalized <= 5.0F ? 5.0F : 10.0F) * magnitude;
-        }
-
-        [[nodiscard]] Keire::UiVisualElementDefinition* FindElement(Keire::UiVisualElementDefinition& element,
-                                                                    const Keire::AssetId id) noexcept
-        {
-            if (element.StableId == id)
-                return &element;
-            for (auto& child : element.Children)
-                if (auto* found = FindElement(child, id))
-                    return found;
-            return nullptr;
-        }
-
-        [[nodiscard]] Keire::UiSize CanvasControlDefaultSize(const Keire::UiVisualElementType type) noexcept
-        {
-            switch (type)
+            auto candidate = document.Selection();
+            while (candidate)
             {
-            case Keire::UiVisualElementType::Label:
-                return {240.0F, 40.0F};
-            case Keire::UiVisualElementType::Image:
-                return {180.0F, 140.0F};
-            case Keire::UiVisualElementType::Slider:
-            case Keire::UiVisualElementType::ProgressBar:
-                return {280.0F, 32.0F};
-            case Keire::UiVisualElementType::ScrollView:
-            case Keire::UiVisualElementType::ListView:
-            case Keire::UiVisualElementType::TreeView:
-                return {320.0F, 240.0F};
-            case Keire::UiVisualElementType::VisualElement:
-                return {320.0F, 180.0F};
-            default:
-                return {220.0F, 48.0F};
+                const auto* element = document.Find(candidate);
+                if (element && CanContainUiChildren(element->Type))
+                    return candidate;
+                candidate = document.ParentOf(candidate);
             }
-        }
-
-        [[nodiscard]] std::string CanvasPixelValue(const float value)
-        {
-            return std::to_string(static_cast<int>(std::lround(value))) + "px";
+            return document.Definition().Root.StableId;
         }
 
         [[nodiscard]] std::string_view RuntimeUiEventName(const Keire::RuntimeUiEventType type) noexcept
@@ -306,13 +261,15 @@ namespace KeireEditor
         m_PreviewStyleSheets.clear();
         m_PreviewTemplates.clear();
         m_BuiltPreviewSettings.reset();
+        m_PreviewSettings = {};
         m_PreviewDiagnostic.clear();
         m_NameDraft.clear();
         m_ClassesDraft.clear();
         m_TextDraft.clear();
         m_CustomTypeDraft.clear();
         m_InlineStyleDraft.clear();
-        m_StyleSheetDraft.clear();
+        m_StyleSheetPicker.Clear();
+        m_StyleSheetDraft = {};
         m_StyleRuleAsset = {};
         m_StyleRuleGeneration = 0;
         m_StyleRuleSelection.reset();
@@ -623,17 +580,30 @@ namespace KeireEditor
 
     void UiBuilderPanel::DrawLibrary(Keire::UiFrame& ui)
     {
-        ui.Text("Add to selected element");
+        ui.Text("Click to add, or drag onto the canvas");
         ui.TextColored(m_Controller.UiBuilderTheme().MutedText,
-                       "Controls are inserted immediately and participate in undo/redo.");
+                       "Non-container selections add beside the selection. Every insertion supports undo/redo.");
         ui.Separator();
         auto& document = m_Controller.UiBuilderState();
         for (const auto type : LibraryTypes)
         {
             if (ui.Button(std::string("+ ") + std::string(UiBuilderElementTypeName(type))))
             {
-                (void)document.AddElement(document.Selection(), type);
-                m_DraftElement = {};
+                try
+                {
+                    const auto parent = PreferredInsertionParent(document);
+                    const auto bounds = CanvasParentBounds(parent);
+                    const auto created = document.AddCanvasElement(
+                        parent, type, bounds, {bounds.X + bounds.Width * 0.5F, bounds.Y + bounds.Height * 0.5F});
+                    document.Select(created);
+                    m_DraftElement = {};
+                    m_Message = "Added " + std::string(UiBuilderElementTypeName(type)) + ".";
+                }
+                catch (const std::exception& error)
+                {
+                    m_Message = error.what();
+                    m_Controller.ReportUiBuilderError(m_Message);
+                }
             }
             if (auto source = ui.BeginDragSource(); source)
             {
@@ -654,7 +624,11 @@ namespace KeireEditor
                 {
                     try
                     {
-                        (void)document.AddCustomElement(document.Selection(), descriptor.Name);
+                        const auto parent = PreferredInsertionParent(document);
+                        const auto bounds = CanvasParentBounds(parent);
+                        (void)document.AddCanvasCustomElement(
+                            parent, descriptor.Name, bounds,
+                            {bounds.X + bounds.Width * 0.5F, bounds.Y + bounds.Height * 0.5F});
                         m_DraftElement = {};
                     }
                     catch (const std::exception& error)
@@ -662,6 +636,12 @@ namespace KeireEditor
                         m_Message = error.what();
                         m_Controller.ReportUiBuilderError(m_Message);
                     }
+                }
+                if (auto source = ui.BeginDragSource(); source)
+                {
+                    const auto payload = std::as_bytes(std::span(descriptor.Name));
+                    ui.SetDragPayload("KEIRE_UI_CUSTOM_CONTROL", payload);
+                    ui.Text("Add " + descriptor.Name);
                 }
                 if (ui.LastItemState().Hovered)
                 {
@@ -682,7 +662,7 @@ namespace KeireEditor
                 const auto asset = Keire::AssetId::Parse(m_NewTemplateDraft);
                 if (!asset)
                     throw std::invalid_argument("Enter a non-zero .keireui asset ID for the template.");
-                (void)document.AddTemplate(document.Selection(), asset);
+                (void)document.AddTemplate(PreferredInsertionParent(document), asset);
                 m_DraftElement = {};
             }
             catch (const std::exception& error)
@@ -696,7 +676,7 @@ namespace KeireEditor
         {
             try
             {
-                (void)document.AddSlot(document.Selection(), m_NewSlotDraft);
+                (void)document.AddSlot(PreferredInsertionParent(document), m_NewSlotDraft);
                 m_DraftElement = {};
             }
             catch (const std::exception& error)
@@ -704,327 +684,6 @@ namespace KeireEditor
                 m_Message = error.what();
                 m_Controller.ReportUiBuilderError(m_Message);
             }
-        }
-    }
-
-    void UiBuilderPanel::DrawViewport(Keire::UiFrame& ui)
-    {
-        auto& document = m_Controller.UiBuilderState();
-        DrawPreviewToolbar(ui);
-        ui.Separator();
-        try
-        {
-            RefreshPreviewSnapshot();
-        }
-        catch (const std::exception& error)
-        {
-            m_PreviewSnapshot.reset();
-            m_PreviewDiagnostic = error.what();
-        }
-
-        const auto available = ui.ContentAvailable();
-        const Keire::UiSize viewportSize{std::max(160.0F, available.Width), std::max(120.0F, available.Height)};
-        (void)ui.InvisibleButton("UiBuilderRetainedViewport", viewportSize);
-        const auto viewport = ui.LastItemRect();
-        const auto viewportState = ui.LastItemState();
-        const auto pointer = ui.PointerState();
-        if (viewportState.Hovered && pointer.Wheel != 0.0F)
-        {
-            m_PreviewSettings.ZoomBy(std::pow(1.15F, pointer.Wheel));
-            ui.CapturePointerWheel();
-        }
-        if (viewportState.Hovered && (pointer.MiddleDown || pointer.RightDown))
-            m_PreviewSettings.PanBy({pointer.Delta.X, pointer.Delta.Y});
-
-        const auto& theme = m_Controller.UiBuilderTheme();
-        ui.DrawFilledRectangle(viewport, {0.035F, 0.04F, 0.05F, 1.0F});
-        if (!m_PreviewSnapshot)
-        {
-            ui.DrawOverlayText({viewport.Minimum.X + 12.0F, viewport.Minimum.Y + 12.0F}, theme.Error,
-                               "Preview unavailable: " + m_PreviewDiagnostic, 0.0F, viewport);
-            return;
-        }
-
-        const float availableWidth = std::max(1.0F, viewport.Size().Width - 24.0F);
-        const float availableHeight = std::max(1.0F, viewport.Size().Height - 24.0F);
-        const float fit = std::min(availableWidth / static_cast<float>(m_PreviewSettings.Width),
-                                   availableHeight / static_cast<float>(m_PreviewSettings.Height));
-        const float rasterScale = std::max(0.001F, fit * m_PreviewSettings.Zoom);
-        const Keire::UiSize canvasSize{static_cast<float>(m_PreviewSettings.Width) * rasterScale,
-                                       static_cast<float>(m_PreviewSettings.Height) * rasterScale};
-        const Keire::UiPosition canvasOrigin{
-            viewport.Minimum.X + (viewport.Size().Width - canvasSize.Width) * 0.5F + m_PreviewSettings.Pan.X,
-            viewport.Minimum.Y + (viewport.Size().Height - canvasSize.Height) * 0.5F + m_PreviewSettings.Pan.Y,
-        };
-        const Keire::UiItemRect canvas{canvasOrigin,
-                                       {canvasOrigin.X + canvasSize.Width, canvasOrigin.Y + canvasSize.Height}};
-
-        if (auto target = ui.BeginDragTarget(canvas, "UiBuilderCanvasControlDrop"); target)
-        {
-            std::vector<std::byte> payload;
-            if (ui.AcceptDragPayload("KEIRE_UI_CONTROL", payload) && payload.size() == 1)
-            {
-                const auto type = static_cast<Keire::UiVisualElementType>(std::to_integer<std::uint8_t>(payload[0]));
-                if (std::ranges::find(LibraryTypes, type) != LibraryTypes.end())
-                {
-                    try
-                    {
-                        const auto created = document.AddElement(document.Definition().Root.StableId, type);
-                        auto candidate = document.Definition();
-                        auto* element = FindElement(candidate.Root, created);
-                        if (!element)
-                            throw std::runtime_error("The dropped UI element was not added to the visual tree.");
-                        const auto size = CanvasControlDefaultSize(type);
-                        SetNamedValue(element->InlineStyles, "position", "absolute");
-                        SetNamedValue(
-                            element->InlineStyles, "left",
-                            CanvasPixelValue((pointer.Position.X - canvasOrigin.X) / rasterScale - size.Width * 0.5F));
-                        SetNamedValue(
-                            element->InlineStyles, "top",
-                            CanvasPixelValue((pointer.Position.Y - canvasOrigin.Y) / rasterScale - size.Height * 0.5F));
-                        SetNamedValue(element->InlineStyles, "width", CanvasPixelValue(size.Width));
-                        SetNamedValue(element->InlineStyles, "height", CanvasPixelValue(size.Height));
-                        (void)document.Edit("Place UI element on canvas", std::move(candidate));
-                        document.Select(created);
-                        m_DraftElement = {};
-                        m_Message = "Placed " + std::string(UiBuilderElementTypeName(type)) + " on the canvas.";
-                    }
-                    catch (const std::exception& error)
-                    {
-                        m_Message = error.what();
-                        m_Controller.ReportUiBuilderError(m_Message);
-                    }
-                }
-            }
-        }
-
-        if (viewportState.Hovered && pointer.LeftPressed && canvas.Contains(pointer.Position))
-        {
-            const UiBuilderPreviewElement* hitElement = nullptr;
-            const float x = (pointer.Position.X - canvasOrigin.X) / rasterScale;
-            const float y = (pointer.Position.Y - canvasOrigin.Y) / rasterScale;
-            for (auto element = m_PreviewSnapshot->Elements.rbegin(); element != m_PreviewSnapshot->Elements.rend();
-                 ++element)
-            {
-                if (!element->State.Visible || !element->State.Rect.Contains(x, y) ||
-                    !element->State.ClipRect.Contains(x, y))
-                {
-                    continue;
-                }
-                hitElement = &*element;
-                document.Select(element->StableId);
-                m_DraftElement = {};
-                break;
-            }
-            if (hitElement && document.Selection() != document.Definition().Root.StableId)
-            {
-                const auto selection = TransformPreviewRect(hitElement->State.Rect, canvasOrigin, rasterScale);
-                constexpr float HandleRadius = 8.0F;
-                const Keire::UiItemRect resizeHandle{
-                    {selection.Maximum.X - HandleRadius, selection.Maximum.Y - HandleRadius},
-                    {selection.Maximum.X + HandleRadius, selection.Maximum.Y + HandleRadius}};
-                m_CanvasGesture.Element = document.Selection();
-                m_CanvasGesture.Initial = hitElement->State.Rect;
-                m_CanvasGesture.Draft = m_CanvasGesture.Initial;
-                m_CanvasGesture.StartPointer = pointer.Position;
-                m_CanvasGesture.Gesture =
-                    resizeHandle.Contains(pointer.Position) ? CanvasGesture::Resize : CanvasGesture::Move;
-                m_CanvasGesture.Changed = false;
-            }
-        }
-
-        if (m_CanvasGesture.Gesture != CanvasGesture::None && pointer.LeftDown)
-        {
-            const float deltaX = (pointer.Position.X - m_CanvasGesture.StartPointer.X) / rasterScale;
-            const float deltaY = (pointer.Position.Y - m_CanvasGesture.StartPointer.Y) / rasterScale;
-            m_CanvasGesture.Changed = m_CanvasGesture.Changed ||
-                                      std::abs(pointer.Position.X - m_CanvasGesture.StartPointer.X) >= 2.0F ||
-                                      std::abs(pointer.Position.Y - m_CanvasGesture.StartPointer.Y) >= 2.0F;
-            m_CanvasGesture.Draft = m_CanvasGesture.Initial;
-            if (m_CanvasGesture.Gesture == CanvasGesture::Move)
-            {
-                m_CanvasGesture.Draft.X = std::clamp(
-                    m_CanvasGesture.Initial.X + deltaX, 0.0F,
-                    std::max(0.0F, static_cast<float>(m_PreviewSettings.Width) - m_CanvasGesture.Initial.Width));
-                m_CanvasGesture.Draft.Y = std::clamp(
-                    m_CanvasGesture.Initial.Y + deltaY, 0.0F,
-                    std::max(0.0F, static_cast<float>(m_PreviewSettings.Height) - m_CanvasGesture.Initial.Height));
-            }
-            else
-            {
-                m_CanvasGesture.Draft.Width =
-                    std::clamp(m_CanvasGesture.Initial.Width + deltaX, 8.0F,
-                               static_cast<float>(m_PreviewSettings.Width) - m_CanvasGesture.Initial.X);
-                m_CanvasGesture.Draft.Height =
-                    std::clamp(m_CanvasGesture.Initial.Height + deltaY, 8.0F,
-                               static_cast<float>(m_PreviewSettings.Height) - m_CanvasGesture.Initial.Y);
-            }
-        }
-        if (m_CanvasGesture.Gesture != CanvasGesture::None && pointer.LeftReleased)
-        {
-            if (m_CanvasGesture.Changed)
-            {
-                try
-                {
-                    auto candidate = document.Definition();
-                    auto* element = FindElement(candidate.Root, m_CanvasGesture.Element);
-                    if (!element)
-                        throw std::runtime_error("The canvas element was removed before the gesture completed.");
-                    Keire::RuntimeUiRect parentRect;
-                    if (const auto parent = document.ParentOf(m_CanvasGesture.Element); parent)
-                    {
-                        if (const auto found = std::ranges::find(m_PreviewSnapshot->Elements, parent,
-                                                                 &UiBuilderPreviewElement::StableId);
-                            found != m_PreviewSnapshot->Elements.end())
-                        {
-                            parentRect = found->State.Rect;
-                        }
-                    }
-                    SetNamedValue(element->InlineStyles, "position", "absolute");
-                    SetNamedValue(element->InlineStyles, "left",
-                                  CanvasPixelValue(m_CanvasGesture.Draft.X - parentRect.X));
-                    SetNamedValue(element->InlineStyles, "top",
-                                  CanvasPixelValue(m_CanvasGesture.Draft.Y - parentRect.Y));
-                    SetNamedValue(element->InlineStyles, "width", CanvasPixelValue(m_CanvasGesture.Draft.Width));
-                    SetNamedValue(element->InlineStyles, "height", CanvasPixelValue(m_CanvasGesture.Draft.Height));
-                    (void)document.Edit(m_CanvasGesture.Gesture == CanvasGesture::Move ? "Move UI element"
-                                                                                       : "Resize UI element",
-                                        std::move(candidate));
-                    m_DraftElement = {};
-                }
-                catch (const std::exception& error)
-                {
-                    m_Message = error.what();
-                    m_Controller.ReportUiBuilderError(m_Message);
-                }
-            }
-            m_CanvasGesture = {};
-        }
-
-        [[maybe_unused]] auto viewportClip = ui.PushClipRect(viewport);
-        constexpr float GridSpacing = 24.0F;
-        const Keire::UiColor minorGrid{0.11F, 0.125F, 0.15F, 0.55F};
-        for (float x = viewport.Minimum.X; x < viewport.Maximum.X; x += GridSpacing)
-            ui.DrawLine({x, viewport.Minimum.Y}, {x, viewport.Maximum.Y}, minorGrid);
-        for (float y = viewport.Minimum.Y; y < viewport.Maximum.Y; y += GridSpacing)
-            ui.DrawLine({viewport.Minimum.X, y}, {viewport.Maximum.X, y}, minorGrid);
-        ui.DrawFilledRectangle(canvas, {0.075F, 0.08F, 0.095F, 1.0F});
-        ui.DrawRectangle(canvas, {0.32F, 0.36F, 0.44F, 1.0F});
-        if (m_PreviewSettings.ShowSafeArea)
-        {
-            const Keire::RuntimeUiRect safe{
-                m_PreviewSettings.SafeArea.Left,
-                m_PreviewSettings.SafeArea.Top,
-                std::max(0.0F, static_cast<float>(m_PreviewSettings.Width) - m_PreviewSettings.SafeArea.Left -
-                                   m_PreviewSettings.SafeArea.Right),
-                std::max(0.0F, static_cast<float>(m_PreviewSettings.Height) - m_PreviewSettings.SafeArea.Top -
-                                   m_PreviewSettings.SafeArea.Bottom),
-            };
-            ui.DrawRectangle(TransformPreviewRect(safe, canvasOrigin, rasterScale), {0.28F, 0.72F, 1.0F, 0.8F}, 1.0F);
-        }
-
-        for (const auto& command : m_PreviewSnapshot->DrawCommands)
-        {
-            if (command.Type == Keire::RuntimeUiDrawType::PushClip || command.Type == Keire::RuntimeUiDrawType::PopClip)
-            {
-                continue;
-            }
-            const auto rectangle = TransformPreviewRect(command.Rect, canvasOrigin, rasterScale);
-            const auto clipRectangle = TransformPreviewRect(command.ClipRect, canvasOrigin, rasterScale);
-            if (!IsPositiveFinite(rectangle) || !IsPositiveFinite(clipRectangle))
-                continue;
-            [[maybe_unused]] auto commandClip = ui.PushClipRect(clipRectangle);
-            switch (command.Type)
-            {
-            case Keire::RuntimeUiDrawType::Quad:
-                ui.DrawFilledRectangle(rectangle, ToUiColor(command.ColorValue), command.CornerRadius * rasterScale);
-                if (command.BorderWidth > 0.0F && command.BorderColor.Alpha > 0.0F)
-                    ui.DrawRectangle(rectangle, ToUiColor(command.BorderColor),
-                                     std::max(1.0F, command.BorderWidth * rasterScale),
-                                     command.CornerRadius * rasterScale);
-                break;
-            case Keire::RuntimeUiDrawType::Image:
-                ui.DrawFilledRectangle(rectangle, {0.12F, 0.15F, 0.2F, command.ColorValue.Alpha},
-                                       command.CornerRadius * rasterScale);
-                ui.DrawLine(rectangle.Minimum, rectangle.Maximum, {0.38F, 0.48F, 0.62F, 0.85F});
-                ui.DrawLine({rectangle.Maximum.X, rectangle.Minimum.Y}, {rectangle.Minimum.X, rectangle.Maximum.Y},
-                            {0.38F, 0.48F, 0.62F, 0.85F});
-                break;
-            case Keire::RuntimeUiDrawType::Text:
-            {
-                const float fontSize = std::max(1.0F, command.FontSize * rasterScale);
-                const auto measured = ui.MeasureText(command.Text, fontSize);
-                Keire::UiPosition position = rectangle.Minimum;
-                if (command.HorizontalAlignment == Keire::RuntimeUiAlignment::Center)
-                    position.X += (rectangle.Size().Width - measured.Width) * 0.5F;
-                else if (command.HorizontalAlignment == Keire::RuntimeUiAlignment::End)
-                    position.X += rectangle.Size().Width - measured.Width;
-                if (command.VerticalAlignment == Keire::RuntimeUiAlignment::Center)
-                    position.Y += (rectangle.Size().Height - measured.Height) * 0.5F;
-                else if (command.VerticalAlignment == Keire::RuntimeUiAlignment::End)
-                    position.Y += rectangle.Size().Height - measured.Height;
-                ui.DrawOverlayText(position, ToUiColor(command.ColorValue), command.Text, fontSize, clipRectangle);
-                break;
-            }
-            case Keire::RuntimeUiDrawType::PushClip:
-            case Keire::RuntimeUiDrawType::PopClip:
-                break;
-            }
-        }
-
-        if (m_PreviewSettings.ShowGuides)
-        {
-            const Keire::UiColor guide{0.22F, 0.78F, 1.0F, 0.9F};
-            if (m_PreviewSettings.VerticalGuide >= 0.0F)
-            {
-                const float x = canvasOrigin.X + m_PreviewSettings.VerticalGuide * rasterScale;
-                ui.DrawLine({x, canvas.Minimum.Y}, {x, canvas.Maximum.Y}, guide, 1.0F);
-            }
-            if (m_PreviewSettings.HorizontalGuide >= 0.0F)
-            {
-                const float y = canvasOrigin.Y + m_PreviewSettings.HorizontalGuide * rasterScale;
-                ui.DrawLine({canvas.Minimum.X, y}, {canvas.Maximum.X, y}, guide, 1.0F);
-            }
-        }
-        if (m_PreviewSettings.ShowRulers)
-        {
-            constexpr float RulerHeight = 18.0F;
-            constexpr float RulerWidth = 38.0F;
-            const Keire::UiColor rulerBackground{0.035F, 0.04F, 0.055F, 0.88F};
-            const Keire::UiColor rulerText{0.62F, 0.69F, 0.78F, 1.0F};
-            ui.DrawFilledRectangle({canvas.Minimum, {canvas.Maximum.X, canvas.Minimum.Y + RulerHeight}},
-                                   rulerBackground);
-            ui.DrawFilledRectangle({canvas.Minimum, {canvas.Minimum.X + RulerWidth, canvas.Maximum.Y}},
-                                   rulerBackground);
-            const float step = RulerStep(rasterScale);
-            for (float value = 0.0F; value <= static_cast<float>(m_PreviewSettings.Width); value += step)
-            {
-                const float x = canvasOrigin.X + value * rasterScale;
-                ui.DrawLine({x, canvas.Minimum.Y}, {x, canvas.Minimum.Y + 6.0F}, rulerText);
-                ui.DrawOverlayText({x + 2.0F, canvas.Minimum.Y + 5.0F}, rulerText,
-                                   std::to_string(static_cast<int>(std::lround(value))), 9.0F, canvas);
-            }
-            for (float value = 0.0F; value <= static_cast<float>(m_PreviewSettings.Height); value += step)
-            {
-                const float y = canvasOrigin.Y + value * rasterScale;
-                ui.DrawLine({canvas.Minimum.X, y}, {canvas.Minimum.X + 6.0F, y}, rulerText);
-                ui.DrawOverlayText({canvas.Minimum.X + 7.0F, y + 1.0F}, rulerText,
-                                   std::to_string(static_cast<int>(std::lround(value))), 9.0F, canvas);
-            }
-        }
-
-        if (m_PreviewSnapshot->SelectedState)
-        {
-            const auto selectedRect = TransformPreviewRect(m_CanvasGesture.Gesture == CanvasGesture::None
-                                                               ? m_PreviewSnapshot->SelectedState->Rect
-                                                               : m_CanvasGesture.Draft,
-                                                           canvasOrigin, rasterScale);
-            ui.DrawRectangle(selectedRect, theme.Accent, 2.0F);
-            constexpr float HandleRadius = 5.0F;
-            const auto handle = selectedRect.Maximum;
-            ui.DrawFilledRectangle({{handle.X - HandleRadius, handle.Y - HandleRadius},
-                                    {handle.X + HandleRadius, handle.Y + HandleRadius}},
-                                   theme.Accent);
         }
     }
 

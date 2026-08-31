@@ -24,6 +24,7 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
           MaterialParameterCollection);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.keireui") == UiDocument);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.KEIREUI") == UiDocument);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.keirestyle") == UiStyleSheet);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Textures/Surface.png") == External);
 
     Keire::AssetSourceRecord instance;
@@ -37,6 +38,8 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
     CHECK(KeireEditor::AssetTypeName(instance) == "Material Parameter Collection");
     instance.RelativePath = "UI/Hud.keireui";
     CHECK(KeireEditor::AssetTypeName(instance) == "UI Document");
+    instance.RelativePath = "UI/Hud.keirestyle";
+    CHECK(KeireEditor::AssetTypeName(instance) == "UI Style Sheet");
 }
 
 TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows distinct")
@@ -52,6 +55,7 @@ TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows 
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ManagedData) == "ScriptableObject");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ScriptableObjectScript) == "C# ScriptableObject class");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::UiDocument) == "UI document");
+    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::UiStyleSheet) == "UI style sheet");
 }
 
 TEST_CASE("managed script creation stays in the selected folder and extends runtime source coverage")

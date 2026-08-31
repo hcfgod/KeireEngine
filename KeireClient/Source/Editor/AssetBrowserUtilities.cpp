@@ -325,6 +325,8 @@ namespace KeireEditor
             return "VFX Effect";
         if (extension == ".keireui")
             return "UI Document";
+        if (extension == ".keirestyle")
+            return "UI Style Sheet";
         if (extension == ".keiredata")
             return "Managed Data";
         if (extension == ".keireprefab")
@@ -353,6 +355,8 @@ namespace KeireEditor
             return AssetBrowserOpenAction::VfxEffect;
         if (extension == ".keireui")
             return AssetBrowserOpenAction::UiDocument;
+        if (extension == ".keirestyle")
+            return AssetBrowserOpenAction::UiStyleSheet;
         if (extension == ".keirematerial")
             return AssetBrowserOpenAction::Material;
         if (extension == ".keirematerialgraph")

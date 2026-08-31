@@ -37,6 +37,17 @@ namespace Keire::RenderBackend
                 },
                 value);
         }
+
+        void ReleaseRetiredSurfaceLeases(RenderFramePacket& frame) noexcept
+        {
+            frame.Requests.clear();
+            frame.RuntimeUiCameraPanels.clear();
+            frame.RuntimeUiWorldPanels.clear();
+            frame.RuntimeUiRenderTextures.clear();
+            frame.Surfaces.clear();
+            frame.PresentationSurface = {};
+            frame.EditorUi.reset();
+        }
     } // namespace
 
     void RenderSharedState::CollectCompletedFrames() { CollectCompletedFrames(false); }
@@ -175,6 +186,10 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUFence(Device, frame.Fence);
             if (frame.ResolvedEditorUi)
                 frame.ResolvedEditorUi->ReleaseGpuTextures(Device, false);
+            // The fence has retired every consumer of these logical epochs. Drop their packet leases and collect
+            // fallback chains before publishing completion so Flush observes both GPU and surface-lifetime retirement.
+            ReleaseRetiredSurfaceLeases(*frame.Frame);
+            CollectRetiredSurfaceEpochs();
             // Flush may observe CompleteFrame's outstanding-count transition immediately. Publish the completed
             // readback tuple before that transition returns its slot so owner-visible diagnostics cannot name a
             // workset that admission has already made reusable.

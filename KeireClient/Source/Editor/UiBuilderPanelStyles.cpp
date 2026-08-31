@@ -42,19 +42,26 @@ namespace KeireEditor
                 break;
             }
         }
-        (void)ui.InputText("Style Asset ID", m_StyleSheetDraft);
+        (void)m_StyleSheetPicker.Draw(
+            ui, m_Controller.UiBuilderAssetRecords(), m_StyleSheetDraft,
+            {.Label = "Style Sheet",
+             .EmptyLabel = "Choose a .keirestyle asset",
+             .ExpectedType = Keire::UiStyleSheetAsset::StaticType(),
+             .Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealUiBuilderAsset(asset); },
+             .AllowNone = true});
         if (ui.Button("Link Style Sheet"))
         {
             try
             {
-                const auto style = Keire::AssetId::Parse(m_StyleSheetDraft);
+                const auto style = m_StyleSheetDraft;
                 if (!style)
-                    throw std::invalid_argument("Enter a non-zero style asset ID.");
+                    throw std::invalid_argument("Choose a .keirestyle asset to link.");
                 auto candidate = document.Definition();
                 if (std::ranges::find(candidate.StyleSheets, style) == candidate.StyleSheets.end())
                     candidate.StyleSheets.push_back(style);
                 (void)document.Edit("Link UI style sheet", std::move(candidate));
-                m_StyleSheetDraft.clear();
+                m_StyleSheetDraft = {};
+                m_StyleSheetPicker.Clear();
             }
             catch (const std::exception& error)
             {

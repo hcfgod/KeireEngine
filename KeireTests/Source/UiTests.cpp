@@ -205,6 +205,24 @@ namespace
                 const auto screenCursor = ui.CursorScreenPosition();
                 ui.SetCursorPosition(cursor);
                 ui.SetCursorScreenPosition(screenCursor);
+                const std::array cursorMappings{
+                    std::pair{Keire::UiCursorShape::TextInput, ImGuiMouseCursor_TextInput},
+                    std::pair{Keire::UiCursorShape::Move, ImGuiMouseCursor_ResizeAll},
+                    std::pair{Keire::UiCursorShape::ResizeHorizontal, ImGuiMouseCursor_ResizeEW},
+                    std::pair{Keire::UiCursorShape::ResizeVertical, ImGuiMouseCursor_ResizeNS},
+                    std::pair{Keire::UiCursorShape::ResizeNorthwestSoutheast, ImGuiMouseCursor_ResizeNWSE},
+                    std::pair{Keire::UiCursorShape::ResizeNortheastSouthwest, ImGuiMouseCursor_ResizeNESW},
+                    std::pair{Keire::UiCursorShape::Hand, ImGuiMouseCursor_Hand},
+                    std::pair{Keire::UiCursorShape::NotAllowed, ImGuiMouseCursor_NotAllowed},
+                };
+                for (const auto& [shape, expected] : cursorMappings)
+                {
+                    ui.SetCursorShape(shape);
+                    CHECK(ImGui::GetMouseCursor() == expected);
+                }
+                ui.SetCursorShape(Keire::UiCursorShape::Default);
+                CHECK(ImGui::GetMouseCursor() == ImGuiMouseCursor_Arrow);
+                CHECK_THROWS_AS(ui.SetCursorShape(static_cast<Keire::UiCursorShape>(255)), std::invalid_argument);
                 ui.SetNextItemWidth(160.0F);
                 ui.DrawLine({10.0F, 10.0F}, {30.0F, 30.0F}, {1.0F, 0.0F, 0.0F, 1.0F}, 2.0F);
                 ui.DrawCircle({40.0F, 40.0F}, 8.0F, {0.0F, 1.0F, 0.0F, 1.0F});

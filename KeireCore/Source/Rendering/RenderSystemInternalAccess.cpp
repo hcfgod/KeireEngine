@@ -65,7 +65,8 @@ namespace Keire
             {
                 renderState.RequireRenderThread("ReadbackRGBA8");
                 const auto resolved = renderState.ResolveSurface(token);
-                if (!resolved || !resolved->Resources.PublishedColor() || resolved->Width == 0 || resolved->Height == 0)
+                auto* const published = resolved ? resolved->PublishedTexture.load(std::memory_order_acquire) : nullptr;
+                if (!published || resolved->Width == 0 || resolved->Height == 0)
                 {
                     throw std::logic_error("Render surface is not available for readback.");
                 }
@@ -96,8 +97,7 @@ namespace Keire
                         throw std::runtime_error("SDL_BeginGPUCopyPass(readback) failed: " + LastSdlError());
                     }
 
-                    const SDL_GPUTextureRegion source{
-                        resolved->Resources.PublishedColor(), 0, 0, 0, 0, 0, resolved->Width, resolved->Height, 1};
+                    const SDL_GPUTextureRegion source{published, 0, 0, 0, 0, 0, resolved->Width, resolved->Height, 1};
                     const SDL_GPUTextureTransferInfo destination{transfer, 0, resolved->Width, resolved->Height};
                     SDL_DownloadFromGPUTexture(copy, &source, &destination);
                     SDL_EndGPUCopyPass(copy);

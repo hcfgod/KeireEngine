@@ -3,8 +3,10 @@
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -27,6 +29,28 @@ namespace KeireEditor
                     return found;
             }
             return nullptr;
+        }
+
+        void SetInlineStyle(std::vector<Keire::UiNamedValue>& styles, const std::string_view name, std::string value)
+        {
+            const auto found = std::ranges::find(styles, name, &Keire::UiNamedValue::Name);
+            if (found != styles.end())
+                found->Value = std::move(value);
+            else
+                styles.push_back({std::string(name), std::move(value)});
+        }
+
+        [[nodiscard]] std::string CanvasPixelValue(float value)
+        {
+            if (value == 0.0F)
+                value = 0.0F;
+            std::array<char, 64> buffer{};
+            const auto [end, error] =
+                std::to_chars(buffer.data(), buffer.data() + buffer.size(), value, std::chars_format::general,
+                              std::numeric_limits<float>::max_digits10);
+            if (error != std::errc{})
+                throw std::runtime_error("UI Builder could not encode canvas geometry.");
+            return std::string(buffer.data(), end) + "px";
         }
 
         [[nodiscard]] const Keire::UiVisualElementDefinition* FindElement(const Keire::UiVisualElementDefinition& root,
@@ -136,6 +160,123 @@ namespace KeireEditor
             }
         }
 
+        void AddDefaultAuthoringProperties(Keire::UiVisualElementDefinition& element)
+        {
+            using Type = Keire::UiVisualElementType;
+            const auto size = [&element](const std::string_view width, const std::string_view height)
+            {
+                element.InlineStyles.push_back({"width", std::string(width)});
+                element.InlineStyles.push_back({"height", std::string(height)});
+            };
+            const auto text = [&element](const std::string_view value)
+            { element.Attributes.push_back({"text", std::string(value)}); };
+            const auto surface = [&element](const std::string_view background = "#182231ff")
+            {
+                element.InlineStyles.push_back({"background-color", std::string(background)});
+                element.InlineStyles.push_back({"border-color", "#50657fff"});
+                element.InlineStyles.push_back({"border-width", "1px"});
+                element.InlineStyles.push_back({"border-radius", "6px"});
+            };
+
+            switch (element.Type)
+            {
+            case Type::VisualElement:
+                size("320px", "180px");
+                surface();
+                element.InlineStyles.push_back({"padding", "12px"});
+                element.InlineStyles.push_back({"gap", "8px"});
+                break;
+            case Type::Label:
+                size("240px", "40px");
+                text("Label");
+                element.InlineStyles.push_back({"color", "#f3f8ffff"});
+                element.InlineStyles.push_back({"font-size", "18px"});
+                element.InlineStyles.push_back({"vertical-align", "center"});
+                break;
+            case Type::Image:
+                size("180px", "140px");
+                surface();
+                break;
+            case Type::Button:
+                size("220px", "48px");
+                text("Button");
+                surface("#245f9eff");
+                element.InlineStyles.push_back({"color", "#ffffffff"});
+                element.InlineStyles.push_back({"text-align", "center"});
+                element.InlineStyles.push_back({"vertical-align", "center"});
+                break;
+            case Type::TextField:
+                size("260px", "48px");
+                element.Attributes.push_back({"value", "Text field"});
+                surface();
+                element.InlineStyles.push_back({"color", "#ffffffff"});
+                element.InlineStyles.push_back({"vertical-align", "center"});
+                break;
+            case Type::Toggle:
+                size("220px", "40px");
+                text("Toggle");
+                element.Attributes.push_back({"checked", "false"});
+                element.InlineStyles.push_back({"color", "#f3f8ffff"});
+                element.InlineStyles.push_back({"vertical-align", "center"});
+                break;
+            case Type::Slider:
+            case Type::ProgressBar:
+                size("280px", "32px");
+                element.Attributes.push_back({"minimum", "0"});
+                element.Attributes.push_back({"maximum", "100"});
+                element.Attributes.push_back({"value", "50"});
+                element.InlineStyles.push_back({"background-color", "#25364aff"});
+                element.InlineStyles.push_back({"color", "#4da3ffff"});
+                element.InlineStyles.push_back({"border-radius", "6px"});
+                break;
+            case Type::ScrollView:
+            case Type::ListView:
+            case Type::TreeView:
+                size("320px", "240px");
+                surface();
+                element.InlineStyles.push_back({"padding", "8px"});
+                element.InlineStyles.push_back({"overflow", "clip"});
+                break;
+            case Type::DropdownField:
+                size("240px", "44px");
+                element.Attributes.push_back({"value", "Option"});
+                surface();
+                element.InlineStyles.push_back({"color", "#ffffffff"});
+                element.InlineStyles.push_back({"vertical-align", "center"});
+                break;
+            case Type::Foldout:
+                size("320px", "160px");
+                text("Foldout");
+                surface();
+                element.InlineStyles.push_back({"padding", "8px"});
+                break;
+            case Type::TabView:
+                size("420px", "260px");
+                surface();
+                element.InlineStyles.push_back({"padding", "8px"});
+                element.InlineStyles.push_back({"gap", "8px"});
+                break;
+            case Type::Toolbar:
+                size("480px", "48px");
+                surface();
+                element.InlineStyles.push_back({"padding", "6px"});
+                element.InlineStyles.push_back({"gap", "6px"});
+                element.InlineStyles.push_back({"flex-direction", "row"});
+                break;
+            case Type::Spacer:
+                size("100px", "24px");
+                break;
+            case Type::Custom:
+                size("220px", "64px");
+                surface();
+                element.InlineStyles.push_back({"padding", "8px"});
+                break;
+            case Type::TemplateContainer:
+            case Type::Slot:
+                break;
+            }
+        }
+
         [[nodiscard]] std::size_t CountInlineStyleProperties(const Keire::UiVisualElementDefinition& element) noexcept
         {
             std::size_t result = element.InlineStyles.size();
@@ -151,7 +292,7 @@ namespace KeireEditor
             if (const auto runtime = document.Find(definition.StableId))
             {
                 if (const auto state = tree.State(*runtime))
-                    result.push_back({definition.StableId, *state});
+                    result.push_back({definition.StableId, *runtime, *state});
             }
             for (const auto& child : definition.Children)
                 CollectPreviewElements(child, document, tree, result);
@@ -231,6 +372,154 @@ namespace KeireEditor
             return result;
         }
     } // namespace
+
+    Keire::RuntimeUiRect ResolveUiBuilderCanvasGesture(const Keire::RuntimeUiRect initial,
+                                                       const Keire::RuntimeUiRect parentBounds,
+                                                       const Keire::Vector2 delta,
+                                                       const UiBuilderCanvasGesture gesture) noexcept
+    {
+        auto result = initial;
+        const float parentRight = parentBounds.X + std::max(0.0F, parentBounds.Width);
+        const float parentBottom = parentBounds.Y + std::max(0.0F, parentBounds.Height);
+        const float initialRight = initial.X + initial.Width;
+        const float initialBottom = initial.Y + initial.Height;
+        const float minimumWidth = std::min(8.0F, std::max(0.0F, parentBounds.Width));
+        const float minimumHeight = std::min(8.0F, std::max(0.0F, parentBounds.Height));
+
+        if (gesture == UiBuilderCanvasGesture::Move)
+        {
+            result.X =
+                std::clamp(initial.X + delta.X, parentBounds.X, std::max(parentBounds.X, parentRight - initial.Width));
+            result.Y = std::clamp(initial.Y + delta.Y, parentBounds.Y,
+                                  std::max(parentBounds.Y, parentBottom - initial.Height));
+            return result;
+        }
+
+        const bool resizeLeft = gesture == UiBuilderCanvasGesture::ResizeLeft ||
+                                gesture == UiBuilderCanvasGesture::ResizeTopLeft ||
+                                gesture == UiBuilderCanvasGesture::ResizeBottomLeft;
+        const bool resizeRight = gesture == UiBuilderCanvasGesture::ResizeRight ||
+                                 gesture == UiBuilderCanvasGesture::ResizeTopRight ||
+                                 gesture == UiBuilderCanvasGesture::ResizeBottomRight;
+        const bool resizeTop = gesture == UiBuilderCanvasGesture::ResizeTop ||
+                               gesture == UiBuilderCanvasGesture::ResizeTopLeft ||
+                               gesture == UiBuilderCanvasGesture::ResizeTopRight;
+        const bool resizeBottom = gesture == UiBuilderCanvasGesture::ResizeBottom ||
+                                  gesture == UiBuilderCanvasGesture::ResizeBottomLeft ||
+                                  gesture == UiBuilderCanvasGesture::ResizeBottomRight;
+
+        if (resizeLeft)
+        {
+            result.X =
+                std::clamp(initial.X + delta.X, parentBounds.X, std::max(parentBounds.X, initialRight - minimumWidth));
+            result.Width = initialRight - result.X;
+        }
+        else if (resizeRight)
+        {
+            result.Width =
+                std::clamp(initial.Width + delta.X, minimumWidth, std::max(minimumWidth, parentRight - initial.X));
+        }
+
+        if (resizeTop)
+        {
+            result.Y = std::clamp(initial.Y + delta.Y, parentBounds.Y,
+                                  std::max(parentBounds.Y, initialBottom - minimumHeight));
+            result.Height = initialBottom - result.Y;
+        }
+        else if (resizeBottom)
+        {
+            result.Height =
+                std::clamp(initial.Height + delta.Y, minimumHeight, std::max(minimumHeight, parentBottom - initial.Y));
+        }
+        return result;
+    }
+
+    Keire::RuntimeUiRect ResolveUiBuilderCanvasPlacement(const Keire::RuntimeUiRect parentBounds,
+                                                         const Keire::UiSize desiredSize,
+                                                         const Keire::UiPosition center) noexcept
+    {
+        const float parentX = std::isfinite(parentBounds.X) ? parentBounds.X : 0.0F;
+        const float parentY = std::isfinite(parentBounds.Y) ? parentBounds.Y : 0.0F;
+        const float parentWidth = std::isfinite(parentBounds.Width) ? std::max(0.0F, parentBounds.Width) : 0.0F;
+        const float parentHeight = std::isfinite(parentBounds.Height) ? std::max(0.0F, parentBounds.Height) : 0.0F;
+        const float inset = std::min(16.0F, std::min(parentWidth, parentHeight) * 0.125F);
+        const float availableWidth = std::max(0.0F, parentWidth - inset * 2.0F);
+        const float availableHeight = std::max(0.0F, parentHeight - inset * 2.0F);
+        const float width =
+            std::min(std::isfinite(desiredSize.Width) ? std::max(0.0F, desiredSize.Width) : 0.0F, availableWidth);
+        const float height =
+            std::min(std::isfinite(desiredSize.Height) ? std::max(0.0F, desiredSize.Height) : 0.0F, availableHeight);
+        const float requestedX = std::isfinite(center.X) ? center.X : parentX + parentWidth * 0.5F;
+        const float requestedY = std::isfinite(center.Y) ? center.Y : parentY + parentHeight * 0.5F;
+        const float minimumX = parentX + inset;
+        const float minimumY = parentY + inset;
+        const float maximumX = std::max(minimumX, parentX + parentWidth - inset - width);
+        const float maximumY = std::max(minimumY, parentY + parentHeight - inset - height);
+        return {
+            std::clamp(requestedX - width * 0.5F, minimumX, maximumX),
+            std::clamp(requestedY - height * 0.5F, minimumY, maximumY),
+            width,
+            height,
+        };
+    }
+
+    Keire::UiSize UiBuilderCanvasControlDefaultSize(const Keire::UiVisualElementType type) noexcept
+    {
+        switch (type)
+        {
+        case Keire::UiVisualElementType::Label:
+            return {240.0F, 40.0F};
+        case Keire::UiVisualElementType::Image:
+            return {180.0F, 140.0F};
+        case Keire::UiVisualElementType::Slider:
+        case Keire::UiVisualElementType::ProgressBar:
+            return {280.0F, 32.0F};
+        case Keire::UiVisualElementType::ScrollView:
+        case Keire::UiVisualElementType::ListView:
+        case Keire::UiVisualElementType::TreeView:
+            return {320.0F, 240.0F};
+        case Keire::UiVisualElementType::VisualElement:
+            return {320.0F, 180.0F};
+        default:
+            return {220.0F, 48.0F};
+        }
+    }
+
+    void PersistUiBuilderCanvasGeometry(Keire::UiVisualElementDefinition& element,
+                                        const Keire::RuntimeUiRect parentBounds, const Keire::RuntimeUiRect geometry)
+    {
+        const bool finite = std::isfinite(parentBounds.X) && std::isfinite(parentBounds.Y) &&
+                            std::isfinite(geometry.X) && std::isfinite(geometry.Y) && std::isfinite(geometry.Width) &&
+                            std::isfinite(geometry.Height);
+        if (!finite || geometry.Width <= 0.0F || geometry.Height <= 0.0F)
+            throw std::invalid_argument("UI Builder canvas geometry must be finite and have positive dimensions.");
+
+        constexpr std::array conflictingProperties{"position",     "left",         "top",         "width",
+                                                   "height",       "margin",       "margin-left", "margin-top",
+                                                   "margin-right", "margin-bottom"};
+        std::erase_if(element.InlineStyles, [&](const Keire::UiNamedValue& value)
+                      { return std::ranges::find(conflictingProperties, value.Name) != conflictingProperties.end(); });
+        SetInlineStyle(element.InlineStyles, "position", "absolute");
+        SetInlineStyle(element.InlineStyles, "left", CanvasPixelValue(geometry.X - parentBounds.X));
+        SetInlineStyle(element.InlineStyles, "top", CanvasPixelValue(geometry.Y - parentBounds.Y));
+        SetInlineStyle(element.InlineStyles, "width", CanvasPixelValue(geometry.Width));
+        SetInlineStyle(element.InlineStyles, "height", CanvasPixelValue(geometry.Height));
+        SetInlineStyle(element.InlineStyles, "margin", "0px");
+    }
+
+    Keire::RuntimeUiRect TransformUiBuilderCanvasPreviewRect(const Keire::RuntimeUiRect rectangle,
+                                                             const Keire::RuntimeUiRect initial,
+                                                             const Keire::RuntimeUiRect draft) noexcept
+    {
+        const float scaleX = initial.Width > 0.001F ? draft.Width / initial.Width : 1.0F;
+        const float scaleY = initial.Height > 0.001F ? draft.Height / initial.Height : 1.0F;
+        return {
+            draft.X + (rectangle.X - initial.X) * scaleX,
+            draft.Y + (rectangle.Y - initial.Y) * scaleY,
+            rectangle.Width * scaleX,
+            rectangle.Height * scaleY,
+        };
+    }
 
     void UiBuilderPreviewSettings::ApplyPreset(const UiBuilderResolutionPreset preset) noexcept
     {
@@ -602,6 +891,7 @@ namespace KeireEditor
         added.StableId = Keire::AssetId::Generate();
         added.Type = type;
         added.Name = UniqueElementName(candidate.Root, type);
+        AddDefaultAuthoringProperties(added);
         const auto id = added.StableId;
         destination->Children.push_back(std::move(added));
         (void)Edit("Add UI element", std::move(candidate));
@@ -623,9 +913,60 @@ namespace KeireEditor
         added.Type = Keire::UiVisualElementType::Custom;
         added.CustomType = std::move(customType);
         added.Name = UniqueElementName(candidate.Root, added.Type);
+        AddDefaultAuthoringProperties(added);
         const auto id = added.StableId;
         destination->Children.push_back(std::move(added));
         (void)Edit("Add custom UI element", std::move(candidate));
+        Select(id);
+        return id;
+    }
+
+    Keire::AssetId UiBuilderDocument::AddCanvasElement(const Keire::AssetId parent,
+                                                       const Keire::UiVisualElementType type,
+                                                       const Keire::RuntimeUiRect parentBounds,
+                                                       const Keire::UiPosition center)
+    {
+        auto candidate = m_Definition;
+        auto* destination = FindElement(candidate.Root, parent ? parent : candidate.Root.StableId);
+        if (!destination)
+            throw std::invalid_argument("The selected UI parent no longer exists.");
+        Keire::UiVisualElementDefinition added;
+        added.StableId = Keire::AssetId::Generate();
+        added.Type = type;
+        added.Name = UniqueElementName(candidate.Root, type);
+        AddDefaultAuthoringProperties(added);
+        PersistUiBuilderCanvasGeometry(
+            added, parentBounds,
+            ResolveUiBuilderCanvasPlacement(parentBounds, UiBuilderCanvasControlDefaultSize(type), center));
+        const auto id = added.StableId;
+        destination->Children.push_back(std::move(added));
+        (void)Edit("Add UI element to canvas", std::move(candidate));
+        Select(id);
+        return id;
+    }
+
+    Keire::AssetId UiBuilderDocument::AddCanvasCustomElement(const Keire::AssetId parent, std::string customType,
+                                                             const Keire::RuntimeUiRect parentBounds,
+                                                             const Keire::UiPosition center)
+    {
+        if (customType.empty())
+            throw std::invalid_argument("A custom UI element requires its registered type name.");
+        auto candidate = m_Definition;
+        auto* destination = FindElement(candidate.Root, parent ? parent : candidate.Root.StableId);
+        if (!destination)
+            throw std::invalid_argument("The selected UI parent no longer exists.");
+        Keire::UiVisualElementDefinition added;
+        added.StableId = Keire::AssetId::Generate();
+        added.Type = Keire::UiVisualElementType::Custom;
+        added.CustomType = std::move(customType);
+        added.Name = UniqueElementName(candidate.Root, added.Type);
+        AddDefaultAuthoringProperties(added);
+        PersistUiBuilderCanvasGeometry(
+            added, parentBounds,
+            ResolveUiBuilderCanvasPlacement(parentBounds, UiBuilderCanvasControlDefaultSize(added.Type), center));
+        const auto id = added.StableId;
+        destination->Children.push_back(std::move(added));
+        (void)Edit("Add custom UI element to canvas", std::move(candidate));
         Select(id);
         return id;
     }

@@ -5,6 +5,7 @@
 #include "Keire/Ui/UiToolkit.h"
 
 #include <algorithm>
+#include <cmath>
 #include <span>
 #include <string_view>
 #include <unordered_map>
@@ -719,6 +720,37 @@ TEST_CASE("UI document maps retained flex and percentage styles deterministicall
     CHECK(laidOutChild->Rect.Y == doctest::Approx(90.0F));
     CHECK(laidOutChild->Rect.Width == doctest::Approx(320.0F));
     CHECK(laidOutChild->Rect.Height == doctest::Approx(180.0F));
+}
+
+TEST_CASE("UI document maps text alignment and safely renders collapsed slider ranges")
+{
+    constexpr std::string_view source = R"xml(<ui schemaVersion="1" name="CollapsedSlider">
+  <VisualElement id="42000000-0000-0000-0000-000000000001" name="root" style="width: 640px; height: 360px;">
+    <Label id="42000000-0000-0000-0000-000000000002" name="label" text="Centered" style="width: 240px; height: 40px; text-align: center; vertical-align: end;"/>
+    <Slider id="42000000-0000-0000-0000-000000000003" name="slider" minimum="5" maximum="5" value="5" style="width: 280px; height: 32px; background-color: #25364aff; color: #4da3ffff;"/>
+  </VisualElement>
+</ui>)xml";
+    const auto tree =
+        Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(AsBytes(source)));
+    const auto document = Keire::CreateRef<Keire::UiDocument>(tree);
+    Keire::RuntimeUiCanvasSettings canvas;
+    canvas.ScaleMode = Keire::RuntimeUiScaleMode::ConstantPixels;
+    document->Tree()->Layout(640.0F, 360.0F, {}, canvas);
+
+    const auto label = document->Find("label");
+    REQUIRE(label);
+    const auto labelState = document->Tree()->State(*label);
+    REQUIRE(labelState);
+    CHECK(labelState->Style.HorizontalAlignment == Keire::RuntimeUiAlignment::Center);
+    CHECK(labelState->Style.VerticalAlignment == Keire::RuntimeUiAlignment::End);
+
+    for (const auto& command : document->Tree()->DrawCommands())
+    {
+        CHECK(std::isfinite(command.Rect.X));
+        CHECK(std::isfinite(command.Rect.Y));
+        CHECK(std::isfinite(command.Rect.Width));
+        CHECK(std::isfinite(command.Rect.Height));
+    }
 }
 
 TEST_CASE("UI document rejects unsupported retained style values")

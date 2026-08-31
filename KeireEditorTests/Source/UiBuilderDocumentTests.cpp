@@ -10,10 +10,12 @@
 #include <doctest/doctest.h>
 
 #include <array>
+#include <cmath>
 #include <filesystem>
 #include <limits>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -49,6 +51,104 @@ TEST_CASE("runtime game UI is isolated from the Scene viewport")
     CHECK_FALSE(KeireEditor::SubmitsRuntimeUiToSceneRenderer(Keire::RuntimeUiRenderTarget::CameraOverlay));
     CHECK(KeireEditor::SubmitsRuntimeUiToSceneRenderer(Keire::RuntimeUiRenderTarget::RenderTexture));
     CHECK(KeireEditor::SubmitsRuntimeUiToSceneRenderer(Keire::RuntimeUiRenderTarget::WorldSurface));
+}
+
+TEST_CASE("UI Builder canvas gestures stay parent bounded and transform live preview geometry")
+{
+    const Keire::RuntimeUiRect parent{50.0F, 50.0F, 400.0F, 300.0F};
+    const Keire::RuntimeUiRect initial{100.0F, 100.0F, 200.0F, 80.0F};
+
+    const auto movedMinimum = KeireEditor::ResolveUiBuilderCanvasGesture(initial, parent, {-500.0F, -500.0F},
+                                                                         KeireEditor::UiBuilderCanvasGesture::Move);
+    CHECK(movedMinimum.X == doctest::Approx(50.0F));
+    CHECK(movedMinimum.Y == doctest::Approx(50.0F));
+    const auto movedMaximum = KeireEditor::ResolveUiBuilderCanvasGesture(initial, parent, {500.0F, 500.0F},
+                                                                         KeireEditor::UiBuilderCanvasGesture::Move);
+    CHECK(movedMaximum.X == doctest::Approx(250.0F));
+    CHECK(movedMaximum.Y == doctest::Approx(270.0F));
+
+    const auto resizedTopLeft = KeireEditor::ResolveUiBuilderCanvasGesture(
+        initial, parent, {-500.0F, -500.0F}, KeireEditor::UiBuilderCanvasGesture::ResizeTopLeft);
+    CHECK(resizedTopLeft.X == doctest::Approx(50.0F));
+    CHECK(resizedTopLeft.Y == doctest::Approx(50.0F));
+    CHECK(resizedTopLeft.Width == doctest::Approx(250.0F));
+    CHECK(resizedTopLeft.Height == doctest::Approx(130.0F));
+    const auto resizedBottomRight = KeireEditor::ResolveUiBuilderCanvasGesture(
+        initial, parent, {500.0F, 500.0F}, KeireEditor::UiBuilderCanvasGesture::ResizeBottomRight);
+    CHECK(resizedBottomRight.Width == doctest::Approx(350.0F));
+    CHECK(resizedBottomRight.Height == doctest::Approx(250.0F));
+
+    const auto transformed = KeireEditor::TransformUiBuilderCanvasPreviewRect({120.0F, 120.0F, 40.0F, 20.0F}, initial,
+                                                                              {150.0F, 130.0F, 300.0F, 160.0F});
+    CHECK(transformed.X == doctest::Approx(180.0F));
+    CHECK(transformed.Y == doctest::Approx(170.0F));
+    CHECK(transformed.Width == doctest::Approx(60.0F));
+    CHECK(transformed.Height == doctest::Approx(40.0F));
+
+    const Keire::RuntimeUiRect undersizedInitial{0.0F, 0.0F, 4.0F, 4.0F};
+    CHECK_NOTHROW((void)KeireEditor::ResolveUiBuilderCanvasGesture(undersizedInitial, {10.0F, 10.0F, 64.0F, 64.0F},
+                                                                   {-20.0F, -20.0F},
+                                                                   KeireEditor::UiBuilderCanvasGesture::ResizeTopLeft));
+}
+
+TEST_CASE("UI Builder empty canvas placement is visible and exact geometry survives relayout")
+{
+    KeireEditor::UiBuilderPreviewSettings defaults;
+    CHECK(defaults.Width == 1920);
+    CHECK(defaults.Height == 1080);
+    CHECK(defaults.ReferenceWidth == 1920);
+    CHECK(defaults.ReferenceHeight == 1080);
+
+    const Keire::RuntimeUiRect compactRoot{0.0F, 0.0F, 64.0F, 64.0F};
+    const auto compactPlacement = KeireEditor::ResolveUiBuilderCanvasPlacement(
+        compactRoot, KeireEditor::UiBuilderCanvasControlDefaultSize(Keire::UiVisualElementType::Label), {32.0F, 32.0F});
+    CHECK(compactPlacement.X == doctest::Approx(8.0F));
+    CHECK(compactPlacement.Y == doctest::Approx(12.0F));
+    CHECK(compactPlacement.Width == doctest::Approx(48.0F));
+    CHECK(compactPlacement.Height == doctest::Approx(40.0F));
+
+    Keire::UiVisualTreeDefinition definition;
+    definition.Name = "EmptyCanvas";
+    definition.Root.StableId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000231");
+    definition.Root.Name = "root";
+    const auto temporary = std::filesystem::temp_directory_path() / "Keire-UiBuilder-Canvas-Placement.keireui";
+    std::error_code error;
+    std::filesystem::remove(temporary, error);
+
+    KeireEditor::UiBuilderDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000232"), definition, 1, temporary, {});
+    const auto label = document.AddCanvasElement(definition.Root.StableId, Keire::UiVisualElementType::Label,
+                                                 compactRoot, {32.0F, 32.0F});
+    CHECK(label);
+    CHECK(document.Definition().Root.Children.size() == 1);
+
+    auto candidate = document.Definition();
+    const Keire::RuntimeUiRect transformed{13.125F, 19.75F, 37.5F, 28.25F};
+    KeireEditor::PersistUiBuilderCanvasGeometry(candidate.Root.Children.front(), compactRoot, transformed);
+    CHECK(document.Edit("Transform UI element exactly", std::move(candidate)));
+    document.Save();
+    document.ReloadFromSource();
+
+    KeireEditor::UiBuilderPreviewSettings settings;
+    settings.Width = 64;
+    settings.Height = 64;
+    settings.ReferenceWidth = 64;
+    settings.ReferenceHeight = 64;
+    settings.ScaleMode = Keire::RuntimeUiScaleMode::ConstantPixels;
+    const auto first = KeireEditor::BuildUiBuilderRetainedPreview(document.Definition(), label, settings);
+    const auto second = KeireEditor::BuildUiBuilderRetainedPreview(document.Definition(), label, settings);
+    REQUIRE(first.SelectedState);
+    REQUIRE(second.SelectedState);
+    CHECK(first.SelectedState->Rect.X == doctest::Approx(transformed.X));
+    CHECK(first.SelectedState->Rect.Y == doctest::Approx(transformed.Y));
+    CHECK(first.SelectedState->Rect.Width == doctest::Approx(transformed.Width));
+    CHECK(first.SelectedState->Rect.Height == doctest::Approx(transformed.Height));
+    CHECK(second.SelectedState->Rect.X == doctest::Approx(first.SelectedState->Rect.X));
+    CHECK(second.SelectedState->Rect.Y == doctest::Approx(first.SelectedState->Rect.Y));
+    CHECK(second.SelectedState->Rect.Width == doctest::Approx(first.SelectedState->Rect.Width));
+    CHECK(second.SelectedState->Rect.Height == doctest::Approx(first.SelectedState->Rect.Height));
+
+    std::filesystem::remove(temporary, error);
 }
 
 TEST_CASE("UI Builder debugger exposes resolved runtime layout and profiler state")
@@ -143,6 +243,41 @@ TEST_CASE("UI Builder source edits are transactional on parse failure")
     CHECK_FALSE(diagnostic.empty());
     CHECK(Keire::UiVisualTreeAsset::Encode(document.Definition()) == before);
     CHECK_FALSE(document.Dirty());
+}
+
+TEST_CASE("UI Builder library controls receive visible finite authoring defaults")
+{
+    auto definition = TestDocument();
+    definition.Root.Children.clear();
+    KeireEditor::UiBuilderDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000219"), definition, 1, "Unused.keireui");
+
+    constexpr std::array types{Keire::UiVisualElementType::VisualElement, Keire::UiVisualElementType::Label,
+                               Keire::UiVisualElementType::Image,         Keire::UiVisualElementType::Button,
+                               Keire::UiVisualElementType::TextField,     Keire::UiVisualElementType::Toggle,
+                               Keire::UiVisualElementType::Slider,        Keire::UiVisualElementType::ProgressBar,
+                               Keire::UiVisualElementType::ScrollView,    Keire::UiVisualElementType::ListView,
+                               Keire::UiVisualElementType::TreeView,      Keire::UiVisualElementType::DropdownField,
+                               Keire::UiVisualElementType::Foldout,       Keire::UiVisualElementType::TabView,
+                               Keire::UiVisualElementType::Toolbar,       Keire::UiVisualElementType::Spacer};
+    std::vector<Keire::AssetId> added;
+    for (const auto type : types)
+        added.push_back(document.AddElement(document.Definition().Root.StableId, type));
+
+    KeireEditor::UiBuilderPreviewSettings settings;
+    settings.Width = 1920;
+    settings.Height = 1080;
+    const auto preview = KeireEditor::BuildUiBuilderRetainedPreview(document.Definition(),
+                                                                    document.Definition().Root.StableId, settings, {});
+    for (const auto id : added)
+    {
+        const auto found = std::ranges::find(preview.Elements, id, &KeireEditor::UiBuilderPreviewElement::StableId);
+        REQUIRE(found != preview.Elements.end());
+        CHECK(std::isfinite(found->State.Rect.X));
+        CHECK(std::isfinite(found->State.Rect.Y));
+        CHECK(found->State.Rect.Width > 0.0F);
+        CHECK(found->State.Rect.Height > 0.0F);
+    }
 }
 
 TEST_CASE("UI Builder preview state clamps devices and keeps navigation transient")

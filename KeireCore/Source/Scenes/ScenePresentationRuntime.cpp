@@ -1332,6 +1332,12 @@ namespace Keire
         m_Impl->CanvasProjection.Draw(*m_Impl->UiTree, ui, offsetX, offsetY, true, false);
     }
 
+    void ScenePresentationRuntime::DrawScreenUi(UiFrame& ui, const Ref<RenderView>& view, const float offsetX,
+                                                const float offsetY) const
+    {
+        m_Impl->CanvasProjection.Draw(*m_Impl->UiTree, ui, offsetX, offsetY, true, false, view);
+    }
+
     void ScenePresentationRuntime::DrawWorldUi(UiFrame& ui, const float offsetX, const float offsetY) const
     {
         m_Impl->CanvasProjection.Draw(*m_Impl->UiTree, ui, offsetX, offsetY, false, true);

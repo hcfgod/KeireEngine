@@ -43,6 +43,8 @@ namespace KeireEditor::Detail
             return controller.CreateAssetBrowserVfxEffect(name);
         case NamedAssetCreationKind::UiDocument:
             return controller.CreateAssetBrowserUiDocument(name);
+        case NamedAssetCreationKind::UiStyleSheet:
+            return controller.CreateAssetBrowserUiStyleSheet(name);
         case NamedAssetCreationKind::MaterialGraph:
             return controller.CreateAssetBrowserMaterialGraph(name, materialShader);
         case NamedAssetCreationKind::ShaderGraph:

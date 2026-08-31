@@ -598,14 +598,14 @@ namespace Keire::RenderBackend
                 throw std::runtime_error("SDL_AcquireGPUCommandBuffer(swapchain) failed: " + LastSdlError());
             if (frame->EditorUi)
             {
-                resolvedEditorUi =
-                    frame->EditorUi->ResolveForRender(EditorUiTextures, frame->DeviceGeneration,
-                                                      [this](const RenderSurfaceToken& token)
-                                                      {
-                                                          const auto surface = ResolveSurface(token);
-                                                          return reinterpret_cast<std::uintptr_t>(
-                                                              surface ? surface->Resources.PublishedColor() : nullptr);
-                                                      });
+                resolvedEditorUi = frame->EditorUi->ResolveForRender(
+                    EditorUiTextures, frame->DeviceGeneration,
+                    [this](const RenderSurfaceToken& token)
+                    {
+                        const auto surface = ResolveSurface(token);
+                        return reinterpret_cast<std::uintptr_t>(
+                            surface ? surface->PublishedTexture.load(std::memory_order_acquire) : nullptr);
+                    });
             }
             RecordSwapchain(commands, resolvedEditorUi ? resolvedEditorUi->Data() : nullptr);
 
@@ -657,7 +657,13 @@ namespace Keire::RenderBackend
                 surface->HasOutput = true;
                 surface->PublishedWorksetSlot.store(frame->FrameSlot, std::memory_order_release);
                 surface->PublishedDepthAvailable.store(surface->SampledDepthValid, std::memory_order_release);
-                surface->PublishedTexture.store(surface->Resources.PublishedColor(), std::memory_order_release);
+                {
+                    // Surface capture holds this mutex while selecting a published epoch and its logical lease. Keep
+                    // publication and fallback release indivisible so a resize can never observe neither output.
+                    std::scoped_lock lock(SurfaceMutex);
+                    surface->PublishedTexture.store(surface->Resources.PublishedColor(), std::memory_order_release);
+                    surface->PresentationFallbackLifetime.store({}, std::memory_order_release);
+                }
             }
             const auto firstPresentation = frame->PresentedAt == std::chrono::steady_clock::time_point{};
             frame->PresentedAt = std::chrono::steady_clock::now();
@@ -884,6 +890,7 @@ namespace Keire::RenderBackend
             {
                 surface->ResourcesAvailable.store(false, std::memory_order_release);
                 surface->PublishedTexture.store(nullptr, std::memory_order_release);
+                surface->PresentationFallbackLifetime.store({}, std::memory_order_release);
                 surface->Owner.reset();
                 surface->Width = 0;
                 surface->Height = 0;

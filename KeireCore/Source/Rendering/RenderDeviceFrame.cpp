@@ -1,23 +1,19 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
+#include "Keire/BuiltinUnlitShaders.h"
+#include "Keire/Log.h"
+#include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/Rendering/ImageBasedLightingInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
 #include "KeireInternal/Rendering/RuntimeUiGeometryInternal.h"
 #include "KeireInternal/UiContextAccessInternal.h"
-
-#include "Keire/BuiltinUnlitShaders.h"
-#include "Keire/Log.h"
-
-#include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/WindowInternal.h"
-
-#include <imgui_impl_sdlgpu3.h>
-#include <stb_easy_font.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <future>
+#include <imgui_impl_sdlgpu3.h>
+#include <stb_easy_font.h>
 #include <stdexcept>
 #include <tuple>
 
@@ -37,7 +33,6 @@ namespace Keire::RenderBackend
         };
 
         static_assert(sizeof(EasyFontVertex) == 16);
-
         using RuntimeUiGeometryBatch = Keire::RenderBackend::RuntimeUiGeometryBatch;
         using RuntimeUiGeometry = Keire::RenderBackend::RuntimeUiGeometry;
 
@@ -229,24 +224,28 @@ namespace Keire::RenderBackend
             }
             const auto presentation =
                 ActiveFrame ? ResolveSurface(ActiveFrame->PresentationSurface) : std::shared_ptr<RenderSurfaceState>{};
-            if (presentation && presentation->Resources.PublishedColor() && presentation->Width != 0 &&
-                presentation->Height != 0 && swapchainWidth != 0 && swapchainHeight != 0)
+            if (presentation && presentation->Width != 0 && presentation->Height != 0 && swapchainWidth != 0 &&
+                swapchainHeight != 0)
             {
                 const bool submitted = std::ranges::any_of(
                     ActiveFrame->Requests, [&presentation](const auto& request)
                     { return request.Surface.Id == presentation->Id && request.Surface.Epoch == presentation->Epoch; });
-                SDL_GPUBlitInfo blit{};
-                blit.source.texture = submitted ? presentation->Resources.WriterColor(ActiveFrame->FrameSlot)
-                                                : presentation->Resources.PublishedColor();
-                blit.source.w = presentation->Width;
-                blit.source.h = presentation->Height;
-                blit.destination.texture = swapchain;
-                blit.destination.w = swapchainWidth;
-                blit.destination.h = swapchainHeight;
-                blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
-                blit.filter = SDL_GPU_FILTER_LINEAR;
-                SDL_BlitGPUTexture(commands, &blit);
-                presentedSurface = true;
+                auto* const source = submitted ? presentation->Resources.WriterColor(ActiveFrame->FrameSlot)
+                                               : presentation->PublishedTexture.load(std::memory_order_acquire);
+                if (source)
+                {
+                    SDL_GPUBlitInfo blit{};
+                    blit.source.texture = source;
+                    blit.source.w = presentation->Width;
+                    blit.source.h = presentation->Height;
+                    blit.destination.texture = swapchain;
+                    blit.destination.w = swapchainWidth;
+                    blit.destination.h = swapchainHeight;
+                    blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+                    blit.filter = SDL_GPU_FILTER_LINEAR;
+                    SDL_BlitGPUTexture(commands, &blit);
+                    presentedSurface = true;
+                }
             }
             std::shared_ptr<Keire::Detail::UiContextAccess> editorUiContextAccess;
             std::unique_lock<std::recursive_mutex> editorUiContextLock;
@@ -757,30 +756,6 @@ namespace Keire::RenderBackend
         return {surface->Id, surface->Epoch, surface->Lifetime};
     }
 
-    SDL_GPUTexture* RenderSharedState::CaptureUiSurfaceTexture(const std::shared_ptr<RenderSurfaceState>& surface)
-    {
-        RequireOwner("CaptureUiSurfaceTexture");
-        if (!FrameActive)
-            throw std::logic_error("Render-surface UI images may only be captured during an active frame.");
-
-        const auto token = CaptureSurfaceToken(surface);
-        auto* texture = surface->PublishedTexture.load(std::memory_order_acquire);
-        if (!texture)
-            return nullptr;
-
-        const auto textureIdentity = reinterpret_cast<std::uintptr_t>(texture);
-        const auto existing =
-            std::ranges::find_if(PendingUiSurfaceTextureBindings,
-                                 [&token, textureIdentity](const CapturedSurfaceTextureBinding& binding)
-                                 {
-                                     return binding.Surface.Id == token.Id && binding.Surface.Epoch == token.Epoch &&
-                                            binding.TextureIdentity == textureIdentity;
-                                 });
-        if (existing == PendingUiSurfaceTextureBindings.end())
-            PendingUiSurfaceTextureBindings.push_back({token, textureIdentity});
-        return texture;
-    }
-
     std::shared_ptr<RenderSurfaceState> RenderSharedState::ResolveSurface(const RenderSurfaceToken& token)
     {
         if (!token)
@@ -823,6 +798,9 @@ namespace Keire::RenderBackend
         replacement->GpuOcclusionDebugMode.store(previous->GpuOcclusionDebugMode.load(std::memory_order_acquire),
                                                  std::memory_order_relaxed);
         replacement->Lifetime = std::make_shared<RenderSurfaceEpochLease>(replacement->Id, replacement->Epoch);
+        // Keep the immediate predecessor even when its first accepted frame is still rendering. Successive resize
+        // epochs form a bounded lease chain and can discover the newest predecessor that has actually published.
+        replacement->PresentationFallbackLifetime.store(previous->Lifetime, std::memory_order_release);
         {
             std::scoped_lock lock(SurfaceMutex);
             const auto found = std::ranges::find_if(Surfaces, [&previous](const RenderSurfaceRegistryEntry& entry)
@@ -860,24 +838,31 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::CollectRetiredSurfaceEpochs() noexcept
     {
-        std::vector<std::shared_ptr<RenderSurfaceState>> retired;
+        for (;;)
         {
-            std::scoped_lock lock(SurfaceMutex);
-            for (auto iterator = Surfaces.begin(); iterator != Surfaces.end();)
+            std::vector<std::shared_ptr<RenderSurfaceState>> retired;
             {
-                if (!iterator->Current && iterator->State && iterator->State->Lifetime.use_count() == 1)
+                std::scoped_lock lock(SurfaceMutex);
+                for (auto iterator = Surfaces.begin(); iterator != Surfaces.end();)
                 {
-                    retired.push_back(std::move(iterator->State));
-                    iterator = Surfaces.erase(iterator);
-                }
-                else
-                {
-                    ++iterator;
+                    if (!iterator->Current && iterator->State && iterator->State->Lifetime.use_count() == 1)
+                    {
+                        retired.push_back(std::move(iterator->State));
+                        iterator = Surfaces.erase(iterator);
+                    }
+                    else
+                    {
+                        ++iterator;
+                    }
                 }
             }
+            if (retired.empty())
+                return;
+            // Retiring a resize epoch releases its predecessor fallback. Repeat so an otherwise-unreferenced chain
+            // is removed in the same render-thread collection boundary instead of surviving until another frame.
+            for (const auto& surface : retired)
+                RetireSurface(*surface);
         }
-        for (const auto& surface : retired)
-            RetireSurface(*surface);
     }
 
     void RenderSharedState::ReleaseResources(SurfaceResources& resources) noexcept

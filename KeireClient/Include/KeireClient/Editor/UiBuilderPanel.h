@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/UiBuilderDocument.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
 
@@ -20,6 +21,8 @@ namespace KeireEditor
         [[nodiscard]] virtual UiBuilderDocument& UiBuilderState() noexcept = 0;
         [[nodiscard]] virtual const Keire::UiThemeDefinition& UiBuilderTheme() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> UiBuilderAssets() const noexcept = 0;
+        [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> UiBuilderAssetRecords() const noexcept = 0;
+        virtual void RevealUiBuilderAsset(Keire::AssetId asset) = 0;
         [[nodiscard]] virtual std::optional<Keire::UiSize> UiBuilderGameViewSize() const noexcept = 0;
         [[nodiscard]] virtual UiBuilderStyleSheetDocument& UiBuilderStyleSheetState() noexcept = 0;
         virtual void ActivateUiBuilderHistory() noexcept = 0;
@@ -52,20 +55,15 @@ namespace KeireEditor
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
-        enum class CanvasGesture : std::uint8_t
-        {
-            None,
-            Move,
-            Resize
-        };
-
         struct CanvasGestureState final
         {
             Keire::AssetId Element;
             Keire::RuntimeUiRect Initial;
             Keire::RuntimeUiRect Draft;
+            Keire::RuntimeUiRect ParentBounds;
             Keire::UiPosition StartPointer;
-            CanvasGesture Gesture = CanvasGesture::None;
+            std::vector<Keire::RuntimeUiElementId> RuntimeElements;
+            UiBuilderCanvasGesture Gesture = UiBuilderCanvasGesture::None;
             bool Changed = false;
         };
 
@@ -83,6 +81,7 @@ namespace KeireEditor
         void DrawSource(Keire::UiFrame& ui);
         void RefreshPreviewSnapshot();
         void RefreshDebuggerSnapshot();
+        [[nodiscard]] Keire::RuntimeUiRect CanvasParentBounds(Keire::AssetId parent) const noexcept;
 
         IUiBuilderController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
@@ -110,7 +109,8 @@ namespace KeireEditor
         std::string m_TextDraft;
         std::string m_CustomTypeDraft;
         std::string m_InlineStyleDraft;
-        std::string m_StyleSheetDraft;
+        AssetPicker m_StyleSheetPicker;
+        Keire::AssetId m_StyleSheetDraft;
         Keire::AssetId m_StyleRuleAsset;
         std::uint64_t m_StyleRuleGeneration = 0;
         std::optional<std::size_t> m_StyleRuleSelection;

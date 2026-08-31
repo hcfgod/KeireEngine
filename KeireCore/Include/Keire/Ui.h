@@ -184,6 +184,19 @@ namespace Keire
         bool RightReleased = false;
     };
 
+    enum class UiCursorShape : std::uint8_t
+    {
+        Default,
+        TextInput,
+        Move,
+        ResizeHorizontal,
+        ResizeVertical,
+        ResizeNorthwestSoutheast,
+        ResizeNortheastSouthwest,
+        Hand,
+        NotAllowed
+    };
+
     struct UiTooltipOptions
     {
         bool Delayed = false;
@@ -638,6 +651,7 @@ namespace Keire
         [[nodiscard]] UiPosition CursorScreenPosition() const;
         [[nodiscard]] bool WindowFocused() const;
         [[nodiscard]] UiPointerState PointerState() const;
+        void SetCursorShape(UiCursorShape shape);
         /// Claims the vertical pointer wheel for the last item while it is hovered or active. Custom zoomable
         /// controls use this to prevent the containing panel from scrolling in the same frame.
         void CapturePointerWheel();

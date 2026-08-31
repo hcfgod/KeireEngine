@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Scenes/ScenePresentationRuntime.h"
+#include "Keire/Ui.h"
 #include "Keire/Ui/UiToolkit.h"
 #include "Keire/Undo.h"
 
@@ -17,6 +18,34 @@
 
 namespace KeireEditor
 {
+    enum class UiBuilderCanvasGesture : std::uint8_t
+    {
+        None,
+        Move,
+        ResizeTop,
+        ResizeRight,
+        ResizeBottom,
+        ResizeLeft,
+        ResizeTopLeft,
+        ResizeTopRight,
+        ResizeBottomRight,
+        ResizeBottomLeft
+    };
+
+    [[nodiscard]] Keire::RuntimeUiRect ResolveUiBuilderCanvasGesture(Keire::RuntimeUiRect initial,
+                                                                     Keire::RuntimeUiRect parentBounds,
+                                                                     Keire::Vector2 delta,
+                                                                     UiBuilderCanvasGesture gesture) noexcept;
+    [[nodiscard]] Keire::RuntimeUiRect ResolveUiBuilderCanvasPlacement(Keire::RuntimeUiRect parentBounds,
+                                                                       Keire::UiSize desiredSize,
+                                                                       Keire::UiPosition center) noexcept;
+    [[nodiscard]] Keire::UiSize UiBuilderCanvasControlDefaultSize(Keire::UiVisualElementType type) noexcept;
+    void PersistUiBuilderCanvasGeometry(Keire::UiVisualElementDefinition& element, Keire::RuntimeUiRect parentBounds,
+                                        Keire::RuntimeUiRect geometry);
+    [[nodiscard]] Keire::RuntimeUiRect TransformUiBuilderCanvasPreviewRect(Keire::RuntimeUiRect rectangle,
+                                                                           Keire::RuntimeUiRect initial,
+                                                                           Keire::RuntimeUiRect draft) noexcept;
+
     enum class UiBuilderResolutionPreset : std::uint8_t
     {
         Hd,
@@ -69,6 +98,7 @@ namespace KeireEditor
     struct UiBuilderPreviewElement final
     {
         Keire::AssetId StableId;
+        Keire::RuntimeUiElementId RuntimeId;
         Keire::RuntimeUiElementState State;
     };
 
@@ -232,6 +262,11 @@ namespace KeireEditor
         [[nodiscard]] bool Edit(std::string_view name, Keire::UiVisualTreeDefinition candidate);
         [[nodiscard]] Keire::AssetId AddElement(Keire::AssetId parent, Keire::UiVisualElementType type);
         [[nodiscard]] Keire::AssetId AddCustomElement(Keire::AssetId parent, std::string customType);
+        [[nodiscard]] Keire::AssetId AddCanvasElement(Keire::AssetId parent, Keire::UiVisualElementType type,
+                                                      Keire::RuntimeUiRect parentBounds, Keire::UiPosition center);
+        [[nodiscard]] Keire::AssetId AddCanvasCustomElement(Keire::AssetId parent, std::string customType,
+                                                            Keire::RuntimeUiRect parentBounds,
+                                                            Keire::UiPosition center);
         [[nodiscard]] bool RemoveElement(Keire::AssetId element);
         [[nodiscard]] bool RemoveSelection();
         [[nodiscard]] bool ReparentElement(Keire::AssetId element, Keire::AssetId parent, std::size_t index);

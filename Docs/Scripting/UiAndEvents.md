@@ -28,13 +28,22 @@ A `.keireui` document opens with these working authoring surfaces:
 - Hierarchy multi-selection, drag-and-drop reparenting, copy/paste with regenerated stable IDs and names, and one
   undoable transaction per accepted edit.
 - A control library containing the built-in controls and the custom controls explicitly registered by the active
-  last-good managed generation.
+  last-good managed generation. Click inserts a visible, sized control beside the current non-container selection or
+  inside the selected container; drag a control onto the canvas to place and size it directly.
 - Inspector editing for names, reusable classes, inline properties, templates, slots, and one-way, two-way, or one-time
   binding declarations.
-- Linked stylesheet management plus selector/declaration add, edit, and remove operations. Style edits have their own
-  undo/redo history and explicit Save/Reload boundary.
+- Linked stylesheet management plus selector/declaration add, edit, and remove operations. Create a **UI Style Sheet**
+  from the Project panel, then link it with the typed searchable asset picker or by dragging the asset onto that picker.
+  Style edits have their own undo/redo history and explicit Save/Reload boundary.
 - A retained-tree preview with resolution presets or a custom size, landscape/portrait orientation, **Match Game
   View**, DPI/reference scaling, safe-area visualization, zoom/pan, rulers, guides, and live pseudo-state toggles.
+
+New documents open on a 1920x1080 authoring canvas when they do not reference Panel Settings. Clicking a library
+control places it near the active parent center; dragging honors the drop point and keeps the complete control inside
+the parent content box. Direct canvas moves and resizes write explicit absolute `left`, `top`, `width`, and `height`
+properties, while editing those layout properties in the Inspector remains the way to return to flex-flow authoring.
+Resize edges and corners use the corresponding `UiCursorShape` through the public `UiFrame::SetCursorShape` boundary;
+projects never need to include or call Dear ImGui cursor APIs.
 
 Preview resolution, DPI, safe-area, rulers, guides, zoom, and pseudo-state choices are authoring aids; they do not
 silently rewrite the referenced `.keireuipanel`. Edit presentation target, scaling, ordering, camera/texture identity,
@@ -237,9 +246,9 @@ UI Toolkit authors project content only; the Kéire Editor shell remains on its 
 not import Unity UXML/USS files, and the clean break deliberately provides no automatic Canvas/Rect Transform
 converter.
 
-The Project panel currently creates `.keireui` documents directly. The focused stylesheet editor opens an existing
-linked `.keirestyle`; Panel Settings and brand-new stylesheet source assets must come from a starter/example asset or
-another valid project-source workflow. Preview controls are not a substitute for persistent Panel Settings authoring.
+The Project panel creates `.keireui` documents and `.keirestyle` style sheets directly. The focused stylesheet editor
+opens an existing linked `.keirestyle`. Panel Settings assets must still come from a starter/example asset or another
+valid project-source workflow; preview controls are not a substitute for persistent Panel Settings authoring.
 
 ## Legacy Scene UI
 

@@ -593,9 +593,9 @@ namespace Keire
                      .BorderWidth = state.Style.BorderWidth});
             if (state.Type == RuntimeUiElementType::Slider)
             {
-                const float normalized = std::clamp((state.Control.Value - state.Control.Minimum) /
-                                                        (state.Control.Maximum - state.Control.Minimum),
-                                                    0.0F, 1.0F);
+                const float range = state.Control.Maximum - state.Control.Minimum;
+                const float normalized =
+                    range > 0.0F ? std::clamp((state.Control.Value - state.Control.Minimum) / range, 0.0F, 1.0F) : 0.0F;
                 const float position = state.Control.Reversed ? 1.0F - normalized : normalized;
                 const float inset = std::min(6.0F * scale, std::min(state.Rect.Width, state.Rect.Height) * 0.25F);
                 RuntimeUiRect fill = state.Rect;

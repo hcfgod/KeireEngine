@@ -327,6 +327,7 @@ namespace Keire::RenderBackend
         SurfaceResources Resources;
         std::atomic<bool> ResourcesAvailable{false};
         std::atomic<SDL_GPUTexture*> PublishedTexture{nullptr};
+        std::atomic<std::shared_ptr<const RenderSurfaceEpochLease>> PresentationFallbackLifetime;
         std::atomic<std::uint32_t> PublishedWorksetSlot{0};
         std::atomic<bool> PublishedDepthAvailable{false};
         std::uint32_t ActiveWorksetSlot = 0;

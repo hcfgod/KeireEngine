@@ -20,6 +20,7 @@ namespace KeireEditor
         PhysicsMaterial,
         VfxEffect,
         UiDocument,
+        UiStyleSheet,
         MaterialGraph,
         ShaderGraph,
         MaterialFunction,

@@ -1167,6 +1167,10 @@ namespace Keire
                 ParseTransitionDurations(style, value);
             else if (name == "font-size")
                 style.FontSize = ParseScalar(value);
+            else if (name == "text-align")
+                style.HorizontalAlignment = ParseAlignment(value);
+            else if (name == "vertical-align")
+                style.VerticalAlignment = ParseAlignment(value);
             else if (name == "overflow")
             {
                 if (value == "visible")
