@@ -4,6 +4,7 @@
 
 #include "Keire/PlatformDirectories.h"
 
+#include <string>
 #include <system_error>
 #include <utility>
 
