@@ -108,7 +108,7 @@ namespace KeireHub
                 {
                     if (ui.Selectable(item.Name + "\n" + item.Category +
                                           (available ? "  ·  Compatible" : "  ·  No compatible editor"),
-                                      templateId == item.Id))
+                                      templateId == item.Id, true))
                     {
                         templateId = item.Id;
                         selectedTemplate = std::ranges::find(snapshot.Templates, templateId, &HubTemplateUiRecord::Id);

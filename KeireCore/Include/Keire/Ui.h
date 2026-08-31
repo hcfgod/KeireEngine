@@ -634,7 +634,7 @@ namespace Keire
                                            std::uint32_t visibleLines = 24);
         [[nodiscard]] bool InputPassword(std::string_view label, std::string& value);
         [[nodiscard]] bool InputTextWithHint(std::string_view label, std::string_view hint, std::string& value);
-        [[nodiscard]] bool Selectable(std::string_view label, bool selected = false);
+        [[nodiscard]] bool Selectable(std::string_view label, bool selected = false, bool keepPopupOpen = false);
         [[nodiscard]] bool MenuItem(std::string_view label, bool selected = false, bool enabled = true);
         [[nodiscard]] bool ColorEdit(std::string_view label, UiColor& color);
         [[nodiscard]] Ref<UiImage> CreateImage(std::uint32_t width, std::uint32_t height,

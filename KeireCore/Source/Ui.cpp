@@ -880,11 +880,12 @@ namespace Keire
         const std::string safeHint(hint);
         return ImGui::InputTextWithHint(safeLabel.c_str(), safeHint.c_str(), &value);
     }
-    bool UiFrame::Selectable(std::string_view label, const bool selected)
+    bool UiFrame::Selectable(std::string_view label, const bool selected, const bool keepPopupOpen)
     {
         m_Impl->RequireActive("Selectable");
         const std::string safeLabel(label);
-        return ImGui::Selectable(safeLabel.c_str(), selected);
+        const auto flags = keepPopupOpen ? ImGuiSelectableFlags_DontClosePopups : ImGuiSelectableFlags_None;
+        return ImGui::Selectable(safeLabel.c_str(), selected, flags);
     }
 
     bool UiFrame::MenuItem(std::string_view label, const bool selected, const bool enabled)

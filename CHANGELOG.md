@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+- Fixed Hub template choices dismissing the Create Project dialog, and preserved explicit popup-closing behavior for
+  menu and combo selectables while allowing modal content to keep its owning popup open.
 - Fixed first-control placement on empty UI Builder documents, including undersized preview bounds, and made direct
   canvas transforms persist exact parent-content-relative absolute geometry with modern resize grips and cursors.
 - Added the typed `UiCursorShape`/`UiFrame::SetCursorShape` UI facade so custom editor controls can request text, move,
