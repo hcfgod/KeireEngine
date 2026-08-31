@@ -312,7 +312,18 @@ namespace Keire::RenderBackend
         if (activeFrame)
             CompleteFrame(activeFrame, true);
         if (firstFailure)
+        {
             CancelQueuedFrames();
+            // A terminal renderer cannot publish a replacement epoch, so its resize-continuity fallback can no
+            // longer become presentable. Sever those edges after ordered packet cancellation so failed frames and
+            // unreachable predecessors release every logical surface owner without changing healthy resize paths.
+            std::scoped_lock lock(SurfaceMutex);
+            for (const auto& entry : Surfaces)
+            {
+                if (entry.State)
+                    entry.State->PresentationFallbackLifetime.store({}, std::memory_order_release);
+            }
+        }
         FramesRetired.notify_all();
         RenderQueueReady.notify_all();
     }

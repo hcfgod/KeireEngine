@@ -48,7 +48,7 @@
       "compatibleEditors": ">=0.1.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 20961,
+      "estimatedSizeBytes": 21203,
       "payloadRoot": "Payloads/Starter3D",
       "payloadFiles": [
         {
