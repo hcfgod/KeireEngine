@@ -51,6 +51,9 @@ namespace KeireEditor
                                 RuntimeUiPointerRoutingState& state) noexcept;
     void CancelRuntimeUiPointer(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
                                 RuntimeUiPointerRoutingState& state) noexcept;
+    void ReconcileRuntimeUiPointerCapture(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                                          RuntimeUiPointerRoutingState& state, bool wasViewportInputActive,
+                                          bool viewportInputActive) noexcept;
     [[nodiscard]] bool RuntimeUiPresentationHitTest(const Keire::Ref<Keire::ScenePresentationRuntime>& presentation,
                                                     float x, float y) noexcept;
     [[nodiscard]] Keire::Ref<Keire::ScenePresentationRuntime>

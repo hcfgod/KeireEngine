@@ -780,6 +780,42 @@ TEST_CASE("UI Builder live drafts replace matching Play documents and revert wit
     assets->Close();
 }
 
+TEST_CASE("UI Toolkit authoring assets publish immediately without waiting for an import catalog")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    specification.Decoders.push_back(Keire::CreateUiStyleSheetAssetDecoder());
+    specification.Decoders.push_back(Keire::CreateUiPanelSettingsAssetDecoder());
+    const auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(specification));
+    const auto visualTree = Keire::AssetId::Generate();
+    const auto styleSheet = Keire::AssetId::Generate();
+    const auto panelSettings = Keire::AssetId::Generate();
+    const auto visualTreeSource = Keire::UiVisualTreeAsset::EncodeSource(TestDocument());
+    constexpr std::string_view styleSheetSource = "@keire-style 1;\nLabel { color: #ffffffff; }\n";
+    const auto panelSettingsSource = Keire::UiPanelSettingsAsset::Encode({});
+    std::string diagnostic;
+
+    REQUIRE(KeireEditor::PublishUiToolkitAuthoringAsset(assets, visualTree, Keire::UiVisualTreeAsset::StaticType(),
+                                                        visualTreeSource, diagnostic));
+    CHECK(diagnostic.empty());
+    REQUIRE(KeireEditor::PublishUiToolkitAuthoringAsset(assets, styleSheet, Keire::UiStyleSheetAsset::StaticType(),
+                                                        AsBytes(styleSheetSource), diagnostic));
+    CHECK(diagnostic.empty());
+    REQUIRE(KeireEditor::PublishUiToolkitAuthoringAsset(
+        assets, panelSettings, Keire::UiPanelSettingsAsset::StaticType(), panelSettingsSource, diagnostic));
+    CHECK(diagnostic.empty());
+    CHECK(assets->Load<Keire::UiVisualTreeAsset>(visualTree).TryGetLoaded());
+    CHECK(assets->Load<Keire::UiStyleSheetAsset>(styleSheet).TryGetLoaded());
+    CHECK(assets->Load<Keire::UiPanelSettingsAsset>(panelSettings).TryGetLoaded());
+
+    CHECK_FALSE(KeireEditor::PublishUiToolkitAuthoringAsset(assets, Keire::AssetId::Generate(),
+                                                            Keire::AssetTypeId(Keire::AssetId::Generate()),
+                                                            visualTreeSource, diagnostic));
+    CHECK(diagnostic.find("not a UI document") != std::string::npos);
+    assets->Close();
+}
+
 TEST_CASE("UI Builder enumerates registered custom controls and authors their stable type names")
 {
     constexpr std::string_view typeName = "EditorTests.FeatureCard";

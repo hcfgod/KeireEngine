@@ -16,6 +16,14 @@ namespace
         Keire::RuntimeUiElementId Button;
     };
 
+    struct PresentationSlider final
+    {
+        Keire::Ref<Keire::SceneRuntimeSession> Session;
+        Keire::Ref<Keire::ScenePresentationRuntime> Presentation;
+        Keire::EntityId Document;
+        Keire::ScenePresentationUiDocumentElement Slider;
+    };
+
     [[nodiscard]] PresentationButton CreatePresentationButton(const Keire::Ref<Keire::AssetSystem>& assets,
                                                               const std::string_view name)
     {
@@ -62,6 +70,49 @@ namespace
         if (!hit)
             throw std::runtime_error("Editor runtime UI routing fixture button did not participate in hit testing.");
         return {std::move(session), std::move(presentation), *hit};
+    }
+
+    [[nodiscard]] PresentationSlider CreatePresentationSlider(const Keire::Ref<Keire::AssetSystem>& assets)
+    {
+        const auto visualTree = Keire::AssetId::Generate();
+        Keire::UiVisualTreeDefinition definition;
+        definition.Name = "Slider capture";
+        definition.Root.StableId = Keire::AssetId::Generate();
+        definition.Root.InlineStyles = {{"width", "200"}, {"height", "100"}};
+        Keire::UiVisualElementDefinition slider;
+        slider.StableId = Keire::AssetId::Generate();
+        slider.Type = Keire::UiVisualElementType::Slider;
+        slider.Name = "volume";
+        slider.Attributes = {{"minimum", "0"}, {"maximum", "100"}, {"value", "0"}};
+        slider.InlineStyles = {{"width", "200"}, {"height", "100"}};
+        definition.Root.Children.push_back(std::move(slider));
+        if (!assets->PublishDevelopmentAsset(visualTree, Keire::CreateRef<Keire::UiVisualTreeAsset>(definition)))
+            throw std::runtime_error("Editor runtime UI routing fixture could not publish its slider visual tree.");
+        const auto panelSettings = Keire::AssetId::Generate();
+        Keire::UiPanelSettingsDefinition panelDefinition;
+        panelDefinition.ScaleMode = Keire::RuntimeUiScaleMode::ConstantPixels;
+        if (!assets->PublishDevelopmentAsset(panelSettings,
+                                             Keire::CreateRef<Keire::UiPanelSettingsAsset>(std::move(panelDefinition))))
+            throw std::runtime_error("Editor runtime UI routing fixture could not publish its slider Panel Settings.");
+
+        auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                    Keire::SceneAsset::EmptyDefinition("Slider capture"));
+        auto documentEntity = scene->CreateEntity("Slider document");
+        const auto document = documentEntity.AddComponent<Keire::UiDocumentComponent>();
+        if (!document)
+            throw std::runtime_error("Editor runtime UI routing fixture could not create its slider document.");
+        document->SetVisualTree(visualTree);
+        document->SetPanelSettings(panelSettings);
+        auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(std::move(scene), assets);
+        session->Play();
+        if (session->State() != Keire::ScenePlayState::Playing || !session->Presentation())
+            throw std::runtime_error("Editor runtime UI routing fixture could not enter Play Mode.");
+        auto presentation = session->Presentation();
+        presentation->Synchronize(session->RuntimeScene(), 200.0F, 100.0F, true);
+        const auto runtimeSlider = presentation->FindUiDocumentElement(documentEntity.Id(), "volume");
+        if (!runtimeSlider)
+            throw std::runtime_error("Editor runtime UI routing fixture could not resolve its slider.");
+        return {std::move(session), std::move(presentation), documentEntity.Id(), *runtimeSlider};
     }
 } // namespace
 
@@ -231,4 +282,35 @@ TEST_CASE("Game runtime UI routes edit-mode pointers without granting keyboard o
     const auto missingPresentation = KeireEditor::ResolveRuntimeGameUiRouting(true, false, true);
     CHECK_FALSE(missingPresentation.Pointer);
     CHECK_FALSE(missingPresentation.Keyboard);
+}
+
+TEST_CASE("Game runtime UI retains slider capture while viewport input ownership remains inactive")
+{
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    assetSpecification.Decoders.push_back(Keire::CreateUiPanelSettingsAssetDecoder());
+    const auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const auto fixture = CreatePresentationSlider(assets);
+    REQUIRE(fixture.Presentation->PointerButton(20.0F, 50.0F, Keire::RuntimeUiPointerButton::Primary, true));
+
+    KeireEditor::RuntimeUiPointerRoutingState state;
+    state.PointerCaptures[0] = fixture.Presentation;
+    KeireEditor::ReconcileRuntimeUiPointerCapture({}, state, false, false);
+    REQUIRE(state.PointerCaptures[0] == fixture.Presentation);
+    fixture.Presentation->PointerMove(180.0F, 50.0F);
+    CHECK(fixture.Presentation->ReadUiDocumentElementValue(fixture.Document, fixture.Slider.DocumentGeneration,
+                                                           fixture.Slider.Element) == doctest::Approx(90.0F));
+
+    KeireEditor::ReconcileRuntimeUiPointerCapture({}, state, false, true);
+    REQUIRE(state.PointerCaptures[0] == fixture.Presentation);
+    KeireEditor::ReconcileRuntimeUiPointerCapture({}, state, true, false);
+    CHECK_FALSE(state.PointerCaptures[0]);
+    fixture.Presentation->PointerMove(40.0F, 50.0F);
+    CHECK(fixture.Presentation->ReadUiDocumentElementValue(fixture.Document, fixture.Slider.DocumentGeneration,
+                                                           fixture.Slider.Element) == doctest::Approx(90.0F));
+
+    fixture.Session->Stop();
+    fixture.Session->EditScene()->Close();
+    assets->Close();
 }

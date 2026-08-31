@@ -3,12 +3,19 @@
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Ui/UiToolkit.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 
 namespace KeireEditor
 {
+    [[nodiscard]] bool PublishUiToolkitAuthoringAsset(const Keire::Ref<Keire::AssetSystem>& assets,
+                                                      Keire::AssetId asset, Keire::AssetTypeId type,
+                                                      std::span<const std::byte> source,
+                                                      std::string& diagnostic) noexcept;
+
     class UiBuilderLiveDraftSession final
     {
       public:

@@ -81,6 +81,14 @@ namespace KeireEditor
         CancelRuntimeUiPointer(presentations, state);
     }
 
+    void ReconcileRuntimeUiPointerCapture(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                                          RuntimeUiPointerRoutingState& state, const bool wasViewportInputActive,
+                                          const bool viewportInputActive) noexcept
+    {
+        if (wasViewportInputActive && !viewportInputActive)
+            CancelRuntimeUiPointer(world, state);
+    }
+
     void RouteRuntimeUiPointer(Keire::UiFrame& ui,
                                const std::span<const Keire::Ref<Keire::ScenePresentationRuntime>> presentations,
                                const Keire::UiItemRect& viewport, RuntimeUiPointerRoutingState& state)

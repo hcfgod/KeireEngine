@@ -1,10 +1,51 @@
 #include "KeireClient/Editor/UiBuilderLiveDraft.h"
 
 #include <exception>
+#include <stdexcept>
 #include <utility>
 
 namespace KeireEditor
 {
+    bool PublishUiToolkitAuthoringAsset(const Keire::Ref<Keire::AssetSystem>& assets, const Keire::AssetId asset,
+                                        const Keire::AssetTypeId type, const std::span<const std::byte> source,
+                                        std::string& diagnostic) noexcept
+    {
+        try
+        {
+            if (!assets || !assets->IsOpen() || !asset)
+                throw std::invalid_argument("UI authoring publication requires an open asset system and asset ID.");
+            Keire::Ref<Keire::Asset> value;
+            if (type == Keire::UiVisualTreeAsset::StaticType())
+            {
+                value = Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(source));
+            }
+            else if (type == Keire::UiStyleSheetAsset::StaticType())
+            {
+                value = Keire::CreateRef<Keire::UiStyleSheetAsset>(Keire::UiStyleSheetAsset::ParseSource(source));
+            }
+            else if (type == Keire::UiPanelSettingsAsset::StaticType())
+                value = Keire::UiPanelSettingsAsset::Decode(source);
+            else
+                throw std::invalid_argument("The asset is not a UI document, style sheet, or Panel Settings asset.");
+            if (!assets->PublishDevelopmentAsset(asset, std::move(value)))
+            {
+                diagnostic = "The current UI asset load must finish before its authoring revision can be published.";
+                return false;
+            }
+            diagnostic.clear();
+            return true;
+        }
+        catch (const std::exception& error)
+        {
+            diagnostic = error.what();
+        }
+        catch (...)
+        {
+            diagnostic = "UI authoring publication failed with an unknown error.";
+        }
+        return false;
+    }
+
     UiBuilderLiveDraftSession::~UiBuilderLiveDraftSession() { Close(); }
 
     void UiBuilderLiveDraftSession::Synchronize(Keire::Ref<Keire::AssetSystem> assets, const bool playActive,

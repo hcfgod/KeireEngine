@@ -576,6 +576,7 @@ namespace KeireEditor
             m_CanvasGesture.Draft = ResolveUiBuilderCanvasGesture(m_CanvasGesture.Initial, m_CanvasGesture.ParentBounds,
                                                                   {deltaX, deltaY}, m_CanvasGesture.Gesture);
         }
+        bool finishCanvasGestureAfterPresentation = false;
         if (m_CanvasGesture.Gesture != UiBuilderCanvasGesture::None && pointer.LeftReleased)
         {
             if (m_CanvasGesture.Changed)
@@ -598,7 +599,9 @@ namespace KeireEditor
                     m_Controller.ReportUiBuilderError(m_Message);
                 }
             }
-            m_CanvasGesture = {};
+            // The retained preview was built before input handling this frame. Keep presenting the committed draft
+            // through the release frame so the stale snapshot cannot flash at the element's previous position.
+            finishCanvasGestureAfterPresentation = true;
         }
 
         [[maybe_unused]] auto viewportClip = ui.PushClipRect(viewport);
@@ -786,5 +789,7 @@ namespace KeireEditor
                 ui.DrawFilledRectangle(inset, fill, 1.5F);
             }
         }
+        if (finishCanvasGestureAfterPresentation)
+            m_CanvasGesture = {};
     }
 } // namespace KeireEditor

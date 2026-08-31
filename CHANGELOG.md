@@ -61,6 +61,10 @@ versions.
 
 ### Fixed
 
+- UI Builder move and resize gestures now retain their committed draft through the pointer-release frame, eliminating
+  the one-frame snapback to stale preview geometry. Game View sliders preserve pointer capture while dragging in Edit
+  or Play Mode, and newly assigned UI documents, styles, templates, and Panel Settings publish directly to the
+  development asset system instead of waiting behind a background full-project import.
 - Packaged-project IDE workspaces now target .NET 10/C# 14 when referencing the packaged `Keire.Managed` assembly,
   eliminating stale .NET 8 reference conflicts and misleading delegate diagnostics. Source checkouts retain their
   dedicated .NET 8 design-time facade.

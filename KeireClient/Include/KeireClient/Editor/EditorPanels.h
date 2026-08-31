@@ -133,6 +133,7 @@ namespace KeireEditor
         virtual void RecordInspectorUndo(std::string_view name = "Edit Scene", std::string mergeKey = {}) = 0;
         virtual void ApplyInspectorTransformEdit(InspectorTransformEdit edit) = 0;
         virtual void NotifyInspectorMaterialAssigned(Keire::AssetId) {}
+        virtual void NotifyInspectorUiToolkitAssetAssigned(Keire::AssetId) noexcept {}
         virtual void AddScriptToEntity(Keire::EntityId, Keire::AssetId)
         {
             throw std::logic_error("This inspector does not support managed script attachment.");

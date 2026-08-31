@@ -18,6 +18,7 @@
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/ColliderComponent.h"
+#include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/ECS/Components/VfxEmitterComponent.h"
 #include "Keire/Rendering/ShaderGraph.h"
 
@@ -1346,11 +1347,20 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     ui.SetTooltip(property.Tooltip, {.Delayed = true});
                                 if (changed)
                                 {
+                                    const auto assignedUiToolkitAsset =
+                                        registration->Type == Keire::UiDocumentComponent::StaticType() &&
+                                                (property.Key == "visualTree" || property.Key == "panelSettings")
+                                            ? std::get_if<Keire::AssetId>(&candidate)
+                                            : nullptr;
+                                    const auto uiToolkitAsset =
+                                        assignedUiToolkitAsset ? *assignedUiToolkitAsset : Keire::AssetId{};
                                     m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
                                                                      registration->Type.ToString() + "." +
                                                                          property.Key + "." + entity.Id().ToString() +
                                                                          "." + std::to_string(m_EditSerial));
                                     setComponentProperty(registration->Type, property.Key, std::move(candidate));
+                                    if (uiToolkitAsset)
+                                        m_Controller.NotifyInspectorUiToolkitAssetAssigned(uiToolkitAsset);
                                     if (audioBusFallback)
                                     {
                                         setComponentProperty(registration->Type, "bus", std::move(*audioBusFallback));

@@ -343,6 +343,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void RecordInspectorUndo(std::string_view name, std::string mergeKey = {}) override;
     void ApplyInspectorTransformEdit(KeireEditor::InspectorTransformEdit edit) override;
     void NotifyInspectorMaterialAssigned(Keire::AssetId material) override;
+    void NotifyInspectorUiToolkitAssetAssigned(Keire::AssetId asset) noexcept override;
     void AddScriptToEntity(Keire::EntityId entity, Keire::AssetId script) override;
     void CommitInspectorMaterial() override;
     void OpenInspectorInputActions(Keire::AssetId asset) override;

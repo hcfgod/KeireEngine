@@ -1406,7 +1406,6 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         }
         else
         {
-            KeireEditor::CancelRuntimeUiPointer(m_PlayRuntimeWorld, m_GameRuntimeUiPointer);
             if (!m_GameEditPresentation)
             {
                 if (const auto assets = SceneViewportAssetSystem())

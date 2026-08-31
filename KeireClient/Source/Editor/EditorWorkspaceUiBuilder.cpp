@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -162,6 +164,54 @@ void EditorWorkspaceLayer::OpenAssetBrowserUiStyleSheet(const Keire::AssetId ass
 
 void EditorWorkspaceLayer::OpenInspectorUiDocument(const Keire::AssetId asset) { OpenUiBuilder(asset); }
 
+void EditorWorkspaceLayer::NotifyInspectorUiToolkitAssetAssigned(const Keire::AssetId asset) noexcept
+{
+    try
+    {
+        const auto assets = Owner().Assets();
+        if (!asset || !assets || !assets->IsOpen() || !m_AssetDatabase)
+            return;
+        const auto& specification = m_AssetDatabase->Specification();
+        std::set<Keire::AssetId> visited;
+        std::string diagnostic;
+        std::function<void(Keire::AssetId)> publish = [&](const Keire::AssetId current)
+        {
+            if (!current || !visited.insert(current).second)
+                return;
+            const auto record = m_AssetDatabase->Find(current);
+            if (!record)
+                return;
+            const bool supported = record->Type == Keire::UiVisualTreeAsset::StaticType() ||
+                                   record->Type == Keire::UiStyleSheetAsset::StaticType() ||
+                                   record->Type == Keire::UiPanelSettingsAsset::StaticType();
+            if (!supported)
+                return;
+            for (const auto dependency : record->Dependencies)
+                publish(dependency);
+            const auto source = specification.ProjectRoot / specification.SourceDirectory / record->RelativePath;
+            const auto bytes = KeireEditor::Detail::ReadBytes(source, "UI authoring asset");
+            if (!KeireEditor::PublishUiToolkitAuthoringAsset(assets, current, record->Type, bytes, diagnostic))
+                throw std::runtime_error(diagnostic);
+        };
+        publish(asset);
+    }
+    catch (const std::exception& error)
+    {
+        try
+        {
+            AddConsoleMessage("UI Toolkit",
+                              std::string("Immediate Game View publication was deferred: ") + error.what(),
+                              m_Theme.Warning, Keire::LogLevel::Warn);
+        }
+        catch (...)
+        {
+        }
+    }
+    catch (...)
+    {
+    }
+}
+
 void EditorWorkspaceLayer::OpenSceneViewportUiDocument(const Keire::AssetId asset)
 {
     try
@@ -201,6 +251,7 @@ void EditorWorkspaceLayer::OpenUiBuilder(const Keire::AssetId asset)
     if (++m_UiBuilderDocumentRevision == 0)
         ++m_UiBuilderDocumentRevision;
     m_UiBuilderDocument->Open(asset, std::move(definition), m_UiBuilderDocumentRevision, source, std::move(context));
+    NotifyInspectorUiToolkitAssetAssigned(asset);
     m_SelectedAsset = asset;
     m_ActiveUndoContext = m_UiBuilderDocument->UndoContext();
     m_UiBuilderPanel->ResetTransientState();
@@ -282,6 +333,7 @@ void EditorWorkspaceLayer::OpenUiBuilderStyleSheet(const Keire::AssetId asset)
         ++m_UiBuilderStyleSheetRevision;
     m_UiBuilderStyleSheetDocument->Open(asset, std::move(definition), m_UiBuilderStyleSheetRevision, source,
                                         std::move(context));
+    NotifyInspectorUiToolkitAssetAssigned(asset);
     m_ActiveUndoContext = m_UiBuilderStyleSheetDocument->UndoContext();
     m_UiBuilderPanel->SetMessage("Editing " + record->RelativePath.generic_string() + ".");
 }
