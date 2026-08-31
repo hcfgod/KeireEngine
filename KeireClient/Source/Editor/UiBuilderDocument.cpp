@@ -373,6 +373,51 @@ namespace KeireEditor
         }
     } // namespace
 
+    UiBuilderCanvasGesture HitTestUiBuilderCanvasGesture(const Keire::UiItemRect rectangle,
+                                                         const Keire::UiPosition position, const float radius) noexcept
+    {
+        if (!std::isfinite(radius) || radius <= 0.0F || !std::isfinite(rectangle.Minimum.X) ||
+            !std::isfinite(rectangle.Minimum.Y) || !std::isfinite(rectangle.Maximum.X) ||
+            !std::isfinite(rectangle.Maximum.Y) || rectangle.Maximum.X <= rectangle.Minimum.X ||
+            rectangle.Maximum.Y <= rectangle.Minimum.Y)
+        {
+            return UiBuilderCanvasGesture::None;
+        }
+
+        const float width = rectangle.Maximum.X - rectangle.Minimum.X;
+        const float height = rectangle.Maximum.Y - rectangle.Minimum.Y;
+        const float centerX = (rectangle.Minimum.X + rectangle.Maximum.X) * 0.5F;
+        const float centerY = (rectangle.Minimum.Y + rectangle.Maximum.Y) * 0.5F;
+        const float cornerRadius = std::min(radius, std::max(1.0F, std::min(width, height) * 0.5F - 2.0F));
+        const float horizontalNormalRadius = std::min({radius, 5.0F, std::max(1.0F, width * 0.5F - 2.0F)});
+        const float verticalNormalRadius = std::min({radius, 5.0F, std::max(1.0F, height * 0.5F - 2.0F)});
+        const float tangentRadius = std::min(radius, 9.0F);
+        const auto near =
+            [&](const Keire::UiPosition center, const float horizontalRadius, const float verticalRadius) noexcept
+        {
+            return std::abs(position.X - center.X) <= horizontalRadius &&
+                   std::abs(position.Y - center.Y) <= verticalRadius;
+        };
+
+        if (near(rectangle.Minimum, cornerRadius, cornerRadius))
+            return UiBuilderCanvasGesture::ResizeTopLeft;
+        if (near({rectangle.Maximum.X, rectangle.Minimum.Y}, cornerRadius, cornerRadius))
+            return UiBuilderCanvasGesture::ResizeTopRight;
+        if (near(rectangle.Maximum, cornerRadius, cornerRadius))
+            return UiBuilderCanvasGesture::ResizeBottomRight;
+        if (near({rectangle.Minimum.X, rectangle.Maximum.Y}, cornerRadius, cornerRadius))
+            return UiBuilderCanvasGesture::ResizeBottomLeft;
+        if (near({centerX, rectangle.Minimum.Y}, tangentRadius, verticalNormalRadius))
+            return UiBuilderCanvasGesture::ResizeTop;
+        if (near({rectangle.Maximum.X, centerY}, horizontalNormalRadius, tangentRadius))
+            return UiBuilderCanvasGesture::ResizeRight;
+        if (near({centerX, rectangle.Maximum.Y}, tangentRadius, verticalNormalRadius))
+            return UiBuilderCanvasGesture::ResizeBottom;
+        if (near({rectangle.Minimum.X, centerY}, horizontalNormalRadius, tangentRadius))
+            return UiBuilderCanvasGesture::ResizeLeft;
+        return rectangle.Contains(position) ? UiBuilderCanvasGesture::Move : UiBuilderCanvasGesture::None;
+    }
+
     Keire::RuntimeUiRect ResolveUiBuilderCanvasGesture(const Keire::RuntimeUiRect initial,
                                                        const Keire::RuntimeUiRect parentBounds,
                                                        const Keire::Vector2 delta,

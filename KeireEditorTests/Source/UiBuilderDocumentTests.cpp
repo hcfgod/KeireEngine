@@ -91,6 +91,25 @@ TEST_CASE("UI Builder canvas gestures stay parent bounded and transform live pre
                                                                    KeireEditor::UiBuilderCanvasGesture::ResizeTopLeft));
 }
 
+TEST_CASE("UI Builder canvas hit testing preserves a move target inside compact controls")
+{
+    const Keire::UiItemRect label{{100.0F, 100.0F}, {168.0F, 114.0F}};
+    CHECK(KeireEditor::HitTestUiBuilderCanvasGesture(label, {134.0F, 107.0F}) ==
+          KeireEditor::UiBuilderCanvasGesture::Move);
+    CHECK(KeireEditor::HitTestUiBuilderCanvasGesture(label, {134.0F, 100.0F}) ==
+          KeireEditor::UiBuilderCanvasGesture::ResizeTop);
+    CHECK(KeireEditor::HitTestUiBuilderCanvasGesture(label, {168.0F, 107.0F}) ==
+          KeireEditor::UiBuilderCanvasGesture::ResizeRight);
+    CHECK(KeireEditor::HitTestUiBuilderCanvasGesture(label, {100.0F, 100.0F}) ==
+          KeireEditor::UiBuilderCanvasGesture::ResizeTopLeft);
+    CHECK(KeireEditor::HitTestUiBuilderCanvasGesture(label, {80.0F, 80.0F}) ==
+          KeireEditor::UiBuilderCanvasGesture::None);
+
+    const Keire::UiItemRect compact{{20.0F, 20.0F}, {28.0F, 28.0F}};
+    CHECK(KeireEditor::HitTestUiBuilderCanvasGesture(compact, {24.0F, 24.0F}) ==
+          KeireEditor::UiBuilderCanvasGesture::Move);
+}
+
 TEST_CASE("UI Builder empty canvas placement is visible and exact geometry survives relayout")
 {
     KeireEditor::UiBuilderPreviewSettings defaults;

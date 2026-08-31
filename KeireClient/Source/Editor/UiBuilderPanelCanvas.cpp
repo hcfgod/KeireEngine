@@ -109,37 +109,6 @@ namespace KeireEditor
             return (normalized <= 2.0F ? 2.0F : normalized <= 5.0F ? 5.0F : 10.0F) * magnitude;
         }
 
-        [[nodiscard]] UiBuilderCanvasGesture CanvasGestureAt(const Keire::UiItemRect rectangle,
-                                                             const Keire::UiPosition position,
-                                                             const float radius) noexcept
-        {
-            const bool horizontal =
-                position.X >= rectangle.Minimum.X - radius && position.X <= rectangle.Maximum.X + radius;
-            const bool vertical =
-                position.Y >= rectangle.Minimum.Y - radius && position.Y <= rectangle.Maximum.Y + radius;
-            const bool left = horizontal && std::abs(position.X - rectangle.Minimum.X) <= radius;
-            const bool right = horizontal && std::abs(position.X - rectangle.Maximum.X) <= radius;
-            const bool top = vertical && std::abs(position.Y - rectangle.Minimum.Y) <= radius;
-            const bool bottom = vertical && std::abs(position.Y - rectangle.Maximum.Y) <= radius;
-            if (left && top)
-                return UiBuilderCanvasGesture::ResizeTopLeft;
-            if (right && top)
-                return UiBuilderCanvasGesture::ResizeTopRight;
-            if (right && bottom)
-                return UiBuilderCanvasGesture::ResizeBottomRight;
-            if (left && bottom)
-                return UiBuilderCanvasGesture::ResizeBottomLeft;
-            if (top && horizontal)
-                return UiBuilderCanvasGesture::ResizeTop;
-            if (right && vertical)
-                return UiBuilderCanvasGesture::ResizeRight;
-            if (bottom && horizontal)
-                return UiBuilderCanvasGesture::ResizeBottom;
-            if (left && vertical)
-                return UiBuilderCanvasGesture::ResizeLeft;
-            return UiBuilderCanvasGesture::None;
-        }
-
         [[nodiscard]] Keire::UiCursorShape CanvasCursorShape(const UiBuilderCanvasGesture gesture) noexcept
         {
             switch (gesture)
@@ -514,7 +483,7 @@ namespace KeireEditor
                                                            ? m_PreviewSnapshot->SelectedState->Rect
                                                            : m_CanvasGesture.Draft,
                                                        canvasOrigin, rasterScale);
-            hoveredSelectionGesture = CanvasGestureAt(selected, pointer.Position, 9.0F);
+            hoveredSelectionGesture = HitTestUiBuilderCanvasGesture(selected, pointer.Position);
         }
         auto cursorGesture =
             m_CanvasGesture.Gesture != UiBuilderCanvasGesture::None ? m_CanvasGesture.Gesture : hoveredSelectionGesture;
@@ -561,7 +530,7 @@ namespace KeireEditor
             {
                 const auto selection =
                     TransformPreviewRect(m_PreviewSnapshot->SelectedState->Rect, canvasOrigin, rasterScale);
-                gesture = CanvasGestureAt(selection, pointer.Position, HandleRadius);
+                gesture = HitTestUiBuilderCanvasGesture(selection, pointer.Position, HandleRadius);
                 if (gesture != UiBuilderCanvasGesture::None)
                 {
                     const auto selected = std::ranges::find(m_PreviewSnapshot->Elements, document.Selection(),
@@ -587,7 +556,7 @@ namespace KeireEditor
                     document.Select(element->StableId);
                     m_DraftElement = {};
                     const auto selection = TransformPreviewRect(element->State.Rect, canvasOrigin, rasterScale);
-                    gesture = CanvasGestureAt(selection, pointer.Position, HandleRadius);
+                    gesture = HitTestUiBuilderCanvasGesture(selection, pointer.Position, HandleRadius);
                     if (gesture == UiBuilderCanvasGesture::None)
                         gesture = UiBuilderCanvasGesture::Move;
                     break;

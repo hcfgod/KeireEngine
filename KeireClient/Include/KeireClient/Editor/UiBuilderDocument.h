@@ -36,6 +36,9 @@ namespace KeireEditor
                                                                      Keire::RuntimeUiRect parentBounds,
                                                                      Keire::Vector2 delta,
                                                                      UiBuilderCanvasGesture gesture) noexcept;
+    [[nodiscard]] UiBuilderCanvasGesture HitTestUiBuilderCanvasGesture(Keire::UiItemRect rectangle,
+                                                                       Keire::UiPosition position,
+                                                                       float radius = 9.0F) noexcept;
     [[nodiscard]] Keire::RuntimeUiRect ResolveUiBuilderCanvasPlacement(Keire::RuntimeUiRect parentBounds,
                                                                        Keire::UiSize desiredSize,
                                                                        Keire::UiPosition center) noexcept;
