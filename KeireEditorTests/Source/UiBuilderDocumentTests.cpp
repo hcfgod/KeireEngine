@@ -2,6 +2,7 @@
 #include "KeireClient/Editor/UiBuilderDocument.h"
 #include "KeireClient/Editor/UiBuilderLiveDraft.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
+#include "KeireClient/Editor/UiMarkupSourceEditor.h"
 #include "KeireClient/Editor/UiStyleSourceEditor.h"
 #include "KeireClient/Editor/UiStyleTokenRefactor.h"
 
@@ -266,6 +267,92 @@ TEST_CASE("UI Builder source edits are transactional on parse failure")
     CHECK_FALSE(document.Dirty());
 }
 
+TEST_CASE("UI Builder accepts unchanged source and keeps source changes undoable")
+{
+    const auto definition = TestDocument();
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "UI Source"});
+    KeireEditor::UiBuilderDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000212"), definition, 1, "Unused.keireui", undo);
+
+    auto source = document.SourcePreview();
+    std::string diagnostic;
+    CHECK(document.ApplySource(std::as_bytes(std::span(source)), diagnostic));
+    CHECK(diagnostic.empty());
+    CHECK(undo->UndoCount() == 0U);
+
+    const auto ready = source.find("Ready");
+    REQUIRE(ready != std::string::npos);
+    source.replace(ready, 5U, "Playing");
+    REQUIRE(document.ApplySource(std::as_bytes(std::span(source)), diagnostic));
+    CHECK(document.Find(definition.Root.Children.front().StableId)->Attributes.front().Value == "Playing");
+    CHECK(undo->UndoCount() == 1U);
+    REQUIRE(document.Undo());
+    CHECK(document.Find(definition.Root.Children.front().StableId)->Attributes.front().Value == "Ready");
+    REQUIRE(document.Redo());
+    CHECK(document.Find(definition.Root.Children.front().StableId)->Attributes.front().Value == "Playing");
+
+    undoService->Close();
+}
+
+TEST_CASE("UI Builder continuous property edits merge while preserving the latest redo state")
+{
+    const auto definition = TestDocument();
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "UI Inspector"});
+    KeireEditor::UiBuilderDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000213"), definition, 1, "Unused.keireui", undo);
+
+    auto first = document.Definition();
+    first.Root.Children.front().Attributes.front().Value = "P";
+    REQUIRE(document.Edit("Edit UI element", std::move(first), "title:text"));
+    auto second = document.Definition();
+    second.Root.Children.front().Attributes.front().Value = "Play";
+    REQUIRE(document.Edit("Edit UI element", std::move(second), "title:text"));
+    CHECK(undo->UndoCount() == 1U);
+    REQUIRE(document.Undo());
+    CHECK(document.Definition().Root.Children.front().Attributes.front().Value == "Ready");
+    REQUIRE(document.Redo());
+    CHECK(document.Definition().Root.Children.front().Attributes.front().Value == "Play");
+
+    undoService->Close();
+}
+
+TEST_CASE("UI Builder source revert is recoverable through undo")
+{
+    const auto root = std::filesystem::temp_directory_path() / "Keire-UiBuilder-Revert-Test";
+    std::error_code error;
+    std::filesystem::remove_all(root, error);
+    std::filesystem::create_directories(root, error);
+    REQUIRE_FALSE(error);
+    const auto source = root / "Hud.keireui";
+    const auto original = TestDocument();
+    const auto sourceBytes = Keire::UiVisualTreeAsset::EncodeSource(original);
+    Keire::Detail::WriteTextFileAtomically(source,
+                                           {reinterpret_cast<const char*>(sourceBytes.data()), sourceBytes.size()});
+
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "UI Revert"});
+    KeireEditor::UiBuilderDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000214"), original, 1, source, undo);
+    auto local = document.Definition();
+    local.Root.Children.front().Attributes.front().Value = "Unsaved local text";
+    REQUIRE(document.Edit("Edit UI element", std::move(local)));
+
+    document.ReloadFromSource(true);
+    CHECK(document.Definition().Root.Children.front().Attributes.front().Value == "Ready");
+    CHECK_FALSE(document.Dirty());
+    REQUIRE(document.Undo());
+    CHECK(document.Definition().Root.Children.front().Attributes.front().Value == "Unsaved local text");
+    CHECK(document.Dirty());
+    REQUIRE(document.Redo());
+    CHECK(document.Definition().Root.Children.front().Attributes.front().Value == "Ready");
+    CHECK_FALSE(document.Dirty());
+
+    undoService->Close();
+    std::filesystem::remove_all(root, error);
+}
+
 TEST_CASE("UI Builder library controls receive visible finite authoring defaults")
 {
     auto definition = TestDocument();
@@ -299,6 +386,14 @@ TEST_CASE("UI Builder library controls receive visible finite authoring defaults
         CHECK(found->State.Rect.Width > 0.0F);
         CHECK(found->State.Rect.Height > 0.0F);
     }
+    const auto* button = document.Find(added[3]);
+    REQUIRE(button);
+    CHECK(std::ranges::none_of(button->InlineStyles,
+                               [](const auto& property)
+                               {
+                                   return property.Name == "background-color" || property.Name == "color" ||
+                                          property.Name == "border-color";
+                               }));
 }
 
 TEST_CASE("UI Builder preview state clamps devices and keeps navigation transient")
@@ -581,7 +676,7 @@ TEST_CASE("UI Builder multi-selection clipboard and reparenting are atomic and r
     document.ReloadFromSource();
     CHECK(document.ParentOf(pasted[0]) == panel.StableId);
     CHECK(document.ParentOf(pasted[1]) == panel.StableId);
-    CHECK_FALSE(undo->CanUndo());
+    CHECK(undo->CanUndo());
 
     undoService->Close();
     std::filesystem::remove_all(root, error);
@@ -1029,6 +1124,37 @@ opac
     CHECK(editor.Source().find("var(--accent)") != std::string::npos);
     REQUIRE(editor.Format());
     CHECK(editor.Source().find("  color: var(--accent);") != std::string::npos);
+}
+
+TEST_CASE("UI markup source editor provides syntax tokens documentation and completion")
+{
+    KeireEditor::UiMarkupSourceEditor editor;
+    editor.SetSource(R"xml(<?xml version="1.0"?>
+<!-- Main call to action. -->
+<But cl)xml");
+    CHECK(editor.LineCount() == 3U);
+    CHECK(std::ranges::any_of(editor.Tokens(), [](const auto& token)
+                              { return token.Kind == KeireEditor::UiMarkupSourceTokenKind::Declaration; }));
+    CHECK(std::ranges::any_of(editor.Tokens(), [](const auto& token)
+                              { return token.Kind == KeireEditor::UiMarkupSourceTokenKind::Comment; }));
+
+    const auto elementOffset = editor.Source().find("But") + 3U;
+    const auto elementCompletions = editor.Completions(elementOffset);
+    const auto button = std::ranges::find(elementCompletions, "Button", &KeireEditor::UiMarkupSourceCompletion::Label);
+    REQUIRE(button != elementCompletions.end());
+    REQUIRE(editor.ApplyCompletion(elementOffset, *button));
+    CHECK(editor.Source().find("<Button cl") != std::string::npos);
+
+    const auto attributeOffset = editor.Source().find("cl") + 2U;
+    const auto attributeCompletions = editor.Completions(attributeOffset);
+    const auto classes =
+        std::ranges::find(attributeCompletions, "class", &KeireEditor::UiMarkupSourceCompletion::Label);
+    REQUIRE(classes != attributeCompletions.end());
+    REQUIRE(editor.ApplyCompletion(attributeOffset, *classes));
+    CHECK(editor.Source().find("class=\"\"") != std::string::npos);
+    const auto classOffset = editor.Source().find("class");
+    REQUIRE(editor.HoverDocumentation(classOffset));
+    CHECK(editor.HoverDocumentation(classOffset)->find("style classes") != std::string::npos);
 }
 
 TEST_CASE("UI token refactors preview every source and reject stale previews before applying")

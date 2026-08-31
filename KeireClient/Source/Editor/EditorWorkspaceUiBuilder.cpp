@@ -140,7 +140,7 @@ bool EditorWorkspaceLayer::CreateAssetBrowserUiStyleSheet(const std::string_view
   --content: #f5f7ffff;
 }
 
-.root {
+.screen {
   width: 100%;
   height: 100%;
   background-color: var(--surface);

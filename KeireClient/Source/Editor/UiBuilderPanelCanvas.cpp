@@ -377,6 +377,7 @@ namespace KeireEditor
     void UiBuilderPanel::DrawViewport(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.UiBuilderState();
+        const auto& theme = m_Controller.UiBuilderTheme();
         DrawPreviewToolbar(ui);
         ui.Separator();
         try
@@ -388,6 +389,8 @@ namespace KeireEditor
             m_PreviewSnapshot.reset();
             m_PreviewDiagnostic = error.what();
         }
+        if (!m_PreviewSnapshot && !m_PreviewDiagnostic.empty())
+            ui.TextColoredWrapped(theme.Error, "Preview unavailable: " + m_PreviewDiagnostic);
 
         const auto available = ui.ContentAvailable();
         const Keire::UiSize viewportSize{std::max(160.0F, available.Width), std::max(120.0F, available.Height)};
@@ -403,12 +406,11 @@ namespace KeireEditor
         if (viewportState.Hovered && (pointer.MiddleDown || pointer.RightDown))
             m_PreviewSettings.PanBy({pointer.Delta.X, pointer.Delta.Y});
 
-        const auto& theme = m_Controller.UiBuilderTheme();
         ui.DrawFilledRectangle(viewport, {0.035F, 0.04F, 0.05F, 1.0F});
         if (!m_PreviewSnapshot)
         {
             ui.DrawOverlayText({viewport.Minimum.X + 12.0F, viewport.Minimum.Y + 12.0F}, theme.Error,
-                               "Preview unavailable: " + m_PreviewDiagnostic, 0.0F, viewport);
+                               "Preview unavailable — see the diagnostic above.", 0.0F, viewport);
             return;
         }
 

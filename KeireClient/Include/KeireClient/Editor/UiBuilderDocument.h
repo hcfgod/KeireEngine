@@ -263,7 +263,8 @@ namespace KeireEditor
         [[nodiscard]] const Keire::UiVisualElementDefinition* Find(Keire::AssetId element) const noexcept;
         [[nodiscard]] Keire::UiVisualElementDefinition* Find(Keire::AssetId element) noexcept;
         [[nodiscard]] Keire::AssetId ParentOf(Keire::AssetId element) const noexcept;
-        [[nodiscard]] bool Edit(std::string_view name, Keire::UiVisualTreeDefinition candidate);
+        [[nodiscard]] bool Edit(std::string_view name, Keire::UiVisualTreeDefinition candidate,
+                                std::string mergeKey = {});
         [[nodiscard]] Keire::AssetId AddElement(Keire::AssetId parent, Keire::UiVisualElementType type);
         [[nodiscard]] Keire::AssetId AddCustomElement(Keire::AssetId parent, std::string customType);
         [[nodiscard]] Keire::AssetId AddCanvasElement(Keire::AssetId parent, Keire::UiVisualElementType type,
@@ -299,7 +300,7 @@ namespace KeireEditor
         void AdvanceGeneration() noexcept;
         void NormalizeSelection() noexcept;
         void RefreshDirtyState();
-        void RecordApplied(std::string_view name, Keire::UiVisualTreeDefinition before);
+        void RecordApplied(std::string_view name, Keire::UiVisualTreeDefinition before, std::string mergeKey = {});
 
         Keire::AssetId m_Asset;
         Keire::AssetId m_Selection;

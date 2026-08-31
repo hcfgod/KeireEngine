@@ -5,6 +5,13 @@ versions.
 
 ## Unreleased
 
+- UI Builder inspector properties now update the retained preview immediately with continuous undo, while XML and CSS
+  source workspaces provide resizable panes, syntax-aware highlighting, cursor documentation, and completion lists.
+- Fixed UI source drafts being replaced when their editor lost focus, accepted valid unchanged source, made disk reverts
+  confirmed and undoable, preserved unapplied drafts across saves, and exposed full preview diagnostics outside the
+  clipped canvas.
+- New UI controls no longer receive decorative inline styles that mask stylesheet rules, and newly created style sheets
+  target the generated document's `.screen` root class.
 - Fixed Hub template choices dismissing the Create Project dialog, and preserved explicit popup-closing behavior for
   menu and combo selectables while allowing modal content to keep its owning popup open.
 - Fixed first-control placement on empty UI Builder documents, including undersized preview bounds, and made direct

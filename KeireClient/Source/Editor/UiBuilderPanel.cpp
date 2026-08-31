@@ -99,22 +99,30 @@ namespace KeireEditor
             {
                 const auto end = text.find(';', begin);
                 auto rule = text.substr(begin, end == std::string_view::npos ? text.size() - begin : end - begin);
-                const auto colon = rule.find(':');
-                if (colon != std::string_view::npos)
+                auto trim = [](std::string_view value)
                 {
-                    auto trim = [](std::string_view value)
-                    {
-                        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
-                            value.remove_prefix(1);
-                        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
-                            value.remove_suffix(1);
-                        return value;
-                    };
-                    const auto name = trim(rule.substr(0, colon));
-                    const auto value = trim(rule.substr(colon + 1));
-                    if (!name.empty() && !value.empty())
-                        result.push_back({std::string(name), std::string(value)});
+                    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+                        value.remove_prefix(1);
+                    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+                        value.remove_suffix(1);
+                    return value;
+                };
+                rule = trim(rule);
+                if (rule.empty())
+                {
+                    if (end == std::string_view::npos)
+                        break;
+                    begin = end + 1;
+                    continue;
                 }
+                const auto colon = rule.find(':');
+                if (colon == std::string_view::npos)
+                    throw std::invalid_argument("Inline style declarations require a ':' between property and value.");
+                const auto name = trim(rule.substr(0, colon));
+                const auto value = trim(rule.substr(colon + 1));
+                if (name.empty() || value.empty())
+                    throw std::invalid_argument("Inline style properties and values cannot be empty.");
+                result.push_back({std::string(name), std::string(value)});
                 if (end == std::string_view::npos)
                     break;
                 begin = end + 1;
@@ -246,6 +254,7 @@ namespace KeireEditor
             m_Controller.SetUiBuilderLivePicking(m_LiveDebugAsset, false);
         m_DraftElement = {};
         m_SourceAsset = {};
+        m_SourceGeneration = 0;
         m_DebugAsset = {};
         m_DebugSelection = {};
         m_DebugGeneration = 0;
@@ -299,9 +308,13 @@ namespace KeireEditor
         m_BindingPathDraft.clear();
         m_BindingModeDraft = "OneWay";
         m_SourceDraft.clear();
+        m_SourceDiagnostic.clear();
+        m_SourceEditor = {};
+        m_SourceEditorState = {};
         m_CanvasGesture = {};
         m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
-        m_SourceEditing = false;
+        m_SourceDirty = false;
+        m_RevertConfirmationOpen = false;
         m_LivePicking = false;
     }
 
@@ -379,7 +392,6 @@ namespace KeireEditor
             try
             {
                 m_Controller.SaveUiBuilderDocument();
-                m_SourceEditing = false;
             }
             catch (const std::exception& error)
             {
@@ -392,17 +404,8 @@ namespace KeireEditor
         ui.SameLine();
         if (ui.IconButton("UiBuilderRevert", Keire::UiIcon::Refresh, false, {30.0F, 28.0F}))
         {
-            try
-            {
-                m_Controller.ReloadUiBuilderDocument();
-                ResetTransientState();
-                m_Message = "Reverted to the imported source.";
-            }
-            catch (const std::exception& error)
-            {
-                m_Message = error.what();
-                m_Controller.ReportUiBuilderError(m_Message);
-            }
+            m_RevertConfirmationOpen = true;
+            ui.OpenPopup("Revert UI Document");
         }
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!document.UndoContext() || !document.UndoContext()->CanUndo()); disabled)
@@ -431,6 +434,38 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, m_Message);
         ui.Separator();
 
+        if (auto popup = ui.BeginPopupModal("Revert UI Document"); popup)
+        {
+            ui.Text("Revert this UI document to its imported source?");
+            ui.TextColoredWrapped(theme.Warning,
+                                  "Unsaved visual and source changes will be replaced. The revert can be undone.");
+            if (ui.Button("Revert"))
+            {
+                try
+                {
+                    m_Controller.ReloadUiBuilderDocument();
+                    m_DraftElement = {};
+                    m_SourceAsset = {};
+                    m_SourceDirty = false;
+                    m_SourceDiagnostic.clear();
+                    m_Message = "Reverted to the imported source. Undo is available.";
+                    m_RevertConfirmationOpen = false;
+                    ui.CloseCurrentPopup();
+                }
+                catch (const std::exception& error)
+                {
+                    m_Message = error.what();
+                    m_Controller.ReportUiBuilderError(m_Message);
+                }
+            }
+            ui.SameLine();
+            if (ui.Button("Cancel"))
+            {
+                m_RevertConfirmationOpen = false;
+                ui.CloseCurrentPopup();
+            }
+        }
+
         if (ui.Button(m_WorkspaceMode == UiBuilderWorkspaceMode::Design ? "Design  •##UiBuilderDesignMode"
                                                                         : "Design##UiBuilderDesignMode"))
             m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
@@ -451,9 +486,49 @@ namespace KeireEditor
         ui.Separator();
 
         const auto available = ui.ContentAvailable();
-        const float leftWidth = std::clamp(available.Width * 0.20F, 210.0F, 300.0F);
-        const float rightWidth = std::clamp(available.Width * 0.25F, 260.0F, 380.0F);
-        const float centerWidth = std::max(260.0F, available.Width - leftWidth - rightWidth - 16.0F);
+        if (available.Width < 720.0F)
+        {
+            const float viewportHeight = std::max(220.0F, available.Height * 0.52F);
+            if (auto center = ui.BeginChild("UiBuilderCompactCenter", {0.0F, viewportHeight}, true); center)
+                DrawViewport(ui);
+            if (auto tools = ui.BeginChild("UiBuilderCompactTools", {0.0F, 0.0F}, true); tools)
+            {
+                if (auto tabs = ui.BeginTabBar("UiBuilderCompactTabs"); tabs)
+                {
+                    if (m_WorkspaceMode == UiBuilderWorkspaceMode::Styles)
+                    {
+                        if (auto sheets = ui.BeginTabItem("Style Sheets"); sheets)
+                            DrawStyleSheets(ui);
+                        if (auto properties = ui.BeginTabItem("Properties"); properties)
+                            DrawStyleProperties(ui);
+                        if (auto computed = ui.BeginTabItem("Computed"); computed)
+                            DrawStyleComputed(ui);
+                        if (auto source = ui.BeginTabItem("CSS Source"); source)
+                            DrawStyleSource(ui);
+                    }
+                    else
+                    {
+                        if (auto hierarchy = ui.BeginTabItem("Hierarchy"); hierarchy)
+                            DrawHierarchy(ui);
+                        if (auto library = ui.BeginTabItem("Library"); library)
+                            DrawLibrary(ui);
+                        if (auto inspector = ui.BeginTabItem("Inspector"); inspector)
+                            DrawInspector(ui);
+                        if (auto debugger = ui.BeginTabItem("Debugger"); debugger)
+                            DrawDebugger(ui);
+                        if (auto source = ui.BeginTabItem("XML Source"); source)
+                            DrawSource(ui);
+                    }
+                }
+            }
+            return;
+        }
+
+        m_LeftPaneWidth = std::clamp(m_LeftPaneWidth, 170.0F, available.Width - 510.0F);
+        m_RightPaneWidth = std::clamp(m_RightPaneWidth, 230.0F, available.Width - m_LeftPaneWidth - 270.0F);
+        float leftWidth = m_LeftPaneWidth;
+        float rightWidth = m_RightPaneWidth;
+        float centerWidth = available.Width - leftWidth - rightWidth - 12.0F;
         if (auto left = ui.BeginChild("UiBuilderLeft", {leftWidth, 0.0F}, true); left)
         {
             if (m_WorkspaceMode == UiBuilderWorkspaceMode::Styles)
@@ -467,8 +542,15 @@ namespace KeireEditor
             }
         }
         ui.SameLine();
+        float centerAndRight = centerWidth + rightWidth;
+        if (ui.Splitter(Keire::UiAxis::Horizontal, "UiBuilderLeftSplitter", leftWidth, centerAndRight, 170.0F, 500.0F))
+            m_LeftPaneWidth = leftWidth;
+        ui.SameLine();
         if (auto center = ui.BeginChild("UiBuilderCenter", {centerWidth, 0.0F}, true); center)
             DrawViewport(ui);
+        ui.SameLine();
+        if (ui.Splitter(Keire::UiAxis::Horizontal, "UiBuilderRightSplitter", centerWidth, rightWidth, 260.0F, 230.0F))
+            m_RightPaneWidth = rightWidth;
         ui.SameLine();
         if (auto right = ui.BeginChild("UiBuilderRight", {rightWidth, 0.0F}, true); right)
         {
@@ -749,16 +831,27 @@ namespace KeireEditor
                                                   : std::string{}));
         ui.TextColored(m_Controller.UiBuilderTheme().MutedText, element->StableId.ToString());
         ui.Separator();
-        (void)ui.InputText("Name", m_NameDraft);
-        (void)ui.InputText(document.Selections().size() > 1 ? "Classes (all selected)" : "Classes", m_ClassesDraft);
-        (void)ui.InputText("Text", m_TextDraft);
+        const bool nameEdited = ui.InputText("Name", m_NameDraft);
+        const bool classesEdited =
+            ui.InputText(document.Selections().size() > 1 ? "Classes (all selected)" : "Classes", m_ClassesDraft);
+        const bool textEdited = ui.InputText("Text", m_TextDraft);
+        bool customTypeEdited = false;
         if (element->Type == Keire::UiVisualElementType::Custom)
-            (void)ui.InputText("Custom Type", m_CustomTypeDraft);
+            customTypeEdited = ui.InputText("Custom Type", m_CustomTypeDraft);
+        bool templateEdited = false;
         if (element->Type == Keire::UiVisualElementType::TemplateContainer)
-            (void)ui.InputText("Template Asset ID", m_TemplateDraft);
+            templateEdited = ui.InputText("Template Asset ID", m_TemplateDraft);
+        bool slotEdited = false;
         if (element->Type != Keire::UiVisualElementType::Slot)
-            (void)ui.InputText("Slot Assignment", m_SlotDraft);
-        (void)ui.InputTextMultiline("Inline Style", m_InlineStyleDraft, 5);
+            slotEdited = ui.InputText("Slot Assignment", m_SlotDraft);
+        bool inlineStyleEdited = ui.InputTextMultiline("Inline Style", m_InlineStyleDraft, 5);
+        ui.TextColored(m_Controller.UiBuilderTheme().MutedText,
+                       "Property changes apply automatically and are undoable.");
+        if (ui.Button("Clear Inline Styles"))
+        {
+            m_InlineStyleDraft.clear();
+            inlineStyleEdited = true;
+        }
 
         ui.Separator();
         ui.Text("Bindings");
@@ -815,8 +908,9 @@ namespace KeireEditor
             }
         }
 
-        ui.Separator();
-        if (ui.Button("Apply Properties"))
+        const bool propertyEdited = nameEdited || classesEdited || textEdited || customTypeEdited || templateEdited ||
+                                    slotEdited || inlineStyleEdited;
+        if (propertyEdited)
         {
             try
             {
@@ -861,9 +955,25 @@ namespace KeireEditor
                     if (auto* selected = findSelection(findSelection, candidate.Root))
                         selected->Classes = classes;
                 }
+                std::string property = "element";
+                if (nameEdited)
+                    property = "name";
+                else if (classesEdited)
+                    property = "classes";
+                else if (textEdited)
+                    property = "text";
+                else if (customTypeEdited)
+                    property = "custom-type";
+                else if (templateEdited)
+                    property = "template";
+                else if (slotEdited)
+                    property = "slot";
+                else if (inlineStyleEdited)
+                    property = "inline-style";
+                const auto mergeKey = document.Asset().ToString() + ":" + element->StableId.ToString() + ":" + property;
                 (void)document.Edit(document.Selections().size() > 1 ? "Edit UI elements" : "Edit UI element",
-                                    std::move(candidate));
-                m_Message = "Applied element properties.";
+                                    std::move(candidate), mergeKey);
+                m_Message = "Element properties updated.";
             }
             catch (const std::exception& error)
             {
@@ -1153,33 +1263,139 @@ namespace KeireEditor
     void UiBuilderPanel::DrawSource(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.UiBuilderState();
-        if (m_SourceAsset != document.Asset() || !m_SourceEditing)
+        const auto& theme = m_Controller.UiBuilderTheme();
+        if (m_SourceAsset != document.Asset() || (!m_SourceDirty && m_SourceGeneration != document.Generation()))
         {
             m_SourceAsset = document.Asset();
+            m_SourceGeneration = document.Generation();
             m_SourceDraft = document.SourcePreview();
+            m_SourceEditor.SetSource(m_SourceDraft);
+            m_SourceEditorState.CursorOffset = std::min(m_SourceEditorState.CursorOffset, m_SourceDraft.size());
+            m_SourceDiagnostic.clear();
         }
-        (void)ui.InputTextMultiline("##UiBuilderSource", m_SourceDraft, 28);
-        m_SourceEditing = ui.LastItemState().Active || ui.LastItemState().Edited;
-        if (ui.Button("Apply Source"))
+
+        ui.TextColored(theme.Accent, "XML MARKUP SOURCE");
+        ui.TextColoredWrapped(theme.MutedText,
+                              "Syntax highlighting, element and attribute completion, documentation, and source "
+                              "validation are available here. Press Ctrl+Enter to apply a valid draft.");
+
+        m_SourceEditorState.Highlights.clear();
+        m_SourceEditorState.Highlights.reserve(m_SourceEditor.Tokens().size());
+        for (const auto& token : m_SourceEditor.Tokens())
+        {
+            Keire::UiColor color;
+            switch (token.Kind)
+            {
+            case UiMarkupSourceTokenKind::Declaration:
+                color = {0.72F, 0.48F, 0.95F, 1.0F};
+                break;
+            case UiMarkupSourceTokenKind::Element:
+                color = {0.28F, 0.78F, 1.0F, 1.0F};
+                break;
+            case UiMarkupSourceTokenKind::Attribute:
+                color = {0.44F, 0.68F, 1.0F, 1.0F};
+                break;
+            case UiMarkupSourceTokenKind::Value:
+                color = {0.36F, 0.86F, 0.58F, 1.0F};
+                break;
+            case UiMarkupSourceTokenKind::Comment:
+                color = {0.48F, 0.56F, 0.62F, 1.0F};
+                break;
+            case UiMarkupSourceTokenKind::Punctuation:
+                color = {0.72F, 0.76F, 0.82F, 1.0F};
+                break;
+            case UiMarkupSourceTokenKind::Invalid:
+                color = theme.Error;
+                break;
+            }
+            m_SourceEditorState.Highlights.push_back({token.Offset, token.Length, color});
+        }
+
+        auto available = ui.ContentAvailable();
+        float editorHeight =
+            std::clamp(m_MarkupSourceEditorHeight, 180.0F, std::max(180.0F, available.Height - 110.0F));
+        float detailsHeight = std::max(90.0F, available.Height - editorHeight - 4.0F);
+        (void)ui.InputCodeEditor("XML markup source", m_SourceDraft, m_SourceEditorState,
+                                 Keire::UiSize{0.0F, editorHeight});
+        const auto sourceState = ui.LastItemState();
+        if (sourceState.Edited)
+        {
+            m_SourceDirty = true;
+            m_SourceDiagnostic.clear();
+            m_SourceEditor.SetSource(m_SourceDraft);
+        }
+        m_SourceEditor.SetCursor(m_SourceEditorState.CursorOffset);
+        if (ui.Splitter(Keire::UiAxis::Vertical, "UiMarkupSourceHeight", editorHeight, detailsHeight, 180.0F, 90.0F))
+            m_MarkupSourceEditorHeight = editorHeight;
+
+        const auto cursor = m_SourceEditor.CursorLocation();
+        ui.TextColored(theme.MutedText, "Ln " + std::to_string(cursor.Line) + ", Col " + std::to_string(cursor.Column) +
+                                            " | " + std::to_string(m_SourceEditor.LineCount()) + " lines | " +
+                                            std::to_string(m_SourceEditor.Tokens().size()) + " syntax tokens");
+        if (const auto documentation = m_SourceEditor.HoverDocumentation(m_SourceEditor.Cursor()))
+            ui.TextColoredWrapped(theme.MutedText, *documentation);
+
+        if (sourceState.Active)
+        {
+            const auto completions = m_SourceEditor.Completions(m_SourceEditor.Cursor(), 8U);
+            if (!completions.empty())
+            {
+                if (auto suggestions = ui.BeginChild("UiMarkupSourceCompletions", {0.0F, 112.0F}, true); suggestions)
+                {
+                    ui.TextColored(theme.Accent, "COMPLETION");
+                    for (const auto& completion : completions)
+                    {
+                        if (ui.Selectable(completion.Label + "##UiMarkupCompletion" + completion.Insertion) &&
+                            m_SourceEditor.ApplyCompletion(m_SourceEditor.Cursor(), completion))
+                        {
+                            m_SourceDraft = m_SourceEditor.Source();
+                            m_SourceEditorState.CursorOffset = m_SourceEditor.Cursor();
+                            m_SourceEditorState.SelectionBegin = m_SourceEditor.Cursor();
+                            m_SourceEditorState.SelectionEnd = m_SourceEditor.Cursor();
+                            m_SourceEditorState.RequestCursor = true;
+                            m_SourceDirty = true;
+                        }
+                        if (ui.LastItemState().Hovered)
+                            ui.SetTooltip(completion.Documentation);
+                    }
+                }
+            }
+        }
+
+        const bool applyShortcut = sourceState.Active && ui.Shortcut({.Key = Keire::UiKey::Enter, .Primary = true});
+        if (ui.Button("Apply Source") || applyShortcut)
         {
             std::string diagnostic;
             if (document.ApplySource(std::as_bytes(std::span(m_SourceDraft)), diagnostic))
             {
-                m_SourceEditing = false;
+                m_SourceGeneration = document.Generation();
+                m_SourceDraft = document.SourcePreview();
+                m_SourceEditor.SetSource(m_SourceDraft);
+                m_SourceDirty = false;
+                m_SourceDiagnostic.clear();
                 m_DraftElement = {};
                 m_Message = "Applied and validated UI source.";
             }
             else if (!diagnostic.empty())
             {
-                m_Message = std::move(diagnostic);
-                m_Controller.ReportUiBuilderError(m_Message);
+                m_SourceDiagnostic = std::move(diagnostic);
+                m_Message = m_SourceDiagnostic;
+                m_Controller.ReportUiBuilderError(m_SourceDiagnostic);
             }
         }
         ui.SameLine();
-        if (ui.Button("Reset Source"))
+        if (ui.Button("Discard Draft"))
         {
             m_SourceDraft = document.SourcePreview();
-            m_SourceEditing = false;
+            m_SourceEditor.SetSource(m_SourceDraft);
+            m_SourceGeneration = document.Generation();
+            m_SourceDirty = false;
+            m_SourceDiagnostic.clear();
         }
+        ui.SameLine();
+        ui.TextColored(m_SourceDirty ? theme.Warning : theme.Success,
+                       m_SourceDirty ? "Draft not applied" : "Source matches the visual document");
+        if (!m_SourceDiagnostic.empty())
+            ui.TextColoredWrapped(theme.Error, m_SourceDiagnostic);
     }
 } // namespace KeireEditor

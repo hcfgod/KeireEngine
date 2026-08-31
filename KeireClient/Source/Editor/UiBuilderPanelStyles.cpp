@@ -1334,8 +1334,55 @@ namespace KeireEditor
             }
         }
 
-        (void)ui.InputCodeEditor("##UiBuilderStyleSource", m_StyleSourceDraft, m_StyleSourceEditorState, 30);
+        m_StyleSourceEditorState.Highlights.clear();
+        m_StyleSourceEditorState.Highlights.reserve(m_StyleSourceEditor.Tokens().size());
+        for (const auto& token : m_StyleSourceEditor.Tokens())
+        {
+            Keire::UiColor color;
+            switch (token.Kind)
+            {
+            case UiStyleSourceTokenKind::Header:
+                color = {0.72F, 0.48F, 0.95F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Selector:
+                color = {0.28F, 0.78F, 1.0F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Property:
+                color = {0.44F, 0.68F, 1.0F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Value:
+                color = {0.88F, 0.76F, 0.48F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Variable:
+                color = {0.88F, 0.48F, 0.86F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Number:
+                color = {0.98F, 0.62F, 0.30F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::String:
+                color = {0.36F, 0.86F, 0.58F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Comment:
+                color = {0.48F, 0.56F, 0.62F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Punctuation:
+                color = {0.72F, 0.76F, 0.82F, 1.0F};
+                break;
+            case UiStyleSourceTokenKind::Invalid:
+                color = theme.Error;
+                break;
+            }
+            m_StyleSourceEditorState.Highlights.push_back({token.Offset, token.Length, color});
+        }
+        const auto sourceAvailable = ui.ContentAvailable();
+        float editorHeight =
+            std::clamp(m_StyleSourceEditorHeight, 180.0F, std::max(180.0F, sourceAvailable.Height - 120.0F));
+        float detailsHeight = std::max(90.0F, sourceAvailable.Height - editorHeight - 4.0F);
+        (void)ui.InputCodeEditor("CSS style source", m_StyleSourceDraft, m_StyleSourceEditorState,
+                                 Keire::UiSize{0.0F, editorHeight});
         const auto sourceState = ui.LastItemState();
+        if (ui.Splitter(Keire::UiAxis::Vertical, "UiStyleSourceHeight", editorHeight, detailsHeight, 180.0F, 90.0F))
+            m_StyleSourceEditorHeight = editorHeight;
         m_StyleSourceEditor.SetCursor(m_StyleSourceEditorState.CursorOffset);
         if (sourceState.Edited)
         {

@@ -170,9 +170,21 @@ namespace Keire
 
     struct UiCodeEditorState
     {
+        struct Highlight final
+        {
+            std::size_t Offset = 0;
+            std::size_t Length = 0;
+            UiColor Color;
+
+            [[nodiscard]] bool operator==(const Highlight&) const = default;
+        };
+
         std::size_t CursorOffset = 0;
         std::size_t SelectionBegin = 0;
         std::size_t SelectionEnd = 0;
+        std::vector<Highlight> Highlights;
+        float ScrollX = 0.0F;
+        float ScrollY = 0.0F;
         bool RequestCursor = false;
     };
 
@@ -632,6 +644,8 @@ namespace Keire
                                               std::uint32_t visibleLines = 4);
         [[nodiscard]] bool InputCodeEditor(std::string_view label, std::string& value, UiCodeEditorState& state,
                                            std::uint32_t visibleLines = 24);
+        [[nodiscard]] bool InputCodeEditor(std::string_view label, std::string& value, UiCodeEditorState& state,
+                                           UiSize size);
         [[nodiscard]] bool InputPassword(std::string_view label, std::string& value);
         [[nodiscard]] bool InputTextWithHint(std::string_view label, std::string_view hint, std::string& value);
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false, bool keepPopupOpen = false);

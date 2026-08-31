@@ -614,7 +614,17 @@ namespace Keire
         const ImVec2 size = axis == UiAxis::Horizontal ? ImVec2(thickness, std::max(available.y, thickness))
                                                        : ImVec2(std::max(available.x, thickness), thickness);
         (void)ImGui::InvisibleButton(safeId.c_str(), size);
-        if (!ImGui::IsItemActive())
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        if (hovered || active)
+            ImGui::SetMouseCursor(axis == UiAxis::Horizontal ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+        const auto color = ImGui::GetColorU32(active    ? ImGuiCol_SeparatorActive
+                                              : hovered ? ImGuiCol_SeparatorHovered
+                                                        : ImGuiCol_Separator);
+        const auto minimum = ImGui::GetItemRectMin();
+        const auto maximum = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddRectFilled(minimum, maximum, color);
+        if (!active)
             return false;
         const float delta = axis == UiAxis::Horizontal ? ImGui::GetIO().MouseDelta.x : ImGui::GetIO().MouseDelta.y;
         const float adjusted = std::clamp(delta, minimumLeading - leadingSize, trailingSize - minimumTrailing);

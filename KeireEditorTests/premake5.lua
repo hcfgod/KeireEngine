@@ -83,6 +83,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderLiveDraft.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderStyleSheetDocument.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiMarkupSourceEditor.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiStyleSourceEditor.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiStyleTokenRefactor.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/VfxEffectDocument.cpp",

@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/UiBuilderDocument.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
+#include "KeireClient/Editor/UiMarkupSourceEditor.h"
 #include "KeireClient/Editor/UiStyleSourceEditor.h"
 #include "KeireClient/Editor/UiStyleTokenRefactor.h"
 
@@ -104,6 +105,7 @@ namespace KeireEditor
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_DraftElement;
         Keire::AssetId m_SourceAsset;
+        std::uint64_t m_SourceGeneration = 0;
         Keire::AssetId m_DebugAsset;
         Keire::AssetId m_DebugSelection;
         std::uint64_t m_DebugGeneration = 0;
@@ -171,11 +173,19 @@ namespace KeireEditor
         std::string m_BindingPathDraft;
         std::string m_BindingModeDraft = "OneWay";
         std::string m_SourceDraft;
+        std::string m_SourceDiagnostic;
+        UiMarkupSourceEditor m_SourceEditor;
+        Keire::UiCodeEditorState m_SourceEditorState;
         std::string m_Message;
         UiBuilderClipboard m_Clipboard;
         CanvasGestureState m_CanvasGesture;
         UiBuilderWorkspaceMode m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
-        bool m_SourceEditing = false;
+        float m_LeftPaneWidth = 240.0F;
+        float m_RightPaneWidth = 320.0F;
+        float m_MarkupSourceEditorHeight = 420.0F;
+        float m_StyleSourceEditorHeight = 420.0F;
+        bool m_SourceDirty = false;
+        bool m_RevertConfirmationOpen = false;
         bool m_LivePicking = false;
     };
 } // namespace KeireEditor

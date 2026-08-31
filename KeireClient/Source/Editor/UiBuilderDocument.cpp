@@ -170,54 +170,31 @@ namespace KeireEditor
             };
             const auto text = [&element](const std::string_view value)
             { element.Attributes.push_back({"text", std::string(value)}); };
-            const auto surface = [&element](const std::string_view background = "#182231ff")
-            {
-                element.InlineStyles.push_back({"background-color", std::string(background)});
-                element.InlineStyles.push_back({"border-color", "#50657fff"});
-                element.InlineStyles.push_back({"border-width", "1px"});
-                element.InlineStyles.push_back({"border-radius", "6px"});
-            };
 
             switch (element.Type)
             {
             case Type::VisualElement:
                 size("320px", "180px");
-                surface();
-                element.InlineStyles.push_back({"padding", "12px"});
-                element.InlineStyles.push_back({"gap", "8px"});
                 break;
             case Type::Label:
                 size("240px", "40px");
                 text("Label");
-                element.InlineStyles.push_back({"color", "#f3f8ffff"});
-                element.InlineStyles.push_back({"font-size", "18px"});
-                element.InlineStyles.push_back({"vertical-align", "center"});
                 break;
             case Type::Image:
                 size("180px", "140px");
-                surface();
                 break;
             case Type::Button:
                 size("220px", "48px");
                 text("Button");
-                surface("#245f9eff");
-                element.InlineStyles.push_back({"color", "#ffffffff"});
-                element.InlineStyles.push_back({"text-align", "center"});
-                element.InlineStyles.push_back({"vertical-align", "center"});
                 break;
             case Type::TextField:
                 size("260px", "48px");
                 element.Attributes.push_back({"value", "Text field"});
-                surface();
-                element.InlineStyles.push_back({"color", "#ffffffff"});
-                element.InlineStyles.push_back({"vertical-align", "center"});
                 break;
             case Type::Toggle:
                 size("220px", "40px");
                 text("Toggle");
                 element.Attributes.push_back({"checked", "false"});
-                element.InlineStyles.push_back({"color", "#f3f8ffff"});
-                element.InlineStyles.push_back({"vertical-align", "center"});
                 break;
             case Type::Slider:
             case Type::ProgressBar:
@@ -225,42 +202,25 @@ namespace KeireEditor
                 element.Attributes.push_back({"minimum", "0"});
                 element.Attributes.push_back({"maximum", "100"});
                 element.Attributes.push_back({"value", "50"});
-                element.InlineStyles.push_back({"background-color", "#25364aff"});
-                element.InlineStyles.push_back({"color", "#4da3ffff"});
-                element.InlineStyles.push_back({"border-radius", "6px"});
                 break;
             case Type::ScrollView:
             case Type::ListView:
             case Type::TreeView:
                 size("320px", "240px");
-                surface();
-                element.InlineStyles.push_back({"padding", "8px"});
-                element.InlineStyles.push_back({"overflow", "clip"});
                 break;
             case Type::DropdownField:
                 size("240px", "44px");
                 element.Attributes.push_back({"value", "Option"});
-                surface();
-                element.InlineStyles.push_back({"color", "#ffffffff"});
-                element.InlineStyles.push_back({"vertical-align", "center"});
                 break;
             case Type::Foldout:
                 size("320px", "160px");
                 text("Foldout");
-                surface();
-                element.InlineStyles.push_back({"padding", "8px"});
                 break;
             case Type::TabView:
                 size("420px", "260px");
-                surface();
-                element.InlineStyles.push_back({"padding", "8px"});
-                element.InlineStyles.push_back({"gap", "8px"});
                 break;
             case Type::Toolbar:
                 size("480px", "48px");
-                surface();
-                element.InlineStyles.push_back({"padding", "6px"});
-                element.InlineStyles.push_back({"gap", "6px"});
                 element.InlineStyles.push_back({"flex-direction", "row"});
                 break;
             case Type::Spacer:
@@ -268,8 +228,6 @@ namespace KeireEditor
                 break;
             case Type::Custom:
                 size("220px", "64px");
-                surface();
-                element.InlineStyles.push_back({"padding", "8px"});
                 break;
             case Type::TemplateContainer:
             case Type::Slot:
@@ -371,6 +329,33 @@ namespace KeireEditor
                     result.push_back(std::move(value));
             return result;
         }
+
+        class ContinuousUiDocumentUndoCommand final : public Keire::UndoCommand
+        {
+          public:
+            ContinuousUiDocumentUndoCommand(std::string name, std::string mergeKey, Keire::UndoOperation redo,
+                                            Keire::UndoOperation undo)
+                : m_Name(std::move(name)), m_MergeKey(std::move(mergeKey)), m_Redo(std::move(redo)),
+                  m_Undo(std::move(undo))
+            {
+            }
+
+            [[nodiscard]] std::string_view Name() const noexcept override { return m_Name; }
+            [[nodiscard]] std::size_t EstimatedBytes() const noexcept override { return 1024U; }
+            void Redo() override { m_Redo(); }
+            void Undo() override { m_Undo(); }
+            [[nodiscard]] bool TryMerge(const Keire::UndoCommand& newer) override
+            {
+                const auto* command = dynamic_cast<const ContinuousUiDocumentUndoCommand*>(&newer);
+                return command && !m_MergeKey.empty() && command->m_MergeKey == m_MergeKey;
+            }
+
+          private:
+            std::string m_Name;
+            std::string m_MergeKey;
+            Keire::UndoOperation m_Redo;
+            Keire::UndoOperation m_Undo;
+        };
     } // namespace
 
     UiBuilderCanvasGesture HitTestUiBuilderCanvasGesture(const Keire::UiItemRect rectangle,
@@ -916,7 +901,8 @@ namespace KeireEditor
                                                                 : Keire::AssetId{};
     }
 
-    bool UiBuilderDocument::Edit(const std::string_view name, Keire::UiVisualTreeDefinition candidate)
+    bool UiBuilderDocument::Edit(const std::string_view name, Keire::UiVisualTreeDefinition candidate,
+                                 std::string mergeKey)
     {
         if (!m_Asset)
             throw std::logic_error("Open a UI document before editing it.");
@@ -926,7 +912,7 @@ namespace KeireEditor
         auto before = m_Definition;
         m_Definition = std::move(candidate);
         NormalizeSelection();
-        RecordApplied(name, std::move(before));
+        RecordApplied(name, std::move(before), std::move(mergeKey));
         RefreshDirtyState();
         AdvanceGeneration();
         return true;
@@ -1286,9 +1272,9 @@ namespace KeireEditor
         try
         {
             auto candidate = Keire::UiVisualTreeAsset::ParseSource(source);
-            const bool changed = Edit("Edit UI source", std::move(candidate));
+            (void)Edit("Edit UI source", std::move(candidate), m_Asset.ToString() + ":source");
             diagnostic.clear();
-            return changed;
+            return true;
         }
         catch (const std::exception& error)
         {
@@ -1326,14 +1312,18 @@ namespace KeireEditor
         const auto bytes = std::as_bytes(std::span(text));
         auto definition = Keire::UiVisualTreeAsset::ParseSource(bytes);
         Keire::UiVisualTreeAsset::Validate(definition);
+        auto before = m_Definition;
+        const bool changed = Keire::UiVisualTreeAsset::Encode(before) != Keire::UiVisualTreeAsset::Encode(definition);
         m_Definition = std::move(definition);
         m_Baseline = m_Definition;
-        m_Selection = m_Definition.Root.StableId;
-        m_Selections = {m_Selection};
-        m_Dirty = false;
-        AdvanceGeneration();
-        if (m_Undo && m_Undo->IsOpen())
-            m_Undo->Clear();
+        NormalizeSelection();
+        if (!Find(m_Selection))
+            Select(m_Definition.Root.StableId);
+        if (changed)
+            RecordApplied("Revert UI document", std::move(before));
+        RefreshDirtyState();
+        if (changed)
+            AdvanceGeneration();
     }
 
     bool UiBuilderDocument::Undo() { return m_Undo && m_Undo->Undo(); }
@@ -1375,14 +1365,15 @@ namespace KeireEditor
             m_Selections = {m_Selection};
     }
 
-    void UiBuilderDocument::RecordApplied(const std::string_view name, Keire::UiVisualTreeDefinition before)
+    void UiBuilderDocument::RecordApplied(const std::string_view name, Keire::UiVisualTreeDefinition before,
+                                          std::string mergeKey)
     {
         if (!m_Undo || !m_Undo->IsOpen())
             return;
         auto after = std::make_shared<std::optional<Keire::UiVisualTreeDefinition>>();
         const auto asset = m_Asset;
-        m_Undo->RecordApplied(Keire::CreateUndoCommand(
-            std::string(name),
+        m_Undo->RecordApplied(std::make_unique<ContinuousUiDocumentUndoCommand>(
+            std::string(name), std::move(mergeKey),
             [this, after, asset]
             {
                 if (m_Asset != asset || !after->has_value())
@@ -1401,7 +1392,6 @@ namespace KeireEditor
                 RefreshDirtyState();
                 AdvanceGeneration();
                 NormalizeSelection();
-            },
-            sizeof(Keire::UiVisualTreeDefinition)));
+            }));
     }
 } // namespace KeireEditor
