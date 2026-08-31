@@ -24,4 +24,9 @@ namespace KeireHub
                                                                        const HubProductSnapshot& snapshot,
                                                                        Keire::WindowSystem& windows,
                                                                        const std::filesystem::path& preferenceRoot);
+    [[nodiscard]] bool DrawHubRuntimeStartupFailure(Keire::UiFrame& ui, HubProductUi& productUi,
+                                                    const HubProductSnapshot& snapshot, Keire::Window& window,
+                                                    Keire::WindowSystem& windows, std::string_view failure,
+                                                    std::string& actionMessage,
+                                                    const std::filesystem::path& preferenceRoot);
 } // namespace KeireHub

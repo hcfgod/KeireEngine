@@ -202,21 +202,22 @@ namespace Keire::Detail
             for (const auto& candidate : files)
             {
                 const auto separator = candidate.find_last_of("/\\");
-                const auto candidateFilename =
-                    separator == std::string::npos ? std::string_view(candidate) : std::string_view(candidate).substr(separator + 1);
+                const auto candidateFilename = separator == std::string::npos
+                                                   ? std::string_view(candidate)
+                                                   : std::string_view(candidate).substr(separator + 1);
                 if (candidateFilename == filename || candidate.find(filename) != std::string::npos)
                 {
                     diagnostic = " (the manifest instead contains '" + candidate + "')";
                     break;
                 }
             }
-            throw std::invalid_argument("Player support manifest runtime closure is missing a required file: " +
-                                        PathToUtf8(path) + diagnostic);
+            throw std::invalid_argument(
+                "Player support manifest runtime closure is missing a required file: " + PathToUtf8(path) + diagnostic);
         }
 
         void ValidateRuntimeClosure(const PlayerSupportManifest& manifest)
         {
-            if (manifest.Files.empty())
+            if (manifest.Files.empty() || manifest.SchemaVersion < 2)
                 return;
 
             static constexpr std::array RequiredManagedFiles{"Coral.Managed.dll", "Coral.Managed.deps.json",
@@ -267,7 +268,7 @@ namespace Keire::Detail
 
                 RequireFile(logicalFiles, executable, manifest.Platform);
                 RequireFile(logicalFiles, nativeRoot / NethostName(manifest.Platform), manifest.Platform);
-                if (manifest.Platform == PlayerPlatform::Windows && manifest.SchemaVersion >= 2)
+                if (manifest.Platform == PlayerPlatform::Windows)
                 {
                     for (const auto filename : RequiredWindowsRuntimeFiles)
                         RequireFile(logicalFiles, nativeRoot / filename, manifest.Platform);

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <span>
+#include <string_view>
 
 namespace KeireHub
 {
@@ -15,4 +16,5 @@ namespace KeireHub
     [[nodiscard]] HubStatus ClearHubVerifiedCache(HubController& controller);
     [[nodiscard]] HubStatus ClearHubVerifiedCache(HubController& controller, std::span<const HubTask> tasks);
     [[nodiscard]] HubStatus SaveHubProjectPreferences(HubController& controller, bool cards, std::uint8_t sortIndex);
+    [[nodiscard]] HubStatus EnsureHubSettingsDirectory(const std::filesystem::path& path, std::string_view label);
 } // namespace KeireHub

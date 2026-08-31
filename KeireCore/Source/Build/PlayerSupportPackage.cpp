@@ -817,7 +817,7 @@ namespace Keire::Detail
             if (!fileSystem.IsRegularFile("manifest.json"))
                 throw std::runtime_error("Installed Build Support manifest is not a regular file.");
             const auto manifest = LoadAnchoredManifest(fileSystem, "manifest.json");
-            ValidatePackageManifest(manifest, {});
+            ValidatePackageManifestStructure(manifest);
             ValidateInstalledFiles(fileSystem, manifest);
             diagnostic.clear();
             return true;

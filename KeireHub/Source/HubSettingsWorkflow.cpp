@@ -4,6 +4,7 @@
 
 #include "Keire/PlatformDirectories.h"
 
+#include <system_error>
 #include <utility>
 
 namespace KeireHub
@@ -54,5 +55,19 @@ namespace KeireHub
         settings.ProjectsView = cards ? ProjectView::Cards : ProjectView::Table;
         settings.ProjectsSort = static_cast<ProjectSort>(sortIndex);
         return controller.Settings().Save(std::move(settings));
+    }
+
+    HubStatus EnsureHubSettingsDirectory(const std::filesystem::path& path, const std::string_view label)
+    {
+        if (path.empty() || !path.is_absolute())
+            return HubStatus::Failure({.Code = HubErrorCode::InvalidArgument,
+                                       .Message = std::string(label) + " must be an absolute folder path."});
+        std::error_code error;
+        std::filesystem::create_directories(path, error);
+        if (error || !std::filesystem::is_directory(path))
+            return HubStatus::Failure({.Code = HubErrorCode::IoWrite,
+                                       .Message = std::string(label) + " could not be created or opened.",
+                                       .TechnicalDetails = error.message()});
+        return HubStatus::Success();
     }
 } // namespace KeireHub

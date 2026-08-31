@@ -1,6 +1,7 @@
 #include "KeireHub/HubDiagnostics.h"
 
 #include "Keire/BuildInfo.h"
+#include "Keire/Log.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
@@ -139,5 +140,22 @@ namespace KeireHub
             return {.Message = "That recovery action is unavailable. See the Hub log if accessible.",
                     .TechnicalDetails = error.what()};
         }
+    }
+
+    bool DrawHubRuntimeStartupFailure(Keire::UiFrame& ui, HubProductUi& productUi, const HubProductSnapshot& snapshot,
+                                      Keire::Window& window, Keire::WindowSystem& windows,
+                                      const std::string_view failure, std::string& actionMessage,
+                                      const std::filesystem::path& preferenceRoot)
+    {
+        const auto action = productUi.DrawFatalRecoveryWindow(ui, window,
+                                                              {.Message = std::string(failure),
+                                                               .ActionMessage = actionMessage,
+                                                               .LogsAvailable = HubLogsAvailable(preferenceRoot)});
+        const auto outcome = HandleHubFatalRecoveryAction(action, snapshot, windows, preferenceRoot);
+        if (!outcome.TechnicalDetails.empty())
+            KEIRE_CLIENT_ERROR("[Project Hub] Fatal recovery action failed: {}", outcome.TechnicalDetails);
+        if (!outcome.Message.empty())
+            actionMessage = outcome.Message;
+        return outcome.CloseRequested;
     }
 } // namespace KeireHub

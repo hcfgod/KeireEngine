@@ -661,7 +661,8 @@ namespace
                         m_ProductUi.DrawNotificationCenter(ui, m_ProductSnapshot, command);
                         m_ProductUi.DrawTaskCenter(ui, m_ProductSnapshot, command);
                         m_ProductUi.DrawAccountDialog(ui, m_ProductSnapshot, command);
-                        DrawNotice(ui, tokens);
+                        KeireHub::Detail::DrawHubNotice(ui, tokens, m_Notice, m_NoticeError, m_ObservedNotice,
+                                                        m_NoticeStarted);
                         if (m_Page == KeireHub::HubPage::Home)
                             m_ProductUi.DrawHome(ui, m_Page, m_ProductSnapshot, command);
                         else if (m_Page == KeireHub::HubPage::Installs)
@@ -716,23 +717,10 @@ namespace
             const auto size = Owner().MainWindow()->LogicalSize();
             KeireHub::UpdateHubChromeLayout(*Owner().MainWindow(), size, false);
             const auto preferenceRoot = Keire::GetPreferenceDirectory();
-            const auto action =
-                m_ProductUi.DrawFatalRecoveryWindow(ui, *Owner().MainWindow(),
-                                                    {.Message = *m_RuntimeStartupFailure,
-                                                     .ActionMessage = m_FatalActionMessage,
-                                                     .LogsAvailable = KeireHub::HubLogsAvailable(preferenceRoot)});
-            const auto outcome =
-                KeireHub::HandleHubFatalRecoveryAction(action, m_ProductSnapshot, *Owner().Windows(), preferenceRoot);
-            if (!outcome.TechnicalDetails.empty())
-                KEIRE_CLIENT_ERROR("[Project Hub] Fatal recovery action failed: {}", outcome.TechnicalDetails);
-            if (!outcome.Message.empty())
-                m_FatalActionMessage = outcome.Message;
-            if (outcome.CloseRequested)
+            if (KeireHub::DrawHubRuntimeStartupFailure(ui, m_ProductUi, m_ProductSnapshot, *Owner().MainWindow(),
+                                                       *Owner().Windows(), *m_RuntimeStartupFailure,
+                                                       m_FatalActionMessage, preferenceRoot))
                 Owner().RequestExit();
-        }
-        void DrawNotice(Keire::UiFrame& ui, const KeireHub::HubDesignTokens& tokens)
-        {
-            KeireHub::Detail::DrawHubNotice(ui, tokens, m_Notice, m_NoticeError, m_ObservedNotice, m_NoticeStarted);
         }
         void SavePreferences()
         {
@@ -752,15 +740,6 @@ namespace
             m_CreateLocation = Keire::Detail::PathToUtf8(m_ProductSnapshot.Settings.DefaultProjectLocation);
             m_CreateOpenAfterCreation = true;
             m_RequestCreatePopup = true;
-        }
-        static void EnsureSettingsDirectory(const std::filesystem::path& path, const std::string_view label)
-        {
-            if (path.empty() || !path.is_absolute())
-                throw std::runtime_error(std::string(label) + " must be an absolute folder path.");
-            std::error_code error;
-            std::filesystem::create_directories(path, error);
-            if (error || !std::filesystem::is_directory(path))
-                throw std::runtime_error(std::string(label) + " could not be created or opened.");
         }
         void LocateProject(const std::filesystem::path& selected)
         {
@@ -953,8 +932,10 @@ namespace
                 {
                     if (!m_Controller || !command.Settings)
                         throw std::logic_error("Hub settings are unavailable.");
-                    EnsureSettingsDirectory(command.Settings->DefaultProjectLocation, "The default project location");
-                    EnsureSettingsDirectory(command.Settings->DefaultEditorRoot, "The default editor root");
+                    RequireWorkflowSuccess(KeireHub::EnsureHubSettingsDirectory(
+                        command.Settings->DefaultProjectLocation, "The default project location"));
+                    RequireWorkflowSuccess(KeireHub::EnsureHubSettingsDirectory(command.Settings->DefaultEditorRoot,
+                                                                                "The default editor root"));
                     const bool packageTaskSettingsChanged =
                         (!m_PackageTasks && !m_Maintenance.Snapshot()->IsRunning()) ||
                         command.Settings->TemporaryRoot != m_PackageTaskTemporaryRoot ||
