@@ -1128,6 +1128,11 @@ assert_equal "$(managed_host_staging_targets KeireHub KeireClient KeireHub Keire
 assert_equal "$(managed_host_staging_targets KeireEditorDev KeireClient KeireHub Keire | tr '\n' ',')" \
   'KeireAssetTool,KeireRuntime,KeireClient,' \
   'Complete editor aggregates refresh managed hosts without staging their proxy target'
+assert_true managed_host_includes_editor_api KeireClient KeireClient Keire
+assert_true managed_host_includes_editor_api KeireAssetTool KeireClient Keire
+assert_false managed_host_includes_editor_api KeireRuntime KeireClient Keire
+assert_true grep -F -q '"$managed_host_target" "$include_editor_api"' "$ROOT/Scripts/Linux/build.sh"
+assert_true grep -F -q '"$managed_host_target" "$include_editor_api"' "$ROOT/Scripts/Mac/build.sh"
 assert_true grep -q 'dependson { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'links { KeireManagedProject }' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'kind "StaticLib"' "$ROOT/Scripts/Premake/Managed.lua"

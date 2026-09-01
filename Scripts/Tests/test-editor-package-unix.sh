@@ -17,6 +17,7 @@ grep -q 'validate_editor_package_stage' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -Fq 'validate_macos_macho_minimum "$stage" "$macos_deployment_target"' \
   "$ROOT/Scripts/Unix/package-editor.sh"
 grep -Fq 'xvfb-run -a "$stage/bin/$runtime"' "$ROOT/Scripts/Unix/package.sh"
+grep -Fq '$CLIENT_TARGET/Managed" "$stage/bin/"' "$ROOT/Scripts/Unix/package.sh"
 grep -Fq '<key>LSMinimumSystemVersion</key>' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -q 'write-package-manifest.py' "$ROOT/Scripts/Unix/package-editor.sh"
 grep -Fq -- '--project-schema-maximum 4' "$ROOT/Scripts/Unix/package-editor.sh"
@@ -100,6 +101,10 @@ python3 "${manifest_arguments[@]}"
 
 assert_true validate_editor_package_stage "$stage" Client Hub Core Core Linux
 assert_false test -e "$stage/bin/Hub"
+$editor_managed_api="$stage/bin/Managed/Keire.Editor.Managed.dll"
+rm "$editor_managed_api"
+assert_false validate_editor_package_stage "$stage" Client Hub Core Core Linux
+: > "$editor_managed_api"
 tar -C "$stage" -czf "$archive" .
 assert_true assert_package_archive_generated_data_free "$archive"
 

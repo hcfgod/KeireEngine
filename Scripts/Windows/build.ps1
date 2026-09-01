@@ -170,8 +170,9 @@ switch ($Generator) {
 
 if ($Generator -eq "ninja") {
     foreach ($managedHostTarget in @(Get-ManagedHostStagingTargets -Project $Project -Target $Target)) {
+        $includeEditorApi = Test-ManagedHostIncludesEditorApi -Project $Project -Target $managedHostTarget
         & (Join-Path $PSScriptRoot "stage-managed-host.ps1") -Root $Root -Configuration $Configuration `
-            -Architecture $Architecture -Target $managedHostTarget -IfPresent
+            -Architecture $Architecture -Target $managedHostTarget -IncludeEditorApi:$includeEditorApi -IfPresent
     }
 }
 

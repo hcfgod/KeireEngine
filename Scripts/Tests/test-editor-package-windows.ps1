@@ -65,6 +65,10 @@ $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premak
 if (-not $clientPremake.Contains("AddKeireManagedHostStaging(true)")) {
     throw "The Windows Ninja build does not delegate managed-host staging to the repository launcher."
 }
+$sdkPackager = Get-Content (Join-Path $Windows "package.ps1") -Raw
+if (-not $sdkPackager.Contains('$($Project.CLIENT_TARGET)\Managed')) {
+    throw "The Windows SDK package does not source the complete Editor managed host."
+}
 
 $stage = Join-Path ([IO.Path]::GetTempPath()) ("keire-editor-package-test-" + [guid]::NewGuid().ToString("N"))
 $archive = "$stage.zip"
@@ -178,6 +182,12 @@ try {
         $script:ExecutableVerificationCalls[0].Arguments[0] -ne "--verify-installation") {
         throw "Editor package validation did not invoke the real executable's hidden installation verifier."
     }
+    $editorManagedApi = Join-Path $stage "bin\Managed\Keire.Editor.Managed.dll"
+    $editorManagedApiBytes = [IO.File]::ReadAllBytes($editorManagedApi)
+    Remove-Item -LiteralPath $editorManagedApi -Force
+    Assert-Throws { Assert-WindowsEditorPackageStage $stage Client Hub Core Core } `
+        "Editor package missing managed Editor API rejection"
+    [IO.File]::WriteAllBytes($editorManagedApi, $editorManagedApiBytes)
     $supportInstallation = Join-Path $stage "bin\BuildSupport\1.2.3\windows-x86_64-1.2.3"
     $supportManifestPath = Join-Path $supportInstallation "manifest.json"
     $supportManifestBytes = [IO.File]::ReadAllBytes($supportManifestPath)

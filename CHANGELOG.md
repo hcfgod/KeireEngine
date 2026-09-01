@@ -29,7 +29,8 @@ versions.
 - Added fast Windows `stage-editor` and `stage-hub` launcher commands for incremental Dist-layout testing without the
   release test matrix or archive round-trip, and kept Player Support builds on the selected generator so packaging no
   longer invalidates otherwise compatible build outputs. Windows PowerShell 5.1 package staging now also uses
-  framework-compatible path and marker checks and explicitly loads its required utility commands.
+  framework-compatible path and marker checks and explicitly loads its required utility commands. Clean Ninja Editor
+  stages now retain the managed Editor API and binding generator assemblies required by the packaged editor.
 - Fixed UI Builder source clicks, caret placement, and drag selections to share exact glyph metrics and the active
   editor's wrapped layout, preserved the live Style Source viewport when clicking after a scroll, and made Hub
   verification tasks show the editor version instead of an internal registration identifier.

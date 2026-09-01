@@ -127,7 +127,8 @@ foreach ($runtime in (Get-WindowsFfmpegRuntimeContract).Files) {
     Copy-Item -LiteralPath (Join-Path $assetWorkerDirectory $runtime.FileName) -Destination "$stage\bin\"
 }
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\$runtimeName.exe" "$stage\bin\"
-Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\Managed" "$stage\bin\" -Recurse
+Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$($Project.CLIENT_TARGET)\Managed" `
+    "$stage\bin\" -Recurse
 Copy-Item "$Root\Build\Bin\$Configuration-windows-$outputArchitecture\$runtimeName\nethost.dll" "$stage\bin\"
 Copy-Item "$Root\Build\Tools\ShaderCompiler\KeireShaderCompiler.exe" "$stage\bin\"
 Get-ChildItem "$Root\Build\Tools\ShaderCompiler" -Filter *.dll -File | Copy-Item -Destination "$stage\bin\"

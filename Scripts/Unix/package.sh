@@ -54,7 +54,7 @@ find "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$asset_worker" -maxdep
   \( -name 'libav*.so*' -o -name 'libav*.dylib' -o -name 'libswresample*.so*' -o -name 'libswresample*.dylib' \) \
   -exec cp -L {} "$stage/bin/" \;
 cp -R "$ROOT/Build/Dependencies/ffmpeg/Release/install/share/licenses/ffmpeg" "$stage/third-party/licenses/"
-cp -R "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$runtime/Managed" "$stage/bin/"
+cp -R "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/Managed" "$stage/bin/"
 dependency_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
 cp "$dependency_install/lib/libassimp.a" "$dependency_install/lib/libzlibstatic.a" "$dependency_install/lib/libJolt.a" "$dependency_install/lib/libRecast.a" "$dependency_install/lib/libDetour.a" "$dependency_install/lib/libDetourCrowd.a" "$dependency_install/lib/libDetourTileCache.a" "$dependency_install/lib/libminiaudio.a" "$stage/lib/"
 cp "$ROOT/Build/Dependencies/coral-patched/Build/Release/libCoral.Native.a" "$stage/lib/"

@@ -774,7 +774,8 @@ editor_package_required_paths() {
       "bin/${namespace}HubWorker" "bin/${namespace}Runtime" "bin/KeireShaderCompiler"
       "bin/Managed/Coral.Managed.dll"
       "bin/Managed/Coral.Managed.deps.json" "bin/Managed/Coral.Managed.runtimeconfig.json"
-      "bin/Managed/Keire.Managed.dll" "bin/Managed/Dotnet/dotnet" "Config/Client.json"
+      "bin/Managed/Keire.Managed.dll" "bin/Managed/Keire.Editor.Managed.dll"
+      "bin/Managed/Keire.Managed.Generators.dll" "bin/Managed/Dotnet/dotnet" "Config/Client.json"
       "Config/Branding/Keire.png" "Config/Marketplace/trusted-marketplace-key.json" \
       "Config/Marketplace/trusted-marketplace-keys.json"
       "third-party/licenses/libsodium-LICENSE.txt"
@@ -1574,6 +1575,11 @@ managed_host_staging_targets() {
         fi
         [[ "$target" == "$editor_dev_target" ]] || printf '%s\n' "$target"
     } | awk '!seen[$0]++'
+}
+
+managed_host_includes_editor_api() {
+    local target="$1" client_target="$2" project_namespace="$3"
+    [[ "$target" == "$client_target" || "$target" == "${project_namespace}AssetTool" ]]
 }
 
 validate_unix_asset_worker_ninja_commands() {

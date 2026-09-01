@@ -51,6 +51,15 @@ Assert-StagingState (($editorDevTargets -join ",") -eq "KeireAssetTool,KeireRunt
 $toolTargets = @(Get-ManagedHostStagingTargets -Project $stagingProject -Target "KeireAssetTool")
 Assert-StagingState (($toolTargets -join ",") -eq "KeireAssetTool") `
     "Direct managed-host target staging changed unexpectedly."
+Assert-StagingState (Test-ManagedHostIncludesEditorApi -Project $stagingProject -Target "KeireClient") `
+    "Editor managed-host staging omitted its editor API contract."
+Assert-StagingState (Test-ManagedHostIncludesEditorApi -Project $stagingProject -Target "KeireAssetTool") `
+    "Asset Tool managed-host staging omitted its editor API contract."
+Assert-StagingState (-not (Test-ManagedHostIncludesEditorApi -Project $stagingProject -Target "KeireRuntime")) `
+    "Player runtime managed-host staging unexpectedly includes editor-only APIs."
+$windowsBuild = Get-Content (Join-Path $root "Scripts\Windows\build.ps1") -Raw
+Assert-StagingState ($windowsBuild.Contains("-IncludeEditorApi:`$includeEditorApi")) `
+    "The Windows Ninja build drops the per-host editor API staging contract."
 
 $fixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-managed-host-" + [guid]::NewGuid().ToString("N"))
 try {

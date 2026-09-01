@@ -985,7 +985,8 @@ function Get-WindowsRequiredEditorPackagePaths {
         "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe",
         "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll",
         "bin\Managed\Coral.Managed.deps.json", "bin\Managed\Coral.Managed.runtimeconfig.json",
-        "bin\Managed\Keire.Managed.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
+        "bin\Managed\Keire.Managed.dll", "bin\Managed\Keire.Editor.Managed.dll",
+        "bin\Managed\Keire.Managed.Generators.dll", "bin\Managed\Dotnet\dotnet.exe", "Config\Client.json",
         "Config\Branding\Keire.png", "Config\Marketplace\trusted-marketplace-key.json",
         "Config\Marketplace\trusted-marketplace-keys.json",
         "content\Fonts\Inter-Variable.ttf", "content\Fonts\MaterialSymbolsRounded-Subset.ttf",
@@ -1649,4 +1650,13 @@ function Get-ManagedHostStagingTargets {
         $targets.Add($Target)
     }
     return @($targets | Select-Object -Unique)
+}
+
+function Test-ManagedHostIncludesEditorApi {
+    param(
+        [Parameter(Mandatory = $true)]$Project,
+        [Parameter(Mandatory = $true)][string]$Target
+    )
+
+    return $Target -in @($Project.CLIENT_TARGET, "$($Project.PROJECT_NAMESPACE)AssetTool")
 }

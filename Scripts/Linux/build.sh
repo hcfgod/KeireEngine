@@ -50,7 +50,11 @@ esac
 stage_unix_asset_worker_runtime "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$PROJECT_NAMESPACE" "$TARGET"
 if [[ "$GENERATOR" == ninja ]]; then
     while IFS= read -r managed_host_target; do
-        bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" "$managed_host_target"
+        include_editor_api=false
+        managed_host_includes_editor_api "$managed_host_target" "$CLIENT_TARGET" "$PROJECT_NAMESPACE" &&
+          include_editor_api=true
+        bash "$ROOT/Scripts/Unix/stage-managed-host.sh" "$ROOT" "$CONFIGURATION" linux "$ARCHITECTURE" \
+          "$managed_host_target" "$include_editor_api"
     done < <(managed_host_staging_targets "$TARGET" "$CLIENT_TARGET" "$HUB_TARGET" "$PROJECT_NAMESPACE")
 fi
 runtime_staging_target="$TARGET"
