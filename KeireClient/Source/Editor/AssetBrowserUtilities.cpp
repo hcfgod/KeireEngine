@@ -295,10 +295,12 @@ namespace KeireEditor
             return "Shader";
         if (extension == ".keirematerial")
             return "Material";
-        if (extension == ".keirematerialgraph")
-            return "Material Graph";
+        if (extension == ".keiremateriallegacy")
+            return "Legacy Material";
         if (extension == ".keireshadergraph")
             return "Shader Graph";
+        if (extension == Keire::ShaderSubgraphAssetSourceExtension)
+            return "Shader Subgraph";
         if (extension == Keire::MaterialFunctionAssetSourceExtension)
             return "Material Function";
         if (extension == Keire::ShaderFunctionAssetSourceExtension)
@@ -311,8 +313,6 @@ namespace KeireEditor
             return "Material Parameter Collection";
         if (extension == ".keirematerialinstance")
             return "Material Instance";
-        if (extension == ".keireshadergraphinstance")
-            return "Legacy Shader Graph Instance";
         if (extension == ".keireanimgraph")
             return "Animator Controller";
         if (extension == ".keireanim")
@@ -362,12 +362,13 @@ namespace KeireEditor
         if (extension == ".keirestyle")
             return AssetBrowserOpenAction::UiStyleSheet;
         if (extension == ".keirematerial")
-            return AssetBrowserOpenAction::Material;
-        if (extension == ".keirematerialgraph")
             return AssetBrowserOpenAction::MaterialGraph;
+        if (extension == ".keiremateriallegacy")
+            return AssetBrowserOpenAction::Material;
         if (extension == ".keirematerialinstance")
             return AssetBrowserOpenAction::MaterialInstance;
-        if (extension == ".keireshadergraph" || extension == Keire::MaterialFunctionAssetSourceExtension ||
+        if (extension == ".keireshadergraph" || extension == Keire::ShaderSubgraphAssetSourceExtension ||
+            extension == Keire::MaterialFunctionAssetSourceExtension ||
             extension == Keire::ShaderFunctionAssetSourceExtension ||
             extension == Keire::MaterialLayerAssetSourceExtension ||
             extension == Keire::MaterialLayerBlendAssetSourceExtension)

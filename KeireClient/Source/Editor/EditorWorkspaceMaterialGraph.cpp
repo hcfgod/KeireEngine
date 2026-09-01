@@ -167,6 +167,8 @@ std::optional<Keire::ShaderGraphDefinition> EditorWorkspaceLayer::ResolveReusabl
     {
         const auto& specification = m_AssetDatabase->Specification();
         const auto bytes = ReadBytes(specification.ProjectRoot / specification.SourceDirectory / record->RelativePath);
+        if (record->Type == Keire::ShaderSubgraphAsset::StaticType())
+            return Keire::ShaderSubgraphAsset::DecodeSource(bytes).Body;
         if (record->Type == Keire::MaterialFunctionAsset::StaticType())
             return Keire::MaterialFunctionAsset::DecodeSource(bytes).Body;
         if (record->Type == Keire::ShaderFunctionAsset::StaticType())
@@ -262,8 +264,8 @@ void EditorWorkspaceLayer::PersistMaterialGraph(const Keire::AssetId asset, cons
         throw std::runtime_error("The Asset Database is unavailable.");
     const auto record = m_AssetDatabase->Find(asset);
     if (!record || record->Type != Keire::MaterialGraphAsset::StaticType() ||
-        record->RelativePath.extension() != ".keirematerialgraph")
-        throw std::runtime_error("The edited Material Graph source is unavailable.");
+        record->RelativePath.extension().string() != Keire::MaterialAssetSourceExtension)
+        throw std::runtime_error("The edited Material source is unavailable.");
     const auto& specification = m_AssetDatabase->Specification();
     WriteBytesAtomically(specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
 }
@@ -274,8 +276,8 @@ void EditorWorkspaceLayer::OpenMaterialGraph(const Keire::AssetId asset)
         return;
     const auto record = m_AssetDatabase->Find(asset);
     if (!record || record->Type != Keire::MaterialGraphAsset::StaticType() ||
-        record->RelativePath.extension() != ".keirematerialgraph")
-        throw std::invalid_argument("Only .keirematerialgraph assets can be opened in the Material Graph editor.");
+        record->RelativePath.extension().string() != Keire::MaterialAssetSourceExtension)
+        throw std::invalid_argument("Only .keirematerial assets can be opened in the Material editor.");
     if (m_MaterialGraphDocument->Dirty() && m_MaterialGraphDocument->Asset() != asset)
         throw std::runtime_error("Save or discard the current Material Graph before opening another one.");
     m_SelectedAsset = asset;

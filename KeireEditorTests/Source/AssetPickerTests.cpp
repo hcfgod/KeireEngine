@@ -46,7 +46,7 @@ TEST_CASE("Asset picker resolves material authoring sources but hides Shader Gra
     Keire::AssetSourceRecord graph;
     graph.Id = Keire::AssetId::Generate();
     graph.Type = Keire::MaterialGraphAsset::StaticType();
-    graph.RelativePath = "Materials/Layered.keirematerialgraph";
+    graph.RelativePath = "Materials/Layered.keirematerial";
     const auto runtimeMaterial = Keire::AssetId::Generate();
     graph.SubAssets = {runtimeMaterial};
     Keire::AssetSourceRecord instance;

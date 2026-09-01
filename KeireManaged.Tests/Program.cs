@@ -2,7 +2,11 @@ var tests = new (string Name, Action Run)[]
 {
     ("Prefab assets expose typed stable identity", PrefabAssetMarkerContract),
     ("Unity-shaped object API replaces public handles and marker components", UnityShapedObjectApiContract),
-    ("Managed state v3 tags direct entity component and asset references", DirectReferenceStateContract),
+    ("Managed state v4 tags direct entity component and asset references", DirectReferenceStateContract),
+    ("Managed serialization v4 custom values migrate and invoke callbacks transactionally",
+     ManagedSerializationV4Tests.Run),
+    ("Runtime services order quarantine migrate and stop transactionally", RuntimeServiceTests.Run),
+    ("Native service contracts validate the bounded source-module ABI", NativeServiceContractTests.Run),
     ("Managed serialization v3 preserves graphs nested dictionaries and transactions", ManagedSerializationV3Tests.Run),
     ("Managed serialization v3 rejects exact boundary overflows atomically", ManagedSerializationV3BoundaryTests.Run),
     ("VFX ranges normalize and validate", VfxRangesNormalizeAndValidate),
@@ -128,9 +132,9 @@ static void DirectReferenceStateContract()
     source.SetReferences(entity, new Keire.AudioSource(entity), prefab);
 
     string state = Keire.ManagedStateSerializer.Capture(source, string.Empty, false);
-    Assert(state.Contains("\"Version\":3", StringComparison.Ordinal) ||
-               state.Contains("\"version\":3", StringComparison.Ordinal),
-           "Managed authoring state must use the v3 format while retaining direct reference records.");
+    Assert(state.Contains("\"Version\":4", StringComparison.Ordinal) ||
+               state.Contains("\"version\":4", StringComparison.Ordinal),
+           "Managed authoring state must use the v4 format while retaining direct reference records.");
     Assert(state.Contains("\"$ref\":\"entity\"", StringComparison.Ordinal) &&
                state.Contains("\"$ref\":\"component\"", StringComparison.Ordinal) &&
                state.Contains("\"$ref\":\"asset\"", StringComparison.Ordinal),

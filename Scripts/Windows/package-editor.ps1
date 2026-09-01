@@ -6,7 +6,8 @@ param(
     [switch]$CI,
     [switch]$Update,
     [switch]$Generate,
-    [switch]$AllowDirty
+    [switch]$AllowDirty,
+    [switch]$DevelopmentStage
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +24,7 @@ $installWorkerTarget = "$($Project.PROJECT_NAMESPACE)InstallWorker"
 Invoke-CheckedWindowsCommand {
     & (Join-Path $PSScriptRoot "package.ps1") -Generator $Generator -Configuration Dist `
         -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate `
-        -AllowDirty:$AllowDirty -StageOnly
+        -AllowDirty:($AllowDirty -or $DevelopmentStage) -StageOnly -DevelopmentStage:$DevelopmentStage
 } "Dist editor package gate"
 Invoke-CheckedWindowsCommand {
     & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration Dist `
@@ -43,14 +44,20 @@ $stage = Join-Path $distributionRoot $name
 $legacyStage = Join-Path $Root "Artifacts\$name"
 $archive = Join-Path $Root "Artifacts\$name.zip"
 $validationRoot = Join-Path $Root "Artifacts\$name-validation"
-Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $legacyStage -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $archive, "$archive.sha256" -Force -ErrorAction SilentlyContinue
+if (-not $DevelopmentStage) {
+    Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $legacyStage -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $archive, "$archive.sha256" -Force -ErrorAction SilentlyContinue
+}
 New-Item -ItemType Directory -Force $distributionRoot | Out-Null
 New-Item -ItemType Directory -Force $stage | Out-Null
 
 foreach ($directory in @("bin", "samples", "Docs")) {
-    Copy-Item -LiteralPath (Join-Path $sdkStage $directory) -Destination $stage -Recurse
+    $sourceDirectory = Join-Path $sdkStage $directory
+    $destinationDirectory = Join-Path $stage $directory
+    New-Item -ItemType Directory -Force $destinationDirectory | Out-Null
+    Get-ChildItem -LiteralPath $sourceDirectory -Force |
+        Copy-Item -Destination $destinationDirectory -Recurse -Force
 }
 Remove-Item -LiteralPath (Join-Path $stage "bin\$($Project.HUB_TARGET).exe"), `
     (Join-Path $stage "bin\$($Project.PROJECT_NAMESPACE)HubWorker.exe") -Force -ErrorAction SilentlyContinue
@@ -83,8 +90,10 @@ Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-
     -Destination (Join-Path $stage "Config\Marketplace")
 Copy-Item -LiteralPath (Join-Path $Root "Config\Marketplace\trusted-marketplace-keys.json") `
     -Destination (Join-Path $stage "Config\Marketplace")
-Copy-Item -LiteralPath (Join-Path $sdkStage "third-party\licenses") `
-    -Destination (Join-Path $stage "third-party") -Recurse
+$licenseDestination = Join-Path $stage "third-party\licenses"
+New-Item -ItemType Directory -Force $licenseDestination | Out-Null
+Get-ChildItem -LiteralPath (Join-Path $sdkStage "third-party\licenses") -Force |
+    Copy-Item -Destination $licenseDestination -Recurse -Force
 foreach ($file in @("README.md", "LICENSE.txt", "THIRD_PARTY_NOTICES.md", "build-manifest.json")) {
     Copy-Item -LiteralPath (Join-Path $sdkStage $file) -Destination $stage
 }
@@ -106,9 +115,16 @@ $dotnetDestination = Join-Path $stage "bin\Managed\Dotnet"
 if (-not (Test-Path -LiteralPath (Join-Path $dotnetSource "dotnet.exe") -PathType Leaf)) {
     throw "The bundled .NET SDK is missing: $dotnetSource"
 }
-Remove-Item -LiteralPath $dotnetDestination -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force $dotnetDestination | Out-Null
-Get-ChildItem -LiteralPath $dotnetSource -Force | Copy-Item -Destination $dotnetDestination -Recurse -Force
+$existingDotnetSdk = Get-ChildItem -LiteralPath (Join-Path $dotnetDestination "sdk") -Directory `
+    -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^10\.' } | Select-Object -First 1
+if (-not $DevelopmentStage -or -not $existingDotnetSdk) {
+    Remove-Item -LiteralPath $dotnetDestination -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force $dotnetDestination | Out-Null
+    Get-ChildItem -LiteralPath $dotnetSource -Force | Copy-Item -Destination $dotnetDestination -Recurse -Force
+}
+else {
+    Write-Host "==> Reusing the staged .NET SDK for development testing"
+}
 
 $sdkManifest = Get-Content -LiteralPath (Join-Path $stage "build-manifest.json") -Raw | ConvertFrom-Json
 if ($sdkManifest.configuration -ne "Dist" -or $sdkManifest.platform -ne "Windows") {
@@ -117,10 +133,31 @@ if ($sdkManifest.configuration -ne "Dist" -or $sdkManifest.platform -ne "Windows
 $playerSupportArchitecture = if ($Architecture -eq "ARM64") { "arm64" } else { "x86_64" }
 $playerSupportOutput = Join-Path $Root `
     "Build\PlayerSupport\editor-$playerSupportArchitecture-$($Project.PROJECT_VERSION)"
-Invoke-CheckedWindowsCommand {
-    & (Join-Path $PSScriptRoot "player-support.ps1") -Architecture $playerSupportArchitecture `
-        -OutputDirectory $playerSupportOutput -InstalledLayoutRoot (Join-Path $stage "bin\BuildSupport")
-} "Packaged Editor host Build Support generation"
+$playerSupportId = "windows-$playerSupportArchitecture-$($Project.PROJECT_VERSION)"
+$playerSupportRoot = Join-Path $stage "bin\BuildSupport"
+$playerSupportDestination = Join-Path $playerSupportRoot "$($Project.PROJECT_VERSION)\$playerSupportId"
+$playerSupportManifest = Join-Path $playerSupportDestination "manifest.json"
+$distRuntime = Join-Path $Root `
+    "Build\Bin\Dist-windows-$outputArchitecture\$($Project.PROJECT_NAMESPACE)Runtime\$($Project.PROJECT_NAMESPACE)Runtime.exe"
+$refreshPlayerSupport = -not $DevelopmentStage -or
+    -not (Test-Path -LiteralPath $playerSupportManifest -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $distRuntime -PathType Leaf) -or
+    (Get-Item -LiteralPath $distRuntime).LastWriteTimeUtc -gt
+        (Get-Item -LiteralPath $playerSupportManifest).LastWriteTimeUtc
+if ($refreshPlayerSupport) {
+    if ($DevelopmentStage -and (Test-Path -LiteralPath $playerSupportDestination -PathType Container)) {
+        Remove-KeireGeneratedDirectory -RepositoryRoot $Root -AllowedRoot $playerSupportRoot `
+            -Path $playerSupportDestination -Description "staged Editor Build Support layout"
+    }
+    Invoke-CheckedWindowsCommand {
+        & (Join-Path $PSScriptRoot "player-support.ps1") -Architecture $playerSupportArchitecture `
+            -OutputDirectory $playerSupportOutput -InstalledLayoutRoot $playerSupportRoot `
+            -Generator $Generator -Toolset $Toolset
+    } "Packaged Editor host Build Support generation"
+}
+else {
+    Write-Host "==> Reusing unchanged packaged Build Support for development testing"
+}
 $dotnetSdk = Get-ChildItem -LiteralPath (Join-Path $dotnetDestination "sdk") -Directory |
     Where-Object { $_.Name -match '^10\.' } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (-not $dotnetSdk) { throw "The bundled editor runtime does not contain the .NET 10 SDK." }
@@ -162,6 +199,14 @@ if ($editorVersion.ExitCode -ne 0 -or -not $editorVersion.StandardOutput.Contain
 $sdkList = (& (Join-Path $dotnetDestination "dotnet.exe") --list-sdks) -join "`n"
 if ($LASTEXITCODE -ne 0 -or -not $sdkList.Contains($dotnetSdk.Name)) {
     throw "Packaged .NET SDK validation failed."
+}
+
+if ($DevelopmentStage) {
+    Remove-Item -LiteralPath $sdkStage -Recurse -Force
+    Write-Host "==> Ready-to-run development Editor stage updated: $stage"
+    Write-Host "==> Launch with: $(Join-Path $stage 'Launch-KeireEditor.cmd')"
+    Write-Host "==> Run package-editor before release to recreate and validate the archive."
+    return
 }
 
 Compress-WindowsArchive (Join-Path $stage "*") $archive

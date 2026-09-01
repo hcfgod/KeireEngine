@@ -521,6 +521,9 @@ namespace Keire
                 commandLine.ExecutablePath.parent_path() / "Managed" / "Dotnet";
             specification.Scripting.ManagedApiAssembly =
                 ResolveManagedApiAssembly(commandLine.ExecutablePath, commandLine.ProjectPath);
+            const auto managedApiDirectory = specification.Scripting.ManagedApiAssembly.parent_path();
+            specification.Scripting.ManagedEditorApiAssembly = managedApiDirectory / "Keire.Editor.Managed.dll";
+            specification.Scripting.ManagedGeneratorAssembly = managedApiDirectory / "Keire.Managed.Generators.dll";
             specification.Physics.Mode = PhysicsMode::Enabled;
             specification.Audio.Mode = AudioMode::Enabled;
             try

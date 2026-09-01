@@ -49,7 +49,8 @@ namespace KeireEditor
             if (std::ranges::find(ElementNames, value) != ElementNames.end())
                 return "Kéire retained-UI element <" + std::string(value) + ">.";
             if (value == "id")
-                return "Stable asset ID. Keep it unique so bindings, selection, and live debugging remain stable.";
+                return "Optional stable element ID. Omit it to generate one automatically when source is applied; "
+                       "keep an explicit ID only when identity must be pinned for bindings or debugging.";
             if (value == "class")
                 return "Space-separated style classes matched by .class selectors.";
             if (value == "style")

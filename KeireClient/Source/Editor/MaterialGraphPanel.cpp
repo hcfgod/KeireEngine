@@ -54,6 +54,77 @@ namespace KeireEditor
                     return candidate;
             }
         }
+
+        [[nodiscard]] constexpr std::string_view MaterialDomainName(const Keire::MaterialDomain domain) noexcept
+        {
+            switch (domain)
+            {
+            case Keire::MaterialDomain::Surface:
+                return "Surface";
+            case Keire::MaterialDomain::Decal:
+                return "Decal";
+            case Keire::MaterialDomain::Volume:
+                return "Volume";
+            }
+            return "Material";
+        }
+
+        [[nodiscard]] constexpr std::string_view
+        MaterialShadingModelName(const Keire::MaterialShadingModel model) noexcept
+        {
+            switch (model)
+            {
+            case Keire::MaterialShadingModel::OpenPbrLit:
+                return "OpenPBR Lit";
+            case Keire::MaterialShadingModel::Unlit:
+                return "Unlit";
+            case Keire::MaterialShadingModel::Hair:
+                return "Hair";
+            case Keire::MaterialShadingModel::Eye:
+                return "Eye";
+            case Keire::MaterialShadingModel::Water:
+                return "Water";
+            case Keire::MaterialShadingModel::ThinTranslucent:
+                return "Thin Translucent";
+            case Keire::MaterialShadingModel::ParticipatingMedia:
+                return "Participating Media";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] constexpr std::string_view
+        MaterialAuthoringModeName(const Keire::MaterialAuthoringMode mode) noexcept
+        {
+            switch (mode)
+            {
+            case Keire::MaterialAuthoringMode::SimpleSurface:
+                return "Simple Surface";
+            case Keire::MaterialAuthoringMode::ClosureGraph:
+                return "Closure Graph";
+            case Keire::MaterialAuthoringMode::LayerStack:
+                return "Layer Stack";
+            }
+            return "Unknown";
+        }
+
+        [[nodiscard]] constexpr std::string_view DefaultParameterSymbol(const Keire::ShaderGraphValueType type) noexcept
+        {
+            switch (type)
+            {
+            case Keire::ShaderGraphValueType::Vector2:
+                return "Vector2";
+            case Keire::ShaderGraphValueType::Vector3:
+                return "Vector3";
+            case Keire::ShaderGraphValueType::Vector4:
+                return "Vector4";
+            case Keire::ShaderGraphValueType::Color:
+                return "BaseColor";
+            case Keire::ShaderGraphValueType::Texture2D:
+                return "Texture";
+            default:
+                return "Scalar";
+            }
+        }
     } // namespace
 
     void MaterialGraphPanel::Draw(Keire::UiFrame& ui)
@@ -63,7 +134,7 @@ namespace KeireEditor
             if (!m_Controller.MaterialGraphState().IsOpen())
             {
                 ui.TextColored(m_Controller.MaterialGraphTheme().MutedText,
-                               "Open a Material Graph asset to author a shader-backed material.");
+                               "Open a Material asset to author its surface program and parameters.");
                 return;
             }
             DrawHeader(ui);
@@ -167,58 +238,61 @@ namespace KeireEditor
                 m_Controller.RedoMaterialGraphEdit();
 
         const auto current = document.Definition().Shader;
-        auto shaderGraph =
-            current.Kind == Keire::MaterialShaderSourceKind::ShaderGraph ? current.Asset : Keire::AssetId{};
-        const AssetPickerOptions graphOptions{
-            .Label = "Shader Graph",
-            .ExpectedType = Keire::ShaderGraphAsset::StaticType(),
-            .Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealMaterialGraphAsset(asset); },
-            .AllowNone = false,
-        };
-        if (m_ShaderGraphPicker.Draw(ui, m_Controller.MaterialGraphAssetRecords(), shaderGraph, graphOptions) &&
-            shaderGraph)
+        if (current.Asset)
         {
-            try
+            auto shaderGraph =
+                current.Kind == Keire::MaterialShaderSourceKind::ShaderGraph ? current.Asset : Keire::AssetId{};
+            const AssetPickerOptions graphOptions{
+                .Label = "Compatibility Shader Graph",
+                .ExpectedType = Keire::ShaderGraphAsset::StaticType(),
+                .Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealMaterialGraphAsset(asset); },
+                .AllowNone = false,
+            };
+            if (m_ShaderGraphPicker.Draw(ui, m_Controller.MaterialGraphAssetRecords(), shaderGraph, graphOptions) &&
+                shaderGraph)
             {
-                Keire::MaterialShaderReference replacement;
-                replacement.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
-                replacement.Asset = shaderGraph;
-                (void)document.SetShader(std::move(replacement));
+                try
+                {
+                    Keire::MaterialShaderReference replacement;
+                    replacement.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+                    replacement.Asset = shaderGraph;
+                    (void)document.SetShader(std::move(replacement));
+                }
+                catch (const std::exception& error)
+                {
+                    Report(error.what());
+                }
             }
-            catch (const std::exception& error)
-            {
-                Report(error.what());
-            }
-        }
 
-        auto rawShader =
-            current.Kind == Keire::MaterialShaderSourceKind::ShaderAsset ? current.Asset : Keire::AssetId{};
-        const AssetPickerOptions rawOptions{
-            .Label = "Raw Shader",
-            .ExpectedType = Keire::ShaderAsset::StaticType(),
-            .Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealMaterialGraphAsset(asset); },
-            .AllowNone = false,
-        };
-        if (m_RawShaderPicker.Draw(ui, m_Controller.MaterialGraphAssetRecords(), rawShader, rawOptions) && rawShader)
-        {
-            try
+            auto rawShader =
+                current.Kind == Keire::MaterialShaderSourceKind::ShaderAsset ? current.Asset : Keire::AssetId{};
+            const AssetPickerOptions rawOptions{
+                .Label = "Compatibility Raw Shader",
+                .ExpectedType = Keire::ShaderAsset::StaticType(),
+                .Reveal = [this](const Keire::AssetId asset) { m_Controller.RevealMaterialGraphAsset(asset); },
+                .AllowNone = false,
+            };
+            if (m_RawShaderPicker.Draw(ui, m_Controller.MaterialGraphAssetRecords(), rawShader, rawOptions) &&
+                rawShader)
             {
-                Keire::MaterialShaderReference replacement;
-                replacement.Kind = Keire::MaterialShaderSourceKind::ShaderAsset;
-                replacement.Asset = rawShader;
-                (void)document.SetShader(std::move(replacement));
-            }
-            catch (const std::exception& error)
-            {
-                Report(error.what());
+                try
+                {
+                    Keire::MaterialShaderReference replacement;
+                    replacement.Kind = Keire::MaterialShaderSourceKind::ShaderAsset;
+                    replacement.Asset = rawShader;
+                    (void)document.SetShader(std::move(replacement));
+                }
+                catch (const std::exception& error)
+                {
+                    Report(error.what());
+                }
             }
         }
-        ui.TextColored(
-            theme.MutedText,
-            hasSurfaceExpressions
-                ? "Legacy surface expressions are preserved for migration; new shader logic belongs in "
-                  "Shader Graph."
-                : "Shader Graph owns executable surface logic; Material Graph binds its exposed parameters.");
+        const auto materialSummary = std::string(MaterialDomainName(document.Definition().Domain)) + "  |  " +
+                                     std::string(MaterialShadingModelName(document.Definition().ShadingModel)) +
+                                     "  |  " +
+                                     std::string(MaterialAuthoringModeName(document.Definition().AuthoringMode));
+        ui.TextColored(theme.MutedText, materialSummary);
         ui.SameLine();
         if (ui.Button(m_ShowPreview ? "Hide Preview" : "Show Preview"))
             m_ShowPreview = !m_ShowPreview;
@@ -275,13 +349,18 @@ namespace KeireEditor
             try
             {
                 EnsureJobScope();
-                const auto shaderTemplate = m_Controller.ResolveMaterialGraphTemplate(document.Definition().Shader);
-                if (!shaderTemplate)
-                    throw std::runtime_error("Select a Shader Graph template to enable the live material preview.");
-                auto composed = Keire::ComposeMaterialGraphShader(document.Definition(), *shaderTemplate);
-                composed =
-                    Keire::ExpandShaderGraphFunctions(composed, [this](const Keire::AssetId asset)
-                                                      { return m_Controller.ResolveMaterialGraphFunction(asset); });
+                auto composed = document.Definition().SurfaceGraph;
+                if (document.Definition().Shader.Asset)
+                {
+                    const auto shaderTemplate = m_Controller.ResolveMaterialGraphTemplate(document.Definition().Shader);
+                    if (!shaderTemplate)
+                        throw std::runtime_error("The compatibility Shader Graph template is unavailable.");
+                    composed = Keire::ComposeMaterialGraphShader(document.Definition(), *shaderTemplate);
+                }
+                if (!Keire::ShaderGraphReferencedAssets(composed).empty())
+                    composed =
+                        Keire::ExpandShaderGraphFunctions(composed, [this](const Keire::AssetId asset)
+                                                          { return m_Controller.ResolveMaterialGraphFunction(asset); });
                 std::vector<ShaderGraphPreviewTexture> textures;
                 bool waitingForTexture = false;
                 const auto addTexture =
@@ -393,12 +472,76 @@ namespace KeireEditor
                                                         const Keire::ShaderGraphNode* compatibleNode,
                                                         const Keire::ShaderGraphPin* compatiblePin)
     {
-        (void)position;
-        (void)compatibleNode;
-        (void)compatiblePin;
-        ui.TextColoredWrapped(m_Controller.MaterialGraphTheme().MutedText,
-                              "Shader Graph owns executable shader logic. Add or edit exposed parameters in the "
-                              "selected Shader Graph, then use Add Override here to set material values.");
+        const auto compatible = [&](const Keire::ShaderGraphNode& candidate)
+        {
+            if (compatiblePin)
+                return std::ranges::any_of(candidate.Pins, [&](const Keire::ShaderGraphPin& pin)
+                                           { return ShaderGraphPinsCanConnect(*compatiblePin, pin); });
+            return !compatibleNode || ShaderGraphNodesCanConnect(*compatibleNode, candidate);
+        };
+        for (const auto& descriptor : Keire::ShaderGraphNodeCatalog())
+        {
+            if (!descriptor.UserCreatable || descriptor.Kind == Keire::ShaderGraphNodeKind::Master ||
+                descriptor.Kind == Keire::ShaderGraphNodeKind::Keyword ||
+                descriptor.Kind == Keire::ShaderGraphNodeKind::Custom)
+                continue;
+            auto node = Keire::CreateShaderGraphNode(descriptor.TypeId, descriptor.DefaultValueType);
+            if (!compatible(node))
+                continue;
+            const auto label = std::string(descriptor.Category) + " / " + std::string(descriptor.DisplayName);
+            if (!ui.MenuItem(label))
+                continue;
+            if (descriptor.Kind == Keire::ShaderGraphNodeKind::Parameter)
+            {
+                node.Symbol = UniqueExpressionSymbol(m_Controller.MaterialGraphState().Definition(),
+                                                     DefaultParameterSymbol(descriptor.DefaultValueType));
+                node.Name = node.Symbol;
+            }
+            node.EditorPosition = position.value_or(Keire::Vector2{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
+                                                                   -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()});
+            const auto nodeId = node.Id;
+            try
+            {
+                if (m_Controller.MaterialGraphState().AddExpressionNode(std::move(node)))
+                    m_SelectedNode = nodeId;
+            }
+            catch (const std::exception& error)
+            {
+                Report(error.what());
+                return false;
+            }
+            ui.CloseCurrentPopup();
+            return true;
+        }
+        for (const auto& record : m_Controller.MaterialGraphAssetRecords())
+        {
+            const bool reusable = record.Type == Keire::ShaderSubgraphAsset::StaticType() ||
+                                  record.Type == Keire::MaterialFunctionAsset::StaticType() ||
+                                  record.Type == Keire::ShaderFunctionAsset::StaticType() ||
+                                  record.Type == Keire::MaterialLayerAsset::StaticType() ||
+                                  record.Type == Keire::MaterialLayerBlendAsset::StaticType();
+            if (!reusable || record.Id == m_Controller.MaterialGraphState().Asset())
+                continue;
+            try
+            {
+                const auto function = m_Controller.ResolveMaterialGraphFunction(record.Id);
+                if (!function)
+                    continue;
+                const auto candidate = Keire::CreateShaderGraphFunctionCallNode(record.Id, *function);
+                if (!compatible(candidate))
+                    continue;
+                const auto label = "Subgraphs / " + record.RelativePath.stem().string();
+                if (ui.MenuItem(label) && AddFunctionNode(record.Id, record.RelativePath.stem().string(), position))
+                {
+                    ui.CloseCurrentPopup();
+                    return true;
+                }
+            }
+            catch (const std::exception&)
+            {
+                // A stale or invalid subgraph is omitted from the compatible palette until its import recovers.
+            }
+        }
         return false;
     }
 
@@ -423,7 +566,11 @@ namespace KeireEditor
         }
         ApplyNodeGraphAnnotations(document.Definition().Authoring, model.NodeIdentities, model.Nodes);
         auto comments = BuildNodeGraphCommentModel(document.Definition().Authoring, model.NodeIdentities);
-        if (auto combo = ui.BeginCombo("Add Override", "Choose Shader Graph parameter..."); combo)
+        if (auto combo = ui.BeginCombo("Add Node", "Choose material node..."); combo)
+            if (DrawExpressionCreationMenu(ui, std::nullopt))
+                return;
+        ui.SameLine();
+        if (auto combo = ui.BeginCombo("Add Override", "Choose compatibility parameter..."); combo)
             for (const auto& property : document.Definition().Properties)
                 if (ui.Selectable(property.Name, false))
                 {

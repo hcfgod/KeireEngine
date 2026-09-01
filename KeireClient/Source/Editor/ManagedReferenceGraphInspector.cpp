@@ -697,6 +697,14 @@ namespace KeireEditor
         case Keire::ManagedAssetPropertyKind::Text:
             changed = m_Ui.InputText(label, std::get<std::string>(node.Value));
             break;
+        case Keire::ManagedAssetPropertyKind::CustomValue:
+        {
+            auto candidate = std::get<std::string>(node.Value);
+            changed = m_Ui.InputTextMultiline(label, candidate, 6);
+            if (changed)
+                node = Keire::DecodeManagedAssetValue(candidate, property);
+            break;
+        }
         case Keire::ManagedAssetPropertyKind::Vector2:
             changed = m_Ui.DragVector2(label, std::get<Keire::Vector2>(node.Value));
             break;

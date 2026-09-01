@@ -1,6 +1,6 @@
 # Serialization And The Inspector
 
-Kéire writes managed-state format v3 and retains readers for v1 and v2 state. State is attached to a behaviour,
+Kéire writes managed-state format v4 and retains readers for v1, v2, and v3 state. State is attached to a behaviour,
 prefab, scene, or persistent managed-data asset; the Inspector edits the same stable-field representation used by
 save/load, duplication, prefab instantiation, hot reload, undo/redo, and Play Mode Changes.
 
@@ -42,6 +42,7 @@ part of normal control flow.
   references;
 - recursively nested one-dimensional arrays, exact `List<T>`, and exact `Dictionary<TKey, TValue>` values;
 - `KeireEvent` values.
+- exact custom atomic types registered with `ManagedValueConverter<T>`.
 
 Dictionary keys must be strings, booleans, characters, integers, enums, or `Guid` values. Custom comparers,
 multidimensional arrays, and custom collection implementations are rejected. Unsupported fields produce a
@@ -90,7 +91,7 @@ public sealed class Encounter : Behaviour
 }
 ```
 
-The v3 document contains one object table and a stable root map for all `[SerializeReference]` fields. It therefore
+The v4 document contains one object table and a stable root map for all `[SerializeReference]` fields. It therefore
 preserves aliases and cycles both within one root and across distinct root fields; no arbitrary assembly-qualified type
 names are loaded from data. The accepted managed generation freezes one serialized-type registry from its locked
 assembly-load context after the engine, locked packages, and project assemblies have loaded. State persistence,
@@ -159,9 +160,21 @@ public sealed class Door : Behaviour
 ```
 
 Preserve the field ID when renaming a field without changing its meaning. Give a replacement meaning a new ID. The
-v1/v2 readers recognize historical field aliases and old entity/asset-reference records; the next save writes
-canonical v3. ScriptableObject fields without this attribute receive a deterministic ID derived from the asset type and field
+v1–v3 readers recognize historical field aliases, old entity/asset-reference records, and earlier graph documents; the
+next explicit authoring save or cook writes canonical v4. ScriptableObject fields without this attribute receive a deterministic ID derived from the asset type and field
 path for Unity-style initial authoring. Add an explicit ID before renaming a field in persistent production data.
+
+## Custom Atomic Values And Callbacks
+
+`ManagedValueConverter<T>` supports exact types that should serialize as one value. Register it with
+`[CustomManagedValueConverter(typeof(T), stableId, version)]`. Its `ManagedSerializedValue` payload may contain only
+bounded scalar, list, and string-keyed map values and cannot conceal an engine reference. Old codec versions advance
+through unique contiguous Runtime-assembly `IManagedValueMigration` edges. Migration and callback failures operate on
+staged documents/graphs and preserve the live state.
+
+Implement `ISerializationCallbackReceiver` for deterministic root-first `OnBeforeSerialize` and
+`OnAfterDeserialize` callbacks. Override `Behaviour.OnValidate` for Editor-authored validation. These callbacks run on
+the managed owner thread, revalidation follows the callback, and an exception rejects the complete candidate.
 
 ## Reference Records
 

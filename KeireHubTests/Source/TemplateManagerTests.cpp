@@ -277,7 +277,7 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/"
                                                        "SG_01_StudioPaint.keireshadergraph"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/"
-                                                       "MG_12_IridescentShield.keirematerialgraph"));
+                                                       "MG_12_IridescentShield.keirematerial"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Vfx/ArcaneNova.keirevfx"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scripts/Runtime/FirstPersonCamera.cs"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs"));

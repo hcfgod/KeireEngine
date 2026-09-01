@@ -838,6 +838,7 @@ internal static class ManagedReferenceGraphCodec
     }
 
     private static bool IsScalar(Type type) =>
+        ManagedCustomValueRegistry.TryResolve(type, out _) ||
         type == typeof(bool) || type == typeof(sbyte) || type == typeof(byte) || type == typeof(short) ||
         type == typeof(ushort) || type == typeof(int) || type == typeof(uint) || type == typeof(long) ||
         type == typeof(ulong) || type == typeof(char) || type == typeof(float) || type == typeof(double) ||

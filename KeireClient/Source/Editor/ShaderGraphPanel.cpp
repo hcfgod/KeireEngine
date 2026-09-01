@@ -672,7 +672,8 @@ namespace KeireEditor
         std::vector<const Keire::AssetSourceRecord*> reusableGraphs;
         for (const auto& record : m_Controller.ShaderGraphAssetRecords())
         {
-            const bool reusable = record.Type == Keire::MaterialFunctionAsset::StaticType() ||
+            const bool reusable = record.Type == Keire::ShaderSubgraphAsset::StaticType() ||
+                                  record.Type == Keire::MaterialFunctionAsset::StaticType() ||
                                   record.Type == Keire::ShaderFunctionAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerBlendAsset::StaticType();

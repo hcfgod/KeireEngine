@@ -152,6 +152,10 @@ namespace Keire
         void InstallManagedAssetGeneration(Coral::Type& nativeRuntime, const std::uint64_t generation);
         void ResetManagedAssetGeneration(const Coral::Type* nativeRuntime, const std::uint64_t generation) noexcept;
         void ReleaseManagedAssetGenerationServices(const std::uint64_t generation) noexcept;
+        void CancelManagedExtensionGeneration(const Coral::Type* runtimeServices, const Coral::Type* editorExtensions,
+                                              std::uint64_t generation) noexcept;
+        void ShutdownManagedExtensionGeneration(const Coral::Type* runtimeServices, const Coral::Type* editorExtensions,
+                                                std::uint64_t generation) noexcept;
         void ResumeGenerationSequence();
 
         [[nodiscard]] std::filesystem::path FindManagedApiProject() const;
@@ -675,6 +679,8 @@ namespace Keire
         std::filesystem::path OutputRoot;
         std::filesystem::path Dotnet;
         std::filesystem::path ManagedApi;
+        std::filesystem::path ManagedEditorApi;
+        std::filesystem::path ManagedGenerator;
         mutable std::mutex Mutex;
         mutable std::condition_variable StatusChanged;
         ManagedBuildStatus Status;
@@ -691,6 +697,10 @@ namespace Keire
         std::map<ManagedTypeId, const Coral::Type*> CandidateManagedAssetRuntimeTypes;
         const Coral::Type* ActiveNativeRuntimeType = nullptr;
         const Coral::Type* CandidateNativeRuntimeType = nullptr;
+        const Coral::Type* ActiveRuntimeServiceBridgeType = nullptr;
+        const Coral::Type* CandidateRuntimeServiceBridgeType = nullptr;
+        const Coral::Type* ActiveEditorExtensionBridgeType = nullptr;
+        const Coral::Type* CandidateEditorExtensionBridgeType = nullptr;
         Ref<AssetSystem> Assets;
         std::mutex ManagedAssetMutex;
         std::map<AssetId, PendingManagedAssetLoad> PendingManagedAssetLoads;

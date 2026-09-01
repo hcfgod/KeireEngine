@@ -32,7 +32,7 @@ TEST_CASE("Shader Graph schema three migrates without disturbing topology and cu
     CHECK(migrated.Authoring == Keire::GraphAuthoringMetadata{});
     const auto saved = Parse(Keire::ShaderGraphAsset::EncodeSource(migrated));
     CHECK(saved.at("schemaVersion") == 6);
-    CHECK(saved.at("target") == static_cast<std::uint8_t>(Keire::ShaderGraphTarget::LegacySurface));
+    CHECK(saved.at("target") == static_cast<std::uint8_t>(Keire::ShaderGraphTarget::Material));
     CHECK(saved.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
     CHECK(saved.contains("authoring"));
 }

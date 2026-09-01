@@ -134,12 +134,12 @@ internal static class ManagedSerializationV3Tests
             System.Text.Json.Nodes.JsonObject retained = migratedDocument["Fields"]!.AsArray()
                 .Select(node => node!.AsObject())
                 .Single(field => field["Name"]!.GetValue<string>() == "LegacyOnly");
-            Assert(migratedDocument["Version"]!.GetValue<int>() == 3 &&
+            Assert(migratedDocument["Version"]!.GetValue<int>() == 4 &&
                        retained["StableId"]!.GetValue<string>() == string.Empty &&
                        retained["Type"]!.GetValue<string>() == "System.Int32" &&
                        retained["Aliases"]!.AsArray().Count == 0 && retained["Value"]!.GetValue<int>() == 41 &&
                        !retained.ContainsKey("ReferenceGraphRoot"),
-                   $"Managed state v{version} unknown fields must survive canonical v3 capture unchanged.");
+                   $"Managed state v{version} unknown fields must survive canonical v4 capture unchanged.");
 
             var restored = new ManagedSerializationV3Probe { Count = -1 };
             _ = Keire.ManagedStateSerializer.Restore(restored, migrated, false);
@@ -152,7 +152,7 @@ internal static class ManagedSerializationV3Tests
                 .Select(node => node!.AsObject())
                 .Single(field => field["Name"]!.GetValue<string>() == "LegacyOnly");
             Assert(System.Text.Json.Nodes.JsonNode.DeepEquals(retained, recapturedUnknown),
-                   "Restoring and recapturing v3 state must preserve retained unknown field payloads exactly.");
+                   "Restoring and recapturing v4 state must preserve retained unknown field payloads exactly.");
         }
     }
 

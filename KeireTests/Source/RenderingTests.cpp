@@ -569,7 +569,7 @@ TEST_CASE("material overrides are validated against shader declarations")
 
 TEST_CASE("sandbox monster material binds dedicated color normal metallic and roughness sources")
 {
-    const auto source = ReadTestBytes("Samples/KeireSandbox/Assets/Materials/Monster1.keirematerial");
+    const auto source = ReadTestBytes("Samples/KeireSandbox/Assets/Materials/Monster1.keiremateriallegacy");
     const auto definition = Keire::MaterialAsset::DecodeSource(source);
     const auto baseColor = Keire::AssetId::Parse("38760a1d-9dfa-4bbc-8ba1-50921ae9d748");
     const auto normal = Keire::AssetId::Parse("0a8ba309-c28a-4842-8949-09ff8c60a1fa");

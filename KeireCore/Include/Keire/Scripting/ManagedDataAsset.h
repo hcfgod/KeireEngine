@@ -19,7 +19,7 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t ManagedDataSchemaVersion = 3;
+    inline constexpr std::uint32_t ManagedDataSchemaVersion = 4;
 
     class KEIRE_API ManagedTypeId final
     {
@@ -57,7 +57,8 @@ namespace Keire
         Array,
         List,
         AssetReference,
-        Dictionary
+        Dictionary,
+        CustomValue
     };
 
     struct ManagedAssetPropertyDescriptor
@@ -82,6 +83,8 @@ namespace Keire
         std::uint32_t TextLines = 1;
         bool ReferenceGraph = false;
         std::vector<ManagedTypeId> ReferenceTypeChoices;
+        std::optional<ManagedTypeId> CustomValueTypeId;
+        std::uint32_t CustomValueVersion = 0;
 
         [[nodiscard]] bool operator==(const ManagedAssetPropertyDescriptor&) const = default;
     };

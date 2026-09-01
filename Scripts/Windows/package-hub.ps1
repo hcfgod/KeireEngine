@@ -7,7 +7,8 @@ param(
     [switch]$Update,
     [switch]$Generate,
     [switch]$AllowDirty,
-    [switch]$StageOnly
+    [switch]$StageOnly,
+    [switch]$DevelopmentStage
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,7 +22,9 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $hubWorkerTarget = "$($Project.PROJECT_NAMESPACE)HubWorker"
 $installWorkerTarget = "$($Project.PROJECT_NAMESPACE)InstallWorker"
-$worktreePolicy = Get-WindowsPackageWorktreePolicy -Root $Root -AllowDirty:$AllowDirty -CI:$CI
+if ($DevelopmentStage -and $CI) { throw "Development staging is not a CI release gate." }
+$effectiveAllowDirty = $AllowDirty -or $DevelopmentStage
+$worktreePolicy = Get-WindowsPackageWorktreePolicy -Root $Root -AllowDirty:$effectiveAllowDirty -CI:$CI
 
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build-info.ps1") } "Build metadata generation"
 Invoke-CheckedWindowsCommand {
@@ -70,7 +73,9 @@ foreach ($path in @($stage, $validationRoot)) {
     }
 }
 Remove-Item -LiteralPath $stage, $validationRoot -Recurse -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $archive, "$archive.sha256" -Force -ErrorAction SilentlyContinue
+if (-not $DevelopmentStage) {
+    Remove-Item -LiteralPath $archive, "$archive.sha256" -Force -ErrorAction SilentlyContinue
+}
 New-Item -ItemType Directory -Force $distributionRoot, (Join-Path $Root "Artifacts"), `
     (Join-Path $stage "bin"), (Join-Path $stage "Config\Branding"), `
     (Join-Path $stage "Config\Marketplace"), `
@@ -226,8 +231,18 @@ if ($workerHelp.ExitCode -ne 0 -or -not $workerHelp.StandardOutput.Contains("--r
 }
 
 if ($StageOnly) {
-    Write-Host "==> Standalone Hub package stage created: $stage"
-    exit 0
+    $stageDescription = if ($DevelopmentStage) {
+        "Ready-to-run development Hub stage updated"
+    }
+    else {
+        "Standalone Hub package stage created"
+    }
+    Write-Host "==> $stageDescription`: $stage"
+    if ($DevelopmentStage) {
+        Write-Host "==> Launch with: $(Join-Path $stage 'Launch-KeireHub.cmd')"
+        Write-Host "==> Run package-hub before release to recreate and validate the archive."
+    }
+    return
 }
 
 Compress-WindowsArchive (Join-Path $stage "*") $archive

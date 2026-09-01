@@ -2,6 +2,11 @@ local repositoryRoot = path.getabsolute("../..")
 local managedProject = path.join(repositoryRoot, "KeireManaged/Keire.Managed.csproj")
 local managedSourceRoot = path.join(repositoryRoot, "KeireManaged")
 local managedOutput = path.join(repositoryRoot, "Build/Managed/Keire.Managed.dll")
+local managedEditorProject = path.join(repositoryRoot, "KeireEditorManaged/Keire.Editor.Managed.csproj")
+local managedEditorSourceRoot = path.join(repositoryRoot, "KeireEditorManaged")
+local managedEditorOutput = path.join(repositoryRoot, "Build/Managed/Keire.Editor.Managed.dll")
+local managedGeneratorSourceRoot = path.join(repositoryRoot, "KeireManaged.Generators")
+local managedGeneratorOutput = path.join(repositoryRoot, "Build/Managed/Keire.Managed.Generators.dll")
 local windowsManagedScript = path.join(repositoryRoot, "Scripts/Windows/build-managed.ps1")
 local unixManagedScript = path.join(repositoryRoot, "Scripts/Unix/build-managed.sh")
 local managedBuildInputs = {}
@@ -27,14 +32,19 @@ end
 -- Visual Studio rejects directories as custom-build file dependencies; the repository launcher regenerates its project
 -- inventory before every normal build. The proxy uses a distinct name so Ninja never confuses the source directory
 -- with the project phony target.
+local managedSourceRoots = { managedSourceRoot, managedEditorSourceRoot, managedGeneratorSourceRoot }
 if _ACTION == "ninja" then
-    addManagedBuildInput(managedSourceRoot)
-    for _, directory in ipairs(os.matchdirs(path.join(managedSourceRoot, "**"))) do
-        addManagedBuildInput(directory)
+    for _, sourceRoot in ipairs(managedSourceRoots) do
+        addManagedBuildInput(sourceRoot)
+        for _, directory in ipairs(os.matchdirs(path.join(sourceRoot, "**"))) do
+            addManagedBuildInput(directory)
+        end
     end
 end
-for _, source in ipairs(os.matchfiles(path.join(managedSourceRoot, "**.cs"))) do
-    addManagedBuildInput(source)
+for _, sourceRoot in ipairs(managedSourceRoots) do
+    for _, source in ipairs(os.matchfiles(path.join(sourceRoot, "**.cs"))) do
+        addManagedBuildInput(source)
+    end
 end
 table.sort(managedBuildInputs)
 
@@ -48,26 +58,30 @@ function AddKeireManagedRuntimeDependency()
     end
 end
 
-function AddKeireManagedHostStaging()
+function AddKeireManagedHostStaging(includeEditorApi)
     if _ACTION == "ninja" then
         return
     end
 
     local commandRepositoryRoot = _ACTION == "gmake" and "." or ".."
+    local editorApiSwitch = includeEditorApi and " -IncludeEditorApi" or ""
+    local editorApiArgument = includeEditorApi and " true" or " false"
 
     filter "system:windows"
         postbuildcommands
         {
             'powershell -NoProfile -ExecutionPolicy Bypass -File "' .. commandRepositoryRoot ..
                 '/Scripts/Windows/stage-managed-host.ps1" -Root "' .. commandRepositoryRoot ..
-                '" -Configuration "%{cfg.buildcfg}" -Architecture "%{cfg.architecture}" -Target "%{prj.name}"'
+                '" -Configuration "%{cfg.buildcfg}" -Architecture "%{cfg.architecture}" -Target "%{prj.name}"' ..
+                editorApiSwitch
         }
 
     filter { "system:linux or macosx" }
         postbuildcommands
         {
             'bash "' .. commandRepositoryRoot .. '/Scripts/Unix/stage-managed-host.sh" "' ..
-                commandRepositoryRoot .. '" "%{cfg.buildcfg}" "%{cfg.system}" "%{cfg.architecture}" "%{prj.name}"'
+                commandRepositoryRoot .. '" "%{cfg.buildcfg}" "%{cfg.system}" "%{cfg.architecture}" "%{prj.name}"' ..
+                editorApiArgument
         }
 
     filter {}
@@ -89,13 +103,21 @@ project(KeireManagedProject)
     {
         "ManagedBuildAnchor.cpp",
         "../../KeireManaged/**.cs",
-        "../../KeireManaged/**.csproj"
+        "../../KeireManaged/**.csproj",
+        "../../KeireEditorManaged/**.cs",
+        "../../KeireEditorManaged/**.csproj",
+        "../../KeireManaged.Generators/**.cs",
+        "../../KeireManaged.Generators/**.csproj"
     }
 
     removefiles
     {
         "../../KeireManaged/bin/**",
-        "../../KeireManaged/obj/**"
+        "../../KeireManaged/obj/**",
+        "../../KeireEditorManaged/bin/**",
+        "../../KeireEditorManaged/obj/**",
+        "../../KeireManaged.Generators/bin/**",
+        "../../KeireManaged.Generators/obj/**"
     }
 
     filter { "files:**.csproj", "system:windows" }
@@ -116,7 +138,7 @@ project(KeireManagedProject)
     filter "files:**.csproj"
         buildmessage "Building managed runtime API"
         buildinputs(managedBuildInputs)
-        buildoutputs { managedOutput }
+        buildoutputs { managedOutput, managedEditorOutput, managedGeneratorOutput }
         linkbuildoutputs "Off"
 
     filter {}

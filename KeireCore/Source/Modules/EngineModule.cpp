@@ -63,6 +63,68 @@ namespace Keire
         {
             return "module." + std::string(moduleId);
         }
+
+        [[nodiscard]] bool ValidManagedBindingId(const std::string_view value)
+        {
+            if (value.size() != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-')
+                return false;
+            return std::ranges::all_of(
+                value,
+                [index = std::size_t{0}](const char character) mutable
+                {
+                    const bool separator = index == 8 || index == 13 || index == 18 || index == 23;
+                    ++index;
+                    return separator ? character == '-' : std::isxdigit(static_cast<unsigned char>(character)) != 0;
+                });
+        }
+
+        [[nodiscard]] bool ValidManagedBindingKind(const ManagedBindingValueKind value) noexcept
+        {
+            return value >= ManagedBindingValueKind::Void && value <= ManagedBindingValueKind::StructuredResult;
+        }
+
+        void ValidateManagedService(ManagedServiceDescriptor& service)
+        {
+            if (!ValidManagedBindingId(service.StableId) || service.AbiVersion == 0 || service.Methods.empty() ||
+                service.Methods.size() > 4096)
+                throw std::invalid_argument("Managed source-module service descriptor is invalid.");
+            service.StableId = AssetId::Parse(service.StableId).ToString();
+            std::ranges::sort(service.Methods, {}, &ManagedBindingMethodDescriptor::StableId);
+            std::set<std::string, std::less<>> methodIds;
+            for (auto& method : service.Methods)
+            {
+                if (!ValidManagedBindingId(method.StableId))
+                    throw std::invalid_argument("Managed source-module method descriptor is invalid.");
+                method.StableId = AssetId::Parse(method.StableId).ToString();
+                if (method.AbiVersion == 0 || !methodIds.insert(method.StableId).second ||
+                    method.Parameters.size() > 256 || !ValidManagedBindingKind(method.Result) ||
+                    !ValidManagedBindingKind(method.StructuredResult) ||
+                    method.ThreadAffinity > ManagedBindingThreadAffinity::MainThread ||
+                    method.Result == ManagedBindingValueKind::BoundedBuffer ||
+                    (method.Result == ManagedBindingValueKind::StructuredResult &&
+                     (method.StructuredResult == ManagedBindingValueKind::Void ||
+                      method.StructuredResult == ManagedBindingValueKind::BoundedBuffer ||
+                      method.StructuredResult == ManagedBindingValueKind::StructuredResult)) ||
+                    (method.Result != ManagedBindingValueKind::StructuredResult &&
+                     method.StructuredResult != ManagedBindingValueKind::Void))
+                    throw std::invalid_argument("Managed source-module method descriptor is invalid.");
+                std::set<std::string, std::less<>> parameterNames;
+                for (const auto& parameter : method.Parameters)
+                {
+                    const bool buffer = parameter.Kind == ManagedBindingValueKind::BoundedBuffer;
+                    if (parameter.Name.empty() || !parameterNames.insert(parameter.Name).second ||
+                        !ValidManagedBindingKind(parameter.Kind) || !ValidManagedBindingKind(parameter.ElementKind) ||
+                        parameter.Kind == ManagedBindingValueKind::Void ||
+                        (buffer && (parameter.ElementKind == ManagedBindingValueKind::Void ||
+                                    parameter.ElementKind == ManagedBindingValueKind::BoundedBuffer ||
+                                    parameter.ElementKind == ManagedBindingValueKind::StructuredResult ||
+                                    parameter.MaximumElements == 0 || parameter.MaximumElements > 65536)) ||
+                        (!buffer &&
+                         (parameter.ElementKind != ManagedBindingValueKind::Void || parameter.MaximumElements != 0)))
+                        throw std::invalid_argument("Managed source-module parameter descriptor is invalid.");
+                }
+            }
+        }
     } // namespace
 
     ModuleVersion ModuleVersion::Parse(const std::string_view value)
@@ -164,6 +226,7 @@ namespace Keire
         std::vector<DiagnosticDefinition> Diagnostics;
         std::vector<ProjectUpgradeStep> ProjectUpgrades;
         std::vector<ModuleMemoryDomainRegistration> MemoryDomains;
+        std::vector<ManagedServiceDescriptor> ManagedServices;
         std::string CurrentModule;
         bool Open = true;
     };
@@ -223,6 +286,14 @@ namespace Keire
         if (!m_Impl->Open)
             throw std::logic_error("Module registration is frozen.");
         m_Impl->MemoryDomains.push_back(std::move(domain));
+    }
+
+    void ModuleRegistrationContext::RegisterManagedService(ManagedServiceDescriptor service)
+    {
+        if (!m_Impl->Open)
+            throw std::logic_error("Module registration is frozen.");
+        ValidateManagedService(service);
+        m_Impl->ManagedServices.push_back(std::move(service));
     }
 
     EngineModule::~EngineModule() = default;
@@ -309,6 +380,9 @@ namespace Keire
             RequireUnique(
                 Registrations->ProjectUpgrades, [](const auto& value) { return value.Id; }, "project upgrade");
             RequireUnique(Registrations->MemoryDomains, [](const auto& value) { return value.Name; }, "memory domain");
+            RequireUnique(
+                Registrations->ManagedServices, [](const auto& value) { return value.StableId; }, "managed service");
+            std::ranges::sort(Registrations->ManagedServices, {}, &ManagedServiceDescriptor::StableId);
         }
 
         void CompleteReplayRegistrations()
@@ -437,6 +511,11 @@ namespace Keire
     std::vector<ModuleMemoryDomainRegistration> ModuleRegistry::MemoryDomains() const
     {
         return m_Impl->Registrations->MemoryDomains;
+    }
+
+    std::vector<ManagedServiceDescriptor> ModuleRegistry::ManagedServices() const
+    {
+        return m_Impl->Registrations->ManagedServices;
     }
 
     void ModuleRegistry::Start(Application& application)

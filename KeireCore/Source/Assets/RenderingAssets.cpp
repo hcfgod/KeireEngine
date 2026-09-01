@@ -1323,10 +1323,10 @@ namespace Keire
     AssetImporterRegistration CreateMaterialAssetImporter()
     {
         AssetImporterRegistration result;
-        result.Name = "Keire.Material";
+        result.Name = "Keire.LegacyMaterial";
         result.Version = 5;
         result.Type = MaterialAsset::StaticType();
-        result.Extensions = {".keirematerial"};
+        result.Extensions = {std::string(LegacyMaterialAssetSourceExtension)};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
             const auto source = MaterialAsset::DecodeAuthoringSource(bytes);

@@ -1052,7 +1052,7 @@ namespace Keire::Detail
         result.DisplayName = source.at("displayName").get<std::string>();
         result.ManagedTypeName = source.at("managedTypeName").get<std::string>();
         const auto kind = source.at("kind").get<std::uint32_t>();
-        if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::Dictionary))
+        if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::CustomValue))
             throw std::runtime_error("Managed asset metadata contains an unsupported property kind.");
         result.Kind = static_cast<ManagedAssetPropertyKind>(kind);
         result.ReadOnly = source.value("readOnly", false);
@@ -1071,6 +1071,9 @@ namespace Keire::Detail
             result.ExpectedAssetType = AssetTypeId(AssetId::Parse(found->get<std::string>()));
         if (const auto found = source.find("expectedManagedType"); found != source.end())
             result.ExpectedManagedType = ManagedTypeId::Parse(found->get<std::string>());
+        if (const auto found = source.find("customValueTypeId"); found != source.end())
+            result.CustomValueTypeId = ManagedTypeId::Parse(found->get<std::string>());
+        result.CustomValueVersion = source.value("customValueVersion", 0U);
         result.IncludeDerivedAssetTypes = source.value("includeDerivedAssetTypes", true);
         if (const auto found = source.find("referenceTypeChoices"); found != source.end())
         {
@@ -1129,6 +1132,52 @@ namespace Keire::Detail
             throw std::runtime_error("Keire.Managed returned malformed managed asset metadata.");
 
         ManagedAssetMetadataResult result;
+        if (const auto services = document.find("nativeServices"); services != document.end())
+        {
+            if (!services->is_array())
+                throw std::runtime_error("Managed native service metadata is malformed.");
+            result.NativeServices.reserve(services->size());
+            for (const auto& encodedService : *services)
+            {
+                ManagedServiceDescriptor service;
+                service.StableId = encodedService.at("stableId").get<std::string>();
+                service.AbiVersion = encodedService.at("abiVersion").get<std::uint32_t>();
+                const auto& methods = encodedService.at("methods");
+                if (!methods.is_array())
+                    throw std::runtime_error("Managed native service method metadata is malformed.");
+                service.Methods.reserve(methods.size());
+                for (const auto& encodedMethod : methods)
+                {
+                    ManagedBindingMethodDescriptor method;
+                    method.StableId = encodedMethod.at("stableId").get<std::string>();
+                    method.AbiVersion = encodedMethod.at("abiVersion").get<std::uint32_t>();
+                    method.ThreadAffinity = static_cast<ManagedBindingThreadAffinity>(
+                        encodedMethod.at("threadAffinity").get<std::uint32_t>());
+                    method.Result =
+                        static_cast<ManagedBindingValueKind>(encodedMethod.at("returnKind").get<std::uint32_t>());
+                    method.StructuredResult =
+                        static_cast<ManagedBindingValueKind>(encodedMethod.value("structuredResultKind", 0U));
+                    const auto& parameters = encodedMethod.at("parameters");
+                    if (!parameters.is_array())
+                        throw std::runtime_error("Managed native service parameter metadata is malformed.");
+                    method.Parameters.reserve(parameters.size());
+                    for (const auto& encodedParameter : parameters)
+                    {
+                        method.Parameters.push_back(
+                            {.Name = encodedParameter.at("name").get<std::string>(),
+                             .Kind =
+                                 static_cast<ManagedBindingValueKind>(encodedParameter.at("kind").get<std::uint32_t>()),
+                             .ElementKind =
+                                 static_cast<ManagedBindingValueKind>(encodedParameter.value("elementKind", 0U)),
+                             .MaximumElements = encodedParameter.at("maximumElements").get<std::uint32_t>()});
+                    }
+                    service.Methods.push_back(std::move(method));
+                }
+                std::ranges::sort(service.Methods, {}, &ManagedBindingMethodDescriptor::StableId);
+                result.NativeServices.push_back(std::move(service));
+            }
+            std::ranges::sort(result.NativeServices, {}, &ManagedServiceDescriptor::StableId);
+        }
         result.Types.reserve(types.size());
         for (const auto& source : types)
         {

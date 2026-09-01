@@ -707,8 +707,14 @@ $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\P
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
+Assert-True ($menuScript.Contains('Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop')) `
+    "Windows batch launcher loads required hashing and JSON cmdlets explicitly"
 Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('"package-hub"') -and
              $menuScript.Contains('$Configuration = "Dist"')) "Dist product package launcher commands"
+Assert-True ($menuScript.Contains('"stage-editor"') -and $menuScript.Contains('"stage-hub"') -and
+             $menuScript.Contains('-DevelopmentStage') -and $menuScript.Contains('-StageOnly') -and
+             $menuScript.Contains('-not $GeneratorWasProvided') -and $menuScript.Contains('$Generator = "ninja"')) `
+    "Fast Dist product staging commands default to Ninja and bypass archive publication"
 Assert-True ($menuScript.Contains('-AllowDirty (package commands only; emits a local development artifact and is rejected in CI)')) `
     "Windows launcher documents the dirty-package development-only boundary"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
@@ -760,6 +766,30 @@ function Exit-KeireWorkspaceLock {}
         "test", "-Generator", "ninja", "-Architecture", "x86_64", "-Toolset", "msc"
     ) -Wait -PassThru -WindowStyle Hidden
     Assert-Equal $launcher.ExitCode 23 "Top-level Windows launcher child exit propagation"
+
+    @'
+param([string]$Generator, [string]$Architecture, [string]$Toolset, [switch]$CI, [switch]$Update,
+      [switch]$Generate, [switch]$AllowDirty, [switch]$DevelopmentStage)
+if ($Generator -cne 'ninja' -or -not $AllowDirty -or -not $DevelopmentStage) { exit 24 }
+exit 0
+'@ | Set-Content (Join-Path $launcherFixture "Scripts\Windows\package-editor.ps1") -Encoding UTF8
+    $editorStageLauncher = Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList @(
+        "-NoProfile", "-NonInteractive", "-File", (Join-Path $launcherFixture "Scripts\project.ps1"),
+        "stage-editor", "-Architecture", "x86_64", "-Toolset", "msc"
+    ) -Wait -PassThru -WindowStyle Hidden
+    Assert-Equal $editorStageLauncher.ExitCode 0 "Fast Editor staging defaults to Ninja development mode"
+
+    @'
+param([string]$Generator, [string]$Architecture, [string]$Toolset, [switch]$CI, [switch]$Update,
+      [switch]$Generate, [switch]$AllowDirty, [switch]$StageOnly, [switch]$DevelopmentStage)
+if ($Generator -cne 'ninja' -or -not $AllowDirty -or -not $StageOnly -or -not $DevelopmentStage) { exit 25 }
+exit 0
+'@ | Set-Content (Join-Path $launcherFixture "Scripts\Windows\package-hub.ps1") -Encoding UTF8
+    $hubStageLauncher = Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList @(
+        "-NoProfile", "-NonInteractive", "-File", (Join-Path $launcherFixture "Scripts\project.ps1"),
+        "stage-hub", "-Architecture", "x86_64", "-Toolset", "msc"
+    ) -Wait -PassThru -WindowStyle Hidden
+    Assert-Equal $hubStageLauncher.ExitCode 0 "Fast Hub staging defaults to Ninja development mode"
 }
 finally {
     Remove-Item $launcherFixture -Recurse -Force -ErrorAction SilentlyContinue
@@ -1225,9 +1255,22 @@ Assert-True ($windowsRun.Contains('[switch]$SmokePlay') -and
     "Rendered Editor Play smoke uses the real window/update/input loop"
 Assert-True ($windowsCommon.Contains('[TimeSpan]$Timeout = [TimeSpan]::Zero') -and
              $windowsCommon.Contains('$process.WaitForExit([int]$timeoutMilliseconds)') -and
+             $windowsCommon.Contains('[void]$process.Handle') -and
+             $windowsCommon.Contains('$process.WaitForExit()') -and
+             $windowsCommon.Contains('$process.Refresh()') -and
              $windowsCommon.Contains('$process.Kill($true)') -and
              $windowsCommon.Contains('taskkill.exe')) `
-    "Captured Windows validation processes enforce a bounded process-tree watchdog"
+    "Captured Windows validation processes enforce a bounded watchdog and publish exit codes on Windows PowerShell"
+Assert-True ($windowsCommon.Contains('$contents.IndexOf($marker, [StringComparison]::Ordinal) -ge 0') -and
+             -not $windowsCommon.Contains('$contents.Contains($marker, [StringComparison]::Ordinal)')) `
+    "Distribution marker validation remains compatible with Windows PowerShell 5.1"
+Assert-Equal (Get-WindowsRelativePath 'C:\Package Root' 'C:\Package Root\bin\Editor.exe') `
+    'bin\Editor.exe' "Windows relative package paths do not require the newer System.IO.Path API"
+$windowsPlayerSupport = Get-Content (Join-Path $Windows "player-support.ps1") -Raw
+Assert-True ($windowsCommon.Contains('function Get-WindowsRelativePath') -and
+             -not $windowsCommon.Contains('[IO.Path]::GetRelativePath') -and
+             -not $windowsPlayerSupport.Contains('[IO.Path]::GetRelativePath')) `
+    "Windows packaging remains compatible with the .NET Framework used by Windows PowerShell 5.1"
 $windowsFfmpeg = Get-Content (Join-Path $Windows "ffmpeg.ps1") -Raw
 $windowsFfmpegContract = Get-Content (Join-Path $Windows "ffmpeg-runtime-contract.ps1") -Raw
 $windowsFfmpegStage = Get-Content (Join-Path $Windows "stage-ffmpeg-runtime.ps1") -Raw
@@ -1299,6 +1342,11 @@ Assert-True ($windowsPackage.Contains('-SmokePlay -SmokeOutput $editorPlayValida
              $windowsPackage.Contains('topmostInputHandled') -and
              $windowsPackage.Contains('nativeWindowInputQueued')) `
     "Package gate runs the rendered additive Editor Play window and input validation"
+Assert-True ($windowsPackage.Contains('[switch]$DevelopmentStage') -and
+             $windowsPackage.Contains('"Editor development build"') -and
+             $windowsPackage.Contains('if (-not $DevelopmentStage)') -and
+             $windowsPackage.Contains('if (-not $StageOnly -and -not $CMake)')) `
+    "Development SDK staging builds Dist products without invoking release-only validation"
 Assert-True ($windowsBuild.Contains('$assetWorkerConsumers') -and
              $windowsBuild.Contains('"$($Project.PROJECT_NAMESPACE)EditorTests"') -and
              $windowsBuild.Contains('stage-ffmpeg-runtime.ps1') -and
@@ -1374,10 +1422,11 @@ Assert-True ($managedPremake.Contains('dependson { KeireManagedProject }') -and
              $managedPremake.Contains('kind "Utility"') -and
              $managedPremake.Contains('ManagedBuildAnchor.cpp')) "Cross-generator managed runtime API project"
 Assert-True ($managedPremake.Contains('buildinputs(managedBuildInputs)') -and
-             $managedPremake.Contains('buildoutputs { managedOutput }') -and
+             $managedPremake.Contains('managedEditorOutput') -and
+             $managedPremake.Contains('managedGeneratorOutput') -and
              $managedPremake.Contains('linkbuildoutputs "Off"')) "Input-aware managed runtime API custom build"
 Assert-True ($managedPremake.Contains('ProjectConfig.PROJECT_NAMESPACE .. "ManagedRuntimeApi"') -and
-             $managedPremake.Contains('addManagedBuildInput(managedSourceRoot)') -and
+             $managedPremake.Contains('managedSourceRoots') -and
              $managedPremake.Contains('os.matchdirs')) "Collision-free managed source inventory dependencies"
 Assert-True ($premakePolicy.Contains('externalanglebrackets "On"') -and
              $premakePolicy.Contains('externalwarnings "Off"') -and
@@ -1438,12 +1487,18 @@ Assert-True ($windowsRun.Contains('[Diagnostics.ProcessStartInfo]::new()') -and
 $managedFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-managed-build-" + [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force (Join-Path $managedFixture "Scripts\Windows"),
-        (Join-Path $managedFixture "KeireManaged"), (Join-Path $managedFixture "Build\Managed") | Out-Null
+        (Join-Path $managedFixture "KeireManaged"), (Join-Path $managedFixture "KeireEditorManaged"),
+        (Join-Path $managedFixture "KeireManaged.Generators"),
+        (Join-Path $managedFixture "Build\Managed") | Out-Null
     Copy-Item (Join-Path $Windows "build-managed.ps1") (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
     $managedSource = Join-Path $managedFixture "KeireManaged\RuntimeApi.cs"
     $managedAssembly = Join-Path $managedFixture "Build\Managed\Keire.Managed.dll"
+    $managedEditorAssembly = Join-Path $managedFixture "Build\Managed\Keire.Editor.Managed.dll"
+    $managedGeneratorAssembly = Join-Path $managedFixture "Build\Managed\Keire.Managed.Generators.dll"
     "source" | Set-Content $managedSource -Encoding ASCII
     "assembly" | Set-Content $managedAssembly -Encoding ASCII
+    "editor" | Set-Content $managedEditorAssembly -Encoding ASCII
+    "generator" | Set-Content $managedGeneratorAssembly -Encoding ASCII
     (Get-Item (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")).LastWriteTimeUtc =
         [DateTime]::UtcNow.AddMinutes(-3)
     (Get-Item $managedSource).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-2)
@@ -1555,6 +1610,11 @@ Assert-True ($playerSupportSource.Contains("kind = 'windows-resource-update'") -
 Assert-True ($playerSupportSource.Contains('create-build-support') -and
              $playerSupportSource.Contains('$SignatureKeyId') -and
              $playerSupportSource.Contains('--manifest-output')) "Windows Build Support generic-package publication"
+Assert-True ($playerSupportSource.Contains("[string]`$Generator = 'ninja'") -and
+             $playerSupportSource.Contains('-Generator $Generator') -and
+             $playerSupportSource.Contains('-Toolset $Toolset') -and
+             -not $playerSupportSource.Contains('-Generator ninja')) `
+    "Windows Build Support preserves the selected build generator instead of invalidating incremental outputs"
 $sampleScene = Get-Content (Join-Path (Get-RepositoryRoot) "Samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene") -Raw
 $sampleSceneDocument = $sampleScene | ConvertFrom-Json
 Assert-True ([int]$sampleSceneDocument.schemaVersion -ge 2 -and $sampleScene.Contains('"components"') -and $sampleScene.Contains('Directional Light')) "Current-schema component sample scene"
@@ -1665,6 +1725,12 @@ Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPa
     $editorPackageScript.Contains('player-support.ps1') -and
     $editorPackageScript.Contains('-InstalledLayoutRoot') -and
     $editorPackageScript.Contains('bin\BuildSupport')) "Windows Dist editor distribution packaging"
+Assert-True ($editorPackageScript.Contains('$DevelopmentStage') -and
+    $editorPackageScript.Contains('Reusing the staged .NET SDK') -and
+    $editorPackageScript.Contains('$distRuntime') -and
+    $editorPackageScript.Contains('Reusing unchanged packaged Build Support') -and
+    $editorPackageScript.Contains('Run package-editor before release')) `
+    "Fast Windows Editor staging reuses heavyweight unchanged payloads and retains the release gate"
 Assert-True ($editorPackageScript.Contains('editor=bin/$($Project.CLIENT_TARGET).exe') -and
     -not $editorPackageScript.Contains('"--entrypoint", "hub=') -and
     -not $editorPackageScript.Contains('"--entrypoint", "worker=') -and
@@ -1674,6 +1740,10 @@ Assert-True ($hubPackageScript.Contains('KEIRE_DISTRIBUTION_TRUSTED_KEYS') -and
     $hubPackageScript.Contains('[IO.Path]::PathSeparator') -and
     $hubPackageScript.Contains('foreach ($trustedKeyPath in $trustedKeyPaths)')) `
     "Windows Hub packaging supports overlapping distribution trust keys"
+Assert-True ($hubPackageScript.Contains('$DevelopmentStage') -and
+    $hubPackageScript.Contains('Ready-to-run development Hub stage updated') -and
+    $hubPackageScript.Contains('Run package-hub before release')) `
+    "Fast Windows Hub staging preserves the full package command as the release gate"
 $packagePublisher = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireHubPackagePublisher\Source\Main.cpp') -Raw
 Assert-True ($packagePublisher.Contains('value.at("dirty").get<bool>()') -and
     $packagePublisher.Contains('value.at("developmentArtifact").get<bool>()') -and

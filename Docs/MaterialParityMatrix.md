@@ -15,18 +15,18 @@ Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 | ID | Capability | Status | Priority | Evidence or remaining gate |
 | --- | --- | --- | --- | --- |
 | ME-AS-001 | Distinct Shader Graph asset | Complete | P0 | `.keireshadergraph`, importer, editor, generated variants, and tests. |
-| ME-AS-002 | Distinct Material Graph asset | Complete | P0 | `.keirematerialgraph`, Material Output composition, importer, editor, and tests. |
-| ME-AS-003 | Direct Material asset | Complete | P0 | Inspector-authored `.keirematerial` remains assignable and shader-backed. |
+| ME-AS-002 | Canonical Material asset | Complete | P0 | `.keirematerial` schema 7, Material Output, importer, editor, preview, and tests. |
+| ME-AS-003 | Legacy Material compatibility | Complete | P0 | `.keiremateriallegacy` remains assignable and raw/custom-shader backed. |
 | ME-AS-004 | Material Instance asset | Complete | P0 | Versioned inheritance, static/dynamic overrides, bounded ancestry, and tests. |
-| ME-AS-005 | Material Function asset | Complete | P0 | `.keirematerialfunction`, typed body, importer/decoder, editor create/open/save. |
-| ME-AS-006 | Shader Function asset | Complete | P1 | `.keireshaderfunction`, typed body, importer/decoder, editor create/open/save. |
-| ME-AS-007 | Material Layer asset | Complete | P0 | `.keiremateriallayer` with Material Attributes output. |
-| ME-AS-008 | Material Layer Blend asset | Complete | P0 | `.keirematerialblend` with Bottom, Top, and Alpha interface. |
-| ME-AS-009 | Material Parameter Collection asset | Complete | P0 | `.keirematerialcollection`, deterministic source/cooked data, importer/decoder. |
+| ME-AS-005 | Material Function subgraph | Complete | P0 | `.keiresubgraph` purpose selects a typed material-function body. |
+| ME-AS-006 | Shader Function subgraph | Complete | P1 | `.keiresubgraph` purpose selects a lower-level typed shader function. |
+| ME-AS-007 | Material Layer subgraph | Complete | P0 | `.keiresubgraph` purpose selects a Material Attributes layer output. |
+| ME-AS-008 | Material Layer Blend subgraph | Complete | P0 | `.keiresubgraph` purpose selects Bottom, Top, and Alpha layer-blend IO. |
+| ME-AS-009 | Material Parameter Collection asset | Complete | P0 | `.keireparametercollection`, deterministic source/cooked data, importer/decoder. |
 | ME-AS-010 | Safe rename, duplicate, move, and trash | Complete | P0 | Generic stable-ID asset operations cover every new extension. |
 | ME-AS-011 | Deterministic source serialization | Complete | P0 | Canonical JSON and byte-equality tests for functions and collections. |
 | ME-AS-012 | Bounded source decoding | Complete | P0 | Explicit size, count, text, schema, identifier, and finite-value limits. |
-| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 6, Material schema 6, and reusable schema 1 reject unsupported future data. |
+| ME-AS-013 | Future-schema rejection | Complete | P0 | Shader schema 6, Material schema 7, and reusable schema 1 reject unsupported future data. |
 | ME-AS-014 | Import dependency extraction | Complete | P0 | Function calls publish sorted unique asset dependencies. |
 | ME-AS-015 | Dependent reimport after function change | Complete | P0 | Asset dependency graph invalidates Shader/Material Graph imports. |
 | ME-AS-016 | Transactional generated shader publication | Complete | P0 | Staged replacement and rollback retain last-good variants. |
@@ -36,7 +36,7 @@ Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 | ME-AS-020 | Source-control-aware checkout/status | Planned | P2 | Requires provider-neutral source-control boundary. |
 | ME-GR-001 | Typed function call node | Complete | P0 | Interface derives from stable Parameter and Output pins. |
 | ME-GR-002 | Calls in Shader Graph | Complete | P0 | Search palette lists compatible project functions and layers. |
-| ME-GR-003 | Calls in Material Graph | Partial | P0 | Schema v1-v4 expressions remain readable for migration; new executable calls belong in Shader Graph. |
+| ME-GR-003 | Calls in Material | Complete | P0 | Material owns executable expressions and expands reusable calls through the shared compiler. |
 | ME-GR-004 | Deterministic recursive expansion | Complete | P0 | Derived IDs make repeated expansion byte-identical. |
 | ME-GR-005 | Missing function diagnostics | Complete | P0 | Expansion rejects unresolved assets before shader publication. |
 | ME-GR-006 | Function recursion rejection | Complete | P0 | Dependency stack rejects direct and indirect cycles. |
@@ -65,7 +65,7 @@ Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 | ME-GR-029 | Copy/paste across assets | Planned | P1 | Requires collision-safe stable-ID remapping and dependency transfer. |
 | ME-GR-030 | Diff/merge visualization | Planned | P1 | Requires semantic graph diff independent of JSON ordering. |
 | ME-MA-001 | Material Output node | Complete | P0 | Owns surface contract and remains distinct from Shader Output. |
-| ME-MA-002 | Shader Graph template selection | Complete | P0 | Material Graph composes expressions through an explicit template. |
+| ME-MA-002 | Standalone surface ownership | Complete | P0 | New Materials compile and preview without an external Shader Graph template. |
 | ME-MA-003 | Raw Shader compatibility workflow | Complete | P1 | Direct/compatibility material values remain supported. |
 | ME-MA-004 | Dynamic exposed parameters | Complete | P0 | Parameter nodes become instance-editable material properties. |
 | ME-MA-005 | Static switch parameters | Complete | P0 | Bounded deterministic shader variants and instance overrides. |
@@ -138,12 +138,12 @@ Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
 | ME-RS-017 | Path-tracing material path | Planned | P2 | Depends on offline renderer milestone. |
 | ME-RS-018 | Mobile material tier | Planned | P0 | Requires explicit resource/instruction and feature policy. |
 | ME-RS-019 | Platform-specific variant pruning | Partial | P0 | Target formats cook selectively; feature-level pruning remains. |
-| ME-RS-020 | Stable renderer ABI versioning | Complete | P0 | Generator and vertex-layout versions are embedded and tested. |
+| ME-RS-020 | Stable renderer ABI versioning | Complete | P0 | Generator/vertex versions plus reflected ProgramArtifact and explicit material-pass contracts are embedded and tested. |
 | ME-PF-001 | Node/connection hard limits | Complete | P0 | 1,024 nodes and 4,096 connections by default. |
 | ME-PF-002 | Texture resource hard limits | Complete | P0 | Portable material texture budget is validated. |
 | ME-PF-003 | Keyword/variant hard limits | Complete | P0 | Deterministic maximum and explicit diagnostic. |
 | ME-PF-004 | Compile cancellation/supersession | Complete | P0 | Generation-checked background jobs. |
-| ME-PF-005 | Derived-data shader cache | Complete | P0 | Asset import cache and immutable inputs. |
+| ME-PF-005 | Derived-data shader cache | Complete | P0 | Asset import cache plus canonical toolchain/source/include/target work keys make immutable inputs explicit. |
 | ME-PF-006 | Reference-scene CPU budget | Planned | P0 | Define hardware tiers and measured thresholds. |
 | ME-PF-007 | Reference-scene GPU budget | Planned | P0 | Define hardware tiers and measured thresholds. |
 | ME-PF-008 | Shader compile-time gate | Planned | P0 | Add cold/warm percentile validation. |

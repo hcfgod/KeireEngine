@@ -283,6 +283,23 @@ bash Scripts/project.sh run --smoke-project
 bash Scripts/project.sh run --editor --project /projects/MyGame
 ```
 
+### Fast Windows Dist staging
+
+Use the development staging commands when testing optimized Editor or Hub behavior from the installed distribution
+layout:
+
+```powershell
+.\Scripts\project.bat stage-editor
+.\Scripts\project.bat stage-hub
+```
+
+These commands build the real `Dist` targets and update the normal runnable layouts under `Build\Distributions`, but
+skip the release test/smoke matrix, SDK consumer builds, archive creation, extraction, and extracted-archive validation.
+They default to Ninja unless `-Generator` is supplied explicitly. Editor staging reuses the bundled .NET SDK and
+unchanged Build Support already in the layout; a newer Dist player runtime automatically refreshes all Build Support
+variants. Run `package-editor` or `package-hub` before release, and after packaging-layout or dependency removals, to
+recreate the distribution from an empty stage and execute the complete release gate.
+
 ## Configurations
 
 | Configuration | Intended use |

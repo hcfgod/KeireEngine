@@ -2,6 +2,10 @@
 param(
     [ValidateSet('x86_64', 'arm64')]
     [string]$Architecture = 'x86_64',
+    [ValidateSet('vs2026', 'vs2022', 'vs2019', 'ninja', 'gmake')]
+    [string]$Generator = 'ninja',
+    [ValidateSet('default', 'msc', 'gcc', 'clang')]
+    [string]$Toolset = 'msc',
     [string]$OutputDirectory,
     [string]$SignatureKeyId,
     [ValidateSet('stable', 'preview', 'nightly')]
@@ -78,7 +82,7 @@ function Copy-TreeIfChanged {
         }
         if ($sourceEntry.PSIsContainer) { continue }
         $sourceFile = $sourceEntry
-        $relative = [IO.Path]::GetRelativePath($sourceRoot, $sourceFile.FullName)
+        $relative = Get-WindowsRelativePath $sourceRoot $sourceFile.FullName
         Copy-FileIfChanged -Source $sourceFile.FullName -Destination (Join-Path $Destination $relative)
     }
 }
@@ -273,7 +277,7 @@ function Publish-PackagedPlayerSupportLayout {
                 throw "Packaged Build Support payload contains a redirect: $($entry.FullName)"
             }
             if ($entry.PSIsContainer) { continue }
-            $relative = [IO.Path]::GetRelativePath($payloadRoot, $entry.FullName)
+            $relative = Get-WindowsRelativePath $payloadRoot $entry.FullName
             Copy-FileIfChanged -Source $entry.FullName -Destination (Join-Path $temporary $relative)
         }
 
@@ -285,8 +289,9 @@ function Publish-PackagedPlayerSupportLayout {
         $files = @(
             foreach ($file in Get-ChildItem -LiteralPath $temporary -File -Force -Recurse |
                     Where-Object { $_.FullName -ne $operationMarker } |
-                    Sort-Object { [IO.Path]::GetRelativePath($temporary, $_.FullName) }) {
-                $relative = [IO.Path]::GetRelativePath($temporary, $file.FullName) -replace '\\', '/'
+                    Sort-Object { Get-WindowsRelativePath $temporary $_.FullName }) {
+                $relative = Get-WindowsRelativePath $temporary $file.FullName
+                $relative = $relative -replace '\\', '/'
                 $executable = $executablePaths.ContainsKey($relative.ToLowerInvariant()) -or
                     $file.Name -ieq 'createdump.exe'
                 [ordered]@{
@@ -536,14 +541,16 @@ if (-not $OutputDirectory) {
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 
-& (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator ninja -Configuration Debug -Architecture x86_64 -Toolset msc -Target KeireAssetTool
+& (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator $Generator -Configuration Debug `
+    -Architecture x86_64 -Toolset $Toolset -Target KeireAssetTool
 if ($LASTEXITCODE -ne 0) { throw 'Could not build the host KeireAssetTool.' }
 $assetTool = Join-Path $repositoryRoot 'Build\Bin\Debug-windows-x86_64\KeireAssetTool\KeireAssetTool.exe'
 $metadata = (& $assetTool describe-player-support-host | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0) { throw 'Could not query player support metadata.' }
 
 foreach ($configuration in @('Debug', 'Release', 'Dist')) {
-    & (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator ninja -Configuration $configuration -Architecture $BuildArchitecture -Toolset msc -Target KeireRuntime
+    & (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator $Generator `
+        -Configuration $configuration -Architecture $BuildArchitecture -Toolset $Toolset -Target KeireRuntime
     if ($LASTEXITCODE -ne 0) { throw "Could not build the $configuration $Architecture player template." }
 }
 
@@ -615,7 +622,8 @@ try {
         -EngineVersion ([string]$metadata.engineVersion) -Platform windows -Architecture $ManifestArchitecture
     Write-Host "Created $archive"
     if ($SignatureKeyId) {
-        & (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator ninja -Configuration Debug -Architecture x86_64 -Toolset msc -Target KeireHubPackagePublisher
+        & (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator $Generator -Configuration Debug `
+            -Architecture x86_64 -Toolset $Toolset -Target KeireHubPackagePublisher
         if ($LASTEXITCODE -ne 0) { throw 'Could not build KeireHubPackagePublisher.' }
         $publisher = Join-Path $repositoryRoot 'Build\Bin\Debug-windows-x86_64\KeireHubPackagePublisher\KeireHubPackagePublisher.exe'
         & $publisher create-build-support --player-support-package $archive --channel $Channel `

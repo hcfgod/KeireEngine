@@ -475,7 +475,8 @@ assert_true test -n "$PROJECT_IDENTIFIER"
 managed_fixture="$(mktemp -d)"
 trap 'rm -rf "$managed_fixture"' EXIT
 mkdir -p "$managed_fixture/Scripts/Unix" "$managed_fixture/Build/Dependencies/dotnet-sdk" \
-  "$managed_fixture/KeireManaged"
+  "$managed_fixture/KeireManaged" "$managed_fixture/KeireEditorManaged" \
+  "$managed_fixture/KeireManaged.Generators"
 cp "$ROOT/Scripts/Unix/build-managed.sh" "$managed_fixture/Scripts/Unix/build-managed.sh"
 printf '%s\n' marker-one > "$managed_fixture/KeireManaged/RuntimeApi.cs"
 cat > "$managed_fixture/Build/Dependencies/dotnet-sdk/dotnet" <<'EOF'
@@ -483,15 +484,26 @@ cat > "$managed_fixture/Build/Dependencies/dotnet-sdk/dotnet" <<'EOF'
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 output=
+project=
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    *.csproj) project="$1"; shift ;;
     --output) output="${2:?--output requires a directory}"; shift 2 ;;
     *) shift ;;
   esac
 done
 [[ -n "$output" ]]
 mkdir -p "$output"
-cp "$root/KeireManaged/RuntimeApi.cs" "$output/Keire.Managed.dll"
+case "$project" in
+  *Keire.Editor.Managed.csproj)
+    cp "$root/KeireManaged/RuntimeApi.cs" "$output/Keire.Managed.dll"
+    printf '%s\n' editor > "$output/Keire.Editor.Managed.dll"
+    ;;
+  *Keire.Managed.Generators.csproj)
+    printf '%s\n' generator > "$output/Keire.Managed.Generators.dll"
+    ;;
+  *) exit 2 ;;
+esac
 printf '%s\n' invoked >> "$root/invocations"
 EOF
 chmod +x "$managed_fixture/Build/Dependencies/dotnet-sdk/dotnet"
@@ -504,7 +516,7 @@ bash "$managed_fixture/Scripts/Unix/build-managed.sh"
 assert_equal "$(cat "$managed_fixture/Build/Managed/Keire.Managed.dll")" marker-two \
   'managed runtime API rebuild after source edit'
 bash "$managed_fixture/Scripts/Unix/build-managed.sh"
-assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 2 \
+assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 4 \
   'incremental managed runtime API launcher invocation count'
 sleep 1
 mkdir "$managed_fixture/KeireManaged/Gameplay"
@@ -514,7 +526,7 @@ sleep 1
 rm "$managed_fixture/KeireManaged/Gameplay/Extra.cs"
 rmdir "$managed_fixture/KeireManaged/Gameplay"
 bash "$managed_fixture/Scripts/Unix/build-managed.sh"
-assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 4 \
+assert_equal "$(wc -l < "$managed_fixture/invocations" | tr -d ' ')" 8 \
   'managed runtime API source inventory invocation count'
 rm -rf "$managed_fixture"
 trap - EXIT
@@ -1099,9 +1111,9 @@ assert_true grep -q 'LinkKeireCore()' "$ROOT/KeireClient/premake5.lua"
 assert_true grep -q 'LinkKeireCore()' "$ROOT/KeireTests/premake5.lua"
 assert_true grep -q 'AddKeireManagedRuntimeDependency()' "$ROOT/KeireClient/premake5.lua"
 assert_true grep -q 'AddKeireManagedRuntimeDependency()' "$ROOT/KeireTests/premake5.lua"
-assert_true grep -q 'AddKeireManagedHostStaging()' "$ROOT/KeireClient/premake5.lua"
+assert_true grep -q 'AddKeireManagedHostStaging(true)' "$ROOT/KeireClient/premake5.lua"
 assert_true grep -q 'AddKeireManagedRuntimeDependency()' "$ROOT/AssetTool/premake5.lua"
-assert_true grep -q 'AddKeireManagedHostStaging()' "$ROOT/AssetTool/premake5.lua"
+assert_true grep -q 'AddKeireManagedHostStaging(true)' "$ROOT/AssetTool/premake5.lua"
 assert_true grep -q 'specification.RuntimeHostDirectory = managedHost' "$ROOT/AssetTool/Source/Main.cpp"
 assert_true grep -q 'specification.RuntimeRootDirectory = managedHost / "Dotnet"' "$ROOT/AssetTool/Source/Main.cpp"
 assert_true grep -q 'Scripts/Unix/stage-managed-host.sh' "$ROOT/Scripts/Premake/Managed.lua"
@@ -1130,10 +1142,11 @@ assert_true grep -F -q 'IntermediateOutputDir = OutputDir .. "-" .. SelectedTool
 assert_true grep -F -q '/Build/Intermediates/" .. IntermediateOutputDir' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q '/Build/Intermediates/" .. IntermediateOutputDir' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -F -q '/Build/Bin/" .. OutputDir' "$ROOT/Scripts/Premake/Common.lua"
-assert_true grep -q 'addManagedBuildInput(managedSourceRoot)' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'managedSourceRoots' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'os.matchdirs' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'buildinputs(managedBuildInputs)' "$ROOT/Scripts/Premake/Managed.lua"
-assert_true grep -q 'buildoutputs { managedOutput }' "$ROOT/Scripts/Premake/Managed.lua"
+assert_true grep -q 'buildoutputs { managedOutput, managedEditorOutput, managedGeneratorOutput }' \
+  "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'linkbuildoutputs "Off"' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -q 'Scripts/Unix/build-managed.sh' "$ROOT/Scripts/Premake/Managed.lua"
 assert_true grep -F -q -- '-newer "$assembly"' "$ROOT/Scripts/Unix/build-managed.sh"
@@ -1144,11 +1157,12 @@ assert_false grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Linux/build.sh"
 assert_false grep -q 'Scripts/Unix/build-info.sh' "$ROOT/Scripts/Mac/build.sh"
 assert_true grep -q 'resolve_compiler_cache' "$ROOT/Scripts/Linux/build.sh"
 assert_true grep -q 'PROFILE_BUILD' "$ROOT/Scripts/Linux/build.sh"
-assert_true grep -q 'KeireManaged KeireManaged.Tests SourceModules Scripts/Premake' "$ROOT/Scripts/Unix/common.sh"
+assert_true grep -q 'KeireEditorManaged.Tests KeireManaged.Generators KeireManaged.Generators.Tests' \
+  "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q -- "-name '*.csproj'" "$ROOT/Scripts/Unix/common.sh"
 assert_true grep -F -q 'dependson { AssetWorkerTarget }' "$ROOT/AssetTool/premake5.lua"
 assert_true grep -F -q 'AddKeireManagedRuntimeDependency()' "$ROOT/KeireRuntime/premake5.lua"
-assert_true grep -F -q 'AddKeireManagedHostStaging()' "$ROOT/KeireRuntime/premake5.lua"
+assert_true grep -F -q 'AddKeireManagedHostStaging(false)' "$ROOT/KeireRuntime/premake5.lua"
 assert_true grep -F -q 'filter { "system:linux"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true grep -F -q '"-Wl,-rpath,'\''$$ORIGIN'\''"' "$ROOT/KeireAssetWorker/premake5.lua"
 assert_true grep -q 'SelectedToolset ~= "msc"' "$ROOT/Scripts/Premake/Common.lua"
@@ -1614,10 +1628,11 @@ for path in bin/CoreAssetTool bin/CoreAssetWorker lib/libCoreZstd.a include/Core
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 rm -rf "$package_stage/third-party/spdlog"
-for path in bin/KeireShaderCompiler lib/libassimp.a lib/libzlibstatic.a include/Core/Undo.h include/Core/ECS/Components/CameraComponent.h include/Core/ECS/Components/MeshRendererComponent.h include/Core/Rendering/RenderSystem.h include/Core/Assets/RenderingAssets.h samples/KeireSandbox/Assets/Shaders/DefaultUnlit.keireshader samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl samples/KeireSandbox/Assets/Materials/DefaultUnlit.keirematerial third-party/licenses/SDL-shadercross-LICENSE.txt third-party/licenses/DirectXShaderCompiler-LICENSE.txt third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt third-party/licenses/SPIRV-Cross-LICENSE.txt third-party/licenses/SPIRV-Headers-LICENSE.txt third-party/licenses/SPIRV-Tools-LICENSE.txt third-party/licenses/assimp-LICENSE.txt third-party/licenses/assimp-zlib-LICENSE.txt third-party/licenses/stb-LICENSE.txt; do
+for path in bin/KeireShaderCompiler lib/libassimp.a lib/libzlibstatic.a include/Core/Undo.h include/Core/ECS/Components/CameraComponent.h include/Core/ECS/Components/MeshRendererComponent.h include/Core/Rendering/RenderSystem.h include/Core/Assets/RenderingAssets.h samples/KeireSandbox/Assets/Shaders/DefaultUnlit.keireshader samples/KeireSandbox/Assets/Shaders/DefaultUnlit.hlsl samples/KeireSandbox/Assets/Materials/DefaultUnlit.keiremateriallegacy third-party/licenses/SDL-shadercross-LICENSE.txt third-party/licenses/DirectXShaderCompiler-LICENSE.txt third-party/licenses/DirectXShaderCompiler-ThirdPartyNotices.txt third-party/licenses/SPIRV-Cross-LICENSE.txt third-party/licenses/SPIRV-Headers-LICENSE.txt third-party/licenses/SPIRV-Tools-LICENSE.txt third-party/licenses/assimp-LICENSE.txt third-party/licenses/assimp-zlib-LICENSE.txt third-party/licenses/stb-LICENSE.txt; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
-for path in bin/Managed/Coral.Managed.dll bin/Managed/Keire.Managed.dll Config/SourceModules.premake.lua \
+for path in bin/Managed/Coral.Managed.dll bin/Managed/Keire.Managed.dll bin/Managed/Keire.Editor.Managed.dll \
+  bin/Managed/Keire.Managed.Generators.dll Config/SourceModules.premake.lua \
   examples/source-module/Source/ClientApplication.cpp examples/source-module/Source/GameplayModule.cpp \
   examples/source-module/Include/GameplayModule.h examples/source-module/CMakeLists.txt \
   examples/source-module/README.md Docs/PlayerBuilds.md Docs/Diagnostics/KEIRE-AUDIO-0001.md \

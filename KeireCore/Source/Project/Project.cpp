@@ -9,6 +9,7 @@
 #include "Keire/BuildInfo.h"
 #include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/PlatformDirectories.h"
+#include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
@@ -539,14 +540,16 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 const auto shaderBytes = std::as_bytes(std::span(shaderManifest.data(), shaderManifest.size()));
                 const auto shader =
                     database->CreateAsset("Shaders/DefaultUnlit.keireshader", CreateShaderAssetImporter(), shaderBytes);
-                const auto materialSource = Json{{"schemaVersion", 1},
-                                                 {"shader", shader.ToString()},
-                                                 {"properties", {{"Tint", Json::array({0.25F, 0.55F, 1.0F, 1.0F})}}}}
-                                                .dump(2) +
-                                            '\n';
-                const auto materialBytes = std::as_bytes(std::span(materialSource.data(), materialSource.size()));
+                (void)shader;
+                auto materialDefinition = CreateOpenPbrMaterial(MaterialShadingModel::Unlit);
+                const auto color =
+                    std::ranges::find(materialDefinition.SurfaceGraph.Nodes, "Color", &ShaderGraphNode::Symbol);
+                if (color == materialDefinition.SurfaceGraph.Nodes.end())
+                    throw std::logic_error("Starter material did not expose its Color parameter.");
+                color->Value = Color{0.25F, 0.55F, 1.0F, 1.0F};
+                const auto materialBytes = MaterialGraphAsset::EncodeSource(materialDefinition);
                 const auto material = database->CreateAsset("Materials/DefaultUnlit.keirematerial",
-                                                            CreateMaterialAssetImporter(), materialBytes);
+                                                            CreateMaterialGraphAssetImporter(), materialBytes);
                 const auto starterUiAssets = Detail::CreateStarterProjectUiAssets(*database);
 
                 auto sceneDefinition = SceneAsset::SampleDefinition(material);

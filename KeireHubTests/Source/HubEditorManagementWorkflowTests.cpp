@@ -189,6 +189,47 @@ TEST_CASE("Editor verification rejects a result when current tracked activity ch
     CHECK(product.Tasks.empty());
 }
 
+TEST_CASE("Editor verification tasks show the product version instead of an internal registration identity")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    auto previousInstallation =
+        TestInstallation(temporary.Path() / "PreviousEditor", "external-editor-0-3-1", InstallationOwnership::External);
+    previousInstallation.Version = "0.3.1";
+    REQUIRE(controller.Installations().Upsert(previousInstallation));
+    auto installation = TestInstallation(temporary.Path() / "CurrentEditor", "external-editor-current",
+                                         InstallationOwnership::External);
+    installation.Version = "0.4.4";
+    REQUIRE(controller.Installations().Upsert(installation));
+    std::latch entered(1);
+    std::latch release(1);
+    HubEditorManagementServices services;
+    services.Verify = [&](const HubEditorManagementWorkItem& item, const std::string&, const std::string&)
+    {
+        entered.count_down();
+        release.wait();
+        return HubResult<EditorInstallationHealthSnapshot>::Success(
+            {.Installation = item.Installation, .Health = InstallationHealth::Healthy});
+    };
+    HubEditorManagementWorkflow workflow(controller,
+                                         {.HostPlatform = "windows",
+                                          .HostArchitecture = "x86_64",
+                                          .ProbeRunning = [](const EditorInstallation&) { return false; }},
+                                         std::move(services));
+
+    REQUIRE(workflow.Execute(Command(HubUiCommandType::VerifyEditor, installation)));
+    entered.wait();
+    HubProductSnapshot product;
+    workflow.ApplySnapshot(product);
+    workflow.ApplyOperationSnapshot(product);
+    REQUIRE(product.Tasks.size() == 1);
+    CHECK(product.Tasks.front().CurrentPackage == "0.4.4");
+
+    release.count_down();
+    REQUIRE(PollUntilTerminal(workflow));
+}
+
 TEST_CASE("Editor verification rejects a result when a targeted package task starts")
 {
     KeireHubTests::TemporaryDirectory temporary;

@@ -330,12 +330,139 @@ namespace
                 const auto availableWidth = ui.ContentAvailable().Width;
                 if (m_CodeEditorState.Highlights.empty())
                 {
-                    m_CodeEditorState.Highlights.push_back({0U, 7U, Keire::UiColor{0.45F, 0.75F, 1.0F, 1.0F}});
+                    for (std::size_t offset = 0; offset <= CodeEditorDragOffset; ++offset)
+                    {
+                        const auto color = offset == CodeEditorClickOffset ? Keire::UiColor{0.13F, 0.71F, 0.89F, 1.0F}
+                                                                           : Keire::UiColor{0.45F, 0.75F, 1.0F, 1.0F};
+                        m_CodeEditorState.Highlights.push_back({offset, 1U, color});
+                    }
+                }
+                auto& io = ImGui::GetIO();
+                const auto originalMousePosition = io.MousePos;
+                const auto originalMouseDelta = io.MouseDelta;
+                const bool originalMouseClicked = io.MouseClicked[0];
+                const auto originalMouseClickCount = io.MouseClickedCount[0];
+                const bool originalMouseDown = io.MouseDown[0];
+                if (m_UiFrames == 1)
+                {
+                    GImGui->InputTextLineIndex.clear();
+                    GImGui->InputTextLineIndex.Offsets.push_back(0);
+                    GImGui->InputTextLineIndex.EndOffset = 4;
+                    const auto& style = ImGui::GetStyle();
+                    io.MousePos = {m_CodeEditorRect.Minimum.X + style.FramePadding.x + 1.0F,
+                                   m_CodeEditorRect.Minimum.Y + style.FramePadding.y + ImGui::GetFontSize() * 1.25F};
+                    io.MouseClicked[0] = true;
+                    io.MouseClickedCount[0] = 1;
+                    io.MouseDown[0] = true;
+                }
+                else if (m_UiFrames == 2)
+                {
+                    const auto* begin = m_CodeEditorText.data();
+                    const auto exactPrefix =
+                        ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize(), std::numeric_limits<float>::max(), 0.0F,
+                                                        begin, begin + CodeEditorClickOffset);
+                    float individuallyRoundedPrefix = 0.0F;
+                    for (std::size_t offset = 0; offset < CodeEditorClickOffset; ++offset)
+                        individuallyRoundedPrefix += ImGui::CalcTextSize(begin + offset, begin + offset + 1U, false).x;
+                    const float roundedCharacterWidth = ImGui::CalcTextSize(begin, begin + 1U, false).x;
+                    CHECK(individuallyRoundedPrefix - exactPrefix.x > roundedCharacterWidth * 0.5F);
+
+                    const auto& style = ImGui::GetStyle();
+                    io.MousePos = {m_CodeEditorRect.Minimum.X + style.FramePadding.x + exactPrefix.x,
+                                   m_CodeEditorRect.Minimum.Y + style.FramePadding.y + ImGui::GetFontSize() * 0.5F};
+                    io.MouseDelta = {};
+                    io.MouseClicked[0] = true;
+                    io.MouseClickedCount[0] = 1;
+                    io.MouseDown[0] = true;
+                }
+                else if (m_UiFrames == 3)
+                {
+                    const auto* begin = m_CodeEditorText.data();
+                    const auto exactPrefix =
+                        ImGui::GetFont()->CalcTextSizeA(ImGui::GetFontSize(), std::numeric_limits<float>::max(), 0.0F,
+                                                        begin, begin + CodeEditorDragOffset);
+                    const auto& style = ImGui::GetStyle();
+                    io.MousePos = {m_CodeEditorRect.Minimum.X + style.FramePadding.x + exactPrefix.x,
+                                   m_CodeEditorRect.Minimum.Y + style.FramePadding.y + ImGui::GetFontSize() * 0.5F};
+                    io.MouseDelta = {1.0F, 0.0F};
+                    io.MouseClicked[0] = false;
+                    io.MouseClickedCount[0] = 0;
+                    io.MouseDown[0] = true;
+                }
+                else if (m_UiFrames == 5)
+                {
+                    const auto& style = ImGui::GetStyle();
+                    io.MousePos = {m_CodeEditorRect.Minimum.X + style.FramePadding.x + 1.0F,
+                                   m_CodeEditorRect.Minimum.Y + style.FramePadding.y + ImGui::GetFontSize() * 0.5F};
+                    io.MouseDelta = {};
+                    io.MouseClicked[0] = true;
+                    io.MouseClickedCount[0] = 1;
+                    io.MouseDown[0] = true;
                 }
                 ImGui::SetKeyboardFocusHere();
                 (void)ui.InputCodeEditor("Source", m_CodeEditorText, m_CodeEditorState, Keire::UiSize{0.0F, 160.0F});
+                m_CodeEditorRect = ui.LastItemRect();
                 CHECK(ui.LastItemRect().Size().Width == doctest::Approx(availableWidth).epsilon(0.01));
                 CHECK(GImGui->InputTextLineIndex.Offsets.Size > 1);
+                if (m_UiFrames == 1)
+                {
+                    CHECK(m_CodeEditorState.CursorOffset ==
+                          static_cast<std::size_t>(GImGui->InputTextLineIndex.Offsets[1]));
+                    CHECK(m_CodeEditorState.SelectionBegin == m_CodeEditorState.CursorOffset);
+                    CHECK(m_CodeEditorState.SelectionEnd == m_CodeEditorState.CursorOffset);
+                }
+                else if (m_UiFrames == 2)
+                {
+                    CHECK(m_CodeEditorState.CursorOffset == CodeEditorClickOffset);
+                    CHECK(m_CodeEditorState.SelectionBegin == CodeEditorClickOffset);
+                    CHECK(m_CodeEditorState.SelectionEnd == CodeEditorClickOffset);
+                }
+                else if (m_UiFrames == 3)
+                {
+                    CHECK(m_CodeEditorState.CursorOffset == CodeEditorDragOffset);
+                    CHECK(std::min(m_CodeEditorState.SelectionBegin, m_CodeEditorState.SelectionEnd) ==
+                          CodeEditorClickOffset);
+                    CHECK(std::max(m_CodeEditorState.SelectionBegin, m_CodeEditorState.SelectionEnd) ==
+                          CodeEditorDragOffset);
+                }
+
+                auto* editorChild = static_cast<ImGuiWindow*>(nullptr);
+                const auto editorId = ImGui::GetItemID();
+                for (auto* child : ImGui::GetCurrentWindow()->DC.ChildWindows)
+                {
+                    if (child && child->ChildId == editorId)
+                    {
+                        editorChild = child;
+                        break;
+                    }
+                }
+                REQUIRE(editorChild != nullptr);
+                if (m_UiFrames < 5)
+                {
+                    const auto targetColor =
+                        IM_COL32(static_cast<int>(0.13F * 255.0F), static_cast<int>(0.71F * 255.0F),
+                                 static_cast<int>(0.89F * 255.0F), 255);
+                    float highlightedGlyphMinimumX = std::numeric_limits<float>::max();
+                    for (const auto& vertex : editorChild->DrawList->VtxBuffer)
+                    {
+                        if (vertex.col == targetColor)
+                            highlightedGlyphMinimumX = std::min(highlightedGlyphMinimumX, vertex.pos.x);
+                    }
+                    REQUIRE(highlightedGlyphMinimumX < std::numeric_limits<float>::max());
+                    const auto* begin = m_CodeEditorText.data();
+                    const float exactPrefix =
+                        ImGui::GetFont()
+                            ->CalcTextSizeA(ImGui::GetFontSize(), std::numeric_limits<float>::max(), 0.0F, begin,
+                                            begin + CodeEditorClickOffset)
+                            .x;
+                    const auto* glyph = GImGui->FontBaked->FindGlyph(static_cast<ImWchar>('i'));
+                    REQUIRE(glyph != nullptr);
+                    const float textOrigin =
+                        editorChild->DC.CursorStartPos.x + ImGui::GetStyle().FramePadding.x - m_CodeEditorState.ScrollX;
+                    const float expectedGlyphMinimumX =
+                        IM_TRUNC(textOrigin + exactPrefix) + glyph->X0 * GImGui->FontBakedScale;
+                    CHECK(highlightedGlyphMinimumX == doctest::Approx(expectedGlyphMinimumX).epsilon(0.001));
+                }
                 const auto* input = ImGui::GetInputTextState(ImGui::GetItemID());
                 if (input)
                 {
@@ -347,6 +474,26 @@ namespace
                 {
                     CHECK(m_UiFrames == 0);
                 }
+                if (m_UiFrames == 4)
+                {
+                    m_CodeEditorExpectedScrollY = std::min(ImGui::GetFontSize() * 4.0F, editorChild->ScrollMax.y);
+                    REQUIRE(m_CodeEditorExpectedScrollY > 0.0F);
+                    editorChild->Scroll.y = m_CodeEditorExpectedScrollY;
+                    editorChild->ScrollTarget.y = std::numeric_limits<float>::max();
+                    CHECK(m_CodeEditorState.ScrollY != doctest::Approx(m_CodeEditorExpectedScrollY));
+                }
+                else if (m_UiFrames == 5)
+                {
+                    CHECK(editorChild->Scroll.y == doctest::Approx(m_CodeEditorExpectedScrollY));
+                    CHECK(m_CodeEditorState.ScrollY == doctest::Approx(m_CodeEditorExpectedScrollY));
+                    REQUIRE(input != nullptr);
+                    CHECK(input->Scroll.y == doctest::Approx(m_CodeEditorExpectedScrollY));
+                }
+                io.MousePos = originalMousePosition;
+                io.MouseDelta = originalMouseDelta;
+                io.MouseClicked[0] = originalMouseClicked;
+                io.MouseClickedCount[0] = originalMouseClickCount;
+                io.MouseDown[0] = originalMouseDown;
             }
 
             std::thread worker(
@@ -364,7 +511,7 @@ namespace
             worker.join();
 
             m_PreviousFrame = &ui;
-            if (++m_UiFrames == 2)
+            if (++m_UiFrames == 6)
                 Owner().RequestExit(7);
         }
 
@@ -373,10 +520,15 @@ namespace
         bool& m_StaleRejected;
         std::atomic<bool>& m_ThreadRejected;
         Keire::UiFrame* m_PreviousFrame = nullptr;
-        std::string m_CodeEditorText =
-            "element very-long-attribute=\"This source line intentionally exceeds the narrow editor width so wrapping "
-            "remains visible and testable without horizontal clipping.\"";
+        Keire::UiItemRect m_CodeEditorRect;
+        static constexpr std::size_t CodeEditorClickOffset = 20U;
+        static constexpr std::size_t CodeEditorDragOffset = 30U;
+        std::string m_CodeEditorText = std::string(48U, 'i') +
+                                       "\nelement very-long-attribute=\"This source line intentionally exceeds the "
+                                       "narrow editor width so wrapping remains visible and testable.\"\n" +
+                                       std::string(16U, '\n');
         Keire::UiCodeEditorState m_CodeEditorState;
+        float m_CodeEditorExpectedScrollY = 0.0F;
         int m_UiFrames = 0;
     };
 
@@ -777,11 +929,12 @@ TEST_CASE("Headless UI runs after updates and rejects stale and cross-thread use
     HeadlessUiApplication application(order, staleRejected, threadRejected);
 
     CHECK(application.Run() == 7);
-    REQUIRE(order.size() == 4);
-    CHECK(order[0] == "update");
-    CHECK(order[1] == "ui");
-    CHECK(order[2] == "update");
-    CHECK(order[3] == "ui");
+    REQUIRE(order.size() == 12);
+    for (std::size_t frame = 0; frame < 6U; ++frame)
+    {
+        CHECK(order[frame * 2U] == "update");
+        CHECK(order[frame * 2U + 1U] == "ui");
+    }
     CHECK(staleRejected);
     CHECK(threadRejected.load(std::memory_order_acquire));
 }

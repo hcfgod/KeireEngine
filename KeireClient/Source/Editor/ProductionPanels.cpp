@@ -798,6 +798,8 @@ void EditorWorkspaceLayer::UpdateManagedBuild()
     {
         Keire::ManagedReloadRequest reload;
         reload.ManagedApiAssembly = status.ManagedApiAssembly;
+        reload.ManagedEditorApiAssembly = status.ManagedEditorApiAssembly;
+        std::set<std::string, std::less<>> runtimeAssemblyFiles;
         std::set<std::string, std::less<>> editorAssemblyFiles;
         const auto projectRoot = Owner().GetProject()->Root();
         for (const auto& record : m_AssetDatabase->Records())
@@ -806,17 +808,24 @@ void EditorWorkspaceLayer::UpdateManagedBuild()
                 continue;
             const auto assembly =
                 Keire::ManagedAssemblyAsset::Decode(ReadBytes(projectRoot / "Assets" / record.RelativePath));
-            if (assembly->Definition().Classification != Keire::ManagedAssemblyClassification::Tests)
+            if (assembly->Definition().Classification == Keire::ManagedAssemblyClassification::Runtime)
+                runtimeAssemblyFiles.emplace(assembly->Definition().Name + ".dll");
+            else if (assembly->Definition().Classification == Keire::ManagedAssemblyClassification::Editor)
                 editorAssemblyFiles.emplace(assembly->Definition().Name + ".dll");
         }
         for (const auto& entry : std::filesystem::directory_iterator(status.ActiveAssemblyDirectory))
         {
-            if (entry.is_regular_file() && editorAssemblyFiles.contains(entry.path().filename().string()))
+            if (entry.is_regular_file() && runtimeAssemblyFiles.contains(entry.path().filename().string()))
             {
                 reload.Assemblies.push_back(entry.path());
             }
+            else if (entry.is_regular_file() && editorAssemblyFiles.contains(entry.path().filename().string()))
+            {
+                reload.EditorAssemblies.push_back(entry.path());
+            }
         }
         std::ranges::sort(reload.Assemblies);
+        std::ranges::sort(reload.EditorAssemblies);
         if (reload.Assemblies.empty())
             throw std::runtime_error("Managed build published no gameplay assemblies.");
         if (!scripts->PrepareReload(std::move(reload)))

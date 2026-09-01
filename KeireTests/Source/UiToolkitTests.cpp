@@ -139,6 +139,41 @@ TEST_CASE("UI visual tree source and cooked codecs are deterministic")
     CHECK(imported.AssetDependencies == definition.StyleSheets);
 }
 
+TEST_CASE("UI visual tree source generates stable element IDs when authors omit them")
+{
+    constexpr std::string_view automaticIdSource = R"xml(<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="AutomaticIds">
+  <VisualElement name="root">
+    <Label name="title" text="Generated"/>
+    <Button id="20000000-0000-4000-8000-000000000003" name="explicit" text="Pinned"/>
+  </VisualElement>
+</ui>
+)xml";
+
+    const auto first = Keire::UiVisualTreeAsset::ParseSource(AsBytes(automaticIdSource));
+    const auto second = Keire::UiVisualTreeAsset::ParseSource(AsBytes(automaticIdSource));
+    REQUIRE(first.Root.StableId);
+    REQUIRE(first.Root.Children.size() == 2U);
+    CHECK(first.Root.Children.front().StableId);
+    CHECK(first.Root.StableId != first.Root.Children.front().StableId);
+    CHECK(first.Root.StableId == second.Root.StableId);
+    CHECK(first.Root.Children.front().StableId == second.Root.Children.front().StableId);
+    CHECK(first.Root.Children.back().StableId == Id("20000000-0000-4000-8000-000000000003"));
+
+    const auto normalized = Keire::UiVisualTreeAsset::EncodeSource(first);
+    const auto normalizedText = std::string_view(reinterpret_cast<const char*>(normalized.data()), normalized.size());
+    CHECK(normalizedText.find("id=\"" + first.Root.StableId.ToString() + "\"") != std::string_view::npos);
+    CHECK(normalizedText.find("id=\"" + first.Root.Children.front().StableId.ToString() + "\"") !=
+          std::string_view::npos);
+    CHECK(Keire::UiVisualTreeAsset::ParseSource(normalized) == first);
+
+    constexpr std::string_view invalidIdSource = R"xml(<ui schemaVersion="1" name="InvalidId">
+  <VisualElement id="not-a-guid"/>
+</ui>)xml";
+    CHECK_THROWS_WITH_AS((void)Keire::UiVisualTreeAsset::ParseSource(AsBytes(invalidIdSource)),
+                         doctest::Contains("UI element <VisualElement> has an invalid id"), std::runtime_error);
+}
+
 TEST_CASE("UI stylesheet parses selectors and round trips authoring source")
 {
     const auto definition = Keire::UiStyleSheetAsset::ParseSource(AsBytes(StyleSource));

@@ -333,7 +333,8 @@ namespace
     [[nodiscard]] ManagedCookBuild BuildManagedAssemblies(const Keire::AssetDatabase& database,
                                                           const Keire::Project& project, const std::string& profile,
                                                           const std::filesystem::path& executable,
-                                                          const bool discoverManagedTypes)
+                                                          const bool discoverManagedTypes,
+                                                          std::vector<Keire::ManagedServiceDescriptor> nativeServices)
     {
         Keire::ManagedBuildRequest request;
         for (const auto& record : database.Records())
@@ -361,6 +362,9 @@ namespace
         specification.RuntimeHostDirectory = managedHost;
         specification.RuntimeRootDirectory = managedHost / "Dotnet";
         specification.ManagedApiAssembly = managedHost / "Keire.Managed.dll";
+        specification.ManagedEditorApiAssembly = managedHost / "Keire.Editor.Managed.dll";
+        specification.ManagedGeneratorAssembly = managedHost / "Keire.Managed.Generators.dll";
+        specification.NativeServices = std::move(nativeServices);
 #if defined(_WIN32)
         const auto developmentDotnet =
             executable.parent_path().parent_path().parent_path().parent_path().parent_path() /
@@ -1224,8 +1228,8 @@ namespace
                     const bool containsManagedData =
                         std::ranges::any_of(database->Records(), [](const Keire::AssetSourceRecord& record)
                                             { return record.Type == Keire::ManagedDataAsset::StaticType(); });
-                    const auto managed =
-                        BuildManagedAssemblies(*database, *project, cookProfile.Name, executable, containsManagedData);
+                    const auto managed = BuildManagedAssemblies(*database, *project, cookProfile.Name, executable,
+                                                                containsManagedData, modules->ManagedServices());
                     if (containsManagedData)
                     {
                         cookProfile.ManagedTypeDiscoveryComplete = true;
@@ -1299,7 +1303,8 @@ namespace
                     std::ranges::any_of(database->Records(), [](const Keire::AssetSourceRecord& record)
                                         { return record.Type == Keire::ManagedDataAsset::StaticType(); });
                 const auto managed = BuildManagedAssemblies(*database, *project, commandLine.Profile.Name, executable,
-                                                            commandLine.Profile.Strict && containsManagedData);
+                                                            commandLine.Profile.Strict && containsManagedData,
+                                                            modules->ManagedServices());
                 if (commandLine.Profile.Strict && containsManagedData)
                 {
                     commandLine.Profile.ManagedTypeDiscoveryComplete = true;

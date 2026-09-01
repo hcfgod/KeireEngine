@@ -4,6 +4,7 @@
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/ECS/Component.h"
 #include "Keire/Input/Input.h"
+#include "Keire/Modules/EngineModule.h"
 #include "Keire/Ref.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Scenes/SceneRuntimeWorld.h"
@@ -763,6 +764,9 @@ namespace Keire
         std::filesystem::path RuntimeHostDirectory;
         std::filesystem::path RuntimeRootDirectory;
         std::filesystem::path ManagedApiAssembly;
+        std::filesystem::path ManagedEditorApiAssembly;
+        std::filesystem::path ManagedGeneratorAssembly;
+        std::vector<ManagedServiceDescriptor> NativeServices;
         ManagedSdkSelection SdkSelection = ManagedSdkSelection::Bundled;
         std::filesystem::path DotnetExecutable;
         std::size_t MaximumDiagnostics = 4096;
@@ -829,6 +833,7 @@ namespace Keire
         std::vector<ManagedBuildDiagnostic> Diagnostics;
         std::filesystem::path ActiveAssemblyDirectory;
         std::filesystem::path ManagedApiAssembly;
+        std::filesystem::path ManagedEditorApiAssembly;
         std::uint64_t Generation = 0;
         std::chrono::milliseconds Elapsed{};
         std::vector<std::string> ChangedAssemblies;
@@ -871,7 +876,9 @@ namespace Keire
     struct ManagedReloadRequest
     {
         std::vector<std::filesystem::path> Assemblies;
+        std::vector<std::filesystem::path> EditorAssemblies;
         std::filesystem::path ManagedApiAssembly;
+        std::filesystem::path ManagedEditorApiAssembly;
         std::vector<ManagedBehaviourState> State;
     };
 
@@ -1039,6 +1046,7 @@ namespace Keire
         void InstallManagedComponents(const Ref<ComponentRegistry>& registry);
         void SetAssetSystem(Ref<AssetSystem> assets);
         void PumpManagedAssets();
+        void UpdateManagedExtensions(double deltaSeconds, double unscaledDeltaSeconds, std::uint64_t frame);
         // The caller retains ownership. The service must outlive every script callback. Passing nullptr drains managed
         // jobs and asset-generation callbacks before clearing the service and is the terminal detach for that active
         // generation.

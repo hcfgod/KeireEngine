@@ -1,15 +1,28 @@
 [CmdletBinding()]
-param([ValidateSet("Release", "Dist")][string]$Configuration = "Release", [string]$Generator = "vs2022", [string]$Architecture = "", [string]$Toolset = "default", [switch]$CI, [switch]$Update, [switch]$Generate, [switch]$AllowDirty, [switch]$StageOnly)
+param(
+    [ValidateSet("Release", "Dist")][string]$Configuration = "Release",
+    [string]$Generator = "vs2022",
+    [string]$Architecture = "",
+    [string]$Toolset = "default",
+    [switch]$CI,
+    [switch]$Update,
+    [switch]$Generate,
+    [switch]$AllowDirty,
+    [switch]$StageOnly,
+    [switch]$DevelopmentStage
+)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
 $Root = Get-RepositoryRoot; $Project = Get-ProjectConfig; $Lock = Get-DependencyLock
 $WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "package"
 try {
-$worktreePolicy = Get-WindowsPackageWorktreePolicy -Root $Root -AllowDirty:$AllowDirty -CI:$CI
+if ($DevelopmentStage -and $CI) { throw "Development staging is not a CI release gate." }
+$effectiveAllowDirty = $AllowDirty -or $DevelopmentStage
+$worktreePolicy = Get-WindowsPackageWorktreePolicy -Root $Root -AllowDirty:$effectiveAllowDirty -CI:$CI
 $dirty = $worktreePolicy.Dirty
 $developmentArtifact = $worktreePolicy.DevelopmentArtifact
 $CMake = Get-CMakeExecutable
-if (-not $CMake) { throw "CMake 3.20 or newer is required for SDK package validation." }
+if (-not $StageOnly -and -not $CMake) { throw "CMake 3.20 or newer is required for SDK package validation." }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset; $outputArchitecture = Get-ArchitectureOutputName $Architecture
 $imguiLibraryName = "$($Project.PROJECT_NAMESPACE)ImGui"
@@ -19,6 +32,14 @@ $assetWorkerName = "$($Project.PROJECT_NAMESPACE)AssetWorker"
 $runtimeName = "$($Project.PROJECT_NAMESPACE)Runtime"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build-info.ps1") } "Build metadata generation"
 $expectedHeadCommit = Get-GitHeadCommit $Root "unknown"
+if ($DevelopmentStage) {
+    Invoke-CheckedWindowsCommand {
+        & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration `
+            -Architecture $Architecture -Toolset $Toolset -Target $Project.CLIENT_TARGET -CI:$CI `
+            -Update:$Update -Generate:$Generate
+    } "Editor development build"
+}
+else {
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate } "Package test suite"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow } "Package editor smoke test"
 $editorPlayValidationDirectory = Join-Path $Root "Build\Validation"
@@ -81,6 +102,7 @@ if ($editorPlayValidation.schemaVersion -ne 1 -or
     $editorPlayValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1 -or
     -not $editorPlayValidation.gpuOcclusion.vfxVisibility.maskConsumed) {
     throw "Rendered additive Editor Play smoke published an incomplete result."
+}
 }
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI } "AssetTool build"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetWorkerName -CI:$CI } "Asset worker build"
@@ -198,6 +220,7 @@ $dotnetRuntimeVersion = (Get-ChildItem "$Root\Build\Dependencies\dotnet-sdk\shar
 $manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; developmentArtifact=$developmentArtifact; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT; jolt=$Lock.JOLT_COMMIT; recast=$Lock.RECAST_COMMIT; miniaudio=$Lock.MINIAUDIO_COMMIT; coral=$Lock.CORAL_COMMIT; dotnetRuntime=$dotnetRuntimeVersion }
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
+if (-not $DevelopmentStage) {
 $parsedManifest = Get-Content "$stage\build-manifest.json" -Raw | ConvertFrom-Json
 if ($parsedManifest.commit -ne $commit -or $parsedManifest.commit -ne (Get-GitHeadCommit $Root "unknown")) {
     throw "Package manifest commit does not match the packaging worktree HEAD."
@@ -368,9 +391,11 @@ $expectedIdentity = if ($dirty) { "$commitPrefix-dirty" } else { $commitPrefix }
 if (-not $versionOutput.Contains($expectedIdentity) -or (-not $dirty -and $versionOutput.Contains("$commitPrefix-dirty"))) {
     throw "Packaged binary identity does not match build-manifest.json."
 }
+}
 Assert-WindowsPackageGeneratedDataFree $stage
 if ($StageOnly) {
-    Write-Host "==> Package stage created: $stage"
+    $stageDescription = if ($DevelopmentStage) { "Development package stage updated" } else { "Package stage created" }
+    Write-Host "==> $stageDescription`: $stage"
     return
 }
 Compress-WindowsArchive "$stage\*" $archive

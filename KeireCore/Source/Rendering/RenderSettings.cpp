@@ -53,9 +53,88 @@ namespace Keire
             throw std::runtime_error("Rendering gpuOcclusion mode is unsupported.");
         }
 
+        [[nodiscard]] std::string_view RenderPathName(const RenderPath path)
+        {
+            switch (path)
+            {
+            case RenderPath::ForwardPlus:
+                return "forwardPlus";
+            case RenderPath::DeferredHybrid:
+                return "deferredHybrid";
+            }
+            throw std::invalid_argument("Render path is unsupported.");
+        }
+
+        [[nodiscard]] RenderPath ParseRenderPath(const std::string_view value)
+        {
+            if (value == "forwardPlus")
+                return RenderPath::ForwardPlus;
+            if (value == "deferredHybrid")
+                return RenderPath::DeferredHybrid;
+            throw std::runtime_error("Rendering renderPath is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view GlobalIlluminationModeName(const GlobalIlluminationMode mode)
+        {
+            switch (mode)
+            {
+            case GlobalIlluminationMode::Disabled:
+                return "disabled";
+            case GlobalIlluminationMode::Baked:
+                return "baked";
+            case GlobalIlluminationMode::Realtime:
+                return "realtime";
+            case GlobalIlluminationMode::Irradyn:
+                return "irradyn";
+            case GlobalIlluminationMode::Hybrid:
+                return "hybrid";
+            }
+            throw std::invalid_argument("Global illumination mode is unsupported.");
+        }
+
+        [[nodiscard]] GlobalIlluminationMode ParseGlobalIlluminationMode(const std::string_view value)
+        {
+            if (value == "disabled")
+                return GlobalIlluminationMode::Disabled;
+            if (value == "baked")
+                return GlobalIlluminationMode::Baked;
+            if (value == "realtime")
+                return GlobalIlluminationMode::Realtime;
+            if (value == "irradyn")
+                return GlobalIlluminationMode::Irradyn;
+            if (value == "hybrid")
+                return GlobalIlluminationMode::Hybrid;
+            throw std::runtime_error("Rendering globalIllumination mode is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view IrradynQualityName(const IrradynQuality quality)
+        {
+            switch (quality)
+            {
+            case IrradynQuality::Performance:
+                return "performance";
+            case IrradynQuality::Balanced:
+                return "balanced";
+            case IrradynQuality::Quality:
+                return "quality";
+            }
+            throw std::invalid_argument("Irradyn quality is unsupported.");
+        }
+
+        [[nodiscard]] IrradynQuality ParseIrradynQuality(const std::string_view value)
+        {
+            if (value == "performance")
+                return IrradynQuality::Performance;
+            if (value == "balanced")
+                return IrradynQuality::Balanced;
+            if (value == "quality")
+                return IrradynQuality::Quality;
+            throw std::runtime_error("Rendering irradynQuality is unsupported.");
+        }
+
         void Validate(const RenderEnvironmentSettings& settings)
         {
-            if (settings.SchemaVersion != 3)
+            if (settings.SchemaVersion != RenderEnvironmentSettingsSchemaVersion)
                 throw std::invalid_argument("Rendering project settings use an unsupported schema version.");
             if (!ValidColor(settings.AmbientColor))
                 throw std::invalid_argument("Ambient color channels must be finite values in 0..1.");
@@ -80,6 +159,9 @@ namespace Keire
                 settings.DirectionalShadowSplitLambda > 1.0F)
                 throw std::invalid_argument("Directional shadow settings are outside supported production limits.");
             (void)GpuOcclusionModeName(settings.GpuOcclusion);
+            (void)RenderPathName(settings.RequestedRenderPath);
+            (void)GlobalIlluminationModeName(settings.RequestedGlobalIllumination);
+            (void)IrradynQualityName(settings.RequestedIrradynQuality);
         }
     } // namespace
 
@@ -91,7 +173,7 @@ namespace Keire
 
         const auto document = Json::parse(Detail::ReadTextFile(path, MaximumSettingsBytes));
         const auto sourceSchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
-        if (sourceSchemaVersion < 1U || sourceSchemaVersion > 3U)
+        if (sourceSchemaVersion < 1U || sourceSchemaVersion > RenderEnvironmentSettingsSchemaVersion)
             throw std::runtime_error("Rendering project settings use an unsupported schema version.");
         RenderEnvironmentSettings result;
         const auto& ambient = document.at("ambientColor");
@@ -116,6 +198,13 @@ namespace Keire
         }
         if (sourceSchemaVersion >= 3U)
             result.GpuOcclusion = ParseGpuOcclusionMode(document.at("gpuOcclusion").get<std::string>());
+        if (sourceSchemaVersion >= 4U)
+        {
+            result.RequestedRenderPath = ParseRenderPath(document.at("renderPath").get<std::string>());
+            result.RequestedGlobalIllumination =
+                ParseGlobalIlluminationMode(document.at("globalIllumination").get<std::string>());
+            result.RequestedIrradynQuality = ParseIrradynQuality(document.at("irradynQuality").get<std::string>());
+        }
         Validate(result);
         return result;
     }
@@ -146,6 +235,80 @@ namespace Keire
             document["directionalShadowSplitLambda"] = settings.DirectionalShadowSplitLambda;
         }
         document["gpuOcclusion"] = GpuOcclusionModeName(settings.GpuOcclusion);
+        document["renderPath"] = RenderPathName(settings.RequestedRenderPath);
+        document["globalIllumination"] = GlobalIlluminationModeName(settings.RequestedGlobalIllumination);
+        document["irradynQuality"] = IrradynQualityName(settings.RequestedIrradynQuality);
         Detail::WriteTextFileAtomically(SettingsPath(projectRoot), document.dump(2) + '\n');
+    }
+
+    RenderFeatureSelection ResolveRenderFeatureSelection(const RenderEnvironmentSettings& settings,
+                                                         const RenderFeatureCapabilities& capabilities)
+    {
+        Validate(settings);
+        RenderFeatureSelection result;
+        result.RequestedPath = settings.RequestedRenderPath;
+        result.EffectivePath = settings.RequestedRenderPath;
+        result.RequestedGlobalIllumination = settings.RequestedGlobalIllumination;
+        result.EffectiveGlobalIllumination = settings.RequestedGlobalIllumination;
+        result.RequestedIrradynQuality = settings.RequestedIrradynQuality;
+
+        if (result.RequestedPath == RenderPath::DeferredHybrid && !capabilities.DeferredHybrid)
+        {
+            result.EffectivePath = RenderPath::ForwardPlus;
+            result.PathFallback = RenderPathFallbackReason::DeferredHybridUnavailable;
+        }
+
+        const bool irradynPathAvailable =
+            !capabilities.IrradynRequiresDeferredHybrid || result.EffectivePath == RenderPath::DeferredHybrid;
+        const bool irradynAvailable = capabilities.IrradynGlobalIllumination && irradynPathAvailable;
+        switch (result.RequestedGlobalIllumination)
+        {
+        case GlobalIlluminationMode::Disabled:
+            break;
+        case GlobalIlluminationMode::Baked:
+            if (!capabilities.BakedGlobalIllumination)
+            {
+                result.EffectiveGlobalIllumination = GlobalIlluminationMode::Disabled;
+                result.GlobalIlluminationFallback = GlobalIlluminationFallbackReason::BakedUnavailable;
+            }
+            break;
+        case GlobalIlluminationMode::Realtime:
+            if (!capabilities.RealtimeGlobalIllumination)
+            {
+                result.EffectiveGlobalIllumination = GlobalIlluminationMode::Disabled;
+                result.GlobalIlluminationFallback = GlobalIlluminationFallbackReason::RealtimeUnavailable;
+            }
+            break;
+        case GlobalIlluminationMode::Irradyn:
+            if (!irradynAvailable)
+            {
+                if (capabilities.RealtimeGlobalIllumination)
+                    result.EffectiveGlobalIllumination = GlobalIlluminationMode::Realtime;
+                else if (capabilities.BakedGlobalIllumination)
+                    result.EffectiveGlobalIllumination = GlobalIlluminationMode::Baked;
+                else
+                    result.EffectiveGlobalIllumination = GlobalIlluminationMode::Disabled;
+                result.GlobalIlluminationFallback =
+                    capabilities.IrradynGlobalIllumination
+                        ? GlobalIlluminationFallbackReason::IrradynRequiresDeferredHybrid
+                        : GlobalIlluminationFallbackReason::IrradynUnavailable;
+            }
+            break;
+        case GlobalIlluminationMode::Hybrid:
+            if (!capabilities.BakedGlobalIllumination || !irradynAvailable)
+            {
+                if (irradynAvailable)
+                    result.EffectiveGlobalIllumination = GlobalIlluminationMode::Irradyn;
+                else if (capabilities.RealtimeGlobalIllumination)
+                    result.EffectiveGlobalIllumination = GlobalIlluminationMode::Realtime;
+                else if (capabilities.BakedGlobalIllumination)
+                    result.EffectiveGlobalIllumination = GlobalIlluminationMode::Baked;
+                else
+                    result.EffectiveGlobalIllumination = GlobalIlluminationMode::Disabled;
+                result.GlobalIlluminationFallback = GlobalIlluminationFallbackReason::HybridUnavailable;
+            }
+            break;
+        }
+        return result;
     }
 } // namespace Keire

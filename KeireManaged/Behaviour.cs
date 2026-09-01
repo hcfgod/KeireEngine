@@ -143,6 +143,7 @@ public abstract class Behaviour : Component
     protected virtual void OnAnimatorIk(AnimationIkContext context) { }
     protected virtual void OnBeforeReload() { }
     protected virtual void OnAfterReload() { }
+    protected virtual void OnValidate() { }
 
     internal void Attach(Entity entity)
     {
@@ -152,6 +153,8 @@ public abstract class Behaviour : Component
         RuntimeCallbackMask = DetectRuntimeCallbacks();
         BehaviourRegistry.Register(this);
     }
+
+    internal void RuntimeValidate() => OnValidate();
 
     private uint DetectRuntimeCallbacks()
     {

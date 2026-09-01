@@ -15,6 +15,53 @@
 
 namespace KeireEditor
 {
+    namespace
+    {
+        [[nodiscard]] constexpr const char* RenderPathName(const Keire::RenderPath path) noexcept
+        {
+            switch (path)
+            {
+            case Keire::RenderPath::ForwardPlus:
+                return "Forward+";
+            case Keire::RenderPath::DeferredHybrid:
+                return "Deferred Hybrid";
+            }
+            return "Unsupported";
+        }
+
+        [[nodiscard]] constexpr const char* GlobalIlluminationName(const Keire::GlobalIlluminationMode mode) noexcept
+        {
+            switch (mode)
+            {
+            case Keire::GlobalIlluminationMode::Disabled:
+                return "Disabled";
+            case Keire::GlobalIlluminationMode::Baked:
+                return "Baked";
+            case Keire::GlobalIlluminationMode::Realtime:
+                return "Realtime";
+            case Keire::GlobalIlluminationMode::Irradyn:
+                return "Irradyn (Experimental)";
+            case Keire::GlobalIlluminationMode::Hybrid:
+                return "Baked + Irradyn Hybrid";
+            }
+            return "Unsupported";
+        }
+
+        [[nodiscard]] constexpr const char* IrradynQualityName(const Keire::IrradynQuality quality) noexcept
+        {
+            switch (quality)
+            {
+            case Keire::IrradynQuality::Performance:
+                return "Performance";
+            case Keire::IrradynQuality::Balanced:
+                return "Balanced";
+            case Keire::IrradynQuality::Quality:
+                return "Quality";
+            }
+            return "Unsupported";
+        }
+    } // namespace
+
     ProjectSettingsPanel::ProjectSettingsPanel(ProjectSettingsDocument& document,
                                                IProjectSettingsController& controller)
         : m_Document(document), m_Controller(controller), m_AssetPicker(std::make_unique<AssetPicker>())
@@ -418,6 +465,76 @@ namespace KeireEditor
         auto settings = m_Document.Settings();
         bool changed = false;
         bool commit = false;
+        ui.Text("Render Pipeline");
+        constexpr std::array renderPaths{Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid};
+        if (auto combo = ui.BeginCombo("Render Path", RenderPathName(settings.RequestedRenderPath)); combo)
+        {
+            for (const auto path : renderPaths)
+            {
+                if (ui.Selectable(RenderPathName(path), settings.RequestedRenderPath == path))
+                {
+                    settings.RequestedRenderPath = path;
+                    changed = true;
+                    commit = true;
+                }
+            }
+        }
+        ui.TextColored(
+            theme.MutedText,
+            settings.RequestedRenderPath == Keire::RenderPath::ForwardPlus
+                ? "Forward+ is the current production path and supports every material fallback."
+                : "Deferred Hybrid uses GBuffer passes while retaining forward passes for specialized materials.");
+
+        constexpr std::array illuminationModes{
+            Keire::GlobalIlluminationMode::Disabled, Keire::GlobalIlluminationMode::Baked,
+            Keire::GlobalIlluminationMode::Realtime, Keire::GlobalIlluminationMode::Irradyn,
+            Keire::GlobalIlluminationMode::Hybrid};
+        if (auto combo =
+                ui.BeginCombo("Global Illumination", GlobalIlluminationName(settings.RequestedGlobalIllumination));
+            combo)
+        {
+            for (const auto mode : illuminationModes)
+            {
+                if (ui.Selectable(GlobalIlluminationName(mode), settings.RequestedGlobalIllumination == mode))
+                {
+                    settings.RequestedGlobalIllumination = mode;
+                    changed = true;
+                    commit = true;
+                }
+            }
+        }
+        if (settings.RequestedGlobalIllumination == Keire::GlobalIlluminationMode::Irradyn ||
+            settings.RequestedGlobalIllumination == Keire::GlobalIlluminationMode::Hybrid)
+        {
+            constexpr std::array qualities{Keire::IrradynQuality::Performance, Keire::IrradynQuality::Balanced,
+                                           Keire::IrradynQuality::Quality};
+            if (auto combo = ui.BeginCombo("Irradyn Quality", IrradynQualityName(settings.RequestedIrradynQuality));
+                combo)
+            {
+                for (const auto quality : qualities)
+                {
+                    if (ui.Selectable(IrradynQualityName(quality), settings.RequestedIrradynQuality == quality))
+                    {
+                        settings.RequestedIrradynQuality = quality;
+                        changed = true;
+                        commit = true;
+                    }
+                }
+            }
+        }
+        const auto currentRuntime = Keire::ResolveRenderFeatureSelection(settings, {});
+        if (currentRuntime.PathFallback != Keire::RenderPathFallbackReason::None)
+            ui.TextColored(theme.Warning, "Deferred Hybrid is not available in this runtime; Forward+ will be used.");
+        if (currentRuntime.GlobalIlluminationFallback != Keire::GlobalIlluminationFallbackReason::None)
+        {
+            ui.TextColored(theme.Warning,
+                           "The requested GI mode is not available in this runtime; rendering uses " +
+                               std::string(GlobalIlluminationName(currentRuntime.EffectiveGlobalIllumination)) + '.');
+        }
+        ui.TextColored(theme.MutedText,
+                       "Requested and effective modes remain separate so capability fallback is explicit and safe.");
+        ui.Spacing();
+
         ui.Text("GPU Occlusion Culling");
         constexpr std::array modes{Keire::GpuOcclusionMode::Disabled, Keire::GpuOcclusionMode::Automatic,
                                    Keire::GpuOcclusionMode::Forced};

@@ -79,6 +79,7 @@ state serialization; collection authoring is currently available for persistent 
 | [Getting Started](GettingStarted.md) | Assemblies, IDE generation, compilation, and attachment |
 | [Behaviours And Lifecycle](BehavioursAndLifecycle.md) | Callback timing, reentrancy, cleanup, reload, and exceptions |
 | [Serialization And The Inspector](SerializationAndInspector.md) | Field eligibility, direct references, stable IDs, and migration |
+| [Managed Extensibility](ManagedExtensibility.md) | Custom values, runtime services, native contracts, Editor SDK, importers, tools, and build hooks |
 | [Entities, Components, And Transforms](EntitiesComponentsAndTransforms.md) | Lookup, hierarchy, cloning, activation, and destruction |
 | [Assets And ScriptableObjects](AssetsAndScriptableObjects.md) | Direct assets, prefabs, persistent data, and residency operations |
 | [Gameplay Services](GameplayServices.md) | Input, physics, navigation, prefabs, VFX, logging, and profiling |
@@ -99,3 +100,7 @@ state serialization; collection authoring is currently available for persistent 
 - [`Rendering.cs`](../../KeireManaged/Rendering.cs) defines cameras, renderers, lights, and dynamic materials.
 - [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) defines `Scene`, `SceneManager`, and render settings.
 - [`SerializationAttributes.cs`](../../KeireManaged/SerializationAttributes.cs) defines Inspector metadata.
+- [`ManagedCustomSerialization.cs`](../../KeireManaged/ManagedCustomSerialization.cs) defines bounded custom values,
+  converters, migrations, and serialization callbacks.
+- [`RuntimeServices.cs`](../../KeireManaged/RuntimeServices.cs) defines application-owned managed services.
+- [`KeireEditorManaged`](../../KeireEditorManaged) defines the Editor-only retained extension SDK.

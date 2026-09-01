@@ -22,7 +22,7 @@ LEGACY_GRAPH_ROOT = ASSETS_ROOT / "Materials" / "MaterialGraphs"
 LEGACY_GENERATED_GRAPH_ROOT = ASSETS_ROOT / "Generated" / "MaterialGraphs"
 SCENE_PATH = ASSETS_ROOT / "Scenes" / "SandboxShowcase.keirescene"
 LEGACY_SCENE_PATH = ASSETS_ROOT / "Scenes" / "ShaderMaterialShowcase.keirescene"
-PLINTH_MATERIAL_PATH = SHOWCASE_ROOT / "Materials" / "ShowcasePlinth.keirematerial"
+PLINTH_MATERIAL_PATH = SHOWCASE_ROOT / "Materials" / "ShowcasePlinth.keiremateriallegacy"
 SCRIPT_PATH = ASSETS_ROOT / "Scripts" / "Runtime" / "Examples" / "ShowcaseOrbit.cs"
 VFX_GUIDE_PATH = ASSETS_ROOT / "Vfx" / "README.md"
 NAMESPACE = uuid.UUID("2fd1dd90-9e2b-54c0-a559-b654bb581a4e")
@@ -1442,7 +1442,7 @@ def graph_paths(example: Example) -> tuple[Path, Path]:
         SHOWCASE_ROOT
         / "MaterialGraphs"
         / level
-        / f"MG_{example.number:02d}_{example.slug}.keirematerialgraph"
+        / f"MG_{example.number:02d}_{example.slug}.keirematerial"
     )
     return shader, material
 

@@ -22,13 +22,13 @@ Assert-StagingState ($premakePolicy.Contains("DependencyManifest.CoralNetHostRun
 Assert-StagingState ($managedPremake.Contains("stage-managed-host.ps1") -and
                      $managedPremake.Contains('if _ACTION == "ninja"')) `
     "Generated IDE projects do not use the shared managed-host staging script."
-Assert-StagingState ($clientPremake.Contains("AddKeireManagedHostStaging()")) `
+Assert-StagingState ($clientPremake.Contains("AddKeireManagedHostStaging(true)")) `
     "The editor project does not stage its managed host."
 Assert-StagingState ($assetToolPremake.Contains("AddKeireManagedRuntimeDependency()") -and
-                     $assetToolPremake.Contains("AddKeireManagedHostStaging()")) `
+                     $assetToolPremake.Contains("AddKeireManagedHostStaging(true)")) `
     "The Asset Tool project does not build and stage its managed host."
 Assert-StagingState ($runtimePremake.Contains("AddKeireManagedRuntimeDependency()") -and
-                     $runtimePremake.Contains("AddKeireManagedHostStaging()")) `
+                     $runtimePremake.Contains("AddKeireManagedHostStaging(false)")) `
     "The packaged player template does not build and stage its managed host."
 Assert-StagingState ($assetToolSource.Contains("specification.RuntimeHostDirectory = managedHost;") -and
                      $assetToolSource.Contains('specification.RuntimeRootDirectory = managedHost / "Dotnet";')) `
@@ -69,6 +69,8 @@ try {
         $file | Set-Content (Join-Path $fixture "Build\Dependencies\coral-patched\Build\Release\$file") -Encoding ASCII
     }
     "managed-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Managed.dll") -Encoding ASCII
+    "editor-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Editor.Managed.dll") -Encoding ASCII
+    "generators" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Managed.Generators.dll") -Encoding ASCII
     "hostfxr" | Set-Content `
         (Join-Path $fixture "Build\Dependencies\dotnet-sdk\host\fxr\10.0.1\hostfxr.dll") -Encoding ASCII
     "coreclr" | Set-Content `
@@ -97,6 +99,12 @@ try {
             "Managed\Dotnet\shared\Microsoft.NETCore.App\10.0.1\coreclr.dll")) {
         Assert-StagingState (Test-Path (Join-Path $target $relativePath)) `
             "Managed-host staging omitted $relativePath."
+    }
+    & (Join-Path $fixture "Scripts\Windows\stage-managed-host.ps1") -Root $fixture `
+        -Configuration Release -Architecture x86_64 -Target KeireClient -IncludeEditorApi
+    foreach ($relativePath in @("Managed\Keire.Editor.Managed.dll", "Managed\Keire.Managed.Generators.dll")) {
+        Assert-StagingState (Test-Path (Join-Path $target $relativePath)) `
+            "Editor managed-host staging omitted $relativePath."
     }
 }
 finally {

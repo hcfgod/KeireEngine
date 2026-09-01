@@ -11,12 +11,42 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Keire
 {
-    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 6;
+    inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 7;
     inline constexpr std::uint32_t MaterialInstanceSourceSchemaVersion = 2;
+    inline constexpr std::string_view MaterialAssetSourceExtension = ".keirematerial";
+    inline constexpr std::string_view MaterialInstanceAssetSourceExtension = ".keirematerialinstance";
+
+    enum class MaterialDomain : std::uint8_t
+    {
+        Surface,
+        Decal,
+        Volume
+    };
+
+    enum class MaterialShadingModel : std::uint8_t
+    {
+        OpenPbrLit,
+        Unlit,
+        Hair,
+        Eye,
+        Water,
+        ThinTranslucent,
+        ParticipatingMedia
+    };
+
+    enum class MaterialAuthoringMode : std::uint8_t
+    {
+        SimpleSurface,
+        ClosureGraph,
+        LayerStack
+    };
+
+    inline constexpr std::uint8_t MaximumMaterialClosureCount = 8;
 
     struct MaterialGraphPropertyBinding
     {
@@ -63,6 +93,11 @@ namespace Keire
     struct MaterialGraphDefinition
     {
         std::uint32_t SchemaVersion = MaterialGraphSourceSchemaVersion;
+        MaterialDomain Domain = MaterialDomain::Surface;
+        MaterialShadingModel ShadingModel = MaterialShadingModel::OpenPbrLit;
+        MaterialAuthoringMode AuthoringMode = MaterialAuthoringMode::SimpleSurface;
+        std::uint8_t MaximumClosures = MaximumMaterialClosureCount;
+        /// Optional legacy/custom pass-template reference. New standalone materials leave this empty.
         MaterialShaderReference Shader;
         MaterialSurfaceState Surface;
         bool ContributeEmissionToGI = true;
@@ -72,8 +107,7 @@ namespace Keire
         std::vector<MaterialGraphPropertyBinding> Properties;
         std::vector<MaterialGraphValueNode> Nodes;
         std::vector<MaterialGraphConnection> Connections;
-        /// Authoritative visual surface program. Schema v6 promotes this graph to first-class OpenPBR/slab authoring;
-        /// the referenced Shader Graph remains a reusable pass template during transactional material migration.
+        /// Authoritative visual material program shared by simple-surface, closure, and layer-stack authoring.
         ShaderGraphDefinition SurfaceGraph;
         GraphAuthoringMetadata Authoring;
 
@@ -159,6 +193,11 @@ namespace Keire
     };
 
     [[nodiscard]] KEIRE_API MaterialPropertyValue DefaultMaterialGraphValue(const ShaderPropertyDefinition& property);
+    /// Creates a standalone assignable material with an exposed OpenPBR surface and no external shader dependency.
+    [[nodiscard]] KEIRE_API MaterialGraphDefinition
+    CreateOpenPbrMaterial(MaterialShadingModel shadingModel = MaterialShadingModel::OpenPbrLit,
+                          MaterialDomain domain = MaterialDomain::Surface,
+                          MaterialAuthoringMode authoringMode = MaterialAuthoringMode::SimpleSurface);
     [[nodiscard]] KEIRE_API MaterialGraphDefinition
     CreateMaterialGraph(MaterialShaderReference shader, const ShaderInterfaceDefinition& interfaceDefinition);
     [[nodiscard]] KEIRE_API ShaderGraphDefinition

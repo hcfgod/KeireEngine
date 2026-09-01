@@ -57,8 +57,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
   hot reload, cooked packs, native player packaging, deterministic `.keireassetpackage` archives, transactional
   project package resolution, Asset Browser package export for selections and folders, selective asset imports,
   persistent collapsible parent/child source groups, receipts, rollback, and recovery.
-- SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, separate Shader and Material Graphs,
-  Direct Materials, inherited and dynamic Material Instances, reusable material/shader functions and layers,
+- SDL3 multi-window and SDL_GPU rendering, Scene and Game views, cameras, picking, unified OpenPBR Materials,
+  target-program Shader Graphs, inherited and dynamic Material Instances, reusable material/shader functions and layers,
   Material Parameter Collections, tagged custom-shader materials, LODs, same-frame camera-local GPU occlusion with
   compacted indirect draws and fail-visible Forward+ local-light masks, capability-gated VFX and spatial-volume mask
   consumers, deterministic direct fallback, and per-surface bounds/HZB diagnostics, spatial lighting data, animation,
@@ -190,6 +190,11 @@ Both platform launchers expose the same top-level workflow:
 | `rename` | Transactionally rename the reusable engine template. |
 | `help` | Print the authoritative options and supported values. |
 
+On Windows, `Scripts\project.bat stage-editor` and `Scripts\project.bat stage-hub` provide a shorter local Dist
+iteration loop. They update the runnable layouts under `Build\Distributions` without running the release test matrix
+or creating and re-extracting archives; the corresponding `package-*` commands remain the release gates. Development
+staging defaults to Ninja so repeated runs retain compatible incremental outputs.
+
 Supported build configurations are `Debug`, `Release`, `Dist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`.
 Available generators and sanitizer support vary by host platform and toolchain; `doctor` and `help` report the valid
 local combination.
@@ -255,6 +260,10 @@ Markdown, and its source validation checks these values against the correspondin
 Managed gameplay targets .NET 10 and C# 14. A project declares source roots through `.keireasm` assets; successful
 generations publish assemblies for editor discovery and player builds. Gameplay types inherit from `Keire.Behaviour`,
 use stable component and field identities, and access runtime systems through canonical entity, component, and asset objects.
+Runtime assemblies may also publish versioned custom value converters/migrations, application-owned runtime services,
+and generated stable source-module bindings. Editor assemblies use the separately packaged `Keire.Editor.Managed.dll`
+for retained property drawers and inspectors, scripted importers, windows/tools, and transactional build hooks; neither
+the Editor API nor Editor assemblies enter cooked players.
 Scripts may live anywhere under `Assets`; script creation and generated Input Actions wrappers extend the selected
 runtime assembly's source roots when their folder is not already covered.
 Camera, Mesh Renderer, and typed light components expose live presentation state, while bounded material property blocks
@@ -326,7 +335,9 @@ email/password fallback retains its separate Auth refresh flow. See [Asset Packa
 | `KeireClient/` | Editor application and authoring UI. |
 | `KeireHub/`, `KeireHubRuntime/` | Hub product UI and reusable project/install management. |
 | `KeireRuntime/` | Cooked desktop player runtime. |
-| `KeireManaged/` | Public managed gameplay API. |
+| `KeireManaged/` | Public managed gameplay API and runtime extensibility contracts. |
+| `KeireEditorManaged/` | Editor-only retained extension SDK. |
+| `KeireManaged.Generators/` | Incremental analyzer/generator for bounded native source-module bindings. |
 | `AssetTool/`, `KeireAssetWorker/` | Command-line asset operations and isolated import work. |
 | `SourceModules/` | Project-selectable native subsystem modules. |
 | `Services/KeireDistributionService/` | Signed catalogs, packages, website, and generated docs host. |

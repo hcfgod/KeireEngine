@@ -126,6 +126,68 @@ namespace Keire
         Forced
     };
 
+    enum class RenderPath : std::uint8_t
+    {
+        ForwardPlus,
+        DeferredHybrid
+    };
+
+    enum class GlobalIlluminationMode : std::uint8_t
+    {
+        Disabled,
+        Baked,
+        Realtime,
+        Irradyn,
+        Hybrid
+    };
+
+    enum class IrradynQuality : std::uint8_t
+    {
+        Performance,
+        Balanced,
+        Quality
+    };
+
+    enum class RenderPathFallbackReason : std::uint8_t
+    {
+        None,
+        DeferredHybridUnavailable
+    };
+
+    enum class GlobalIlluminationFallbackReason : std::uint8_t
+    {
+        None,
+        BakedUnavailable,
+        RealtimeUnavailable,
+        IrradynUnavailable,
+        IrradynRequiresDeferredHybrid,
+        HybridUnavailable
+    };
+
+    struct RenderFeatureCapabilities
+    {
+        bool DeferredHybrid = false;
+        bool BakedGlobalIllumination = false;
+        bool RealtimeGlobalIllumination = false;
+        bool IrradynGlobalIllumination = false;
+        bool IrradynRequiresDeferredHybrid = true;
+
+        auto operator<=>(const RenderFeatureCapabilities&) const noexcept = default;
+    };
+
+    struct RenderFeatureSelection
+    {
+        RenderPath RequestedPath = RenderPath::ForwardPlus;
+        RenderPath EffectivePath = RenderPath::ForwardPlus;
+        RenderPathFallbackReason PathFallback = RenderPathFallbackReason::None;
+        GlobalIlluminationMode RequestedGlobalIllumination = GlobalIlluminationMode::Disabled;
+        GlobalIlluminationMode EffectiveGlobalIllumination = GlobalIlluminationMode::Disabled;
+        GlobalIlluminationFallbackReason GlobalIlluminationFallback = GlobalIlluminationFallbackReason::None;
+        IrradynQuality RequestedIrradynQuality = IrradynQuality::Balanced;
+
+        auto operator<=>(const RenderFeatureSelection&) const noexcept = default;
+    };
+
     enum class GpuOcclusionDebugView : std::uint8_t
     {
         None,
@@ -260,9 +322,11 @@ namespace Keire
         float FarPlane = 1000.0F;
     };
 
+    inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 4;
+
     struct RenderEnvironmentSettings
     {
-        std::uint32_t SchemaVersion = 3;
+        std::uint32_t SchemaVersion = RenderEnvironmentSettingsSchemaVersion;
         Color AmbientColor{0.20F, 0.22F, 0.26F, 1.0F};
         float AmbientIntensity = 0.75F;
         float Exposure = 1.0F;
@@ -276,6 +340,9 @@ namespace Keire
         std::uint32_t DirectionalShadowResolution = 2048;
         float DirectionalShadowSplitLambda = 0.65F;
         GpuOcclusionMode GpuOcclusion = GpuOcclusionMode::Automatic;
+        RenderPath RequestedRenderPath = RenderPath::ForwardPlus;
+        GlobalIlluminationMode RequestedGlobalIllumination = GlobalIlluminationMode::Disabled;
+        IrradynQuality RequestedIrradynQuality = IrradynQuality::Balanced;
 
         auto operator<=>(const RenderEnvironmentSettings&) const noexcept = default;
     };
@@ -285,6 +352,8 @@ namespace Keire
     KEIRE_API void ValidateRenderEnvironmentSettings(const RenderEnvironmentSettings& settings);
     KEIRE_API void SaveRenderEnvironmentSettings(const std::filesystem::path& projectRoot,
                                                  const RenderEnvironmentSettings& settings);
+    [[nodiscard]] KEIRE_API RenderFeatureSelection ResolveRenderFeatureSelection(
+        const RenderEnvironmentSettings& settings, const RenderFeatureCapabilities& capabilities);
 
     class KEIRE_API RenderView final : public RefCounted
     {

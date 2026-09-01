@@ -55,7 +55,7 @@ namespace KeireEditor
                 return "Custom Graphics Output";
             case Keire::ShaderGraphTarget::Compute:
                 return "Compute Shader Output";
-            case Keire::ShaderGraphTarget::LegacySurface:
+            case Keire::ShaderGraphTarget::Material:
                 break;
             }
             switch (definition.Output)

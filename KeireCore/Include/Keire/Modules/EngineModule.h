@@ -74,6 +74,62 @@ namespace Keire
         std::string Parent;
     };
 
+    enum class ManagedBindingValueKind : std::uint8_t
+    {
+        Void,
+        Boolean,
+        SignedInteger,
+        UnsignedInteger,
+        FloatingPoint,
+        Utf8String,
+        Vector2,
+        Vector3,
+        Vector4,
+        Quaternion,
+        Color,
+        StableId,
+        EntityId,
+        AssetId,
+        ComponentTypeId,
+        BoundedBuffer,
+        StructuredResult
+    };
+
+    enum class ManagedBindingThreadAffinity : std::uint8_t
+    {
+        AnyThread,
+        ManagedOwnerThread,
+        MainThread
+    };
+
+    struct ManagedBindingParameterDescriptor
+    {
+        std::string Name;
+        ManagedBindingValueKind Kind = ManagedBindingValueKind::Void;
+        ManagedBindingValueKind ElementKind = ManagedBindingValueKind::Void;
+        std::uint32_t MaximumElements = 0;
+        auto operator<=>(const ManagedBindingParameterDescriptor&) const = default;
+    };
+
+    struct ManagedBindingMethodDescriptor
+    {
+        std::string StableId;
+        std::uint32_t AbiVersion = 1;
+        ManagedBindingThreadAffinity ThreadAffinity = ManagedBindingThreadAffinity::ManagedOwnerThread;
+        std::vector<ManagedBindingParameterDescriptor> Parameters;
+        ManagedBindingValueKind Result = ManagedBindingValueKind::Void;
+        ManagedBindingValueKind StructuredResult = ManagedBindingValueKind::Void;
+        auto operator<=>(const ManagedBindingMethodDescriptor&) const = default;
+    };
+
+    struct ManagedServiceDescriptor
+    {
+        std::string StableId;
+        std::uint32_t AbiVersion = 1;
+        std::vector<ManagedBindingMethodDescriptor> Methods;
+        auto operator<=>(const ManagedServiceDescriptor&) const = default;
+    };
+
     class KEIRE_API ModuleRegistrationContext final
     {
       public:
@@ -89,6 +145,7 @@ namespace Keire
         void RegisterDiagnostic(DiagnosticDefinition definition);
         void RegisterProjectUpgrade(ProjectUpgradeStep step);
         void RegisterMemoryDomain(ModuleMemoryDomainRegistration domain);
+        void RegisterManagedService(ManagedServiceDescriptor service);
 
       private:
         friend class ModuleRegistry;
@@ -134,6 +191,7 @@ namespace Keire
         [[nodiscard]] std::vector<DiagnosticDefinition> Diagnostics() const;
         [[nodiscard]] std::vector<ProjectUpgradeStep> ProjectUpgrades() const;
         [[nodiscard]] std::vector<ModuleMemoryDomainRegistration> MemoryDomains() const;
+        [[nodiscard]] std::vector<ManagedServiceDescriptor> ManagedServices() const;
 
         void Start(Application& application);
         [[nodiscard]] bool IsStarted() const noexcept;

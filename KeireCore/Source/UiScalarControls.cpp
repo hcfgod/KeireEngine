@@ -57,6 +57,13 @@ namespace Keire
                 if (child && child->ChildId == id)
                     return child;
             }
+            // Before InputTextMultiline begins for the current frame, the persistent child is not yet present in
+            // parent.DC.ChildWindows. Its live scroll position is still authoritative over the public state mirror.
+            for (auto* child : GImGui->Windows)
+            {
+                if (child && child->ParentWindow == &parent && child->ChildId == id)
+                    return child;
+            }
             return nullptr;
         }
 
@@ -69,6 +76,14 @@ namespace Keire
         [[nodiscard]] bool IsCodeWordCharacter(const char character) noexcept
         {
             return std::isalnum(static_cast<unsigned char>(character)) != 0 || character == '_' || character == '-';
+        }
+
+        [[nodiscard]] float MeasureCodeEditorText(ImFont& font, const float fontSize, const char* begin,
+                                                  const char* end) noexcept
+        {
+            if (begin >= end)
+                return 0.0F;
+            return font.CalcTextSizeA(fontSize, FLT_MAX, 0.0F, begin, end).x;
         }
 
         [[nodiscard]] std::optional<CodeEditorSelection>
@@ -101,7 +116,7 @@ namespace Keire
                 unsigned int codePoint = 0;
                 const auto length = std::max(1, ImTextCharFromUtf8(&codePoint, character, lineEnd));
                 const auto* next = std::min(character + length, lineEnd);
-                const float width = ImGui::CalcTextSize(character, next, false).x;
+                const float width = MeasureCodeEditorText(*context.Font, context.FontSize, character, next);
                 if (requestedX < x + width * 0.5F)
                     break;
                 x += width;
@@ -142,7 +157,7 @@ namespace Keire
             if (begin >= end)
                 return 0.0F;
             drawList.AddText(&font, fontSize, position, color, begin, end, 0.0F, &clipRectangle);
-            return ImGui::CalcTextSize(begin, end, false).x;
+            return MeasureCodeEditorText(font, fontSize, begin, end);
         }
 
         void DrawCodeEditorText(const std::string_view value, UiCodeEditorState& state, const ImGuiID id,
@@ -243,24 +258,8 @@ namespace Keire
             const ImRect expectedFrame(frameMinimum, {frameMinimum.x + frameWidth, frameMinimum.y + size.y});
             const bool originalMouseClicked = io.MouseClicked[0];
             const auto originalClickCount = io.MouseClickedCount[0];
-            const float previousScrollY = state.ScrollY;
-            const bool replaceClick = originalMouseClicked && expectedFrame.Contains(io.MousePos);
-            if (replaceClick)
-            {
-                const auto& style = ImGui::GetStyle();
-                const ImVec2 origin{frameMinimum.x + style.FramePadding.x - state.ScrollX,
-                                    frameMinimum.y + style.FramePadding.y - previousScrollY};
-                if (const auto selection =
-                        SelectionAtMouse(value, GImGui->InputTextLineIndex, origin, io.MousePos, originalClickCount))
-                {
-                    state.CursorOffset = selection->End;
-                    state.SelectionBegin = selection->Begin;
-                    state.SelectionEnd = selection->End;
-                    state.RequestCursor = true;
-                }
-                ImGui::SetKeyboardFocusHere();
-                io.MouseClicked[0] = false;
-            }
+            const auto* existingChild = FindCodeEditorChild(*parent, id);
+            const float previousScrollY = existingChild ? existingChild->Scroll.y : state.ScrollY;
             const bool requestedCursor = state.RequestCursor;
             const auto flags =
                 ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackAlways | ImGuiInputTextFlags_WordWrap;
@@ -269,8 +268,6 @@ namespace Keire
                 ImGui::InputTextMultiline(safeLabel.c_str(), &value, {size.x == 0.0F ? -FLT_MIN : size.x, size.y},
                                           flags, UpdateCodeEditorState, &state);
             ImGui::PopStyleColor();
-            io.MouseClicked[0] = originalMouseClicked;
-            io.MouseClickedCount[0] = originalClickCount;
             if (requestedCursor)
             {
                 if (auto* input = ImGui::GetInputTextState(id))
@@ -279,20 +276,37 @@ namespace Keire
                     input->CursorCenterY = false;
                 }
             }
+            auto* child = FindCodeEditorChild(*parent, id);
+            const bool replaceClick = originalMouseClicked && !io.KeyShift && expectedFrame.Contains(io.MousePos) &&
+                                      child && child->ClipRect.Contains(io.MousePos);
             if (replaceClick)
             {
-                auto* child = FindCodeEditorChild(*parent, id);
-                if (auto* input = ImGui::GetInputTextState(id))
+                const auto& style = ImGui::GetStyle();
+                const ImVec2 origin{child->DC.CursorStartPos.x + style.FramePadding.x - state.ScrollX,
+                                    child->DC.CursorStartPos.y + style.FramePadding.y};
+                if (const auto selection =
+                        SelectionAtMouse(value, GImGui->InputTextLineIndex, origin, io.MousePos, originalClickCount))
                 {
-                    input->CursorFollow = false;
-                    input->CursorCenterY = false;
-                    input->CursorAnimReset();
-                }
-                if (child)
-                {
-                    child->Scroll.y = previousScrollY;
-                    child->ScrollTarget.y = FLT_MAX;
-                    child->ScrollTargetCenterRatio.y = 0.0F;
+                    state.CursorOffset = selection->End;
+                    state.SelectionBegin = selection->Begin;
+                    state.SelectionEnd = selection->End;
+                    state.RequestCursor = false;
+                    if (auto* input = ImGui::GetInputTextState(id))
+                    {
+                        input->SetSelection(static_cast<int>(selection->Begin), static_cast<int>(selection->End));
+                        input->CursorFollow = false;
+                        input->CursorCenterY = false;
+                        input->Scroll.y = std::clamp(previousScrollY, 0.0F, child->ScrollMax.y);
+                        input->CursorAnimReset();
+                    }
+                    else
+                    {
+                        state.RequestCursor = true;
+                    }
+                    const float restoredScrollY = std::clamp(previousScrollY, 0.0F, child->ScrollMax.y);
+                    child->Scroll.y = restoredScrollY;
+                    ImGui::SetScrollY(child, restoredScrollY);
+                    state.ScrollY = restoredScrollY;
                 }
             }
             state.CursorOffset = std::min(state.CursorOffset, value.size());

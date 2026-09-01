@@ -32,6 +32,7 @@ configuration="${2:?configuration is required}"
 system="${3:?system is required}"
 architecture="${4:?architecture is required}"
 target="${5:?target is required}"
+include_editor_api="${6:-false}"
 
 output_architecture="$(architecture_output_name "$architecture")"
 target_directory="$root/Build/Bin/$configuration-$system-$output_architecture/$target"
@@ -54,6 +55,12 @@ for file in "${files[@]}"; do
   copy_file_if_changed "$coral_directory/$file" "$managed_directory/$file"
 done
 copy_file_if_changed "$root/Build/Managed/Keire.Managed.dll" "$managed_directory/Keire.Managed.dll"
+if [[ "$include_editor_api" == true ]]; then
+  copy_file_if_changed "$root/Build/Managed/Keire.Editor.Managed.dll" \
+    "$managed_directory/Keire.Editor.Managed.dll"
+  copy_file_if_changed "$root/Build/Managed/Keire.Managed.Generators.dll" \
+    "$managed_directory/Keire.Managed.Generators.dll"
+fi
 
 hostfxr_directory="$(find "$dotnet_root/host/fxr" -mindepth 1 -maxdepth 1 -type d -print | sort | tail -n 1)"
 core_runtime_directory="$(

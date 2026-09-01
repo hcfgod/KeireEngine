@@ -811,14 +811,13 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                            std::string("Material Parameter Collection editor unavailable: ") + error.what());
         }
     }
-    else if (record->RelativePath.extension() == ".keirematerialgraph")
+    else if (record->RelativePath.extension().string() == Keire::MaterialAssetSourceExtension)
     {
         ui.Separator();
-        ui.TextColored(theme.Accent, "MATERIAL GRAPH");
-        ui.Text("Unreal-style surface expressions composed through a reusable Shader Graph template.");
-        ui.TextColored(theme.MutedText,
-                       "Parameters flow into Material Instances; generated shader variants remain engine-managed.");
-        if (ui.Button("Open Material Graph"))
+        ui.TextColored(theme.Accent, "MATERIAL");
+        ui.Text("OpenPBR surface, closure, and layer authoring in one assignable graph.");
+        ui.TextColored(theme.MutedText, "Parameters flow into Material Instances; generated programs stay internal.");
+        if (ui.Button("Open Material"))
         {
             try
             {
@@ -826,16 +825,15 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             }
             catch (const std::exception& error)
             {
-                m_Controller.ReportInspectorAssetError(std::string("Material Graph editor failed to open: ") +
-                                                       error.what());
+                m_Controller.ReportInspectorAssetError(std::string("Material editor failed to open: ") + error.what());
             }
         }
         ui.SameLine();
-        if (ui.Button("Reimport Material Graph"))
+        if (ui.Button("Reimport Material"))
             m_Controller.ImportInspectorAssets();
-        ui.TextColored(theme.MutedText, "Double-clicking this asset opens its own Material Graph document.");
+        ui.TextColored(theme.MutedText, "Double-clicking this asset opens its Material document.");
     }
-    else if (record->RelativePath.extension() == ".keirematerial")
+    else if (record->RelativePath.extension().string() == Keire::LegacyMaterialAssetSourceExtension)
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "MATERIAL");

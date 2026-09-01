@@ -51,7 +51,7 @@ project(ProjectConfig.CLIENT_TARGET)
     LinkKeireCore()
 
     AddKeireManagedRuntimeDependency()
-    AddKeireManagedHostStaging()
+    AddKeireManagedHostStaging(true)
 
     LinkSDL3()
 

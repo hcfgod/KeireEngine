@@ -1634,7 +1634,7 @@ TEST_CASE("Sandbox Shader and Material Graph gallery decodes every progressive m
     CHECK(plinthRenderer->Data.find("d22ab141-adbb-53e9-a556-f07c5baf89be") != std::string::npos);
     CHECK(std::filesystem::exists(
         std::filesystem::current_path() /
-        "Samples/KeireSandbox/Assets/Examples/MaterialLab/Materials/ShowcasePlinth.keirematerial"));
+        "Samples/KeireSandbox/Assets/Examples/MaterialLab/Materials/ShowcasePlinth.keiremateriallegacy"));
 
     const auto showcaseScript = Keire::ComponentTypeId::Parse("73616e64-626f-4078-8000-000000000060");
     std::size_t scriptedObjects = 0;

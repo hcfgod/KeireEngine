@@ -242,6 +242,57 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     CHECK(projectTimePreserved);
 }
 
+TEST_CASE("Managed IDE workspace isolates editor APIs and installs binding generators")
+{
+    const auto root = UniqueTemporaryRoot("Keire-ManagedIdeEditor-");
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup() { std::filesystem::remove_all(Root); }
+    } cleanup{root};
+    std::filesystem::create_directories(root / "Assets/Scripts/Runtime");
+    std::filesystem::create_directories(root / "Assets/Scripts/Editor");
+    std::filesystem::create_directories(root / "Library/Managed");
+    std::ofstream(root / "Library/Managed/Keire.Managed.dll", std::ios::binary) << "runtime-api";
+    std::ofstream(root / "Library/Managed/Keire.Editor.Managed.dll", std::ios::binary) << "editor-api";
+    std::ofstream(root / "Library/Managed/Keire.Managed.Generators.dll", std::ios::binary) << "generator";
+
+    Keire::ScriptSystemSpecification specification;
+    specification.Mode = Keire::ScriptMode::Enabled;
+    specification.ProjectRoot = root;
+    specification.AssemblyDirectory = "Library/ScriptAssemblies";
+    specification.ManagedApiAssembly = root / "Library/Managed/Keire.Managed.dll";
+    specification.ManagedEditorApiAssembly = root / "Library/Managed/Keire.Editor.Managed.dll";
+    specification.ManagedGeneratorAssembly = root / "Library/Managed/Keire.Managed.Generators.dll";
+    auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
+
+    Keire::ManagedAssemblyDefinition runtime;
+    runtime.Name = "Runtime";
+    runtime.RootNamespace = "Game";
+    runtime.SourceRoots = {"Assets/Scripts/Runtime"};
+    Keire::ManagedAssemblyDefinition editor;
+    editor.Name = "Editor";
+    editor.RootNamespace = "Game.Editor";
+    editor.Classification = Keire::ManagedAssemblyClassification::Editor;
+    editor.SourceRoots = {"Assets/Scripts/Editor"};
+    editor.References = {TestAsset(301)};
+    Keire::ManagedBuildRequest request;
+    request.Assemblies = {{TestAsset(301), runtime}, {TestAsset(302), editor}};
+
+    const auto workspace = scripts->GenerateIdeWorkspace(request, "Editor SDK");
+    REQUIRE(workspace.Projects.size() == 2);
+    const auto runtimeBytes = ReadBytes(root / "Runtime.csproj");
+    const auto editorBytes = ReadBytes(root / "Editor.csproj");
+    const std::string runtimeText(reinterpret_cast<const char*>(runtimeBytes.data()), runtimeBytes.size());
+    const std::string editorText(reinterpret_cast<const char*>(editorBytes.data()), editorBytes.size());
+    CHECK(runtimeText.find("<Reference Include=\"Keire.Editor.Managed\">") == std::string::npos);
+    CHECK(editorText.find("<Reference Include=\"Keire.Editor.Managed\">") != std::string::npos);
+    CHECK(runtimeText.find("<Analyzer Include=") != std::string::npos);
+    CHECK(editorText.find("<Analyzer Include=") != std::string::npos);
+    CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Editor.Managed.dll"));
+    CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Managed.Generators.dll"));
+}
+
 TEST_CASE("Managed IDE workspace references the engine API project in source checkouts")
 {
     const auto root = UniqueTemporaryRoot("Keire-ManagedIdeSource-");
@@ -476,144 +527,155 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     }
     {
         std::ofstream stream(root / "Scripts/Player.cs", std::ios::binary | std::ios::trunc);
-        stream << "using Keire; using Game.Support; using System.Collections.Generic; namespace Game; "
-                  "[System.Serializable, StableSerializedTypeId(\"73616e64-626f-4078-8000-000000000095\")] "
-                  "public sealed class PlayerGraphNode { public string Name = string.Empty; "
-                  "public PlayerGraphNode? Next; public Dictionary<string, PlayerGraphNode?> Links = new(); } "
-                  "public interface IPlayerOperation { } "
-                  "[SerializableType, StableSerializedTypeId(\"73616e64-626f-4078-8000-00000000009a\")] "
-                  "public sealed class PlayerMultiply : IPlayerOperation { public float Factor = 2.0f; } "
-                  "[SerializableType, StableSerializedTypeId(\"73616e64-626f-4078-8000-00000000009b\")] "
-                  "public sealed class PlayerAdd : IPlayerOperation { public float Offset = 1.0f; } "
-                  "[CreateAssetMenu(\"Feature Gallery/Feature Graph Library\", \"FeatureGraphLibrary\")] "
-                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-00000000018e\")] "
-                  "public sealed class FeatureGraphLibrary : ScriptableObject { "
-                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000018d\")] "
-                  "public List<IPlayerOperation> Operations = new(); } "
-                  "[StableComponentId(\"73616e64-626f-4078-8000-000000000097\")] "
-                  "public sealed class PlayerDependency : Behaviour { } "
-                  "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
-                  "[RequireComponent(typeof(PlayerDependency))] "
-                  "[ExecutionOrder(-50)] public sealed class Player : ReloadBehaviourBase { "
-                  "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\"), "
-                  "Range(0.0, 20.0), InspectorName(\"Move Speed\"), Header(\"Movement\"), "
-                  "Tooltip(\"Maximum movement speed in metres per second.\")] "
-                  "public float Speed = 7.5f; "
-                  "[SerializeField] public float ConsumedSpeed = -1.0f; "
-                  "[SerializeField] public bool SeekFailureObserved = false; "
-                  "[SerializeField] public bool ClipFailureObserved = false; "
-                  "[SerializeField] public bool ClipDidNotAddSource = false; "
-                  "[SerializeField] public bool Utf8BusLimitObserved = false; "
-                  "[SerializeField] public bool Utf8BusBoundaryAccepted = false; "
-                  "[SerializeField] public bool RunAudioScalarValidation = false; "
-                  "[SerializeField] public bool VolumeValidationObserved = false; "
-                  "[SerializeField] public bool PitchValidationObserved = false; "
-                  "[SerializeField] public bool AudioListenerValidationObserved = false; "
-                  "[SerializeField] public bool AudioReverbValidationObserved = false; "
-                  "[SerializeField] public bool DisableThroughProperty = false; "
-                  "[SerializeField] public bool DisableObserved = false; "
-                  "[SerializeField] public bool AnimatorIkObserved = false; "
-                  "[SerializeField, Min(0.0), Max(1.0), InspectorStep(0.05)] "
-                  "public float AnimatorIkWeight = -1.0f; "
-                  "[SerializeField] public bool AnimationEventObserved = false; "
-                  "[SerializeField] public string AnimationEventName = string.Empty; "
-                  "[SerializeField, Multiline(6), InspectorName(\"Last Animation Event\"), "
-                  "Header(\"Diagnostics\"), ReadOnlyInInspector] "
-                  "public string AnimationEventText = string.Empty; "
-                  "[SerializeField] public bool ProceduralMotionEventObserved = false; "
-                  "[SerializeField] public byte ProceduralMotionEventState = 0; "
-                  "[SerializeField] public PlayerTuning? Tuning = null; "
-                  "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000093\")] "
-                  "public Dictionary<string, List<int[]>> Inventory = new(); "
-                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-000000000094\")] "
-                  "public PlayerGraphNode? Graph = null; "
-                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009c\")] "
-                  "public List<IPlayerOperation> Operations = new(); "
-                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009d\")] "
-                  "public IPlayerOperation[] OperationArray = []; "
-                  "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009e\")] "
-                  "public Dictionary<string, IPlayerOperation> OperationMap = new(); "
-                  "protected override void Awake() { Speed += ReloadBonus; } "
-                  "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
-                  "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
-                  "try { var source = Entity.GetComponent<AudioSource>() ?? "
-                  "throw new System.InvalidOperationException(); source.Time = 0.5f; } "
-                  "catch (System.InvalidOperationException) { SeekFailureObserved = true; } "
-                  "if (RunAudioScalarValidation) { ValidateAudioScalars(); ValidateAudioEnvironment(); } "
-                  "else { ValidateMissingAudioSource(); ValidateAudioBusNames(); } } "
-                  "private void ValidateMissingAudioSource() { "
-                  "try { _ = Entity.GetComponent<AudioSource>() ?? "
-                  "throw new System.InvalidOperationException(); } "
-                  "catch (System.InvalidOperationException) { ClipFailureObserved = true; } "
-                  "ClipDidNotAddSource = !Entity.HasComponent<AudioSource>(); } "
-                  "private void ValidateAudioBusNames() { var clip = new AssetId(1, 2); "
-                  "try { Audio.Play(Entity, clip, new AudioPlaybackOptions { "
-                  "Bus = new string('\\u00e9', 65) }); } "
-                  "catch (System.ArgumentException) { Utf8BusLimitObserved = true; } "
-                  "try { _ = Audio.Play(Entity, clip, new AudioPlaybackOptions { "
-                  "Bus = new string('\\u00e9', 64) }); Utf8BusBoundaryAccepted = true; } "
-                  "catch (System.ArgumentException) { } } "
-                  "private void ValidateAudioScalars() { var source = Entity.GetComponent<AudioSource>()!; "
-                  "source.Volume = 16.0f; var volumeFailures = 0; "
-                  "foreach (var value in new float[] { float.NaN, -0.01f, 16.01f }) { "
-                  "try { source.Volume = value; } "
-                  "catch (System.ArgumentOutOfRangeException) { volumeFailures++; } } "
-                  "VolumeValidationObserved = volumeFailures == 3 && source.Volume == 16.0f; "
-                  "source.Pitch = 8.0f; var pitchFailures = 0; "
-                  "foreach (var value in new float[] { float.PositiveInfinity, 0.01f, 8.01f }) { "
-                  "try { source.Pitch = value; } "
-                  "catch (System.ArgumentOutOfRangeException) { pitchFailures++; } } "
-                  "PitchValidationObserved = pitchFailures == 3 && source.Pitch == 8.0f; } "
-                  "private void ValidateAudioEnvironment() { "
-                  "if (Entity.TryGetComponent(out AudioListener? listener)) { "
-                  "listener.Primary = false; listener.VolumeDecibels = -6.0206f; "
-                  "AudioListenerValidationObserved = !listener.Primary && "
-                  "System.MathF.Abs(listener.Gain - 0.5f) < 0.001f; } "
-                  "if (Entity.TryGetComponent(out AudioReverbZone? zone)) { "
-                  "zone.Shape = AudioReverbZoneShape.Sphere; zone.SphereRadius = 8.0f; zone.BlendDistance = 2.0f; "
-                  "zone.ReverbSend = 0.75f; zone.Priority = 3; AudioReverbValidationObserved = "
-                  "zone.Shape == AudioReverbZoneShape.Sphere && zone.SphereRadius == 8.0f && "
-                  "zone.BlendDistance == 2.0f && zone.ReverbSend == 0.75f && zone.Priority == 3; } } "
-                  "protected override void OnDisable() { DisableObserved = !Enabled; } "
-                  "protected override void OnAnimatorIk(AnimationIkContext context) { "
-                  "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; } "
-                  "protected override void OnAnimationEvent(AnimationEvent animationEvent) { "
-                  "AnimationEventObserved = true; AnimationEventName = animationEvent.Name; "
-                  "AnimationEventText = animationEvent.Text; } "
-                  "protected override void OnProceduralMotionEvent(ProceduralMotionEvent motionEvent) { "
-                  "ProceduralMotionEventObserved = true; ProceduralMotionEventState = (byte)motionEvent.State; } "
-                  "protected override void OnBeforeReload() { Speed += 1.0f; } "
-                  "protected override void OnAfterReload() { Speed += 1.0f; } } "
-                  "[StableComponentId(\"73616e64-626f-4078-8000-000000000096\")] "
-                  "public sealed class ReloadFailureProbe : Behaviour { "
-                  "protected override void OnBeforeReload() { "
-                  "throw new System.InvalidOperationException(\"intentional before-reload failure\"); } "
-                  "protected override void OnAfterReload() { "
-                  "throw new System.InvalidOperationException(\"intentional after-reload failure\"); } } "
-                  "[System.Serializable] public sealed class ReusedNestedTuning { "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000195\")] public float Value = 1.0f; } "
-                  "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
-                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000190\")] "
-                  "public sealed class PlayerTuning : ScriptableObject { "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000191\"), Range(0.0, 100.0), "
-                  "InspectorStep(0.25), InspectorName(\"Movement Speed\"), Header(\"Movement\"), "
-                  "Tooltip(\"Base movement speed.\")] "
-                  "public float Speed = 7.5f; "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000192\"), ReadOnlyInInspector] "
-                  "public PlayerTuning? Parent; "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000194\"), Multiline(5), "
-                  "InspectorName(\"Design Notes\")] public string Notes = string.Empty; "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000196\")] "
-                  "public ReusedNestedTuning Primary = new(); "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000197\")] "
-                  "public ReusedNestedTuning Secondary = new(); } "
-                  "[CreateAssetMenu(\"Gameplay/Implicit Tuning\", \"ImplicitTuning\")] "
-                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000193\")] "
-                  "public sealed class ImplicitFieldTuning : ScriptableObject { public float Value = 1.0f; } "
-                  "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000198\")] "
-                  "public sealed class DuplicateFieldTuning : ScriptableObject { "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000199\")] public float First = 1.0f; "
-                  "[StableFieldId(\"73616e64-626f-4078-8000-000000000199\")] public float Second = 2.0f; }\n";
+        stream
+            << "using Keire; using Game.Support; using System.Collections.Generic; namespace Game; "
+               "[System.Serializable, StableSerializedTypeId(\"73616e64-626f-4078-8000-000000000095\")] "
+               "public sealed class PlayerGraphNode { public string Name = string.Empty; "
+               "public PlayerGraphNode? Next; public Dictionary<string, PlayerGraphNode?> Links = new(); } "
+               "public interface IPlayerOperation { } "
+               "[SerializableType, StableSerializedTypeId(\"73616e64-626f-4078-8000-00000000009a\")] "
+               "public sealed class PlayerMultiply : IPlayerOperation { public float Factor = 2.0f; } "
+               "[SerializableType, StableSerializedTypeId(\"73616e64-626f-4078-8000-00000000009b\")] "
+               "public sealed class PlayerAdd : IPlayerOperation { public float Offset = 1.0f; } "
+               "[CreateAssetMenu(\"Feature Gallery/Feature Graph Library\", \"FeatureGraphLibrary\")] "
+               "[StableAssetTypeId(\"73616e64-626f-4078-8000-00000000018e\")] "
+               "public sealed class FeatureGraphLibrary : ScriptableObject { "
+               "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000018d\")] "
+               "public List<IPlayerOperation> Operations = new(); } "
+               "[StableComponentId(\"73616e64-626f-4078-8000-000000000097\")] "
+               "public sealed class PlayerDependency : Behaviour { } "
+               "[StableComponentId(\"73616e64-626f-4078-8000-000000000099\")] "
+               "[RequireComponent(typeof(PlayerDependency))] "
+               "[ExecutionOrder(-50)] public sealed class Player : ReloadBehaviourBase { "
+               "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\"), "
+               "Range(0.0, 20.0), InspectorName(\"Move Speed\"), Header(\"Movement\"), "
+               "Tooltip(\"Maximum movement speed in metres per second.\")] "
+               "public float Speed = 7.5f; "
+               "[SerializeField] public float ConsumedSpeed = -1.0f; "
+               "[SerializeField] public bool SeekFailureObserved = false; "
+               "[SerializeField] public bool ClipFailureObserved = false; "
+               "[SerializeField] public bool ClipDidNotAddSource = false; "
+               "[SerializeField] public bool Utf8BusLimitObserved = false; "
+               "[SerializeField] public bool Utf8BusBoundaryAccepted = false; "
+               "[SerializeField] public bool RunAudioScalarValidation = false; "
+               "[SerializeField] public bool VolumeValidationObserved = false; "
+               "[SerializeField] public bool PitchValidationObserved = false; "
+               "[SerializeField] public bool AudioListenerValidationObserved = false; "
+               "[SerializeField] public bool AudioReverbValidationObserved = false; "
+               "[SerializeField] public bool DisableThroughProperty = false; "
+               "[SerializeField] public bool DisableObserved = false; "
+               "[SerializeField] public int RuntimeServiceTicks = -1; "
+               "[SerializeField] public bool AnimatorIkObserved = false; "
+               "[SerializeField, Min(0.0), Max(1.0), InspectorStep(0.05)] "
+               "public float AnimatorIkWeight = -1.0f; "
+               "[SerializeField] public bool AnimationEventObserved = false; "
+               "[SerializeField] public string AnimationEventName = string.Empty; "
+               "[SerializeField, Multiline(6), InspectorName(\"Last Animation Event\"), "
+               "Header(\"Diagnostics\"), ReadOnlyInInspector] "
+               "public string AnimationEventText = string.Empty; "
+               "[SerializeField] public bool ProceduralMotionEventObserved = false; "
+               "[SerializeField] public byte ProceduralMotionEventState = 0; "
+               "[SerializeField] public PlayerTuning? Tuning = null; "
+               "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000093\")] "
+               "public Dictionary<string, List<int[]>> Inventory = new(); "
+               "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-000000000094\")] "
+               "public PlayerGraphNode? Graph = null; "
+               "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009c\")] "
+               "public List<IPlayerOperation> Operations = new(); "
+               "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009d\")] "
+               "public IPlayerOperation[] OperationArray = []; "
+               "[SerializeReference, StableFieldId(\"73616e64-626f-4078-8000-00000000009e\")] "
+               "public Dictionary<string, IPlayerOperation> OperationMap = new(); "
+               "protected override void Awake() { Speed += ReloadBonus; } "
+               "protected override void FixedUpdate() { ConsumedSpeed = Speed; "
+               "if (DisableThroughProperty) { DisableThroughProperty = false; Enabled = false; } "
+               "try { var source = Entity.GetComponent<AudioSource>() ?? "
+               "throw new System.InvalidOperationException(); source.Time = 0.5f; } "
+               "catch (System.InvalidOperationException) { SeekFailureObserved = true; } "
+               "if (RunAudioScalarValidation) { ValidateAudioScalars(); ValidateAudioEnvironment(); } "
+               "else { ValidateMissingAudioSource(); ValidateAudioBusNames(); } } "
+               "protected override void Update() { RuntimeServiceTicks = ReloadCounterService.Current; } "
+               "private void ValidateMissingAudioSource() { "
+               "try { _ = Entity.GetComponent<AudioSource>() ?? "
+               "throw new System.InvalidOperationException(); } "
+               "catch (System.InvalidOperationException) { ClipFailureObserved = true; } "
+               "ClipDidNotAddSource = !Entity.HasComponent<AudioSource>(); } "
+               "private void ValidateAudioBusNames() { var clip = new AssetId(1, 2); "
+               "try { Audio.Play(Entity, clip, new AudioPlaybackOptions { "
+               "Bus = new string('\\u00e9', 65) }); } "
+               "catch (System.ArgumentException) { Utf8BusLimitObserved = true; } "
+               "try { _ = Audio.Play(Entity, clip, new AudioPlaybackOptions { "
+               "Bus = new string('\\u00e9', 64) }); Utf8BusBoundaryAccepted = true; } "
+               "catch (System.ArgumentException) { } } "
+               "private void ValidateAudioScalars() { var source = Entity.GetComponent<AudioSource>()!; "
+               "source.Volume = 16.0f; var volumeFailures = 0; "
+               "foreach (var value in new float[] { float.NaN, -0.01f, 16.01f }) { "
+               "try { source.Volume = value; } "
+               "catch (System.ArgumentOutOfRangeException) { volumeFailures++; } } "
+               "VolumeValidationObserved = volumeFailures == 3 && source.Volume == 16.0f; "
+               "source.Pitch = 8.0f; var pitchFailures = 0; "
+               "foreach (var value in new float[] { float.PositiveInfinity, 0.01f, 8.01f }) { "
+               "try { source.Pitch = value; } "
+               "catch (System.ArgumentOutOfRangeException) { pitchFailures++; } } "
+               "PitchValidationObserved = pitchFailures == 3 && source.Pitch == 8.0f; } "
+               "private void ValidateAudioEnvironment() { "
+               "if (Entity.TryGetComponent(out AudioListener? listener)) { "
+               "listener.Primary = false; listener.VolumeDecibels = -6.0206f; "
+               "AudioListenerValidationObserved = !listener.Primary && "
+               "System.MathF.Abs(listener.Gain - 0.5f) < 0.001f; } "
+               "if (Entity.TryGetComponent(out AudioReverbZone? zone)) { "
+               "zone.Shape = AudioReverbZoneShape.Sphere; zone.SphereRadius = 8.0f; zone.BlendDistance = 2.0f; "
+               "zone.ReverbSend = 0.75f; zone.Priority = 3; AudioReverbValidationObserved = "
+               "zone.Shape == AudioReverbZoneShape.Sphere && zone.SphereRadius == 8.0f && "
+               "zone.BlendDistance == 2.0f && zone.ReverbSend == 0.75f && zone.Priority == 3; } } "
+               "protected override void OnDisable() { DisableObserved = !Enabled; } "
+               "protected override void OnAnimatorIk(AnimationIkContext context) { "
+               "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; } "
+               "protected override void OnAnimationEvent(AnimationEvent animationEvent) { "
+               "AnimationEventObserved = true; AnimationEventName = animationEvent.Name; "
+               "AnimationEventText = animationEvent.Text; } "
+               "protected override void OnProceduralMotionEvent(ProceduralMotionEvent motionEvent) { "
+               "ProceduralMotionEventObserved = true; ProceduralMotionEventState = (byte)motionEvent.State; } "
+               "protected override void OnBeforeReload() { Speed += 1.0f; } "
+               "protected override void OnAfterReload() { Speed += 1.0f; } } "
+               "[RuntimeService(\"73616e64-626f-4078-8000-0000000001a0\")] "
+               "public sealed class ReloadCounterService : IRuntimeService, IRuntimeServiceHotReloadState { "
+               "public static int Current { get; private set; } "
+               "public void Start(RuntimeServiceContext context) { Current = 0; } "
+               "public void Update(RuntimeServiceUpdateContext context) { ++Current; } "
+               "public void Stop() { } "
+               "public ManagedSerializedValue CaptureState() => ManagedSerializedValue.From((long)Current); "
+               "public void RestoreState(ManagedSerializedValue state) { Current = checked((int)state.AsInt64()); } } "
+               "[StableComponentId(\"73616e64-626f-4078-8000-000000000096\")] "
+               "public sealed class ReloadFailureProbe : Behaviour { "
+               "protected override void OnBeforeReload() { "
+               "throw new System.InvalidOperationException(\"intentional before-reload failure\"); } "
+               "protected override void OnAfterReload() { "
+               "throw new System.InvalidOperationException(\"intentional after-reload failure\"); } } "
+               "[System.Serializable] public sealed class ReusedNestedTuning { "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000195\")] public float Value = 1.0f; } "
+               "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
+               "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000190\")] "
+               "public sealed class PlayerTuning : ScriptableObject { "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000191\"), Range(0.0, 100.0), "
+               "InspectorStep(0.25), InspectorName(\"Movement Speed\"), Header(\"Movement\"), "
+               "Tooltip(\"Base movement speed.\")] "
+               "public float Speed = 7.5f; "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000192\"), ReadOnlyInInspector] "
+               "public PlayerTuning? Parent; "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000194\"), Multiline(5), "
+               "InspectorName(\"Design Notes\")] public string Notes = string.Empty; "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000196\")] "
+               "public ReusedNestedTuning Primary = new(); "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000197\")] "
+               "public ReusedNestedTuning Secondary = new(); } "
+               "[CreateAssetMenu(\"Gameplay/Implicit Tuning\", \"ImplicitTuning\")] "
+               "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000193\")] "
+               "public sealed class ImplicitFieldTuning : ScriptableObject { public float Value = 1.0f; } "
+               "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000198\")] "
+               "public sealed class DuplicateFieldTuning : ScriptableObject { "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000199\")] public float First = 1.0f; "
+               "[StableFieldId(\"73616e64-626f-4078-8000-000000000199\")] public float Second = 2.0f; }\n";
     }
 
     Keire::ScriptSystemSpecification specification;
@@ -680,6 +742,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     scripts->CommitReload();
     CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Active);
     CHECK(scripts->ReloadStatus().Generation == 1);
+    CHECK_NOTHROW(scripts->UpdateManagedExtensions(0.016, 0.02, 1));
     const auto managedAssetCatalog = scripts->ManagedAssetCatalog();
     CHECK(managedAssetCatalog.Generation == 1);
     const auto& managedAssetTypes = managedAssetCatalog.Types;
@@ -1083,9 +1146,20 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Awake));
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Enable));
     CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Start));
+    CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Update));
     const auto replayCheckpoint = scripts->CaptureReplayCheckpoint();
     REQUIRE(replayCheckpoint.size() == 1U);
     CHECK(replayCheckpoint.front().Enabled);
+    const auto runtimeServiceTicks = [](const std::string& state)
+    {
+        const auto fields = nlohmann::json::parse(state).at("Fields");
+        const auto found = std::ranges::find(fields, std::string("RuntimeServiceTicks"), [](const nlohmann::json& field)
+                                             { return field.at("Name").get<std::string>(); });
+        if (found == fields.end())
+            throw std::runtime_error("RuntimeServiceTicks is absent from the managed checkpoint.");
+        return found->at("Value").get<std::int32_t>();
+    };
+    CHECK(runtimeServiceTicks(replayCheckpoint.front().State) == 1);
     REQUIRE(scripts->SetBehaviourEnabled(instance, false));
     REQUIRE_FALSE(scripts->CaptureReplayCheckpoint().front().Enabled);
     CHECK_NOTHROW(scripts->RestoreReplayCheckpoint(replayCheckpoint));
@@ -1115,6 +1189,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     REQUIRE(scripts->PrepareReload(request));
     CHECK_NOTHROW(scripts->CommitReload());
     CHECK(scripts->ReloadStatus().Generation == 2);
+    CHECK_NOTHROW(scripts->UpdateManagedExtensions(0.016, 0.02, 2));
+    CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Update));
+    CHECK(runtimeServiceTicks(scripts->CaptureReplayCheckpoint().front().State) == 2);
     const auto secondCatalog = scripts->ManagedAssetCatalog();
     CHECK(secondCatalog.Generation == 2);
     CHECK(secondCatalog.Types == managedAssetCatalog.Types);

@@ -225,7 +225,8 @@ namespace Keire
             {
                 if (error)
                     throw std::runtime_error("Could not enumerate project assets for Shader Graph migration.");
-                if (!iterator->is_regular_file(error) || error || iterator->path().extension() != ".keirematerialgraph")
+                if (!iterator->is_regular_file(error) || error ||
+                    iterator->path().extension().string() != MaterialAssetSourceExtension)
                 {
                     error.clear();
                     continue;

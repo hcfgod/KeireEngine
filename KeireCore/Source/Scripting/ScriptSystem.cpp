@@ -105,13 +105,34 @@ namespace Keire
                                            std::filesystem::copy_options::overwrite_existing);
             }
 
+            const auto generationManagedEditorApi = managedApiOutput / "Keire.Editor.Managed.dll";
+            if (!ManagedEditorApi.empty())
+            {
+                if (!std::filesystem::is_regular_file(ManagedEditorApi))
+                    throw std::runtime_error("The managed build has no valid Keire.Editor.Managed API assembly.");
+                std::filesystem::copy_file(ManagedEditorApi, generationManagedEditorApi,
+                                           std::filesystem::copy_options::overwrite_existing);
+            }
+            const auto generationManagedGenerator = managedApiOutput / "Keire.Managed.Generators.dll";
+            if (!ManagedGenerator.empty())
+            {
+                if (!std::filesystem::is_regular_file(ManagedGenerator))
+                    throw std::runtime_error("The managed build has no valid Keire.Managed.Generators analyzer.");
+                std::filesystem::copy_file(ManagedGenerator, generationManagedGenerator,
+                                           std::filesystem::copy_options::overwrite_existing);
+            }
+
             std::map<AssetId, std::string> names;
             for (const auto& assembly : request.Assemblies)
                 names.emplace(assembly.Asset, assembly.Definition.Name);
             for (const auto& assembly : request.Assemblies)
-                WriteText(projectDirectory / (assembly.Definition.Name + ".csproj"),
-                          GenerateProject(assembly, names, ProjectRoot, projectDirectory, generationManagedApi, {},
-                                          "net10.0", "14.0"));
+                WriteText(
+                    projectDirectory / (assembly.Definition.Name + ".csproj"),
+                    GenerateProject(assembly, names, ProjectRoot, projectDirectory, generationManagedApi, {},
+                                    ManagedEditorApi.empty() ? std::filesystem::path{} : generationManagedEditorApi,
+                                    ManagedGenerator.empty() ? std::filesystem::path{} : generationManagedGenerator,
+                                    assembly.Definition.Classification == ManagedAssemblyClassification::Editor,
+                                    "net10.0", "14.0"));
 
             const auto aggregatorPath = projectDirectory / "Keire.Managed.Build.csproj";
             WriteText(aggregatorPath, GenerateManagedBuildAggregator(request));
@@ -176,6 +197,8 @@ namespace Keire
                 Status.Diagnostics = std::move(diagnostics);
                 Status.ActiveAssemblyDirectory = active / "Assemblies";
                 Status.ManagedApiAssembly = generationManagedApi;
+                Status.ManagedEditorApiAssembly =
+                    ManagedEditorApi.empty() ? std::filesystem::path{} : generationManagedEditorApi;
                 Status.Generation = operation.Value();
                 Status.Elapsed =
                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
@@ -224,6 +247,20 @@ namespace Keire
             if (!std::filesystem::is_regular_file(m_Impl->ManagedApi))
                 throw std::invalid_argument("The Keire.Managed API assembly does not exist.");
         }
+        if (!specification.ManagedEditorApiAssembly.empty())
+        {
+            m_Impl->ManagedEditorApi =
+                std::filesystem::absolute(specification.ManagedEditorApiAssembly).lexically_normal();
+            if (!std::filesystem::is_regular_file(m_Impl->ManagedEditorApi))
+                throw std::invalid_argument("The Keire.Editor.Managed API assembly does not exist.");
+        }
+        if (!specification.ManagedGeneratorAssembly.empty())
+        {
+            m_Impl->ManagedGenerator =
+                std::filesystem::absolute(specification.ManagedGeneratorAssembly).lexically_normal();
+            if (!std::filesystem::is_regular_file(m_Impl->ManagedGenerator))
+                throw std::invalid_argument("The Keire.Managed.Generators analyzer does not exist.");
+        }
         m_Impl->Dotnet =
             m_Impl->Specification.DotnetExecutable.empty()
                 ? std::filesystem::path{}
@@ -256,6 +293,8 @@ namespace Keire
         ManagedIdeWorkspace result;
         result.Solution = m_Impl->ProjectRoot / (safeName + ".sln");
         auto ideManagedApi = m_Impl->ManagedApi;
+        auto ideManagedEditorApi = m_Impl->ManagedEditorApi;
+        auto ideManagedGenerator = m_Impl->ManagedGenerator;
         auto ideManagedApiProject = m_Impl->FindManagedApiProject();
         if (!ideManagedApi.empty())
         {
@@ -264,6 +303,21 @@ namespace Keire
             const auto contents = Detail::ReadTextFile(ideManagedApi, std::size_t{64} << 20U);
             (void)Detail::WriteFileAtomicallyIfChanged(reference, std::as_bytes(std::span(contents)));
             ideManagedApi = reference;
+            if (!ideManagedEditorApi.empty())
+            {
+                const auto editorReference = referenceDirectory / ideManagedEditorApi.filename();
+                const auto editorContents = Detail::ReadTextFile(ideManagedEditorApi, std::size_t{64} << 20U);
+                (void)Detail::WriteFileAtomicallyIfChanged(editorReference, std::as_bytes(std::span(editorContents)));
+                ideManagedEditorApi = editorReference;
+            }
+            if (!ideManagedGenerator.empty())
+            {
+                const auto generatorReference = referenceDirectory / ideManagedGenerator.filename();
+                const auto generatorContents = Detail::ReadTextFile(ideManagedGenerator, std::size_t{64} << 20U);
+                (void)Detail::WriteFileAtomicallyIfChanged(generatorReference,
+                                                           std::as_bytes(std::span(generatorContents)));
+                ideManagedGenerator = generatorReference;
+            }
             if (!ideManagedApiProject.empty())
             {
                 const auto designTimeProject = referenceDirectory / "Keire.Managed.VisualStudio.csproj";
@@ -280,7 +334,9 @@ namespace Keire
             const auto project = m_Impl->ProjectRoot / (assembly.Definition.Name + ".csproj");
             (void)Detail::WriteTextFileAtomicallyIfChanged(
                 project, GenerateProject(assembly, names, m_Impl->ProjectRoot, m_Impl->ProjectRoot, ideManagedApi,
-                                         ideManagedApiProject, ideTargetFramework, ideLanguageVersion));
+                                         ideManagedApiProject, ideManagedEditorApi, ideManagedGenerator,
+                                         assembly.Definition.Classification == ManagedAssemblyClassification::Editor,
+                                         ideTargetFramework, ideLanguageVersion));
             result.Projects.push_back(project);
         }
         (void)Detail::WriteTextFileAtomicallyIfChanged(

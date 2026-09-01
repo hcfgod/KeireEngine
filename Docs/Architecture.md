@@ -726,6 +726,25 @@ descriptor path used by native components and managed data assets. Canonical sta
 identity. Tagged state-v2 references record entity identity, concrete component type, or stable asset identity;
 restoration rebinds scene objects to the destination world before any lifecycle callback runs.
 
+Managed serialization schema 4 adds exact-type atomic converters identified by stable codec IDs and versions. Their
+payload is a bounded canonical scalar/list/map tree that cannot carry engine references. Runtime-assembly migrations
+advance a temporary document through a unique contiguous chain before construction; root-first serialization callbacks
+and Editor validation run only against staged graphs. The accepted generation is published only after revalidation,
+so converter, migration, or callback failure retains the prior object graph and generation.
+
+`Keire.Editor.Managed` is a separate packaged assembly. Runtime `.keireasm` projects reference only `Keire.Managed`;
+Editor projects reference both and are omitted from players. Exact candidate allowlists build deterministic catalogs
+for retained drawers, editors, importers, windows, tools, settings, and build processors. The native reload transaction
+stages their generation before Behaviour migration, commits after migration succeeds, rejects stale callbacks by
+generation, and disposes retired registrations in reverse order before unloading the old context. Application-owned
+managed runtime services use the same transaction, topological stable-ID ordering, reverse shutdown, optional-service
+quarantine, and bounded hot-reload state transfer.
+
+Source modules register stable managed service/method descriptors instead of function pointers in public C# APIs. The
+managed incremental generator accepts only the bounded value ABI and emits typed stubs; reload publication requires an
+exact descriptor match including versions, parameters, span bounds, structured result, and thread affinity. Raw
+pointers and unmanaged ownership never cross this boundary.
+
 Audio playback crosses `IScriptRuntimeServices` as a value request containing the validated clip asset ID, output bus,
 gain, pitch, priority, loop/spatial flags, and attenuation distances. The Play adapter creates or updates the scene
 Audio Source and presentation runtime at the safe boundary. Editor-only asset preview uses a separately tracked voice
@@ -810,6 +829,10 @@ and destroys the context before RenderSystem releases GPU and window resources.
 Scene submissions carry a Kéire-owned `RenderEnvironmentSettings` value. JSON persistence stays private in
 `ProjectSettings/Rendering.keiresettings`; public headers expose only colors, scalar values, paths, and validation
 functions. Fragment-stage lighting consumes that environment together with the deterministic active Directional Light.
+Schema 4 also stores requested Render Path, Global Illumination, and Irradyn quality as project intent. A pure
+capability resolver produces the effective path/mode and separate fallback reasons. The current backend advertises
+Forward+ with GI disabled; Deferred Hybrid and Irradyn remain explicit unavailable capabilities instead of silently
+running a different pipeline under the requested label. Schemas 1–3 migrate to Forward+/disabled/balanced defaults.
 `ProjectSettingsDocument` owns the editor draft, validation, dirty lifecycle, atomic save, and coalesced undo command;
 the workspace consumes its immutable settings for Scene and Game submissions instead of retaining a mutable copy.
 Every primary editor panel owns its registration and persistent UI state. `SceneViewportPanel` owns its render view,
@@ -945,13 +968,13 @@ workspace shutdown, or Play teardown. Live debugging consumes immutable, generat
 renderer-statistics snapshots; unavailable providers remain explicitly unavailable, and picking never exposes mutable
 runtime nodes to editor code.
 
-Editor material authoring has three deliberate workflows. `MaterialDocument` and `MaterialInspectorPanel` own compact
-Direct Material editing. `MaterialGraphDocument` and `MaterialGraphPanel` own the authoritative OpenPBR/slab surface
-program, stable parameters and textures, compatibility diagnostics, dirty lifecycle, and bounded undo/redo.
-`ShaderGraphDocument` owns target-based UI, Fullscreen, VFX, Custom Graphics, and Compute programs. Legacy Surface
-remains a compatibility target until transactional material migration is complete.
-`MaterialInstanceAsset` stores only inherited property and surface overrides and is edited through the Inspector. All
-three preserve a tagged raw-Shader or Shader-Graph reference behind the same runtime material boundary. Material file
+Editor material authoring has one primary workflow plus explicit compatibility. `MaterialGraphDocument` and
+`MaterialGraphPanel` own a standalone schema-7 OpenPBR surface program, stable parameters and textures, domain,
+shading model, authoring mode, closure budget, compilation diagnostics, dirty lifecycle, and bounded undo/redo.
+`ShaderGraphDocument` owns target-based Material, UI, Fullscreen, VFX, Custom Graphics, and Compute programs.
+`MaterialDocument` and `MaterialInspectorPanel` remain available only for `.keiremateriallegacy` raw/custom-shader
+sources. `MaterialInstanceAsset` stores only inherited property and surface overrides and is edited through the
+Inspector. Every path publishes behind the same runtime material boundary. Material file
 snapshots enter the project-assets undo context; the workspace and asset-operation service coordinate persistence.
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
@@ -984,8 +1007,8 @@ when disconnected, while legacy Master nodes accept neutral defaults for later s
 compilation is revisioned, debounced, and performed away from the owner thread; stale completions are discarded and only
 the newest valid result can replace the last-good preview. The workspace supplies confined include reads, nonblocking
 custom-mesh resolution through the asset system, and persistence. Both graph editors reserve the canvas as the dominant
-region and place a bounded, collapsible square preview on the right when space permits. Material Graph evaluates its
-schema-6 surface graph against the selected reusable shader contract before preview.
+region and place a bounded, collapsible square preview on the right when space permits. Material evaluates its
+schema-7 surface graph directly; historical externally backed sources compose their compatibility template first.
 Shader Graph expands reusable calls first. Preview evaluation failures remain
 visible diagnostics rather than being converted into an indistinguishable checkerboard result.
 
@@ -997,7 +1020,7 @@ persisted nested local-graph stacks are not part of the 0.4.0 contract; cable ro
 See [Unified Graph Authoring](GraphAuthoring.md) for the interaction and migration contract.
 
 Shader schema 6 retains the renderer-neutral resource declarations and displacement bound introduced by schemas 4 and
-5, while Material schema 6 carries the same portable sampler, Texture2D-array/cube/3D, and bounded
+5, while Material schema 7 carries the same portable sampler, Texture2D-array/cube/3D, and bounded
 read-only structured/byte-address buffer declarations through encoding, reflection, dependency extraction, and typed
 material overrides. Generic backend GPU asset and binding realization for array/cube/3D textures and user buffers is
 deferred. Runtime import rejects those resources until the backend contract exists instead of manufacturing a fallback.
@@ -1029,16 +1052,29 @@ after the staged directory is live. Any source-publication failure restores the 
 preserving the original exception. The asset scanner ignores engine atomic-write temporaries and editor backups, so a
 concurrent scan cannot assign identities to files that will disappear at commit. A successful save then queues a
 targeted import of the parent graph, every generated shader/material subasset, and dependent loaded assets. Runtime
-`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Schema-6 Material Graph import compiles its
-authoritative OpenPBR/slab surface program through the shared graph compiler and publishes one runtime material.
-Schema-1–5 assets upgrade deterministically and preserve their surface expressions under the canonical
-`surfaceGraph`. Material
-Instance resolution starts from a Direct Material or Material Graph root
+`MaterialGraphAsset` and `MaterialInstanceAsset` remain immutable data. Schema-7 Material import compiles its
+authoritative OpenPBR surface program through `ProgramArtifact`, publishes reflected variants and an explicit
+domain/shading-model pass contract, then publishes one runtime material. Schema-1–6 assets upgrade deterministically
+and preserve their surface expressions under the canonical `surfaceGraph`. Material Instance resolution starts from a
+Material, compatibility Material, or Material Instance root
 before applying at most 16 ancestors; it rejects cycles, unknown properties, and type changes without introducing
 mutable renderer-global state. Instance import publishes its own stable ordinary `MaterialAsset` subasset referencing
 the inherited shader variant; editor pickers and viewport drops alias the authoring instance to that renderer-safe
-identity. Legacy `ShaderGraphInstanceAsset` remains registered for 0.1.x project compatibility but is not offered for
-new creation.
+identity. Legacy `ShaderGraphInstanceAsset` remains readable by its codec for explicit migration but is not registered
+for new import or creation.
+The program artifact separates authoring from render consumption: it carries target/stage entry points, stable
+properties, resource bindings, variants, dependency paths, diagnostics, and the complete eligible material-pass set.
+Simple opaque OpenPBR/Unlit surfaces select the standard GBuffer contract; closure and layer-stack authoring selects
+the extended contract; Hair/Eye and transparent surfaces remain forward-only. Every material retains a forward pass so
+capability fallback is a renderer decision rather than a recompile or implicit shader convention.
+
+Shader compiler work has a second immutable boundary. `ShaderCompileManifest` canonicalizes exact source/toolchain
+digests, virtual include paths, defines, stage, entry, platform, architecture, output format, compiler policy flags, and
+program ABI before deriving a SHA-256 work key. Local/remote scheduling policy and priority stay outside that key. The
+Supabase queue is disabled by default, forces tenant-scoped RLS, exposes owner reads only, and confines enqueue, lease,
+renew, complete, and fail transitions to service-role coordinator RPCs with pinned search paths. Executors are
+intended to remain networkless; artifacts live in a private content-addressed bucket and complete only under the active
+lease token.
 Catalog-producing editor work is isolated in the private `KeireAssetWorker` executable. `AssetOperationService` owns
 one child at a time, prioritizes external imports and explicit actions ahead of cook and coalesced material refreshes,
 and exchanges versioned request/progress/result documents under `Library/AssetOperations/<operation-id>`. A worker

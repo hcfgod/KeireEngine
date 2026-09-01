@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 
+#include "Keire/Rendering/ProgramArtifact.h"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -100,6 +102,21 @@ namespace KeireEditor
                                        { return connection.Input.Node == output->Id; });
         }
 
+        [[nodiscard]] constexpr Keire::MaterialGraphDiagnosticSeverity
+        MaterialSeverity(const Keire::ShaderGraphDiagnosticSeverity severity) noexcept
+        {
+            switch (severity)
+            {
+            case Keire::ShaderGraphDiagnosticSeverity::Info:
+                return Keire::MaterialGraphDiagnosticSeverity::Info;
+            case Keire::ShaderGraphDiagnosticSeverity::Warning:
+                return Keire::MaterialGraphDiagnosticSeverity::Warning;
+            case Keire::ShaderGraphDiagnosticSeverity::Error:
+                return Keire::MaterialGraphDiagnosticSeverity::Error;
+            }
+            return Keire::MaterialGraphDiagnosticSeverity::Error;
+        }
+
         [[nodiscard]] std::optional<Keire::AssetId>
         FindIdentity(const std::span<const std::pair<StableNodeId, Keire::AssetId>> identities,
                      const StableNodeId id) noexcept
@@ -143,7 +160,9 @@ namespace KeireEditor
                   .Preview =
                       [this](const Keire::AssetId asset, const Keire::MaterialGraphDefinition& definition)
                   {
-                      if (!m_Specification.Preview || !m_Specification.ResolveShader)
+                      // Standalone materials are previewed directly from SurfaceGraph by MaterialGraphPanel. The
+                      // application scene preview remains a compatibility path for externally backed materials.
+                      if (!definition.Shader.Asset || !m_Specification.Preview || !m_Specification.ResolveShader)
                           return;
                       std::optional<Keire::MaterialAssetDefinition> material;
                       try
@@ -188,19 +207,23 @@ namespace KeireEditor
                   .CancelPreview = m_Specification.StopPreview,
                   .Persist = m_Specification.Persist})
     {
-        if (!m_Specification.ResolveInterface || !m_Specification.ResolveShader || !m_Specification.Persist)
-            throw std::invalid_argument(
-                "Material Graph documents require shader-interface, runtime-shader, and persistence services.");
+        if (!m_Specification.Persist)
+            throw std::invalid_argument("Material documents require a persistence service.");
     }
 
     void MaterialGraphDocument::Open(const Keire::AssetId asset, const std::span<const std::byte> bytes,
                                      const std::uint64_t revision, Keire::Ref<Keire::UndoContext> undo)
     {
         auto definition = Keire::MaterialGraphAsset::DecodeSource(bytes);
-        const auto shaderInterface = m_Specification.ResolveInterface(definition.Shader);
-        if (!shaderInterface)
-            throw std::invalid_argument("Material Graph shader interface is unavailable.");
-        Keire::SynchronizeMaterialGraphInterface(definition, *shaderInterface);
+        if (definition.Shader.Asset)
+        {
+            const auto shaderInterface = m_Specification.ResolveInterface
+                                             ? m_Specification.ResolveInterface(definition.Shader)
+                                             : std::optional<Keire::ShaderInterfaceDefinition>{};
+            if (!shaderInterface)
+                throw std::invalid_argument("Material compatibility shader interface is unavailable.");
+            Keire::SynchronizeMaterialGraphInterface(definition, *shaderInterface);
+        }
         m_Host.Open(asset, std::move(definition), revision, std::move(undo));
         m_AutosaveSeconds = 0.0;
         RefreshDiagnostics();
@@ -286,6 +309,8 @@ namespace KeireEditor
 
     bool MaterialGraphDocument::SetShader(Keire::MaterialShaderReference shader)
     {
+        if (!m_Specification.ResolveInterface)
+            throw std::invalid_argument("Material compatibility shader selection is unavailable.");
         const auto shaderInterface = m_Specification.ResolveInterface(shader);
         if (!shaderInterface)
             throw std::invalid_argument("Selected shader does not expose a compatible material interface.");
@@ -659,20 +684,37 @@ namespace KeireEditor
 
     void MaterialGraphDocument::RefreshDiagnostics()
     {
-        const auto shaderInterface = m_Specification.ResolveInterface(Definition().Shader);
-        if (shaderInterface)
+        m_Diagnostics.clear();
+        if (!Definition().Shader.Asset)
         {
-            m_Diagnostics = Keire::ValidateMaterialGraphAgainstInterface(Definition(), *shaderInterface);
+            Keire::ProgramCompileOptions options;
+            options.ShaderGraph.ResolveFunction = m_Specification.ResolveFunction;
+            const auto artifact = Keire::CompileMaterialProgram(Definition(), options);
+            m_Diagnostics.reserve(artifact.Program.Diagnostics.size());
+            for (const auto& diagnostic : artifact.Program.Diagnostics)
+                m_Diagnostics.push_back({MaterialSeverity(diagnostic.Severity),
+                                         diagnostic.Code,
+                                         diagnostic.Message,
+                                         {},
+                                         diagnostic.Node,
+                                         diagnostic.Pin});
+            return;
         }
-        else
+
+        const auto shaderInterface = m_Specification.ResolveInterface
+                                         ? m_Specification.ResolveInterface(Definition().Shader)
+                                         : std::optional<Keire::ShaderInterfaceDefinition>{};
+        if (!shaderInterface)
         {
             m_Diagnostics = {{Keire::MaterialGraphDiagnosticSeverity::Error,
                               "MAT1000",
-                              "Selected shader interface is unavailable.",
+                              "Compatibility shader interface is unavailable.",
                               {},
                               {},
                               {}}};
+            return;
         }
+        m_Diagnostics = Keire::ValidateMaterialGraphAgainstInterface(Definition(), *shaderInterface);
         if (Definition().Shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph ||
             !HasSurfaceExpressions(Definition()))
             return;

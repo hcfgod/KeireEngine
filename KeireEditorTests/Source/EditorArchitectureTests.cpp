@@ -269,13 +269,13 @@ TEST_CASE("asset browser source hierarchy collapses persistent child assets")
     std::array<Keire::AssetSourceRecord, 5> records;
     for (auto& record : records)
         record.Id = Keire::AssetId::Generate();
-    records[0].RelativePath = "Graphs/Main.keirematerialgraph";
-    records[1].RelativePath = "Graphs/Function.keirematerialfunction";
+    records[0].RelativePath = "Graphs/Main.keirematerial";
+    records[1].RelativePath = "Graphs/Function.keiresubgraph";
     records[1].ParentSource = records[0].Id;
-    records[2].RelativePath = "Graphs/Layer.keiremateriallayer";
+    records[2].RelativePath = "Graphs/Layer.keiresubgraph";
     records[2].ParentSource = records[0].Id;
-    records[3].RelativePath = "Graphs/Standalone.keirematerialfunction";
-    records[4].RelativePath = "Graphs/Nested.keirematerialfunction";
+    records[3].RelativePath = "Graphs/Standalone.keiresubgraph";
+    records[4].RelativePath = "Graphs/Nested.keiresubgraph";
     records[4].ParentSource = records[1].Id;
     const std::array<const Keire::AssetSourceRecord*, 5> pointers{&records[1], &records[0], &records[2], &records[3],
                                                                   &records[4]};
@@ -1146,6 +1146,9 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     CHECK(Keire::LoadProjectAuthoringSettings(root) == authoring);
     edited = document.Settings();
     edited.Exposure = std::numeric_limits<float>::infinity();
+    CHECK_THROWS_AS(document.Update(edited), std::invalid_argument);
+    edited = document.Settings();
+    edited.RequestedGlobalIllumination = static_cast<Keire::GlobalIlluminationMode>(255U);
     CHECK_THROWS_AS(document.Update(edited), std::invalid_argument);
 
     document.Close();
@@ -2343,7 +2346,7 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
                                 .Type = Keire::MaterialGraphAsset::StaticType(),
                                 .PreviewAsset = generatedMaterial,
                                 .PreviewShader = generatedShader,
-                                .RelativePath = "Generated.keirematerialgraph",
+                                .RelativePath = "Generated.keirematerial",
                                 .Digest = "generated-material-graph-preview"}));
     const auto generatedMaterialGraphResult = await();
     REQUIRE(generatedMaterialGraphResult.Pixels.size() == 96U * 96U * 4U);

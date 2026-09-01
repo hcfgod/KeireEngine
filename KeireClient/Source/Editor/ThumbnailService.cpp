@@ -1268,17 +1268,13 @@ namespace KeireEditor
                                        Keire::Ref<Keire::JobSystem> jobs)
         : m_Impl(std::make_unique<Impl>(std::move(cacheDirectory), queueCapacity, std::move(jobs)))
     {
-        RegisterProvider(".keirematerial", 6, MakeMaterialPreview);
+        RegisterProvider(".keirematerial", 7, [](const ThumbnailRequest& request, const auto width, const auto height)
+                         { return MakeShaderGraphPreview(request, width, height, "MAT"); });
+        RegisterProvider(".keiremateriallegacy", 1, MakeMaterialPreview);
         RegisterProvider(".keireshadergraph", 2,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "SG"); });
-        RegisterProvider(".keirematerialgraph", 2,
-                         [](const ThumbnailRequest& request, const auto width, const auto height)
-                         { return MakeShaderGraphPreview(request, width, height, "MG"); });
         RegisterProvider(".keirematerialinstance", 2,
-                         [](const ThumbnailRequest& request, const auto width, const auto height)
-                         { return MakeShaderGraphPreview(request, width, height, "MI"); });
-        RegisterProvider(".keireshadergraphinstance", 2,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MI"); });
         RegisterProvider(".keirevfx", 1, MakeVfxPreview);
@@ -1327,6 +1323,9 @@ namespace KeireEditor
         RegisterProvider(".keiredata", 2, Detail::MakeDataThumbnail);
         RegisterProvider(".json", 1, Detail::MakeDataThumbnail);
         RegisterProvider(
+            ".keiresubgraph", 1, [](const ThumbnailRequest& request, const auto width, const auto height)
+            { return Detail::MakeNodeGraphThumbnail(request, width, height, {37, 29, 52}, {166, 108, 236}, "SG"); });
+        RegisterProvider(
             ".keirematerialfunction", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
             { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 28, 46}, {211, 87, 197}, "MF"); });
         RegisterProvider(
@@ -1339,7 +1338,7 @@ namespace KeireEditor
             ".keirematerialblend", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
             { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 28, 46}, {211, 87, 197}, "MB"); });
         RegisterProvider(
-            ".keirematerialcollection", 2, [](const ThumbnailRequest& request, const auto width, const auto height)
+            ".keireparametercollection", 3, [](const ThumbnailRequest& request, const auto width, const auto height)
             { return Detail::MakeNodeGraphThumbnail(request, width, height, {44, 28, 46}, {211, 87, 197}, "MC"); });
         for (const std::string extension : {".txt", ".md", ".xml", ".yaml", ".yml", ".csv", ".ini", ".toml"})
             RegisterProvider(extension, 1, [](const ThumbnailRequest& request, const auto width, const auto height)

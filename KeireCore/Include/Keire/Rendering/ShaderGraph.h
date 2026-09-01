@@ -88,11 +88,11 @@ namespace Keire
         All = (1U << 0U) | (1U << 1U) | (1U << 2U)
     };
 
-    /// Program contract selected by a Shader Graph. LegacySurface remains readable during the material migration but
-    /// new surface authoring belongs to .keirematerial assets.
+    /// Program contract selected by a Shader Graph. Material programs may be used directly by advanced authors;
+    /// assignable surface authoring normally starts from a .keirematerial asset.
     enum class ShaderGraphTarget : std::uint8_t
     {
-        LegacySurface,
+        Material,
         Ui,
         Fullscreen,
         Vfx,
@@ -109,7 +109,7 @@ namespace Keire
 
     struct ShaderGraphTargetDefinition
     {
-        ShaderGraphTarget Target = ShaderGraphTarget::LegacySurface;
+        ShaderGraphTarget Target = ShaderGraphTarget::Material;
         ShaderGraphShaderStage Stages =
             static_cast<ShaderGraphShaderStage>(static_cast<std::uint8_t>(ShaderGraphShaderStage::Vertex) |
                                                 static_cast<std::uint8_t>(ShaderGraphShaderStage::Fragment));
@@ -424,7 +424,8 @@ namespace Keire
     struct ShaderGraphCompileOptions
     {
         std::filesystem::path GeneratedSource = "Assets/Generated/ShaderGraph.hlsl";
-        std::size_t MaximumVariants = 64;
+        /// Variants are demand-pruned by higher-level cook policy. The portable compiler refuses more than 1024.
+        std::size_t MaximumVariants = 1024;
         std::size_t MaximumNodes = 1024;
         std::size_t MaximumConnections = 4096;
         std::size_t MaximumCustomIncludes = 64;

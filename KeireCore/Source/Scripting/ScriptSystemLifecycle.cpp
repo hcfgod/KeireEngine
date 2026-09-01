@@ -190,6 +190,48 @@ namespace Keire
         ReleaseManagedAssetGenerationServices(generation);
     }
 
+    void ScriptSystem::Impl::CancelManagedExtensionGeneration(const Coral::Type* runtimeServices,
+                                                              const Coral::Type* editorExtensions,
+                                                              const std::uint64_t generation) noexcept
+    {
+        if (generation == 0)
+            return;
+        const RuntimeScope scope(*this);
+        for (const auto* bridge : {editorExtensions, runtimeServices})
+        {
+            if (!bridge)
+                continue;
+            try
+            {
+                (void)bridge->InvokeStaticMethod<Coral::Bool32>("Cancel", generation);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+
+    void ScriptSystem::Impl::ShutdownManagedExtensionGeneration(const Coral::Type* runtimeServices,
+                                                                const Coral::Type* editorExtensions,
+                                                                const std::uint64_t generation) noexcept
+    {
+        if (generation == 0)
+            return;
+        const RuntimeScope scope(*this);
+        for (const auto* bridge : {editorExtensions, runtimeServices})
+        {
+            if (!bridge)
+                continue;
+            try
+            {
+                (void)bridge->InvokeStaticMethod<Coral::Bool32>("Shutdown", generation);
+            }
+            catch (...)
+            {
+            }
+        }
+    }
+
     void ScriptSystem::Impl::ReleaseManagedAssetGenerationServices(const std::uint64_t generation) noexcept
     {
         if (Specification.RuntimeServices)
@@ -271,6 +313,10 @@ namespace Keire
     void ScriptSystem::Impl::ShutdownRuntime() noexcept
     {
         DrainManagedJobs(false);
+        CancelManagedExtensionGeneration(CandidateRuntimeServiceBridgeType, CandidateEditorExtensionBridgeType,
+                                         Reload.Generation + 1);
+        ShutdownManagedExtensionGeneration(ActiveRuntimeServiceBridgeType, ActiveEditorExtensionBridgeType,
+                                           Reload.Generation);
         ResetManagedAssetGeneration(CandidateNativeRuntimeType, Reload.Generation + 1);
         ResetManagedAssetGeneration(ActiveNativeRuntimeType, Reload.Generation);
         {
@@ -288,6 +334,10 @@ namespace Keire
         CandidateManagedAssetRuntimeTypes.clear();
         ActiveNativeRuntimeType = nullptr;
         CandidateNativeRuntimeType = nullptr;
+        ActiveRuntimeServiceBridgeType = nullptr;
+        CandidateRuntimeServiceBridgeType = nullptr;
+        ActiveEditorExtensionBridgeType = nullptr;
+        CandidateEditorExtensionBridgeType = nullptr;
         Unload(CandidateContext);
         Unload(ActiveContext);
         if (RuntimeInitialized)

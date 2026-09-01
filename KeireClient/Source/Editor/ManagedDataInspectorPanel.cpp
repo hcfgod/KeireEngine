@@ -431,6 +431,14 @@ namespace KeireEditor
             return property.TextLines > 1
                        ? ui.InputTextMultiline(label, std::get<std::string>(value.Value), property.TextLines)
                        : ui.InputText(label, std::get<std::string>(value.Value));
+        case Keire::ManagedAssetPropertyKind::CustomValue:
+        {
+            auto candidate = std::get<std::string>(value.Value);
+            if (!ui.InputTextMultiline(label, candidate, 6))
+                return false;
+            value = Keire::DecodeManagedAssetValue(candidate, property);
+            return true;
+        }
         case Keire::ManagedAssetPropertyKind::Vector2:
             return ui.DragVector2(label, std::get<Keire::Vector2>(value.Value));
         case Keire::ManagedAssetPropertyKind::Vector3:

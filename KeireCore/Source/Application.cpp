@@ -278,6 +278,7 @@ namespace Keire
             {
                 if (!m_Impl->Assets)
                     throw std::invalid_argument("Enabled scripting requires enabled assets.");
+                m_Impl->Specification.Scripting.NativeServices = m_Impl->ModuleService->ManagedServices();
                 m_Impl->ScriptService = CreateRef<ScriptSystem>(m_Impl->Specification.Scripting, m_Impl->JobService);
                 m_Impl->ScriptService->SetAssetSystem(m_Impl->Assets);
             }
@@ -425,7 +426,12 @@ namespace Keire
                         if (m_Impl->StreamingService)
                             (void)m_Impl->StreamingService->Pump();
                         if (m_Impl->ScriptService)
+                        {
                             m_Impl->ScriptService->PumpManagedAssets();
+                            m_Impl->ScriptService->UpdateManagedExtensions(m_Impl->Clock->DeltaTime().Seconds(),
+                                                                           m_Impl->Clock->UnscaledDeltaTime().Seconds(),
+                                                                           m_Impl->Clock->FrameCount());
+                        }
                         if (m_Impl->SceneService)
                             m_Impl->SceneService->AdvanceFrame();
                     }

@@ -47,28 +47,28 @@ namespace
         "Samples/KeireSandbox/Assets/Scenes/SandboxShowcase.keirescene.keiremeta";
     constexpr std::string_view StudioPaintMaterialGraphPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/"
-        "MG_01_StudioPaint.keirematerialgraph";
+        "MG_01_StudioPaint.keirematerial";
     constexpr std::string_view StudioPaintMaterialMetadataPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/"
-        "MG_01_StudioPaint.keirematerialgraph.keiremeta";
+        "MG_01_StudioPaint.keirematerial.keiremeta";
     constexpr std::string_view StudioPaintShaderGraphPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/"
         "SG_01_StudioPaint.keireshadergraph";
     constexpr std::string_view AutomotiveMaterialGraphPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/02_Production/"
-        "MG_05_AutomotiveClearCoat.keirematerialgraph";
+        "MG_05_AutomotiveClearCoat.keirematerial";
     constexpr std::string_view AutomotiveMaterialMetadataPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/02_Production/"
-        "MG_05_AutomotiveClearCoat.keirematerialgraph.keiremeta";
+        "MG_05_AutomotiveClearCoat.keirematerial.keiremeta";
     constexpr std::string_view AutomotiveShaderGraphPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/02_Production/"
         "SG_05_AutomotiveClearCoat.keireshadergraph";
     constexpr std::string_view NeonMaterialGraphPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/"
-        "MG_03_NeonPulse.keirematerialgraph";
+        "MG_03_NeonPulse.keirematerial";
     constexpr std::string_view NeonMaterialMetadataPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/"
-        "MG_03_NeonPulse.keirematerialgraph.keiremeta";
+        "MG_03_NeonPulse.keirematerial.keiremeta";
     constexpr std::string_view NeonShaderGraphPath =
         "Samples/KeireSandbox/Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/"
         "SG_03_NeonPulse.keireshadergraph";

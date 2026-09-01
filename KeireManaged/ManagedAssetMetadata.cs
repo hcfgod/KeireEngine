@@ -22,6 +22,7 @@ internal static class ManagedAssetMetadata
         public int SchemaVersion { get; init; } = 1;
         public List<TypeDocument> Types { get; } = [];
         public List<BehaviourGraphDocument> Behaviours { get; } = [];
+        public List<NativeServiceDescriptor> NativeServices { get; } = [];
         public List<DiagnosticDocument> Diagnostics { get; } = [];
     }
 
@@ -86,6 +87,8 @@ internal static class ManagedAssetMetadata
         public int TextLines { get; set; } = 1;
         public bool ReferenceGraph { get; set; }
         public List<string> ReferenceTypeChoices { get; } = [];
+        public string? CustomValueTypeId { get; set; }
+        public uint? CustomValueVersion { get; set; }
     }
 
     private sealed class DiagnosticDocument
@@ -127,7 +130,9 @@ internal static class ManagedAssetMetadata
                 {
                     Name = caller.GetName().Name ??
                            throw new InvalidOperationException("Managed metadata test assembly has no stable name."),
-                    Types = SafeTypes(caller).Where(type => !string.IsNullOrWhiteSpace(type.FullName))
+                    Types = SafeTypes(caller).Where(type => !string.IsNullOrWhiteSpace(type.FullName) &&
+                                                           !type.IsDefined(typeof(NativeServiceContractAttribute),
+                                                                           false))
                         .Select(type => type.FullName!).Order(StringComparer.Ordinal).ToList(),
                 },
             ],
@@ -206,8 +211,12 @@ internal static class ManagedAssetMetadata
         }
         IReadOnlyDictionary<Guid, Type> serializedTypeRegistry = ManagedReferenceGraphCodec.InstallTypeRegistry(
             allowedTypes, typeof(ManagedAssetMetadata), nameof(ManagedAssetMetadata));
+        _ = ManagedCustomValueRegistry.Install(allowedTypes, typeof(ManagedAssetMetadata),
+                                               nameof(ManagedAssetMetadata));
+        ManagedCandidateTypeRegistry.Install(typeof(ManagedAssetMetadata), allowedTypes);
 
         var document = new ExportDocument();
+        document.NativeServices.AddRange(NativeServiceCatalog.Discover(allowedTypes));
         IEnumerable<Type> candidates = allowedTypes
             .Where(type => type.Assembly != typeof(ScriptableObject).Assembly &&
                            type != typeof(ScriptableObject) && !type.IsAbstract &&
@@ -447,6 +456,7 @@ internal static class ManagedAssetMetadata
             Tooltip = member.Member.GetCustomAttribute<TooltipAttribute>(true)?.Text ?? string.Empty,
             ReferenceGraph = referenceGraph,
         };
+        ApplyCustomValueDescriptor(result, valueType);
         RangeAttribute? range = member.Member.GetCustomAttribute<RangeAttribute>(true);
         MinAttribute? minimum = member.Member.GetCustomAttribute<MinAttribute>(true);
         MaxAttribute? maximum = member.Member.GetCustomAttribute<MaxAttribute>(true);
@@ -549,6 +559,7 @@ internal static class ManagedAssetMetadata
             Tooltip = string.Empty,
             ReferenceGraph = graphContext && IsGraphNodeSlot(elementType),
         };
+        ApplyCustomValueDescriptor(result, elementType);
         if (result.ReferenceGraph && IsGraphObjectSlot(elementType))
         {
             RegisterReferenceChoices(ownerType, elementType, $"{ownerType.FullName}.Element", result, context,
@@ -613,6 +624,7 @@ internal static class ManagedAssetMetadata
             Tooltip = string.Empty,
             ReferenceGraph = graphContext && IsGraphNodeSlot(valueType),
         };
+        ApplyCustomValueDescriptor(result, valueType);
         if (result.ReferenceGraph && IsGraphObjectSlot(valueType))
         {
             RegisterReferenceChoices(ownerType, valueType, $"{ownerType.FullName}.{name}", result, context,
@@ -757,9 +769,19 @@ internal static class ManagedAssetMetadata
             return 14;
         if (IsDictionary(type, out _, out _))
             return 15;
+        if (ManagedCustomValueRegistry.TryResolve(type, out _))
+            return 16;
         if (typeof(Entity).IsAssignableFrom(type) || typeof(Component).IsAssignableFrom(type))
             throw new InvalidOperationException("persistent managed assets cannot reference scene objects");
         return 11;
+    }
+
+    private static void ApplyCustomValueDescriptor(PropertyDocument descriptor, Type type)
+    {
+        if (!ManagedCustomValueRegistry.TryResolve(type, out var converter))
+            return;
+        descriptor.CustomValueTypeId = converter.StableId.ToString("D");
+        descriptor.CustomValueVersion = converter.Version;
     }
 
     private static bool IsInteger(Type type) =>

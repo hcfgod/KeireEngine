@@ -44,8 +44,12 @@ $packager = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 foreach ($contract in @("-Configuration Dist", "-StageOnly", "Build\Dependencies\dotnet-sdk",
         "Build\Distributions", "Assert-WindowsEditorPackageStage", "write-package-manifest.py",
         "editor-package.json", "player-support.ps1", "InstalledLayoutRoot", "bin\BuildSupport",
-        '$Project.CLIENT_TARGET', '(Join-Path $stage "third-party")')) {
+        "Remove-KeireGeneratedDirectory", '$Project.CLIENT_TARGET', '(Join-Path $stage "third-party")')) {
     if (-not $packager.Contains($contract)) { throw "The Windows editor packager is missing '$contract'." }
+}
+if (-not $packager.Contains(
+        'if ($DevelopmentStage -and (Test-Path -LiteralPath $playerSupportDestination -PathType Container))')) {
+    throw "The Windows editor development stage does not safely refresh its existing Build Support layout."
 }
 $hubPackager = Get-Content (Join-Path $Windows "package-hub.ps1") -Raw
 if ($hubPackager.Contains("InstalledLayoutRoot") -or $hubPackager.Contains("bin\BuildSupport")) {
@@ -58,7 +62,7 @@ if ($packager.Contains('(Join-Path $stage "third-party\licenses") | Out-Null')) 
     throw "The Windows editor packager must not pre-create the copied license directory."
 }
 $clientPremake = Get-Content (Join-Path (Get-RepositoryRoot) "KeireClient\premake5.lua") -Raw
-if (-not $clientPremake.Contains("AddKeireManagedHostStaging()")) {
+if (-not $clientPremake.Contains("AddKeireManagedHostStaging(true)")) {
     throw "The Windows Ninja build does not delegate managed-host staging to the repository launcher."
 }
 

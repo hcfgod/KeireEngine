@@ -412,12 +412,12 @@ namespace
                                       "SG_03_NeonPulse.keireshadergraph";
             const auto materialSource =
                 repository / "Samples/KeireSandbox/Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/"
-                             "MG_03_NeonPulse.keirematerialgraph";
+                             "MG_03_NeonPulse.keirematerial";
             Graph = Database->CreateAsset("Graphs/NeonPulse.keireshadergraph", shaderGraphImporter,
                                           ReadAssetBytes(shaderSource));
             auto definition = Keire::MaterialGraphAsset::DecodeSource(ReadAssetBytes(materialSource));
             definition.Shader.Asset = Graph;
-            MaterialGraph = Database->CreateAsset("Materials/NeonPulse.keirematerialgraph", materialGraphImporter,
+            MaterialGraph = Database->CreateAsset("Materials/NeonPulse.keirematerial", materialGraphImporter,
                                                   Keire::MaterialGraphAsset::EncodeSource(definition));
             const auto record = Database->Find(MaterialGraph);
             if (!record || record->SubAssets.size() < 2)

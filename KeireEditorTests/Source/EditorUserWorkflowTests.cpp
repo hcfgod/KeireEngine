@@ -13,14 +13,13 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
 {
     using enum KeireEditor::AssetBrowserOpenAction;
 
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerial") == Material);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialgraph") == MaterialGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerial") == MaterialGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keiremateriallegacy") == Material);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialinstance") == MaterialInstance);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.keireshadergraph") == ShaderGraph);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.KEIRESHADERGRAPH") == ShaderGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Common.keirematerialfunction") == ShaderGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Layer.keiremateriallayer") == ShaderGraph);
-    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Globals.keirematerialcollection") ==
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Common.keiresubgraph") == ShaderGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Globals.keireparametercollection") ==
           MaterialParameterCollection);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.keireui") == UiDocument);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.KEIREUI") == UiDocument);
@@ -32,9 +31,9 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
     CHECK(KeireEditor::AssetTypeName(instance) == "Material Instance");
     instance.RelativePath = "Materials/Legacy.keireshadergraphinstance";
     CHECK(KeireEditor::AssetTypeName(instance) == "Legacy Shader Graph Instance");
-    instance.RelativePath = "Materials/Common.keirematerialfunction";
-    CHECK(KeireEditor::AssetTypeName(instance) == "Material Function");
-    instance.RelativePath = "Materials/Globals.keirematerialcollection";
+    instance.RelativePath = "Materials/Common.keiresubgraph";
+    CHECK(KeireEditor::AssetTypeName(instance) == "Shader Subgraph");
+    instance.RelativePath = "Materials/Globals.keireparametercollection";
     CHECK(KeireEditor::AssetTypeName(instance) == "Material Parameter Collection");
     instance.RelativePath = "UI/Hud.keireui";
     CHECK(KeireEditor::AssetTypeName(instance) == "UI Document");

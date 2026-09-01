@@ -1277,7 +1277,8 @@ namespace KeireEditor
         ui.TextColored(theme.Accent, "XML MARKUP SOURCE");
         ui.TextColoredWrapped(theme.MutedText,
                               "Syntax highlighting, element and attribute completion, documentation, and source "
-                              "validation are available here. Press Ctrl+Enter to apply a valid draft.");
+                              "validation are available here. Element IDs are optional and generated automatically "
+                              "when applied. Press Ctrl+Enter to apply a valid draft.");
 
         m_SourceEditorState.Highlights.clear();
         m_SourceEditorState.Highlights.reserve(m_SourceEditor.Tokens().size());

@@ -1,26 +1,26 @@
 # Material Graph
 
-A Material Graph is an assignable artist-authored OpenPBR/slab surface graph. Schema 6 stores its authoritative
-`surfaceGraph`, stable parameters, material state, and reusable template reference, then publishes an immutable material
-for Mesh Renderers. Opening a Material Graph never redirects into its referenced Shader Graph.
+A Material is an assignable artist-authored OpenPBR surface program. Schema 7 stores its authoritative `surfaceGraph`,
+stable parameters, domain, shading model, authoring mode, closure budget, and render state, then publishes immutable
+program and material artifacts for Mesh Renderers. A new Material has no hidden Shader Graph dependency.
 
 ## Choose The Right Asset
 
 | Asset | Use it for |
 | --- | --- |
-| Shader Graph | UI, Fullscreen, VFX, Custom Graphics, or Compute target program; Legacy Surface only during migration. |
-| Direct Material | Property values against a Shader Graph or raw shader without a surface-expression graph. |
-| Material Graph | Full surface-expression graph against a selected Shader Graph. |
-| Material Instance | Lightweight inherited overrides from a Direct Material, Material Graph, or another instance. |
+| Shader Graph | UI, Fullscreen, VFX, Custom Graphics, or Compute target program. |
+| Material | Simple OpenPBR inputs, a full closure graph, or a layer stack in one assignable asset. |
+| Legacy Material | Compatibility values against a raw shader or historical surface Shader Graph. |
+| Material Instance | Lightweight inherited overrides from a Material or another instance. |
 
 ## Create A Material Graph
 
-1. In Project, choose **Create > Material Graph**.
-2. Select the Shader Graph template in the creation picker.
-3. Open the new `.keirematerialgraph` asset.
-4. Create Blackboard inputs and expression nodes.
+1. In Project, choose **Create > Material**.
+2. Open the new `.keirematerial` asset.
+3. Choose the surface domain, shading model, and authoring mode.
+4. Create parameters and expression nodes from **Add Node** or the canvas context menu.
 5. Connect final values to the protected Material Output.
-6. Save and assign the Material Graph asset to a Mesh Renderer material slot.
+6. Save and assign the Material asset to a Mesh Renderer material slot.
 
 The surface catalog includes OpenPBR Surface, Mix Slabs, Add Slabs, Coat, Fuzz, typed Material Attributes, and the
 existing BSDF modifiers. Mix clamps its factor and Add normalizes non-negative weights so the preview and generated

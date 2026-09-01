@@ -1,14 +1,14 @@
 # Shaders And Materials
 
-Kéire separates surface-material authoring from target-program authoring. A Material Graph owns the editable
-OpenPBR/slab surface program and its parameters. A Shader Graph owns a UI, Fullscreen, VFX, Custom Graphics, or Compute
-program target, including legal stages, resources, output contract, and render integration. Legacy Surface remains a
-readable Shader Graph target while transactional migration moves surface graphs into materials. Both authoring paths
-share typed graph validation, deterministic lowering, HLSL generation, reflection, and last-good publication.
+Kéire separates surface-material authoring from target-program authoring. A Material owns the editable OpenPBR
+surface program, parameters, domain, shading model, authoring mode, closure budget, and render state. A Shader Graph
+owns a Material, UI, Fullscreen, VFX, Custom Graphics, or Compute program target, including legal stages, resources,
+output contract, and render integration. Both authoring paths share typed graph validation, deterministic lowering,
+HLSL generation, reflected program artifacts, explicit material-pass contracts, and last-good publication.
 
 ```text
-Raw HLSL + .keireshader ---------------------------> Direct Material -----\
-Material Graph OpenPBR/slab program -------------------------------------+--> MaterialAsset --> RenderSystem
+Raw HLSL + .keireshader ---------------------------> Legacy Material -----\
+Material OpenPBR surface program ----------------------------------------+--> MaterialAsset --> RenderSystem
                                                         Material Instance/
 
 Shader Graph target program --> ShaderAsset --> UI / Fullscreen / VFX / Custom Graphics
@@ -18,9 +18,9 @@ The renderer never needs to understand either authoring graph format. It consume
 and public authoring contracts do not expose native GPU handles or backend compiler types.
 
 Double-clicking a `.keireshadergraph` opens its target program in the Shader Graph panel. Double-clicking a
-`.keirematerialgraph` opens its surface graph, parameter blackboard, and material preview. Ordinary `.keirematerial`
-and `.keirematerialinstance` assets open in the Inspector. Shader Graphs are not assignable to Mesh Renderers: users
-assign a Direct Material, Material Graph, or Material Instance.
+`.keirematerial` opens its surface graph, parameter blackboard, and material preview. Material Instances open in the
+Inspector. Shader Graphs are not assignable to Mesh Renderers: users assign a Material, Material Instance, or explicit
+`.keiremateriallegacy` compatibility asset.
 
 ## Asset Roles
 
@@ -28,18 +28,16 @@ assign a Direct Material, Material Graph, or Material Instance.
 | --- | --- | --- |
 | Raw shader | `.hlsl` + `.keireshader` | Expert-authored HLSL, entries, defines, render state, and exposed properties. |
 | Shader Graph | `.keireshadergraph` | Target-based UI, Fullscreen, VFX, Custom Graphics, or Compute program plus resources, variants, generated shaders, and live preview. |
-| Direct Material | `.keirematerial` | Compact material authoring with a tagged raw-shader or Shader-Graph reference. |
-| Material Graph | `.keirematerialgraph` | Schema-6 OpenPBR/slab surface program with stable parameters, layers, textures, and material state. |
-| Material Instance | `.keirematerialinstance` | Lightweight property and surface overrides inherited from a Direct Material, Material Graph, or Material Instance. |
-| Material Function | `.keirematerialfunction` | Reusable typed material-expression body callable from Shader Graphs and Material Graphs. |
-| Shader Function | `.keireshaderfunction` | Reusable lower-level shader-expression body with an explicit typed interface. |
-| Material Layer | `.keiremateriallayer` | Reusable Material Attributes-producing layer graph. |
-| Material Layer Blend | `.keirematerialblend` | Reusable two-layer blend graph with typed Bottom, Top, and Alpha inputs. |
-| Material Parameter Collection | `.keirematerialcollection` | Project-global scalar, vector, and color defaults with stable parameter identities and runtime state. |
+| Material | `.keirematerial` | Schema-7 OpenPBR surface program with stable parameters, domains, shading models, closures/layers, textures, and render state. |
+| Material Instance | `.keirematerialinstance` | Lightweight property and surface overrides inherited from a Material or Material Instance. |
+| Legacy Material | `.keiremateriallegacy` | Compatibility values against a raw shader or historical surface Shader Graph. |
+| Shader Subgraph | `.keiresubgraph` | Reusable typed material/shader function, Material Attributes layer, or layer-blend body selected by its purpose. |
+| Material Parameter Collection | `.keireparametercollection` | Project-global scalar, vector, and color defaults with stable parameter identities and runtime state. |
 | Legacy Shader Graph instance | `.keireshadergraphinstance` | Readable compatibility format from 0.1.x; new assets use Material Instance. |
 
-Direct Materials, Material Graphs, and Material Instances are equally valid assignment workflows. All support custom
-shaders without exposing generated code and cook to the same immutable `MaterialAsset` consumed by the renderer.
+Materials and Material Instances are the primary assignment workflows. Legacy Materials keep raw/custom shader
+projects readable without exposing generated code; every path cooks to the same immutable `MaterialAsset` consumed by
+the renderer.
 
 ## Shader Graph Authoring
 
@@ -88,7 +86,7 @@ published runtime assets.
 
 Shader Graph schema 6 stores its explicit target definition and retains the finite, non-negative maximum
 world-position-displacement radius introduced by schema 5. Schemas 1–5 migrate in memory; old Fullscreen outputs infer
-the Fullscreen target and other old graphs infer Legacy Surface. Generated shader contract 7 publishes target/stage
+the Fullscreen target and other old graphs infer Material. Generated shader contract 7 publishes target/stage
 metadata and the validated displacement bound in a schema-2 shader manifest. Compute target graphs serialize and
 validate today but compilation fails explicitly until the compute-program artifact ABI is available.
 
@@ -105,19 +103,17 @@ shaders.
 
 ## Materials Using Custom Shader Graphs
 
-Creating a Material Graph opens an explicit shader-template picker and opens the new graph as soon as its validated
-creation transaction completes. The Material Graph owns the executable surface expressions and publishes them through
-the shared typed compiler. A raw Shader remains supported for compact Direct Material value authoring. The source
-retains a tagged shader reference while projects transition from reusable Legacy Surface templates:
+Creating a Material produces a standalone OpenPBR surface and opens it as soon as its validated creation transaction
+completes. The Material owns its executable surface expressions and publishes them through the shared typed compiler.
+Historical sources may retain a tagged shader reference while they transition from reusable surface templates:
 
 - `asset` selects a raw `ShaderAsset`.
 - `graph` selects a Shader Graph target and canonical keyword permutation.
 - `builtin` reserves explicit engine-provided shader contracts.
 
-The Material Inspector edits Direct Materials with separate **Shader Graph** and **Raw Shader** pickers. Material Graph
-schema 6 stores one authoritative `surfaceGraph`; schemas 1–5 remain readable and explicit publication writes the
-canonical field. This is the first migration milestone: `.keirematerialgraph` remains the surface container until the
-transactional `.keirematerial` promotion is implemented.
+The Material editor exposes the shared searchable/context-compatible node catalog, direct surface preview, and
+domain/shading/authoring summary. Schema 7 stores one authoritative `surfaceGraph`; schemas 1–6 remain readable and
+save to the canonical field. External Shader Graph and Raw Shader pickers appear only for compatibility sources.
 
 Parameter nodes become Material Instance properties and expose a stable symbol, display name, group, description,
 sort priority, optional range, step, and typed default. Keyword nodes provide static parameters backed by deterministic
@@ -135,10 +131,11 @@ published material usable.
 Shader Graph parameters publish stable property IDs. Compatibility bindings resolve those IDs before display names,
 so a template rename retains its value. Unknown properties, type changes, output-contract mismatches, duplicate
 symbols, cycles, invalid static parameters, and colliding identities produce `MAT` or underlying graph diagnostics
-instead of silently changing the material. Schema-1/2/3/4/5 sources upgrade in memory to schema 6 while retaining
+instead of silently changing the material. Schema-1/2/3/4/5/6 sources upgrade in memory to schema 7 while retaining
 former values and executable surface connections under the canonical `surfaceGraph`. Graphs retain the shader
-compiler's portable limits of 1,024 nodes, 4,096 connections, 16 keywords, and 64
-generated variants; source and cooked payloads remain capped at 4 MiB.
+compiler's portable limits of 1,024 nodes, 4,096 connections, 16 keywords, and 1,024 generated variants. A graph emits
+a warning after 128 variants so accidental permutation growth remains visible; source and cooked payloads remain
+capped at 4 MiB.
 
 Material Instances never compile or duplicate shader code. Creation requires a selected Direct Material, Material
 Graph, or Material Instance parent. The Inspector presents parameters produced by the composed Material Graph and
@@ -180,14 +177,29 @@ and submit back-to-front.
 
 ## Safe Legacy Migration
 
-Schema-6 readers preserve historical Material Graph and Shader Graph identities without rewriting source on open.
-Explicitly saving a Material Graph writes its executable surface program under the canonical `surfaceGraph` field;
-old Fullscreen Shader Graphs infer the Fullscreen target and other old Shader Graphs infer Legacy Surface.
+Schema-7 readers preserve historical Material Graph and Shader Graph identities without rewriting source on open.
+Explicitly saving a Material writes its executable surface program under the canonical `surfaceGraph` field; old
+Fullscreen Shader Graphs infer the Fullscreen target and other old Shader Graphs infer the Material target.
 
 The complete identity-preserving conversion of Legacy Surface `.keireshadergraph` assets into material assets is not
 yet shipped. It requires check/preview/apply modes, before/after artifact hashes, staged source and metadata backups,
 whole-project validation, redirectors, and atomic rollback. The existing `migrate-shader-graphs` utility implements the
 earlier Material-Graph-to-template layout and must not be used as evidence that this reverse migration is complete.
+
+## Render Path And Global Illumination Selection
+
+Project Rendering settings store requested intent separately from effective runtime support. `Forward+` is the current
+production render path. `Deferred Hybrid` requests standard or extended GBuffer passes while retaining the compiled
+forward escape pass required by Hair, Eye, transparency, unsupported closure features, and backend fallback. Simple
+OpenPBR and Unlit surfaces publish the standard GBuffer contract; closure/layer authoring publishes the extended
+contract; Hair and Eye are forward-only. Decal, volume, shadow, surface-cache, bake, depth/velocity, and selection
+passes remain explicit artifact entries rather than hidden shader conventions.
+
+Global illumination intent is `Disabled`, `Baked`, `Realtime`, experimental `Irradyn`, or `Hybrid`, with an independent
+Irradyn Performance/Balanced/Quality choice. The capability resolver returns the requested and effective modes plus a
+specific fallback reason. The current runtime advertises neither Deferred Hybrid nor the new GI backends, so selecting
+them is preserved as project intent but executes through the safe Forward+/disabled fallback. No setting is evidence
+that the corresponding backend has shipped.
 
 ## Renderer And Compiler Boundary
 
@@ -203,6 +215,15 @@ failure. Each import owns a UUID-named scratch directory below the operating sys
 completion. Process-aware leases preserve work owned by another live Editor, while a later import prunes abandoned jobs
 after a one-hour grace period. Cleanup ignores links, files, and non-Kéire names. Compiler discovery is
 executable-relative, with `KEIRE_SHADER_COMPILER` as an intentional override.
+
+Compilation service adapters use a schema-1 canonical job manifest. The manifest fingerprints the exact toolchain,
+source, include closure, defines, stage, entry point, target platform/architecture/binary format, debug policy, and
+program ABI, then derives a lowercase SHA-256 work key. Policy (`LocalOnly`, `RemotePreferred`, or `RemoteRequired`) and
+interactive/background priority do not enter the key, so scheduling cannot change artifact identity. The remote queue
+foundation is feature-flagged off by default, owner-readable under forced RLS, and writable only through service-role
+coordinator RPCs. Priority leases use `SKIP LOCKED`, bounded renewals, retry exhaustion, private artifact storage, and
+lease-token-checked completion. The desktop configuration remains publishable-key-only; networkless compiler executors
+never receive Supabase credentials.
 
 ```powershell
 ./Scripts/project.ps1 bootstrap -Generator ninja -Toolset msc
@@ -222,9 +243,9 @@ Twelve progressive Shader Graph/Material Graph pairs live in
 `Samples/KeireSandbox/Assets/Examples/MaterialLab`, with separate `ShaderGraphs` and `MaterialGraphs` trees organized
 into Foundations, Production, and Advanced tiers. The examples cover studio paint, tiled textures, animated emission,
 procedural cutout, clear coat, anisotropy, transmission and refraction, world-aligned texturing, dissolve, holographic
-scanlines, vertex displacement, and iridescent Fresnel shading. Every Shader Graph defines a reusable shader contract;
-its paired schema-3 Material Graph selects that contract, binds every exposed input, and owns a complete surface
-expression network.
+scanlines, vertex displacement, and iridescent Fresnel shading. Every example Shader Graph retains a target-program
+contract; its paired canonical Material owns the executable surface expression network and migrates historical
+template bindings without changing asset identity.
 
 `Assets/Scenes/SandboxShowcase.keirescene` presents all twelve pairs on production renderer primitives with an active
 camera, lighting, a staged gallery floor, managed presentation behavior, and four edit-mode VFX examples. It is the

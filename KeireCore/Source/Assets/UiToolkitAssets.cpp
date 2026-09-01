@@ -3,6 +3,7 @@
 #include "Keire/Ui/UiStyleProperties.h"
 
 #include "Keire/Assets/AssetPipeline.h"
+#include "KeireInternal/Assets/AssetInternal.h"
 
 #include <nlohmann/json.hpp>
 
@@ -337,18 +338,55 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] AssetId DeriveAutomaticElementId(const Detail::Sha256Digest& documentDigest,
+                                                       const std::size_t elementOrdinal) noexcept
+        {
+            std::array<std::byte, 40> identity{};
+            std::ranges::copy(documentDigest, identity.begin());
+            const auto ordinal = static_cast<std::uint64_t>(elementOrdinal);
+            for (std::size_t index = 0; index < sizeof(ordinal); ++index)
+            {
+                const auto shift = static_cast<unsigned int>((sizeof(ordinal) - index - 1U) * 8U);
+                identity[documentDigest.size() + index] = static_cast<std::byte>((ordinal >> shift) & 0xffU);
+            }
+
+            const auto digest = Detail::Sha256(identity);
+            std::uint64_t high = 0;
+            std::uint64_t low = 0;
+            for (std::size_t index = 0; index < 8U; ++index)
+            {
+                high = (high << 8U) | std::to_integer<std::uint8_t>(digest[index]);
+                low = (low << 8U) | std::to_integer<std::uint8_t>(digest[index + 8U]);
+            }
+            high = (high & 0xffffffffffff0fffULL) | 0x0000000000005000ULL;
+            low = (low & 0x3fffffffffffffffULL) | 0x8000000000000000ULL;
+            return {high, low};
+        }
+
         [[nodiscard]] UiVisualElementDefinition ParseElement(const std::vector<XmlTag>& tags, std::size_t& cursor,
-                                                             const std::size_t depth)
+                                                             const std::size_t depth,
+                                                             const Detail::Sha256Digest& documentDigest,
+                                                             std::size_t& elementOrdinal)
         {
             if (depth > MaximumUiTreeDepth || cursor >= tags.size() || tags[cursor].Closing)
                 throw std::runtime_error("UI document element nesting is invalid or exceeds the safety limit.");
             const auto& tag = tags[cursor++];
             UiVisualElementDefinition result;
+            result.StableId = DeriveAutomaticElementId(documentDigest, elementOrdinal++);
             result.Type = ParseElementType(tag.Name);
             if (result.Type == UiVisualElementType::Custom)
                 result.CustomType = tag.Name;
             if (const auto* id = Attribute(tag, "id"))
-                result.StableId = AssetId::Parse(*id);
+            {
+                try
+                {
+                    result.StableId = AssetId::Parse(*id);
+                }
+                catch (const std::invalid_argument& error)
+                {
+                    throw std::runtime_error("UI element <" + tag.Name + "> has an invalid id: " + error.what());
+                }
+            }
             if (const auto* name = Attribute(tag, "name"))
                 result.Name = *name;
             if (const auto* classes = Attribute(tag, "class"))
@@ -381,7 +419,7 @@ namespace Keire
             if (tag.SelfClosing)
                 return result;
             while (cursor < tags.size() && !tags[cursor].Closing)
-                result.Children.push_back(ParseElement(tags, cursor, depth + 1));
+                result.Children.push_back(ParseElement(tags, cursor, depth + 1, documentDigest, elementOrdinal));
             if (cursor >= tags.size() || tags[cursor].Name != tag.Name)
                 throw std::runtime_error("UI document element tags are not balanced.");
             ++cursor;
@@ -1046,7 +1084,9 @@ namespace Keire
             result.StyleSheets.push_back(AssetId::Parse(*source));
             ++cursor;
         }
-        result.Root = ParseElement(tags, cursor, 1);
+        const auto documentDigest = Detail::Sha256(bytes);
+        std::size_t elementOrdinal = 0;
+        result.Root = ParseElement(tags, cursor, 1, documentDigest, elementOrdinal);
         if (cursor >= tags.size() || !tags[cursor].Closing || tags[cursor].Name != "ui" || cursor + 1 != tags.size())
             throw std::runtime_error("UI document must contain exactly one visual root.");
         Validate(result);

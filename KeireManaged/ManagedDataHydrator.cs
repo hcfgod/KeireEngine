@@ -32,7 +32,7 @@ internal static class ManagedDataHydrator
         using JsonDocument parsed = JsonDocument.Parse(document);
         JsonElement root = parsed.RootElement;
         uint schemaVersion = root.GetProperty("schemaVersion").GetUInt32();
-        if (schemaVersion is not 1 and not 3)
+        if (schemaVersion < 1 || schemaVersion > 4)
             throw new InvalidOperationException("Managed data hydration uses an unsupported schema.");
 
         Type type = target.GetType();
@@ -65,7 +65,8 @@ internal static class ManagedDataHydrator
         IReadOnlyDictionary<string, object?> sharedValues = new Dictionary<string, object?>();
         if (shared.Length != 0)
         {
-            if (schemaVersion != 3 || !root.TryGetProperty("referenceGraph", out JsonElement sharedGraph))
+            if (schemaVersion is not 3 and not 4 ||
+                !root.TryGetProperty("referenceGraph", out JsonElement sharedGraph))
             {
                 throw new ManagedSerializationException(
                     "KEIRE-MANAGED-SERIALIZATION-0003", shared[0].Path, shared[0].Member.ValueType, null,
@@ -150,6 +151,7 @@ internal static class ManagedDataHydrator
                 candidate.Member.SetValue(target, candidate.Value);
                 applied.Add((candidate.Member, previous));
             }
+            ManagedSerializationCallbacks.InvokeAfterDeserialize(target);
             target.Validate();
         }
         catch (Exception exception)

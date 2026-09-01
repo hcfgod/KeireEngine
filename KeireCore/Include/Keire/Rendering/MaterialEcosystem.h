@@ -18,11 +18,13 @@ namespace Keire
 {
     inline constexpr std::uint32_t GraphFunctionSourceSchemaVersion = 1;
     inline constexpr std::uint32_t MaterialParameterCollectionSourceSchemaVersion = 1;
+    inline constexpr std::string_view ShaderSubgraphAssetSourceExtension = ".keiresubgraph";
+    // Legacy split extensions remain readable through their explicit compatibility importer factories.
     inline constexpr std::string_view MaterialFunctionAssetSourceExtension = ".keirematerialfunction";
     inline constexpr std::string_view ShaderFunctionAssetSourceExtension = ".keireshaderfunction";
     inline constexpr std::string_view MaterialLayerAssetSourceExtension = ".keiremateriallayer";
     inline constexpr std::string_view MaterialLayerBlendAssetSourceExtension = ".keirematerialblend";
-    inline constexpr std::string_view MaterialParameterCollectionAssetSourceExtension = ".keirematerialcollection";
+    inline constexpr std::string_view MaterialParameterCollectionAssetSourceExtension = ".keireparametercollection";
 
     struct GraphFunctionDefinition
     {
@@ -121,6 +123,28 @@ namespace Keire
         [[nodiscard]] static GraphFunctionDefinition DecodeSource(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> EncodeSource(const GraphFunctionDefinition& definition);
         [[nodiscard]] static Ref<MaterialFunctionAsset> Error();
+
+      private:
+        GraphFunctionDefinition m_Definition;
+    };
+
+    /// Canonical reusable graph asset. Its Body.Purpose selects material function, shader function, layer, or blend.
+    class KEIRE_API ShaderSubgraphAsset final : public Asset
+    {
+      public:
+        explicit ShaderSubgraphAsset(GraphFunctionDefinition definition = {});
+        [[nodiscard]] static constexpr AssetTypeId StaticType() noexcept
+        {
+            return AssetTypeId(AssetId(0x4b45495245535542ULL, 0x4752415048000001ULL));
+        }
+        [[nodiscard]] AssetTypeId Type() const noexcept override { return StaticType(); }
+        [[nodiscard]] std::size_t ResidentBytes() const noexcept override;
+        [[nodiscard]] const GraphFunctionDefinition& Definition() const noexcept { return m_Definition; }
+        [[nodiscard]] static Ref<ShaderSubgraphAsset> Decode(std::span<const std::byte> bytes);
+        [[nodiscard]] static std::vector<std::byte> Encode(const GraphFunctionDefinition& definition);
+        [[nodiscard]] static GraphFunctionDefinition DecodeSource(std::span<const std::byte> bytes);
+        [[nodiscard]] static std::vector<std::byte> EncodeSource(const GraphFunctionDefinition& definition);
+        [[nodiscard]] static Ref<ShaderSubgraphAsset> Error();
 
       private:
         GraphFunctionDefinition m_Definition;
@@ -266,6 +290,8 @@ namespace Keire
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateMaterialLayerAssetDecoder();
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateMaterialLayerBlendAssetImporter();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateMaterialLayerBlendAssetDecoder();
+    [[nodiscard]] KEIRE_API AssetImporterRegistration CreateShaderSubgraphAssetImporter();
+    [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateShaderSubgraphAssetDecoder();
     [[nodiscard]] KEIRE_API AssetImporterRegistration CreateMaterialParameterCollectionAssetImporter();
     [[nodiscard]] KEIRE_API AssetDecoderRegistration CreateMaterialParameterCollectionAssetDecoder();
 } // namespace Keire

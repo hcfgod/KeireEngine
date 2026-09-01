@@ -1,12 +1,21 @@
 #include "KeireInternal/Assets/ShaderCompilerJobs.h"
 
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/ShaderCompilation.h"
 
+#include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
 #include <charconv>
 #include <fstream>
+#include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -134,3 +143,201 @@ namespace Keire::Detail
         WriteTextFileAtomically(jobDirectory / LeaseFileName, std::to_string(processId) + "\n");
     }
 } // namespace Keire::Detail
+
+namespace Keire
+{
+    namespace
+    {
+        using Json = nlohmann::json;
+
+        [[nodiscard]] bool IsLowercaseSha256(const std::string_view value) noexcept
+        {
+            return value.size() == 64U &&
+                   std::ranges::all_of(
+                       value, [](const unsigned char character)
+                       { return std::isdigit(character) != 0 || (character >= 'a' && character <= 'f'); });
+        }
+
+        [[nodiscard]] bool IsIdentifier(const std::string_view value) noexcept
+        {
+            if (value.empty() || value.size() > 128U ||
+                !(std::isalpha(static_cast<unsigned char>(value.front())) != 0 || value.front() == '_'))
+                return false;
+            return std::ranges::all_of(value.substr(1), [](const unsigned char character)
+                                       { return std::isalnum(character) != 0 || character == '_'; });
+        }
+
+        [[nodiscard]] bool IsVirtualPath(const std::string_view value) noexcept
+        {
+            if (value.empty() || value.size() > 1024U || value.front() == '/' ||
+                value.find('\\') != std::string_view::npos || value.find(':') != std::string_view::npos)
+                return false;
+            std::size_t begin = 0;
+            while (begin < value.size())
+            {
+                const auto end = value.find('/', begin);
+                const auto segment =
+                    value.substr(begin, end == std::string_view::npos ? value.size() - begin : end - begin);
+                if (segment.empty() || segment == "." || segment == "..")
+                    return false;
+                if (end == std::string_view::npos)
+                    break;
+                begin = end + 1U;
+            }
+            return true;
+        }
+
+        [[nodiscard]] std::string_view StageName(const ShaderCompileStage stage)
+        {
+            switch (stage)
+            {
+            case ShaderCompileStage::Vertex:
+                return "vertex";
+            case ShaderCompileStage::Fragment:
+                return "fragment";
+            case ShaderCompileStage::Compute:
+                return "compute";
+            }
+            throw std::invalid_argument("Shader compile stage is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view PlatformName(const ShaderCompilePlatform platform)
+        {
+            switch (platform)
+            {
+            case ShaderCompilePlatform::Windows:
+                return "windows";
+            case ShaderCompilePlatform::Linux:
+                return "linux";
+            case ShaderCompilePlatform::MacOS:
+                return "macos";
+            }
+            throw std::invalid_argument("Shader compile platform is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view ArchitectureName(const ShaderCompileArchitecture architecture)
+        {
+            switch (architecture)
+            {
+            case ShaderCompileArchitecture::X86_64:
+                return "x86_64";
+            case ShaderCompileArchitecture::Arm64:
+                return "arm64";
+            }
+            throw std::invalid_argument("Shader compile architecture is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view FormatName(const ShaderCompileBinaryFormat format)
+        {
+            switch (format)
+            {
+            case ShaderCompileBinaryFormat::Dxil:
+                return "dxil";
+            case ShaderCompileBinaryFormat::SpirV:
+                return "spirv";
+            case ShaderCompileBinaryFormat::Msl:
+                return "msl";
+            }
+            throw std::invalid_argument("Shader compile binary format is unsupported.");
+        }
+    } // namespace
+
+    void ValidateShaderCompileManifest(const ShaderCompileManifest& manifest)
+    {
+        if (manifest.SchemaVersion != ShaderCompileManifestSchemaVersion ||
+            manifest.ProgramAbiVersion != ShaderCompileProgramAbiVersion)
+            throw std::invalid_argument("Shader compile manifest schema or program ABI is unsupported.");
+        if (!IsLowercaseSha256(manifest.ToolchainSha256) || !IsLowercaseSha256(manifest.SourceSha256))
+            throw std::invalid_argument("Shader compile manifest digests must be lowercase SHA-256 values.");
+        (void)StageName(manifest.Stage);
+        (void)PlatformName(manifest.Target.Platform);
+        (void)ArchitectureName(manifest.Target.Architecture);
+        (void)FormatName(manifest.Target.Format);
+        if (!IsIdentifier(manifest.EntryPoint))
+            throw std::invalid_argument("Shader compile entry point is invalid.");
+        if ((manifest.Target.Format == ShaderCompileBinaryFormat::Dxil &&
+             manifest.Target.Platform != ShaderCompilePlatform::Windows) ||
+            (manifest.Target.Format == ShaderCompileBinaryFormat::Msl &&
+             manifest.Target.Platform != ShaderCompilePlatform::MacOS) ||
+            (manifest.Target.Platform == ShaderCompilePlatform::MacOS &&
+             manifest.Target.Format != ShaderCompileBinaryFormat::Msl))
+            throw std::invalid_argument("Shader compile platform and binary format are incompatible.");
+        if (manifest.Defines.size() > 64U || manifest.Dependencies.size() > 256U)
+            throw std::invalid_argument("Shader compile manifest exceeds define or dependency limits.");
+
+        std::vector<std::string_view> defineNames;
+        defineNames.reserve(manifest.Defines.size());
+        for (const auto& define : manifest.Defines)
+        {
+            if (!IsIdentifier(define.Name) || define.Value.size() > 256U ||
+                define.Value.find_first_of("\r\n") != std::string::npos)
+                throw std::invalid_argument("Shader compile define is invalid.");
+            defineNames.push_back(define.Name);
+        }
+        std::ranges::sort(defineNames);
+        if (std::ranges::adjacent_find(defineNames) != defineNames.end())
+            throw std::invalid_argument("Shader compile define names must be unique.");
+
+        std::vector<std::string_view> dependencyPaths;
+        dependencyPaths.reserve(manifest.Dependencies.size());
+        for (const auto& dependency : manifest.Dependencies)
+        {
+            if (!IsVirtualPath(dependency.VirtualPath) || !IsLowercaseSha256(dependency.Sha256))
+                throw std::invalid_argument("Shader compile dependency path or digest is invalid.");
+            dependencyPaths.push_back(dependency.VirtualPath);
+        }
+        std::ranges::sort(dependencyPaths);
+        if (std::ranges::adjacent_find(dependencyPaths) != dependencyPaths.end())
+            throw std::invalid_argument("Shader compile dependency paths must be unique.");
+    }
+
+    void ValidateShaderCompilationRequest(const ShaderCompilationRequest& request)
+    {
+        ValidateShaderCompileManifest(request.Manifest);
+        if (request.Policy > ShaderCompilationPolicy::RemoteRequired ||
+            request.Priority > ShaderCompilationPriority::Background)
+            throw std::invalid_argument("Shader compilation request policy or priority is unsupported.");
+    }
+
+    ShaderCompileManifest CanonicalizeShaderCompileManifest(ShaderCompileManifest manifest)
+    {
+        ValidateShaderCompileManifest(manifest);
+        std::ranges::sort(manifest.Defines, {}, &ShaderCompileDefine::Name);
+        std::ranges::sort(manifest.Dependencies, {}, &ShaderCompileDependency::VirtualPath);
+        return manifest;
+    }
+
+    std::string EncodeShaderCompileManifest(const ShaderCompileManifest& manifest)
+    {
+        const auto canonical = CanonicalizeShaderCompileManifest(manifest);
+        Json defines = Json::array();
+        for (const auto& define : canonical.Defines)
+            defines.push_back({{"name", define.Name}, {"value", define.Value}});
+        Json dependencies = Json::array();
+        for (const auto& dependency : canonical.Dependencies)
+            dependencies.push_back({{"path", dependency.VirtualPath}, {"sha256", dependency.Sha256}});
+        return Json{{"schemaVersion", canonical.SchemaVersion},
+                    {"programAbiVersion", canonical.ProgramAbiVersion},
+                    {"toolchainSha256", canonical.ToolchainSha256},
+                    {"sourceSha256", canonical.SourceSha256},
+                    {"stage", StageName(canonical.Stage)},
+                    {"entryPoint", canonical.EntryPoint},
+                    {"target",
+                     {{"platform", PlatformName(canonical.Target.Platform)},
+                      {"architecture", ArchitectureName(canonical.Target.Architecture)},
+                      {"format", FormatName(canonical.Target.Format)}}},
+                    {"defines", std::move(defines)},
+                    {"dependencies", std::move(dependencies)},
+                    {"warningsAsErrors", canonical.WarningsAsErrors},
+                    {"debugInformation", canonical.DebugInformation}}
+            .dump();
+    }
+
+    std::string ShaderCompileWorkKey(const ShaderCompileManifest& manifest)
+    {
+        const auto encoded = EncodeShaderCompileManifest(manifest);
+        return Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(encoded))));
+    }
+
+    bool IsShaderCompileWorkKey(const std::string_view value) noexcept { return IsLowercaseSha256(value); }
+} // namespace Keire

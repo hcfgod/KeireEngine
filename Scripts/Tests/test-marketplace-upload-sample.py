@@ -48,7 +48,7 @@ require(
     "The upload sample must contain two Shader Graphs.",
 )
 require(
-    source_extensions.count(".keirematerialgraph") == 2,
+    source_extensions.count(".keirematerial") == 2,
     "The upload sample must contain two Material Graphs.",
 )
 

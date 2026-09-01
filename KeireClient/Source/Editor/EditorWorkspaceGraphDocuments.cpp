@@ -184,7 +184,8 @@ void EditorWorkspaceLayer::PersistShaderGraph(const Keire::AssetId asset, const 
         throw std::runtime_error("The edited graph source is unavailable.");
     if (record->Type != Keire::ShaderGraphAsset::StaticType())
     {
-        const bool reusable = record->Type == Keire::MaterialFunctionAsset::StaticType() ||
+        const bool reusable = record->Type == Keire::ShaderSubgraphAsset::StaticType() ||
+                              record->Type == Keire::MaterialFunctionAsset::StaticType() ||
                               record->Type == Keire::ShaderFunctionAsset::StaticType() ||
                               record->Type == Keire::MaterialLayerAsset::StaticType() ||
                               record->Type == Keire::MaterialLayerBlendAsset::StaticType();
@@ -212,7 +213,8 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
     if (!m_AssetDatabase)
         return;
     const auto record = m_AssetDatabase->Find(asset);
-    const bool reusable = record && (record->Type == Keire::MaterialFunctionAsset::StaticType() ||
+    const bool reusable = record && (record->Type == Keire::ShaderSubgraphAsset::StaticType() ||
+                                     record->Type == Keire::MaterialFunctionAsset::StaticType() ||
                                      record->Type == Keire::ShaderFunctionAsset::StaticType() ||
                                      record->Type == Keire::MaterialLayerAsset::StaticType() ||
                                      record->Type == Keire::MaterialLayerBlendAsset::StaticType());
@@ -270,7 +272,9 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
     else
     {
         Keire::GraphFunctionDefinition definition;
-        if (record->Type == Keire::MaterialFunctionAsset::StaticType())
+        if (record->Type == Keire::ShaderSubgraphAsset::StaticType())
+            definition = Keire::ShaderSubgraphAsset::DecodeSource(bytes);
+        else if (record->Type == Keire::MaterialFunctionAsset::StaticType())
             definition = Keire::MaterialFunctionAsset::DecodeSource(bytes);
         else if (record->Type == Keire::ShaderFunctionAsset::StaticType())
             definition = Keire::ShaderFunctionAsset::DecodeSource(bytes);

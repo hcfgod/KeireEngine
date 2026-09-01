@@ -38,12 +38,12 @@ SAMPLE_ASSETS = (
         CONTENT_ROOT / "Shaders/SG_09_EnergyDissolve.keireshadergraph",
     ),
     (
-        "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_03_NeonPulse.keirematerialgraph",
-        CONTENT_ROOT / "Materials/MG_03_NeonPulse.keirematerialgraph",
+        "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_03_NeonPulse.keirematerial",
+        CONTENT_ROOT / "Materials/MG_03_NeonPulse.keirematerial",
     ),
     (
-        "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_09_EnergyDissolve.keirematerialgraph",
-        CONTENT_ROOT / "Materials/MG_09_EnergyDissolve.keirematerialgraph",
+        "Assets/Examples/MaterialLab/MaterialGraphs/03_Advanced/MG_09_EnergyDissolve.keirematerial",
+        CONTENT_ROOT / "Materials/MG_09_EnergyDissolve.keirematerial",
     ),
 )
 

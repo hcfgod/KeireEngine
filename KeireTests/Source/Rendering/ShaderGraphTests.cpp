@@ -192,7 +192,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
     CHECK(variant.Hlsl.find("Generator version 7, source schema 6") != std::string::npos);
-    CHECK(manifest.at("programTarget") == "Legacy Surface");
+    CHECK(manifest.at("programTarget") == "Material");
     CHECK(manifest.at("programStages") == 3U);
     CHECK(variant.Hlsl.find("cbuffer InstanceAddressingData : register(b2, space1)") != std::string::npos);
     CHECK(variant.Hlsl.find("uint4 InstanceParameters;") != std::string::npos);

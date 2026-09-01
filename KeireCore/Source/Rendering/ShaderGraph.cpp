@@ -602,7 +602,7 @@ namespace Keire
         if (definition.Purpose == ShaderGraphPurpose::Shader)
         {
             const bool validTarget =
-                (definition.Target.Target == ShaderGraphTarget::LegacySurface &&
+                (definition.Target.Target == ShaderGraphTarget::Material &&
                  definition.Output != ShaderGraphOutput::Fullscreen && stages == graphicsStages) ||
                 (definition.Target.Target == ShaderGraphTarget::Ui && definition.Output == ShaderGraphOutput::Unlit &&
                  stages == graphicsStages) ||

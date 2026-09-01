@@ -53,6 +53,12 @@ namespace
         add("split lambda", [](auto& environment) { environment.DirectionalShadowSplitLambda = 1.01F; });
         add("occlusion mode",
             [](auto& environment) { environment.GpuOcclusion = static_cast<Keire::GpuOcclusionMode>(255U); });
+        add("render path",
+            [](auto& environment) { environment.RequestedRenderPath = static_cast<Keire::RenderPath>(255U); });
+        add("global illumination", [](auto& environment)
+            { environment.RequestedGlobalIllumination = static_cast<Keire::GlobalIlluminationMode>(255U); });
+        add("Irradyn quality",
+            [](auto& environment) { environment.RequestedIrradynQuality = static_cast<Keire::IrradynQuality>(255U); });
         return result;
     }
 

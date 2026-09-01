@@ -29,7 +29,7 @@ bool EditorWorkspaceLayer::ExtractShaderGraphSelectionToFunction(const std::span
         if (!source)
             throw std::runtime_error("The open Shader Graph source is unavailable.");
         const auto destination = source->RelativePath.parent_path() /
-                                 (std::string(name) + std::string(Keire::ShaderFunctionAssetSourceExtension));
+                                 (std::string(name) + std::string(Keire::ShaderSubgraphAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A Shader Function with this name already exists beside the graph.");
 
@@ -42,7 +42,7 @@ bool EditorWorkspaceLayer::ExtractShaderGraphSelectionToFunction(const std::span
         state->PlaceholderAsset = placeholder;
         state->ShaderBefore = before;
         state->ShaderAfter = std::move(extracted.Parent);
-        m_AssetOperations->QueueCreateAsset(destination, Keire::ShaderFunctionAsset::Encode(extracted.Function), {},
+        m_AssetOperations->QueueCreateAsset(destination, Keire::ShaderSubgraphAsset::Encode(extracted.Function), {},
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
                                              .UndoName = "Extract Shader Function",
                                              .GraphFunctionExtraction = std::move(state),
@@ -74,7 +74,7 @@ bool EditorWorkspaceLayer::ExtractMaterialGraphSelectionToFunction(const std::sp
         if (!source)
             throw std::runtime_error("The open Material Graph source is unavailable.");
         const auto destination = source->RelativePath.parent_path() /
-                                 (std::string(name) + std::string(Keire::MaterialFunctionAssetSourceExtension));
+                                 (std::string(name) + std::string(Keire::ShaderSubgraphAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A Material Function with this name already exists beside the graph.");
 
@@ -87,7 +87,7 @@ bool EditorWorkspaceLayer::ExtractMaterialGraphSelectionToFunction(const std::sp
         state->PlaceholderAsset = placeholder;
         state->MaterialBefore = before;
         state->MaterialAfter = std::move(extracted.Parent);
-        m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialFunctionAsset::Encode(extracted.Function), {},
+        m_AssetOperations->QueueCreateAsset(destination, Keire::ShaderSubgraphAsset::Encode(extracted.Function), {},
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
                                              .UndoName = "Extract Material Function",
                                              .GraphFunctionExtraction = std::move(state),

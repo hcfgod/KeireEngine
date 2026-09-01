@@ -19,6 +19,7 @@ namespace Keire
         using Json = nlohmann::json;
 
         constexpr std::size_t MaximumCollectionElements = 16ULL * 1024U;
+        constexpr std::size_t MaximumCustomCollectionElements = 4ULL * 1024U;
         constexpr std::size_t MaximumStringBytes = 1ULL * 1024U * 1024U;
         constexpr std::size_t MaximumDepth = 32;
 
@@ -86,6 +87,65 @@ namespace Keire
             if (!high || !low)
                 throw std::invalid_argument("Managed asset-reference data is missing its ID.");
             return AssetId(Unsigned(*high), Unsigned(*low));
+        }
+
+        void ValidateCustomPayload(const Json& value, const std::size_t depth)
+        {
+            if (depth > MaximumDepth)
+                throw std::invalid_argument("Managed custom value payload exceeds 32 nested levels.");
+            if (value.is_null() || value.is_boolean() || value.is_number_integer() || value.is_number_unsigned())
+                return;
+            if (value.is_number_float())
+            {
+                if (!std::isfinite(value.get<double>()))
+                    throw std::invalid_argument("Managed custom value payload contains a non-finite number.");
+                return;
+            }
+            if (value.is_string())
+            {
+                if (value.get_ref<const std::string&>().size() > MaximumStringBytes)
+                    throw std::invalid_argument("Managed custom value payload exceeds the UTF-8 string limit.");
+                return;
+            }
+            if (value.is_array())
+            {
+                if (value.size() > MaximumCustomCollectionElements)
+                    throw std::invalid_argument("Managed custom value payload exceeds the list element limit.");
+                for (const auto& element : value)
+                    ValidateCustomPayload(element, depth + 1);
+                return;
+            }
+            if (value.is_object())
+            {
+                if (value.size() > MaximumCustomCollectionElements)
+                    throw std::invalid_argument("Managed custom value payload exceeds the map entry limit.");
+                for (const auto& [key, element] : value.items())
+                {
+                    if (key.size() > MaximumStringBytes)
+                        throw std::invalid_argument("Managed custom value map key exceeds the UTF-8 string limit.");
+                    ValidateCustomPayload(element, depth + 1);
+                }
+                return;
+            }
+            throw std::invalid_argument("Managed custom value payload contains an unsupported JSON value.");
+        }
+
+        [[nodiscard]] Json CanonicalCustomRecord(const Json& value, const ManagedAssetPropertyDescriptor& property)
+        {
+            if (!property.CustomValueTypeId || !*property.CustomValueTypeId || property.CustomValueVersion == 0)
+                throw std::invalid_argument("Managed custom value descriptor is incomplete.");
+            if (!value.is_object() || value.size() != 3 || !value.contains("$custom") || !value.contains("version") ||
+                !value.contains("payload") || !value.at("$custom").is_string())
+            {
+                throw std::invalid_argument("Managed custom value record is malformed.");
+            }
+            if (ManagedTypeId::Parse(value.at("$custom").get<std::string>()) != *property.CustomValueTypeId)
+                throw std::invalid_argument("Managed custom value record uses the wrong stable codec ID.");
+            const auto version = Unsigned(value.at("version"));
+            if (version == 0 || version > property.CustomValueVersion)
+                throw std::invalid_argument("Managed custom value record uses an unsupported codec version.");
+            ValidateCustomPayload(value.at("payload"), 0);
+            return value;
         }
 
         [[nodiscard]] ManagedAssetValueNode DefaultNode(const ManagedAssetPropertyDescriptor& property)
@@ -244,6 +304,9 @@ namespace Keire
                 }
                 break;
             }
+            case ManagedAssetPropertyKind::CustomValue:
+                result.Value = CanonicalCustomRecord(source, property).dump();
+                break;
             }
             return result;
         }
@@ -389,6 +452,10 @@ namespace Keire
                 }
                 return result;
             }
+            case ManagedAssetPropertyKind::CustomValue:
+                if (!IsPresent(value))
+                    return nullptr;
+                return CanonicalCustomRecord(Json::parse(std::get<std::string>(value.Value)), property);
             }
             throw std::logic_error("Unsupported managed data property kind.");
         }

@@ -477,8 +477,8 @@ void EditorWorkspaceLayer::OpenAssetBrowserMaterial(const Keire::AssetId asset)
         return;
     const auto record = m_AssetDatabase->Find(asset);
     if (!record || record->Type != Keire::MaterialAsset::StaticType() ||
-        record->RelativePath.extension() != ".keirematerial")
-        throw std::invalid_argument("Only .keirematerial assets can be opened in the Material Inspector.");
+        record->RelativePath.extension().string() != Keire::LegacyMaterialAssetSourceExtension)
+        throw std::invalid_argument("Only legacy material assets can be opened in the compatibility inspector.");
     m_SelectedAsset = asset;
     if (m_InspectorPanel)
     {

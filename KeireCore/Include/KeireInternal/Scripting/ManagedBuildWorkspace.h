@@ -20,7 +20,8 @@ namespace Keire
         GenerateProject(const ManagedAssemblyGraphEntry& assembly, const std::map<AssetId, std::string>& names,
                         const std::filesystem::path& projectRoot, const std::filesystem::path& projectDirectory,
                         const std::filesystem::path& managedApi, const std::filesystem::path& managedApiProject,
-                        std::string_view targetFramework, std::string_view languageVersion);
+                        const std::filesystem::path& managedEditorApi, const std::filesystem::path& managedGenerator,
+                        bool includeEditorApi, std::string_view targetFramework, std::string_view languageVersion);
         [[nodiscard]] std::string GenerateSolution(const ManagedBuildRequest& request,
                                                    const std::map<AssetId, std::string>& names,
                                                    const std::filesystem::path& projectRoot,

@@ -1,4 +1,5 @@
 #include "Keire/Rendering/MaterialEcosystem.h"
+#include "Keire/Rendering/ProgramArtifact.h"
 #include "Keire/Rendering/ShaderGraph.h"
 
 #include "KeireInternal/Rendering/ShaderGraphCompilerInternal.h"
@@ -87,6 +88,8 @@ namespace Keire
                     return std::nullopt;
                 const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
                 const auto functionBytes = context.ReadProjectFile(sourcePrefix / source->RelativePath);
+                if (source->Type == ShaderSubgraphAsset::StaticType())
+                    return ShaderSubgraphAsset::DecodeSource(functionBytes).Body;
                 if (source->Type == MaterialFunctionAsset::StaticType())
                     return MaterialFunctionAsset::DecodeSource(functionBytes).Body;
                 if (source->Type == ShaderFunctionAsset::StaticType())
@@ -97,12 +100,14 @@ namespace Keire
                     return MaterialLayerBlendAsset::DecodeSource(functionBytes).Body;
                 return std::nullopt;
             };
-            const auto compilation = CompileShaderGraph(definition, compileOptions);
-            if (!compilation.Succeeded() || compilation.Variants.empty())
+            ProgramCompileOptions programOptions;
+            programOptions.ShaderGraph = std::move(compileOptions);
+            const auto program = CompileShaderGraphProgram(definition, programOptions);
+            if (!program.Succeeded())
             {
-                const auto diagnostic = compilation.Diagnostics.empty()
+                const auto diagnostic = program.Diagnostics.empty()
                                             ? std::string("Shader Graph generated no shader variants.")
-                                            : compilation.Diagnostics.front().Message;
+                                            : program.Diagnostics.front().Message;
                 throw std::runtime_error("Shader Graph program compilation failed: " + diagnostic);
             }
 
@@ -110,9 +115,9 @@ namespace Keire
             if (!shaderImporter.ContextualImport)
                 throw std::logic_error("Shader Graph import requires the contextual shader importer.");
             std::vector<std::pair<std::vector<std::string>, AssetId>> shaderVariants;
-            shaderVariants.reserve(compilation.Variants.size());
+            shaderVariants.reserve(program.Variants.size());
             std::set<std::filesystem::path> sourceDependencies;
-            for (const auto& variant : compilation.Variants)
+            for (const auto& variant : program.Variants)
             {
                 const auto shaderKey = "shader/" + variant.StableSuffix;
                 const auto shaderId = definition.GeneratedAssetOwner
@@ -149,7 +154,7 @@ namespace Keire
                 shaderVariants.emplace_back(variant.Keywords, shaderId);
             }
 
-            if (definition.Target.Target != ShaderGraphTarget::LegacySurface)
+            if (definition.Target.Target != ShaderGraphTarget::Material)
                 return output;
 
             ShaderGraphInstanceDefinition defaults;
@@ -215,9 +220,9 @@ namespace Keire
                 if (source->Type == ShaderGraphAsset::StaticType())
                 {
                     graph = ShaderGraphAsset::DecodeSource(parentBytes);
-                    if (graph.Target.Target != ShaderGraphTarget::LegacySurface)
+                    if (graph.Target.Target != ShaderGraphTarget::Material)
                         throw std::invalid_argument(
-                            "Shader Graph instances only support legacy surface graphs; bind program properties "
+                            "Shader Graph instances only support material-target graphs; bind program properties "
                             "through the target-specific runtime API.");
                     graphAsset = parent;
                     break;

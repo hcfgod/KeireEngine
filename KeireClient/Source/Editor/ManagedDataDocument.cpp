@@ -50,6 +50,12 @@ namespace KeireEditor
             case Keire::ManagedAssetPropertyKind::Text:
                 value.Value = std::string{};
                 break;
+            case Keire::ManagedAssetPropertyKind::CustomValue:
+                if (!property.CustomValueTypeId || property.CustomValueVersion == 0)
+                    throw std::invalid_argument("Managed custom value descriptor is incomplete.");
+                value.Value = std::string("{\"$custom\":\"") + property.CustomValueTypeId->ToString() +
+                              "\",\"payload\":null,\"version\":" + std::to_string(property.CustomValueVersion) + '}';
+                break;
             case Keire::ManagedAssetPropertyKind::Vector2:
                 value.Value = Keire::Vector2{};
                 break;

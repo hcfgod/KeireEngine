@@ -30,6 +30,9 @@ Available on both `Entity` and `Component`/`Behaviour`:
 `Awake`, `OnEnable`, `Start`, `FixedUpdate`, `Update`, `LateUpdate`, `OnDisable`, `OnDestroy`, collision/trigger
 callbacks, animation/procedural callbacks, `OnBeforeReload`, and `OnAfterReload`.
 
+Serialization lifecycle also includes `ISerializationCallbackReceiver.OnBeforeSerialize`,
+`ISerializationCallbackReceiver.OnAfterDeserialize`, and the Editor-authored `Behaviour.OnValidate` callback.
+
 Active additions and prefab instances complete required `Awake`/`OnEnable` work before returning. Inactive entities
 defer `Awake`; disabled behaviours on active entities receive `Awake` but not `OnEnable`. `Start` runs once before the
 first enabled update. Destruction commits after the current update loop.
@@ -97,6 +100,21 @@ polymorphic concrete types, cycles, sharing, exact dictionaries, exact lists, an
 arrays within the documented limits. Multidimensional arrays and unstable/custom dictionary-key contracts remain
 unsupported and reject the candidate generation without replacing the previous valid state.
 
+Atomic custom values use `ManagedSerializedValue`, `ManagedValueConverter<T>`,
+`CustomManagedValueConverterAttribute`, `IManagedValueMigration`, and `ManagedValueMigrationAttribute`. Runtime
+services use `IRuntimeService`, `RuntimeServiceAttribute`, `RuntimeServiceDependencyAttribute`,
+`RuntimeServiceContext`, and `RuntimeServiceUpdateContext`. Native source-module contracts use
+`NativeServiceContractAttribute`, `NativeMethodAttribute`, and optional `NativeBufferAttribute`; typed stubs come from
+the packaged `Keire.Managed.Generators` analyzer.
+
+## Editor Extensions
+
+Editor `.keireasm` assemblies may use `Keire.Editor.Managed.dll`. The main surfaces are `SerializedObject`,
+`SerializedProperty`, property drawers/decorators, custom `Editor` implementations, `ScriptedImporter`,
+`AssetImportContext`, `AssetPostprocessor`, `EditorWindow`, `SettingsProvider`, `EditorTool`, `Selection`, `Undo`,
+`EditorApplication`, `AssetDatabase`, and ordered build processor interfaces. Every discovered extension type requires
+an `EditorExtensionIdAttribute`; retained UI is created with `CreatePropertyGUI`, `CreateInspectorGUI`, or `CreateGUI`.
+
 ## Source Files
 
 | File | Surface |
@@ -112,3 +130,7 @@ unsupported and reject the candidate generation without replacing the previous v
 | [`RuntimeWorld.cs`](../../KeireManaged/RuntimeWorld.cs) | Scenes and render settings |
 | [`Jobs.cs`](../../KeireManaged/Jobs.cs) | Managed jobs |
 | [`RuntimeAssets.cs`](../../KeireManaged/RuntimeAssets.cs) | Asset load operations |
+| [`ManagedCustomSerialization.cs`](../../KeireManaged/ManagedCustomSerialization.cs) | Custom values, converters, migrations, callbacks |
+| [`RuntimeServices.cs`](../../KeireManaged/RuntimeServices.cs) | Application-owned managed services |
+| [`NativeServiceContracts.cs`](../../KeireManaged/NativeServiceContracts.cs) | Stable native source-module ABI declarations |
+| [`KeireEditorManaged`](../../KeireEditorManaged) | Editor-only inspectors, importers, tools, windows, and build hooks |

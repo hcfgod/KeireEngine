@@ -6,7 +6,9 @@
 #include "KeireInternal/Process.h"
 
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/ShaderCompilation.h"
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -90,4 +92,53 @@ TEST_CASE("shader compiler cleanup rejects unsafe roots and invalid leases")
     CHECK_THROWS_AS(Keire::Detail::WriteShaderCompilerJobLease(directory.Path, 0), std::invalid_argument);
     CHECK_THROWS_AS(Keire::Detail::WriteShaderCompilerJobLease(fileRoot, Keire::Detail::CurrentProcessId()),
                     std::invalid_argument);
+}
+
+TEST_CASE("shader compile manifests produce order-independent content-addressed work keys")
+{
+    Keire::ShaderCompileManifest manifest;
+    manifest.ToolchainSha256 = std::string(64, 'a');
+    manifest.SourceSha256 = std::string(64, 'b');
+    manifest.Stage = Keire::ShaderCompileStage::Fragment;
+    manifest.EntryPoint = "PSMain";
+    manifest.Target = {Keire::ShaderCompilePlatform::Linux, Keire::ShaderCompileArchitecture::X86_64,
+                       Keire::ShaderCompileBinaryFormat::SpirV};
+    manifest.Defines = {{"USE_FOG", "1"}, {"ALPHA_MODE", "MASK"}};
+    manifest.Dependencies = {{"Shaders/Lighting.hlsli", std::string(64, 'c')},
+                             {"Shaders/Common.hlsli", std::string(64, 'd')}};
+
+    const auto workKey = Keire::ShaderCompileWorkKey(manifest);
+    CHECK(Keire::IsShaderCompileWorkKey(workKey));
+    CHECK(workKey.size() == 64U);
+
+    std::ranges::reverse(manifest.Defines);
+    std::ranges::reverse(manifest.Dependencies);
+    CHECK(Keire::ShaderCompileWorkKey(manifest) == workKey);
+
+    manifest.DebugInformation = true;
+    CHECK(Keire::ShaderCompileWorkKey(manifest) != workKey);
+}
+
+TEST_CASE("shader compile manifests reject ambiguous unsafe or incompatible jobs")
+{
+    Keire::ShaderCompileManifest manifest;
+    manifest.ToolchainSha256 = std::string(64, 'a');
+    manifest.SourceSha256 = std::string(64, 'b');
+    CHECK_NOTHROW(Keire::ValidateShaderCompileManifest(manifest));
+
+    auto invalid = manifest;
+    invalid.Dependencies = {{"../escape.hlsli", std::string(64, 'c')}};
+    CHECK_THROWS_AS(Keire::ValidateShaderCompileManifest(invalid), std::invalid_argument);
+    invalid = manifest;
+    invalid.Defines = {{"DUPLICATE", "1"}, {"DUPLICATE", "2"}};
+    CHECK_THROWS_AS(Keire::ValidateShaderCompileManifest(invalid), std::invalid_argument);
+    invalid = manifest;
+    invalid.Target = {Keire::ShaderCompilePlatform::Linux, Keire::ShaderCompileArchitecture::X86_64,
+                      Keire::ShaderCompileBinaryFormat::Dxil};
+    CHECK_THROWS_AS(Keire::ValidateShaderCompileManifest(invalid), std::invalid_argument);
+
+    Keire::ShaderCompilationRequest request;
+    request.Manifest = manifest;
+    request.Policy = static_cast<Keire::ShaderCompilationPolicy>(255U);
+    CHECK_THROWS_AS(Keire::ValidateShaderCompilationRequest(request), std::invalid_argument);
 }

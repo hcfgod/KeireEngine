@@ -26,6 +26,7 @@ namespace Keire::Detail
 
         std::vector<ManagedAssetTypeDescriptor> Types;
         std::vector<BehaviourGraph> Behaviours;
+        std::vector<ManagedServiceDescriptor> NativeServices;
         std::vector<ManagedAssetTypeDiagnostic> Diagnostics;
     };
 

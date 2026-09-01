@@ -125,7 +125,7 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
             "Assets/Scenes/SandboxShowcase.keirescene",
             "Assets/Scenes/SampleScene.keirescene",
             "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_01_StudioPaint.keireshadergraph",
-            "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_01_StudioPaint.keirematerialgraph",
+            "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_01_StudioPaint.keirematerial",
             "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_12_IridescentShield.keireshadergraph",
             "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs",
             "Assets/Vfx/ArcaneNova.keirevfx",

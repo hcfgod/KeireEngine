@@ -12,7 +12,7 @@ internal static class ManagedStateSerializer
 
     private sealed class StateDocument
     {
-        public int Version { get; set; } = 3;
+        public int Version { get; set; } = 4;
         public List<StateField> Fields { get; set; } = [];
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public JsonElement? ReferenceGraph { get; set; }
@@ -205,6 +205,7 @@ internal static class ManagedStateSerializer
             TypeInfoResolver = resolver,
             WriteIndented = false
         };
+        options.Converters.Add(new ManagedCustomValueJsonConverterFactory());
         options.Converters.Add(new ManagedCanonicalDictionaryConverterFactory());
         options.Converters.Add(new EntityJsonConverter());
         options.Converters.Add(new ComponentJsonConverterFactory());
@@ -219,6 +220,12 @@ internal static class ManagedStateSerializer
         var retained = document.Fields.ToList();
         MaterializeRetainedGraphRoots(document, retained);
         var allFields = SerializableFields(behaviour.GetType(), true).ToArray();
+        Behaviour candidate = behaviour;
+        if (ManagedSerializationCallbacks.ContainsCallbacks(behaviour))
+        {
+            candidate = ManagedObjectSerializer.CreateBehaviourSerializationCandidate(behaviour, allFields);
+            ManagedSerializationCallbacks.InvokeBeforeSerialize(candidate);
+        }
         var graphRoots = new List<ManagedReferenceGraphCodec.CaptureRoot>();
         if (!includeReloadOnly)
         {
@@ -230,7 +237,7 @@ internal static class ManagedStateSerializer
         foreach (var field in allFields.Where(field => IsSerializable(field, includeReloadOnly)))
         {
             var descriptor = Describe(field);
-            object? value = field.GetValue(behaviour);
+            object? value = field.GetValue(candidate);
             string path = $"{field.DeclaringType?.FullName}.{field.Name}";
             descriptor.ReferenceGraph = field.IsDefined(typeof(SerializeReferenceAttribute), true);
             if (descriptor.ReferenceGraph)
@@ -257,7 +264,7 @@ internal static class ManagedStateSerializer
             RemoveCapturedFields(retained, descriptor);
             retained.Add(descriptor);
         }
-        document.Version = 3;
+        document.Version = 4;
         document.Fields = retained.OrderBy(field => field.StableId, StringComparer.Ordinal)
             .ThenBy(field => field.Name, StringComparer.Ordinal).ToList();
         document.ReferenceGraph = graphRoots.Count == 0
@@ -380,6 +387,26 @@ internal static class ManagedStateSerializer
             s_restoreWorld = previousWorld;
         }
 
+        if (prepared.Count != 0 && (ManagedSerializationCallbacks.ContainsCallbacks(behaviour) ||
+                                    prepared.Any(candidate =>
+                                        ManagedSerializationCallbacks.ContainsCallbacks(candidate.Value))))
+        {
+            FieldInfo[] callbackFields = SerializableFields(behaviour.GetType(), true);
+            Behaviour callbackCandidate =
+                ManagedObjectSerializer.CreateBehaviourSerializationCandidate(behaviour, callbackFields);
+            foreach (var candidate in prepared)
+                candidate.Field.SetValue(callbackCandidate, candidate.Value);
+            ManagedSerializationCallbacks.InvokeAfterDeserialize(callbackCandidate);
+            for (int index = 0; index < prepared.Count; ++index)
+            {
+                var candidate = prepared[index];
+                object? callbackValue = candidate.Field.GetValue(callbackCandidate);
+                ManagedObjectSerializer.ValidateSerializableValue(callbackValue, candidate.Field.FieldType,
+                    candidate.Path, candidate.Field.IsDefined(typeof(SerializeReferenceAttribute), true));
+                prepared[index] = (candidate.Field, callbackValue, candidate.Path, candidate.Fallback);
+            }
+        }
+
         var applied = new List<(FieldInfo Field, object? Previous)>(prepared.Count);
         try
         {
@@ -424,7 +451,7 @@ internal static class ManagedStateSerializer
                 $"Managed state documents cannot exceed {MaximumDocumentBytes} bytes.");
         StateDocument result = JsonSerializer.Deserialize<StateDocument>(state, Options) ??
                                throw new InvalidOperationException("Managed state document is empty.");
-        if (result.Version is < 1 or > 3)
+        if (result.Version is < 1 or > 4)
             throw new InvalidOperationException($"Managed state version {result.Version} is unsupported.");
         foreach (StateField field in result.Fields)
         {

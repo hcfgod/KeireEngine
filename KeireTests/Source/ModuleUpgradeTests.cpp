@@ -92,6 +92,41 @@ namespace
         unsigned char m_State = 7;
     };
 
+    class ManagedBindingModule final : public Keire::EngineModule
+    {
+      public:
+        explicit ManagedBindingModule(const bool invalid = false) : m_Invalid(invalid) {}
+
+        [[nodiscard]] Keire::ModuleDescriptor Descriptor() const override
+        {
+            return {.Id = "sample.managed-binding", .DisplayName = "Managed Binding", .Version = {1, 0, 0}};
+        }
+
+        void Register(Keire::ModuleRegistrationContext& context) override
+        {
+            Keire::ManagedServiceDescriptor service{.StableId = "73616e64-626f-4078-8000-00000000f801",
+                                                    .AbiVersion = 2};
+            service.Methods.push_back({.StableId = m_Invalid ? "invalid" : "73616e64-626f-4078-8000-00000000f803",
+                                       .AbiVersion = 1,
+                                       .Parameters = {{.Name = "values",
+                                                       .Kind = Keire::ManagedBindingValueKind::BoundedBuffer,
+                                                       .ElementKind = Keire::ManagedBindingValueKind::SignedInteger,
+                                                       .MaximumElements = 128}},
+                                       .Result = Keire::ManagedBindingValueKind::SignedInteger});
+            service.Methods.push_back(
+                {.StableId = "73616e64-626f-4078-8000-00000000f802",
+                 .AbiVersion = 1,
+                 .ThreadAffinity = Keire::ManagedBindingThreadAffinity::MainThread,
+                 .Parameters = {{.Name = "asset", .Kind = Keire::ManagedBindingValueKind::AssetId}},
+                 .Result = Keire::ManagedBindingValueKind::StructuredResult,
+                 .StructuredResult = Keire::ManagedBindingValueKind::AssetId});
+            context.RegisterManagedService(std::move(service));
+        }
+
+      private:
+        bool m_Invalid = false;
+    };
+
     struct TemporaryDirectory final
     {
         explicit TemporaryDirectory(const std::string& name) : Path(KeireTests::MakeTestDirectory(name))
@@ -185,6 +220,21 @@ TEST_CASE("Source modules reject cycles and discard failed registration")
     CHECK_THROWS_WITH_AS(Keire::CreateRef<Keire::ModuleRegistry>(Keire::ModuleRegistrySpecification{
                              {Keire::CreateRef<TestModule>(failing, nullptr, true)}}),
                          "registration failed", std::runtime_error);
+}
+
+TEST_CASE("Source modules publish deterministic bounded managed service descriptors")
+{
+    const auto registry = Keire::CreateRef<Keire::ModuleRegistry>(
+        Keire::ModuleRegistrySpecification{{Keire::CreateRef<ManagedBindingModule>()}});
+    const auto services = registry->ManagedServices();
+    REQUIRE(services.size() == 1);
+    CHECK(services.front().StableId == "73616e64-626f-4078-8000-00000000f801");
+    REQUIRE(services.front().Methods.size() == 2);
+    CHECK(services.front().Methods.front().StableId == "73616e64-626f-4078-8000-00000000f802");
+    CHECK(services.front().Methods.back().Parameters.front().MaximumElements == 128);
+    CHECK_THROWS_AS(Keire::CreateRef<Keire::ModuleRegistry>(
+                        Keire::ModuleRegistrySpecification{{Keire::CreateRef<ManagedBindingModule>(true)}}),
+                    std::invalid_argument);
 }
 
 TEST_CASE("Simulation-affecting source modules declare and capture their replay state explicitly")

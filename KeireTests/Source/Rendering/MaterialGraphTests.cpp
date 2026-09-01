@@ -397,7 +397,7 @@ TEST_CASE("Material Instances override parameters exposed by composed Material G
     context.SourceRoot = context.ProjectRoot / "Assets";
     context.ReadProjectFile = [graphBytes, shaderBytes](const std::filesystem::path& path)
     {
-        if (path.generic_string() == "Assets/Materials/Parent.keirematerialgraph")
+        if (path.generic_string() == "Assets/Materials/Parent.keirematerial")
             return std::vector<std::byte>(graphBytes);
         if (path.generic_string() == "Assets/Graphs/Surface.keireshadergraph")
             return std::vector<std::byte>(shaderBytes);
@@ -408,7 +408,7 @@ TEST_CASE("Material Instances override parameters exposed by composed Material G
     {
         if (asset == parentGraph)
             return Keire::AssetImportSource{asset, Keire::MaterialGraphAsset::StaticType(),
-                                            "Materials/Parent.keirematerialgraph"};
+                                            "Materials/Parent.keirematerial"};
         if (asset == shaderGraph)
             return Keire::AssetImportSource{asset, Keire::ShaderGraphAsset::StaticType(),
                                             "Graphs/Surface.keireshadergraph"};
@@ -482,7 +482,7 @@ TEST_CASE("Sandbox and packaged template ship current Material Graph sources")
     std::size_t expressionGraphCount = 0;
     for (const auto& entry : std::filesystem::recursive_directory_iterator(sandbox))
     {
-        if (!entry.is_regular_file() || entry.path().extension() != ".keirematerialgraph")
+        if (!entry.is_regular_file() || entry.path().extension().string() != Keire::MaterialAssetSourceExtension)
             continue;
         const auto source = ReadAssetSource(entry.path());
         const auto definition = Keire::MaterialGraphAsset::DecodeSource(source);
@@ -733,7 +733,7 @@ TEST_CASE("Legacy procedural Material Graph migration is transactional and prese
             std::filesystem::remove_all(Root, ignored);
         }
     } cleanup{root};
-    const auto materialPath = root / "Assets/Materials/Paint.keirematerialgraph";
+    const auto materialPath = root / "Assets/Materials/Paint.keirematerial";
     std::filesystem::create_directories(materialPath.parent_path());
     const auto legacy = Keire::CreateDefaultShaderGraph();
     const auto legacyBytes = Keire::ShaderGraphAsset::EncodeSource(legacy);
@@ -791,7 +791,7 @@ TEST_CASE("Legacy Material Graph migration rejects destination conflicts without
             std::filesystem::remove_all(Root, ignored);
         }
     } cleanup{root};
-    const auto materialPath = root / "Assets/Materials/Paint.keirematerialgraph";
+    const auto materialPath = root / "Assets/Materials/Paint.keirematerial";
     const auto shaderPath = root / "Assets/Materials/Paint_Shader.keireshadergraph";
     std::filesystem::create_directories(materialPath.parent_path());
     const auto legacyBytes = Keire::ShaderGraphAsset::EncodeSource(Keire::CreateDefaultShaderGraph());

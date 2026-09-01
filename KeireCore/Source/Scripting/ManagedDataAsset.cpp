@@ -145,7 +145,7 @@ namespace Keire
                 throw std::invalid_argument("Managed asset property tree exceeds the depth or property-count limit.");
             if (!property.StableFieldId)
                 throw std::invalid_argument("Managed asset properties require non-empty stable field IDs.");
-            if (property.Kind > ManagedAssetPropertyKind::Dictionary)
+            if (property.Kind > ManagedAssetPropertyKind::CustomValue)
                 throw std::invalid_argument("Managed asset property uses an unsupported property kind.");
             if (!HasVisibleText(property.Name) || !HasVisibleText(property.DisplayName) ||
                 !HasVisibleText(property.ManagedTypeName))
@@ -192,6 +192,15 @@ namespace Keire
             else if (property.ExpectedAssetType || property.ExpectedManagedType)
             {
                 throw std::invalid_argument("Only managed asset-reference properties may declare asset constraints.");
+            }
+            if (property.Kind == ManagedAssetPropertyKind::CustomValue)
+            {
+                if (!property.CustomValueTypeId || !*property.CustomValueTypeId || property.CustomValueVersion == 0)
+                    throw std::invalid_argument("Managed custom values require a stable codec ID and version.");
+            }
+            else if (property.CustomValueTypeId || property.CustomValueVersion != 0)
+            {
+                throw std::invalid_argument("Only managed custom values may declare codec metadata.");
             }
             if (!property.ReferenceGraph && !property.ReferenceTypeChoices.empty())
                 throw std::invalid_argument("Only reference-graph properties may declare concrete type choices.");
@@ -253,6 +262,11 @@ namespace Keire
                 result["expectedAssetType"] = property.ExpectedAssetType->ToString();
             if (property.ExpectedManagedType)
                 result["expectedManagedType"] = property.ExpectedManagedType->ToString();
+            if (property.CustomValueTypeId)
+            {
+                result["customValueTypeId"] = property.CustomValueTypeId->ToString();
+                result["customValueVersion"] = property.CustomValueVersion;
+            }
             result["referenceTypeChoices"] = Json::array();
             for (const auto type : property.ReferenceTypeChoices)
                 result["referenceTypeChoices"].push_back(type.ToString());
@@ -272,7 +286,7 @@ namespace Keire
             result.DisplayName = source.at("displayName").get<std::string>();
             result.ManagedTypeName = source.at("managedTypeName").get<std::string>();
             const auto kind = source.at("kind").get<std::uint32_t>();
-            if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::Dictionary))
+            if (kind > static_cast<std::uint32_t>(ManagedAssetPropertyKind::CustomValue))
                 throw std::invalid_argument("Managed type catalog contains an unsupported property kind.");
             result.Kind = static_cast<ManagedAssetPropertyKind>(kind);
             result.ReadOnly = source.value("readOnly", false);
@@ -291,6 +305,9 @@ namespace Keire
                 result.ExpectedAssetType = AssetTypeId::Parse(found->get<std::string>());
             if (const auto found = source.find("expectedManagedType"); found != source.end())
                 result.ExpectedManagedType = ManagedTypeId::Parse(found->get<std::string>());
+            if (const auto found = source.find("customValueTypeId"); found != source.end())
+                result.CustomValueTypeId = ManagedTypeId::Parse(found->get<std::string>());
+            result.CustomValueVersion = source.value("customValueVersion", 0U);
             result.IncludeDerivedAssetTypes = source.value("includeDerivedAssetTypes", true);
             if (const auto found = source.find("referenceTypeChoices"); found != source.end())
             {
@@ -584,6 +601,9 @@ namespace Keire
             case ManagedAssetPropertyKind::AssetReference:
                 AddExpectedDependency(dependencies, includeDerivedByAsset, ReadAssetReference(value), property);
                 return;
+            case ManagedAssetPropertyKind::CustomValue:
+                (void)DecodeManagedAssetValue(value.dump(), property);
+                return;
             }
             throw std::invalid_argument("Managed data field uses an unsupported property kind.");
         }
@@ -845,12 +865,12 @@ namespace Keire
 
             ManagedDataDefinition definition;
             const auto sourceVersion = document.at("schemaVersion").get<std::uint32_t>();
-            if (sourceVersion != 1 && sourceVersion != ManagedDataSchemaVersion)
+            if (sourceVersion < 1 || sourceVersion > ManagedDataSchemaVersion)
                 throw std::invalid_argument("Managed data asset uses an unsupported schema version.");
             definition.SchemaVersion = ManagedDataSchemaVersion;
             definition.ManagedType = ManagedTypeId::Parse(document.at("managedTypeId").get<std::string>());
             definition.ManagedTypeName = document.at("managedTypeName").get<std::string>();
-            if (sourceVersion == ManagedDataSchemaVersion)
+            if (sourceVersion >= 3)
             {
                 if (const auto graph = document.find("referenceGraph"); graph != document.end())
                     definition.ReferenceGraph = graph->dump();

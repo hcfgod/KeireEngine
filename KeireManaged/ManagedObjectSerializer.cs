@@ -133,9 +133,38 @@ internal static class ManagedObjectSerializer
         return (T)CloneValue(source, typeof(T), new CloneContext(), typeof(T).FullName ?? typeof(T).Name)!;
     }
 
-    internal static void ValidateSerializableValue(object? value, Type declaredType, string path)
+    internal static void ValidateSerializableValue(object? value, Type declaredType, string path,
+                                                   bool preserveReferences = false)
     {
-        _ = CloneValue(value, declaredType, new CloneContext(), path);
+        _ = CloneValue(value, declaredType, new CloneContext(), path, preserveReferences);
+    }
+
+    internal static Behaviour CreateBehaviourSerializationCandidate(Behaviour source,
+                                                                     IReadOnlyList<FieldInfo> fields)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        MethodInfo memberwiseClone = typeof(object).GetMethod("MemberwiseClone",
+            BindingFlags.Instance | BindingFlags.NonPublic) ??
+            throw new InvalidOperationException("The managed runtime does not expose MemberwiseClone.");
+        var candidate = (Behaviour)memberwiseClone.Invoke(source, null)!;
+        var context = new CloneContext();
+        context.Active.Add(source);
+        context.Clones.Add(source, candidate);
+        try
+        {
+            foreach (FieldInfo field in fields)
+            {
+                string path = $"{field.DeclaringType?.FullName}.{field.Name}";
+                object? clone = CloneValue(field.GetValue(source), field.FieldType, context, path,
+                                           field.IsDefined(typeof(SerializeReferenceAttribute), true));
+                field.SetValue(candidate, clone);
+            }
+        }
+        finally
+        {
+            context.Active.Remove(source);
+        }
+        return candidate;
     }
 
     internal static void ValidateFieldLimitForTests(Type type) => _ = GetMembers(type, false);
@@ -203,7 +232,8 @@ internal static class ManagedObjectSerializer
                                       bool preserveReferences = false)
     {
         bool countsTowardDepth = !typeof(EngineObject).IsAssignableFrom(declaredType) &&
-                                 !IsImmutableValue(declaredType) && !declaredType.IsEnum;
+                                 !IsImmutableValue(declaredType) && !declaredType.IsEnum &&
+                                 !ManagedCustomValueRegistry.TryResolve(declaredType, out _);
         if (countsTowardDepth)
             ++context.Depth;
         try
@@ -222,6 +252,12 @@ internal static class ManagedObjectSerializer
     private static object? CloneValueCore(object? value, Type declaredType, CloneContext context, string path,
                                           bool preserveReferences)
     {
+        if (ManagedCustomValueRegistry.TryResolve(declaredType, out var converter))
+        {
+            ManagedSerializedValue payload = ManagedCustomValueRegistry.Write(value, declaredType, path);
+            return ManagedCustomValueRegistry.Read(converter.StableId, converter.Version, payload, declaredType, path);
+        }
+
         if (typeof(EngineObject).IsAssignableFrom(declaredType))
             return value;
 
@@ -459,7 +495,8 @@ internal static class ManagedObjectSerializer
 
     private static void ValidateElementType(Type type, string path, bool preserveReferences = false)
     {
-        if (typeof(EngineObject).IsAssignableFrom(type) || IsImmutableValue(type) || type.IsEnum)
+        if (typeof(EngineObject).IsAssignableFrom(type) || IsImmutableValue(type) || type.IsEnum ||
+            ManagedCustomValueRegistry.TryResolve(type, out _))
             return;
         if (type.IsArray)
         {

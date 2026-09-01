@@ -131,7 +131,9 @@ namespace Keire
         GenerateProject(const ManagedAssemblyGraphEntry& assembly, const std::map<AssetId, std::string>& names,
                         const std::filesystem::path& projectRoot, const std::filesystem::path& projectDirectory,
                         const std::filesystem::path& managedApi, const std::filesystem::path& managedApiProject,
-                        const std::string_view targetFramework, const std::string_view languageVersion)
+                        const std::filesystem::path& managedEditorApi, const std::filesystem::path& managedGenerator,
+                        const bool includeEditorApi, const std::string_view targetFramework,
+                        const std::string_view languageVersion)
         {
             std::string text = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                                "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    "
@@ -195,6 +197,27 @@ namespace Keire
                 text += "  <ItemGroup>\n    <Reference Include=\"Keire.Managed\">\n      <HintPath>" +
                         XmlEscape(PathText(referencePath)) +
                         "</HintPath>\n      <Private>false</Private>\n    </Reference>\n  </ItemGroup>\n";
+            }
+            if (includeEditorApi)
+            {
+                if (managedEditorApi.empty())
+                    throw std::invalid_argument("Editor managed assemblies require Keire.Editor.Managed.");
+                std::error_code error;
+                auto referencePath = std::filesystem::relative(managedEditorApi, projectDirectory, error);
+                if (error || referencePath.empty())
+                    referencePath = managedEditorApi;
+                text += "  <ItemGroup>\n    <Reference Include=\"Keire.Editor.Managed\">\n      <HintPath>" +
+                        XmlEscape(PathText(referencePath)) +
+                        "</HintPath>\n      <Private>false</Private>\n    </Reference>\n  </ItemGroup>\n";
+            }
+            if (!managedGenerator.empty())
+            {
+                std::error_code error;
+                auto analyzerPath = std::filesystem::relative(managedGenerator, projectDirectory, error);
+                if (error || analyzerPath.empty())
+                    analyzerPath = managedGenerator;
+                text += "  <ItemGroup>\n    <Analyzer Include=\"" + XmlEscape(PathText(analyzerPath)) +
+                        "\" />\n  </ItemGroup>\n";
             }
             if (!assembly.Definition.References.empty())
             {

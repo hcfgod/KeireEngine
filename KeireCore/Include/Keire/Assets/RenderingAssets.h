@@ -238,6 +238,8 @@ namespace Keire
     };
 
     /// Editable material source. Import resolves graph targets to an immutable runtime MaterialAssetDefinition.
+    inline constexpr std::string_view LegacyMaterialAssetSourceExtension = ".keiremateriallegacy";
+
     struct MaterialAuthoringDefinition
     {
         std::uint32_t SchemaVersion = 4;

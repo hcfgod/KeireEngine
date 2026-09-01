@@ -293,6 +293,11 @@ namespace Keire
                      {"routing", std::move(routing)}});
             }
             Json result = {{"schemaVersion", definition.SchemaVersion},
+                           {"material",
+                            {{"domain", static_cast<std::uint8_t>(definition.Domain)},
+                             {"shadingModel", static_cast<std::uint8_t>(definition.ShadingModel)},
+                             {"authoringMode", static_cast<std::uint8_t>(definition.AuthoringMode)},
+                             {"maximumClosures", definition.MaximumClosures}}},
                            {"shader", EncodeShaderReference(definition.Shader)},
                            {"surface",
                             {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
@@ -322,6 +327,16 @@ namespace Keire
             if (sourceSchema == 0 || sourceSchema > MaterialGraphSourceSchemaVersion)
                 throw std::invalid_argument("Material Graph source schema is unsupported.");
             result.SchemaVersion = MaterialGraphSourceSchemaVersion;
+            if (sourceSchema >= 7)
+            {
+                const auto& material = source.at("material");
+                result.Domain = static_cast<MaterialDomain>(material.value("domain", std::uint8_t{0}));
+                result.ShadingModel =
+                    static_cast<MaterialShadingModel>(material.value("shadingModel", std::uint8_t{0}));
+                result.AuthoringMode =
+                    static_cast<MaterialAuthoringMode>(material.value("authoringMode", std::uint8_t{0}));
+                result.MaximumClosures = material.value("maximumClosures", MaximumMaterialClosureCount);
+            }
             result.Shader = DecodeShaderReference(source.at("shader"));
             const auto& surface = source.value("surface", Json::object());
             result.Surface.AlphaMode =
@@ -579,6 +594,74 @@ namespace Keire
             return property.DefaultTexture;
         }
         throw std::invalid_argument("Shader property type cannot be represented by a Material Graph.");
+    }
+
+    MaterialGraphDefinition CreateOpenPbrMaterial(const MaterialShadingModel shadingModel, const MaterialDomain domain,
+                                                  const MaterialAuthoringMode authoringMode)
+    {
+        if ((domain == MaterialDomain::Volume) != (shadingModel == MaterialShadingModel::ParticipatingMedia) ||
+            authoringMode > MaterialAuthoringMode::LayerStack)
+            throw std::invalid_argument("Material domain, shading model, or authoring mode is incompatible.");
+
+        MaterialGraphDefinition result;
+        result.Domain = domain;
+        result.ShadingModel = shadingModel;
+        result.AuthoringMode = authoringMode;
+        result.OutputNode = AssetId::Generate();
+        result.SurfaceGraph = CreateTargetShaderGraph(ShaderGraphTarget::Material);
+        result.SurfaceGraph.Output =
+            domain == MaterialDomain::Decal               ? ShaderGraphOutput::Decal
+            : domain == MaterialDomain::Volume            ? ShaderGraphOutput::Transparent
+            : shadingModel == MaterialShadingModel::Unlit ? ShaderGraphOutput::Unlit
+            : shadingModel == MaterialShadingModel::Hair  ? ShaderGraphOutput::Hair
+            : shadingModel == MaterialShadingModel::Eye   ? ShaderGraphOutput::Eye
+            : shadingModel == MaterialShadingModel::Water || shadingModel == MaterialShadingModel::ThinTranslucent
+                ? ShaderGraphOutput::Transparent
+                : ShaderGraphOutput::Surface;
+        result.SurfaceGraph.Nodes.clear();
+        auto master = CreateDefaultShaderGraph(result.SurfaceGraph.Output).Nodes.front();
+        master.Name = "Material Output";
+        master.EditorPosition = {760.0F, 180.0F};
+        result.SurfaceGraph.Nodes.push_back(std::move(master));
+
+        const auto expose = [&](const std::string_view name, const ShaderGraphValueType type, ShaderGraphValue value,
+                                const Vector2 position)
+        {
+            auto parameter = CreateShaderGraphNode(ShaderGraphNodeKind::Parameter, type);
+            parameter.Name = std::string(name);
+            parameter.Symbol = std::string(name);
+            parameter.Value = std::move(value);
+            parameter.EditorPosition = position;
+            parameter.ParameterMetadata.Category = "Surface";
+            const auto output = parameter.Pins.front().Id;
+            const auto input = std::ranges::find(result.SurfaceGraph.Nodes.front().Pins, name, &ShaderGraphPin::Name);
+            if (input == result.SurfaceGraph.Nodes.front().Pins.end())
+                throw std::logic_error("Default material output is missing an exposed surface input.");
+            result.SurfaceGraph.Connections.push_back(
+                {AssetId::Generate(), {parameter.Id, output}, {result.SurfaceGraph.Nodes.front().Id, input->Id}});
+            result.SurfaceGraph.Nodes.push_back(std::move(parameter));
+        };
+
+        const auto hasPin = [&](const std::string_view name)
+        {
+            const auto& pins = result.SurfaceGraph.Nodes.front().Pins;
+            return std::ranges::find(pins, name, &ShaderGraphPin::Name) != pins.end();
+        };
+        if (hasPin("BaseColor"))
+            expose("BaseColor", ShaderGraphValueType::Color, Color{0.18F, 0.18F, 0.18F, 1.0F}, {120.0F, 40.0F});
+        else if (hasPin("Color"))
+            expose("Color", ShaderGraphValueType::Color, Color{0.18F, 0.18F, 0.18F, 1.0F}, {120.0F, 40.0F});
+        if (hasPin("Roughness"))
+            expose("Roughness", ShaderGraphValueType::Scalar, 0.5F, {120.0F, 150.0F});
+        if (hasPin("Metallic"))
+            expose("Metallic", ShaderGraphValueType::Scalar, 0.0F, {120.0F, 260.0F});
+        if (hasPin("Emission"))
+            expose("Emission", ShaderGraphValueType::Color, Color{0.0F, 0.0F, 0.0F, 1.0F}, {120.0F, 370.0F});
+        if (hasPin("Opacity"))
+            expose("Opacity", ShaderGraphValueType::Scalar, 1.0F, {120.0F, 480.0F});
+
+        ValidateMaterialGraph(result);
+        return result;
     }
 
     MaterialGraphDefinition CreateMaterialGraph(MaterialShaderReference shader,
@@ -927,6 +1010,10 @@ namespace Keire
     void ValidateMaterialGraph(const MaterialGraphDefinition& definition)
     {
         if (definition.SchemaVersion != MaterialGraphSourceSchemaVersion ||
+            definition.Domain > MaterialDomain::Volume ||
+            definition.ShadingModel > MaterialShadingModel::ParticipatingMedia ||
+            definition.AuthoringMode > MaterialAuthoringMode::LayerStack || definition.MaximumClosures == 0 ||
+            definition.MaximumClosures > MaximumMaterialClosureCount ||
             definition.Shader.Kind > MaterialShaderSourceKind::ShaderGraph ||
             definition.Properties.size() > MaximumMaterialProperties ||
             definition.Nodes.size() > MaximumMaterialGraphNodes ||
@@ -938,10 +1025,15 @@ namespace Keire
             definition.EmissiveGIIntensity < 0.0F || definition.EmissiveGIIntensity > 100'000.0F ||
             !Math::IsFinite(definition.OutputPosition))
             throw std::invalid_argument("Material Graph definition is invalid or exceeds a portable bound.");
-        if (!definition.Shader.Asset ||
-            (definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph && !ValidTarget(definition.Shader.Target)))
-            throw std::invalid_argument("Material Graph requires a valid shader or Shader Graph target.");
-        if (definition.Shader.Kind != MaterialShaderSourceKind::ShaderGraph &&
+        if ((definition.Domain == MaterialDomain::Volume) !=
+            (definition.ShadingModel == MaterialShadingModel::ParticipatingMedia))
+            throw std::invalid_argument("Material Graph domain and shading model are incompatible.");
+        if (definition.Shader.Asset && definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph &&
+            !ValidTarget(definition.Shader.Target))
+            throw std::invalid_argument("Material Graph Shader Graph target is invalid.");
+        if (!definition.Shader.Asset && (!definition.Shader.Keywords.empty() || definition.Shader.Target != "default"))
+            throw std::invalid_argument("Standalone materials cannot select an external shader target or keyword.");
+        if (definition.Shader.Asset && definition.Shader.Kind != MaterialShaderSourceKind::ShaderGraph &&
             (!definition.Shader.Keywords.empty() || definition.Shader.Target != "default"))
             throw std::invalid_argument("Only Shader Graph references may select targets or keywords.");
         for (const auto& [name, option] : definition.Shader.Keywords)
@@ -1124,15 +1216,41 @@ namespace Keire
     AssetImporterRegistration CreateMaterialGraphAssetImporter()
     {
         AssetImporterRegistration result;
-        result.Name = "Keire.MaterialGraph";
-        result.Version = 9;
+        result.Name = "Keire.Material";
+        result.Version = 10;
         result.Type = MaterialGraphAsset::StaticType();
-        result.Extensions = {".keirematerialgraph"};
+        result.Extensions = {std::string(MaterialAssetSourceExtension)};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
             if (!context.Asset || !context.ResolveSubAssetId)
                 throw std::invalid_argument("Material Graph import requires a stable asset and subasset resolver.");
             const auto definition = MaterialGraphAsset::DecodeSource(bytes);
+            if (!definition.Shader.Asset)
+            {
+                if (context.ProjectRoot.empty() || context.SourceRoot.empty() || !context.ReadProjectFile)
+                    throw std::invalid_argument("Standalone Material import requires a complete project context.");
+                const auto graphImporter = CreateShaderGraphAssetImporter();
+                if (!graphImporter.ContextualImport)
+                    throw std::logic_error("Standalone Material import requires the Shader Graph compiler pipeline.");
+                auto graphContext = context;
+                graphContext.ResolveSubAssetId = [resolve = context.ResolveSubAssetId](const std::string_view key)
+                { return resolve(key == "material/default" ? key : "material-program/" + std::string(key)); };
+                auto output = graphImporter.ContextualImport(graphContext,
+                                                             ShaderGraphAsset::EncodeSource(definition.SurfaceGraph));
+                output.Bytes = MaterialGraphAsset::Encode(definition);
+                const auto materialSubAsset = std::ranges::find_if(
+                    output.SubAssets, [](const AssetGeneratedSubAsset& subAsset)
+                    { return subAsset.Type == MaterialAsset::StaticType() && subAsset.Key == "material/default"; });
+                if (materialSubAsset == output.SubAssets.end())
+                    throw std::logic_error("Standalone Material compiler did not publish its runtime material.");
+                auto material = MaterialAsset::Decode(materialSubAsset->Bytes)->Definition();
+                material.Surface = definition.Surface;
+                material.ContributeEmissionToGI = definition.ContributeEmissionToGI;
+                material.EmissiveGIIntensity = definition.EmissiveGIIntensity;
+                materialSubAsset->Name = "Runtime Material";
+                materialSubAsset->Bytes = MaterialAsset::Encode(material);
+                return output;
+            }
             if (HasMaterialSurfaceExpressions(definition))
             {
                 if (definition.Shader.Kind != MaterialShaderSourceKind::ShaderGraph || context.ProjectRoot.empty() ||
@@ -1240,7 +1358,7 @@ namespace Keire
         result.Name = "Keire.MaterialInstance";
         result.Version = 2;
         result.Type = MaterialInstanceAsset::StaticType();
-        result.Extensions = {".keirematerialinstance"};
+        result.Extensions = {std::string(MaterialInstanceAssetSourceExtension)};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
             if (!context.Asset || context.ProjectRoot.empty() || context.SourceRoot.empty() ||

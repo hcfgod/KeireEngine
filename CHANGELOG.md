@@ -5,6 +5,39 @@ versions.
 
 ## Unreleased
 
+- Overhauled materials around one canonical `.keirematerial` schema-7 source that owns its OpenPBR surface program,
+  domain, shading model, simple/closure/layer authoring mode, bounded closure budget, parameters, and render state.
+  Materials now compile through a renderer-neutral reflected program artifact and explicit material-pass contract,
+  preview without a hidden Shader Graph dependency, and expose the shared context-aware node catalog directly in the
+  Material editor. Historical flat materials remain available only through `.keiremateriallegacy` compatibility.
+- Reframed `.keireshadergraph` as target-program authoring for Material, UI, Fullscreen, VFX, Custom Graphics, and
+  Compute targets; generated variants now share the same artifact/reflection boundary, enforce a 1,024 hard variant
+  limit with a 128-variant warning threshold, and retain stable entry-point, resource, dependency, and diagnostic data.
+- Added schema-4 requested/effective Render Path and GI settings with explicit Forward+/disabled fallbacks, standard
+  versus extended GBuffer eligibility, and forward-only Hair/Eye contracts. Added deterministic content-addressed
+  shader compilation manifests plus a disabled-by-default, forced-RLS Supabase priority/lease queue foundation whose
+  private mutation RPCs remain service-role-only.
+
+- Added managed extensibility foundations: separately packaged `Keire.Editor.Managed` and binding generator
+  assemblies, authoritative Runtime/Editor `.keireasm` references and player exclusion, deterministic exact-allowlist
+  catalogs, generation-safe last-good activation, retained inspector/importer/window/tool/build contracts,
+  application-owned runtime services, and exact stable source-module ABI validation.
+- Added canonical managed serialization v4 with bounded custom atomic values, stable converter versions, contiguous
+  migrations, transactional serialization callbacks and `OnValidate`, native v1–v4 readers, structured custom-value
+  metadata, and rollback-preserving native validation.
+
+- Added fast Windows `stage-editor` and `stage-hub` launcher commands for incremental Dist-layout testing without the
+  release test matrix or archive round-trip, and kept Player Support builds on the selected generator so packaging no
+  longer invalidates otherwise compatible build outputs. Windows PowerShell 5.1 package staging now also uses
+  framework-compatible path and marker checks and explicitly loads its required utility commands.
+- Fixed UI Builder source clicks, caret placement, and drag selections to share exact glyph metrics and the active
+  editor's wrapped layout, preserved the live Style Source viewport when clicking after a scroll, and made Hub
+  verification tasks show the editor version instead of an internal registration identifier.
+- UI markup element IDs are now optional while authoring; omitted IDs are generated deterministically when source is
+  applied and written into the normalized source for stable bindings, selection, and debugging.
+
+- Fixed Windows PowerShell 5.1 package validation losing successful child-process exit codes, which could make Editor
+  packaging retry and fail after the packaged runtime had already completed successfully.
 - Fixed UI Builder XML and CSS syntax colors rendering as detached highlight bars or escaping above and below the
   editor, made source editors consume their full pane width, wrapped long source lines, and stopped mouse multi-click
   selection from unexpectedly scrolling or selecting offset text in the source viewport. CSS-style `left`, `right`,

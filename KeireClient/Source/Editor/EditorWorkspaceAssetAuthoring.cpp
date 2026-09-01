@@ -372,6 +372,7 @@ bool EditorWorkspaceLayer::CreateVfxEffect(const std::string_view name)
 
 bool EditorWorkspaceLayer::CreateMaterialGraph(const std::string_view name, const Keire::AssetId shaderAsset)
 {
+    (void)shaderAsset;
     if (!m_AssetDatabase || !m_AssetOperations)
         return false;
     try
@@ -379,36 +380,16 @@ bool EditorWorkspaceLayer::CreateMaterialGraph(const std::string_view name, cons
         if (m_AssetOperations->Busy())
             (void)m_AssetOperations->PreemptBackgroundImports();
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
-            throw std::invalid_argument("Material Graph name must be one non-empty path component.");
-        const auto shader = m_AssetDatabase->Find(shaderAsset);
-        if (!shader ||
-            (shader->Type != Keire::ShaderAsset::StaticType() && shader->Type != Keire::ShaderGraphAsset::StaticType()))
-            throw std::runtime_error("Choose a compatible Shader Graph or raw Shader for the Material Graph.");
-
-        Keire::MaterialShaderReference shaderReference;
-        shaderReference.Asset = shader->Id;
-        shaderReference.Kind = shader->Type == Keire::ShaderGraphAsset::StaticType()
-                                   ? Keire::MaterialShaderSourceKind::ShaderGraph
-                                   : Keire::MaterialShaderSourceKind::ShaderAsset;
-        const auto shaderInterface = ResolveMaterialGraphInterface(shaderReference);
-        if (!shaderInterface)
-            throw std::runtime_error("The selected shader does not expose a compatible material interface.");
-        auto definition = Keire::CreateMaterialGraph(std::move(shaderReference), *shaderInterface);
-        if (definition.Shader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph)
-        {
-            const auto shaderTemplate = ResolveMaterialGraphTemplate(definition.Shader);
-            if (!shaderTemplate)
-                throw std::runtime_error("The selected Shader Graph template could not be loaded.");
-            definition.SurfaceGraph = Keire::CreateMaterialSurfaceGraph(*shaderTemplate);
-        }
+            throw std::invalid_argument("Material name must be one non-empty path component.");
+        auto definition = Keire::CreateOpenPbrMaterial();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
-        const auto destination = directory / (std::string(name) + ".keirematerialgraph");
+        const auto destination = directory / (std::string(name) + std::string(Keire::MaterialAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
-            throw std::runtime_error("A Material Graph with that name already exists in this folder.");
+            throw std::runtime_error("A Material with that name already exists in this folder.");
         m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialGraphAsset::EncodeSource(definition), {},
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenMaterialGraph,
-                                             .UndoName = "Create Material Graph",
-                                             .Reason = "material-graph-creation"});
+                                             .UndoName = "Create Material",
+                                             .Reason = "material-creation"});
         m_AssetStatus = "Creating and opening " + destination.generic_string() + ".";
         return true;
     }
@@ -460,32 +441,13 @@ bool EditorWorkspaceLayer::CreateReusableGraph(const std::string_view name, cons
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Reusable graph name must be one non-empty path component.");
 
-        std::string_view extension;
-        std::vector<std::byte> bytes;
-        switch (purpose)
-        {
-        case Keire::ShaderGraphPurpose::MaterialFunction:
-            extension = Keire::MaterialFunctionAssetSourceExtension;
-            bytes = Keire::MaterialFunctionAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
-            break;
-        case Keire::ShaderGraphPurpose::ShaderFunction:
-            extension = Keire::ShaderFunctionAssetSourceExtension;
-            bytes = Keire::ShaderFunctionAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
-            break;
-        case Keire::ShaderGraphPurpose::MaterialLayer:
-            extension = Keire::MaterialLayerAssetSourceExtension;
-            bytes = Keire::MaterialLayerAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
-            break;
-        case Keire::ShaderGraphPurpose::MaterialLayerBlend:
-            extension = Keire::MaterialLayerBlendAssetSourceExtension;
-            bytes = Keire::MaterialLayerBlendAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
-            break;
-        case Keire::ShaderGraphPurpose::Shader:
+        if (purpose == Keire::ShaderGraphPurpose::Shader)
             throw std::invalid_argument("Use Shader Graph creation for shader assets.");
-        }
+        const auto bytes = Keire::ShaderSubgraphAsset::Encode(Keire::CreateDefaultGraphFunction(purpose));
 
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
-        const auto destination = directory / (std::string(name) + std::string(extension));
+        const auto destination =
+            directory / (std::string(name) + std::string(Keire::ShaderSubgraphAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A reusable graph with that name already exists in this folder.");
         m_AssetOperations->QueueCreateAsset(
@@ -1019,36 +981,17 @@ bool EditorWorkspaceLayer::CreateMaterial(const std::string_view name)
     {
         if (m_AssetOperations->Busy())
             (void)m_AssetOperations->PreemptBackgroundImports();
-        Keire::MaterialShaderReference shader;
-        if (const auto selected = m_AssetDatabase->Find(m_SelectedAsset);
-            selected && (selected->Type == Keire::ShaderAsset::StaticType() ||
-                         selected->Type == Keire::ShaderGraphAsset::StaticType()))
-        {
-            shader.Asset = selected->Id;
-            shader.Kind = selected->Type == Keire::ShaderGraphAsset::StaticType()
-                              ? Keire::MaterialShaderSourceKind::ShaderGraph
-                              : Keire::MaterialShaderSourceKind::ShaderAsset;
-        }
-        if (!shader.Asset)
-        {
-            const auto records = m_AssetDatabase->Records();
-            const auto found =
-                std::ranges::find(records, Keire::ShaderAsset::StaticType(), &Keire::AssetSourceRecord::Type);
-            if (found != records.end())
-                shader.Asset = found->Id;
-        }
-
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Material name must be one non-empty path component.");
-        const auto destination = directory / (std::string(name) + ".keirematerial");
+        const auto destination = directory / (std::string(name) + std::string(Keire::MaterialAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A material with that name already exists in this folder.");
-        Keire::MaterialAuthoringDefinition definition;
-        definition.Shader = std::move(shader);
-        m_AssetOperations->QueueCreateAsset(
-            destination, Keire::MaterialAsset::EncodeAuthoringSource(definition), {},
-            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal, .UndoName = "Create Material"});
+        m_AssetOperations->QueueCreateAsset(destination,
+                                            Keire::MaterialGraphAsset::EncodeSource(Keire::CreateOpenPbrMaterial()), {},
+                                            {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenMaterialGraph,
+                                             .UndoName = "Create Material",
+                                             .Reason = "material-creation"});
         m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
         return true;
     }

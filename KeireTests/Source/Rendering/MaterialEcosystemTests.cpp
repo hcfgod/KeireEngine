@@ -47,6 +47,10 @@ TEST_CASE("reusable shader graphs round trip with distinct purposes and stable d
     CHECK(Keire::ShaderFunctionAsset::DecodeSource(Keire::ShaderFunctionAsset::EncodeSource(shader)) == shader);
     CHECK(Keire::MaterialLayerAsset::DecodeSource(Keire::MaterialLayerAsset::EncodeSource(layer)) == layer);
     CHECK(Keire::MaterialLayerBlendAsset::DecodeSource(Keire::MaterialLayerBlendAsset::EncodeSource(blend)) == blend);
+    CHECK(Keire::ShaderSubgraphAsset::DecodeSource(Keire::ShaderSubgraphAsset::EncodeSource(material)) == material);
+    CHECK(Keire::ShaderSubgraphAsset::DecodeSource(Keire::ShaderSubgraphAsset::EncodeSource(shader)) == shader);
+    CHECK(Keire::ShaderSubgraphAsset::DecodeSource(Keire::ShaderSubgraphAsset::EncodeSource(layer)) == layer);
+    CHECK(Keire::ShaderSubgraphAsset::DecodeSource(Keire::ShaderSubgraphAsset::EncodeSource(blend)) == blend);
 
     const auto functionId = Keire::AssetId::Parse("506c34ab-8347-4bc9-9062-21529279e8f2");
     const auto graph = CallFunction(functionId, material.Body);
@@ -79,7 +83,7 @@ TEST_CASE("Shader Graph import resolves reusable function assets and publishes t
 {
     const auto functionId = Keire::AssetId::Parse("24edac13-e172-4f3c-aef3-b2ef7d6a8d15");
     const auto function = Keire::CreateDefaultGraphFunction(Keire::ShaderGraphPurpose::MaterialFunction);
-    const auto functionBytes = Keire::MaterialFunctionAsset::EncodeSource(function);
+    const auto functionBytes = Keire::ShaderSubgraphAsset::EncodeSource(function);
     const auto graph = CallFunction(functionId, function.Body);
     const auto graphBytes = Keire::ShaderGraphAsset::EncodeSource(graph);
 
@@ -91,7 +95,7 @@ TEST_CASE("Shader Graph import resolves reusable function assets and publishes t
     context.RelativePath = "Shaders/FunctionConsumer.keireshadergraph";
     context.ReadProjectFile = [&](const std::filesystem::path& path)
     {
-        if (path == std::filesystem::path("Assets/Functions/Common.keirematerialfunction"))
+        if (path == std::filesystem::path("Assets/Functions/Common.keiresubgraph"))
             return std::vector<std::byte>(functionBytes);
         throw std::runtime_error("Unexpected reusable graph dependency path: " + path.generic_string());
     };
@@ -99,8 +103,8 @@ TEST_CASE("Shader Graph import resolves reusable function assets and publishes t
     {
         if (asset != functionId)
             return std::nullopt;
-        return Keire::AssetImportSource{functionId, Keire::MaterialFunctionAsset::StaticType(),
-                                        "Functions/Common.keirematerialfunction"};
+        return Keire::AssetImportSource{functionId, Keire::ShaderSubgraphAsset::StaticType(),
+                                        "Functions/Common.keiresubgraph"};
     };
     std::map<std::string, Keire::AssetId, std::less<>> subAssets;
     context.ResolveSubAssetId = [&](const std::string_view key)
@@ -190,14 +194,15 @@ TEST_CASE("dynamic material instances enforce inherited property types and prese
     CHECK_THROWS_AS(instance->SetProperty("Roughness", 0.5F), std::logic_error);
 }
 
-TEST_CASE("built-in asset registration exposes every material ecosystem asset type")
+TEST_CASE("built-in asset registration exposes the canonical material ecosystem asset types")
 {
     const auto importers = Keire::CreateBuiltinAssetImporters();
     const auto has = [&](const Keire::AssetTypeId type)
     { return std::ranges::any_of(importers, [type](const auto& importer) { return importer.Type == type; }); };
-    CHECK(has(Keire::MaterialFunctionAsset::StaticType()));
-    CHECK(has(Keire::ShaderFunctionAsset::StaticType()));
-    CHECK(has(Keire::MaterialLayerAsset::StaticType()));
-    CHECK(has(Keire::MaterialLayerBlendAsset::StaticType()));
+    CHECK(has(Keire::ShaderSubgraphAsset::StaticType()));
+    CHECK_FALSE(has(Keire::MaterialFunctionAsset::StaticType()));
+    CHECK_FALSE(has(Keire::ShaderFunctionAsset::StaticType()));
+    CHECK_FALSE(has(Keire::MaterialLayerAsset::StaticType()));
+    CHECK_FALSE(has(Keire::MaterialLayerBlendAsset::StaticType()));
     CHECK(has(Keire::MaterialParameterCollectionAsset::StaticType()));
 }

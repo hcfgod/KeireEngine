@@ -6,6 +6,7 @@ param(
     [string]$Configuration,
     [Parameter(Mandatory = $true)][string]$Architecture,
     [Parameter(Mandatory = $true)][string]$Target,
+    [switch]$IncludeEditorApi,
     [switch]$IfPresent
 )
 
@@ -26,6 +27,8 @@ $coralConfiguration = if ($Configuration -in @("Release", "Profile", "Dist")) { 
 $coralDirectory = Join-Path $resolvedRoot "Build\Dependencies\coral-patched\Build\$coralConfiguration"
 $netHost = Join-Path $resolvedRoot "Build\Dependencies\coral-nethost\nethost.dll"
 $managedAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Managed.dll"
+$managedEditorAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Editor.Managed.dll"
+$managedGeneratorAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Managed.Generators.dll"
 $dotnetRoot = Join-Path $resolvedRoot "Build\Dependencies\dotnet-sdk"
 $coralFiles = @("Coral.Managed.dll", "Coral.Managed.deps.json", "Coral.Managed.runtimeconfig.json")
 
@@ -70,6 +73,12 @@ if (-not (Test-Path -LiteralPath $netHost)) {
 if (-not (Test-Path -LiteralPath $managedAssembly)) {
     throw "The Keire.Managed runtime API is missing."
 }
+if ($IncludeEditorApi -and -not (Test-Path -LiteralPath $managedEditorAssembly)) {
+    throw "The Keire.Editor.Managed API is missing."
+}
+if ($IncludeEditorApi -and -not (Test-Path -LiteralPath $managedGeneratorAssembly)) {
+    throw "The Keire.Managed.Generators analyzer is missing."
+}
 
 $hostFxr = Get-ChildItem (Join-Path $dotnetRoot "host\fxr") -Directory |
     Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
@@ -88,6 +97,12 @@ foreach ($file in $coralFiles) {
     Copy-FileIfChanged -Source (Join-Path $coralDirectory $file) -Destination (Join-Path $managedDirectory $file)
 }
 Copy-FileIfChanged -Source $managedAssembly -Destination (Join-Path $managedDirectory "Keire.Managed.dll")
+if ($IncludeEditorApi) {
+    Copy-FileIfChanged -Source $managedEditorAssembly `
+        -Destination (Join-Path $managedDirectory "Keire.Editor.Managed.dll")
+    Copy-FileIfChanged -Source $managedGeneratorAssembly `
+        -Destination (Join-Path $managedDirectory "Keire.Managed.Generators.dll")
+}
 Copy-FileIfChanged -Source $netHost -Destination (Join-Path $targetDirectory "nethost.dll")
 Copy-TreeIfChanged -Source $hostFxr.FullName -Destination $bundledHost
 Copy-TreeIfChanged -Source $coreRuntime.FullName -Destination $bundledRuntime

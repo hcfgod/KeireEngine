@@ -230,7 +230,7 @@ namespace Keire
             if (sourceSchemaVersion >= 6U)
             {
                 result.Target.Target = static_cast<ShaderGraphTarget>(
-                    source.value("target", static_cast<std::uint8_t>(ShaderGraphTarget::LegacySurface)));
+                    source.value("target", static_cast<std::uint8_t>(ShaderGraphTarget::Material)));
                 result.Target.Stages = static_cast<ShaderGraphShaderStage>(
                     source.value("stages", static_cast<std::uint8_t>(result.Target.Stages)));
                 result.Target.FullscreenInjectionPoint = static_cast<ShaderGraphFullscreenInjectionPoint>(

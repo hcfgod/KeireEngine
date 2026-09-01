@@ -172,6 +172,33 @@ TEST_CASE("managed data dictionaries preserve nested values in canonical key ord
     CHECK_THROWS_AS((void)Keire::EncodeManagedAssetValue(decoded, dictionary), std::invalid_argument);
 }
 
+TEST_CASE("managed custom values preserve bounded canonical codec records")
+{
+    const auto codec = Keire::ManagedTypeId::Parse("62000000-0000-4000-8000-000000000001");
+    Keire::ManagedAssetPropertyDescriptor property{.StableFieldId =
+                                                       Keire::AssetId::Parse("22000000-0000-4000-8000-000000000021"),
+                                                   .Name = "Duration",
+                                                   .DisplayName = "Duration",
+                                                   .ManagedTypeName = "Example.Duration",
+                                                   .Kind = Keire::ManagedAssetPropertyKind::CustomValue,
+                                                   .CustomValueTypeId = codec,
+                                                   .CustomValueVersion = 3};
+
+    const auto decoded = Keire::DecodeManagedAssetValue(
+        R"({"version":2,"payload":{"seconds":1.5,"labels":["a","b"]},"$custom":"62000000-0000-4000-8000-000000000001"})",
+        property);
+    CHECK(
+        Keire::EncodeManagedAssetValue(decoded, property) ==
+        R"({"$custom":"62000000-0000-4000-8000-000000000001","payload":{"labels":["a","b"],"seconds":1.5},"version":2})");
+
+    CHECK_THROWS_AS((void)Keire::DecodeManagedAssetValue(
+                        R"({"$custom":"62000000-0000-4000-8000-000000000002","version":2,"payload":null})", property),
+                    std::invalid_argument);
+    CHECK_THROWS_AS((void)Keire::DecodeManagedAssetValue(
+                        R"({"$custom":"62000000-0000-4000-8000-000000000001","version":4,"payload":null})", property),
+                    std::invalid_argument);
+}
+
 TEST_CASE("managed data string limits count UTF-8 bytes")
 {
     Keire::ManagedAssetPropertyDescriptor text{.StableFieldId =
@@ -390,7 +417,7 @@ TEST_CASE("managed data schema three stores one object table and migrates per-fi
                           .ReferenceGraphRoot = shared.Roots[1].Key}};
     const auto encoded = Keire::ManagedDataAsset::Encode(definition);
     const auto text = Text(encoded);
-    CHECK(text.find(R"("schemaVersion": 3)") != std::string::npos);
+    CHECK(text.find(R"("schemaVersion": 4)") != std::string::npos);
     CHECK(text.find(R"("referenceGraph")") != std::string::npos);
     const auto roundTrip = Keire::ManagedDataAsset::Decode(encoded)->Definition();
     const auto roundTripGraph = Keire::DecodeManagedReferenceGraph(roundTrip.ReferenceGraph);
@@ -405,7 +432,7 @@ TEST_CASE("managed data schema three stores one object table and migrates per-fi
         R"(","name":"Graph","managedTypeName":"Tests.GraphNode","formerNames":[],"referenceGraph":true,"value":)" +
         standalone + R"(}],"dependencies":[]})";
     const auto migrated = Keire::ManagedDataAsset::Decode(Bytes(legacy))->Definition();
-    CHECK(migrated.SchemaVersion == 3);
+    CHECK(migrated.SchemaVersion == 4);
     CHECK_FALSE(migrated.ReferenceGraph.empty());
     REQUIRE(migrated.Fields.size() == 1);
     CHECK_FALSE(migrated.Fields.front().ReferenceGraphRoot.empty());
@@ -414,10 +441,12 @@ TEST_CASE("managed data schema three stores one object table and migrates per-fi
 TEST_CASE("managed data assets reject malformed duplicate and non-canonical source state")
 {
     CHECK_THROWS_AS((void)Keire::ManagedDataAsset::Decode(Bytes("{}")), std::invalid_argument);
-    CHECK_THROWS_AS(
-        (void)Keire::ManagedDataAsset::Decode(Bytes(
-            R"({"schemaVersion":2,"managedTypeId":"10000000-0000-4000-8000-000000000001","managedTypeName":"Example","fields":[],"dependencies":[]})")),
-        std::invalid_argument);
+    CHECK(
+        Keire::ManagedDataAsset::Decode(
+            Bytes(
+                R"({"schemaVersion":2,"managedTypeId":"10000000-0000-4000-8000-000000000001","managedTypeName":"Example","fields":[],"dependencies":[]})"))
+            ->Definition()
+            .SchemaVersion == 4);
 
     CHECK_THROWS_AS(
         (void)Keire::ManagedDataAsset::Decode(Bytes(

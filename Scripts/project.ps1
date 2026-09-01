@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
+    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "stage-editor", "stage-hub", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
     [string]$Command = "menu",
     [string]$Generator = "vs2022",
     [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
@@ -31,6 +31,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+$GeneratorWasProvided = $PSBoundParameters.ContainsKey("Generator")
 $TargetWasProvided = $PSBoundParameters.ContainsKey("Target")
 # Windows PowerShell 5 otherwise uses the active OEM code page for interactive
 # input and native command output, which corrupts names such as "Kéire".
@@ -46,9 +48,11 @@ $Project = Get-ProjectConfig
 $Target = if ($Target) { $Target } else { $Project.CLIENT_TARGET }
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 if ($Command -eq "package" -and -not $ConfigurationWasProvided) { $Configuration = "Release" }
-if ($Command -in @("package-editor", "package-hub", "package-installer", "package-hub-installer")) {
+if ($Command -in @("stage-editor", "stage-hub", "package-editor", "package-hub", "package-installer",
+        "package-hub-installer")) {
     $Configuration = "Dist"
 }
+if ($Command -in @("stage-editor", "stage-hub") -and -not $GeneratorWasProvided) { $Generator = "ninja" }
 
 function Invoke-CheckedCommand {
     param(
@@ -114,6 +118,20 @@ function Invoke-ProjectCommand {
                 & (Join-Path $WindowsScripts "coverage.ps1") -Architecture $Architecture -CI:$CI -Update:$Update `
                     -Generate:$Force
             } "Coverage"
+        }
+        "stage-editor" {
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "package-editor.ps1") -Generator $Generator `
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
+                    -AllowDirty -DevelopmentStage
+            } "Editor development stage"
+        }
+        "stage-hub" {
+            Invoke-CheckedCommand {
+                & (Join-Path $WindowsScripts "package-hub.ps1") -Generator $Generator `
+                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
+                    -AllowDirty -StageOnly -DevelopmentStage
+            } "Standalone Hub development stage"
         }
         "package" {
             Invoke-CheckedCommand {
@@ -181,8 +199,8 @@ function Show-Help {
     Write-Host @"
 Usage: Scripts\project.ps1 <command> [options]
 
-Commands: bootstrap, generate, build, test, run, clean, coverage, package,
-          package-editor, package-hub, package-installer, package-hub-installer,
+Commands: bootstrap, generate, build, test, run, clean, coverage, stage-editor, stage-hub,
+          package, package-editor, package-hub, package-installer, package-hub-installer,
           doctor, rename, vendor-update, help
 
 Common options:
@@ -196,6 +214,9 @@ Common options:
   -SmokeProject (run the sample project editor and exit after several frames)
   -Editor -ProjectPath <path> (open the editor directly instead of the project hub)
   -CleanScope <full|build|generated> (clean only; full removes the complete Build directory)
+  stage-editor incrementally updates a runnable Dist editor without release tests or archive validation
+  stage-hub incrementally updates a runnable Dist Hub without creating or extracting an archive
+  development staging defaults to Ninja unless -Generator is supplied explicitly
   package-editor writes a ready-to-run Dist editor under Build\Distributions and an archive under Artifacts
   package-hub writes a standalone Dist Hub under Build\Distributions and an archive under Artifacts
   package-installer builds the editor distribution and creates its native OS installer under Artifacts
@@ -231,16 +252,18 @@ function Show-Menu {
         Write-Host "4. Run tests"
         Write-Host "5. Run $($Project.HUB_TARGET)"
         Write-Host "6. Coverage report"
-        Write-Host "7. Package SDK"
-        Write-Host "8. Package Editor (Dist)"
-        Write-Host "9. Package Hub (Dist)"
-        Write-Host "10. Package Editor Installer"
-        Write-Host "11. Package Standalone Hub Installer"
-        Write-Host "12. Doctor"
-        Write-Host "13. Clean"
-        Write-Host "14. Vendor update"
-        Write-Host "15. Rename template"
-        Write-Host "16. Exit"
+        Write-Host "7. Stage Editor for quick Dist testing"
+        Write-Host "8. Stage Hub for quick Dist testing"
+        Write-Host "9. Package SDK"
+        Write-Host "10. Package Editor (Dist)"
+        Write-Host "11. Package Hub (Dist)"
+        Write-Host "12. Package Editor Installer"
+        Write-Host "13. Package Standalone Hub Installer"
+        Write-Host "14. Doctor"
+        Write-Host "15. Clean"
+        Write-Host "16. Vendor update"
+        Write-Host "17. Rename template"
+        Write-Host "18. Exit"
         Write-Host ""
         $choice = Read-Host "Choose an option"
         try {
@@ -251,15 +274,17 @@ function Show-Menu {
                 "4" { Read-BuildSettings $true; Invoke-ProjectCommand test }
                 "5" { Read-BuildSettings $true; Invoke-ProjectCommand run }
                 "6" { Read-BuildSettings $false; Invoke-ProjectCommand coverage }
-                "7" { Read-BuildSettings $false; $script:Configuration=Read-Setting "Package configuration (Release, Dist)" "Release"; Invoke-ProjectCommand package }
-                "8" { Read-BuildSettings $false; Invoke-ProjectCommand package-editor }
-                "9" { Read-BuildSettings $false; Invoke-ProjectCommand package-hub }
-                "10" { Read-BuildSettings $false; Invoke-ProjectCommand package-installer }
-                "11" { Read-BuildSettings $false; Invoke-ProjectCommand package-hub-installer }
-                "12" { Read-BuildSettings $false; Invoke-ProjectCommand doctor }
-                "13" { $script:CleanScope = Read-Setting "Clean scope (full, build, generated)" $CleanScope; Invoke-ProjectCommand clean }
-                "14" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest, SDL, json, imgui)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
-                "15" {
+                "7" { $script:Generator = "ninja"; Read-BuildSettings $false; Invoke-ProjectCommand stage-editor }
+                "8" { $script:Generator = "ninja"; Read-BuildSettings $false; Invoke-ProjectCommand stage-hub }
+                "9" { Read-BuildSettings $false; $script:Configuration=Read-Setting "Package configuration (Release, Dist)" "Release"; Invoke-ProjectCommand package }
+                "10" { Read-BuildSettings $false; Invoke-ProjectCommand package-editor }
+                "11" { Read-BuildSettings $false; Invoke-ProjectCommand package-hub }
+                "12" { Read-BuildSettings $false; Invoke-ProjectCommand package-installer }
+                "13" { Read-BuildSettings $false; Invoke-ProjectCommand package-hub-installer }
+                "14" { Read-BuildSettings $false; Invoke-ProjectCommand doctor }
+                "15" { $script:CleanScope = Read-Setting "Clean scope (full, build, generated)" $CleanScope; Invoke-ProjectCommand clean }
+                "16" { $script:Dependency=Read-Setting "Dependency (spdlog, doctest, SDL, json, imgui)" $Dependency; $script:Tag=Read-Setting "Tag" $Tag; Invoke-ProjectCommand vendor-update }
+                "17" {
                     # Keep proposed values local so a failed rename cannot poison
                     # the defaults shown by the next menu attempt.
                     $proposedName = Read-Setting "PascalCase identifier" $Project.PROJECT_IDENTIFIER
@@ -274,7 +299,7 @@ function Show-Menu {
                         $script:Target = $Project.CLIENT_TARGET
                     }
                 }
-                "16" { return }
+                "18" { return }
                 default { Write-Warning "Invalid menu choice '$choice'." }
             }
         }

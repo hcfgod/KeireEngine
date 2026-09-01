@@ -630,6 +630,9 @@ namespace KeireHub
         const auto progressMessage = reportsProgress ? "Verified " + std::to_string(operation->VerifiedFiles) + " of " +
                                                            std::to_string(operation->TotalFiles) + " declared files."
                                                      : RunningMessage(operation->Operation);
+        const auto target = std::ranges::find(product.Editors, operation->InstallationId, &HubEditorUiRecord::Id);
+        const auto targetLabel =
+            target != product.Editors.end() && !target->Version.empty() ? target->Version : operation->InstallationId;
         for (auto& editor : product.Editors)
         {
             editor.ManagementBusy =
@@ -652,7 +655,7 @@ namespace KeireHub
                      .Phase = operation->State == HubEditorManagementState::Completed ? "Completed" : "Needs attention",
                      .Message =
                          operation->Failure ? operation->Failure->Message : "Editor installation check completed.",
-                     .CurrentPackage = operation->InstallationId,
+                     .CurrentPackage = targetLabel,
                      .Progress = operation->State == HubEditorManagementState::Completed ? 1.0F : operationProgress,
                      .BytesTransferred = operation->VerifiedBytes,
                      .TotalBytes = operation->TotalBytes,
@@ -665,7 +668,7 @@ namespace KeireHub
                                  .Title = OperationTitle(operation->Operation),
                                  .Phase = reportsProgress ? "Verifying files" : "Checking",
                                  .Message = progressMessage,
-                                 .CurrentPackage = operation->InstallationId,
+                                 .CurrentPackage = targetLabel,
                                  .Progress = operationProgress,
                                  .BytesTransferred = operation->VerifiedBytes,
                                  .TotalBytes = operation->TotalBytes,

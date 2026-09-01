@@ -267,6 +267,31 @@ TEST_CASE("UI Builder source edits are transactional on parse failure")
     CHECK_FALSE(document.Dirty());
 }
 
+TEST_CASE("UI Builder applies source without IDs and exposes its generated identities")
+{
+    const auto definition = TestDocument();
+    KeireEditor::UiBuilderDocument document;
+    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000219"), definition, 1, "Unused.keireui");
+    constexpr std::string_view source = R"xml(<ui schemaVersion="1" name="GeneratedIds">
+  <VisualElement name="root">
+    <Button name="play" text="Play"/>
+  </VisualElement>
+</ui>)xml";
+
+    std::string diagnostic;
+    REQUIRE(document.ApplySource(AsBytes(source), diagnostic));
+    CHECK(diagnostic.empty());
+    REQUIRE(document.Definition().Root.StableId);
+    REQUIRE(document.Definition().Root.Children.size() == 1U);
+    CHECK(document.Definition().Root.Children.front().StableId);
+    CHECK(document.Definition().Root.StableId != document.Definition().Root.Children.front().StableId);
+
+    const auto normalized = document.SourcePreview();
+    CHECK(normalized.find("id=\"" + document.Definition().Root.StableId.ToString() + "\"") != std::string::npos);
+    CHECK(normalized.find("id=\"" + document.Definition().Root.Children.front().StableId.ToString() + "\"") !=
+          std::string::npos);
+}
+
 TEST_CASE("UI Builder accepts unchanged source and keeps source changes undoable")
 {
     const auto definition = TestDocument();

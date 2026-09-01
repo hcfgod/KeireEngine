@@ -60,7 +60,7 @@ namespace Keire
         ShaderGraphDefinition result;
         switch (target)
         {
-        case ShaderGraphTarget::LegacySurface:
+        case ShaderGraphTarget::Material:
             result = CreateDefaultShaderGraph(ShaderGraphOutput::Surface);
             break;
         case ShaderGraphTarget::Ui:
@@ -122,8 +122,8 @@ namespace Keire
     {
         switch (target)
         {
-        case ShaderGraphTarget::LegacySurface:
-            return "Legacy Surface";
+        case ShaderGraphTarget::Material:
+            return "Material";
         case ShaderGraphTarget::Ui:
             return "UI";
         case ShaderGraphTarget::Fullscreen:

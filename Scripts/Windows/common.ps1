@@ -457,6 +457,10 @@ function Get-ProjectGenerationFingerprint {
         "KeireRuntime",
         "KeireManaged",
         "KeireManaged.Tests",
+        "KeireEditorManaged",
+        "KeireEditorManaged.Tests",
+        "KeireManaged.Generators",
+        "KeireManaged.Generators.Tests",
         "SourceModules",
         "Scripts\Premake"
     )
@@ -682,6 +686,26 @@ function Get-WindowsKeireSandboxUiPackageFiles {
     )
 }
 
+function Get-WindowsRelativePath {
+    param(
+        [Parameter(Mandatory = $true)][string]$BasePath,
+        [Parameter(Mandatory = $true)][string]$Path
+    )
+
+    $separator = [IO.Path]::DirectorySeparatorChar
+    $resolvedBase = [IO.Path]::GetFullPath($BasePath).TrimEnd('\', '/') + $separator
+    $resolvedPath = [IO.Path]::GetFullPath($Path)
+    $baseUri = [Uri]::new($resolvedBase)
+    $pathUri = [Uri]::new($resolvedPath)
+    if (-not [IO.Path]::GetPathRoot($resolvedBase).Equals([IO.Path]::GetPathRoot($resolvedPath),
+            [StringComparison]::OrdinalIgnoreCase) -or $baseUri.Scheme -cne $pathUri.Scheme -or
+        -not $baseUri.Host.Equals($pathUri.Host, [StringComparison]::OrdinalIgnoreCase)) {
+        return $resolvedPath
+    }
+
+    return [Uri]::UnescapeDataString($baseUri.MakeRelativeUri($pathUri).ToString()).Replace('/', $separator)
+}
+
 function Test-WindowsGeneratedPackagePath {
     param([string]$RelativePath)
 
@@ -757,10 +781,10 @@ function Compress-WindowsArchive {
 function Get-WindowsRequiredPackagePaths {
     param([string]$ClientTarget, [string]$HubTarget, [string]$CoreTarget, [string]$Namespace)
     @(
-        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll", "bin\Managed\Keire.Managed.dll", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
+        "bin\$ClientTarget.exe", "bin\$HubTarget.exe", "bin\$($Namespace)AssetTool.exe", "bin\$($Namespace)AssetWorker.exe", "bin\$($Namespace)Runtime.exe", "bin\KeireShaderCompiler.exe", "bin\dxcompiler.dll", "bin\dxil.dll", "bin\nethost.dll", "bin\Managed\Coral.Managed.dll", "bin\Managed\Keire.Managed.dll", "bin\Managed\Keire.Editor.Managed.dll", "bin\Managed\Keire.Managed.Generators.dll", "lib\$CoreTarget.lib", "lib\$($Namespace)ImGui.lib", "lib\$($Namespace)Zstd.lib", "Config\Client.json", "include\$Namespace\Core.h", "include\$Namespace\Log.h",
         "include\$Namespace\Api.h", "include\$Namespace\Application.h", "include\$Namespace\Assert.h", "include\$Namespace\BuildInfo.h",
         "include\$Namespace\EntryPoint.h", "include\$Namespace\Event.h", "include\$Namespace\Layer.h", "include\$Namespace\Ref.h", "include\$Namespace\Undo.h",
-        "include\$Namespace\Time.h", "include\$Namespace\Math\Math.h", "include\$Namespace\ECS\Component.h", "include\$Namespace\ECS\Entity.h", "include\$Namespace\ECS\Components\TransformComponent.h", "include\$Namespace\ECS\Components\DirectionalLightComponent.h", "include\$Namespace\ECS\Components\AudioComponents.h", "include\$Namespace\ECS\Components\UiDocumentComponent.h", "include\$Namespace\Ui\UiToolkit.h", "include\$Namespace\ECS\Components\CameraComponent.h", "include\$Namespace\ECS\Components\MeshRendererComponent.h", "include\$Namespace\Rendering\RenderSystem.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Assets\RenderingAssets.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keirematerial",
+        "include\$Namespace\Time.h", "include\$Namespace\Math\Math.h", "include\$Namespace\ECS\Component.h", "include\$Namespace\ECS\Entity.h", "include\$Namespace\ECS\Components\TransformComponent.h", "include\$Namespace\ECS\Components\DirectionalLightComponent.h", "include\$Namespace\ECS\Components\AudioComponents.h", "include\$Namespace\ECS\Components\UiDocumentComponent.h", "include\$Namespace\Ui\UiToolkit.h", "include\$Namespace\ECS\Components\CameraComponent.h", "include\$Namespace\ECS\Components\MeshRendererComponent.h", "include\$Namespace\Rendering\RenderSystem.h", "include\$Namespace\Assets\Asset.h", "include\$Namespace\Assets\AssetSystem.h", "include\$Namespace\Assets\AssetPipeline.h", "include\$Namespace\Assets\InputActionAsset.h", "include\$Namespace\Assets\RenderingAssets.h", "include\$Namespace\Input\Input.h", "include\$Namespace\Project\Project.h", "include\$Namespace\Scenes\Scene.h", "include\$Namespace\Scenes\SceneAsset.h", "include\$Namespace\Scenes\SceneSystem.h", "include\$Namespace\Ui.h", "include\$Namespace\UiWorkspace.h", "include\$Namespace\Window.h", "include\$Namespace\WindowConfig.h", "samples\KeireSandbox\ProjectSettings\Project.keireproject", "samples\KeireSandbox\ProjectSettings\Rendering.keiresettings", "samples\KeireSandbox\Assets\Input\DefaultInput.keireinput", "samples\KeireSandbox\Assets\Scenes\SampleScene.keirescene", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.keireshader", "samples\KeireSandbox\Assets\Shaders\DefaultUnlit.hlsl", "samples\KeireSandbox\Assets\Materials\DefaultUnlit.keiremateriallegacy",
         "samples\KeireSandbox\Assets\UI\SandboxMenu.keirestyle",
         "samples\KeireSandbox\Assets\UI\SandboxMenu.keirestyle.keiremeta",
         "samples\KeireSandbox\Assets\UI\SandboxMenu.keireui",
@@ -861,6 +885,9 @@ function Invoke-WindowsExecutableCapture {
     try {
         $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru `
             -RedirectStandardOutput $standardOutput -RedirectStandardError $standardError
+        # Cache the native handle before a short-lived child can exit. Without this, Windows PowerShell 5.1 can
+        # return a Process object whose ExitCode remains null even after WaitForExit reports completion.
+        [void]$process.Handle
         if ($Timeout -gt [TimeSpan]::Zero) {
             $timeoutMilliseconds = [Math]::Min([int]::MaxValue, [Math]::Ceiling($Timeout.TotalMilliseconds))
             if (-not $process.WaitForExit([int]$timeoutMilliseconds)) {
@@ -880,6 +907,11 @@ function Invoke-WindowsExecutableCapture {
         else {
             $process.WaitForExit()
         }
+        # Windows PowerShell 5.1 does not reliably populate ExitCode after the timed WaitForExit overload, even when
+        # it returns true and redirected output has completed. The parameterless wait drains redirected streams and
+        # Refresh makes the terminated process state visible before reading ExitCode.
+        $process.WaitForExit()
+        $process.Refresh()
         $exitCode = $process.ExitCode
         $process.Dispose()
         $process = $null
@@ -981,7 +1013,7 @@ function Assert-WindowsRenderTestHooksAbsent {
     foreach ($executable in $ExecutablePaths) {
         $contents = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($executable))
         foreach ($marker in $markers) {
-            if ($contents.Contains($marker, [StringComparison]::Ordinal)) {
+            if ($contents.IndexOf($marker, [StringComparison]::Ordinal) -ge 0) {
                 throw "Distribution executable '$executable' contains renderer test hook '$marker'."
             }
         }
@@ -1069,7 +1101,7 @@ function Assert-WindowsPackagedBuildSupport {
     $actualFiles = @(
         Get-ChildItem -LiteralPath $installation -File -Force -Recurse |
             Where-Object { $_.FullName -ne $manifestPath } |
-            ForEach-Object { ([IO.Path]::GetRelativePath($installation, $_.FullName) -replace '\\', '/') }
+            ForEach-Object { (Get-WindowsRelativePath $installation $_.FullName) -replace '\\', '/' }
     )
     if ($actualFiles.Count -ne $inventory.Count -or
         @($actualFiles | Where-Object { -not $inventory.Contains($_) }).Count -ne 0) {

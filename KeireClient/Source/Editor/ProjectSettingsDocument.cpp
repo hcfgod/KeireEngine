@@ -10,6 +10,7 @@ namespace KeireEditor
     {
         void Validate(const Keire::RenderEnvironmentSettings& settings)
         {
+            Keire::ValidateRenderEnvironmentSettings(settings);
             const auto finite = [](const float value) { return std::isfinite(value); };
             if (!finite(settings.AmbientColor.Red) || !finite(settings.AmbientColor.Green) ||
                 !finite(settings.AmbientColor.Blue) || !finite(settings.AmbientColor.Alpha) ||

@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 $projectPath = [System.IO.Path]::GetFullPath($ProjectRoot)
 $featureRoot = Join-Path $projectPath 'Assets\Examples\FeatureGallery'
 $shaderTemplate = Join-Path $featureRoot 'Materials\ShaderGraphs\01_Foundations\SG_02_TiledCeramic.keireshadergraph'
-$materialTemplate = Join-Path $featureRoot 'Materials\MaterialGraphs\01_Foundations\MG_02_TiledCeramic.keirematerialgraph'
+$materialTemplate = Join-Path $featureRoot 'Materials\MaterialGraphs\01_Foundations\MG_02_TiledCeramic.keirematerial'
 $vfxRoot = Join-Path $featureRoot 'VFX'
 $destinationRoot = Join-Path $featureRoot 'SyntyWar'
 
@@ -237,7 +237,7 @@ foreach ($entry in $materials)
         }
     }
     $materialId = Get-StableGuid 'synty-war-material-asset' $entry.Key
-    $materialPath = Join-Path $materialDirectory "MG_$($entry.Key).keirematerialgraph"
+    $materialPath = Join-Path $materialDirectory "MG_$($entry.Key).keirematerial"
     Write-JsonFile $materialPath $material
     Write-AssetMeta $materialPath $materialId 'Keire.MaterialGraph' 9 '4b454952-454d-4752-4150-480000000001' @($shaderId)
 }

@@ -169,6 +169,14 @@ namespace Keire
             return result;
         }
 
+        [[nodiscard]] GraphFunctionDefinition DecodeShaderSubgraphJson(const Json& source)
+        {
+            if (!source.is_object() || !source.contains("body"))
+                throw std::invalid_argument("Shader Subgraph source is malformed.");
+            const auto body = ShaderGraphAsset::DecodeSource(TextBytes(source.at("body").dump()));
+            return DecodeGraphFunctionJson(source, body.Purpose);
+        }
+
         [[nodiscard]] Json EncodeCollectionJson(const MaterialParameterCollectionDefinition& definition)
         {
             ValidateMaterialParameterCollection(definition);
@@ -413,6 +421,42 @@ namespace Keire
     KEIRE_DEFINE_GRAPH_FUNCTION_ASSET(MaterialLayerBlendAsset, ShaderGraphPurpose::MaterialLayerBlend)
 
 #undef KEIRE_DEFINE_GRAPH_FUNCTION_ASSET
+
+    ShaderSubgraphAsset::ShaderSubgraphAsset(GraphFunctionDefinition definition) : m_Definition(std::move(definition))
+    {
+        if (m_Definition.Body.Nodes.empty())
+            m_Definition = CreateDefaultGraphFunction(ShaderGraphPurpose::MaterialFunction);
+        ValidateGraphFunction(m_Definition, m_Definition.Body.Purpose);
+    }
+
+    std::size_t ShaderSubgraphAsset::ResidentBytes() const noexcept { return GraphFunctionResidentBytes(m_Definition); }
+
+    Ref<ShaderSubgraphAsset> ShaderSubgraphAsset::Decode(const std::span<const std::byte> bytes)
+    {
+        if (bytes.empty() || bytes.size() > MaximumGraphFunctionBytes)
+            throw std::invalid_argument("Shader Subgraph asset is empty or exceeds its byte limit.");
+        return CreateRef<ShaderSubgraphAsset>(DecodeShaderSubgraphJson(Json::parse(Text(bytes))));
+    }
+
+    std::vector<std::byte> ShaderSubgraphAsset::Encode(const GraphFunctionDefinition& definition)
+    {
+        return TextBytes(EncodeGraphFunctionJson(definition, definition.Body.Purpose).dump(2) + '\n');
+    }
+
+    GraphFunctionDefinition ShaderSubgraphAsset::DecodeSource(const std::span<const std::byte> bytes)
+    {
+        return Decode(bytes)->Definition();
+    }
+
+    std::vector<std::byte> ShaderSubgraphAsset::EncodeSource(const GraphFunctionDefinition& definition)
+    {
+        return Encode(definition);
+    }
+
+    Ref<ShaderSubgraphAsset> ShaderSubgraphAsset::Error()
+    {
+        return CreateRef<ShaderSubgraphAsset>(CreateDefaultGraphFunction(ShaderGraphPurpose::MaterialFunction));
+    }
 
     MaterialParameterCollectionAsset::MaterialParameterCollectionAsset(MaterialParameterCollectionDefinition definition)
         : m_Definition(std::move(definition))
@@ -707,12 +751,37 @@ namespace Keire
         return GraphFunctionDecoder<MaterialLayerBlendAsset>();
     }
 
+    AssetImporterRegistration CreateShaderSubgraphAssetImporter()
+    {
+        AssetImporterRegistration result;
+        result.Name = "Keire.ShaderSubgraph";
+        result.Version = 1;
+        result.Type = ShaderSubgraphAsset::StaticType();
+        result.Extensions = {std::string(ShaderSubgraphAssetSourceExtension)};
+        result.Import = [](const std::span<const std::byte> bytes)
+        {
+            const auto definition = DecodeShaderSubgraphJson(Json::parse(Text(bytes)));
+            return ShaderSubgraphAsset::EncodeSource(definition);
+        };
+        result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
+        {
+            const auto definition = DecodeShaderSubgraphJson(Json::parse(Text(bytes)));
+            AssetImportOutput output;
+            output.Bytes = ShaderSubgraphAsset::EncodeSource(definition);
+            output.AssetDependencies = ShaderGraphReferencedAssets(definition.Body);
+            return output;
+        };
+        return result;
+    }
+
+    AssetDecoderRegistration CreateShaderSubgraphAssetDecoder() { return GraphFunctionDecoder<ShaderSubgraphAsset>(); }
+
     AssetImporterRegistration CreateMaterialParameterCollectionAssetImporter()
     {
         return {"Keire.MaterialParameterCollection",
                 1,
                 MaterialParameterCollectionAsset::StaticType(),
-                {".keirematerialcollection"},
+                {std::string(MaterialParameterCollectionAssetSourceExtension)},
                 [](const std::span<const std::byte> bytes)
                 {
                     return MaterialParameterCollectionAsset::Encode(
