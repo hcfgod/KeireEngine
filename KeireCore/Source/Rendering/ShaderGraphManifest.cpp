@@ -43,8 +43,8 @@ namespace Keire::Detail
 
         [[nodiscard]] std::string SemanticName(const ShaderTextureSemantic semantic)
         {
-            constexpr std::array names{"Generic",   "BaseColor", "Normal",   "MetallicRoughness",
-                                       "Occlusion", "Emissive",  "Metallic", "Roughness"};
+            constexpr std::array names{"Generic",  "BaseColor", "Normal",    "MetallicRoughness", "Occlusion",
+                                       "Emissive", "Metallic",  "Roughness", "Specular"};
             const auto index = static_cast<std::size_t>(semantic);
             return index < names.size() ? names[index] : names.front();
         }
@@ -113,8 +113,48 @@ namespace Keire::Detail
             definition.Output == ShaderGraphOutput::Transparent || definition.Output == ShaderGraphOutput::Decal;
         const bool fullscreen = definition.Target.Target == ShaderGraphTarget::Fullscreen;
         const bool lit = definition.Output != ShaderGraphOutput::Unlit && !fullscreen;
+        Json passes = Json::array();
+        const auto addPass = [&](const std::string_view role, const std::string_view define)
+        {
+            Json pass{{"role", role}};
+            if (!define.empty())
+                pass["define"] = define;
+            passes.push_back(std::move(pass));
+        };
+        if (definition.Target.Target != ShaderGraphTarget::Material ||
+            definition.Output == ShaderGraphOutput::Fullscreen)
+        {
+            addPass("primary", {});
+        }
+        else
+        {
+            switch (definition.Output)
+            {
+            case ShaderGraphOutput::Surface:
+            case ShaderGraphOutput::Unlit:
+                addPass("depthVelocity", "KEIRE_PASS_DEPTH_VELOCITY");
+                addPass("deferredGBufferStandard", "KEIRE_PASS_DEFERRED_GBUFFER_STANDARD");
+                addPass("forwardOpaque", "KEIRE_PASS_FORWARD_OPAQUE");
+                break;
+            case ShaderGraphOutput::Hair:
+            case ShaderGraphOutput::Eye:
+                addPass("depthVelocity", "KEIRE_PASS_DEPTH_VELOCITY");
+                addPass("forwardOpaque", "KEIRE_PASS_FORWARD_OPAQUE");
+                break;
+            case ShaderGraphOutput::Transparent:
+                addPass("forwardTransparent", "KEIRE_PASS_FORWARD_TRANSPARENT");
+                break;
+            case ShaderGraphOutput::Decal:
+                addPass("decalDBuffer", "KEIRE_PASS_DECAL_DBUFFER");
+                addPass("forwardTransparent", "KEIRE_PASS_FORWARD_TRANSPARENT");
+                break;
+            case ShaderGraphOutput::Fullscreen:
+                addPass("primary", {});
+                break;
+            }
+        }
         const Json manifest{
-            {"schemaVersion", 2},
+            {"schemaVersion", 3},
             {"materialGraphSourceSchemaVersion", definition.SchemaVersion},
             {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
             {"programTarget", ShaderGraphTargetName(definition.Target.Target)},
@@ -133,9 +173,11 @@ namespace Keire::Detail
             {"maximumWorldPositionDisplacementRadius",
              maximumWorldPositionDisplacementRadius ? Json(*maximumWorldPositionDisplacementRadius) : Json(nullptr)},
             {"usesImageBasedLighting", lit},
+            {"spatialLightingAbiVersion", lit ? 3 : 0},
             {"usesVertexMaterialParameters", usesVertexMaterialParameters},
             {"stages", {{"vertex", "VSMain"}, {"fragment", "PSMain"}}},
             {"defines", std::move(defines)},
+            {"passes", std::move(passes)},
             {"includeRoots", std::move(roots)},
             {"resources", resourceContract.at("resources")},
             {"renderState",

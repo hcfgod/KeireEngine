@@ -2,6 +2,8 @@
 #include "Keire/ECS/Components/DirectionalLightComponent.h"
 
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Rendering/MaterialPassRoutingInternal.h"
+#include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderFramePacketInternal.h"
 #include "KeireInternal/Rendering/RenderPipelineStateInternal.h"
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
@@ -261,6 +263,7 @@ namespace
         std::size_t AvailableSlots = 0;
         std::size_t SurfaceLifetimeOwners = 0;
         bool DistinctRenderThread = false;
+        bool RuntimeUiSubmissionAcceptedDuringOwnerFrame = false;
         bool Closed = false;
     };
 
@@ -281,6 +284,7 @@ namespace
             m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
                                                      Keire::SceneAsset::EmptyDefinition("terminal-queue-failure"));
             m_View = Owner().Renderer()->CreateView({.Name = "terminal-queue-failure", .Width = 32, .Height = 32});
+            m_Ui = Keire::CreateRef<Keire::RuntimeUiTree>();
         }
 
         void OnUpdate(const Keire::Time&) override
@@ -311,6 +315,15 @@ namespace
                 m_OldSurfaceLifetime = state->Lifetime;
                 surface->RequestSize(64U, 64U);
                 Keire::RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(*renderer);
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                while (!Keire::RenderSystemInternalAccess::TerminalFailure(*renderer) &&
+                       std::chrono::steady_clock::now() < deadline)
+                {
+                    std::this_thread::yield();
+                }
+                REQUIRE(Keire::RenderSystemInternalAccess::TerminalFailure(*renderer));
+                renderer->SubmitRuntimeUi(m_Ui);
+                m_Probe.RuntimeUiSubmissionAcceptedDuringOwnerFrame = true;
                 Owner().RequestExit();
             }
             ++m_Frame;
@@ -352,6 +365,7 @@ namespace
         TerminalQueueFailureProbe& m_Probe;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::RuntimeUiTree> m_Ui;
         std::weak_ptr<const Keire::RenderBackend::RenderSurfaceEpochLease> m_OldSurfaceLifetime;
         std::uint32_t m_Frame = 0;
     };
@@ -688,6 +702,59 @@ TEST_CASE("Render pipeline accepts depths one through three without drops and fl
             CHECK_FALSE(probe.Timelines[index].Cancelled);
         }
     }
+}
+
+TEST_CASE("Directional shadow resolution hints scale the validated project base")
+{
+    using Keire::RenderBackend::DirectionalShadowResolutionForHint;
+
+    CHECK(DirectionalShadowResolutionForHint(2048U, Keire::ShadowResolutionHint::Low) == 512U);
+    CHECK(DirectionalShadowResolutionForHint(2048U, Keire::ShadowResolutionHint::Medium) == 1024U);
+    CHECK(DirectionalShadowResolutionForHint(2048U, Keire::ShadowResolutionHint::High) == 2048U);
+    CHECK(DirectionalShadowResolutionForHint(2048U, Keire::ShadowResolutionHint::VeryHigh) == 4096U);
+    CHECK(DirectionalShadowResolutionForHint(256U, Keire::ShadowResolutionHint::Low) == 256U);
+    CHECK(DirectionalShadowResolutionForHint(8192U, Keire::ShadowResolutionHint::VeryHigh) == 8192U);
+
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("directional-resolution"));
+    auto entity = scene->CreateEntity("sun");
+    const auto light = entity.AddComponent<Keire::DirectionalLightComponent>();
+    REQUIRE(light);
+    light->SetShadowResolution(Keire::ShadowResolutionHint::VeryHigh);
+    CHECK(Keire::RenderBackend::ResolveLighting(scene).ShadowResolution == Keire::ShadowResolutionHint::VeryHigh);
+    scene->Close();
+}
+
+TEST_CASE("Material pass roles map to exact runtime target layouts")
+{
+    using Keire::RenderBackend::MaterialPassTargetLayout;
+    using Keire::RenderBackend::RuntimeMaterialPassRole;
+
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("primary") == RuntimeMaterialPassRole::Primary);
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("depthVelocity") ==
+          RuntimeMaterialPassRole::DepthVelocity);
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("deferredGBufferStandard") ==
+          RuntimeMaterialPassRole::DeferredGBufferStandard);
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("deferredGBufferExtended") ==
+          RuntimeMaterialPassRole::DeferredGBufferExtended);
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("forwardOpaque") ==
+          RuntimeMaterialPassRole::ForwardOpaque);
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("forwardTransparent") ==
+          RuntimeMaterialPassRole::ForwardTransparent);
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("decalDBuffer") ==
+          RuntimeMaterialPassRole::DecalDBuffer);
+    CHECK(Keire::RenderBackend::RuntimeMaterialPassRoleFromName("unknown") == RuntimeMaterialPassRole::Unsupported);
+
+    CHECK(Keire::RenderBackend::MaterialPassTargetLayoutForRole(RuntimeMaterialPassRole::Primary) ==
+          MaterialPassTargetLayout::ForwardColor);
+    CHECK(Keire::RenderBackend::MaterialPassTargetLayoutForRole(RuntimeMaterialPassRole::DepthVelocity) ==
+          MaterialPassTargetLayout::Velocity);
+    CHECK(Keire::RenderBackend::MaterialPassTargetLayoutForRole(RuntimeMaterialPassRole::DeferredGBufferStandard) ==
+          MaterialPassTargetLayout::GBuffer);
+    CHECK(Keire::RenderBackend::MaterialPassTargetLayoutForRole(RuntimeMaterialPassRole::DecalDBuffer) ==
+          MaterialPassTargetLayout::DBuffer);
+    CHECK(Keire::RenderBackend::MaterialPassTargetLayoutForRole(RuntimeMaterialPassRole::Unsupported) ==
+          MaterialPassTargetLayout::Unsupported);
 }
 
 TEST_CASE("Render pipeline rejects frame bounds outside one through three")
@@ -1305,7 +1372,7 @@ TEST_CASE("Render capture failure returns its unaccepted slot exactly once")
     CHECK(probe.AvailableSlots == 2U);
 }
 
-TEST_CASE("First terminal frame failure cancels a saturated queue in order and releases every packet lease")
+TEST_CASE("First terminal frame failure preserves the active owner capture and cancels its saturated queue in order")
 {
     UsePipelineDummyVideoDriver();
     TerminalQueueFailureProbe probe;
@@ -1313,6 +1380,7 @@ TEST_CASE("First terminal frame failure cancels a saturated queue in order and r
     (void)application.PushLayer(std::make_unique<TerminalQueueFailureLayer>(probe));
     CHECK_THROWS_WITH((void)application.Run(), "Injected accepted-frame terminal failure.");
     CHECK(probe.DistinctRenderThread);
+    CHECK(probe.RuntimeUiSubmissionAcceptedDuringOwnerFrame);
     CHECK(probe.Closed);
     CHECK(probe.Statistics.AcceptedFrames == 3U);
     CHECK(probe.Statistics.RetiredFrames == 0U);

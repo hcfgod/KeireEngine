@@ -1,10 +1,109 @@
+#include "Keire/Rendering/MaterialGraph.h"
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
 #include <algorithm>
+#include <type_traits>
 #include <unordered_map>
 
 namespace Keire
 {
+    namespace
+    {
+        [[nodiscard]] ShaderPropertyDefinition ExtractedMaterialProperty(const std::string& name,
+                                                                         const MaterialPropertyValue& value)
+        {
+            ShaderPropertyDefinition result;
+            result.Id = AssetId::Generate();
+            result.Name = name;
+            result.DisplayName = name;
+            result.Category = "Extracted";
+            std::visit(
+                [&](const auto& typed)
+                {
+                    using T = std::decay_t<decltype(typed)>;
+                    if constexpr (std::same_as<T, float>)
+                    {
+                        result.Type = ShaderPropertyType::Scalar;
+                        result.DefaultValue.X = typed;
+                    }
+                    else if constexpr (std::same_as<T, Vector2>)
+                    {
+                        result.Type = ShaderPropertyType::Vector2;
+                        result.DefaultValue = {typed.X, typed.Y, 0.0F, 0.0F};
+                    }
+                    else if constexpr (std::same_as<T, Vector3>)
+                    {
+                        result.Type = ShaderPropertyType::Vector3;
+                        result.DefaultValue = {typed.X, typed.Y, typed.Z, 0.0F};
+                    }
+                    else if constexpr (std::same_as<T, Vector4>)
+                    {
+                        result.Type = ShaderPropertyType::Vector4;
+                        result.DefaultValue = typed;
+                    }
+                    else if constexpr (std::same_as<T, Color>)
+                    {
+                        result.Type = ShaderPropertyType::Color;
+                        result.DefaultValue = {typed.Red, typed.Green, typed.Blue, typed.Alpha};
+                    }
+                    else
+                    {
+                        result.Type = ShaderPropertyType::Texture2D;
+                        result.DefaultTexture = typed;
+                    }
+                },
+                value);
+            return result;
+        }
+
+        [[nodiscard]] MaterialGraphDefinition ExtractedMaterialGraph(const MaterialAssetDefinition& definition)
+        {
+            MaterialGraphDefinition result;
+            if (definition.Shader)
+            {
+                ShaderInterfaceDefinition interfaceDefinition;
+                interfaceDefinition.Properties.reserve(definition.Properties.size());
+                for (const auto& [name, value] : definition.Properties)
+                    interfaceDefinition.Properties.push_back(ExtractedMaterialProperty(name, value));
+                MaterialShaderReference shader;
+                shader.Kind = MaterialShaderSourceKind::ShaderAsset;
+                shader.Asset = definition.Shader;
+                result = CreateMaterialGraph(std::move(shader), interfaceDefinition);
+            }
+            else
+            {
+                result = CreateOpenPbrMaterial();
+                for (auto& node : result.SurfaceGraph.Nodes)
+                {
+                    if (node.Kind != ShaderGraphNodeKind::Parameter)
+                        continue;
+                    const auto value = definition.Properties.find(node.Symbol);
+                    if (value != definition.Properties.end())
+                        node.Value =
+                            std::visit([](const auto& typed) -> ShaderGraphValue { return typed; }, value->second);
+                }
+            }
+            result.Surface = definition.Surface;
+            result.ContributeEmissionToGI = definition.ContributeEmissionToGI;
+            result.EmissiveGIIntensity = definition.EmissiveGIIntensity;
+            ValidateMaterialGraph(result);
+            return result;
+        }
+
+        [[nodiscard]] const AssetImporterRegistration&
+        MaterialGraphImporter(const std::unordered_map<std::string, AssetImporterRegistration>& importers)
+        {
+            const auto expected = CreateMaterialGraphAssetImporter();
+            const auto found = importers.find(expected.Name);
+            if (found == importers.end() || found->second.Version != expected.Version ||
+                found->second.Type != expected.Type)
+            {
+                throw std::logic_error("Material extraction requires the Kéire Material Graph importer.");
+            }
+            return found->second;
+        }
+    } // namespace
+
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)
     {
         std::scoped_lock operation(*m_Impl->OperationMutex);
@@ -271,11 +370,9 @@ namespace Keire
         if (generated == imported.SubAssets.end() || generated->Type != MaterialAsset::StaticType())
             throw std::invalid_argument("The selected model does not contain that generated material.");
         const auto definition = MaterialAsset::Decode(generated->Bytes)->Definition();
-        const auto materialImporter = m_Impl->Importers.find("Keire.Material");
-        if (materialImporter == m_Impl->Importers.end())
-            throw std::logic_error("Material extraction requires the Kéire material importer.");
-        const auto source = MaterialAsset::EncodeSource(definition);
-        return CreateAssetUnlocked(relativePath, materialImporter->second, source, {}, {});
+        const auto& materialImporter = MaterialGraphImporter(m_Impl->Importers);
+        const auto source = MaterialGraphAsset::EncodeSource(ExtractedMaterialGraph(definition));
+        return CreateAssetUnlocked(relativePath, materialImporter, source, {}, {});
     }
 
     std::vector<AssetId> AssetDatabase::ExtractMaterials(const AssetId model,
@@ -287,9 +384,7 @@ namespace Keire
             throw std::invalid_argument("Material extraction requires a model asset.");
         const auto imported = m_Impl->Import(*record);
         const auto mesh = MeshAsset::Decode(imported.Bytes);
-        const auto materialImporter = m_Impl->Importers.find("Keire.Material");
-        if (materialImporter == m_Impl->Importers.end())
-            throw std::logic_error("Material extraction requires the Kéire material importer.");
+        const auto& materialImporter = MaterialGraphImporter(m_Impl->Importers);
 
         std::vector<AssetId> result;
         std::vector<std::filesystem::path> createdPaths;
@@ -323,8 +418,8 @@ namespace Keire
                 for (std::size_t copy = 2; destinationExists(destination); ++copy)
                     destination = relativeDirectory / (name + " " + std::to_string(copy) + ".keirematerial");
                 const auto definition = MaterialAsset::Decode(generated->Bytes)->Definition();
-                const auto source = MaterialAsset::EncodeSource(definition);
-                result.push_back(CreateAssetUnlocked(destination, materialImporter->second, source, {}, {}));
+                const auto source = MaterialGraphAsset::EncodeSource(ExtractedMaterialGraph(definition));
+                result.push_back(CreateAssetUnlocked(destination, materialImporter, source, {}, {}));
                 createdPaths.push_back(destination);
             }
         }

@@ -8,14 +8,16 @@ compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shaders/BuiltinSky.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinGrid.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinShadow.hlsl" "$ROOT/KeireCore/Shaders/BuiltinToneMap.hlsl" \
-  "$ROOT/KeireCore/Shaders/BuiltinRuntimeUi.hlsl")
-prefixes=(BuiltinUnlit BuiltinSky BuiltinGrid BuiltinShadow BuiltinToneMap BuiltinRuntimeUi)
+  "$ROOT/KeireCore/Shaders/BuiltinRuntimeUi.hlsl" "$ROOT/KeireCore/Shaders/BuiltinDeferredGBuffer.hlsl" \
+  "$ROOT/KeireCore/Shaders/BuiltinDeferredLighting.hlsl" "$ROOT/KeireCore/Shaders/BuiltinIrradyn.hlsl")
+prefixes=(BuiltinUnlit BuiltinSky BuiltinGrid BuiltinShadow BuiltinToneMap BuiltinRuntimeUi \
+  BuiltinDeferredGBuffer BuiltinDeferredLighting BuiltinIrradyn)
 generated="$ROOT/Build/Generated/Keire/BuiltinUnlitShaders.h"
 stamp="$ROOT/Build/Generated/Keire/BuiltinRenderingShaders.stamp"
 lock="$ROOT/Build/Generated/.locks/builtin-rendering.lock"
 
 [[ -x "$compiler" ]] || { printf 'KeireShaderCompiler is required before generating built-in rendering shaders.\n' >&2; exit 1; }
-fingerprint="$(generated_content_fingerprint builtin-rendering-v1 "${BASH_SOURCE[0]}" "$cache_helper" \
+fingerprint="$(generated_content_fingerprint builtin-rendering-v2 "${BASH_SOURCE[0]}" "$cache_helper" \
   "$compiler" "${source_files[@]}")"
 generated_content_is_current "$generated" "$stamp" "$fingerprint" && exit 0
 
@@ -38,7 +40,8 @@ files=(vertex.dxil fragment.dxil vertex.spv fragment.spv vertex.metal fragment.m
 for source_index in "${!source_files[@]}"; do
   for index in "${!names[@]}"; do
     "$compiler" "${source_files[$source_index]}" -s HLSL -d "${destinations[$index]}" -t "${stages[$index]}" \
-      -e "${entries[$index]}" -o "$temporary/${prefixes[$source_index]}-${files[$index]}"
+      -e "${entries[$index]}" \
+      -o "$temporary/${prefixes[$source_index]}-${files[$index]}"
   done
 done
 

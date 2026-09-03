@@ -8,6 +8,11 @@
 #include <string>
 #include <vector>
 
+namespace Keire
+{
+    enum class RenderPath : std::uint8_t;
+}
+
 namespace Keire::RenderBackend
 {
     struct FrameGraphResource final
@@ -57,7 +62,61 @@ namespace Keire::RenderBackend
         StorageRead,
         StorageWrite,
         CopySource,
-        Present
+        Present,
+        DepthStencilAttachment
+    };
+
+    enum class FrameGraphTextureFormat : std::uint8_t
+    {
+        Undefined,
+        Rgba8Unorm,
+        Rgba8Srgb,
+        Rgba16Float,
+        Rgba32Float,
+        Rgba32Uint,
+        Rg16Float,
+        R32Float,
+        D32Float
+    };
+
+    enum class FrameGraphResourceUsage : std::uint16_t
+    {
+        None = 0,
+        Sampled = 1U << 0U,
+        ColorAttachment = 1U << 1U,
+        DepthStencilAttachment = 1U << 2U,
+        Storage = 1U << 3U,
+        TransferSource = 1U << 4U,
+        TransferDestination = 1U << 5U,
+        Present = 1U << 6U,
+        IndirectArguments = 1U << 7U,
+        UnfilteredRead = 1U << 8U
+    };
+
+    [[nodiscard]] constexpr FrameGraphResourceUsage operator|(const FrameGraphResourceUsage left,
+                                                              const FrameGraphResourceUsage right) noexcept
+    {
+        return static_cast<FrameGraphResourceUsage>(static_cast<std::uint16_t>(left) |
+                                                    static_cast<std::uint16_t>(right));
+    }
+
+    [[nodiscard]] constexpr bool HasFrameGraphResourceUsage(const FrameGraphResourceUsage usages,
+                                                            const FrameGraphResourceUsage usage) noexcept
+    {
+        return (static_cast<std::uint16_t>(usages) & static_cast<std::uint16_t>(usage)) != 0U;
+    }
+
+    struct FrameGraphTextureDescription final
+    {
+        FrameGraphTextureFormat Format = FrameGraphTextureFormat::Undefined;
+        FrameGraphResourceUsage Usage = FrameGraphResourceUsage::None;
+        std::uint8_t SampleCount = 1;
+        std::uint8_t WidthScaleNumerator = 1;
+        std::uint8_t WidthScaleDenominator = 1;
+        std::uint8_t HeightScaleNumerator = 1;
+        std::uint8_t HeightScaleDenominator = 1;
+
+        auto operator<=>(const FrameGraphTextureDescription&) const noexcept = default;
     };
 
     struct FrameGraphResourceDescription final
@@ -67,6 +126,8 @@ namespace Keire::RenderBackend
         bool Imported = false;
         std::uint64_t CompatibilityKey = 0;
         std::uint64_t SizeBytes = 0;
+        /// Typed texture metadata is mandatory for production transient textures. Undefined preserves legacy tests.
+        FrameGraphTextureDescription Texture;
     };
 
     struct FrameGraphPassDescription final
@@ -104,6 +165,7 @@ namespace Keire::RenderBackend
             FrameGraphResourceKind Kind = FrameGraphResourceKind::Texture;
             std::uint64_t CompatibilityKey = 0;
             std::uint64_t SizeBytes = 0;
+            FrameGraphTextureDescription Texture;
         };
 
         std::vector<FrameGraphPass> Order;
@@ -141,10 +203,21 @@ namespace Keire::RenderBackend
 
     struct StaticSceneFrameGraph final
     {
+        RenderPath Path{};
         FrameGraph Graph;
         CompiledFrameGraph Compiled;
         FrameGraphResource HdrScene;
+        FrameGraphResource SceneDepth;
         FrameGraphResource SampledDepth;
+        FrameGraphResource GBufferBaseColorMetallic;
+        FrameGraphResource GBufferNormalRoughness;
+        FrameGraphResource GBufferMaterial;
+        FrameGraphResource GBufferLighting;
+        FrameGraphResource GBufferVelocity;
+        FrameGraphResource DBufferBaseColor;
+        FrameGraphResource DBufferNormal;
+        FrameGraphResource DBufferMaterial;
+        FrameGraphResource IrradynRadiance;
         FrameGraphResource GpuOcclusionDepth;
         FrameGraphResource GpuOcclusionPyramid;
         FrameGraphResource GpuOcclusionIndirectArguments;
@@ -161,10 +234,18 @@ namespace Keire::RenderBackend
         FrameGraphPass GpuOcclusionCullingPass;
         FrameGraphPass SpatialSelection;
         FrameGraphPass VfxPreparation;
+        FrameGraphPass DepthVelocity;
+        FrameGraphPass DeferredGBufferStandard;
+        FrameGraphPass DeferredGBufferExtended;
+        FrameGraphPass DeferredDecals;
+        FrameGraphPass DeferredLighting;
+        FrameGraphPass ForwardOpaqueTail;
         FrameGraphPass Opaque;
         FrameGraphPass ResolveDepth;
         FrameGraphPass Sky;
         FrameGraphPass Transparency;
+        FrameGraphPass IrradynTrace;
+        FrameGraphPass IrradynComposite;
         FrameGraphPass ToneMap;
         FrameGraphPass Overlays;
         FrameGraphPass Readback;
@@ -172,4 +253,5 @@ namespace Keire::RenderBackend
     };
 
     [[nodiscard]] StaticSceneFrameGraph BuildStaticSceneFrameGraph();
+    [[nodiscard]] StaticSceneFrameGraph BuildStaticSceneFrameGraph(RenderPath path);
 } // namespace Keire::RenderBackend

@@ -1474,7 +1474,7 @@ public static class Debug
     }
 
     public static void DrawLine(Vector3 start, Vector3 end, Color color, float duration = 0.0f) =>
-        RuntimeBridge.Current.DrawLine(start, end, color, duration);
+        NativeRuntime.DrawDebugLine(start, end, color, duration);
 }
 
 public static class Log

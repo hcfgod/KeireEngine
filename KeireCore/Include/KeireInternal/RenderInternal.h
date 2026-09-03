@@ -22,9 +22,43 @@ namespace Keire::Detail
 {
     class UiContextAccess;
 
-    [[nodiscard]] constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool vertex) noexcept
+    [[nodiscard]] constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool) noexcept { return 3U; }
+
+    [[nodiscard]] constexpr std::uint32_t DeferredGBufferShaderUniformBufferCount(const bool vertex) noexcept
     {
-        return vertex ? 3U : 2U;
+        return vertex ? 3U : 0U;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t DeferredGBufferShaderStorageBufferCount(const bool vertex) noexcept
+    {
+        return vertex ? 1U : 0U;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t DeferredLightingShaderUniformBufferCount(const bool vertex) noexcept
+    {
+        return vertex ? 0U : 3U;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t DeferredLightingShaderSamplerCount(const bool vertex) noexcept
+    {
+        return vertex ? 0U : 16U;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t DeferredLightingShaderStorageTextureCount(const bool) noexcept { return 0U; }
+
+    [[nodiscard]] constexpr std::uint32_t DeferredLightingShaderStorageBufferCount(const bool vertex) noexcept
+    {
+        return vertex ? 0U : 4U;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t IrradynShaderUniformBufferCount(const bool vertex) noexcept
+    {
+        return vertex ? 0U : 2U;
+    }
+
+    [[nodiscard]] constexpr std::uint32_t IrradynShaderSamplerCount(const bool vertex) noexcept
+    {
+        return vertex ? 0U : 7U;
     }
 } // namespace Keire::Detail
 

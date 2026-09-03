@@ -536,6 +536,14 @@ void EditorWorkspaceLayer::SetProjectManagedSdk(KeireEditor::ManagedSdkPreferenc
         scripts->ConfigureManagedSdk(preference.Selection, std::move(preference.CustomExecutable));
 }
 
+Keire::RenderFeatureCapabilities EditorWorkspaceLayer::ProjectRenderFeatureCapabilities() const noexcept
+{
+    Keire::RenderFeatureCapabilities result{};
+    if (const auto renderer = Owner().Renderer())
+        result = renderer->FeatureCapabilities();
+    return result;
+}
+
 void EditorWorkspaceLayer::ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings)
 {
     Keire::ValidateProjectAuthoringSettings(settings);

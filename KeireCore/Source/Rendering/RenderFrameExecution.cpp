@@ -74,6 +74,7 @@ namespace Keire::RenderBackend
             surface.GpuOcclusionAutomaticQualifyingFrames = 0;
             surface.GpuOcclusionAutomaticMinimumFrames = 0;
             surface.GpuOcclusionAutomaticCooldownFrames = 0;
+            surface.GpuOcclusionAutomaticUnprofitableActivations = 0;
             surface.GpuOcclusionValidationCooldown = false;
             surface.GpuOcclusionValidationFallbackEventPending = false;
             surface.GpuOcclusionDebugMipLevel = 0;
@@ -425,6 +426,9 @@ namespace Keire::RenderBackend
             telemetryThreadNamed = true;
         }
         ActiveFrame = frame;
+        if (frame->FrameSlot >= RuntimeUiUploadCounts.size())
+            RuntimeUiUploadCounts.resize(Specification.MaximumFramesInFlight);
+        RuntimeUiUploadCounts[frame->FrameSlot] = 0;
         frame->RenderStartedAt = std::chrono::steady_clock::now();
         frame->Timeline.QueueDelayMilliseconds =
             std::chrono::duration<float, std::milli>(frame->RenderStartedAt - frame->AcceptedAt).count();
@@ -478,6 +482,8 @@ namespace Keire::RenderBackend
 #endif
         if (FrameUploadCommands || FrameUploadPass || !FrameUploadTransfers.empty())
             throw std::logic_error("A previous frame left the GPU upload context active.");
+        if (!PendingGpuSkinOutputPublications.empty())
+            throw std::logic_error("A previous frame left GPU skin-output publications pending.");
 
         if (GpuSubmissionSerial == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("GPU submission serial exhausted.");
@@ -505,6 +511,16 @@ namespace Keire::RenderBackend
                 if (publicationWriterIndex >= surface->Resources.FinalOutputs.size())
                     throw std::logic_error(
                         "A captured render-surface epoch has no output for the accepted frame slot.");
+                if (publicationWriterIndex >= surface->Resources.TemporalHistories.size())
+                    throw std::logic_error(
+                        "A captured render-surface epoch has no temporal history for the accepted frame slot.");
+                if (!surface->Resources.IrradynHistories.empty() &&
+                    publicationWriterIndex >= surface->Resources.IrradynHistories.size())
+                {
+                    throw std::logic_error(
+                        "A captured render-surface epoch has no Irradyn history for the accepted frame slot.");
+                }
+                surface->IrradynRecordedThisFrame = false;
                 publicationSurfaces.push_back(std::move(surface));
             }
 
@@ -564,7 +580,7 @@ namespace Keire::RenderBackend
                 Statistics.SkinningPreparationMilliseconds + Statistics.VfxPreparationMilliseconds +
                 Statistics.DrawPreparationMilliseconds + Statistics.ShadowRecordingMilliseconds +
                 Statistics.ForwardPlusCullingMilliseconds + Statistics.ScenePassMilliseconds +
-                Statistics.DepthPassMilliseconds + Statistics.ToneMapMilliseconds +
+                Statistics.DepthPassMilliseconds + Statistics.ToneMapMilliseconds + Statistics.UiRecordingMilliseconds +
                 Statistics.GpuOcclusionDepthPassMilliseconds + Statistics.GpuOcclusionPyramidRecordingMilliseconds +
                 Statistics.GpuOcclusionCullingRecordingMilliseconds;
             Statistics.CommandRecordingUnattributedMilliseconds =
@@ -651,6 +667,14 @@ namespace Keire::RenderBackend
                                 std::move(FrameUploadTransfers), std::move(FrameGpuOcclusionReadbacks),
                                 submissionStarted, Statistics.VfxGpuWorlds != 0, PendingRetiredBytes});
             submittedFence = nullptr;
+            for (const auto& publication : PendingGpuSkinOutputPublications)
+            {
+                auto& output = publication.Instance->Outputs[publication.OutputSlot];
+                output.PoseGeneration = publication.PoseGeneration;
+                publication.Instance->LastPublishedOutputSlot = publication.OutputSlot;
+                publication.Instance->HasPublishedOutput = true;
+            }
+            PendingGpuSkinOutputPublications.clear();
             PendingRetiredBytes = 0;
             PendingRetired.clear();
             PendingRetiredMeshes.clear();
@@ -671,6 +695,29 @@ namespace Keire::RenderBackend
                 std::swap(surface->Resources.FinalOutputs.front(),
                           surface->Resources.FinalOutputs[publicationWriterIndex]);
                 surface->HasOutput = true;
+                if (surface->ActiveFeatureSelection.EffectiveAntiAliasing == RenderAntiAliasingMode::Taa)
+                {
+                    std::swap(surface->Resources.TemporalHistories.front(),
+                              surface->Resources.TemporalHistories[publicationWriterIndex]);
+                    surface->TemporalHistoryValid = true;
+                    surface->TemporalHistoryPath = surface->ActiveFeatureSelection.EffectivePath;
+                }
+                else
+                {
+                    surface->TemporalHistoryValid = false;
+                    surface->TemporalHistoryPath = RenderPath::Automatic;
+                }
+                if (surface->IrradynRecordedThisFrame)
+                {
+                    std::swap(surface->Resources.IrradynHistories.front(),
+                              surface->Resources.IrradynHistories[publicationWriterIndex]);
+                    surface->IrradynHistoryValid = true;
+                }
+                else
+                {
+                    surface->IrradynHistoryValid = false;
+                }
+                surface->IrradynRecordedThisFrame = false;
                 surface->PublishedWorksetSlot.store(frame->FrameSlot, std::memory_order_release);
                 surface->PublishedDepthAvailable.store(surface->SampledDepthValid, std::memory_order_release);
                 {
@@ -839,13 +886,16 @@ namespace Keire::RenderBackend
             for (const auto& request : frame->Requests)
             {
                 if (const auto surface = ResolveSurface(request.Surface))
+                {
                     surface->SampledDepthValid = false;
+                    surface->IrradynRecordedThisFrame = false;
+                }
             }
-            FrameActive = false;
             ActiveGpuSubmissionSerial = 0;
             FrameExecutionActive = false;
             PreparedRuntimeUiTextures.clear();
             FrameRuntimeUiRenderTextureTargets.clear();
+            PendingGpuSkinOutputPublications.clear();
             ActiveFrame.reset();
             throw;
         }

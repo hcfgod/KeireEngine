@@ -144,8 +144,14 @@ namespace Keire
 
         void ValidateLightingSet(const LightingSetDefinition& definition)
         {
-            if (definition.SchemaVersion != 1)
+            if (definition.SchemaVersion != LightingSetSchemaVersion)
                 throw std::invalid_argument("Lighting set has an unsupported schema.");
+            constexpr auto validContributions =
+                static_cast<std::uint8_t>(BakedLightingContribution::StaticDiffuseIndirect) |
+                static_cast<std::uint8_t>(BakedLightingContribution::StaticSpecularIndirect) |
+                static_cast<std::uint8_t>(BakedLightingContribution::StationaryDirect);
+            if ((static_cast<std::uint8_t>(definition.Contributions) & ~validContributions) != 0U)
+                throw std::invalid_argument("Lighting set contains an unsupported contribution channel.");
             if (definition.InputFingerprint.size() > 128 || definition.Renderers.size() > MaximumBindings ||
                 definition.MixedLights.size() > MaximumBindings ||
                 definition.ReflectionProbes.size() > MaximumBindings ||
@@ -326,9 +332,17 @@ namespace Keire
     {
         const auto document = FromCbor(bytes, "Lighting set");
         LightingSetDefinition definition;
-        definition.SchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+        const auto sourceSchemaVersion = document.at("schemaVersion").get<std::uint32_t>();
+        if (sourceSchemaVersion != 1U && sourceSchemaVersion != LightingSetSchemaVersion)
+            throw std::runtime_error("Lighting set has an unsupported schema.");
+        definition.SchemaVersion = LightingSetSchemaVersion;
         definition.Scene = DecodeAssetId(document.at("scene"));
         definition.InputFingerprint = document.value("inputFingerprint", std::string{});
+        if (sourceSchemaVersion >= 2U)
+        {
+            definition.Contributions =
+                static_cast<BakedLightingContribution>(document.at("contributions").get<std::uint8_t>());
+        }
         definition.Lightmaps = DecodeAssetId(document.at("lightmaps"));
         definition.Directionality = DecodeAssetId(document.at("directionality"));
         definition.ShadowMasks = DecodeAssetId(document.at("shadowMasks"));
@@ -374,6 +388,7 @@ namespace Keire
         return ToCbor({{"schemaVersion", definition.SchemaVersion},
                        {"scene", EncodeAssetId(definition.Scene)},
                        {"inputFingerprint", definition.InputFingerprint},
+                       {"contributions", static_cast<std::uint8_t>(definition.Contributions)},
                        {"lightmaps", EncodeAssetId(definition.Lightmaps)},
                        {"directionality", EncodeAssetId(definition.Directionality)},
                        {"shadowMasks", EncodeAssetId(definition.ShadowMasks)},
@@ -400,6 +415,7 @@ namespace Keire
     AssetImporterRegistration CreateLightingSetAssetImporter()
     {
         auto result = CreateImporter<LightingSetAsset, LightingSetDefinition>("Keire.LightingSet", ".keirelighting");
+        result.Version = 2;
         result.Import = {};
         result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)
         {

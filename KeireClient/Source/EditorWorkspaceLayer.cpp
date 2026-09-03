@@ -521,17 +521,15 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
             *send = percentage / 100.0;
             return true;
         });
-    m_PropertyDrawers->RegisterOverride(
-        Keire::DirectionalLightComponent::StaticType(), "shadows",
-        [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,
-           Keire::ComponentPropertyValue& value)
-        {
-            auto* shadows = std::get_if<std::int64_t>(&value);
-            if (!shadows)
-                throw std::invalid_argument("Directional Light shadow metadata must serialize an Integer.");
-            constexpr std::array choices{std::string_view("None"), std::string_view("Hard"), std::string_view("Soft")};
-            return editor.EditChoice(property.DisplayName, *shadows, choices);
-        });
+    const auto registerLightChoices = [this](const Keire::ComponentTypeId type)
+    {
+        m_PropertyDrawers->RegisterIntegerChoices(type, "shadows", {"None", "Hard", "Soft"});
+        m_PropertyDrawers->RegisterIntegerChoices(type, "bakeMode", {"Realtime", "Mixed", "Baked"});
+        m_PropertyDrawers->RegisterIntegerChoices(type, "shadowResolution", {"Low", "Medium", "High", "Very High"});
+    };
+    registerLightChoices(Keire::DirectionalLightComponent::StaticType());
+    registerLightChoices(Keire::PointLightComponent::StaticType());
+    registerLightChoices(Keire::SpotLightComponent::StaticType());
     const auto registerAssetPicker = [this](const std::string_view key, const Keire::AssetTypeId type)
     {
         m_PropertyDrawers->RegisterOverride(
@@ -1064,6 +1062,7 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
                                                  "Managed build");
                 m_ManagedRuntimeCoordinator->Update(time.UnscaledDeltaTime().Seconds());
                 m_PlayModeCoordinator->ContinuePendingPlay();
+                CaptureManagedRuntimeDiagnostics();
                 break;
             }
             case Phase::BuildAndCook:

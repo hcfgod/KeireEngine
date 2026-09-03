@@ -2,6 +2,7 @@
 
 #include "Keire/Rendering/RenderSystem.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
+#include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
 #include "KeireInternal/Rendering/RenderFramePacketInternal.h"
 #include "KeireInternal/Rendering/SpatialLightingInternal.h"
 
@@ -78,6 +79,10 @@ namespace Keire::RenderBackend
     {
         // Index zero is the published output. Indices 1..N are writer outputs owned by accepted frame slots 0..N-1.
         std::vector<SDL_GPUTexture*> FinalOutputs;
+        // Temporal history mirrors final-output ownership so an accepted frame never samples a texture it writes.
+        std::vector<SDL_GPUTexture*> TemporalHistories;
+        // Reduced-resolution Irradyn history follows the same published/writer ownership contract.
+        std::vector<SDL_GPUTexture*> IrradynHistories;
         std::vector<struct SurfaceFrameWorkset> Worksets;
 
         [[nodiscard]] bool Empty() const noexcept;
@@ -91,6 +96,28 @@ namespace Keire::RenderBackend
         {
             const auto index = static_cast<std::size_t>(frameSlot) + 1U;
             return index < FinalOutputs.size() ? FinalOutputs[index] : nullptr;
+        }
+
+        [[nodiscard]] SDL_GPUTexture* PublishedTemporalHistory() const noexcept
+        {
+            return TemporalHistories.empty() ? nullptr : TemporalHistories.front();
+        }
+
+        [[nodiscard]] SDL_GPUTexture* WriterTemporalHistory(const std::uint32_t frameSlot) const noexcept
+        {
+            const auto index = static_cast<std::size_t>(frameSlot) + 1U;
+            return index < TemporalHistories.size() ? TemporalHistories[index] : nullptr;
+        }
+
+        [[nodiscard]] SDL_GPUTexture* PublishedIrradynHistory() const noexcept
+        {
+            return IrradynHistories.empty() ? nullptr : IrradynHistories.front();
+        }
+
+        [[nodiscard]] SDL_GPUTexture* WriterIrradynHistory(const std::uint32_t frameSlot) const noexcept
+        {
+            const auto index = static_cast<std::size_t>(frameSlot) + 1U;
+            return index < IrradynHistories.size() ? IrradynHistories[index] : nullptr;
         }
     };
 
@@ -266,7 +293,17 @@ namespace Keire::RenderBackend
     {
         SDL_GPUTexture* HdrColor = nullptr;
         SDL_GPUTexture* MultisampleHdrColor = nullptr;
+        SDL_GPUTexture* GBufferBaseColorMetallic = nullptr;
+        SDL_GPUTexture* GBufferNormalRoughness = nullptr;
+        SDL_GPUTexture* GBufferMaterial = nullptr;
+        SDL_GPUTexture* GBufferLighting = nullptr;
+        SDL_GPUTexture* GBufferVelocity = nullptr;
+        SDL_GPUTexture* DBufferBaseColor = nullptr;
+        SDL_GPUTexture* DBufferNormal = nullptr;
+        SDL_GPUTexture* DBufferMaterial = nullptr;
+        SDL_GPUTexture* IrradynRadiance = nullptr;
         SDL_GPUTexture* Depth = nullptr;
+        SDL_GPUTexture* MultisampleDepth = nullptr;
         SDL_GPUTexture* SampledDepth = nullptr;
         SDL_GPUTexture* DirectionalShadow = nullptr;
         SDL_GPUTexture* LocalShadow = nullptr;
@@ -285,15 +322,18 @@ namespace Keire::RenderBackend
 
         [[nodiscard]] bool Empty() const noexcept
         {
-            return !HdrColor && !MultisampleHdrColor && !Depth && !SampledDepth && !DirectionalShadow && !LocalShadow &&
-                   GpuOcclusion.Empty() && TransientTextures.empty() && ForwardPlus.Empty() &&
-                   SpatialSelection.Empty() && GpuVfx.Empty() && DynamicUploads.Empty();
+            return !HdrColor && !MultisampleHdrColor && !GBufferBaseColorMetallic && !GBufferNormalRoughness &&
+                   !GBufferMaterial && !GBufferLighting && !GBufferVelocity && !DBufferBaseColor && !DBufferNormal &&
+                   !DBufferMaterial && !IrradynRadiance && !Depth && !MultisampleDepth && !SampledDepth &&
+                   !DirectionalShadow && !LocalShadow && GpuOcclusion.Empty() && TransientTextures.empty() &&
+                   ForwardPlus.Empty() && SpatialSelection.Empty() && GpuVfx.Empty() && DynamicUploads.Empty();
         }
     };
 
     inline bool SurfaceResources::Empty() const noexcept
     {
-        return FinalOutputs.empty() && std::ranges::all_of(Worksets, &SurfaceFrameWorkset::Empty);
+        return FinalOutputs.empty() && TemporalHistories.empty() && IrradynHistories.empty() &&
+               std::ranges::all_of(Worksets, &SurfaceFrameWorkset::Empty);
     }
 
     struct RenderSharedState;
@@ -337,6 +377,9 @@ namespace Keire::RenderBackend
         bool SampledDepthValid = false;
         GpuOcclusionSurfaceDiagnostics GpuOcclusionDiagnostics;
         GpuOcclusionSurfaceDiagnostics PublishedGpuOcclusionDiagnostics;
+        RenderFeatureSelection ActiveFeatureSelection;
+        RenderPath TemporalHistoryPath = RenderPath::Automatic;
+        IrradynSceneCache IrradynCache;
         mutable std::mutex GpuOcclusionPublicationMutex;
         GpuOcclusionPolicy::AllocationRetryState GpuOcclusionAllocationRetry;
         GpuOcclusionMode GpuOcclusionSubmittedMode = GpuOcclusionMode::Automatic;
@@ -346,6 +389,7 @@ namespace Keire::RenderBackend
         std::uint32_t GpuOcclusionAutomaticQualifyingFrames = 0;
         std::uint32_t GpuOcclusionAutomaticMinimumFrames = 0;
         std::uint32_t GpuOcclusionAutomaticCooldownFrames = 0;
+        std::uint32_t GpuOcclusionAutomaticUnprofitableActivations = 0;
         std::uint64_t GpuOcclusionLatestCandidateTriangles = 0;
         std::uint64_t GpuOcclusionLatestVisibleTriangles = 0;
         bool GpuOcclusionAutomaticActive = false;
@@ -354,6 +398,9 @@ namespace Keire::RenderBackend
         std::uint64_t Generation = 0;
         bool Submitted = false;
         bool HasOutput = false;
+        bool TemporalHistoryValid = false;
+        bool IrradynHistoryValid = false;
+        bool IrradynRecordedThisFrame = false;
 
         [[nodiscard]] SurfaceFrameWorkset& Workset(const std::uint32_t frameSlot)
         {

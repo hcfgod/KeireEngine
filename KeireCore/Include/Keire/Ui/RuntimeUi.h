@@ -584,6 +584,8 @@ namespace Keire
     {
         std::size_t RenderedVertices = 0;
         std::size_t DrawBatches = 0;
+        std::size_t UploadBufferPoolSize = 0;
+        std::size_t UploadBufferReallocations = 0;
         std::size_t GlyphAtlasEntries = 0;
         std::size_t GlyphAtlasBytes = 0;
         std::size_t ImageAtlasEntries = 0;

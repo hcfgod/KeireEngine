@@ -134,6 +134,8 @@ namespace Keire
                 }
                 managedApi.AddInternalCall("Keire.NativeRuntime", "WriteLogIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeWriteLog));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "DrawDebugLineIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeDrawDebugLine));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "RegisterProfileNameIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeRegisterProfileName));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "RecordProfileSpanIcall",

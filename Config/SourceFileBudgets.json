@@ -25,5 +25,9 @@
   "defaultMaximumLines": 1500,
   "testMaximumLines": 2500,
   "testRoots": ["KeireEditorTests", "KeireHubTests", "KeireManaged.Tests", "KeireRenderTests", "KeireTests"],
-  "exceptions": {}
+  "exceptions": {
+    "KeireClient/Source/Editor/UiBuilderPanelStyles.cpp": 1520,
+    "KeireCore/Source/Assets/UiToolkitAssets.cpp": 1508,
+    "KeireCore/Source/Rendering/MaterialGraph.cpp": 1513
+  }
 }

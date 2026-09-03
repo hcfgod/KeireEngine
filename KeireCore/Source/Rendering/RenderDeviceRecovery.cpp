@@ -216,6 +216,11 @@ namespace Keire::RenderBackend
             surface->FailedWidth = 0;
             surface->FailedHeight = 0;
             surface->HasOutput = false;
+            surface->TemporalHistoryValid = false;
+            surface->TemporalHistoryPath = RenderPath::Automatic;
+            surface->IrradynHistoryValid = false;
+            surface->IrradynRecordedThisFrame = false;
+            surface->IrradynCache.Clear();
             surface->SampledDepthValid = false;
             ++surface->Generation;
             surface->PublishSurfacePropertiesSnapshot();
@@ -255,6 +260,8 @@ namespace Keire::RenderBackend
         ShadowPipeline = nullptr;
         SceneDepthPipeline = nullptr;
         ToneMapPipeline = nullptr;
+        DeferredGBufferPipeline = nullptr;
+        DeferredLightingPipeline = nullptr;
         RuntimeUiPipeline = nullptr;
         RuntimeUiCameraOverlayPipeline = nullptr;
         RuntimeUiRenderTexturePipeline = nullptr;
@@ -271,6 +278,7 @@ namespace Keire::RenderBackend
         GpuOcclusionDebugBoundsPipeline = nullptr;
         ShadowSampler = nullptr;
         ToneMapSampler = nullptr;
+        DeferredSampler = nullptr;
         GpuOcclusionSampler = nullptr;
         EmptyShadowTexture = nullptr;
         SpatialSelectionFallbackBuffer = nullptr;
@@ -295,6 +303,11 @@ namespace Keire::RenderBackend
         GpuOcclusionPipelineFailure.clear();
         GpuOcclusionPipelinesAttempted = false;
         SpatialSelectionPipelineAttempted = false;
+        DeferredPipelinesAttempted = false;
+        DeferredCapability.store(false, std::memory_order_release);
+        Msaa2Capability.store(false, std::memory_order_release);
+        Msaa4Capability.store(false, std::memory_order_release);
+        DeferredPipelineFailure.clear();
         VfxInitializePipeline = nullptr;
         VfxResetPipeline = nullptr;
         VfxKillPipeline = nullptr;
@@ -417,7 +430,7 @@ namespace Keire::RenderBackend
         {
             if (DepthFormat == SDL_GPU_TEXTUREFORMAT_INVALID &&
                 SDL_GPUTextureSupportsFormat(Device, candidate, SDL_GPU_TEXTURETYPE_2D,
-                                             SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
+                                             SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER))
             {
                 DepthFormat = candidate;
             }
@@ -472,6 +485,15 @@ namespace Keire::RenderBackend
     {
         const auto recoveryStarted = std::chrono::steady_clock::now();
         RecoveryStartedAt = recoveryStarted;
+        const bool retryRequiresGpuVfx =
+            interrupted &&
+            std::ranges::any_of(interrupted->Requests,
+                                [](const QueuedSceneRequest& request)
+                                {
+                                    return std::ranges::any_of(request.Packet.VfxSnapshots,
+                                                               [](const VfxRenderSnapshot& snapshot)
+                                                               { return !snapshot.GpuEmitters().empty(); });
+                                });
         const auto cleanupHealthyCandidate = [this]() noexcept
         {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
@@ -653,6 +675,19 @@ namespace Keire::RenderBackend
                 {
                     cleanupHealthyCandidate();
                     return DeviceRecoveryResult::Failed;
+                }
+                if (retryRequiresGpuVfx)
+                {
+                    // Recovery must replay the interrupted immutable packet in full. The normal asynchronous cold
+                    // start is inappropriate here because it would silently omit GPU effects from the retry.
+                    const auto vfxStarted = std::chrono::steady_clock::now();
+                    VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Compiling, std::memory_order_release);
+                    CompileGpuVfxPipelines();
+                    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::steady_clock::now() - vfxStarted);
+                    VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                        std::memory_order_relaxed);
+                    VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready, std::memory_order_release);
                 }
                 DeviceGeneration.store(*candidateGeneration, std::memory_order_release);
                 const auto recoveredGeneration = *candidateGeneration;

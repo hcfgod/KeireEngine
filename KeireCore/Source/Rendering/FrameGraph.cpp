@@ -1,5 +1,7 @@
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 
+#include "Keire/Rendering/RenderSystem.h"
+
 #include <algorithm>
 #include <deque>
 #include <optional>
@@ -7,12 +9,94 @@
 
 namespace Keire::RenderBackend
 {
+    namespace
+    {
+        [[nodiscard]] constexpr bool ValidSampleCount(const std::uint8_t sampleCount) noexcept
+        {
+            return sampleCount == 1U || sampleCount == 2U || sampleCount == 4U || sampleCount == 8U;
+        }
+
+        [[nodiscard]] constexpr bool IsDepthFormat(const FrameGraphTextureFormat format) noexcept
+        {
+            return format == FrameGraphTextureFormat::D32Float;
+        }
+
+        [[nodiscard]] constexpr std::uint64_t
+        TypedTextureCompatibilityKey(const FrameGraphTextureDescription& texture) noexcept
+        {
+            return (std::uint64_t{1} << 63U) | (static_cast<std::uint64_t>(texture.Format) << 48U) |
+                   (static_cast<std::uint64_t>(texture.SampleCount) << 40U) |
+                   (static_cast<std::uint64_t>(texture.WidthScaleNumerator) << 32U) |
+                   (static_cast<std::uint64_t>(texture.WidthScaleDenominator) << 24U) |
+                   (static_cast<std::uint64_t>(texture.HeightScaleNumerator) << 16U) |
+                   (static_cast<std::uint64_t>(texture.HeightScaleDenominator) << 8U);
+        }
+
+        void ValidateResourceDescription(FrameGraphResourceDescription& description)
+        {
+            const auto& texture = description.Texture;
+            if (description.Kind == FrameGraphResourceKind::Buffer)
+            {
+                if (texture.Format != FrameGraphTextureFormat::Undefined ||
+                    texture.Usage != FrameGraphResourceUsage::None)
+                {
+                    throw std::invalid_argument("Frame-graph buffers cannot declare texture metadata.");
+                }
+                return;
+            }
+
+            if (!ValidSampleCount(texture.SampleCount) || texture.WidthScaleNumerator == 0U ||
+                texture.WidthScaleDenominator == 0U || texture.HeightScaleNumerator == 0U ||
+                texture.HeightScaleDenominator == 0U)
+            {
+                throw std::invalid_argument("Frame-graph texture sample and relative-size metadata is invalid.");
+            }
+            if (texture.Format == FrameGraphTextureFormat::Undefined)
+            {
+                if (texture.Usage != FrameGraphResourceUsage::None)
+                    throw std::invalid_argument("Frame-graph texture usage requires an exact texture format.");
+                return;
+            }
+            if (texture.Usage == FrameGraphResourceUsage::None)
+                throw std::invalid_argument("Typed frame-graph textures require at least one declared usage.");
+
+            const bool depthUsage =
+                HasFrameGraphResourceUsage(texture.Usage, FrameGraphResourceUsage::DepthStencilAttachment);
+            const bool colorUsage = HasFrameGraphResourceUsage(texture.Usage, FrameGraphResourceUsage::ColorAttachment);
+            if (IsDepthFormat(texture.Format) != depthUsage || (depthUsage && colorUsage))
+                throw std::invalid_argument("Frame-graph depth formats and attachment usages are incompatible.");
+
+            const auto typedKey = TypedTextureCompatibilityKey(texture);
+            if (description.CompatibilityKey != 0U && description.CompatibilityKey != typedKey)
+            {
+                throw std::invalid_argument(
+                    "Typed frame-graph textures cannot override their derived alias compatibility key.");
+            }
+            description.CompatibilityKey = typedKey;
+        }
+
+        [[nodiscard]] FrameGraphResourceDescription TextureResource(std::string name,
+                                                                    const FrameGraphTextureFormat format,
+                                                                    const FrameGraphResourceUsage usage,
+                                                                    const bool imported = false)
+        {
+            FrameGraphResourceDescription result;
+            result.Name = std::move(name);
+            result.Kind = FrameGraphResourceKind::Texture;
+            result.Imported = imported;
+            result.Texture.Format = format;
+            result.Texture.Usage = usage;
+            return result;
+        }
+    } // namespace
+
     FrameGraphResource FrameGraph::AddResource(FrameGraphResourceDescription description)
     {
         if (description.Name.empty())
             throw std::invalid_argument("Frame-graph resources require a diagnostic name.");
         if (std::ranges::any_of(m_Resources, [&](const auto& resource) { return resource.Name == description.Name; }))
             throw std::invalid_argument("Frame-graph resource names must be unique.");
+        ValidateResourceDescription(description);
         const auto index = static_cast<std::uint32_t>(m_Resources.size());
         m_Resources.push_back(std::move(description));
         return {index};
@@ -160,13 +244,15 @@ namespace Keire::RenderBackend
                 {
                     selected = physicalIndex;
                     allocation.SizeBytes = std::max(allocation.SizeBytes, resource.SizeBytes);
+                    allocation.Texture.Usage = allocation.Texture.Usage | resource.Texture.Usage;
                     break;
                 }
             }
             if (!selected)
             {
                 selected = static_cast<std::uint32_t>(result.TransientAllocations.size());
-                result.TransientAllocations.push_back({resource.Kind, resource.CompatibilityKey, resource.SizeBytes});
+                result.TransientAllocations.push_back(
+                    {resource.Kind, resource.CompatibilityKey, resource.SizeBytes, resource.Texture});
                 physicalLifetimes.push_back({});
             }
             result.PhysicalResources[resourceIndex] = *selected;
@@ -186,6 +272,11 @@ namespace Keire::RenderBackend
                 return FrameGraphResourceState::StorageWrite;
             if (pass.Kind == FrameGraphPassKind::Present)
                 return FrameGraphResourceState::Present;
+            if (m_Resources[resource.Value].Kind == FrameGraphResourceKind::Texture &&
+                IsDepthFormat(m_Resources[resource.Value].Texture.Format))
+            {
+                return FrameGraphResourceState::DepthStencilAttachment;
+            }
             return m_Resources[resource.Value].Kind == FrameGraphResourceKind::Texture
                        ? FrameGraphResourceState::ColorAttachment
                        : FrameGraphResourceState::StorageWrite;
@@ -241,16 +332,27 @@ namespace Keire::RenderBackend
         m_Passes.clear();
     }
 
-    StaticSceneFrameGraph BuildStaticSceneFrameGraph()
+    StaticSceneFrameGraph BuildStaticSceneFrameGraph() { return BuildStaticSceneFrameGraph(RenderPath::ForwardPlus); }
+
+    StaticSceneFrameGraph BuildStaticSceneFrameGraph(const RenderPath path)
     {
+        if (path != RenderPath::ForwardPlus && path != RenderPath::DeferredHybrid)
+            throw std::invalid_argument("A static scene frame graph requires a resolved render path.");
+
         StaticSceneFrameGraph result;
+        result.Path = path;
         const auto uploads = result.Graph.AddResource({"Uploaded resources", FrameGraphResourceKind::Buffer, true});
-        const auto shadows = result.Graph.AddResource({"Directional shadows", FrameGraphResourceKind::Texture, true});
+        const auto shadows = result.Graph.AddResource(
+            TextureResource("Directional shadows", FrameGraphTextureFormat::D32Float,
+                            FrameGraphResourceUsage::DepthStencilAttachment | FrameGraphResourceUsage::Sampled, true));
         result.ForwardPlusLightTiles =
             result.Graph.AddResource({"Forward+ tile lists", FrameGraphResourceKind::Buffer, true});
-        result.GpuOcclusionDepth = result.Graph.AddResource({"Occlusion depth", FrameGraphResourceKind::Texture, true});
-        result.GpuOcclusionPyramid =
-            result.Graph.AddResource({"Occlusion depth pyramid", FrameGraphResourceKind::Texture, true});
+        result.GpuOcclusionDepth = result.Graph.AddResource(
+            TextureResource("Occlusion depth", FrameGraphTextureFormat::D32Float,
+                            FrameGraphResourceUsage::DepthStencilAttachment | FrameGraphResourceUsage::Sampled, true));
+        result.GpuOcclusionPyramid = result.Graph.AddResource(
+            TextureResource("Occlusion depth pyramid", FrameGraphTextureFormat::R32Float,
+                            FrameGraphResourceUsage::Sampled | FrameGraphResourceUsage::Storage, true));
         result.GpuOcclusionIndirectArguments =
             result.Graph.AddResource({"Occlusion indirect arguments", FrameGraphResourceKind::Buffer, true});
         result.GpuVisibilityMasks =
@@ -259,17 +361,60 @@ namespace Keire::RenderBackend
             result.Graph.AddResource({"Frame-owned spatial selection records", FrameGraphResourceKind::Buffer, true});
         result.VfxDynamicCandidates =
             result.Graph.AddResource({"VFX dynamic visibility candidates", FrameGraphResourceKind::Buffer, true});
-        result.HdrScene = result.Graph.AddResource({"HDR scene color", FrameGraphResourceKind::Texture, false, 4});
-        result.SampledDepth = result.Graph.AddResource({"Sampled scene depth", FrameGraphResourceKind::Texture, true});
+        result.HdrScene = result.Graph.AddResource(
+            TextureResource("HDR scene color", FrameGraphTextureFormat::Rgba16Float,
+                            FrameGraphResourceUsage::ColorAttachment | FrameGraphResourceUsage::Sampled));
+        result.SceneDepth = result.Graph.AddResource(
+            TextureResource("Scene depth", FrameGraphTextureFormat::D32Float,
+                            FrameGraphResourceUsage::DepthStencilAttachment | FrameGraphResourceUsage::Sampled, true));
+        result.SampledDepth = result.Graph.AddResource(
+            TextureResource("Sampled scene depth", FrameGraphTextureFormat::D32Float,
+                            FrameGraphResourceUsage::DepthStencilAttachment | FrameGraphResourceUsage::Sampled, true));
         const auto skyComplete = result.Graph.AddResource({"Sky complete", FrameGraphResourceKind::Buffer, true});
         const auto transparencyComplete =
             result.Graph.AddResource({"Transparency complete", FrameGraphResourceKind::Buffer, true});
         const auto vfxPrepared =
             result.Graph.AddResource({"VFX expansion complete", FrameGraphResourceKind::Buffer, true});
-        const auto toneMapped = result.Graph.AddResource({"Tone-mapped scene", FrameGraphResourceKind::Texture, true});
-        const auto overlays = result.Graph.AddResource({"Scene overlays", FrameGraphResourceKind::Texture, true});
+        const auto toneMapped = result.Graph.AddResource(
+            TextureResource("Tone-mapped scene", FrameGraphTextureFormat::Rgba8Unorm,
+                            FrameGraphResourceUsage::ColorAttachment | FrameGraphResourceUsage::Sampled, true));
+        const auto overlays = result.Graph.AddResource(
+            TextureResource("Scene overlays", FrameGraphTextureFormat::Rgba8Unorm,
+                            FrameGraphResourceUsage::ColorAttachment | FrameGraphResourceUsage::Sampled, true));
         const auto readback = result.Graph.AddResource({"Readback", FrameGraphResourceKind::Buffer, true});
-        const auto presentation = result.Graph.AddResource({"Presentation", FrameGraphResourceKind::Texture, true});
+        const auto presentation = result.Graph.AddResource(
+            TextureResource("Presentation", FrameGraphTextureFormat::Rgba8Unorm,
+                            FrameGraphResourceUsage::ColorAttachment | FrameGraphResourceUsage::Present, true));
+
+        constexpr auto gBufferUsage = FrameGraphResourceUsage::ColorAttachment | FrameGraphResourceUsage::Sampled;
+        result.GBufferVelocity = result.Graph.AddResource(
+            TextureResource("Motion vectors", FrameGraphTextureFormat::Rg16Float, gBufferUsage));
+
+        if (path == RenderPath::DeferredHybrid)
+        {
+            result.GBufferBaseColorMetallic = result.Graph.AddResource(
+                TextureResource("GBuffer base color and metallic", FrameGraphTextureFormat::Rgba8Srgb, gBufferUsage));
+            result.GBufferNormalRoughness = result.Graph.AddResource(
+                TextureResource("GBuffer normal and roughness", FrameGraphTextureFormat::Rgba16Float, gBufferUsage));
+            result.GBufferMaterial = result.Graph.AddResource(
+                TextureResource("GBuffer material", FrameGraphTextureFormat::Rgba8Unorm, gBufferUsage));
+            result.GBufferLighting = result.Graph.AddResource(
+                TextureResource("GBuffer baked and spatial lighting", FrameGraphTextureFormat::Rgba32Float,
+                                FrameGraphResourceUsage::ColorAttachment | FrameGraphResourceUsage::Sampled));
+            result.DBufferBaseColor = result.Graph.AddResource(
+                TextureResource("DBuffer base color", FrameGraphTextureFormat::Rgba8Srgb, gBufferUsage));
+            result.DBufferNormal = result.Graph.AddResource(
+                TextureResource("DBuffer normal", FrameGraphTextureFormat::Rgba16Float, gBufferUsage));
+            result.DBufferMaterial = result.Graph.AddResource(
+                TextureResource("DBuffer material", FrameGraphTextureFormat::Rgba8Unorm, gBufferUsage));
+            auto irradynRadiance =
+                TextureResource("Irradyn radiance", FrameGraphTextureFormat::Rgba16Float, gBufferUsage);
+            irradynRadiance.Texture.WidthScaleNumerator = 1U;
+            irradynRadiance.Texture.WidthScaleDenominator = 2U;
+            irradynRadiance.Texture.HeightScaleNumerator = 1U;
+            irradynRadiance.Texture.HeightScaleDenominator = 2U;
+            result.IrradynRadiance = result.Graph.AddResource(std::move(irradynRadiance));
+        }
 
         result.ResourceUploads = result.Graph.AddPass({"Resource uploads", {}, {uploads}, FrameGraphPassKind::Upload});
         result.DirectionalShadows =
@@ -304,11 +449,49 @@ namespace Keire::RenderBackend
                                   {uploads, result.GpuVisibilityMasks, result.ForwardPlusLightTiles},
                                   {vfxPrepared},
                                   FrameGraphPassKind::Compute});
-        result.Opaque =
-            result.Graph.AddPass({"Opaque and mask",
-                                  {uploads, shadows, result.ForwardPlusLightTiles, result.GpuOcclusionIndirectArguments,
-                                   result.SpatialSelectionRecords, vfxPrepared},
-                                  {result.HdrScene}});
+
+        const std::vector opaqueInputs{uploads,
+                                       shadows,
+                                       result.ForwardPlusLightTiles,
+                                       result.GpuOcclusionIndirectArguments,
+                                       result.SpatialSelectionRecords,
+                                       vfxPrepared};
+        result.DepthVelocity = result.Graph.AddPass(
+            {path == RenderPath::DeferredHybrid ? "Depth and velocity prepass" : "Forward+ motion-vector prepass",
+             opaqueInputs,
+             {result.SceneDepth, result.GBufferVelocity}});
+        if (path == RenderPath::ForwardPlus)
+        {
+            result.Opaque = result.Graph.AddPass({"Opaque and mask", opaqueInputs, {result.HdrScene}});
+        }
+        else
+        {
+            result.DeferredGBufferStandard =
+                result.Graph.AddPass({"Deferred GBuffer standard",
+                                      opaqueInputs,
+                                      {result.SceneDepth, result.GBufferBaseColorMetallic,
+                                       result.GBufferNormalRoughness, result.GBufferMaterial, result.GBufferLighting}});
+            result.DeferredGBufferExtended =
+                result.Graph.AddPass({"Deferred GBuffer extended",
+                                      opaqueInputs,
+                                      {result.SceneDepth, result.GBufferBaseColorMetallic,
+                                       result.GBufferNormalRoughness, result.GBufferMaterial, result.GBufferLighting}});
+            result.DeferredDecals =
+                result.Graph.AddPass({"Deferred decals",
+                                      {result.SceneDepth},
+                                      {result.DBufferBaseColor, result.DBufferNormal, result.DBufferMaterial}});
+            result.DeferredLighting = result.Graph.AddPass(
+                {"Deferred lighting",
+                 {shadows, result.ForwardPlusLightTiles, result.SpatialSelectionRecords, result.SceneDepth,
+                  result.GBufferBaseColorMetallic, result.GBufferNormalRoughness, result.GBufferMaterial,
+                  result.GBufferLighting, result.GBufferVelocity, result.DBufferBaseColor, result.DBufferNormal,
+                  result.DBufferMaterial},
+                 {result.HdrScene}});
+            result.ForwardOpaqueTail =
+                result.Graph.AddPass({"Forward-only opaque tail", opaqueInputs, {result.HdrScene}});
+            result.Opaque = result.ForwardOpaqueTail;
+        }
+
         result.ResolveDepth =
             result.Graph.AddPass({"Sampled scene depth", {uploads, result.HdrScene}, {result.SampledDepth}});
         result.Sky = result.Graph.AddPass({"Sky", {result.HdrScene}, {skyComplete}});
@@ -317,7 +500,25 @@ namespace Keire::RenderBackend
                                   {result.HdrScene, result.SampledDepth, skyComplete, result.ForwardPlusLightTiles,
                                    result.SpatialSelectionRecords, vfxPrepared},
                                   {transparencyComplete}});
-        result.ToneMap = result.Graph.AddPass({"ACES tone map", {result.HdrScene, transparencyComplete}, {toneMapped}});
+        auto toneMapDependency = transparencyComplete;
+        if (path == RenderPath::DeferredHybrid)
+        {
+            const auto irradynComplete =
+                result.Graph.AddResource({"Irradyn complete", FrameGraphResourceKind::Buffer, true});
+            result.IrradynTrace = result.Graph.AddPass(
+                {"Irradyn trace and temporal accumulation",
+                 {result.HdrScene, result.SceneDepth, result.GBufferBaseColorMetallic, result.GBufferNormalRoughness,
+                  result.GBufferMaterial, result.GBufferVelocity, transparencyComplete},
+                 {result.IrradynRadiance}});
+            result.IrradynComposite =
+                result.Graph.AddPass({"Irradyn bilateral composite",
+                                      {result.IrradynRadiance, result.SceneDepth, result.GBufferBaseColorMetallic,
+                                       result.GBufferNormalRoughness, result.GBufferMaterial},
+                                      {result.HdrScene, irradynComplete}});
+            toneMapDependency = irradynComplete;
+        }
+        result.ToneMap = result.Graph.AddPass(
+            {"ACES tone map", {result.HdrScene, result.GBufferVelocity, toneMapDependency}, {toneMapped}});
         result.Overlays =
             result.Graph.AddPass({"Editor overlays",
                                   {toneMapped, result.GpuOcclusionPyramid, result.GpuOcclusionIndirectArguments},

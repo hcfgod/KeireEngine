@@ -401,6 +401,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SetProjectDefaultInput(Keire::AssetId asset, Keire::AssetId map) override;
     [[nodiscard]] KeireEditor::ManagedSdkPreference ProjectManagedSdk() const override;
     void SetProjectManagedSdk(KeireEditor::ManagedSdkPreference preference) override;
+    [[nodiscard]] Keire::RenderFeatureCapabilities ProjectRenderFeatureCapabilities() const noexcept override;
     void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) override;
     [[nodiscard]] KeireEditor::SceneDocument& LightingSceneDocument() noexcept override;
     [[nodiscard]] bool LightingBakeBusy() const noexcept override;
@@ -950,6 +951,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     };
     std::deque<InputHistoryEntry> m_InputHistory;
     Keire::Ref<Keire::RenderView> m_GameRenderView;
+    Keire::Internal::DynamicResolutionController m_GameDynamicResolution;
     Keire::Ref<Keire::ScenePresentationRuntime> m_GameEditPresentation;
     Keire::UiItemRect m_GameViewportRect;
     Keire::AudioVoiceId m_InspectorAudioPreviewVoice;

@@ -150,7 +150,7 @@ Copy-Item (Join-Path $dependencyInstall "lib\assimp.lib"), (Join-Path $dependenc
     (Join-Path $dependencyInstall "lib\Detour.lib"), (Join-Path $dependencyInstall "lib\DetourCrowd.lib"), `
     (Join-Path $dependencyInstall "lib\DetourTileCache.lib"), (Join-Path $dependencyInstall "lib\miniaudio.lib") "$stage\lib\"
 $coralConfiguration = if ($Configuration -eq "Dist") { "Release" } else { $Configuration }
-Copy-Item "$Root\Build\Dependencies\coral-patched\Build\$coralConfiguration\Coral.Native.lib" "$stage\lib\"
+Copy-Item "$Root\Build\Dependencies\coral\Build\$coralConfiguration\Coral.Native.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Dependencies\coral-nethost\nethost.lib" "$stage\lib\"
 Copy-Item "$Root\Config\Client.json" "$stage\Config\Client.json"
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" "$stage\samples\KeireSandbox" `
@@ -186,7 +186,7 @@ Copy-Item "$Root\Vendor\stb\LICENSE" "$stage\third-party\licenses\stb-LICENSE.tx
 Copy-Item "$dependencyInstall\share\licenses\keire\Jolt-LICENSE.txt", `
     "$dependencyInstall\share\licenses\keire\Recast-LICENSE.txt", `
     "$dependencyInstall\share\licenses\keire\miniaudio-LICENSE.txt" "$stage\third-party\licenses\"
-Copy-Item "$Root\Build\Dependencies\coral-patched\LICENSE" "$stage\third-party\licenses\Coral-LICENSE.txt"
+Copy-Item "$Root\Build\Dependencies\coral\LICENSE" "$stage\third-party\licenses\Coral-LICENSE.txt"
 Copy-Item "$Root\Build\Dependencies\dotnet-sdk\LICENSE.txt" "$stage\third-party\licenses\dotnet-LICENSE.txt"
 Copy-Item "$Root\Build\Dependencies\dotnet-sdk\ThirdPartyNotices.txt" `
     "$stage\third-party\licenses\dotnet-ThirdPartyNotices.txt"

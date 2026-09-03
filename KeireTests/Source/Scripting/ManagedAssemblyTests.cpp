@@ -497,7 +497,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
         std::string(KEIRE_BUILD_CONFIGURATION) == "Release" || std::string(KEIRE_BUILD_CONFIGURATION) == "Dist"
             ? "Release"
             : "Debug";
-    const auto host = std::filesystem::absolute("Build/Dependencies/coral-patched/Build/" + configuration);
+    const auto host = std::filesystem::absolute("Build/Dependencies/coral/Build/" + configuration);
 #if defined(_WIN32)
     const auto dotnet = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet.exe");
 #else

@@ -62,6 +62,18 @@ Kéire already includes substantial, integrated engine and authoring foundations
   Material Parameter Collections, tagged custom-shader materials, LODs, same-frame camera-local GPU occlusion with
   compacted indirect draws and fail-visible Forward+ local-light masks, capability-gated VFX and spatial-volume mask
   consumers, deterministic direct fallback, and per-surface bounds/HZB diagnostics, spatial lighting data, animation,
+  versioned Automatic/Forward+/Deferred-Hybrid and TAA/MSAA capability contracts, digest-verified backend program
+  artifacts, exact pass-role/backend cooked shader lanes, typed transient texture allocation, a validated 24-pass
+  Deferred Hybrid graph with capability-selected live recording, portable GBuffer/deferred-lighting pipelines,
+  reflection/IBL, baked lightmaps and probes, cookies, contact shadows, mixed-light masks, deforming motion vectors, and
+  explicit baked-versus-realtime lighting ownership. Forward+ and Deferred Hybrid TAA use jittered projection,
+  jitter-independent motion-vector reprojection, neighborhood-clamped per-surface history, and unjittered
+  shadow-cascade fitting. Deferred Hybrid MSAA retains single-sample deferred/GI data while shading final geometry
+  through a hardware-multisampled coverage subpass. Staged Irradyn traces fully lit
+  scene color at reduced resolution, combines it with a bounded off-screen/WPO/translucency/hair/VFX scene-card cache,
+  and publishes fence-safe temporal history before a bilateral composite. Live FXAA/MSAA capability probing drives Scene, Game, and runtime
+  surface samples before recording, with FXAA tone-map fallback, real static and automatic dynamic resolution across
+  every supported AA mode, complete cooked render-setting parity, and weighted soft-shadow filtering,
   importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot grounding, zero-clip procedural
   humanoid locomotion, presentation interpolation, VFX authoring, and performance gates.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
@@ -245,6 +257,7 @@ Current authoring and runtime contracts include:
 | Project descriptor | 4 | Older descriptors are inspected and upgraded transactionally before mutation. |
 | Scene source | 6 | Schemas 1–5 migrate in memory; saves emit canonical schema 6. |
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
+| Cooked shader asset | 3 | Schemas 1–2 migrate to the `primary` pass role; schema 3 keys each binary by exact role and backend format. |
 | Shader Graph source | 6 | Schemas 1–5 migrate in memory; publication emits canonical target-based schema 6. |
 | Material Graph source | 6 | Schemas 1–5 migrate in memory; publication emits canonical schema 6 with an authoritative OpenPBR/slab surface graph. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
@@ -363,7 +376,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 84 maintained guides grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 86 maintained guides grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.4 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),

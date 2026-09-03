@@ -136,7 +136,7 @@ $licenseSources = @(
     @("Vendor\assimp\LICENSE", "assimp-LICENSE.txt"),
     @("Vendor\assimp\contrib\zlib\LICENSE", "assimp-zlib-LICENSE.txt"),
     @("Vendor\stb\LICENSE", "stb-LICENSE.txt"),
-    @("Build\Dependencies\coral-patched\LICENSE", "Coral-LICENSE.txt")
+    @("Build\Dependencies\coral\LICENSE", "Coral-LICENSE.txt")
 )
 foreach ($license in $licenseSources) {
     $licenseSource = Join-Path $Root $license[0]

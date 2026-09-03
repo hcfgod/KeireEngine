@@ -24,7 +24,7 @@ if (-not (Test-Path -LiteralPath $targetDirectory)) {
 }
 
 $coralConfiguration = if ($Configuration -in @("Release", "Profile", "Dist")) { "Release" } else { "Debug" }
-$coralDirectory = Join-Path $resolvedRoot "Build\Dependencies\coral-patched\Build\$coralConfiguration"
+$coralDirectory = Join-Path $resolvedRoot "Build\Dependencies\coral\Build\$coralConfiguration"
 $netHost = Join-Path $resolvedRoot "Build\Dependencies\coral-nethost\nethost.dll"
 $managedAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Managed.dll"
 $managedEditorAssembly = Join-Path $resolvedRoot "Build\Managed\Keire.Editor.Managed.dll"
@@ -64,7 +64,7 @@ function Copy-TreeIfChanged {
 
 foreach ($file in $coralFiles) {
     if (-not (Test-Path -LiteralPath (Join-Path $coralDirectory $file))) {
-        throw "The patched Coral runtime output is missing: $file"
+        throw "The Coral runtime output is missing: $file"
     }
 }
 if (-not (Test-Path -LiteralPath $netHost)) {

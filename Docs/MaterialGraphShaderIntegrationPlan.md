@@ -47,8 +47,8 @@ public asset exposes SDL, native GPU handles, backend compiler objects, or third
 | OpenPBR/slab graph foundation | Partial | Core surface, bounded mix/add, coat, fuzz, HLSL lowering, and editor preview ship; complex deferred closure payloads remain. |
 | Shared typed compiler | Complete | Both authoring paths emit the same versioned ProgramArtifact, reflection, diagnostics, dependencies, and variants. |
 | Target integrations | Partial | Graphics variants publish; bounded UI/fullscreen/VFX runtime request APIs and compute dispatch remain. |
-| Deferred renderer | Partial | Requested/effective settings, pass eligibility, and deterministic Forward+ fallback ship; the backend remains planned. |
-| Irradyn GI | Partial | Requested/effective modes, quality intent, capability gates, and deterministic fallback ship; the backend remains experimental and unavailable. |
+| Deferred renderer | Complete | Single-sample Deferred Hybrid, exact backend probing, standard/extended GBuffer lanes, decals, forward escape, and spatial-lighting parity are live. |
+| Irradyn GI | Partial | Requested/effective modes, quality intent, and the live Deferred Hybrid spatial-lighting path ship; a dedicated multi-bounce scene cache remains future work. |
 | Material promotion | Complete | `.keirematerial` schema 7 is authoritative; old flat sources are explicit compatibility assets. |
 | Material Instance schema 3 | Planned | Instance schema 2 remains authoritative pending static-parameter and redirector migration. |
 | Certified interchange adapters | Planned | Assimp remains the current legacy FBX/OBJ/glTF adapter; USD, Alembic, MaterialX, and process plug-ins are not certified. |

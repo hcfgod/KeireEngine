@@ -5,6 +5,7 @@
 #include "KeireInternal/Build/PlayerPackage.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
@@ -97,6 +98,41 @@ namespace
                                          ambient[3].get<float>()};
         result.Rendering.AmbientIntensity = rendering.at("ambientIntensity").get<float>();
         result.Rendering.Exposure = rendering.at("exposure").get<float>();
+        const auto environment = rendering.value("environment", std::string{});
+        result.Rendering.Environment = environment.empty() ? Keire::AssetId{} : Keire::AssetId::Parse(environment);
+        result.Rendering.EnvironmentRotationDegrees = rendering.value("environmentRotationDegrees", 0.0F);
+        result.Rendering.EnvironmentDiffuseIntensity = rendering.value("environmentDiffuseIntensity", 1.0F);
+        result.Rendering.EnvironmentSpecularIntensity = rendering.value("environmentSpecularIntensity", 1.0F);
+        result.Rendering.SkyVisible = rendering.value("skyVisible", true);
+        result.Rendering.DirectionalShadowDistance = rendering.value("directionalShadowDistance", 100.0F);
+        result.Rendering.DirectionalShadowCascadeCount = rendering.value("directionalShadowCascadeCount", 4U);
+        result.Rendering.DirectionalShadowResolution = rendering.value("directionalShadowResolution", 2048U);
+        result.Rendering.DirectionalShadowSplitLambda = rendering.value("directionalShadowSplitLambda", 0.65F);
+        result.Rendering.GpuOcclusion = static_cast<Keire::GpuOcclusionMode>(
+            rendering.value("gpuOcclusion", static_cast<std::uint8_t>(Keire::GpuOcclusionMode::Automatic)));
+        result.Rendering.RequestedRenderPath = static_cast<Keire::RenderPath>(
+            rendering.value("renderPath", static_cast<std::uint8_t>(Keire::RenderPath::Automatic)));
+        result.Rendering.RequestedAntiAliasing = static_cast<Keire::RenderAntiAliasingMode>(
+            rendering.value("antiAliasing", static_cast<std::uint8_t>(Keire::RenderAntiAliasingMode::Taa)));
+        result.Rendering.RequestedDynamicResolution = static_cast<Keire::DynamicResolutionMode>(
+            rendering.value("dynamicResolution", static_cast<std::uint8_t>(Keire::DynamicResolutionMode::Disabled)));
+        result.Rendering.RenderScale = rendering.value("renderScale", 1.0F);
+        result.Rendering.MinimumDynamicResolutionScale = rendering.value("minimumDynamicResolutionScale", 0.67F);
+        result.Rendering.MaximumDynamicResolutionScale = rendering.value("maximumDynamicResolutionScale", 1.0F);
+        result.Rendering.DynamicResolutionTargetMilliseconds =
+            rendering.value("dynamicResolutionTargetMilliseconds", 16.667F);
+        result.Rendering.RequestedGlobalIllumination = static_cast<Keire::GlobalIlluminationMode>(
+            rendering.value("globalIllumination", static_cast<std::uint8_t>(Keire::GlobalIlluminationMode::Disabled)));
+        result.Rendering.RequestedIrradynQuality = static_cast<Keire::IrradynQuality>(
+            rendering.value("irradynQuality", static_cast<std::uint8_t>(Keire::IrradynQuality::Balanced)));
+        try
+        {
+            Keire::ValidateRenderEnvironmentSettings(result.Rendering);
+        }
+        catch (const std::exception& error)
+        {
+            throw Keire::CommandLineError(std::string("Runtime rendering settings are invalid: ") + error.what());
+        }
         const auto& subsystems = source.at("subsystems");
         result.Scripting = subsystems.at("scripting").get<bool>();
         result.Physics = subsystems.at("physics").get<bool>();
@@ -420,7 +456,16 @@ namespace
             const auto activePresentation = Keire::Internal::ActiveRuntimePresentation(world);
             KeireRuntime::SynchronizeRuntimeUiTextInput(activePresentation, Owner().Windows(), Owner().MainWindow());
             const auto selected = Keire::Internal::SelectRuntimeRenderSession(world);
-            m_View->Surface()->RequestSize(width, height);
+            auto environment = RenderEnvironment();
+            environment.SkyVisible = selected.Camera && environment.SkyVisible &&
+                                     selected.Camera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+            const auto featureSelection =
+                Keire::ResolveRenderFeatureSelection(environment, Owner().Renderer()->FeatureCapabilities());
+            const float renderScale =
+                m_DynamicResolution.Update(environment, featureSelection, Owner().Renderer()->Statistics());
+            const auto [renderWidth, renderHeight] = Keire::Internal::ScaledRenderSurfaceExtent(
+                static_cast<float>(width), static_cast<float>(height), 1.0F, renderScale);
+            m_View->Surface()->RequestSize(renderWidth, renderHeight);
             Keire::RenderCamera camera;
             if (selected.Camera)
             {
@@ -432,9 +477,6 @@ namespace
                 camera.FarPlane = selected.Camera->Camera->FarPlane();
             }
             m_View->SetCamera(camera);
-            auto environment = RenderEnvironment();
-            environment.SkyVisible = selected.Camera && environment.SkyVisible &&
-                                     selected.Camera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
             KeireRuntime::SubmitRuntimeWorldRendering(Owner().Renderer(), world, m_View, environment,
                                                       MaterialParameters(), selected.Session,
                                                       selected.Camera.has_value());
@@ -994,6 +1036,7 @@ namespace
         Keire::Ref<Keire::SceneRuntimeSession> m_Runtime;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
+        Keire::Internal::DynamicResolutionController m_DynamicResolution;
         Keire::Ref<Keire::ScenePresentationRuntime> m_Presentation;
         Keire::WindowSystemInternalAccess::EventSinkToken m_EventSink = 0;
         KeireRuntime::RuntimeUiPointerState m_UiPointer;

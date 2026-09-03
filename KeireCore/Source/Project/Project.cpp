@@ -51,6 +51,198 @@ namespace Keire
         constexpr std::size_t MaximumRegistryBytes = 4ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumRecentProjects = 50;
 
+        [[nodiscard]] ShaderGraphNode& FindGraphNode(ShaderGraphDefinition& graph, const AssetId id)
+        {
+            const auto found = std::ranges::find(graph.Nodes, id, &ShaderGraphNode::Id);
+            if (found == graph.Nodes.end())
+                throw std::logic_error("Starter material graph node is unavailable.");
+            return *found;
+        }
+
+        [[nodiscard]] AssetId FindGraphParameter(const ShaderGraphDefinition& graph, const std::string_view symbol)
+        {
+            const auto found = std::ranges::find(graph.Nodes, symbol, &ShaderGraphNode::Symbol);
+            if (found == graph.Nodes.end() || found->Kind != ShaderGraphNodeKind::Parameter)
+                throw std::logic_error("Starter material parameter is unavailable: " + std::string(symbol));
+            return found->Id;
+        }
+
+        [[nodiscard]] const ShaderGraphPin& FindGraphPin(const ShaderGraphNode& node, const std::string_view name,
+                                                         const ShaderGraphPinDirection direction)
+        {
+            const auto found = std::ranges::find_if(node.Pins, [name, direction](const ShaderGraphPin& pin)
+                                                    { return pin.Name == name && pin.Direction == direction; });
+            if (found == node.Pins.end())
+                throw std::logic_error("Starter material graph pin is unavailable: " + node.Name + "." +
+                                       std::string(name));
+            return *found;
+        }
+
+        void ConnectGraph(ShaderGraphDefinition& graph, const AssetId outputNode, const std::string_view outputPin,
+                          const AssetId inputNode, const std::string_view inputPin)
+        {
+            const auto& output =
+                FindGraphPin(FindGraphNode(graph, outputNode), outputPin, ShaderGraphPinDirection::Output);
+            const auto& input = FindGraphPin(FindGraphNode(graph, inputNode), inputPin, ShaderGraphPinDirection::Input);
+            graph.Connections.push_back({AssetId::Generate(), {outputNode, output.Id}, {inputNode, input.Id}});
+        }
+
+        [[nodiscard]] MaterialGraphDefinition CreateStarterMaterial()
+        {
+            auto result = CreateOpenPbrMaterial(MaterialShadingModel::OpenPbrLit);
+            auto& graph = result.SurfaceGraph;
+            const auto master = std::ranges::find(graph.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
+            if (master == graph.Nodes.end())
+                throw std::logic_error("Starter material graph has no surface output.");
+            const auto masterId = master->Id;
+
+            const auto renameParameter =
+                [&graph](const std::string_view current, const std::string_view replacement, ShaderGraphValue value)
+            {
+                auto& node = FindGraphNode(graph, FindGraphParameter(graph, current));
+                node.Name = replacement;
+                node.Symbol = replacement;
+                node.Value = std::move(value);
+                node.ParameterMetadata.Category = "Imported PBR";
+                return node.Id;
+            };
+            const auto tint = renameParameter("BaseColor", "Tint", Color{1.0F, 1.0F, 1.0F, 1.0F});
+            const auto roughnessFactor = renameParameter("Roughness", "RoughnessFactor", 1.0F);
+            const auto metallicFactor = renameParameter("Metallic", "MetallicFactor", 0.0F);
+            const auto emissiveFactor = renameParameter("Emission", "EmissiveFactor", Color{0.0F, 0.0F, 0.0F, 1.0F});
+            const auto opacity = FindGraphParameter(graph, "Opacity");
+            FindGraphNode(graph, opacity).ParameterMetadata.Category = "Imported PBR";
+            graph.Connections.clear();
+
+            const auto addParameter = [&graph](const std::string_view name, const ShaderGraphValueType type,
+                                               ShaderGraphValue value, const ShaderTextureSemantic semantic,
+                                               const Vector2 position)
+            {
+                auto node = CreateShaderGraphNode(ShaderGraphNodeKind::Parameter, type);
+                node.Name = name;
+                node.Symbol = name;
+                node.Value = std::move(value);
+                node.TextureSemantic = semantic;
+                node.EditorPosition = position;
+                node.ParameterMetadata.Category = "Imported PBR";
+                const auto id = node.Id;
+                graph.Nodes.push_back(std::move(node));
+                return id;
+            };
+            const auto addNode = [&graph](const ShaderGraphNodeKind kind, const ShaderGraphValueType type,
+                                          const std::string_view name, const Vector2 position)
+            {
+                auto node = CreateShaderGraphNode(kind, type);
+                node.Name = name;
+                node.EditorPosition = position;
+                const auto id = node.Id;
+                graph.Nodes.push_back(std::move(node));
+                return id;
+            };
+
+            const auto normalScale = addParameter("NormalScale", ShaderGraphValueType::Scalar, 1.0F,
+                                                  ShaderTextureSemantic::Generic, {40.0F, 700.0F});
+            const auto occlusionStrength = addParameter("OcclusionStrength", ShaderGraphValueType::Scalar, 1.0F,
+                                                        ShaderTextureSemantic::Generic, {40.0F, 810.0F});
+            const auto specularFactor = addParameter("SpecularFactor", ShaderGraphValueType::Scalar, 0.5F,
+                                                     ShaderTextureSemantic::Generic, {40.0F, 920.0F});
+            const auto mainTexture = addParameter("MainTexture", ShaderGraphValueType::Texture2D, AssetId{},
+                                                  ShaderTextureSemantic::BaseColor, {-720.0F, 40.0F});
+            const auto normalTexture = addParameter("NormalTexture", ShaderGraphValueType::Texture2D, AssetId{},
+                                                    ShaderTextureSemantic::Normal, {-720.0F, 190.0F});
+            const auto metallicRoughnessTexture =
+                addParameter("MetallicRoughnessTexture", ShaderGraphValueType::Texture2D, AssetId{},
+                             ShaderTextureSemantic::MetallicRoughness, {-720.0F, 340.0F});
+            const auto emissiveTexture = addParameter("EmissiveTexture", ShaderGraphValueType::Texture2D, AssetId{},
+                                                      ShaderTextureSemantic::Emissive, {-720.0F, 640.0F});
+            const auto metallicTexture = addParameter("MetallicTexture", ShaderGraphValueType::Texture2D, AssetId{},
+                                                      ShaderTextureSemantic::Metallic, {-720.0F, 790.0F});
+            const auto roughnessTexture = addParameter("RoughnessTexture", ShaderGraphValueType::Texture2D, AssetId{},
+                                                       ShaderTextureSemantic::Roughness, {-720.0F, 940.0F});
+            const auto specularTexture = addParameter("SpecularTexture", ShaderGraphValueType::Texture2D, AssetId{},
+                                                      ShaderTextureSemantic::Specular, {-720.0F, 1090.0F});
+
+            const auto uv =
+                addNode(ShaderGraphNodeKind::UV, ShaderGraphValueType::Vector2, "Imported UV0", {-940.0F, 480.0F});
+            const auto addSample = [&](const AssetId texture, const std::string_view name, const float y)
+            {
+                const auto sample =
+                    addNode(ShaderGraphNodeKind::TextureSample, ShaderGraphValueType::Color, name, {-420.0F, y});
+                ConnectGraph(graph, texture, "Value", sample, "Texture");
+                ConnectGraph(graph, uv, "UV", sample, "UV");
+                return sample;
+            };
+            const auto baseSample = addSample(mainTexture, "Sample Base Color", 40.0F);
+            const auto normalSample = addSample(normalTexture, "Sample Normal", 190.0F);
+            const auto packedSample = addSample(metallicRoughnessTexture, "Sample Metallic Roughness", 340.0F);
+            const auto emissiveSample = addSample(emissiveTexture, "Sample Emissive", 640.0F);
+            const auto metallicSample = addSample(metallicTexture, "Sample Metallic", 790.0F);
+            const auto roughnessSample = addSample(roughnessTexture, "Sample Roughness", 940.0F);
+            const auto specularSample = addSample(specularTexture, "Sample Specular", 1090.0F);
+
+            const auto baseMultiply = addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Color,
+                                              "Base Color x Tint", {80.0F, 40.0F});
+            ConnectGraph(graph, baseSample, "RGBA", baseMultiply, "A");
+            ConnectGraph(graph, tint, "Value", baseMultiply, "B");
+            ConnectGraph(graph, baseMultiply, "Result", masterId, "BaseColor");
+
+            const auto normalMap = addNode(ShaderGraphNodeKind::NormalMap, ShaderGraphValueType::Vector3,
+                                           "Decode Normal", {80.0F, 180.0F});
+            ConnectGraph(graph, normalSample, "RGBA", normalMap, "Sample");
+            ConnectGraph(graph, normalScale, "Value", normalMap, "Scale");
+            ConnectGraph(graph, normalMap, "Normal", masterId, "Normal");
+
+            const auto metallicMaximum = addNode(ShaderGraphNodeKind::Maximum, ShaderGraphValueType::Scalar,
+                                                 "Metallic Sources", {80.0F, 330.0F});
+            const auto metallicMultiply = addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Scalar,
+                                                  "Metallic Factor", {300.0F, 330.0F});
+            ConnectGraph(graph, packedSample, "B", metallicMaximum, "A");
+            ConnectGraph(graph, metallicSample, "R", metallicMaximum, "B");
+            ConnectGraph(graph, metallicMaximum, "Result", metallicMultiply, "A");
+            ConnectGraph(graph, metallicFactor, "Value", metallicMultiply, "B");
+            ConnectGraph(graph, metallicMultiply, "Result", masterId, "Metallic");
+
+            const auto roughnessSources = addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Scalar,
+                                                  "Roughness Sources", {80.0F, 440.0F});
+            const auto roughnessMultiply = addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Scalar,
+                                                   "Roughness Factor", {300.0F, 440.0F});
+            ConnectGraph(graph, packedSample, "G", roughnessSources, "A");
+            ConnectGraph(graph, roughnessSample, "R", roughnessSources, "B");
+            ConnectGraph(graph, roughnessSources, "Result", roughnessMultiply, "A");
+            ConnectGraph(graph, roughnessFactor, "Value", roughnessMultiply, "B");
+            ConnectGraph(graph, roughnessMultiply, "Result", masterId, "Roughness");
+
+            const auto specularMultiply = addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Scalar,
+                                                  "Specular Factor", {300.0F, 500.0F});
+            ConnectGraph(graph, specularSample, "R", specularMultiply, "A");
+            ConnectGraph(graph, specularFactor, "Value", specularMultiply, "B");
+            ConnectGraph(graph, specularMultiply, "Result", masterId, "Specular");
+
+            const auto occlusionMultiply = addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Scalar,
+                                                   "Occlusion Strength", {300.0F, 550.0F});
+            ConnectGraph(graph, packedSample, "R", occlusionMultiply, "A");
+            ConnectGraph(graph, occlusionStrength, "Value", occlusionMultiply, "B");
+            ConnectGraph(graph, occlusionMultiply, "Result", masterId, "Occlusion");
+
+            const auto emissiveMultiply = addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Color,
+                                                  "Emissive Factor", {300.0F, 660.0F});
+            ConnectGraph(graph, emissiveSample, "RGBA", emissiveMultiply, "A");
+            ConnectGraph(graph, emissiveFactor, "Value", emissiveMultiply, "B");
+            ConnectGraph(graph, emissiveMultiply, "Result", masterId, "Emission");
+
+            const auto baseMask = addNode(ShaderGraphNodeKind::ComponentMask, ShaderGraphValueType::Vector4,
+                                          "Base Alpha", {300.0F, 770.0F});
+            const auto opacityMultiply =
+                addNode(ShaderGraphNodeKind::Multiply, ShaderGraphValueType::Scalar, "Opacity", {510.0F, 770.0F});
+            ConnectGraph(graph, baseMultiply, "Result", baseMask, "Value");
+            ConnectGraph(graph, baseMask, "A", opacityMultiply, "A");
+            ConnectGraph(graph, opacity, "Value", opacityMultiply, "B");
+            ConnectGraph(graph, opacityMultiply, "Result", masterId, "Opacity");
+
+            ValidateMaterialGraph(result);
+            return result;
+        }
+
         struct EngineVersion
         {
             std::uint32_t Major = 0;
@@ -541,12 +733,7 @@ float4 PSMain(VertexOutput input) : SV_Target0
                 const auto shader =
                     database->CreateAsset("Shaders/DefaultUnlit.keireshader", CreateShaderAssetImporter(), shaderBytes);
                 (void)shader;
-                auto materialDefinition = CreateOpenPbrMaterial(MaterialShadingModel::Unlit);
-                const auto color =
-                    std::ranges::find(materialDefinition.SurfaceGraph.Nodes, "Color", &ShaderGraphNode::Symbol);
-                if (color == materialDefinition.SurfaceGraph.Nodes.end())
-                    throw std::logic_error("Starter material did not expose its Color parameter.");
-                color->Value = Color{0.25F, 0.55F, 1.0F, 1.0F};
+                auto materialDefinition = CreateStarterMaterial();
                 const auto materialBytes = MaterialGraphAsset::EncodeSource(materialDefinition);
                 const auto material = database->CreateAsset("Materials/DefaultUnlit.keirematerial",
                                                             CreateMaterialGraphAssetImporter(), materialBytes);

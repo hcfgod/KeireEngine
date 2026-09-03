@@ -682,6 +682,26 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(std::filesystem::exists(created->Root() / "Assets/Shaders/DefaultUnlit.hlsl"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/Shaders/DefaultUnlit.keireshader"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/Materials/DefaultUnlit.keirematerial"));
+    const auto starterMaterialSource =
+        KeireTests::ReadFile(created->Root() / "Assets/Materials/DefaultUnlit.keirematerial");
+    const auto starterMaterial = Keire::MaterialGraphAsset::DecodeSource(
+        std::as_bytes(std::span(starterMaterialSource.data(), starterMaterialSource.size())));
+    CHECK(starterMaterial.ShadingModel == Keire::MaterialShadingModel::OpenPbrLit);
+    const auto starterMaterialProgram = Keire::CompileMaterialProgram(starterMaterial);
+    REQUIRE(starterMaterialProgram.Succeeded());
+    for (const auto property : {std::string_view("Tint"), std::string_view("MainTexture"),
+                                std::string_view("NormalTexture"), std::string_view("MetallicRoughnessTexture"),
+                                std::string_view("MetallicTexture"), std::string_view("RoughnessTexture"),
+                                std::string_view("EmissiveTexture"), std::string_view("SpecularTexture")})
+    {
+        CHECK(std::ranges::find(starterMaterialProgram.Program.Reflection.Properties, property,
+                                &Keire::ShaderPropertyDefinition::Name) !=
+              starterMaterialProgram.Program.Reflection.Properties.end());
+    }
+    CHECK(std::ranges::find(starterMaterialProgram.Passes, Keire::MaterialPass::DeferredGBufferStandard,
+                            &Keire::MaterialPassContract::Pass) != starterMaterialProgram.Passes.end());
+    CHECK(std::ranges::find(starterMaterialProgram.Passes, Keire::MaterialPass::DepthVelocity,
+                            &Keire::MaterialPassContract::Pass) != starterMaterialProgram.Passes.end());
     CHECK(std::filesystem::exists(created->Root() / "Assets/UI/Starter.keirestyle"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterHud.keireui"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterCard.keireui"));

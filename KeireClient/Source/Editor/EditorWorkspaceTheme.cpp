@@ -8,6 +8,7 @@
 #include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorDocumentWorkspaceCoordinator.h"
+#include "KeireClient/Editor/EditorPanelMenuPolicy.h"
 #include "KeireClient/Editor/ExternalAssetImportController.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
@@ -76,7 +77,12 @@ void EditorWorkspaceLayer::DrawEmptyState(Keire::UiFrame& ui, const std::string_
 
 void EditorWorkspaceLayer::DrawPanelMenuItem(Keire::UiFrame& ui, Keire::UiPanelRegistration& panel)
 {
-    if (ui.MenuItem(panel.Title(), panel.Visible()))
+    if (!ui.MenuItem(panel.Title(), panel.Visible()))
+        return;
+
+    if (KeireEditor::EditorPanelMenuActionFor(panel.Visible()) == KeireEditor::EditorPanelMenuAction::Hide)
+        panel.SetVisible(false);
+    else
         panel.RequestFocus();
 }
 

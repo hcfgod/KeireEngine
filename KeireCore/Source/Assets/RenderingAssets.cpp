@@ -485,7 +485,19 @@ namespace Keire
                 fragmentUniformBuffers < minimumFragmentUniformBuffers ||
                 fragmentUniformBuffers > expectedFragmentUniformBuffers ||
                 fragment.value("samplers", 0U) != expectedSamplers)
-                throw std::invalid_argument("Shader violates Kéire's fixed graphics resource-binding ABI.");
+            {
+                throw std::invalid_argument(
+                    "Shader violates Kéire's fixed graphics resource-binding ABI (vertex uniform/storage/samplers=" +
+                    std::to_string(vertex.value("uniform_buffers", 0U)) + "/" +
+                    std::to_string(vertex.value("storage_buffers", 0U)) + "/" +
+                    std::to_string(vertex.value("samplers", 0U)) +
+                    ", fragment uniform/storage/samplers=" + std::to_string(fragmentUniformBuffers) + "/" +
+                    std::to_string(fragment.value("storage_buffers", 0U)) + "/" +
+                    std::to_string(fragment.value("samplers", 0U)) +
+                    ", expected fragment uniform range=" + std::to_string(minimumFragmentUniformBuffers) + ".." +
+                    std::to_string(expectedFragmentUniformBuffers) + ", storage/samplers=" +
+                    std::to_string(expectedFragmentStorageBuffers) + "/" + std::to_string(expectedSamplers) + ").");
+            }
 
             constexpr std::array<std::string_view, 6> vertexTypes{"float3", "float3", "float2",
                                                                   "float4", "float4", "float2"};
@@ -645,6 +657,40 @@ namespace Keire
             return result;
         }
 
+        struct ShaderPassCompileLane final
+        {
+            std::string Role;
+            std::optional<std::string> Define;
+        };
+
+        [[nodiscard]] std::vector<ShaderPassCompileLane> ParseShaderPasses(const Json& manifest)
+        {
+            const auto schemaVersion = manifest.value("schemaVersion", 0U);
+            if (schemaVersion < 3U)
+                return {{"primary", std::nullopt}};
+            const auto& source = manifest.at("passes");
+            if (!source.is_array() || source.empty() || source.size() > ShaderAssetPassRoleHardLimit)
+                throw std::invalid_argument("Shader passes must be a non-empty bounded array.");
+            std::vector<ShaderPassCompileLane> result;
+            std::set<std::string, std::less<>> roles;
+            std::set<std::string, std::less<>> defines;
+            for (const auto& encoded : source)
+            {
+                ShaderPassCompileLane lane;
+                lane.Role = encoded.at("role").get<std::string>();
+                if (!Detail::ValidShaderIdentifier(lane.Role) || !roles.insert(lane.Role).second)
+                    throw std::invalid_argument("Shader pass roles must be unique identifiers.");
+                if (encoded.contains("define"))
+                {
+                    lane.Define = encoded.at("define").get<std::string>();
+                    if (!Detail::ValidShaderIdentifier(*lane.Define) || !defines.insert(*lane.Define).second)
+                        throw std::invalid_argument("Shader pass defines must be unique identifiers.");
+                }
+                result.push_back(std::move(lane));
+            }
+            return result;
+        }
+
         void DiscoverDependencies(const AssetImportContext& context, const std::filesystem::path& relative,
                                   const std::span<const std::filesystem::path> includeRoots,
                                   std::vector<AssetSourceDependency>& output, std::set<std::string>& visiting,
@@ -705,7 +751,7 @@ namespace Keire
         [[nodiscard]] ShaderAssetDefinition ParseShaderManifest(const Json& manifest)
         {
             const auto sourceSchemaVersion = manifest.is_object() ? manifest.value("schemaVersion", 0U) : 0U;
-            if (sourceSchemaVersion == 0U || sourceSchemaVersion > 2U)
+            if (sourceSchemaVersion == 0U || sourceSchemaVersion > 3U)
                 throw std::invalid_argument("Shader manifest has an unsupported schema.");
             ShaderAssetDefinition result;
             result.Source = manifest.at("source").get<std::string>();
@@ -785,7 +831,8 @@ namespace Keire
                 {"Occlusion", ShaderTextureSemantic::Occlusion},
                 {"Emissive", ShaderTextureSemantic::Emissive},
                 {"Metallic", ShaderTextureSemantic::Metallic},
-                {"Roughness", ShaderTextureSemantic::Roughness}};
+                {"Roughness", ShaderTextureSemantic::Roughness},
+                {"Specular", ShaderTextureSemantic::Specular}};
             for (const auto& property : properties)
             {
                 const auto typeName = property.at("type").get<std::string>();
@@ -848,7 +895,14 @@ namespace Keire
 
     const ShaderVariant* ShaderAsset::Variant(const ShaderBinaryFormat format) const noexcept
     {
-        const auto found = std::ranges::find(m_Definition.Variants, format, &ShaderVariant::Format);
+        return Variant(format, "primary");
+    }
+
+    const ShaderVariant* ShaderAsset::Variant(const ShaderBinaryFormat format,
+                                              const std::string_view passRole) const noexcept
+    {
+        const auto found = std::ranges::find_if(m_Definition.Variants, [format, passRole](const ShaderVariant& variant)
+                                                { return variant.Format == format && variant.PassRole == passRole; });
         return found == m_Definition.Variants.end() ? nullptr : &*found;
     }
 
@@ -1204,7 +1258,7 @@ namespace Keire
             throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 5;
+        result.Version = 7;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =
@@ -1220,6 +1274,7 @@ namespace Keire
 
             const auto includeRoots = ParseIncludeRoots(manifest, context);
             const auto defines = ParseDefines(manifest);
+            const auto passLanes = ParseShaderPasses(manifest);
             std::set<std::string> visiting;
             std::set<std::string> visited;
             DiscoverDependencies(context, definition.Source, includeRoots, definition.Dependencies, visiting, visited);
@@ -1250,26 +1305,57 @@ namespace Keire
             stagedIncludeRoots.reserve(includeRoots.size());
             for (const auto& includeRoot : includeRoots)
                 stagedIncludeRoots.push_back(stagedRoot / std::filesystem::relative(includeRoot, context.ProjectRoot));
-            for (const auto format : specification.Formats)
+            for (const auto& passLane : passLanes)
             {
-                const auto name = format == ShaderBinaryFormat::Dxil    ? std::string_view("DXIL")
-                                  : format == ShaderBinaryFormat::SpirV ? std::string_view("SPIRV")
-                                                                        : std::string_view("MSL");
-                const auto extension = format == ShaderBinaryFormat::Msl ? ".metal" : ".bin";
-                const auto vertexPath = temporary.Path() / (std::string("vertex-") + std::string(name) + extension);
-                const auto fragmentPath = temporary.Path() / (std::string("fragment-") + std::string(name) + extension);
-                definition.Variants.push_back(
-                    {format,
-                     Compile(compiler, source, name, "vertex", definition.VertexEntry, vertexPath, stagedIncludeRoots,
-                             defines, specification, temporary.Path()),
-                     Compile(compiler, source, name, "fragment", definition.FragmentEntry, fragmentPath,
-                             stagedIncludeRoots, defines, specification, temporary.Path())});
+                auto laneDefines = defines;
+                if (passLane.Define)
+                {
+                    if (std::ranges::any_of(laneDefines, [&passLane](const auto& define)
+                                            { return define.first == *passLane.Define; }))
+                    {
+                        throw std::invalid_argument("Shader pass defines must not collide with global defines.");
+                    }
+                    laneDefines.emplace_back(*passLane.Define, "1");
+                }
+                for (const auto format : specification.Formats)
+                {
+                    const auto name = format == ShaderBinaryFormat::Dxil    ? std::string_view("DXIL")
+                                      : format == ShaderBinaryFormat::SpirV ? std::string_view("SPIRV")
+                                                                            : std::string_view("MSL");
+                    const auto extension = format == ShaderBinaryFormat::Msl ? ".metal" : ".bin";
+                    const auto stem = passLane.Role + '-' + std::string(name);
+                    const auto vertexPath = temporary.Path() / ("vertex-" + stem + extension);
+                    const auto fragmentPath = temporary.Path() / ("fragment-" + stem + extension);
+                    definition.Variants.push_back(
+                        {format,
+                         Compile(compiler, source, name, "vertex", definition.VertexEntry, vertexPath,
+                                 stagedIncludeRoots, laneDefines, specification, temporary.Path()),
+                         Compile(compiler, source, name, "fragment", definition.FragmentEntry, fragmentPath,
+                                 stagedIncludeRoots, laneDefines, specification, temporary.Path()),
+                         passLane.Role});
+                }
             }
 
-            const auto& spirv =
-                *std::ranges::find(definition.Variants, ShaderBinaryFormat::SpirV, &ShaderVariant::Format);
+            const auto findSpirv = [&definition](const std::string_view role)
+            {
+                return std::ranges::find_if(
+                    definition.Variants, [role](const ShaderVariant& variant)
+                    { return variant.Format == ShaderBinaryFormat::SpirV && variant.PassRole == role; });
+            };
+            auto spirv = definition.Variants.end();
+            for (const auto role : {std::string_view("forwardOpaque"), std::string_view("forwardTransparent"),
+                                    std::string_view("primary")})
+            {
+                spirv = findSpirv(role);
+                if (spirv != definition.Variants.end())
+                    break;
+            }
+            if (spirv == definition.Variants.end())
+            {
+                spirv = std::ranges::find(definition.Variants, ShaderBinaryFormat::SpirV, &ShaderVariant::Format);
+            }
             if (definition.InstanceAddressingAbiVersion == 2U &&
-                !HasSpirvDescriptorBinding(spirv.Vertex, "InstanceAddressingData", 1U, 2U))
+                !HasSpirvDescriptorBinding(spirv->Vertex, "InstanceAddressingData", 1U, 2U))
             {
                 throw std::invalid_argument(
                     "Shader instance-addressing ABI v2 requires uint4 InstanceParameters at vertex b2/space1.");
@@ -1277,11 +1363,11 @@ namespace Keire
             const auto vertexSpirv = temporary.Path() / "reflection.vert.spv";
             const auto fragmentSpirv = temporary.Path() / "reflection.frag.spv";
             std::ofstream(vertexSpirv, std::ios::binary)
-                .write(reinterpret_cast<const char*>(spirv.Vertex.data()),
-                       static_cast<std::streamsize>(spirv.Vertex.size()));
+                .write(reinterpret_cast<const char*>(spirv->Vertex.data()),
+                       static_cast<std::streamsize>(spirv->Vertex.size()));
             std::ofstream(fragmentSpirv, std::ios::binary)
-                .write(reinterpret_cast<const char*>(spirv.Fragment.data()),
-                       static_cast<std::streamsize>(spirv.Fragment.size()));
+                .write(reinterpret_cast<const char*>(spirv->Fragment.data()),
+                       static_cast<std::streamsize>(spirv->Fragment.size()));
             const auto vertexReflection = temporary.Path() / "vertex.json";
             const auto fragmentReflection = temporary.Path() / "fragment.json";
             RunCompiler(
@@ -1302,6 +1388,9 @@ namespace Keire
         {
             auto definition = ShaderAsset::Decode(bytes)->Definition();
             const auto target = ResolveHostTarget(requested);
+            std::set<std::string, std::less<>> passRoles;
+            for (const auto& variant : definition.Variants)
+                passRoles.insert(variant.PassRole);
             const auto required = [target](const ShaderBinaryFormat format)
             {
                 if (target == AssetTargetPlatform::Windows)
@@ -1312,9 +1401,10 @@ namespace Keire
             };
             std::erase_if(definition.Variants,
                           [&required](const ShaderVariant& variant) { return !required(variant.Format); });
-            const std::size_t expected = target == AssetTargetPlatform::Windows ? 2U : 1U;
+            const std::size_t expectedPerRole = target == AssetTargetPlatform::Windows ? 2U : 1U;
+            const auto expected = passRoles.size() * expectedPerRole;
             if (definition.Variants.size() != expected)
-                throw std::runtime_error("Shader asset does not contain the requested target variant.");
+                throw std::runtime_error("Shader asset does not contain every requested target pass-role variant.");
             return Detail::EncodeCanonicalShaderAsset(definition);
         };
         return result;
@@ -1327,6 +1417,7 @@ namespace Keire
         result.Version = 5;
         result.Type = MaterialAsset::StaticType();
         result.Extensions = {std::string(LegacyMaterialAssetSourceExtension)};
+        result.PreviousNames = {"Keire.Material"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
             const auto source = MaterialAsset::DecodeAuthoringSource(bytes);

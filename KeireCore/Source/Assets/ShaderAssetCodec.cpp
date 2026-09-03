@@ -81,6 +81,7 @@ namespace Keire::Detail
             for (const auto& variant : definition.Variants)
             {
                 variants.push_back({{"format", static_cast<std::uint8_t>(variant.Format)},
+                                    {"passRole", variant.PassRole},
                                     {"vertex", Json::binary(ToUnsigned(variant.Vertex))},
                                     {"fragment", Json::binary(ToUnsigned(variant.Fragment))}});
             }
@@ -119,9 +120,9 @@ namespace Keire::Detail
                 throw std::invalid_argument("Canonical shader data must be an object.");
             ShaderAssetDefinition result;
             const auto sourceSchemaVersion = source.at("schemaVersion").get<std::uint32_t>();
-            if (sourceSchemaVersion == 0U || sourceSchemaVersion > 2U)
+            if (sourceSchemaVersion == 0U || sourceSchemaVersion > ShaderAssetSchemaVersion)
                 throw std::invalid_argument("Canonical shader data has an unsupported schema.");
-            result.SchemaVersion = 2;
+            result.SchemaVersion = ShaderAssetSchemaVersion;
             result.Source = source.at("source").get<std::string>();
             result.VertexEntry = source.at("vertexEntry").get<std::string>();
             result.FragmentEntry = source.at("fragmentEntry").get<std::string>();
@@ -188,8 +189,10 @@ namespace Keire::Detail
             {
                 const auto& vertex = variant.at("vertex").get_binary();
                 const auto& fragment = variant.at("fragment").get_binary();
-                result.Variants.push_back({static_cast<ShaderBinaryFormat>(variant.at("format").get<std::uint8_t>()),
-                                           ToBytes(vertex), ToBytes(fragment)});
+                result.Variants.push_back(
+                    {static_cast<ShaderBinaryFormat>(variant.at("format").get<std::uint8_t>()), ToBytes(vertex),
+                     ToBytes(fragment),
+                     sourceSchemaVersion >= 3U ? variant.at("passRole").get<std::string>() : std::string("primary")});
             }
             ValidateShaderDefinition(result, false);
             return result;

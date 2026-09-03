@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -43,11 +44,20 @@ namespace Keire::RenderBackend::GpuOcclusionPolicy
     inline constexpr float ForcedMinimumOccluderPixels = 256.0F;
     inline constexpr std::uint32_t AutomaticQualifyingFrames = 2U;
     inline constexpr std::uint32_t AutomaticMinimumActiveFrames = 30U;
+    inline constexpr std::uint32_t AutomaticRetryInitialFrames = 60U;
+    inline constexpr std::uint32_t AutomaticRetryMaximumFrames = 1920U;
     inline constexpr std::uint32_t AutomaticCoverageColumns = 16U;
     inline constexpr std::uint32_t AutomaticCoverageRows = 9U;
     inline constexpr std::uint32_t AllocationRetryMaximumFrames = 120U;
     inline constexpr std::uint64_t ConservativeTextureBytesPerTexel = 4U;
     inline constexpr std::uint64_t MaximumTextureBytesPerSurface = 256ULL * 1024ULL * 1024ULL;
+
+    [[nodiscard]] constexpr std::uint32_t
+    AutomaticUnprofitableRetryDelay(const std::uint32_t previousUnprofitableActivations) noexcept
+    {
+        const auto shift = std::min(previousUnprofitableActivations, 5U);
+        return std::min(AutomaticRetryInitialFrames << shift, AutomaticRetryMaximumFrames);
+    }
 
     [[nodiscard]] constexpr ResourceExtent ResolveConservativeResourceExtent(const std::uint32_t width,
                                                                              const std::uint32_t height) noexcept

@@ -65,8 +65,12 @@ static void ManagedMathFormattingContract()
 
         Keire.Log.Info($"Position: {new Keire.Vector2(1.25f, -2.5f)}");
         Keire.Debug.Log(new Keire.Vector2(1.25f, -2.5f));
+        Keire.Debug.DrawLine(new Keire.Vector3(1.0f, 2.0f, 3.0f), new Keire.Vector3(4.0f, 5.0f, 6.0f),
+                             new Keire.Color(1.0f, 0.5f, 0.25f), 0.5f);
         Assert(NativeLogFixture.WriteCount == 2,
                "Interpolated and object-based Vector2 logging must both reach the native log without recursion.");
+        Assert(NativeLogFixture.DebugLineCount == 1,
+               "Debug.DrawLine must use the production native runtime bridge.");
     }
     finally
     {

@@ -707,14 +707,28 @@ $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\P
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
-Assert-True ($menuScript.Contains('Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop')) `
-    "Windows batch launcher loads required hashing and JSON cmdlets explicitly"
+Assert-True (-not $menuScript.Contains('Import-Module Microsoft.PowerShell.Utility')) `
+    "Windows batch launcher leaves utility-module autoloading available to nested build and package scripts"
+Assert-True ($windowsCommon.Contains(
+        'Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop -Scope Local -Force')) `
+    "Windows build and package scripts import required hashing and JSON commands in their own command scope"
 Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('"package-hub"') -and
              $menuScript.Contains('$Configuration = "Dist"')) "Dist product package launcher commands"
 Assert-True ($menuScript.Contains('"stage-editor"') -and $menuScript.Contains('"stage-hub"') -and
              $menuScript.Contains('-DevelopmentStage') -and $menuScript.Contains('-StageOnly') -and
              $menuScript.Contains('-not $GeneratorWasProvided') -and $menuScript.Contains('$Generator = "ninja"')) `
     "Fast Dist product staging commands default to Ninja and bypass archive publication"
+Assert-True ($menuScript.Contains('Invoke-IsolatedWindowsPowerShell $arguments') -and
+             $menuScript.Contains('"-AllowDirty", "-DevelopmentStage"') -and
+             $menuScript.Contains('"-AllowDirty", "-StageOnly", "-DevelopmentStage"')) `
+    "Development staging isolates nested package scripts in a fresh Windows PowerShell command scope"
+Assert-True ($menuScript.Contains(
+        '$windowsModulePath = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\Modules"') -and
+             $menuScript.Contains('$env:PSModulePath = (@($windowsModulePath) + $remainingModulePaths)') -and
+             $menuScript.Contains('$env:PSModulePath = $previousModulePath')) `
+    "Isolated Windows PowerShell staging prefers compatible built-in modules and restores the caller environment"
+Assert-True ($menuScript.Contains('$SelectedCommand -notin @("help", "stage-editor", "stage-hub")')) `
+    "The isolated development package process owns the shared workspace lock"
 Assert-True ($menuScript.Contains('-AllowDirty (package commands only; emits a local development artifact and is rejected in CI)')) `
     "Windows launcher documents the dirty-package development-only boundary"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
@@ -965,10 +979,10 @@ Assert-True ($dependencyScript.Contains('shader-compiler.ps1')) "Host shader com
 Assert-True ($dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT') -and
              $dependencyScript.Contains('ReleaseDLL') -and
              $dependencyScript.Contains('libsodium.dll')) "Pinned private catalog verifier bootstrap"
-$coralRoot = Join-Path (Get-RepositoryRoot) "Patches\Coral"
 $coralScript = Get-Content (Join-Path $Windows "coral.ps1") -Raw
 $unixCoralScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\coral.sh") -Raw
 $unixCommonScript = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Unix\common.sh") -Raw
+$dependencyLock = Get-Content (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") -Raw
 Assert-True ($unixCoralScript.Contains('pinned_dotnet_sdk_root "$dotnet_path" "$dotnet_sdk_version"') -and
              $unixCoralScript.Contains('"-DDOTNET_EXE=$dotnet_executable"') -and
              $unixCoralScript.Contains('"$dotnet_sdk_version" "$dotnet_root" "$macos_deployment_target"') -and
@@ -987,8 +1001,10 @@ Assert-True ($coralScript.Contains('Assert-KeireLockedGitSource') -and
              $coralScript.Contains('Get-WindowsToolchainIdentity') -and
              $coralScript.Contains('Get-KeireCoralBuildVariantKey') -and
              $coralScript.Contains('$WorkspaceIdentity = Get-KeireWorkspaceIdentity $Root') -and
-             $coralScript.Contains('$ExpectedStamp = "$($Lock.CORAL_COMMIT)|$PatchDigest|$BuildVariant|')) `
-    "Windows Coral source and variant-isolated patched-build caches are validated and serialized"
+             $coralScript.Contains('git clone --quiet --no-hardlinks --no-checkout $Source') -and
+             $coralScript.Contains('$CacheKey = "$($Lock.CORAL_COMMIT.Substring(0, 12))-$BuildVariant"') -and
+             -not $coralScript.Contains('Patches\Coral') -and -not $coralScript.Contains('git apply')) `
+    "Windows Coral source and variant-isolated build caches are validated without local patching"
 Assert-True ($dependencyScript.Contains('-Configuration Debug -Architecture $Architecture') -and
              $dependencyScript.Contains('-Configuration Release -Architecture $Architecture')) `
     "Windows dependency bootstrap forwards the selected target architecture to Coral"
@@ -996,9 +1012,11 @@ Assert-True ($unixCoralScript.Contains('locked_git_source_validate') -and
              $unixCoralScript.Contains('".locks/coral-$coral_commit.lock"') -and
              $unixCoralScript.Contains('".locks/coral-$cache_key.lock"') -and
              $unixCoralScript.Contains('coral_build_variant_key') -and
+             $unixCoralScript.Contains('git clone --quiet --no-hardlinks --no-checkout "$source_path"') -and
              $unixCoralScript.Contains('workspace_key="$(workspace_identity "$ROOT")"') -and
-             $unixCoralScript.Contains('expected_stamp="$coral_commit|$patch_digest|$variant_key|')) `
-    "Unix Coral source and variant-isolated patched-build caches are validated and serialized"
+             $unixCoralScript.Contains('cache_key="${coral_commit:0:12}-$variant_key"') -and
+             -not $unixCoralScript.Contains('Patches/Coral') -and -not $unixCoralScript.Contains('git apply')) `
+    "Unix Coral source and variant-isolated build caches are validated without local patching"
 Assert-True ($unixCoralScript.Contains('xcrun --sdk macosx --show-sdk-path') -and
              $unixCoralScript.Contains('xcrun --sdk macosx --show-sdk-version') -and
              $unixCoralScript.Contains('"-DCMAKE_OSX_SYSROOT=$macos_sdk_path"')) `
@@ -1025,20 +1043,10 @@ Assert-True ($coralScript.Contains('$env:CL') -and $coralScript.Contains('$env:_
 Assert-True ($dependencyScript.Contains('Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "dependencies"') -and
              $dependencyScript.Contains('Coral Debug and Release metadata must resolve to one checkout-isolated build variant')) `
     "Windows dependency consumers retain a checkout lock and validate Coral variant coherence"
-$coralPatchPath = "Patches/Coral/0001-keire-net10-nethost-lifetime.patch"
-$coralPatchEol = ([string](& git -C (Get-RepositoryRoot) check-attr eol -- $coralPatchPath)).Trim()
-Assert-Equal $coralPatchEol "$coralPatchPath`: eol: lf" "Coral patch LF checkout policy"
-$coralHostPatch = Get-Content (Join-Path (Get-RepositoryRoot) $coralPatchPath) -Raw
-Assert-True (-not $coralHostPatch.Contains('\ No newline at end of file')) `
-    "Coral host patch avoids cross-EOL end-of-file context"
-$coralBootstrapPatch = Get-Content (Join-Path $coralRoot "0004-keire-apply-host-settings-before-discovery.patch") -Raw
-Assert-True ($coralBootstrapPatch.IndexOf('m_Settings = std::move(InSettings);') -lt
-             $coralBootstrapPatch.IndexOf('if (!LoadHostFXR())')) "Bundled .NET root is installed before Coral host discovery"
-$coralWarningPatch = Get-Content (Join-Path $coralRoot "0005-keire-warning-clean-native-host.patch") -Raw
-Assert-True ($coralWarningPatch.Contains('memcpy(buffer, InString.data(), InString.size() * sizeof(UCChar))') -and
-             $coralWarningPatch.Contains('buffer[InString.size()] = {};') -and
-             $coralWarningPatch.Contains('reinterpret_cast<const UCChar*>(UINTPTR_MAX)') -and
-             $coralWarningPatch.Contains('target_compile_options(Coral.Native PRIVATE /wd4996)')) "Warning-clean Coral native host patch"
+Assert-True ($dependencyLock.Contains('CORAL_URL=https://github.com/hcfgod/Coral.git') -and
+             $dependencyLock.Contains('CORAL_COMMIT=ffae6176ec5d922f61e3b5f944a133837715a706') -and
+             -not (Test-Path (Join-Path (Get-RepositoryRoot) 'Patches\Coral'))) `
+    "Coral consumes the tested fork commit without a repository-local patch set"
 $premakePolicy = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
 $distributionPublisherProject = Get-Content `
     (Join-Path (Get-RepositoryRoot) `
@@ -1502,9 +1510,12 @@ try {
     (Get-Item (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")).LastWriteTimeUtc =
         [DateTime]::UtcNow.AddMinutes(-3)
     (Get-Item $managedSource).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-2)
-    (Get-Item (Join-Path $managedFixture "KeireManaged")).LastWriteTimeUtc =
-        [DateTime]::UtcNow.AddMinutes(-2)
-    (Get-Item $managedAssembly).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-1)
+    foreach ($sourceRoot in @("KeireManaged", "KeireEditorManaged", "KeireManaged.Generators")) {
+        (Get-Item (Join-Path $managedFixture $sourceRoot)).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-2)
+    }
+    foreach ($assembly in @($managedAssembly, $managedEditorAssembly, $managedGeneratorAssembly)) {
+        (Get-Item $assembly).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-1)
+    }
     $global:LASTEXITCODE = 37
     & (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
     Assert-Equal $LASTEXITCODE 0 "Current managed runtime API launcher exit code"
@@ -1523,6 +1534,7 @@ finally {
 }
 Assert-True ($corePremake.Contains('Source/ECS/Components/CameraComponent.cpp') -and $corePremake.Contains('Source/ECS/Components/MeshRendererComponent.cpp')) "Explicit built-in component translation units"
 $generatedContentScript = Get-Content (Join-Path $Windows 'prepare-generated-content.ps1') -Raw
+$builtinShaderScript = Get-Content (Join-Path $Windows 'builtin-shaders.ps1') -Raw
 Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              $generatedContentScript.Contains('builtin-shaders.ps1') -and
              $generatedContentScript.Contains('builtin-occlusion.ps1') -and
@@ -1532,7 +1544,13 @@ Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugPyramid.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinOcclusionDebugBounds.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinSpatialSelection.hlsl')) -and
-             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl'))) `
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinUnlit.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinDeferredGBuffer.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinDeferredLighting.hlsl')) -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinIrradyn.hlsl')) -and
+             $builtinShaderScript.Contains('BuiltinDeferredGBuffer') -and
+             $builtinShaderScript.Contains('BuiltinDeferredLighting') -and
+             $builtinShaderScript.Contains('BuiltinIrradyn')) `
     "First-party built-in shader generation"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
     Where-Object { $_.Name -like 'Render*.cpp' -or $_.Name -like 'Render*.h' } |
@@ -1552,6 +1570,8 @@ Assert-True ($renderSource.Contains('ReadbackRGBA8') -and (Test-Path (Join-Path 
 $testRunner = Get-Content (Join-Path $Windows 'test.ps1') -Raw
 Assert-True ($testRunner.Contains('direct3d12') -and $testRunner.Contains('vulkan') -and $testRunner.Contains('KEIRE_REQUIRE_GPU_TESTS')) "Conditional Windows GPU test backends"
 Assert-True ($renderSource.Contains('BuiltinShaderUniformBufferCount(vertex)') -and $renderSource.Contains('SDL_PushGPUFragmentUniformData')) "Built-in and asset-backed shader uniform bindings"
+Assert-True ($renderSource.Contains('EnsureDeferredPipelines') -and $renderSource.Contains('DeferredGBufferPipeline') -and
+             $renderSource.Contains('DeferredLightingPipeline')) "Deferred Hybrid pipelines remain capability-gated and lifecycle-owned"
 $renderFacadeLines = @(Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSystem.cpp')).Count
 Assert-True ($renderFacadeLines -lt 700) "RenderSystem facade remains below 700 lines ($renderFacadeLines lines)"
 $renderSettingsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSettings.cpp') -Raw

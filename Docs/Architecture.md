@@ -196,8 +196,38 @@ are also published to the Assets profiler category.
 Renderer resource replacement uses the fence retirement queue. GPU bytes remain charged until their submission fence
 signals, and CPU pages remain owned by snapshots, jobs, or consumers until their last reference releases. The compiled
 frame graph publishes an immutable inspection snapshot containing deterministic pass order, resource lifetimes,
-transitions, estimated bytes, and physical alias slots. The Render Graph panel reads that snapshot rather than compiling
-a second graph and performs JSON or Graphviz export only after an explicit atomic-save action.
+transitions, estimated bytes, physical alias slots, exact texture formats/usages, sample counts, and relative extents.
+Inspection schema 2 is populated from the compiled graph rather than inferred from resource names. The Render Graph
+panel reads that snapshot rather than compiling a second graph and performs JSON or Graphviz export only after an
+explicit atomic-save action.
+
+Production transient textures are typed. The compiler derives compatibility keys from format, sample count, and
+relative extent, rejects forged or depth/color-incompatible descriptors, and unions usage flags when disjoint logical
+resources share one physical slot. Surface creation translates the compiled allocation directly into SDL_GPU format
+and usage requirements and fails before publication when the selected backend cannot satisfy them. Forward+ and
+Deferred Hybrid plans share the common visibility, shadow, spatial-lighting, transparent, and post-processing tail;
+the deferred plan inserts depth/velocity, standard/extended GBuffer, DBuffer decal, lighting, and forward-only opaque
+passes. Its portable built-in standard-GBuffer and lighting pipelines are probed as one transaction after device
+creation; unsupported formats or any partial creation failure release the entire set, while recovery invalidates it for
+the replacement device. Deferred capability is published only after the complete probe. Single-sample surfaces route
+standard deferred materials into the GBuffer and forward-only materials into the opaque tail. Supported multisample
+surfaces keep those single-sample data passes, then shade final geometry through a multisampled forward coverage
+subpass and resolve before Irradyn. Unsupported hardware or missing resources retains Forward+ without changing
+project intent.
+
+Immutable scene capture owns temporal transform and skin-palette history rather than mutating ECS presentation state.
+History is keyed
+by scene, entity, surface ID, and surface epoch, advances only for accepted consecutive frame IDs, and is retired after
+a bounded inactive interval. A separate surface-epoch camera record supplies previous view-projection. The generated
+depth/velocity lane combines those values per instance with paired current/previous CPU or compute-skinned vertex
+streams and previous-time world-position offset. A missing or discontinuous history aliases current to previous and is
+therefore fail-zero. Decal-domain scene draws form a third prepared list and execute only through the DBuffer role
+on an active deferred surface. Fullscreen lighting consumes those DBuffer attachments together with the already-owned
+Forward+ storage buffers and directional/local shadow resources, avoiding a second light-list lifetime or ordering
+contract. Its fourth GBuffer attachment transports baked-lighting layers, mixed-mask layers, spatial-selection record,
+and additive contribution; the resolve binds the contribution's lighting arrays and evaluates SH/lightmap diffuse,
+two-probe box-projected specular IBL, cookies, contact shadows, and mixed-light masks. When GPU spatial classification is
+unavailable, preparation uploads the same bounded record ABI from deterministic CPU selection.
 
 Each render surface retains grow-only dynamic upload storage for scene instances and CPU VFX vertices. Instance data is
 mapped once into a cyclic transfer arena and copied to reusable per-batch storage in one copy pass; CPU VFX uses the same
@@ -447,7 +477,7 @@ not become build authority or expose runtime-host implementation state.
 Each collectible managed load context receives its own Coral internal-call table. Calls cross an application-owned
 `IScriptRuntimeServices` boundary, retain only value handles, validate the currently executing script generation, and
 route gameplay logging, frame time, input actions, and transform access back to owner-thread engine services.
-Coral's patched reflection registry assigns monotonic opaque IDs with reference-equality lookup, so hash collisions and
+Coral's forked reflection registry assigns monotonic opaque IDs with reference-equality lookup, so hash collisions and
 retired metadata cannot alias a later type, method, field, property, or attribute. Context, assembly, and reflected-method
 caches are concurrent across independent runtime hosts; diagnostic load status is thread-local.
 Managed build generations contain both the engine API and gameplay outputs. Source checkouts incrementally compile the
@@ -696,8 +726,10 @@ Schemas v1-v4 migrate in memory, while unknown component records remain round-tr
 
 `SceneRuntimeSession` clones the in-memory authored scene for Play while retaining entity IDs. `SceneRuntimeWorld` owns
 the ordered set of sessions shared by Editor Play and the packaged player, assigns non-reused opaque handles, and
-commits additive load/unload/active changes at owner-thread safe boundaries. Each session retains isolated physics,
-audio, VFX, UI, and managed lifecycle state while all loaded sessions tick and render. A persistent hierarchy keeps its
+accepts stopped sessions so the owner can register them before Play lifecycle traversal. The world resolves their scene
+asset from the authored source until the runtime clone is published. It commits additive load/unload/active changes at
+owner-thread safe boundaries. Each session retains isolated physics, audio, VFX, UI, and managed lifecycle state while
+all loaded sessions tick and render. A persistent hierarchy keeps its
 original session as an unloaded carrier so identity and lifecycle are not reconstructed across transitions. Pause
 suppresses update callbacks, Step advances one fixed tick, and world Close stops every session. Component callback
 exceptions fault only their session and preserve the edit scene. Detailed contracts live in
@@ -768,10 +800,10 @@ component path and editor-produced value before simulation advances again, so th
 Runtime, and Mixed final values. Its dependency graph locks required created ancestors/components and rejects
 delete/edit or remove/edit contradictions before definition validation.
 
-The primary Play session is assigned before its managed `Awake`/`OnEnable` traversal and adopted into the runtime world
-after startup succeeds. Editor managed services therefore resolve the pending primary session when world lookup has not
-yet become available; this matches packaged runtime startup and keeps rendering, audio, physics, and UI component access
-valid throughout lifecycle callbacks. Managed callback failures retained by `ScriptSystem` are advanced through a
+The primary Play session is assigned and adopted into the runtime world before its managed `Awake`/`OnEnable`
+traversal. `SceneRuntimeSession::Play` publishes the cloned scene before invoking those callbacks, so active-scene,
+name, tag, component, rendering, audio, physics, and UI queries all resolve through the same world contract from the
+first lifecycle callback onward. Managed callback failures retained by `ScriptSystem` are advanced through a
 per-service cursor and published once to the Editor Console with their generation, type, callback, entity, and message.
 
 Play-stop decisions are queued from UI callbacks and executed at the next update safe boundary. Render submission
@@ -829,10 +861,32 @@ and destroys the context before RenderSystem releases GPU and window resources.
 Scene submissions carry a Kéire-owned `RenderEnvironmentSettings` value. JSON persistence stays private in
 `ProjectSettings/Rendering.keiresettings`; public headers expose only colors, scalar values, paths, and validation
 functions. Fragment-stage lighting consumes that environment together with the deterministic active Directional Light.
-Schema 4 also stores requested Render Path, Global Illumination, and Irradyn quality as project intent. A pure
-capability resolver produces the effective path/mode and separate fallback reasons. The current backend advertises
-Forward+ with GI disabled; Deferred Hybrid and Irradyn remain explicit unavailable capabilities instead of silently
-running a different pipeline under the requested label. Schemas 1–3 migrate to Forward+/disabled/balanced defaults.
+Schema 5 stores requested Render Path, anti-aliasing, static and bounded dynamic resolution, Global Illumination, and
+Irradyn quality as project intent. `Automatic` resolves to the best available Forward+/Deferred-Hybrid path; TAA below
+native scale remains TAA followed by spatial presentation upscaling, not TAAU. A pure capability resolver publishes
+requested/effective modes and explicit fallback reasons.
+Schemas 1–4 migrate without silently enabling temporal or dynamic-resolution behavior.
+The renderer publishes Deferred Hybrid only after its complete backend probe succeeds; Project Settings consumes that
+live capability, and per-surface recording falls back to Forward+ only for unavailable exact attachments.
+The same live capability snapshot includes FXAA, exact 2x/4x MSAA, temporal AA, deferred multisample, and dynamic
+resolution. Scene, Game, and runtime view owners resolve it before recording UI, presentation, or readback work and
+transactionally request the required surface sample count. None, FXAA, and TAA use a single-sample surface; supported
+MSAA owns the corresponding multisample epoch for Forward+ or Deferred Hybrid. Hardware inability still produces an
+explicit AA fallback, but render-path and GI selection no longer makes an otherwise supported AA mode unavailable.
+Every path owns one published temporal-history texture plus one writer per accepted frame slot. The tone-map pass
+reprojects that history with the depth/velocity lane, clamps it against current-frame neighbors, and copies the resolved
+color into the frame-owned history writer before overlays. Publication rotates color and history together only after
+the submitted fence succeeds. Resize, recovery, path changes, and camera-frame discontinuities invalidate reuse;
+directional cascade construction always consumes the unjittered camera projection. The motion lane applies the current
+jitter to both camera transforms so static output does not inherit the Halton sample displacement, and its lifetime is
+declared through tone mapping to prevent transient aliasing before TAA samples it.
+Irradyn owns a second reduced-resolution published/writer history set. The Deferred-Hybrid graph runs its trace after
+transparency and VFX, copies the accumulated result into the accepted frame slot's writer history, then resolves it
+through a bilateral additive pass before tone mapping. Irradyn history rotates only after successful frame publication
+and is invalidated with surface resize, camera discontinuity, path changes, and device recovery. Its persistent CPU
+scene-card cache is surface-owned and render-thread-affine; bounded rolling updates keep transformed opaque/masked/WPO
+bounds plus low-density transparent, hair, volume, and VFX aggregates without exposing renderer implementation state
+through the public API.
 `ProjectSettingsDocument` owns the editor draft, validation, dirty lifecycle, atomic save, and coalesced undo command;
 the workspace consumes its immutable settings for Scene and Game submissions instead of retaining a mutable copy.
 Every primary editor panel owns its registration and persistent UI state. `SceneViewportPanel` owns its render view,
@@ -1062,15 +1116,19 @@ mutable renderer-global state. Instance import publishes its own stable ordinary
 the inherited shader variant; editor pickers and viewport drops alias the authoring instance to that renderer-safe
 identity. Legacy `ShaderGraphInstanceAsset` remains readable by its codec for explicit migration but is not registered
 for new import or creation.
-The program artifact separates authoring from render consumption: it carries target/stage entry points, stable
+The schema-2 program artifact separates authoring from render consumption: it carries target/stage entry points, stable
 properties, resource bindings, variants, dependency paths, diagnostics, and the complete eligible material-pass set.
+Cooked variants add exact pass/stage/D3D12-Vulkan-Metal backend binaries, per-stage reflection, and verified SHA-256
+payload identities. Cooked validation rejects incomplete lanes, undeclared material passes, duplicate stages, backend
+format mismatches, and payload corruption before runtime publication.
 Simple opaque OpenPBR/Unlit surfaces select the standard GBuffer contract; closure and layer-stack authoring selects
 the extended contract; Hair/Eye and transparent surfaces remain forward-only. Every material retains a forward pass so
 capability fallback is a renderer decision rather than a recompile or implicit shader convention.
 
-Shader compiler work has a second immutable boundary. `ShaderCompileManifest` canonicalizes exact source/toolchain
-digests, virtual include paths, defines, stage, entry, platform, architecture, output format, compiler policy flags, and
-program ABI before deriving a SHA-256 work key. Local/remote scheduling policy and priority stay outside that key. The
+Shader compiler work has a second immutable boundary. Schema-2 `ShaderCompileManifest` canonicalizes exact
+source/toolchain digests, virtual include paths, defines, pass, stage, entry, platform, architecture, backend, output
+format, compiler policy flags, and program ABI into deterministic CBOR before deriving a domain-separated SHA-256 work
+key. Local/remote scheduling policy and priority stay outside that key. The
 Supabase queue is disabled by default, forces tenant-scoped RLS, exposes owner reads only, and confines enqueue, lease,
 renew, complete, and fail transitions to service-role coordinator RPCs with pinned search paths. Executors are
 intended to remain networkless; artifacts live in a private content-addressed bucket and complete only under the active
@@ -1244,7 +1302,7 @@ runtime assembly's source roots when `Assets/Scripts/Generated` is not already c
 
 ## Dependency Build Boundary
 
-Assimp and stb are immutable private asset-import dependencies. Coral d53b268 with the versioned Kéire patch set,
+Assimp and stb are immutable private asset-import dependencies. The Kéire Coral fork at ffae617,
 .NET 10, Jolt 5.6.0, Recast/Detour 1.6.0, and miniaudio
 0.11.25 are immutable private gameplay dependencies resolved into compiler-keyed source and build caches from exact
 commits in `Config/Dependencies.lock`. The dependency bridge builds Assimp statically with

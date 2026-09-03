@@ -269,7 +269,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 22;
+        result.Version = 23;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -368,9 +368,18 @@ namespace Keire
                     diagnostic += " " + std::string(projectIO->LastReadFailure());
                 throw std::invalid_argument(std::move(diagnostic));
             }
-            const bool animationSource = contentType == "animation";
+            const bool explicitlyAnimationSource = contentType == "animation";
+            const bool animationSource =
+                explicitlyAnimationSource ||
+                (contentType == "model" && scene->mNumMeshes == 0U && scene->mNumAnimations != 0U);
             if (animationSource && scene->mNumAnimations == 0)
                 throw std::invalid_argument("Animation Source import found no animation clips in the selected file.");
+            if (animationSource && !explicitlyAnimationSource)
+            {
+                output.Diagnostics.push_back(
+                    {AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                     "Detected an animation-only source and published skeleton, rig, and clip assets automatically."});
+            }
             bool hasSkinning = false;
             for (unsigned int meshIndex = 0; meshIndex < scene->mNumMeshes; ++meshIndex)
                 hasSkinning = hasSkinning || (scene->mMeshes[meshIndex] && scene->mMeshes[meshIndex]->mNumBones != 0);
@@ -425,9 +434,8 @@ namespace Keire
             }
             if (extension == "fbx" || extension == "obj")
             {
-                constexpr std::array legacyTextureTypes{aiTextureType_SPECULAR, aiTextureType_SHININESS,
-                                                        aiTextureType_OPACITY, aiTextureType_REFLECTION,
-                                                        aiTextureType_UNKNOWN};
+                constexpr std::array legacyTextureTypes{aiTextureType_SHININESS, aiTextureType_OPACITY,
+                                                        aiTextureType_REFLECTION, aiTextureType_UNKNOWN};
                 for (unsigned int materialIndex = 0; materialIndex < scene->mNumMaterials; ++materialIndex)
                     for (const auto type : legacyTextureTypes)
                         if (scene->mMaterials[materialIndex]->GetTextureCount(type) != 0)
@@ -617,6 +625,14 @@ namespace Keire
                             sourceMaterial->Get(AI_MATKEY_COLOR_EMISSIVE, emissive) == aiReturn_SUCCESS)
                             definition.Properties.emplace("EmissiveFactor",
                                                           Color{emissive.r, emissive.g, emissive.b, 1.0F});
+                        aiColor3D specular{0.5F, 0.5F, 0.5F};
+                        if (declared("SpecularFactor") &&
+                            sourceMaterial->Get(AI_MATKEY_COLOR_SPECULAR, specular) == aiReturn_SUCCESS)
+                        {
+                            definition.Properties.emplace(
+                                "SpecularFactor",
+                                std::clamp(std::max({specular.r, specular.g, specular.b}), 0.0F, 1.0F));
+                        }
 
                         const auto addTexture = [&](const aiTextureType type, const std::string_view property,
                                                     const TextureSemantic semantic,
@@ -646,13 +662,22 @@ namespace Keire
                                    TextureColorSpace::Linear);
                         addTexture(aiTextureType_GLTF_METALLIC_ROUGHNESS, "MetallicRoughnessTexture",
                                    TextureSemantic::Data, TextureColorSpace::Linear);
-                        addTexture(aiTextureType_AMBIENT_OCCLUSION, "OcclusionTexture", TextureSemantic::Data,
-                                   TextureColorSpace::Linear);
+                        if (sourceMaterial->GetTextureCount(aiTextureType_AMBIENT_OCCLUSION) != 0U &&
+                            sourceMaterial->GetTextureCount(aiTextureType_GLTF_METALLIC_ROUGHNESS) == 0U)
+                        {
+                            output.Diagnostics.push_back(
+                                {AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                                 "Material '" + materialNames[materialIndex] +
+                                     "' provides standalone occlusion without a packed metallic/roughness map; "
+                                     "the imported material uses neutral occlusion."});
+                        }
                         addTexture(aiTextureType_EMISSIVE, "EmissiveTexture", TextureSemantic::Color,
                                    TextureColorSpace::Srgb);
                         addTexture(aiTextureType_METALNESS, "MetallicTexture", TextureSemantic::Data,
                                    TextureColorSpace::Linear);
                         addTexture(aiTextureType_DIFFUSE_ROUGHNESS, "RoughnessTexture", TextureSemantic::Data,
+                                   TextureColorSpace::Linear);
+                        addTexture(aiTextureType_SPECULAR, "SpecularTexture", TextureSemantic::Data,
                                    TextureColorSpace::Linear);
 
                         aiString alphaMode;

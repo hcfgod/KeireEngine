@@ -482,10 +482,10 @@ namespace
                 const auto ownership = CaptureOwnership(*renderer, *m_View->Surface(), diagnostics);
                 const bool ready =
                     diagnostics.State == Keire::GpuOcclusionSurfaceState::Active && diagnostics.ReadbackValid &&
-                    diagnostics.SpatialMaskEntries == 1U && diagnostics.SpatialSelectionRecords == 1U &&
-                    diagnostics.SpatialSelectionDraws == 1U && diagnostics.SpatialMaskConsumed &&
+                    diagnostics.SpatialMaskEntries == 1U && diagnostics.SpatialSelectionRecords == 2U &&
+                    diagnostics.SpatialSelectionDraws == 2U && diagnostics.SpatialMaskConsumed &&
                     ownership.SpatialOwned && ownership.SpatialSameFrame && ownership.SpatialDispatchSucceeded &&
-                    ownership.SpatialOutputReady && ownership.SpatialConsumedDraws == 1U;
+                    ownership.SpatialOutputReady && ownership.SpatialConsumedDraws == 2U;
                 if (ready || m_SubmittedFrames >= 120U)
                 {
                     m_Results->Diagnostics = diagnostics;
@@ -890,13 +890,13 @@ TEST_CASE("ABI-v3 spatial selection consumes exact frame-owned output in a rende
     CHECK(diagnostics.SourceSurfaceEpoch == ownership.SurfaceEpoch);
     CHECK(diagnostics.SourceDeviceGeneration == ownership.DeviceGeneration);
     CHECK(diagnostics.SpatialMaskEntries == 1U);
-    CHECK(diagnostics.SpatialSelectionRecords == 1U);
-    CHECK(diagnostics.SpatialSelectionDraws == 1U);
+    CHECK(diagnostics.SpatialSelectionRecords == 2U);
+    CHECK(diagnostics.SpatialSelectionDraws == 2U);
     CHECK(diagnostics.SpatialMaskConsumed);
     CHECK(ownership.VisibilityOwned);
     CHECK(ownership.SpatialMaskCount == 1U);
-    CHECK(ownership.SpatialRecordCount == 1U);
-    CHECK(ownership.SpatialConsumedDraws == 1U);
+    CHECK(ownership.SpatialRecordCount == 2U);
+    CHECK(ownership.SpatialConsumedDraws == 2U);
     CHECK(ownership.SpatialOwned);
     CHECK(ownership.SpatialSameFrame);
     CHECK(ownership.SpatialDispatchSucceeded);

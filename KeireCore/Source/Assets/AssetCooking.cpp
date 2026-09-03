@@ -458,7 +458,8 @@ namespace Keire
                     ((property.TextureSemantic == ShaderTextureSemantic::MetallicRoughness ||
                       property.TextureSemantic == ShaderTextureSemantic::Occlusion ||
                       property.TextureSemantic == ShaderTextureSemantic::Metallic ||
-                      property.TextureSemantic == ShaderTextureSemantic::Roughness) &&
+                      property.TextureSemantic == ShaderTextureSemantic::Roughness ||
+                      property.TextureSemantic == ShaderTextureSemantic::Specular) &&
                      settings.Semantic == TextureSemantic::Data && settings.ColorSpace == TextureColorSpace::Linear);
                 if (!compatible)
                     throw std::runtime_error("Material texture property '" + property.Name +

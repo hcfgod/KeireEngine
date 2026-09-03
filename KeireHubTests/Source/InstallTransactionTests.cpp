@@ -216,6 +216,7 @@ namespace
         {
             KeireHub::Detail::SetInstallMutationTransientRenameFailuresForTesting(0);
             KeireHub::Detail::SetInstallMutationTransientDeleteFailuresForTesting(0);
+            KeireHub::Detail::SetInstallMutationTransientDirectoryNotEmptyFailuresForTesting(0);
         }
 
         ScopedTransientRenameFailures(const ScopedTransientRenameFailures&) = delete;
@@ -271,6 +272,22 @@ TEST_CASE("anchored install mutations retry transient Windows file-filter interf
         INFO(removed.Error().TechnicalDetails);
     REQUIRE(removed);
     CHECK_FALSE(std::filesystem::exists(root / "journal.json"));
+}
+
+TEST_CASE("anchored install directory removal retries pending Windows child deletion")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / "transaction";
+    {
+        KeireHub::Detail::InstallMutationFileSystem files(root, true, true);
+        KeireHub::Detail::SetInstallMutationTransientDirectoryNotEmptyFailuresForTesting(3);
+        const auto removed = files.RemoveRootIfEmpty();
+        KeireHub::Detail::SetInstallMutationTransientDirectoryNotEmptyFailuresForTesting(0);
+        if (!removed)
+            INFO(removed.Error().TechnicalDetails);
+        REQUIRE(removed);
+    }
+    CHECK_FALSE(std::filesystem::exists(root));
 }
 #endif
 

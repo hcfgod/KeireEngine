@@ -2,6 +2,7 @@
 
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
+#include "KeireClient/Editor/SceneDocument.h"
 #include "KeireInternal/Diagnostics/GraphicsCaptureInternal.h"
 
 #include <algorithm>
@@ -26,9 +27,17 @@ void EditorWorkspaceLayer::DrawRenderGraph(Keire::UiFrame& ui)
         const auto statistics = renderer->Statistics();
         const auto sceneSurface = m_SceneViewportPanel ? m_SceneViewportPanel->OcclusionDiagnostics()
                                                        : std::optional<Keire::GpuOcclusionSurfaceDiagnostics>{};
-        const auto occlusion =
-            KeireEditor::BuildGpuOcclusionPanelDiagnostics(renderer->Capabilities(), statistics, sceneSurface);
-        const auto occlusionStatus = sceneSurface ? "Scene surface: " + occlusion.Status : occlusion.Status;
+        const auto gameSurface = m_GameRenderView && m_GameRenderView->Surface()
+                                     ? std::optional(m_GameRenderView->Surface()->OcclusionDiagnostics())
+                                     : std::nullopt;
+        const auto playSession =
+            m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+        const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
+        const auto occlusionSurface =
+            KeireEditor::SelectGpuOcclusionPanelSurface(playActive, gameSurface, sceneSurface);
+        const auto occlusion = KeireEditor::BuildGpuOcclusionPanelDiagnostics(renderer->Capabilities(), statistics,
+                                                                              occlusionSurface.Diagnostics);
+        const auto occlusionStatus = std::string(occlusionSurface.Label) + ": " + occlusion.Status;
         ui.TextColored(occlusion.Warning                                                     ? m_Theme.Warning
                        : occlusion.State == KeireEditor::GpuOcclusionDiagnosticState::Active ? m_Theme.Success
                                                                                              : m_Theme.MutedText,

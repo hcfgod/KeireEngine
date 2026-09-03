@@ -1,5 +1,8 @@
 #include "KeireInternal/Assets/ImportedMaterialShader.h"
 
+#include "Keire/Rendering/MaterialGraph.h"
+#include "Keire/Rendering/ProgramArtifact.h"
+
 #include "KeireInternal/FileSystem.h"
 
 #include <nlohmann/json.hpp>
@@ -51,6 +54,37 @@ namespace Keire
                 }
                 return ReadTextFile(resolve(relative), maximumBytes);
             };
+            const auto materialShader = [&]() -> std::optional<ImportedMaterialShader>
+            {
+                const auto material = std::filesystem::path("Materials") / "DefaultUnlit.keirematerial";
+                const auto metadata = PathWithSuffix(material, ".keiremeta");
+                if (!context.ResolveSubAssetIdFor || !regularFile(material) || !regularFile(metadata))
+                    return std::nullopt;
+                try
+                {
+                    const auto metadataJson = nlohmann::json::parse(read(metadata, MaximumShaderMetadataBytes));
+                    const auto materialId = AssetId::Parse(metadataJson.at("id").get<std::string>());
+                    const auto source = read(material, MaximumShaderManifestBytes);
+                    const auto definition = MaterialGraphAsset::DecodeSource(std::as_bytes(std::span(source)));
+                    const auto compiled = CompileMaterialProgram(definition);
+                    const auto variant =
+                        std::ranges::find_if(compiled.Program.Variants, [](const ProgramArtifactVariant& candidate)
+                                             { return candidate.Keywords.empty(); });
+                    if (!materialId || !compiled.Succeeded() || variant == compiled.Program.Variants.end())
+                        return std::nullopt;
+
+                    ImportedMaterialShader result;
+                    result.Id =
+                        context.ResolveSubAssetIdFor(materialId, "material-program/shader/" + variant->StableSuffix);
+                    for (const auto& property : compiled.Program.Reflection.Properties)
+                        result.Properties.insert(property.Name);
+                    return result.Id ? std::optional(std::move(result)) : std::nullopt;
+                }
+                catch (const std::exception&)
+                {
+                    return std::nullopt;
+                }
+            };
 
             const std::filesystem::path shaderRootRelative = "Shaders";
             const auto shaderRoot = resolve(shaderRootRelative);
@@ -63,7 +97,9 @@ namespace Keire
                 throw std::runtime_error("Could not inspect the project material shader directory: " + error.message());
             }
             if (!shaderDirectory)
-                return std::nullopt;
+                return materialShader();
+            if (auto material = materialShader())
+                return material;
 
             std::vector<std::filesystem::path> candidates;
             const auto standard = shaderRootRelative / "DefaultUnlit.keireshader";

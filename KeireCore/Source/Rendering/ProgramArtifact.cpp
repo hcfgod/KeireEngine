@@ -1,9 +1,13 @@
 #include "Keire/Rendering/ProgramArtifact.h"
 
+#include "KeireInternal/Assets/AssetInternal.h"
+
 #include <algorithm>
+#include <cctype>
 #include <ranges>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 
 namespace Keire
@@ -114,6 +118,54 @@ namespace Keire
         {
             return diagnostic.Severity == ShaderGraphDiagnosticSeverity::Error;
         }
+
+        [[nodiscard]] bool IsLowercaseSha256(const std::string_view value) noexcept
+        {
+            return value.size() == 64U &&
+                   std::ranges::all_of(
+                       value, [](const unsigned char character)
+                       { return std::isdigit(character) != 0 || (character >= 'a' && character <= 'f'); });
+        }
+
+        [[nodiscard]] bool IsPassRole(const std::string_view value) noexcept
+        {
+            if (value.empty() || value.size() > 128U ||
+                !(std::isalpha(static_cast<unsigned char>(value.front())) != 0 || value.front() == '_'))
+                return false;
+            return std::ranges::all_of(value.substr(1), [](const unsigned char character)
+                                       { return std::isalnum(character) != 0 || character == '_'; });
+        }
+
+        [[nodiscard]] bool IsSingleProgramStage(const ProgramStage stage) noexcept
+        {
+            return stage == ProgramStage::Vertex || stage == ProgramStage::Fragment || stage == ProgramStage::Compute;
+        }
+
+        [[nodiscard]] bool BackendFormatMatches(const ProgramBackend backend, const ProgramBinaryFormat format) noexcept
+        {
+            return (backend == ProgramBackend::D3D12 && format == ProgramBinaryFormat::Dxil) ||
+                   (backend == ProgramBackend::Vulkan && format == ProgramBinaryFormat::SpirV) ||
+                   (backend == ProgramBackend::Metal && format == ProgramBinaryFormat::Metallib);
+        }
+
+        void ValidateStageBinary(const ProgramStageBinary& binary)
+        {
+            if (!IsPassRole(binary.PassRole) || !BackendFormatMatches(binary.Backend, binary.Format) ||
+                !IsSingleProgramStage(binary.Stage) || binary.EntryPoint.empty() || binary.Bytes.empty() ||
+                binary.Bytes.size() > ProgramBinaryMaximumBytes || !IsLowercaseSha256(binary.Sha256) ||
+                binary.Reflection.AbiVersion != ProgramReflectionAbiVersion ||
+                binary.Reflection.Resources.size() > ProgramResourceHardLimit)
+            {
+                throw std::invalid_argument("Program backend binary contract is incomplete or incompatible.");
+            }
+            if (Detail::DigestToString(Detail::Sha256(binary.Bytes)) != binary.Sha256)
+                throw std::invalid_argument("Program backend binary digest does not match its payload.");
+            if (std::ranges::none_of(binary.Reflection.EntryPoints, [&binary](const ProgramEntryPoint& entry)
+                                     { return entry.Stage == binary.Stage && entry.Name == binary.EntryPoint; }))
+            {
+                throw std::invalid_argument("Program backend binary reflection does not expose its entry point.");
+            }
+        }
     } // namespace
 
     bool ProgramArtifact::Succeeded() const noexcept
@@ -159,6 +211,70 @@ namespace Keire
             return "Compute";
         }
         return "Unknown";
+    }
+
+    std::string_view ProgramBackendName(const ProgramBackend backend) noexcept
+    {
+        switch (backend)
+        {
+        case ProgramBackend::D3D12:
+            return "D3D12";
+        case ProgramBackend::Vulkan:
+            return "Vulkan";
+        case ProgramBackend::Metal:
+            return "Metal";
+        }
+        return "Unknown";
+    }
+
+    std::string_view ProgramBinaryFormatName(const ProgramBinaryFormat format) noexcept
+    {
+        switch (format)
+        {
+        case ProgramBinaryFormat::Dxil:
+            return "DXIL";
+        case ProgramBinaryFormat::SpirV:
+            return "SPIR-V";
+        case ProgramBinaryFormat::Metallib:
+            return "Metallib";
+        }
+        return "Unknown";
+    }
+
+    std::string_view MaterialPassName(const MaterialPass pass) noexcept
+    {
+        switch (pass)
+        {
+        case MaterialPass::DepthOnly:
+            return "depthOnly";
+        case MaterialPass::DepthVelocity:
+            return "depthVelocity";
+        case MaterialPass::DeferredGBufferStandard:
+            return "deferredGBufferStandard";
+        case MaterialPass::DeferredGBufferExtended:
+            return "deferredGBufferExtended";
+        case MaterialPass::ForwardOpaque:
+            return "forwardOpaque";
+        case MaterialPass::ForwardTransparent:
+            return "forwardTransparent";
+        case MaterialPass::DecalDBuffer:
+            return "decalDBuffer";
+        case MaterialPass::ShadowAtlasDepth:
+            return "shadowAtlasDepth";
+        case MaterialPass::ShadowVirtualDepth:
+            return "shadowVirtualDepth";
+        case MaterialPass::ShadowTransmittance:
+            return "shadowTransmittance";
+        case MaterialPass::VolumeInject:
+            return "volumeInject";
+        case MaterialPass::SurfaceCacheCapture:
+            return "surfaceCacheCapture";
+        case MaterialPass::BakeSurface:
+            return "bakeSurface";
+        case MaterialPass::SelectionId:
+            return "selectionId";
+        }
+        return "unknown";
     }
 
     ProgramArtifact CompileShaderGraphProgram(const ShaderGraphDefinition& definition,
@@ -289,7 +405,8 @@ namespace Keire
     {
         if (artifact.SchemaVersion != ProgramArtifactSchemaVersion || artifact.Target > ProgramTarget::Compute ||
             artifact.Stages == ProgramStage::None || artifact.Variants.empty() ||
-            artifact.Variants.size() > ProgramVariantHardLimit || artifact.Reflection.AbiVersion == 0)
+            artifact.Variants.size() > ProgramVariantHardLimit ||
+            artifact.Reflection.AbiVersion != ProgramReflectionAbiVersion)
             throw std::invalid_argument("Program artifact schema, target, stages, or variant bounds are invalid.");
         const bool compute = artifact.Target == ProgramTarget::Compute;
         if (compute != HasProgramStage(artifact.Stages, ProgramStage::Compute) ||
@@ -299,11 +416,26 @@ namespace Keire
 
         std::set<std::string, std::less<>> suffixes;
         for (const auto& variant : artifact.Variants)
+        {
             if (variant.StableSuffix.empty() || !suffixes.insert(variant.StableSuffix).second ||
-                variant.GeneratedSource.empty() || variant.Hlsl.empty() || variant.Manifest.empty())
+                variant.GeneratedSource.empty() || variant.Hlsl.empty() || variant.Manifest.empty() ||
+                variant.Binaries.size() > ProgramBinaryHardLimit)
                 throw std::invalid_argument("Program artifact variants require unique complete payloads.");
+            std::set<std::tuple<std::string, ProgramBackend, ProgramStage>> binaries;
+            for (const auto& binary : variant.Binaries)
+            {
+                ValidateStageBinary(binary);
+                if (!HasProgramStage(artifact.Stages, binary.Stage) ||
+                    !binaries.emplace(binary.PassRole, binary.Backend, binary.Stage).second)
+                {
+                    throw std::invalid_argument("Program artifact contains a duplicate or undeclared stage binary.");
+                }
+            }
+        }
         std::set<std::pair<std::uint32_t, std::uint32_t>> bindings;
         std::set<std::string, std::less<>> symbols;
+        if (artifact.Reflection.Resources.size() > ProgramResourceHardLimit)
+            throw std::invalid_argument("Program reflection exceeds the portable resource limit.");
         for (const auto& resource : artifact.Reflection.Resources)
             if (resource.Symbol.empty() || !symbols.insert(resource.Symbol).second || resource.ArrayCount == 0 ||
                 !bindings.emplace(resource.Space, resource.Binding).second)
@@ -325,5 +457,63 @@ namespace Keire
                 pass.Condition > MaterialPassCondition::VirtualShadowMaps || pass.VertexEntry.empty() ||
                 pass.FragmentEntry.empty())
                 throw std::invalid_argument("Material program artifact contains an invalid pass contract.");
+    }
+
+    void ValidateCookedProgramArtifact(const ProgramArtifact& artifact)
+    {
+        ValidateProgramArtifact(artifact);
+        for (const auto& variant : artifact.Variants)
+        {
+            if (variant.Binaries.empty())
+                throw std::invalid_argument("Cooked program variants require backend binaries.");
+            std::set<std::pair<std::string, ProgramBackend>> lanes;
+            for (const auto& binary : variant.Binaries)
+                lanes.emplace(binary.PassRole, binary.Backend);
+            for (const auto& [role, backend] : lanes)
+            {
+                for (const auto stage : {ProgramStage::Vertex, ProgramStage::Fragment, ProgramStage::Compute})
+                {
+                    if (!HasProgramStage(artifact.Stages, stage))
+                        continue;
+                    if (std::ranges::none_of(
+                            variant.Binaries, [role, backend, stage](const ProgramStageBinary& binary)
+                            { return binary.PassRole == role && binary.Backend == backend && binary.Stage == stage; }))
+                    {
+                        throw std::invalid_argument("Cooked program backend lane is missing a declared stage.");
+                    }
+                }
+            }
+        }
+    }
+
+    void ValidateCookedMaterialProgramArtifact(const MaterialProgramArtifact& artifact)
+    {
+        ValidateMaterialProgramArtifact(artifact);
+        ValidateCookedProgramArtifact(artifact.Program);
+        std::set<std::string, std::less<>> declaredPasses;
+        for (const auto& pass : artifact.Passes)
+            declaredPasses.emplace(MaterialPassName(pass.Pass));
+        for (const auto& variant : artifact.Program.Variants)
+        {
+            std::set<ProgramBackend> backends;
+            for (const auto& binary : variant.Binaries)
+            {
+                if (!declaredPasses.contains(binary.PassRole))
+                    throw std::invalid_argument("Cooked material program contains an undeclared pass binary.");
+                backends.insert(binary.Backend);
+            }
+            for (const auto backend : backends)
+            {
+                for (const auto& pass : artifact.Passes)
+                {
+                    const auto role = MaterialPassName(pass.Pass);
+                    if (std::ranges::none_of(variant.Binaries, [role, backend](const ProgramStageBinary& binary)
+                                             { return binary.PassRole == role && binary.Backend == backend; }))
+                    {
+                        throw std::invalid_argument("Cooked material backend lane is missing a declared pass.");
+                    }
+                }
+            }
+        }
     }
 } // namespace Keire

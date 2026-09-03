@@ -153,7 +153,8 @@ namespace Keire
         Unmapped,
         ExactName,
         Semantic,
-        TargetConflict
+        TargetConflict,
+        Hierarchy
     };
 
     struct AnimationRetargetBoneMapping
@@ -174,6 +175,7 @@ namespace Keire
         std::size_t SourceTrackCount = 0;
         std::size_t MappedTrackCount = 0;
         std::size_t ExactNameMatchCount = 0;
+        std::size_t HierarchyMatchCount = 0;
         std::size_t SemanticMatchCount = 0;
         bool RootMotionMapped = true;
         std::vector<AnimationRetargetBoneMapping> Mappings;

@@ -143,6 +143,7 @@ namespace Keire
             SuggestImportSettings;
         std::function<AssetImportOutput(std::span<const std::byte>)> RestoreCachedOutput;
         std::vector<AssetTypeId> CompatibleTypes;
+        std::vector<std::string> PreviousNames;
     };
 
     struct AssetSourceRecord

@@ -166,6 +166,7 @@ namespace
             Keire::RenderEnvironmentSettings environment;
             environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             environment.AmbientIntensity = 1.0F;
+            environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
             constexpr std::array modes{Keire::GpuOcclusionMode::Disabled, Keire::GpuOcclusionMode::Automatic,
                                        Keire::GpuOcclusionMode::Forced};
             for (std::size_t index = 0; index < m_Views.size(); ++index)
@@ -212,7 +213,9 @@ namespace
         FreshPoseSkinnedTarget,
         TerminalFallback,
         NoSubmitIdle,
-        PartialFallback
+        PartialFallback,
+        EmptyFrustumStandby,
+        FrustumEdgeTransition
     };
 
     struct GpuOcclusionCaptureResults final
@@ -285,7 +288,9 @@ namespace
                 const auto column = m_TargetCount == 1U ? 0 : static_cast<std::int32_t>(index % 11U) - 5;
                 const auto row = m_TargetCount == 1U ? 0 : static_cast<std::int32_t>(index / 11U) - 5;
                 targetTransform->SetLocalPosition(
-                    {static_cast<float>(column) * 0.12F, static_cast<float>(row) * 0.12F, -1.5F});
+                    m_Scenario == GpuOcclusionCaptureScenario::FrustumEdgeTransition
+                        ? Keire::Vector3{3.8F, 0.0F, -1.5F}
+                        : Keire::Vector3{static_cast<float>(column) * 0.12F, static_cast<float>(row) * 0.12F, -1.5F});
                 const float scale =
                     m_TargetCount == 1U
                         ? (m_Scenario == GpuOcclusionCaptureScenario::FreshPoseSkinnedTarget ? 1.0F : 0.5F)
@@ -303,13 +308,16 @@ namespace
             surface.SampleCount = Keire::RenderSampleCount::One;
             m_View = Owner().Renderer()->CreateView(surface);
             Keire::RenderCamera camera;
-            camera.View = Keire::Math::LookAt({0.0F, 0.0F, 5.0F}, {}, {0.0F, 1.0F, 0.0F});
+            camera.View = m_Scenario == GpuOcclusionCaptureScenario::EmptyFrustumStandby
+                              ? Keire::Math::LookAt({0.0F, 0.0F, 5.0F}, {0.0F, 0.0F, 10.0F}, {0.0F, 1.0F, 0.0F})
+                              : Keire::Math::LookAt({0.0F, 0.0F, 5.0F}, {}, {0.0F, 1.0F, 0.0F});
             camera.Projection = Keire::Math::Perspective(55.0F, static_cast<float>(m_Width) / m_Height, 0.1F, 100.0F);
             camera.ClearColor = surface.ClearColor;
             m_View->SetCamera(camera);
             m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             m_Environment.AmbientIntensity = 1.0F;
             m_Environment.SkyVisible = false;
+            m_Environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
             m_Environment.GpuOcclusion = m_Mode;
         }
 
@@ -435,6 +443,14 @@ namespace
                 };
                 const bool fallback = diagnostics.State == Keire::GpuOcclusionSurfaceState::Fallback ||
                                       diagnostics.State == Keire::GpuOcclusionSurfaceState::Unsupported;
+                if (m_Scenario == GpuOcclusionCaptureScenario::EmptyFrustumStandby &&
+                    diagnostics.State == Keire::GpuOcclusionSurfaceState::Idle &&
+                    diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::NoEligibleCandidates)
+                {
+                    capture();
+                    Owner().RequestExit();
+                    return;
+                }
                 if (m_Scenario == GpuOcclusionCaptureScenario::NoSubmitIdle && m_FollowUpPending)
                 {
                     capture();
@@ -486,6 +502,8 @@ namespace
                       diagnostics.Visible == diagnostics.Candidates && diagnostics.Culled == 0U) ||
                      (m_Scenario == GpuOcclusionCaptureScenario::FreshPoseSkinnedTarget &&
                       diagnostics.FreshPoseSkinnedCandidates != 0U && diagnostics.FreshPoseSkinnedDepthDraws != 0U) ||
+                     (m_Scenario == GpuOcclusionCaptureScenario::FrustumEdgeTransition &&
+                      diagnostics.Candidates == 1U && diagnostics.Visible == 1U && diagnostics.Culled == 0U) ||
                      (m_Scenario == GpuOcclusionCaptureScenario::PartialFallback &&
                       diagnostics.State == Keire::GpuOcclusionSurfaceState::Active &&
                       diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::LegacyShaderAbi));
@@ -506,6 +524,8 @@ namespace
                     }
                     if (m_Scenario == GpuOcclusionCaptureScenario::RevealTarget)
                         m_TargetTransform->SetLocalPosition({1.65F, 0.0F, -1.5F});
+                    else if (m_Scenario == GpuOcclusionCaptureScenario::FrustumEdgeTransition)
+                        m_TargetTransform->SetLocalPosition({3.4F, 0.0F, -1.5F});
                     else if (m_Scenario == GpuOcclusionCaptureScenario::ResetToDisabled)
                     {
                         m_View->Surface()->RequestSize(ResetWidth, ResetHeight);
@@ -530,7 +550,11 @@ namespace
                     }
                     m_FollowUpPending = true;
                 }
-                else if (m_Scenario == GpuOcclusionCaptureScenario::RevealTarget && m_FollowUpPending)
+                else if ((m_Scenario == GpuOcclusionCaptureScenario::RevealTarget ||
+                          m_Scenario == GpuOcclusionCaptureScenario::FrustumEdgeTransition) &&
+                         m_FollowUpPending &&
+                         (m_Scenario != GpuOcclusionCaptureScenario::FrustumEdgeTransition ||
+                          (diagnostics.ReadbackValid && diagnostics.Candidates >= 2U && diagnostics.Visible >= 2U)))
                 {
                     capture();
                     Owner().RequestExit();
@@ -642,6 +666,7 @@ namespace
             m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             m_Environment.AmbientIntensity = 1.0F;
             m_Environment.SkyVisible = false;
+            m_Environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
             m_Environment.GpuOcclusion = Keire::GpuOcclusionMode::Automatic;
         }
 
@@ -664,7 +689,7 @@ namespace
                 CaptureCurrentState();
                 const auto& first = m_Results->Diagnostics[0];
                 const auto& second = m_Results->Diagnostics[1];
-                const auto& fallback = m_Results->Diagnostics[2];
+                const auto& standby = m_Results->Diagnostics[2];
                 const auto active = [](const Keire::GpuOcclusionSurfaceDiagnostics& diagnostics)
                 {
                     return diagnostics.RequestedMode == Keire::GpuOcclusionMode::Automatic &&
@@ -672,15 +697,15 @@ namespace
                            diagnostics.State == Keire::GpuOcclusionSurfaceState::Active && diagnostics.ReadbackValid &&
                            diagnostics.Culled >= HiddenTargetCount;
                 };
-                const bool typedFallback =
-                    fallback.RequestedMode == Keire::GpuOcclusionMode::Automatic &&
-                    fallback.EffectiveMode == Keire::GpuOcclusionMode::Disabled &&
-                    fallback.State == Keire::GpuOcclusionSurfaceState::Fallback &&
-                    fallback.FallbackReason == Keire::GpuOcclusionFallbackReason::NoSafeOccluders &&
-                    !fallback.ReadbackValid;
+                const bool typedStandby =
+                    standby.RequestedMode == Keire::GpuOcclusionMode::Automatic &&
+                    standby.EffectiveMode == Keire::GpuOcclusionMode::Disabled &&
+                    standby.State == Keire::GpuOcclusionSurfaceState::Idle &&
+                    standby.FallbackReason == Keire::GpuOcclusionFallbackReason::NoSafeOccluders &&
+                    !standby.ReadbackValid;
                 const auto& statistics = m_Results->Statistics;
-                if (active(first) && active(second) && typedFallback && statistics.GpuOcclusionEnabled &&
-                    statistics.GpuOcclusionFallbackActive && statistics.GpuOcclusionDispatches > 0U &&
+                if (active(first) && active(second) && typedStandby && statistics.GpuOcclusionEnabled &&
+                    !statistics.GpuOcclusionFallbackActive && statistics.GpuOcclusionDispatches > 0U &&
                     statistics.GpuOcclusionIndirectDraws > 0U)
                 {
                     m_Results->Captured = true;
@@ -797,6 +822,7 @@ namespace
             m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             m_Environment.AmbientIntensity = 1.0F;
             m_Environment.SkyVisible = false;
+            m_Environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
             m_Environment.GpuOcclusion = Keire::GpuOcclusionMode::Forced;
         }
 
@@ -938,7 +964,7 @@ TEST_CASE("GPU occlusion decisions remain camera-local across game and observer 
     CHECK(statistics.GpuOcclusionCulled == front.Culled + observer.Culled);
     CHECK(statistics.GpuOcclusionSafeOccluders == front.SafeOccluders + observer.SafeOccluders);
     CHECK(statistics.GpuOcclusionDispatches > 0U);
-    CHECK(statistics.GpuOcclusionIndirectDraws == 2U);
+    CHECK(statistics.GpuOcclusionIndirectDraws == 4U);
 
     for (const auto& frame : results->Frames)
         REQUIRE(frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4U));
@@ -1086,7 +1112,9 @@ TEST_CASE("forced GPU occlusion removes hidden instances without changing render
     const auto depthOrder = passOrder("Occlusion depth");
     const auto pyramidOrder = passOrder("Occlusion depth pyramid");
     const auto cullingOrder = passOrder("GPU occlusion culling");
-    const auto opaqueOrder = passOrder("Opaque and mask");
+    auto opaqueOrder = passOrder("Deferred GBuffer standard");
+    if (!opaqueOrder)
+        opaqueOrder = passOrder("Opaque and mask");
     REQUIRE(depthOrder);
     REQUIRE(pyramidOrder);
     REQUIRE(cullingOrder);
@@ -1136,6 +1164,35 @@ TEST_CASE("a completed frame without a surface submission idles stale GPU occlus
     CHECK(results->Statistics.GpuOcclusionCulled == 0U);
     CHECK(results->Statistics.GpuOcclusionCandidateTriangles == 0U);
     CHECK(results->Statistics.GpuOcclusionCulledTriangles == 0U);
+}
+
+TEST_CASE("forced GPU occlusion treats an empty camera frustum as standby instead of fallback")
+{
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::EmptyFrustumStandby));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Diagnostics.size() == 1U);
+    const auto& diagnostics = results->Diagnostics.front();
+    CHECK(diagnostics.RequestedMode == Keire::GpuOcclusionMode::Forced);
+    CHECK(diagnostics.EffectiveMode == Keire::GpuOcclusionMode::Disabled);
+    CHECK(diagnostics.State == Keire::GpuOcclusionSurfaceState::Idle);
+    CHECK(diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::NoEligibleCandidates);
+    CHECK(diagnostics.EligibleCandidates == 0U);
+    CHECK_FALSE(diagnostics.ReadbackValid);
+    CHECK_FALSE(results->Statistics.GpuOcclusionEnabled);
+    CHECK_FALSE(results->Statistics.GpuOcclusionFallbackActive);
+    CHECK(results->Statistics.GpuOcclusionFallbackSurfaces == 0U);
 }
 
 TEST_CASE("active legacy partial fallback surfaces publish aggregate and profiler classification")
@@ -1204,6 +1261,31 @@ TEST_CASE("same-frame GPU occlusion reveals a moved target on the next rendered 
     REQUIRE(results->Diagnostics.size() == 2);
     CHECK(results->Diagnostics.front().ReadbackValid);
     CHECK(results->Diagnostics.front().Culled > 0U);
+    CHECK(MaximumPixelDifference(results->Frames[0], results->Frames[1]) > MinimumBehaviorDelta);
+}
+
+TEST_CASE("GPU occlusion retains a target as its bounds enter the camera edge")
+{
+    RenderAssetFixture assets(true);
+    auto results = std::make_shared<GpuOcclusionCaptureResults>();
+    auto specification = RenderTestSpecification();
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<GpuOcclusionCaptureLayer>(
+            assets.CubeMesh, assets.ShaderGraphMaterial, Keire::GpuOcclusionMode::Forced, results,
+            GpuOcclusionCaptureScenario::FrustumEdgeTransition));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE_FALSE(results->TimedOut);
+    REQUIRE(results->Frames.size() == 2U);
+    REQUIRE(results->Diagnostics.size() == 2U);
+    CHECK(results->Diagnostics[0].Candidates == 1U);
+    CHECK(results->Diagnostics[0].Visible == 1U);
+    CHECK(results->Diagnostics[1].Candidates >= 2U);
+    CHECK(results->Diagnostics[1].Visible >= 2U);
     CHECK(MaximumPixelDifference(results->Frames[0], results->Frames[1]) > MinimumBehaviorDelta);
 }
 
@@ -1278,7 +1360,7 @@ TEST_CASE("Automatic GPU occlusion activates after two profitable frames without
     CHECK(MaximumPixelDifference(direct->Frames.front(), automatic->Frames.front()) <= ColorTolerance);
 }
 
-TEST_CASE("mixed Automatic GPU occlusion surfaces retain active aggregate work when a small surface falls back")
+TEST_CASE("mixed Automatic GPU occlusion surfaces retain active aggregate work when a small surface is on standby")
 {
     RenderAssetFixture assets(true, false, false, false, true);
     for (const bool fallbackFirst : {false, true})
@@ -1310,21 +1392,21 @@ TEST_CASE("mixed Automatic GPU occlusion surfaces retain active aggregate work w
             CHECK(diagnostics.Culled >= 127U);
         }
 
-        const auto& fallback = results->Diagnostics[2];
-        CHECK(fallback.RequestedMode == Keire::GpuOcclusionMode::Automatic);
-        CHECK(fallback.EffectiveMode == Keire::GpuOcclusionMode::Disabled);
-        CHECK(fallback.State == Keire::GpuOcclusionSurfaceState::Fallback);
-        CHECK(fallback.FallbackReason == Keire::GpuOcclusionFallbackReason::NoSafeOccluders);
-        CHECK_FALSE(fallback.ReadbackValid);
-        CHECK(fallback.Candidates == 0U);
+        const auto& standby = results->Diagnostics[2];
+        CHECK(standby.RequestedMode == Keire::GpuOcclusionMode::Automatic);
+        CHECK(standby.EffectiveMode == Keire::GpuOcclusionMode::Disabled);
+        CHECK(standby.State == Keire::GpuOcclusionSurfaceState::Idle);
+        CHECK(standby.FallbackReason == Keire::GpuOcclusionFallbackReason::NoSafeOccluders);
+        CHECK_FALSE(standby.ReadbackValid);
+        CHECK(standby.Candidates == 0U);
 
         const auto& statistics = results->Statistics;
         CHECK(statistics.GpuOcclusionEnabled);
-        CHECK(statistics.GpuOcclusionFallbackActive);
+        CHECK_FALSE(statistics.GpuOcclusionFallbackActive);
         CHECK(statistics.GpuOcclusionDispatches > 0U);
         CHECK(statistics.GpuOcclusionIndirectDraws > 0U);
         CHECK(statistics.GpuOcclusionActiveSurfaces == 2U);
-        CHECK(statistics.GpuOcclusionFallbackSurfaces == 1U);
+        CHECK(statistics.GpuOcclusionFallbackSurfaces == 0U);
         CHECK(statistics.GpuOcclusionPartialFallbackSurfaces == 0U);
         CHECK(statistics.GpuOcclusionReadbackValid);
         CHECK(statistics.GpuOcclusionCandidates ==

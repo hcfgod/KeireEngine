@@ -30,6 +30,7 @@ namespace
         bool CameraValidationCompleted = false;
         bool EnvironmentValidationCompleted = false;
         bool AdditiveSceneValidationCompleted = false;
+        bool SurfaceSampleValidationCompleted = false;
     };
 
     [[nodiscard]] std::vector<std::pair<std::string_view, Keire::RenderEnvironmentSettings>> InvalidEnvironments()
@@ -55,6 +56,19 @@ namespace
             [](auto& environment) { environment.GpuOcclusion = static_cast<Keire::GpuOcclusionMode>(255U); });
         add("render path",
             [](auto& environment) { environment.RequestedRenderPath = static_cast<Keire::RenderPath>(255U); });
+        add("anti-aliasing", [](auto& environment)
+            { environment.RequestedAntiAliasing = static_cast<Keire::RenderAntiAliasingMode>(255U); });
+        add("dynamic resolution", [](auto& environment)
+            { environment.RequestedDynamicResolution = static_cast<Keire::DynamicResolutionMode>(255U); });
+        add("render scale", [](auto& environment) { environment.RenderScale = 0.49F; });
+        add("dynamic resolution range",
+            [](auto& environment)
+            {
+                environment.MinimumDynamicResolutionScale = 0.9F;
+                environment.MaximumDynamicResolutionScale = 0.8F;
+            });
+        add("dynamic resolution target",
+            [](auto& environment) { environment.DynamicResolutionTargetMilliseconds = 50.01F; });
         add("global illumination", [](auto& environment)
             { environment.RequestedGlobalIllumination = static_cast<Keire::GlobalIlluminationMode>(255U); });
         add("Irradyn quality",
@@ -80,6 +94,17 @@ namespace
             (void)m_Scene->CreateEntity("Primary renderer").AddComponent<Keire::MeshRendererComponent>();
             (void)m_AdditionalScene->CreateEntity("Additional renderer").AddComponent<Keire::MeshRendererComponent>();
             m_View = Owner().Renderer()->CreateView({.Name = "Public render contract", .Width = 64, .Height = 64});
+
+            const auto surface = m_View->Surface();
+            const auto initialGeneration = surface->Generation();
+            CHECK_NOTHROW(surface->RequestSampleCount(Keire::RenderSampleCount::Two));
+            CHECK(surface->Generation() == initialGeneration + 1U);
+            CHECK_NOTHROW(surface->RequestSampleCount(Keire::RenderSampleCount::Two));
+            CHECK(surface->Generation() == initialGeneration + 1U);
+            CHECK_THROWS_AS(surface->RequestSampleCount(static_cast<Keire::RenderSampleCount>(3U)),
+                            std::invalid_argument);
+            CHECK(surface->Generation() == initialGeneration + 1U);
+            m_Probe.SurfaceSampleValidationCompleted = true;
 
             auto camera = m_View->Camera();
             camera.NearPlane = std::numeric_limits<float>::min();
@@ -187,4 +212,5 @@ TEST_CASE("Public render camera and environment contracts reject invalid values 
     CHECK(probe.CameraValidationCompleted);
     CHECK(probe.EnvironmentValidationCompleted);
     CHECK(probe.AdditiveSceneValidationCompleted);
+    CHECK(probe.SurfaceSampleValidationCompleted);
 }

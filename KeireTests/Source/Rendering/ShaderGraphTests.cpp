@@ -174,7 +174,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 7);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 10);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -184,14 +184,36 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
 
     const auto& variant = compilation.Variants.front();
     const auto manifest = nlohmann::json::parse(variant.Manifest);
-    CHECK(manifest.at("schemaVersion") == 2U);
+    CHECK(manifest.at("schemaVersion") == 3U);
     CHECK(manifest.at("materialGraphSourceSchemaVersion") == Keire::ShaderGraphSourceSchemaVersion);
     CHECK(manifest.at("materialGraphGeneratedShaderVersion") == Keire::ShaderGraphGeneratedShaderVersion);
     CHECK(manifest.at("vertexLayoutVersion") == Keire::ShaderGraphVertexLayoutVersion);
     CHECK(manifest.at("instanceAddressingAbiVersion") == 2U);
     CHECK(manifest.at("occlusionSupport") == 3U);
+    CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 7, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 10, source schema 6") != std::string::npos);
+    REQUIRE(manifest.at("passes").size() == 3U);
+    CHECK(manifest.at("passes")[0].at("role") == "depthVelocity");
+    CHECK(manifest.at("passes")[1].at("role") == "deferredGBufferStandard");
+    CHECK(manifest.at("passes")[2].at("role") == "forwardOpaque");
+    CHECK(variant.Hlsl.find("KEIRE_PASS_DEPTH_VELOCITY") != std::string::npos);
+    CHECK(variant.Hlsl.find("KEIRE_PASS_DEFERRED_GBUFFER_STANDARD") != std::string::npos);
+    CHECK(variant.Hlsl.find("float4 BaseColorMetallic : SV_Target0") != std::string::npos);
+    CHECK(variant.Hlsl.find("float4 Lighting : SV_Target3") != std::string::npos);
+    CHECK(variant.Hlsl.find("float2 Velocity : SV_Target0") != std::string::npos);
+    CHECK(variant.Hlsl.find("float3 PreviousPosition : TEXCOORD6") != std::string::npos);
+    CHECK(variant.Hlsl.find("float4 PreviousClipPosition : TEXCOORD11") != std::string::npos);
+    CHECK(variant.Hlsl.find("float4 previousWorld = mul(Model, float4(input.PreviousPosition, 1.0F))") !=
+          std::string::npos);
+    CHECK(variant.Hlsl.find("output.PreviousClipPosition = mul(NormalMatrix, previousWorld)") != std::string::npos);
+    CHECK(variant.Hlsl.find("output.Velocity = (currentNdc - previousNdc)") != std::string::npos);
+    CHECK(variant.Hlsl.find("spatialRecord + contribution * 65536U") != std::string::npos);
+    CHECK(variant.Hlsl.find("lightContribution != SpatialSelection.y + 1U") != std::string::npos);
+    CHECK(variant.Hlsl.find("DecodeSpatialLightingSample(lightmapSample, ShadowMaskParameters.y > 0.5F)") !=
+          std::string::npos);
+    CHECK(variant.Hlsl.find("DecodeSpatialLightingSample(reflectionSample, ShadowMaskParameters.z > 0.5F)") !=
+          std::string::npos);
     CHECK(manifest.at("programTarget") == "Material");
     CHECK(manifest.at("programStages") == 3U);
     CHECK(variant.Hlsl.find("cbuffer InstanceAddressingData : register(b2, space1)") != std::string::npos);
@@ -311,6 +333,7 @@ TEST_CASE("Shader Graph compiles every output model to bounded runtime shader ma
         INFO(static_cast<int>(output));
         REQUIRE(compilation.Succeeded());
         REQUIRE(compilation.Variants.size() == 1);
+        const auto manifest = nlohmann::json::parse(compilation.Variants.front().Manifest);
         CHECK(compilation.Variants.front().Hlsl.find("VSMain") != std::string::npos);
         CHECK(compilation.Variants.front().Hlsl.find("PSMain") != std::string::npos);
         CHECK(compilation.Variants.front().Manifest.find("ShaderGraph-") != std::string::npos);
@@ -318,26 +341,55 @@ TEST_CASE("Shader Graph compiles every output model to bounded runtime shader ma
             CHECK(compilation.Variants.front().Manifest.find("\"blend\": true") != std::string::npos);
         else
             CHECK(compilation.Variants.front().Manifest.find("\"blend\": false") != std::string::npos);
-        const auto& manifest = compilation.Variants.front().Manifest;
         if (output == Keire::ShaderGraphOutput::Unlit || output == Keire::ShaderGraphOutput::Fullscreen)
         {
-            CHECK(manifest.find("\"receivesShadows\": false") != std::string::npos);
-            CHECK(manifest.find("\"usesForwardPlus\": false") != std::string::npos);
-            CHECK(manifest.find("\"usesImageBasedLighting\": false") != std::string::npos);
+            CHECK_FALSE(manifest.at("receivesShadows").get<bool>());
+            CHECK_FALSE(manifest.at("usesForwardPlus").get<bool>());
+            CHECK_FALSE(manifest.at("usesImageBasedLighting").get<bool>());
+            CHECK(manifest.at("spatialLightingAbiVersion") == 0U);
         }
         else
         {
-            CHECK(manifest.find("\"receivesShadows\": true") != std::string::npos);
-            CHECK(manifest.find("\"usesForwardPlus\": true") != std::string::npos);
-            CHECK(manifest.find("\"usesImageBasedLighting\": true") != std::string::npos);
+            CHECK(manifest.at("receivesShadows").get<bool>());
+            CHECK(manifest.at("usesForwardPlus").get<bool>());
+            CHECK(manifest.at("usesImageBasedLighting").get<bool>());
+            CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
+        }
+        const auto& passes = manifest.at("passes");
+        if (output == Keire::ShaderGraphOutput::Surface || output == Keire::ShaderGraphOutput::Unlit)
+        {
+            REQUIRE(passes.size() == 3U);
+            CHECK(passes[0].at("role") == "depthVelocity");
+            CHECK(passes[1].at("role") == "deferredGBufferStandard");
+            CHECK(passes[2].at("role") == "forwardOpaque");
+        }
+        else if (output == Keire::ShaderGraphOutput::Hair || output == Keire::ShaderGraphOutput::Eye)
+        {
+            REQUIRE(passes.size() == 2U);
+            CHECK(passes[0].at("role") == "depthVelocity");
+            CHECK(passes[1].at("role") == "forwardOpaque");
+        }
+        else if (output == Keire::ShaderGraphOutput::Decal)
+        {
+            REQUIRE(passes.size() == 2U);
+            CHECK(passes[0].at("role") == "decalDBuffer");
+            CHECK(passes[1].at("role") == "forwardTransparent");
+        }
+        else
+        {
+            REQUIRE(passes.size() == 1U);
+            const auto expectedRole = output == Keire::ShaderGraphOutput::Transparent ? "forwardTransparent"
+                                      : output == Keire::ShaderGraphOutput::Decal     ? "decalDBuffer"
+                                                                                      : "primary";
+            CHECK(passes[0].at("role") == expectedRole);
         }
         if (output == Keire::ShaderGraphOutput::Hair)
-            CHECK(manifest.find("\"culling\": \"None\"") != std::string::npos);
+            CHECK(manifest.at("renderState").at("culling") == "None");
         if (output == Keire::ShaderGraphOutput::Fullscreen)
         {
-            CHECK(manifest.find("\"culling\": \"None\"") != std::string::npos);
-            CHECK(manifest.find("\"depthTest\": false") != std::string::npos);
-            CHECK(manifest.find("\"depthWrite\": false") != std::string::npos);
+            CHECK(manifest.at("renderState").at("culling") == "None");
+            CHECK_FALSE(manifest.at("renderState").at("depthTest").get<bool>());
+            CHECK_FALSE(manifest.at("renderState").at("depthWrite").get<bool>());
         }
     }
 }
@@ -439,30 +491,66 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
     { return ReadBytes(root / relative); };
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 5);
+    CHECK(importer.Version == 7);
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
-    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
-    CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
-    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
+    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil, "forwardOpaque") != nullptr);
+    CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV, "forwardOpaque") != nullptr);
+    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl, "forwardOpaque") != nullptr);
     CHECK(shader->Definition().InstanceAddressingAbiVersion == 2U);
     CHECK(shader->Definition().OcclusionSupport == Keire::ShaderOcclusionSupport::None);
     CHECK_FALSE(shader->Definition().MaximumWorldPositionDisplacementRadius);
     CHECK(imported.Diagnostics.empty());
+
+    auto unlitOptions = options;
+    unlitOptions.GeneratedSource = "Assets/Generated/ShaderGraphUnlitTest.hlsl";
+    const auto unlitCompilation =
+        Keire::CompileShaderGraph(Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit), unlitOptions);
+    REQUIRE(unlitCompilation.Succeeded());
+    REQUIRE(unlitCompilation.Variants.size() == 1U);
+    const auto unlitSource = directory.Path / unlitCompilation.Variants.front().GeneratedSource;
+    auto unlitManifest = unlitSource;
+    unlitManifest.replace_extension(".keireshader");
+    WriteText(unlitSource, unlitCompilation.Variants.front().Hlsl);
+    WriteText(unlitManifest, unlitCompilation.Variants.front().Manifest);
+    auto unlitContext = context;
+    unlitContext.SourcePath = unlitManifest;
+    unlitContext.RelativePath = unlitManifest.lexically_relative(unlitContext.SourceRoot);
+    const auto unlitImported = importer.ContextualImport(unlitContext, ReadBytes(unlitManifest));
+    const auto unlitShader = Keire::ShaderAsset::Decode(unlitImported.Bytes);
+    CHECK(unlitShader->Definition().SpatialLightingAbiVersion == 0U);
+    CHECK(unlitShader->Variant(Keire::ShaderBinaryFormat::Dxil, "deferredGBufferStandard") != nullptr);
+    CHECK(unlitShader->Variant(Keire::ShaderBinaryFormat::SpirV, "depthVelocity") != nullptr);
+    CHECK(unlitImported.Diagnostics.empty());
+
     CHECK(compilation.Variants.front().Hlsl.find("MaterialNoise") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("MaterialValueNoise") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("graphClearCoat") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("EvaluateGraphDirectLighting") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("ForwardPlusLights") != std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find(
-              "StructuredBuffer<ShaderGraphLocalLight> ForwardPlusLights : register(t5, space2)") != std::string::npos);
-    CHECK(compilation.Variants.front().Hlsl.find("StructuredBuffer<uint4> ForwardPlusTiles : register(t6, space2)") !=
+              "StructuredBuffer<ShaderGraphLocalLight> ForwardPlusLights : register(t10, space2)") !=
+          std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("StructuredBuffer<uint4> ForwardPlusTiles : register(t11, space2)") !=
           std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find(
-              "StructuredBuffer<uint4> ForwardPlusLightIndices : register(t7, space2)") != std::string::npos);
+              "StructuredBuffer<uint4> ForwardPlusLightIndices : register(t12, space2)") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find(
+              "StructuredBuffer<ShaderGraphSpatialSelectionRecord> SpatialSelectionRecords : register(t13, space2)") !=
+          std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("register(t16, space2)") == std::string::npos);
     CHECK(compilation.Variants.front().Hlsl.find("EvaluateDirectionalShadow") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("for (int y = -1; y <= 1; ++y)") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("for (int x = -1; x <= 1; ++x)") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find(
+              "const float weight = (2.0F - abs((float)x)) * (2.0F - abs((float)y))") != std::string::npos);
+
+    auto collidingManifest = nlohmann::json::parse(compilation.Variants.front().Manifest);
+    collidingManifest["defines"]["KEIRE_PASS_FORWARD_OPAQUE"] = "1";
+    const auto collidingManifestText = collidingManifest.dump();
+    CHECK_THROWS_AS(importer.ContextualImport(context, std::as_bytes(std::span(collidingManifestText))),
+                    std::invalid_argument);
     const auto localParameters = compilation.Variants.front().Hlsl.find("float4 LocalShadowParameters[62]");
     const auto localSampleBounds = compilation.Variants.front().Hlsl.find("float4 LocalShadowSampleBounds[20]");
     REQUIRE(localParameters != std::string::npos);
@@ -663,9 +751,14 @@ TEST_CASE("Shader Graph composes typed material attributes and four production B
     const auto imported = Keire::CreateShaderAssetImporter().ContextualImport(context, ReadBytes(manifestPath));
     CHECK(imported.Diagnostics.empty());
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
-    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
-    CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
-    CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
+    REQUIRE(shader->Definition().Variants.size() == 9U);
+    for (const auto role : {std::string_view("depthVelocity"), std::string_view("deferredGBufferStandard"),
+                            std::string_view("forwardOpaque")})
+    {
+        CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil, role) != nullptr);
+        CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV, role) != nullptr);
+        CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl, role) != nullptr);
+    }
 
     auto invalidParameter = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter,
                                                          Keire::ShaderGraphValueType::MaterialAttributes);
@@ -726,12 +819,27 @@ TEST_CASE("Shader Graph diagnostics identify unused work and validation rejects 
     CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
 }
 
-TEST_CASE("Shader Graph stage analysis rejects fragment-only expressions in world-position offset")
+TEST_CASE("Shader Graph time-driven displacement emits previous-frame deformation")
 {
     auto graph = Keire::CreateDefaultShaderGraph();
     auto time = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Time);
     graph.Nodes.push_back(time);
     Connect(graph, time, "Seconds", graph.Nodes.front(), "WorldPositionOffset");
+
+    const auto compilation = Keire::CompileShaderGraph(graph);
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1U);
+    CHECK(compilation.Variants.front().Hlsl.find("world.xyz += float3(FrameParameters.x") != std::string::npos);
+    CHECK(compilation.Variants.front().Hlsl.find("previousWorld.xyz += float3((FrameParameters.x - "
+                                                 "FrameParameters.y)") != std::string::npos);
+}
+
+TEST_CASE("Shader Graph stage analysis rejects fragment-only expressions in world-position offset")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto viewDirection = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::ViewDirection);
+    graph.Nodes.push_back(viewDirection);
+    Connect(graph, viewDirection, "Vector", graph.Nodes.front(), "WorldPositionOffset");
 
     const auto compilation = Keire::CompileShaderGraph(graph);
     CHECK_FALSE(compilation.Succeeded());

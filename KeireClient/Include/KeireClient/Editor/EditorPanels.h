@@ -5,6 +5,7 @@
 #include "Keire/Core.h"
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InspectorTransformUndo.h"
+#include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -198,6 +199,7 @@ namespace KeireEditor
         virtual void SetProjectDefaultInput(Keire::AssetId asset, Keire::AssetId map) = 0;
         [[nodiscard]] virtual ManagedSdkPreference ProjectManagedSdk() const = 0;
         virtual void SetProjectManagedSdk(ManagedSdkPreference preference) = 0;
+        [[nodiscard]] virtual Keire::RenderFeatureCapabilities ProjectRenderFeatureCapabilities() const noexcept = 0;
         virtual void ApplyProjectAuthoringSettings(const Keire::ProjectAuthoringSettings& settings) = 0;
     };
 
@@ -230,12 +232,13 @@ namespace KeireEditor
         Keire::Ref<Keire::ScenePresentationRuntime> m_UiPresentation;
         Keire::UiItemRect m_ViewportRect;
         Keire::RenderCamera m_LastCamera;
+        Keire::Internal::DynamicResolutionController m_DynamicResolution;
         std::filesystem::path m_ProjectRoot;
         std::vector<Keire::AssetId> m_BoxSelectionBase;
         Keire::UiPosition m_BoxSelectionStart;
         bool m_BoxSelecting = false;
         bool m_BoxSelectionAdditive = false;
-        bool m_CameraPreviewVisible = true;
+        bool m_CameraPreviewVisible = false;
         bool m_SuppressWarpPointerDelta = false;
     };
 
@@ -325,6 +328,11 @@ namespace KeireEditor
                                              const Keire::Ref<Keire::Component>& component,
                                              const Keire::ComponentRegistration& registration,
                                              SceneDocument& sceneDocument, const Keire::Ref<Keire::Scene>& scene);
+        void DrawDirectionalLightAdvancedProperties(Keire::UiFrame& ui,
+                                                    const Keire::Ref<Keire::DirectionalLightComponent>& light,
+                                                    SceneDocument& sceneDocument,
+                                                    std::span<const Keire::AssetId> editTargets, bool multiEditing,
+                                                    std::size_t componentOrdinal);
 
         IInspectorController& m_Controller;
         std::unique_ptr<AssetInspectorPanel> m_AssetInspector;

@@ -222,6 +222,28 @@ namespace KeireEditor
         m_Overrides.insert_or_assign(OverrideKey(component, propertyKey), std::move(drawer));
     }
 
+    void PropertyDrawerRegistry::RegisterIntegerChoices(const Keire::ComponentTypeId component,
+                                                        const std::string& propertyKey,
+                                                        std::vector<std::string> choices)
+    {
+        if (choices.empty())
+            throw std::invalid_argument("An integer-choice property requires at least one choice.");
+        RegisterOverride(
+            component, propertyKey,
+            [choices = std::move(choices)](IPropertyEditor& editor, const Keire::ComponentProperty& property,
+                                           Keire::ComponentPropertyValue& value)
+            {
+                auto* selected = std::get_if<std::int64_t>(&value);
+                if (!selected)
+                    throw std::invalid_argument("Integer-choice property metadata must serialize an Integer.");
+                std::vector<std::string_view> views;
+                views.reserve(choices.size());
+                for (const auto& choice : choices)
+                    views.emplace_back(choice);
+                return editor.EditChoice(property.DisplayName, *selected, views);
+            });
+    }
+
     bool PropertyDrawerRegistry::Draw(IPropertyEditor& editor, const Keire::ComponentTypeId component,
                                       const Keire::ComponentProperty& property,
                                       Keire::ComponentPropertyValue& value) const

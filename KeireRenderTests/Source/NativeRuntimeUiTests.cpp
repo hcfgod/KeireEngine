@@ -12,7 +12,10 @@ namespace
     class NativeRuntimeUiLayer final : public Keire::Layer
     {
       public:
-        explicit NativeRuntimeUiLayer(bool& rendered) : Layer("Native Runtime UI"), m_Rendered(rendered) {}
+        NativeRuntimeUiLayer(bool& rendered, bool& uploadPoolReused)
+            : Layer("Native Runtime UI"), m_Rendered(rendered), m_UploadPoolReused(uploadPoolReused)
+        {
+        }
 
       protected:
         void OnAttach() override
@@ -43,11 +46,14 @@ namespace
         {
             const auto renderer = Owner().Renderer();
             m_Rendered = renderer && renderer->Statistics().DrawCalls > 0;
+            m_UploadPoolReused = renderer && renderer->Statistics().RuntimeUiRenderer.UploadBufferPoolSize == 1U &&
+                                 renderer->Statistics().RuntimeUiRenderer.UploadBufferReallocations == 0U;
             Owner().MainWindow()->SetVisible(false);
         }
 
       private:
         bool& m_Rendered;
+        bool& m_UploadPoolReused;
         std::uint32_t m_Frames = 0;
     };
 
@@ -71,9 +77,11 @@ namespace
 TEST_CASE("runtime Game UI renders through SDL GPU without editor UI")
 {
     bool rendered = false;
+    bool uploadPoolReused = false;
     Keire::Application application(NativeRuntimeUiSpecification());
-    (void)application.PushLayer(std::make_unique<NativeRuntimeUiLayer>(rendered));
+    (void)application.PushLayer(std::make_unique<NativeRuntimeUiLayer>(rendered, uploadPoolReused));
     CHECK(application.Run() == 0);
     CHECK(rendered);
+    CHECK(uploadPoolReused);
     CHECK_FALSE(application.UiEnabled());
 }

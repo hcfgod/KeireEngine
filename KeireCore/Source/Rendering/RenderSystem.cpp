@@ -134,7 +134,30 @@ namespace Keire
             owner->RequireOwner("RenderSurface::RequestSize");
             if (m_Impl->State->RequestedWidth == width && m_Impl->State->RequestedHeight == height)
                 return;
-            m_Impl->State = owner->CreateSurfaceEpoch(m_Impl->State, width, height);
+            m_Impl->State =
+                owner->CreateSurfaceEpoch(m_Impl->State, width, height, m_Impl->State->Specification.SampleCount);
+        }
+    }
+
+    void RenderSurface::RequestSampleCount(const RenderSampleCount sampleCount)
+    {
+        switch (sampleCount)
+        {
+        case RenderSampleCount::One:
+        case RenderSampleCount::Two:
+        case RenderSampleCount::Four:
+        case RenderSampleCount::Eight:
+            break;
+        default:
+            throw std::invalid_argument("Render surface sample count must be 1, 2, 4, or 8.");
+        }
+        if (const auto owner = m_Impl->State->Owner.lock())
+        {
+            owner->RequireOwner("RenderSurface::RequestSampleCount");
+            if (m_Impl->State->Specification.SampleCount == sampleCount)
+                return;
+            m_Impl->State = owner->CreateSurfaceEpoch(m_Impl->State, m_Impl->State->RequestedWidth,
+                                                      m_Impl->State->RequestedHeight, sampleCount);
         }
     }
 
@@ -344,15 +367,47 @@ namespace Keire
             m_Impl->State->StartGpuVfxPipelineWarmup();
     }
     RenderMode RenderSystem::Mode() const noexcept { return m_Impl->State->Specification.Mode; }
+    RenderFeatureCapabilities RenderSystem::FeatureCapabilities() const noexcept
+    {
+        const bool rendered =
+            m_Impl->State->Specification.Mode == RenderMode::Rendered &&
+            m_Impl->State->DeviceLifecycle.load(std::memory_order_acquire) == RenderDeviceState::Running;
+        const bool deferredHybrid = rendered && m_Impl->State->DeferredCapability.load(std::memory_order_acquire);
+        const bool msaa2 = rendered && m_Impl->State->Msaa2Capability.load(std::memory_order_acquire);
+        const bool msaa4 = rendered && m_Impl->State->Msaa4Capability.load(std::memory_order_acquire);
+        return {.DeferredHybrid = deferredHybrid,
+                .BakedGlobalIllumination = rendered,
+                .RealtimeGlobalIllumination = rendered,
+                .IrradynGlobalIllumination = deferredHybrid,
+                .IrradynRequiresDeferredHybrid = true,
+                .Fxaa = rendered,
+                .TemporalAntiAliasing = rendered,
+                .Msaa2 = msaa2,
+                .Msaa4 = msaa4,
+                .DeferredMultisample = deferredHybrid && (msaa2 || msaa4),
+                .DynamicResolution = rendered};
+    }
     RenderCapabilities RenderSystem::Capabilities() const noexcept
     {
         const bool rendered =
             m_Impl->State->Specification.Mode == RenderMode::Rendered &&
             m_Impl->State->DeviceLifecycle.load(std::memory_order_acquire) == RenderDeviceState::Running;
         const bool gpuOcclusion = rendered && m_Impl->State->GpuOcclusionCapability.load(std::memory_order_acquire);
+        const bool deferredHybrid = rendered && m_Impl->State->DeferredCapability.load(std::memory_order_acquire);
+        const auto features = FeatureCapabilities();
         const auto visibility = RenderBackend::AdvertisedGpuVisibilityCapabilities(gpuOcclusion);
         return {.CpuVfxSimulation = true,
                 .GpuVfxSimulation = rendered,
+                .DeferredHybrid = deferredHybrid,
+                .BakedGlobalIllumination = rendered,
+                .RealtimeGlobalIllumination = rendered,
+                .IrradynGlobalIllumination = deferredHybrid,
+                .Fxaa = features.Fxaa,
+                .TemporalAntiAliasing = features.TemporalAntiAliasing,
+                .Msaa2 = features.Msaa2,
+                .Msaa4 = features.Msaa4,
+                .DeferredMultisample = features.DeferredMultisample,
+                .DynamicResolution = features.DynamicResolution,
                 .TransparentPass = rendered,
                 .DynamicSpritePackets = rendered,
                 .TexturedSpritePackets = false,
@@ -429,11 +484,31 @@ namespace Keire
         for (const auto& surface : state.LiveSurfaces())
             largestPixels = std::max(largestPixels, static_cast<std::uint64_t>(surface->Width) * surface->Height);
 
-        const auto resources = state.SceneFrameGraph.Graph.Resources();
-        const auto passes = state.SceneFrameGraph.Graph.Passes();
-        const auto& compiled = state.SceneFrameGraph.Compiled;
+        const auto& frameGraph = state.DeferredCapability.load(std::memory_order_acquire)
+                                     ? state.DeferredSceneFrameGraph
+                                     : state.SceneFrameGraph;
+        const auto resources = frameGraph.Graph.Resources();
+        const auto passes = frameGraph.Graph.Passes();
+        const auto& compiled = frameGraph.Compiled;
         snapshot.Resources.reserve(resources.size());
         std::vector<std::uint64_t> aliasBytes(compiled.TransientAllocations.size());
+        const auto textureBytesPerPixel = [](const RenderBackend::FrameGraphTextureFormat format) noexcept
+        {
+            switch (format)
+            {
+            case RenderBackend::FrameGraphTextureFormat::Rgba16Float:
+                return 8ULL;
+            case RenderBackend::FrameGraphTextureFormat::Rg16Float:
+            case RenderBackend::FrameGraphTextureFormat::Rgba8Unorm:
+            case RenderBackend::FrameGraphTextureFormat::Rgba8Srgb:
+            case RenderBackend::FrameGraphTextureFormat::R32Float:
+            case RenderBackend::FrameGraphTextureFormat::D32Float:
+                return 4ULL;
+            case RenderBackend::FrameGraphTextureFormat::Undefined:
+                return 0ULL;
+            }
+            return 0ULL;
+        };
         for (std::uint32_t index = 0; index < resources.size(); ++index)
         {
             const auto& resource = resources[index];
@@ -442,13 +517,37 @@ namespace Keire
             auto estimatedBytes = resource.SizeBytes;
             if (estimatedBytes == 0 && resource.Kind == RenderBackend::FrameGraphResourceKind::Texture)
             {
-                const auto bytesPerPixel = resource.Name.find("HDR") != std::string::npos ? 8ULL : 4ULL;
-                estimatedBytes = largestPixels * bytesPerPixel;
+                auto bytesPerPixel = textureBytesPerPixel(resource.Texture.Format);
+                if (bytesPerPixel == 0U)
+                    bytesPerPixel = resource.Name.find("HDR") != std::string::npos ? 8ULL : 4ULL;
+                const auto numerator = static_cast<long double>(resource.Texture.WidthScaleNumerator) *
+                                       resource.Texture.HeightScaleNumerator;
+                const auto denominator = static_cast<long double>(resource.Texture.WidthScaleDenominator) *
+                                         resource.Texture.HeightScaleDenominator;
+                const auto scaledBytes = static_cast<long double>(largestPixels) * bytesPerPixel * numerator /
+                                         denominator * resource.Texture.SampleCount;
+                estimatedBytes = static_cast<std::uint64_t>(
+                    std::min(scaledBytes, static_cast<long double>(std::numeric_limits<std::uint64_t>::max())));
             }
-            snapshot.Resources.push_back({index, resource.Name,
-                                          static_cast<FrameGraphSnapshotResourceKind>(resource.Kind),
-                                          lifetime.FirstPass, lifetime.LastPass, physical, resource.CompatibilityKey,
-                                          estimatedBytes, resource.Imported, lifetime.Used});
+            FrameGraphSnapshotResource captured;
+            captured.Index = index;
+            captured.Name = resource.Name;
+            captured.Kind = static_cast<FrameGraphSnapshotResourceKind>(resource.Kind);
+            captured.FirstPass = lifetime.FirstPass;
+            captured.LastPass = lifetime.LastPass;
+            captured.PhysicalAliasSlot = physical;
+            captured.CompatibilityKey = resource.CompatibilityKey;
+            captured.EstimatedBytes = estimatedBytes;
+            captured.Imported = resource.Imported;
+            captured.Used = lifetime.Used;
+            captured.TextureFormat = static_cast<FrameGraphSnapshotTextureFormat>(resource.Texture.Format);
+            captured.Usage = static_cast<FrameGraphSnapshotResourceUsage>(resource.Texture.Usage);
+            captured.SampleCount = resource.Texture.SampleCount;
+            captured.WidthScaleNumerator = resource.Texture.WidthScaleNumerator;
+            captured.WidthScaleDenominator = resource.Texture.WidthScaleDenominator;
+            captured.HeightScaleNumerator = resource.Texture.HeightScaleNumerator;
+            captured.HeightScaleDenominator = resource.Texture.HeightScaleDenominator;
+            snapshot.Resources.push_back(std::move(captured));
             if (!resource.Imported && lifetime.Used)
             {
                 snapshot.TheoreticalUnaliasedBytes += estimatedBytes;

@@ -9,7 +9,10 @@ $Sources = @(
     @{ Prefix = "BuiltinGrid"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinGrid.hlsl") },
     @{ Prefix = "BuiltinShadow"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinShadow.hlsl") },
     @{ Prefix = "BuiltinToneMap"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinToneMap.hlsl") },
-    @{ Prefix = "BuiltinRuntimeUi"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinRuntimeUi.hlsl") }
+    @{ Prefix = "BuiltinRuntimeUi"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinRuntimeUi.hlsl") },
+    @{ Prefix = "BuiltinDeferredGBuffer"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinDeferredGBuffer.hlsl") },
+    @{ Prefix = "BuiltinDeferredLighting"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinDeferredLighting.hlsl") },
+    @{ Prefix = "BuiltinIrradyn"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinIrradyn.hlsl") }
 )
 $Generated = Join-Path $Root "Build\Generated\Keire\BuiltinUnlitShaders.h"
 $Stamp = Join-Path $Root "Build\Generated\Keire\BuiltinRenderingShaders.stamp"
@@ -21,7 +24,7 @@ if (-not (Test-Path -LiteralPath $Compiler -PathType Leaf)) {
 }
 
 $FingerprintInputs = @($PSCommandPath, $CacheHelper, $Compiler) + @($Sources | ForEach-Object { $_.Path })
-$Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-rendering-v1" -Inputs $FingerprintInputs
+$Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-rendering-v2" -Inputs $FingerprintInputs
 if (Test-GeneratedContentCurrent -Output $Generated -Stamp $Stamp -Fingerprint $Fingerprint) {
     return
 }
@@ -49,7 +52,9 @@ try {
         Copy-Item -LiteralPath $Source.Path -Destination $StagedSource
         foreach ($Variant in $Variants) {
             $Output = Join-Path $Temporary "$($Source.Prefix)-$($Variant.File)"
-            & $Compiler $StagedSource -s HLSL -d $Variant.Destination -t $Variant.Stage -e $Variant.Entry -o $Output
+            $CompilerArguments = @($StagedSource, '-s', 'HLSL', '-d', $Variant.Destination, '-t', $Variant.Stage,
+                                   '-e', $Variant.Entry, '-o', $Output)
+            & $Compiler @CompilerArguments
             if ($LASTEXITCODE -ne 0) {
                 throw "$($Source.Prefix) $($Variant.Name) shader compilation failed."
             }

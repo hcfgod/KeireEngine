@@ -6,6 +6,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <type_traits>
@@ -28,7 +29,7 @@ namespace Keire::Detail
         constexpr auto OcclusionSupportMask = static_cast<std::uint8_t>(ShaderOcclusionSupport::ConservativeBounds |
                                                                         ShaderOcclusionSupport::DepthOnlyGeometryMatch);
         const auto occlusionSupport = static_cast<std::uint8_t>(definition.OcclusionSupport);
-        if (definition.SchemaVersion != 2 ||
+        if (definition.SchemaVersion != ShaderAssetSchemaVersion ||
             (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > 3) ||
             definition.Topology > ShaderPrimitiveTopology::PointList || definition.Culling > ShaderCullMode::Back ||
             (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U &&
@@ -66,8 +67,8 @@ namespace Keire::Detail
         }
         if (definition.Properties.size() > MaximumShaderProperties ||
             definition.Dependencies.size() > MaximumShaderDependencies ||
-            (!allowMissingVariants && definition.Variants.empty()) ||
-            (requireVariants && definition.Variants.size() != 3))
+            definition.Variants.size() > ShaderAssetPassRoleHardLimit * 3U ||
+            (!allowMissingVariants && definition.Variants.empty()))
             throw std::invalid_argument("Shader definition exceeds a bounded collection or lacks variants.");
 
         std::set<std::string, std::less<>> propertyNames;
@@ -83,7 +84,7 @@ namespace Keire::Detail
             if (property.Type == ShaderPropertyType::Texture2D)
             {
                 ++textureProperties;
-                if (property.TextureSemantic > ShaderTextureSemantic::Roughness)
+                if (property.TextureSemantic > ShaderTextureSemantic::Specular)
                     throw std::invalid_argument("Shader texture property semantic is invalid.");
             }
             else
@@ -113,11 +114,27 @@ namespace Keire::Detail
             (definition.UsesForwardPlus ? 3U : 0U) + (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U);
         if (definition.UserReadOnlyBuffers + reservedReadOnlyBuffers > 8U)
             throw std::invalid_argument("Shader read-only buffers exceed the portable eight-buffer limit.");
-        std::set<ShaderBinaryFormat> formats;
+        constexpr std::size_t maximumStageBinaryBytes = 64ULL * 1024ULL * 1024ULL;
+        std::set<std::pair<std::string, ShaderBinaryFormat>> lanes;
+        std::map<std::string, std::set<ShaderBinaryFormat>, std::less<>> formatsByRole;
         for (const auto& variant : definition.Variants)
         {
-            if (variant.Vertex.empty() || variant.Fragment.empty() || !formats.insert(variant.Format).second)
-                throw std::invalid_argument("Shader variants must be non-empty and have unique formats.");
+            if (!ValidShaderIdentifier(variant.PassRole) || variant.Format > ShaderBinaryFormat::Msl ||
+                variant.Vertex.empty() || variant.Fragment.empty() || variant.Vertex.size() > maximumStageBinaryBytes ||
+                variant.Fragment.size() > maximumStageBinaryBytes ||
+                !lanes.emplace(variant.PassRole, variant.Format).second)
+            {
+                throw std::invalid_argument(
+                    "Shader pass variants must be bounded, non-empty, and unique by pass role and format.");
+            }
+            formatsByRole[variant.PassRole].insert(variant.Format);
+        }
+        if (formatsByRole.size() > ShaderAssetPassRoleHardLimit)
+            throw std::invalid_argument("Shader asset exceeds the cooked pass-role hard limit.");
+        if (requireVariants &&
+            std::ranges::any_of(formatsByRole, [](const auto& role) { return role.second.size() != 3U; }))
+        {
+            throw std::invalid_argument("Every imported shader pass role requires DXIL, SPIR-V, and MSL variants.");
         }
     }
 

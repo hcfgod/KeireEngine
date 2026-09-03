@@ -465,10 +465,16 @@ namespace
                 const auto baked = Keire::LightingBaker::Bake(bake);
                 auto updated = scene->Definition();
                 updated.BakedLighting = baked.LightingSet;
+                std::vector<Keire::AssetId> publicationTargets;
+                publicationTargets.reserve(baked.Assets.size() + 1U);
+                publicationTargets.push_back(request.BakeScene);
+                for (const auto& output : baked.Assets)
+                    publicationTargets.push_back(output.Id);
                 try
                 {
                     Keire::Detail::WriteFileAtomically(sourcePath, Keire::SceneAsset::Encode(updated));
-                    result.Import = database->ImportAll(Keire::AssetImportPolicy::KeepLastGood, {}, progress);
+                    result.Import =
+                        database->ImportAssets(publicationTargets, Keire::AssetImportPolicy::FailFast, {}, progress);
                 }
                 catch (...)
                 {
@@ -477,9 +483,7 @@ namespace
                 }
                 result.CreatedAsset = baked.LightingSet;
                 result.LightingCacheHit = baked.CacheHit;
-                result.MutatedAssets.push_back(request.BakeScene);
-                for (const auto& output : baked.Assets)
-                    result.MutatedAssets.push_back(output.Id);
+                result.MutatedAssets = std::move(publicationTargets);
                 break;
             }
             }

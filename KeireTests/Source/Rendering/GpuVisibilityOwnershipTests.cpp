@@ -99,13 +99,23 @@ TEST_CASE("surface frame ownership provides one writer per bounded slot")
         SurfaceResources resources;
         resources.Worksets.resize(depth);
         resources.FinalOutputs.resize(depth + 1U);
+        resources.TemporalHistories.resize(depth + 1U);
         for (std::uint32_t index = 0; index <= depth; ++index)
+        {
             resources.FinalOutputs[index] = reinterpret_cast<SDL_GPUTexture*>(static_cast<std::uintptr_t>(index + 1U));
+            resources.TemporalHistories[index] =
+                reinterpret_cast<SDL_GPUTexture*>(static_cast<std::uintptr_t>(index + depth + 2U));
+        }
 
         CHECK(resources.PublishedColor() == resources.FinalOutputs.front());
+        CHECK(resources.PublishedTemporalHistory() == resources.TemporalHistories.front());
         for (std::uint32_t slot = 0; slot < depth; ++slot)
+        {
             CHECK(resources.WriterColor(slot) == resources.FinalOutputs[slot + 1U]);
+            CHECK(resources.WriterTemporalHistory(slot) == resources.TemporalHistories[slot + 1U]);
+        }
         CHECK(resources.WriterColor(depth) == nullptr);
+        CHECK(resources.WriterTemporalHistory(depth) == nullptr);
     }
 }
 

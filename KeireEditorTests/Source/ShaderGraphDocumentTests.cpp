@@ -705,9 +705,9 @@ TEST_CASE("Shader Graph hero example imports compiled shader and runtime materia
             ++shaders;
             const auto shader = Keire::ShaderAsset::Decode(subAsset.Bytes);
             REQUIRE(shader);
-            CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil) != nullptr);
-            CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV) != nullptr);
-            CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl) != nullptr);
+            for (const auto format :
+                 {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::Msl})
+                CHECK(shader->Variant(format, "forwardTransparent") != nullptr);
         }
         else if (subAsset.Type == Keire::MaterialAsset::StaticType())
             runtimeMaterial = &subAsset;

@@ -1,9 +1,11 @@
 #include "Keire/Core.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <vector>
 
 TEST_CASE("lighting texture arrays preserve deterministic mip and layer payloads")
@@ -59,11 +61,37 @@ TEST_CASE("lighting sets preserve eight-channel mixed-light assignments")
         definition.MixedLights.push_back(
             {Keire::AssetId(0x2000000000000000ULL, static_cast<std::uint64_t>(channel) + 1U), channel});
     const auto decoded = Keire::LightingSetAsset::Decode(Keire::LightingSetAsset::Encode(definition));
+    CHECK(decoded->Definition().SchemaVersion == Keire::LightingSetSchemaVersion);
+    CHECK(Keire::HasBakedLightingContribution(decoded->Definition().Contributions,
+                                              Keire::BakedLightingContribution::StaticDiffuseIndirect));
     REQUIRE(decoded->Definition().MixedLights.size() == 8);
     for (std::uint8_t channel = 0; channel < 8; ++channel)
         CHECK(decoded->Definition().MixedLights[channel].ShadowMaskChannel == channel);
     definition.MixedLights.back().ShadowMaskChannel = 8;
     CHECK_THROWS_AS((void)Keire::LightingSetAsset::Encode(definition), std::invalid_argument);
+}
+
+TEST_CASE("lighting set schema one migrates to explicit baked contribution ownership")
+{
+    Keire::LightingSetDefinition definition;
+    definition.Scene = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000009");
+    const auto current = Keire::LightingSetAsset::Encode(definition);
+    auto document = nlohmann::json::from_cbor(reinterpret_cast<const std::uint8_t*>(current.data()),
+                                              reinterpret_cast<const std::uint8_t*>(current.data() + current.size()));
+    document["schemaVersion"] = 1U;
+    document.erase("contributions");
+    const auto legacyBytes = nlohmann::json::to_cbor(document);
+    std::vector<std::byte> legacy(legacyBytes.size());
+    std::memcpy(legacy.data(), legacyBytes.data(), legacyBytes.size());
+
+    const auto migrated = Keire::LightingSetAsset::Decode(legacy);
+    CHECK(migrated->Definition().SchemaVersion == Keire::LightingSetSchemaVersion);
+    CHECK(Keire::HasBakedLightingContribution(migrated->Definition().Contributions,
+                                              Keire::BakedLightingContribution::StaticDiffuseIndirect));
+    CHECK(Keire::HasBakedLightingContribution(migrated->Definition().Contributions,
+                                              Keire::BakedLightingContribution::StaticSpecularIndirect));
+    CHECK(Keire::HasBakedLightingContribution(migrated->Definition().Contributions,
+                                              Keire::BakedLightingContribution::StationaryDirect));
 }
 
 TEST_CASE("scene schema v6 persists bake settings and generated lighting reference")

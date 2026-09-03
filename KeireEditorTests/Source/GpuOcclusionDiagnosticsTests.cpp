@@ -28,6 +28,32 @@ TEST_CASE("GPU occlusion project modes have explicit editor labels and fallback 
           std::string_view::npos);
 }
 
+TEST_CASE("GPU occlusion panels follow the Game camera during Play")
+{
+    Keire::GpuOcclusionSurfaceDiagnostics scene;
+    scene.Candidates = 7;
+    Keire::GpuOcclusionSurfaceDiagnostics game;
+    game.Candidates = 0;
+
+    auto selected = KeireEditor::SelectGpuOcclusionPanelSurface(true, game, scene);
+    REQUIRE(selected.Diagnostics);
+    CHECK(selected.Diagnostics->Candidates == 0);
+    CHECK(selected.Label == "Game camera (Play)");
+
+    selected = KeireEditor::SelectGpuOcclusionPanelSurface(false, game, scene);
+    REQUIRE(selected.Diagnostics);
+    CHECK(selected.Diagnostics->Candidates == 7);
+    CHECK(selected.Label == "Scene editor camera");
+
+    selected = KeireEditor::SelectGpuOcclusionPanelSurface(false, game, std::nullopt);
+    REQUIRE(selected.Diagnostics);
+    CHECK(selected.Label == "Game camera (Edit)");
+
+    selected = KeireEditor::SelectGpuOcclusionPanelSurface(true, std::nullopt, scene);
+    REQUIRE(selected.Diagnostics);
+    CHECK(selected.Label == "Scene editor camera");
+}
+
 TEST_CASE("GPU occlusion diagnostics distinguish unavailable disabled and pending states")
 {
     Keire::RenderCapabilities capabilities;
@@ -40,9 +66,9 @@ TEST_CASE("GPU occlusion diagnostics distinguish unavailable disabled and pendin
 
     capabilities.GpuOcclusionCulling = true;
     presentation = KeireEditor::BuildGpuOcclusionDiagnostics(capabilities, statistics);
-    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Disabled);
+    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Standby);
     CHECK(presentation.Pyramid == "HZB idle");
-    CHECK(presentation.Readback == "Visibility readback unavailable while GPU occlusion is disabled");
+    CHECK(presentation.Readback == "Visibility readback unavailable while GPU occlusion is inactive");
     CHECK(presentation.Readback.find("pending") == std::string::npos);
 
     statistics.GpuOcclusionEnabled = true;
@@ -79,7 +105,9 @@ TEST_CASE("GPU occlusion diagnostics expose readback age accounting and fallback
     CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Active);
     CHECK(presentation.CountersConsistent);
     CHECK(presentation.ReadbackFresh);
-    CHECK(presentation.Visibility.find("64 culled (64%)") != std::string::npos);
+    CHECK(presentation.Visibility.find("64 occlusion-rejected (64%)") != std::string::npos);
+    CHECK(presentation.Visibility.find("36 conservatively visible") != std::string::npos);
+    CHECK(presentation.Readback.find("not guaranteed to produce on-screen pixels") != std::string::npos);
     CHECK(presentation.Pyramid.find("12 safe occluders") != std::string::npos);
     CHECK(presentation.Recording ==
           "Last completed frame occlusion recording 0.1 ms depth / 0.2 ms pyramid / 0.3 ms cull");
@@ -175,7 +203,7 @@ TEST_CASE("GPU occlusion panels prefer active Scene surface diagnostics over res
     surface.EligibleSafeOccluders = 4;
     surface.EligibleCandidateTriangles = 26'664;
     presentation = KeireEditor::BuildGpuOcclusionPanelDiagnostics(capabilities, aggregate, surface);
-    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Disabled);
+    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Standby);
     CHECK_FALSE(presentation.Warning);
     CHECK(presentation.Status.find("below the Automatic activation threshold") != std::string::npos);
     CHECK(presentation.Status.find("use Forced to validate this scene") != std::string::npos);
@@ -230,8 +258,9 @@ TEST_CASE("per-surface GPU occlusion diagnostics preserve typed fallback and sou
     auto presentation = KeireEditor::BuildGpuOcclusionSurfaceDiagnostics(diagnostics, &aggregate);
     CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Active);
     CHECK(presentation.Status.find("requested Forced, effective Forced") != std::string::npos);
-    CHECK(presentation.Readback == "Visibility source frame 91 (2 frames old)");
-    CHECK(presentation.Visibility.find("22 culled (73%)") != std::string::npos);
+    CHECK(presentation.Readback.find("Visibility source frame 91 (2 frames old)") != std::string::npos);
+    CHECK(presentation.Readback.find("not guaranteed to produce on-screen pixels") != std::string::npos);
+    CHECK(presentation.Visibility.find("22 occlusion-rejected (73%)") != std::string::npos);
     CHECK(presentation.Pyramid.find("last completed frame aggregate: 8 dispatches / 3 indirect draws") !=
           std::string::npos);
 
@@ -257,7 +286,7 @@ TEST_CASE("per-surface GPU occlusion diagnostics preserve typed fallback and sou
     diagnostics.State = Keire::GpuOcclusionSurfaceState::Idle;
     diagnostics.FallbackReason = Keire::GpuOcclusionFallbackReason::BelowAutomaticThreshold;
     presentation = KeireEditor::BuildGpuOcclusionSurfaceDiagnostics(diagnostics);
-    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Disabled);
+    CHECK(presentation.State == KeireEditor::GpuOcclusionDiagnosticState::Standby);
     CHECK(presentation.Readback == "Visibility readback unavailable while GPU occlusion is idle");
     CHECK(presentation.Readback.find("pending") == std::string::npos);
 

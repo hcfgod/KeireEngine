@@ -86,6 +86,28 @@ TEST_CASE("Scene runtime world exposes stable additive handles and explicit quer
     CHECK(fixture.World->QueryTag("Second", Keire::SceneQueryScope::Active).size() == 2);
 }
 
+TEST_CASE("Scene runtime world can adopt a stopped session before Play lifecycle callbacks")
+{
+    RuntimeWorldFixture fixture;
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Prepared"));
+    const auto target = scene->CreateEntity("Query Target");
+    const auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, fixture.Assets);
+
+    const auto handle = fixture.World->Adopt(session);
+    REQUIRE(handle);
+    CHECK(fixture.World->Active() == handle);
+    CHECK(fixture.World->Asset(handle) == scene->Asset());
+    CHECK_FALSE(fixture.World->Find(handle));
+
+    session->Play();
+    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+    REQUIRE(fixture.World->Find(handle) == session->RuntimeScene());
+    const auto matches = fixture.World->QueryName("Query Target", Keire::SceneQueryScope::Active);
+    REQUIRE(matches.size() == 1);
+    CHECK(matches.front().Id() == target.Id());
+}
+
 TEST_CASE("Persistent scene objects retain their hierarchy identity when their loaded scene retires")
 {
     RuntimeWorldFixture fixture;

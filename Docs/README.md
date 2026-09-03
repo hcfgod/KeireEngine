@@ -27,7 +27,7 @@ material is labeled as roadmap material and does not redefine the supported API 
 
 ## Complete Guide Library
 
-All 84 published guides are listed below in the same groups used by the documentation website.
+All 86 published guides are listed below in the same groups used by the documentation website.
 
 ### Start Here
 

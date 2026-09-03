@@ -57,6 +57,7 @@ namespace KeireHub::Detail
 #if defined(_WIN32)
         std::atomic<std::size_t> s_TransientRenameFailures = 0;
         std::atomic<std::size_t> s_TransientDeleteFailures = 0;
+        std::atomic<std::size_t> s_TransientDirectoryNotEmptyFailures = 0;
 #endif
 
         void InvokeMutationHook(const std::string_view operation, const std::filesystem::path& relative)
@@ -222,7 +223,8 @@ namespace KeireHub::Detail
             std::this_thread::sleep_for(std::chrono::milliseconds(delayMilliseconds));
         }
 
-        static void MarkForDeletion(const HANDLE handle, const std::string_view failureMessage)
+        static void MarkForDeletion(const HANDLE handle, const std::string_view failureMessage,
+                                    const bool directory = false)
         {
             constexpr std::size_t maximumAttempts = 8;
             FILE_DISPOSITION_INFO disposition{.DeleteFile = TRUE};
@@ -230,22 +232,37 @@ namespace KeireHub::Detail
             {
                 DWORD error = ERROR_SUCCESS;
 #if defined(KEIRE_INSTALL_TRANSACTION_TESTING)
-                auto injectedFailures = s_TransientDeleteFailures.load(std::memory_order_acquire);
-                while (injectedFailures != 0 && !s_TransientDeleteFailures.compare_exchange_weak(
-                                                    injectedFailures, injectedFailures - 1, std::memory_order_acq_rel,
-                                                    std::memory_order_acquire))
+                if (directory)
                 {
+                    auto injectedFailures = s_TransientDirectoryNotEmptyFailures.load(std::memory_order_acquire);
+                    while (injectedFailures != 0 && !s_TransientDirectoryNotEmptyFailures.compare_exchange_weak(
+                                                        injectedFailures, injectedFailures - 1,
+                                                        std::memory_order_acq_rel, std::memory_order_acquire))
+                    {
+                    }
+                    if (injectedFailures != 0)
+                        error = ERROR_DIR_NOT_EMPTY;
                 }
-                if (injectedFailures != 0)
-                    error = ERROR_ACCESS_DENIED;
-                else
+                if (error == ERROR_SUCCESS)
+                {
+                    auto injectedFailures = s_TransientDeleteFailures.load(std::memory_order_acquire);
+                    while (injectedFailures != 0 && !s_TransientDeleteFailures.compare_exchange_weak(
+                                                        injectedFailures, injectedFailures - 1,
+                                                        std::memory_order_acq_rel, std::memory_order_acquire))
+                    {
+                    }
+                    if (injectedFailures != 0)
+                        error = ERROR_ACCESS_DENIED;
+                }
+                if (error == ERROR_SUCCESS)
 #endif
                 {
                     if (SetFileInformationByHandle(handle, FileDispositionInfo, &disposition, sizeof(disposition)))
                         return;
                     error = GetLastError();
                 }
-                if (!IsTransientFileFilterError(error) || attempt + 1 == maximumAttempts)
+                const bool pendingChildDeletion = directory && error == ERROR_DIR_NOT_EMPTY;
+                if ((!IsTransientFileFilterError(error) && !pendingChildDeletion) || attempt + 1 == maximumAttempts)
                     ThrowWindows(failureMessage, error);
                 WaitForTransientFileFilter(attempt);
             }
@@ -682,7 +699,7 @@ namespace KeireHub::Detail
                                  NtOpenExisting, NtFileDirectory);
                 RejectNonDirectory(directory.Get());
                 InvokeMutationHook("remove-directory", relative);
-                MarkForDeletion(directory.Get(), "Cannot remove anchored install directory");
+                MarkForDeletion(directory.Get(), "Cannot remove anchored install directory", true);
                 return HubStatus::Success();
             }
             catch (const std::exception& error)
@@ -700,7 +717,7 @@ namespace KeireHub::Detail
                 InvokeMutationHook("remove-root", {});
                 RejectReparsePoint(m_RootHandle.Get());
                 RejectNonDirectory(m_RootHandle.Get());
-                MarkForDeletion(m_RootHandle.Get(), "Cannot remove anchored install root");
+                MarkForDeletion(m_RootHandle.Get(), "Cannot remove anchored install root", true);
                 return HubStatus::Success();
             }
             catch (const std::exception& error)
@@ -1007,6 +1024,11 @@ namespace KeireHub::Detail
     void SetInstallMutationTransientDeleteFailuresForTesting(const std::size_t failureCount) noexcept
     {
         s_TransientDeleteFailures.store(failureCount, std::memory_order_release);
+    }
+
+    void SetInstallMutationTransientDirectoryNotEmptyFailuresForTesting(const std::size_t failureCount) noexcept
+    {
+        s_TransientDirectoryNotEmptyFailures.store(failureCount, std::memory_order_release);
     }
 #endif
 #endif

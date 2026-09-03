@@ -1133,12 +1133,24 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
             if (const auto renderer = Owner().Renderer())
             {
                 const auto statistics = renderer->Statistics();
-                ui.Text("GPU submit   " + std::to_string(statistics.DrawCalls) + " draws / " +
+                ui.Text("GPU submit (all surfaces)   " + std::to_string(statistics.DrawCalls) + " draws / " +
                         std::to_string(statistics.Triangles) + " triangles");
-                ui.Text("Visibility   " + std::to_string(statistics.VisibleSubmeshes) + " visible / " +
-                        std::to_string(statistics.CulledSubmeshes) + " culled / " +
+                ui.Text("CPU visibility (all surfaces)   " + std::to_string(statistics.VisibleSubmeshes) +
+                        " visible / " + std::to_string(statistics.CulledSubmeshes) + " culled / " +
                         std::to_string(statistics.InstanceBatches) + " batches");
-                const auto occlusion = KeireEditor::BuildGpuOcclusionDiagnostics(renderer->Capabilities(), statistics);
+                const auto sceneSurface = m_SceneViewportPanel ? m_SceneViewportPanel->OcclusionDiagnostics()
+                                                               : std::optional<Keire::GpuOcclusionSurfaceDiagnostics>{};
+                const auto gameSurface = m_GameRenderView && m_GameRenderView->Surface()
+                                             ? std::optional(m_GameRenderView->Surface()->OcclusionDiagnostics())
+                                             : std::nullopt;
+                const auto playSession =
+                    m_SceneDocument ? m_SceneDocument->PlaySession() : Keire::Ref<Keire::SceneRuntimeSession>{};
+                const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
+                const auto occlusionSurface =
+                    KeireEditor::SelectGpuOcclusionPanelSurface(playActive, gameSurface, sceneSurface);
+                const auto occlusion = KeireEditor::BuildGpuOcclusionPanelDiagnostics(
+                    renderer->Capabilities(), statistics, occlusionSurface.Diagnostics);
+                ui.Text("GPU visibility source  " + std::string(occlusionSurface.Label));
                 ui.TextColored(occlusion.Warning ? m_Theme.Warning
                                : occlusion.State == KeireEditor::GpuOcclusionDiagnosticState::Active
                                    ? m_Theme.Success
@@ -1162,6 +1174,7 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.ScenePassMilliseconds) + " ms scene / " +
                         std::to_string(statistics.DepthPassMilliseconds) + " ms depth / " +
                         std::to_string(statistics.ToneMapMilliseconds) + " ms tone map / " +
+                        std::to_string(statistics.UiRecordingMilliseconds) + " ms UI / " +
                         std::to_string(statistics.CommandRecordingUnattributedMilliseconds) + " ms other");
                 ui.Text("Scheduling " + std::to_string(statistics.AllowedFramesInFlight) + " frames in flight / " +
                         std::to_string(statistics.GpuFenceWaitMilliseconds) + " ms fence wait / " +
@@ -1177,6 +1190,9 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
                         std::to_string(statistics.ForwardPlusUploadBytes) + " Forward+ bytes / " +
                         std::to_string(statistics.ForwardPlusBufferReallocations) + " buffer reallocations / " +
                         std::to_string(statistics.ForwardPlusCacheHits) + " cache hits");
+                ui.Text("Runtime UI uploads " + std::to_string(statistics.RuntimeUiRenderer.UploadBufferPoolSize) +
+                        " pooled buffers / " + std::to_string(statistics.RuntimeUiRenderer.UploadBufferReallocations) +
+                        " reallocations this frame");
                 ui.Text("GPU VFX " + std::to_string(statistics.VfxGpuWorlds) + " worlds / " +
                         std::to_string(statistics.VfxComputeDispatches) + " dispatches / " +
                         std::to_string(statistics.VfxComputeThreadGroups) + " thread groups / " +

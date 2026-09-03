@@ -68,6 +68,14 @@ cbuffer LocalLightConstants : register(b1, space3)
     LocalLightData LocalLights[62];
 };
 
+cbuffer EnvironmentConstants : register(b2, space3)
+{
+    float4 DiffuseIrradiance[9];
+    // Rotation, diffuse intensity, exposure, and reserved.
+    float4 EnvironmentParameters;
+    float4 EnvironmentEncoding;
+};
+
 Texture2DArray<float> DirectionalShadowTexture : register(t0, space2);
 SamplerState DirectionalShadowSampler : register(s0, space2);
 Texture2DArray<float> LocalShadowTexture : register(t1, space2);
@@ -120,28 +128,35 @@ float SampleShadowPcf(Texture2DArray<float> textureValue, SamplerState samplerVa
 {
     if (any(uv < sampleBounds.xy) || any(uv > sampleBounds.zw) || depth <= 0.0F || depth >= 1.0F)
         return 1.0F;
-    const int radius = soft ? 1 : 0;
+    if (!soft)
+        return depth <= textureValue.SampleLevel(samplerValue, float3(uv, layer), 0.0F) ? 1.0F : 0.0F;
+
     float visibility = 0.0F;
-    for (int y = -radius; y <= radius; ++y)
+    float totalWeight = 0.0F;
+    [unroll]
+    for (int y = -1; y <= 1; ++y)
     {
-        for (int x = -radius; x <= radius; ++x)
+        [unroll]
+        for (int x = -1; x <= 1; ++x)
         {
+            const float weight = (2.0F - abs((float)x)) * (2.0F - abs((float)y));
             const float2 unclampedUv = uv + float2(x, y) * inverseResolution;
             if (!clampSamples &&
                 (any(unclampedUv < sampleBounds.xy) || any(unclampedUv > sampleBounds.zw)))
             {
-                visibility += 1.0F;
+                visibility += weight;
             }
             else
             {
                 const float2 sampleUv = clamp(unclampedUv, sampleBounds.xy, sampleBounds.zw);
                 const float storedDepth =
                     textureValue.SampleLevel(samplerValue, float3(sampleUv, layer), 0.0F);
-                visibility += depth <= storedDepth ? 1.0F : 0.0F;
+                visibility += depth <= storedDepth ? weight : 0.0F;
             }
+            totalWeight += weight;
         }
     }
-    return visibility / (float)((radius * 2 + 1) * (radius * 2 + 1));
+    return visibility / max(totalWeight, 1.0F);
 }
 
 float SampleDirectionalShadow(const float3 worldPosition, const float viewDepth)
@@ -194,6 +209,33 @@ float SampleLocalShadow(const uint lightIndex, const float3 worldPosition)
     return lerp(1.0F, visibility, saturate(LocalShadowParameters[lightIndex].y));
 }
 
+float3 RotateEnvironmentDirection(float3 direction)
+{
+    const float rotation = radians(EnvironmentParameters.x);
+    const float sineRotation = sin(rotation);
+    const float cosineRotation = cos(rotation);
+    direction.xz = float2(direction.x * cosineRotation - direction.z * sineRotation,
+                          direction.x * sineRotation + direction.z * cosineRotation);
+    return direction;
+}
+
+float3 EvaluateEnvironmentDiffuse(float3 normal)
+{
+    normal = normalize(RotateEnvironmentDirection(normal));
+    const float x = normal.x;
+    const float y = normal.y;
+    const float z = normal.z;
+    return max(DiffuseIrradiance[0].rgb * 0.282095F + DiffuseIrradiance[1].rgb * (0.488603F * y) +
+                   DiffuseIrradiance[2].rgb * (0.488603F * z) +
+                   DiffuseIrradiance[3].rgb * (0.488603F * x) +
+                   DiffuseIrradiance[4].rgb * (1.092548F * x * y) +
+                   DiffuseIrradiance[5].rgb * (1.092548F * y * z) +
+                   DiffuseIrradiance[6].rgb * (0.315392F * (3.0F * y * y - 1.0F)) +
+                   DiffuseIrradiance[7].rgb * (1.092548F * x * z) +
+                   DiffuseIrradiance[8].rgb * (0.546274F * (z * z - x * x)),
+               0.0F.xxx);
+}
+
 float4 PSMain(VertexOutput input) : SV_Target0
 {
     const float shadow = SampleDirectionalShadow(input.WorldPosition, input.ViewDepth);
@@ -222,6 +264,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
                          LocalLights[lightIndex].ColorIntensity.a * attenuation * diffuse *
                          SampleLocalShadow(lightIndex, input.WorldPosition);
     }
-    return float4(saturate(input.AmbientColor.rgb + input.DirectColor.rgb * shadow + localLighting),
+    const float3 environmentDiffuse = input.BaseColor.rgb * EvaluateEnvironmentDiffuse(input.WorldNormal) *
+                                      EnvironmentParameters.y * EnvironmentParameters.z / 3.14159265F;
+    return float4(saturate(input.AmbientColor.rgb + environmentDiffuse + input.DirectColor.rgb * shadow + localLighting),
                   input.AmbientColor.a);
 }

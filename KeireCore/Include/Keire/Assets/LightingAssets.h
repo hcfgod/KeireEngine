@@ -12,6 +12,8 @@
 
 namespace Keire
 {
+    inline constexpr std::uint32_t LightingSetSchemaVersion = 2;
+
     enum class LightingTextureTarget : std::uint8_t
     {
         Texture2DArray,
@@ -125,9 +127,30 @@ namespace Keire
         AssetId Data;
     };
 
+    enum class BakedLightingContribution : std::uint8_t
+    {
+        None = 0,
+        StaticDiffuseIndirect = 1U << 0U,
+        StaticSpecularIndirect = 1U << 1U,
+        StationaryDirect = 1U << 2U
+    };
+
+    [[nodiscard]] constexpr BakedLightingContribution operator|(const BakedLightingContribution left,
+                                                                const BakedLightingContribution right) noexcept
+    {
+        return static_cast<BakedLightingContribution>(static_cast<std::uint8_t>(left) |
+                                                      static_cast<std::uint8_t>(right));
+    }
+
+    [[nodiscard]] constexpr bool HasBakedLightingContribution(const BakedLightingContribution contributions,
+                                                              const BakedLightingContribution contribution) noexcept
+    {
+        return (static_cast<std::uint8_t>(contributions) & static_cast<std::uint8_t>(contribution)) != 0U;
+    }
+
     struct LightingSetDefinition
     {
-        std::uint32_t SchemaVersion = 1;
+        std::uint32_t SchemaVersion = LightingSetSchemaVersion;
         AssetId Scene;
         std::string InputFingerprint;
         AssetId Lightmaps;
@@ -139,6 +162,10 @@ namespace Keire
         std::vector<MixedLightBinding> MixedLights;
         std::vector<ReflectionProbeBinding> ReflectionProbes;
         std::vector<LightProbeVolumeBinding> LightProbeVolumes;
+        /// Channels owned by this immutable bake. Realtime GI must replace or exclude these channels, never add them.
+        BakedLightingContribution Contributions = BakedLightingContribution::StaticDiffuseIndirect |
+                                                  BakedLightingContribution::StaticSpecularIndirect |
+                                                  BakedLightingContribution::StationaryDirect;
     };
 
     class KEIRE_API LightingSetAsset final : public Asset

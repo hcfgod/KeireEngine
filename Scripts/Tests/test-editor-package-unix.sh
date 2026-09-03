@@ -101,7 +101,7 @@ python3 "${manifest_arguments[@]}"
 
 assert_true validate_editor_package_stage "$stage" Client Hub Core Core Linux
 assert_false test -e "$stage/bin/Hub"
-$editor_managed_api="$stage/bin/Managed/Keire.Editor.Managed.dll"
+editor_managed_api="$stage/bin/Managed/Keire.Editor.Managed.dll"
 rm "$editor_managed_api"
 assert_false validate_editor_package_stage "$stage" Client Hub Core Core Linux
 : > "$editor_managed_api"

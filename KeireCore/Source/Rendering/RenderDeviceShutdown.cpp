@@ -290,6 +290,7 @@ namespace Keire::RenderBackend
             ReleaseGpuVfxPipelines();
             ReleaseGpuOcclusionPipelines();
             ReleaseSpatialSelectionPipeline();
+            ReleaseDeferredPipelines();
             VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::NotStarted, std::memory_order_relaxed);
             if (ToneMapPipeline)
                 SDL_ReleaseGPUGraphicsPipeline(Device, ToneMapPipeline);

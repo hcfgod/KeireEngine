@@ -76,6 +76,21 @@ TEST_CASE("GPU skinning shader storage matches the mesh vertex lane layout")
     CHECK(shaderLaneCount == sizeof(Keire::RenderBackend::GpuMeshVertex) / sizeof(Keire::Vector4));
 }
 
+TEST_CASE("deferred local shadows sample packed atlas tiles from the physical texture layer")
+{
+    std::ifstream stream("KeireCore/Shaders/BuiltinDeferredLighting.hlsl", std::ios::binary);
+    REQUIRE(stream.good());
+    const std::string shader{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+    const auto localShadow = shader.find("float EvaluateLocalShadow");
+    REQUIRE(localShadow != std::string::npos);
+    const auto localShadowEnd = shader.find("float3 FresnelSchlick", localShadow);
+    REQUIRE(localShadowEnd != std::string::npos);
+    const auto implementation = shader.substr(localShadow, localShadowEnd - localShadow);
+
+    CHECK(implementation.find("LocalShadowTexture, LocalShadowSampler, uv, 0.0F") != std::string::npos);
+    CHECK(implementation.find("LocalShadowTexture, LocalShadowSampler, uv, matrixIndex") == std::string::npos);
+}
+
 TEST_CASE("CPU mesh VFX particles enter material-aware scene rendering")
 {
     Keire::VfxRenderParticle particle;
@@ -129,6 +144,34 @@ TEST_CASE("GPU skinning output slots stay bounded by frames in flight")
     CHECK(SkinningOutputSlot(4, 3) == 0);
     CHECK(SkinningOutputSlot(10, 3) == 0);
     CHECK(SkinningOutputSlot(10, 0) == 0);
+}
+
+TEST_CASE("GPU skinning output ownership includes persistent palette uploads")
+{
+    Keire::RenderBackend::GpuSkinOutputResources output;
+    CHECK(output.Empty());
+
+    output.Palette.Buffer = reinterpret_cast<SDL_GPUBuffer*>(std::uintptr_t{1});
+    output.Palette.Transfer = reinterpret_cast<SDL_GPUTransferBuffer*>(std::uintptr_t{2});
+    output.Palette.Bytes = 64;
+    CHECK_FALSE(output.Palette.Empty());
+    CHECK_FALSE(output.Empty());
+
+    output.Palette = {};
+    output.PreviousPalette.Transfer = reinterpret_cast<SDL_GPUTransferBuffer*>(std::uintptr_t{3});
+    CHECK_FALSE(output.PreviousPalette.Empty());
+    CHECK_FALSE(output.Empty());
+}
+
+TEST_CASE("GPU skinning only reuses a submitted previous pose from another output slot")
+{
+    using Keire::RenderBackend::CanReusePreviousSkinOutput;
+
+    CHECK(CanReusePreviousSkinOutput(true, 0, 1, 42, 42));
+    CHECK_FALSE(CanReusePreviousSkinOutput(false, 0, 1, 42, 42));
+    CHECK_FALSE(CanReusePreviousSkinOutput(true, 1, 1, 42, 42));
+    CHECK_FALSE(CanReusePreviousSkinOutput(true, 0, 1, 0, 0));
+    CHECK_FALSE(CanReusePreviousSkinOutput(true, 0, 1, 41, 42));
 }
 
 TEST_CASE("GPU skinning instances isolate writable outputs by render surface")

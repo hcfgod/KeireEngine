@@ -106,6 +106,8 @@ namespace KeireEditor
                 return "semantic";
             case Keire::AnimationRetargetMatch::TargetConflict:
                 return "target conflict";
+            case Keire::AnimationRetargetMatch::Hierarchy:
+                return "hierarchy";
             }
             return "unknown";
         }
@@ -480,6 +482,7 @@ namespace KeireEditor
                                    std::to_string(diagnostics.MappedTrackCount) + " / " +
                                        std::to_string(diagnostics.SourceTrackCount) + " tracks mapped  |  " +
                                        std::to_string(diagnostics.ExactNameMatchCount) + " exact  |  " +
+                                       std::to_string(diagnostics.HierarchyMatchCount) + " hierarchy  |  " +
                                        std::to_string(diagnostics.SemanticMatchCount) + " semantic");
                     ui.TextColored(diagnostics.RootMotionMapped ? theme.Success : theme.Warning,
                                    diagnostics.RootMotionMapped ? "Root motion mapping is compatible."

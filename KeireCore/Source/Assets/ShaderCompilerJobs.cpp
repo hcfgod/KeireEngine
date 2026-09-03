@@ -13,6 +13,7 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstring>
 #include <fstream>
 #include <ranges>
 #include <span>
@@ -237,8 +238,84 @@ namespace Keire
                 return "spirv";
             case ShaderCompileBinaryFormat::Msl:
                 return "msl";
+            case ShaderCompileBinaryFormat::Metallib:
+                return "metallib";
             }
             throw std::invalid_argument("Shader compile binary format is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view BackendName(const ShaderCompileBackend backend)
+        {
+            switch (backend)
+            {
+            case ShaderCompileBackend::D3D12:
+                return "d3d12";
+            case ShaderCompileBackend::Vulkan:
+                return "vulkan";
+            case ShaderCompileBackend::Metal:
+                return "metal";
+            case ShaderCompileBackend::Automatic:
+                break;
+            }
+            throw std::invalid_argument("Shader compile backend is unsupported.");
+        }
+
+        [[nodiscard]] ShaderCompileBackend ResolveBackend(const ShaderCompileTarget& target)
+        {
+            if (target.Backend != ShaderCompileBackend::Automatic)
+                return target.Backend;
+            switch (target.Format)
+            {
+            case ShaderCompileBinaryFormat::Dxil:
+                return ShaderCompileBackend::D3D12;
+            case ShaderCompileBinaryFormat::SpirV:
+                return ShaderCompileBackend::Vulkan;
+            case ShaderCompileBinaryFormat::Msl:
+            case ShaderCompileBinaryFormat::Metallib:
+                return ShaderCompileBackend::Metal;
+            }
+            throw std::invalid_argument("Shader compile backend cannot be inferred from the binary format.");
+        }
+
+        [[nodiscard]] std::string_view OptimizationName(const ShaderCompileOptimization optimization)
+        {
+            switch (optimization)
+            {
+            case ShaderCompileOptimization::Debug:
+                return "debug";
+            case ShaderCompileOptimization::Development:
+                return "development";
+            case ShaderCompileOptimization::Shipping:
+                return "shipping";
+            }
+            throw std::invalid_argument("Shader compile optimization policy is unsupported.");
+        }
+
+        [[nodiscard]] Json EncodeManifestDocument(const ShaderCompileManifest& canonical)
+        {
+            Json defines = Json::array();
+            for (const auto& define : canonical.Defines)
+                defines.push_back({{"name", define.Name}, {"value", define.Value}});
+            Json dependencies = Json::array();
+            for (const auto& dependency : canonical.Dependencies)
+                dependencies.push_back({{"path", dependency.VirtualPath}, {"sha256", dependency.Sha256}});
+            return {{"schemaVersion", canonical.SchemaVersion},
+                    {"programAbiVersion", canonical.ProgramAbiVersion},
+                    {"toolchainSha256", canonical.ToolchainSha256},
+                    {"sourceSha256", canonical.SourceSha256},
+                    {"passRole", canonical.PassRole},
+                    {"stage", StageName(canonical.Stage)},
+                    {"entryPoint", canonical.EntryPoint},
+                    {"target",
+                     {{"platform", PlatformName(canonical.Target.Platform)},
+                      {"architecture", ArchitectureName(canonical.Target.Architecture)},
+                      {"backend", BackendName(canonical.Target.Backend)},
+                      {"format", FormatName(canonical.Target.Format)}}},
+                    {"defines", std::move(defines)},
+                    {"dependencies", std::move(dependencies)},
+                    {"optimization", OptimizationName(canonical.Optimization)},
+                    {"warningsAsErrors", canonical.WarningsAsErrors},
+                    {"debugInformation", canonical.DebugInformation}};
         }
     } // namespace
 
@@ -252,16 +329,24 @@ namespace Keire
         (void)StageName(manifest.Stage);
         (void)PlatformName(manifest.Target.Platform);
         (void)ArchitectureName(manifest.Target.Architecture);
+        const auto backend = ResolveBackend(manifest.Target);
+        (void)BackendName(backend);
         (void)FormatName(manifest.Target.Format);
-        if (!IsIdentifier(manifest.EntryPoint))
-            throw std::invalid_argument("Shader compile entry point is invalid.");
-        if ((manifest.Target.Format == ShaderCompileBinaryFormat::Dxil &&
-             manifest.Target.Platform != ShaderCompilePlatform::Windows) ||
-            (manifest.Target.Format == ShaderCompileBinaryFormat::Msl &&
-             manifest.Target.Platform != ShaderCompilePlatform::MacOS) ||
-            (manifest.Target.Platform == ShaderCompilePlatform::MacOS &&
-             manifest.Target.Format != ShaderCompileBinaryFormat::Msl))
-            throw std::invalid_argument("Shader compile platform and binary format are incompatible.");
+        (void)OptimizationName(manifest.Optimization);
+        if (!IsIdentifier(manifest.PassRole) || !IsIdentifier(manifest.EntryPoint))
+            throw std::invalid_argument("Shader compile pass role or entry point is invalid.");
+        const bool d3d12 = backend == ShaderCompileBackend::D3D12 &&
+                           manifest.Target.Platform == ShaderCompilePlatform::Windows &&
+                           manifest.Target.Format == ShaderCompileBinaryFormat::Dxil;
+        const bool vulkan = backend == ShaderCompileBackend::Vulkan &&
+                            manifest.Target.Platform != ShaderCompilePlatform::MacOS &&
+                            manifest.Target.Format == ShaderCompileBinaryFormat::SpirV;
+        const bool metal = backend == ShaderCompileBackend::Metal &&
+                           manifest.Target.Platform == ShaderCompilePlatform::MacOS &&
+                           (manifest.Target.Format == ShaderCompileBinaryFormat::Msl ||
+                            manifest.Target.Format == ShaderCompileBinaryFormat::Metallib);
+        if (!d3d12 && !vulkan && !metal)
+            throw std::invalid_argument("Shader compile platform, backend, and binary format are incompatible.");
         if (manifest.Defines.size() > 64U || manifest.Dependencies.size() > 256U)
             throw std::invalid_argument("Shader compile manifest exceeds define or dependency limits.");
 
@@ -301,6 +386,7 @@ namespace Keire
 
     ShaderCompileManifest CanonicalizeShaderCompileManifest(ShaderCompileManifest manifest)
     {
+        manifest.Target.Backend = ResolveBackend(manifest.Target);
         ValidateShaderCompileManifest(manifest);
         std::ranges::sort(manifest.Defines, {}, &ShaderCompileDefine::Name);
         std::ranges::sort(manifest.Dependencies, {}, &ShaderCompileDependency::VirtualPath);
@@ -310,33 +396,29 @@ namespace Keire
     std::string EncodeShaderCompileManifest(const ShaderCompileManifest& manifest)
     {
         const auto canonical = CanonicalizeShaderCompileManifest(manifest);
-        Json defines = Json::array();
-        for (const auto& define : canonical.Defines)
-            defines.push_back({{"name", define.Name}, {"value", define.Value}});
-        Json dependencies = Json::array();
-        for (const auto& dependency : canonical.Dependencies)
-            dependencies.push_back({{"path", dependency.VirtualPath}, {"sha256", dependency.Sha256}});
-        return Json{{"schemaVersion", canonical.SchemaVersion},
-                    {"programAbiVersion", canonical.ProgramAbiVersion},
-                    {"toolchainSha256", canonical.ToolchainSha256},
-                    {"sourceSha256", canonical.SourceSha256},
-                    {"stage", StageName(canonical.Stage)},
-                    {"entryPoint", canonical.EntryPoint},
-                    {"target",
-                     {{"platform", PlatformName(canonical.Target.Platform)},
-                      {"architecture", ArchitectureName(canonical.Target.Architecture)},
-                      {"format", FormatName(canonical.Target.Format)}}},
-                    {"defines", std::move(defines)},
-                    {"dependencies", std::move(dependencies)},
-                    {"warningsAsErrors", canonical.WarningsAsErrors},
-                    {"debugInformation", canonical.DebugInformation}}
-            .dump();
+        return EncodeManifestDocument(canonical).dump();
+    }
+
+    std::vector<std::byte> EncodeShaderCompileManifestCbor(const ShaderCompileManifest& manifest)
+    {
+        const auto canonical = CanonicalizeShaderCompileManifest(manifest);
+        const auto encoded = Json::to_cbor(EncodeManifestDocument(canonical));
+        std::vector<std::byte> result(encoded.size());
+        std::memcpy(result.data(), encoded.data(), encoded.size());
+        return result;
     }
 
     std::string ShaderCompileWorkKey(const ShaderCompileManifest& manifest)
     {
-        const auto encoded = EncodeShaderCompileManifest(manifest);
-        return Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(encoded))));
+        constexpr std::string_view domain = "keire-shader-work-v2";
+        const auto encoded = EncodeShaderCompileManifestCbor(manifest);
+        std::vector<std::byte> payload;
+        payload.reserve(domain.size() + 1U + encoded.size());
+        const auto domainBytes = std::as_bytes(std::span(domain));
+        payload.insert(payload.end(), domainBytes.begin(), domainBytes.end());
+        payload.push_back(std::byte{0});
+        payload.insert(payload.end(), encoded.begin(), encoded.end());
+        return Detail::DigestToString(Detail::Sha256(payload));
     }
 
     bool IsShaderCompileWorkKey(const std::string_view value) noexcept { return IsLowercaseSha256(value); }

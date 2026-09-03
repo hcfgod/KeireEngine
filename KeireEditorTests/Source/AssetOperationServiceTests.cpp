@@ -4,8 +4,10 @@
 
 #include <KeireEditorTests/EditorTestSupport.h>
 
+#include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
@@ -191,6 +193,29 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         CHECK(targeted->WorkerOutput.find("kind=import-assets") != std::string::npos);
         CHECK(targeted->WorkerOutput.find("reason='isolated-worker-targeted-test'") != std::string::npos);
         CHECK(targeted->WorkerOutput.find("targets=1") != std::string::npos);
+
+        operations.QueueLightingBake(created->Result.CreatedAsset, true,
+                                     {.Reason = "isolated-worker-lighting-publication-test"});
+        const auto bakeDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        while (operations.Busy() && std::chrono::steady_clock::now() < bakeDeadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        operations.Update();
+        const auto baked = operations.TakeCompletion();
+        REQUIRE(baked);
+        INFO(baked->Result.Diagnostic);
+        CHECK(baked->Result.Success);
+        CHECK(baked->Kind == Keire::Detail::AssetWorkerOperationKind::BakeLighting);
+        REQUIRE(baked->Result.CreatedAsset);
+        CHECK(std::ranges::find(baked->Result.MutatedAssets, created->Result.CreatedAsset) !=
+              baked->Result.MutatedAssets.end());
+        CHECK(std::ranges::find(baked->Result.MutatedAssets, baked->Result.CreatedAsset) !=
+              baked->Result.MutatedAssets.end());
+        const auto bakedCatalog = Keire::Detail::LoadCatalog(baked->Result.Import.CatalogPath);
+        CHECK(std::ranges::find(bakedCatalog.Entries, baked->Result.CreatedAsset, &Keire::Detail::CatalogEntry::Id) !=
+              bakedCatalog.Entries.end());
 
         operations.QueueMutation({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
                                   .Asset = created->Result.CreatedAsset,

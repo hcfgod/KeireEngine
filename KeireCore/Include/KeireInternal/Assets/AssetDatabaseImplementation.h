@@ -755,6 +755,11 @@ namespace Keire
                 if (importer.Name.empty() || importer.Version == 0 || !importer.Type || importer.Extensions.empty() ||
                     (!importer.Import && !importer.ContextualImport))
                     throw std::invalid_argument("Asset importer registration is incomplete.");
+                std::unordered_set<std::string> previousNames;
+                for (const auto& previousName : importer.PreviousNames)
+                    if (previousName.empty() || previousName == importer.Name ||
+                        !previousNames.insert(previousName).second)
+                        throw std::invalid_argument("Asset importer previous name is invalid or duplicated.");
                 for (auto& extension : importer.Extensions)
                 {
                     std::ranges::transform(extension, extension.begin(), [](const unsigned char value)
@@ -783,13 +788,32 @@ namespace Keire
         [[nodiscard]] const AssetImporterRegistration* FindImporter(const AssetSourceRecord& record) const
         {
             const auto found = Importers.find(record.Importer);
-            if (found == Importers.end())
-                return nullptr;
-            const auto& importer = found->second;
-            const auto compatible =
-                importer.Type == record.Type ||
-                std::ranges::find(importer.CompatibleTypes, record.Type) != importer.CompatibleTypes.end();
-            return importer.Version >= record.ImporterVersion && compatible ? &importer : nullptr;
+            const auto compatible = [&record](const AssetImporterRegistration& importer)
+            {
+                return importer.Version >= record.ImporterVersion &&
+                       (importer.Type == record.Type ||
+                        std::ranges::find(importer.CompatibleTypes, record.Type) != importer.CompatibleTypes.end());
+            };
+            if (found != Importers.end() && compatible(found->second))
+                return &found->second;
+
+            const auto* inferred = InferImporter(record.RelativePath);
+            if (inferred && compatible(*inferred) &&
+                std::ranges::find(inferred->PreviousNames, record.Importer) != inferred->PreviousNames.end())
+                return inferred;
+
+            const AssetImporterRegistration* renamed = nullptr;
+            for (const auto& [name, importer] : Importers)
+            {
+                (void)name;
+                if (!compatible(importer) ||
+                    std::ranges::find(importer.PreviousNames, record.Importer) == importer.PreviousNames.end())
+                    continue;
+                if (renamed)
+                    return nullptr;
+                renamed = &importer;
+            }
+            return renamed;
         }
         [[nodiscard]] AssetImportContext
         CreateImportContext(const AssetSourceRecord& record,
@@ -1278,8 +1302,14 @@ namespace Keire
                             monitorLock.lock();
                             if (revision == SourceRevision.load(std::memory_order_acquire))
                             {
-                                PublishedChangeScan = MonitoredScan{std::move(scanned), revision, verifyDigests};
-                                PublishedScans.fetch_add(1, std::memory_order_relaxed);
+                                // A polling request can queue a cheap signature scan while the startup digest scan
+                                // is still running. Preserve the verified result until the consumer takes it;
+                                // otherwise the later signature-only scan can erase an offline same-signature edit.
+                                if (!PublishedChangeScan || verifyDigests || !PublishedChangeScan->DigestsVerified)
+                                {
+                                    PublishedChangeScan = MonitoredScan{std::move(scanned), revision, verifyDigests};
+                                    PublishedScans.fetch_add(1, std::memory_order_relaxed);
+                                }
                             }
                             else if (verifyDigests)
                             {

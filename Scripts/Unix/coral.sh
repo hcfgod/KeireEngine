@@ -52,7 +52,7 @@ fi
 }
 
 temporary_source=""
-temporary_patched=""
+temporary_checkout=""
 coral_cache_lock_held=0
 cleanup_coral_cache() {
   if [[ "$coral_cache_lock_held" -eq 1 ]]; then
@@ -62,8 +62,8 @@ cleanup_coral_cache() {
   case "${temporary_source:-}" in
     "${source_root:-}/"*) rm -rf "$temporary_source" || true ;;
   esac
-  case "${temporary_patched:-}" in
-    "${build_root:-}/"*) rm -rf "$temporary_patched" || true ;;
+  case "${temporary_checkout:-}" in
+    "${build_root:-}/"*) rm -rf "$temporary_checkout" || true ;;
   esac
 }
 trap cleanup_coral_cache EXIT
@@ -72,17 +72,6 @@ coral_url="$(config_value "$ROOT/Config/Dependencies.lock" CORAL_URL)"
 coral_commit="$(config_value "$ROOT/Config/Dependencies.lock" CORAL_COMMIT)"
 macos_deployment_target="$(config_value "$ROOT/Config/Dependencies.lock" MACOS_DEPLOYMENT_TARGET)"
 dotnet_sdk_version="$(config_value "$ROOT/Config/Dependencies.lock" DOTNET_SDK_VERSION)"
-patch_root="$ROOT/Patches/Coral"
-patches=()
-while IFS= read -r patch; do
-  patches+=("$patch")
-done < <(find "$patch_root" -maxdepth 1 -type f -name '*.patch' -print | sort)
-((${#patches[@]} > 0)) || { printf 'The Kéire Coral patch set is empty.\n' >&2; exit 1; }
-if command -v sha256sum >/dev/null 2>&1; then
-  patch_digest="$({ for patch in "${patches[@]}"; do basename "$patch"; printf '\n'; cat "$patch"; done; } | sha256sum | awk '{print $1}')"
-else
-  patch_digest="$({ for patch in "${patches[@]}"; do basename "$patch"; printf '\n'; cat "$patch"; done; } | shasum -a 256 | awk '{print $1}')"
-fi
 
 source_root="${XDG_CACHE_HOME:-$HOME/.cache}/keire/dependency-sources"
 source_path="$source_root/coral-$coral_commit"
@@ -264,52 +253,49 @@ variant_key="$(coral_build_variant_key "$platform" "$architecture" "$toolset" "$
   "$dotnet_sdk_version" "$dotnet_root" "$macos_deployment_target" "$nethost_identity" "$workspace_key")"
 
 build_root="${XDG_CACHE_HOME:-$HOME/.cache}/keire/dependency-builds"
-cache_key="${coral_commit:0:12}-${patch_digest:0:16}-$variant_key"
-patched="$build_root/coral-$cache_key"
-stamp="$patched/keire-coral-patch.stamp"
-expected_stamp="$coral_commit|$patch_digest|$variant_key|$nethost_rid|$host_pack_version"
+cache_key="${coral_commit:0:12}-$variant_key"
+checkout="$build_root/coral-$cache_key"
 mkdir -p "$build_root"
 workspace_lock_acquire "$build_root" "coral-build-$cache_key" ".locks/coral-$cache_key.lock" >&2
 coral_cache_lock_held=1
-if [[ -L "$patched" || (-e "$patched" && ! -d "$patched") ]]; then
-  printf 'Coral build cache is not an ordinary directory: %s\n' "$patched" >&2
+if [[ -L "$checkout" || (-e "$checkout" && ! -d "$checkout") ]]; then
+  printf 'Coral build cache is not an ordinary directory: %s\n' "$checkout" >&2
   exit 1
 fi
-if [[ ! -f "$stamp" || "$(tr -d '\r\n' < "$stamp")" != "$expected_stamp" ]]; then
-  temporary_patched="$build_root/coral-$cache_key.tmp-$$"
-  case "$temporary_patched" in "$build_root"/*) rm -rf "$temporary_patched" ;; *) exit 1 ;; esac
-  git clone --quiet --no-hardlinks --shared "$source_path" "$temporary_patched"
-  for patch in "${patches[@]}"; do
-    git -C "$temporary_patched" apply --whitespace=error-all "$patch"
-  done
-  printf '%s\n' "$expected_stamp" > "$temporary_patched/keire-coral-patch.stamp"
-  if [[ -e "$patched" ]]; then
-    case "$patched" in "$build_root"/*) rm -rf "$patched" ;; *) exit 1 ;; esac
-  fi
-  mv "$temporary_patched" "$patched"
-  temporary_patched=""
-  printf '==> Coral patch cache prepared at %s\n' "$patched"
+if [[ -d "$checkout" ]]; then
+  locked_git_source_validate "$checkout" "$coral_commit" 'Coral build'
 else
-  printf '==> Coral patch cache is current\n'
+  temporary_checkout="$build_root/coral-$cache_key.tmp-$$"
+  case "$temporary_checkout" in "$build_root"/*) rm -rf "$temporary_checkout" ;; *) exit 1 ;; esac
+  if ! git clone --quiet --no-hardlinks --no-checkout "$source_path" "$temporary_checkout" ||
+     ! git -C "$temporary_checkout" checkout --quiet --detach "$coral_commit" ||
+     ! locked_git_source_validate "$temporary_checkout" "$coral_commit" 'Coral build' ||
+     ! mv "$temporary_checkout" "$checkout"; then
+    case "$temporary_checkout" in "$build_root"/*) rm -rf "$temporary_checkout" ;; esac
+    printf 'Could not prepare the Coral build checkout.\n' >&2
+    exit 1
+  fi
+  temporary_checkout=""
+  printf '==> Coral build checkout prepared at %s\n' "$checkout"
 fi
 
 if [[ "$build" == 1 ]]; then
-  native_build="$patched/Build/$configuration"
-  if [[ -L "$patched/Build" || (-e "$patched/Build" && ! -d "$patched/Build") ]]; then
-    printf 'Coral native build parent is not an ordinary directory: %s\n' "$patched/Build" >&2
+  native_build="$checkout/Build/$configuration"
+  if [[ -L "$checkout/Build" || (-e "$checkout/Build" && ! -d "$checkout/Build") ]]; then
+    printf 'Coral native build parent is not an ordinary directory: %s\n' "$checkout/Build" >&2
     exit 1
   fi
-  if [[ ! -e "$patched/Build" ]] && ! mkdir "$patched/Build" 2>/dev/null && [[ ! -d "$patched/Build" ]]; then
-    printf 'Could not create Coral native build parent: %s\n' "$patched/Build" >&2
+  if [[ ! -e "$checkout/Build" ]] && ! mkdir "$checkout/Build" 2>/dev/null && [[ ! -d "$checkout/Build" ]]; then
+    printf 'Could not create Coral native build parent: %s\n' "$checkout/Build" >&2
     exit 1
   fi
-  [[ -d "$patched/Build" && ! -L "$patched/Build" ]] || exit 1
+  [[ -d "$checkout/Build" && ! -L "$checkout/Build" ]] || exit 1
   if [[ -L "$native_build" || (-e "$native_build" && ! -d "$native_build") ]]; then
     printf 'Coral native build path is not an ordinary directory: %s\n' "$native_build" >&2
     exit 1
   fi
   if [[ "$force" == 1 && -e "$native_build" ]]; then
-    case "$native_build" in "$patched"/Build/*) rm -rf "$native_build" ;; *) exit 1 ;; esac
+    case "$native_build" in "$checkout"/Build/*) rm -rf "$native_build" ;; *) exit 1 ;; esac
   fi
   if [[ ! -e "$native_build" ]] && ! mkdir "$native_build" 2>/dev/null && [[ ! -d "$native_build" ]]; then
     printf 'Could not create Coral native build path: %s\n' "$native_build" >&2
@@ -326,21 +312,21 @@ if [[ "$build" == 1 ]]; then
       "-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
   fi
   DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH" \
-    cmake -S "$patched/cmake" -B "$native_build" -G Ninja "${cmake_options[@]}"
+    cmake -S "$checkout/cmake" -B "$native_build" -G Ninja "${cmake_options[@]}"
   DOTNET_ROOT="$dotnet_root" PATH="$dotnet_root:$PATH" \
     cmake --build "$native_build" --target Coral.Native --parallel "$(build_parallel_jobs)"
   [[ -f "$native_build/Coral.Managed.dll" ]] || {
-    printf 'Patched Coral build did not produce Coral.Managed.dll.\n' >&2
+    printf 'Coral build did not produce Coral.Managed.dll.\n' >&2
     exit 1
   }
-  printf '==> Patched Coral %s build is ready\n' "$configuration"
+  printf '==> Coral %s build is ready\n' "$configuration"
 fi
 
 workspace_lock_release >&2
 coral_cache_lock_held=0
 
-printf 'CORAL_SOURCE=%s\nCORAL_COMMIT=%s\nCORAL_PATCH_DIGEST=%s\nCORAL_BUILD_VARIANT=%s\n' \
-  "$patched" "$coral_commit" "$patch_digest" "$variant_key"
+printf 'CORAL_SOURCE=%s\nCORAL_COMMIT=%s\nCORAL_BUILD_VARIANT=%s\n' \
+  "$checkout" "$coral_commit" "$variant_key"
 printf 'CORAL_NETHOST_LIBRARY=%s\nCORAL_NETHOST_RUNTIME=%s\nCORAL_DOTNET_ROOT=%s\n' \
   "$nethost_library" "$nethost_runtime" "$dotnet_root"
 trap - EXIT

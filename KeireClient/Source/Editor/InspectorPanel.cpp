@@ -604,7 +604,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         ui.Spacing();
                         auto& lightExpanded = expansion("directional-light");
                         if (auto card =
-                                ui.BeginChild("DirectionalLightCard", {0.0F, lightExpanded ? 360.0F : 38.0F}, true);
+                                ui.BeginChild("DirectionalLightCard", {0.0F, lightExpanded ? 665.0F : 38.0F}, true);
                             card)
                         {
                             const auto registration = scene->Components()->Find(light->Type());
@@ -678,12 +678,14 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     m_Controller.RecordInspectorUndo();
                                     setComponentProperty(light->Type(), "shadowBias", static_cast<double>(bias));
                                 }
+                                DrawDirectionalLightAdvancedProperties(ui, light, sceneDocument, editTargets,
+                                                                       multiEditing, editingComponentOrdinal);
                                 if (ui.Button("Reset Light"))
                                 {
                                     m_Controller.RecordInspectorUndo();
                                     resetComponent(light->Type());
                                 }
-                                ui.TextColored(theme.MutedText, "Direct lighting | Directional shadows");
+                                ui.TextColored(theme.MutedText, "Direct + baked lighting | Cookies | Contact shadows");
                             }
                         }
                     }

@@ -5,19 +5,6 @@
 
 namespace Keire
 {
-    AssetOperationCancelled::AssetOperationCancelled() : std::runtime_error("Asset operation was cancelled.") {}
-
-    ExternalAssetImportReceiptId ExternalAssetImportReceiptId::Parse(const std::string_view value)
-    {
-        return ExternalAssetImportReceiptId(AssetId::Parse(value));
-    }
-
-    std::string ExternalAssetImportReceiptId::ToString() const { return m_Value.ToString(); }
-
-    AssetTrashId AssetTrashId::Parse(const std::string_view value) { return AssetTrashId(AssetId::Parse(value)); }
-
-    std::string AssetTrashId::ToString() const { return m_Value.ToString(); }
-
     AssetDatabase::AssetDatabase(AssetDatabaseSpecification specification)
         : AssetDatabase(std::move(specification), Initialization::Full)
     {
@@ -406,6 +393,9 @@ namespace Keire
         bool failed = false;
         std::size_t completed = 0;
         std::vector<std::pair<AssetSourceRecord, std::uint32_t>> metadataUpgrades;
+        std::vector<AssetId> successfulSourceAssets;
+        std::vector<AssetId> successfulReplacedAssets;
+        successfulSourceAssets.reserve(records.size());
         for (auto record : records)
         {
             ThrowIfOperationCancelled(cancellation);
@@ -469,6 +459,10 @@ namespace Keire
                 if (!restoredFromCache)
                     m_Impl->StoreCachedImport(record, imported);
                 m_Impl->StoreCookInput(record, std::move(imported));
+                successfulSourceAssets.push_back(record.Id);
+                successfulReplacedAssets.push_back(record.Id);
+                successfulReplacedAssets.insert(successfulReplacedAssets.end(), record.SubAssets.begin(),
+                                                record.SubAssets.end());
                 if (const auto* importer = m_Impl->FindImporter(record);
                     importer && importer->Version > record.ImporterVersion)
                     metadataUpgrades.emplace_back(record, importer->Version);
@@ -497,13 +491,6 @@ namespace Keire
             ReportOperationProgress(progress, AssetOperationPhase::Importing, completed, records.size(),
                                     record.RelativePath);
         }
-        if (failed)
-        {
-            const auto previous = m_Impl->CacheRoot / "Runtime" / "catalog.json";
-            if (std::filesystem::is_regular_file(previous))
-                result.CatalogPath = previous;
-            return result;
-        }
         for (const auto& [previous, version] : metadataUpgrades)
         {
             const auto record = Find(previous.Id);
@@ -530,6 +517,33 @@ namespace Keire
             m_Impl->StoreCachedImport(upgraded, *imported);
             m_Impl->StoreCookInput(upgraded, std::move(*imported));
             m_Impl->PublishRecord(std::move(upgraded), m_Impl->ReadSignature(source, metadata));
+        }
+        if (failed)
+        {
+            const auto previous = m_Impl->CacheRoot / "Runtime" / "catalog.json";
+            if (!std::filesystem::is_regular_file(previous))
+                return result;
+            result.CatalogPath = previous;
+            if (successfulSourceAssets.empty())
+                return result;
+            try
+            {
+                ThrowIfOperationCancelled(cancellation);
+                const auto cooked =
+                    AssetCooker::CookUnlocked(*this, AssetBuildProfile{}, m_Impl->CacheRoot / "Runtime", cancellation,
+                                              progress, successfulSourceAssets, successfulReplacedAssets);
+                result.CatalogPath = cooked.CatalogPath;
+            }
+            catch (const AssetOperationCancelled&)
+            {
+                throw;
+            }
+            catch (const std::exception& error)
+            {
+                KEIRE_CORE_ERROR("Successful best-effort imports could not be merged into the last-good catalog: {}",
+                                 error.what());
+            }
+            return result;
         }
         try
         {

@@ -61,6 +61,8 @@ namespace Keire
                 return "forwardPlus";
             case RenderPath::DeferredHybrid:
                 return "deferredHybrid";
+            case RenderPath::Automatic:
+                return "automatic";
             }
             throw std::invalid_argument("Render path is unsupported.");
         }
@@ -71,7 +73,63 @@ namespace Keire
                 return RenderPath::ForwardPlus;
             if (value == "deferredHybrid")
                 return RenderPath::DeferredHybrid;
+            if (value == "automatic")
+                return RenderPath::Automatic;
             throw std::runtime_error("Rendering renderPath is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view AntiAliasingModeName(const RenderAntiAliasingMode mode)
+        {
+            switch (mode)
+            {
+            case RenderAntiAliasingMode::None:
+                return "none";
+            case RenderAntiAliasingMode::Fxaa:
+                return "fxaa";
+            case RenderAntiAliasingMode::Taa:
+                return "taa";
+            case RenderAntiAliasingMode::Msaa2:
+                return "msaa2";
+            case RenderAntiAliasingMode::Msaa4:
+                return "msaa4";
+            }
+            throw std::invalid_argument("Anti-aliasing mode is unsupported.");
+        }
+
+        [[nodiscard]] RenderAntiAliasingMode ParseAntiAliasingMode(const std::string_view value)
+        {
+            if (value == "none")
+                return RenderAntiAliasingMode::None;
+            if (value == "fxaa")
+                return RenderAntiAliasingMode::Fxaa;
+            if (value == "taa")
+                return RenderAntiAliasingMode::Taa;
+            if (value == "msaa2")
+                return RenderAntiAliasingMode::Msaa2;
+            if (value == "msaa4")
+                return RenderAntiAliasingMode::Msaa4;
+            throw std::runtime_error("Rendering antiAliasing mode is unsupported.");
+        }
+
+        [[nodiscard]] std::string_view DynamicResolutionModeName(const DynamicResolutionMode mode)
+        {
+            switch (mode)
+            {
+            case DynamicResolutionMode::Disabled:
+                return "disabled";
+            case DynamicResolutionMode::Automatic:
+                return "automatic";
+            }
+            throw std::invalid_argument("Dynamic resolution mode is unsupported.");
+        }
+
+        [[nodiscard]] DynamicResolutionMode ParseDynamicResolutionMode(const std::string_view value)
+        {
+            if (value == "disabled")
+                return DynamicResolutionMode::Disabled;
+            if (value == "automatic")
+                return DynamicResolutionMode::Automatic;
+            throw std::runtime_error("Rendering dynamicResolution mode is unsupported.");
         }
 
         [[nodiscard]] std::string_view GlobalIlluminationModeName(const GlobalIlluminationMode mode)
@@ -160,6 +218,20 @@ namespace Keire
                 throw std::invalid_argument("Directional shadow settings are outside supported production limits.");
             (void)GpuOcclusionModeName(settings.GpuOcclusion);
             (void)RenderPathName(settings.RequestedRenderPath);
+            (void)AntiAliasingModeName(settings.RequestedAntiAliasing);
+            (void)DynamicResolutionModeName(settings.RequestedDynamicResolution);
+            if (!std::isfinite(settings.RenderScale) || settings.RenderScale < 0.5F || settings.RenderScale > 1.0F ||
+                !std::isfinite(settings.MinimumDynamicResolutionScale) ||
+                settings.MinimumDynamicResolutionScale < 0.5F || settings.MinimumDynamicResolutionScale > 1.0F ||
+                !std::isfinite(settings.MaximumDynamicResolutionScale) ||
+                settings.MaximumDynamicResolutionScale < settings.MinimumDynamicResolutionScale ||
+                settings.MaximumDynamicResolutionScale > 1.0F ||
+                !std::isfinite(settings.DynamicResolutionTargetMilliseconds) ||
+                settings.DynamicResolutionTargetMilliseconds < 8.0F ||
+                settings.DynamicResolutionTargetMilliseconds > 50.0F)
+            {
+                throw std::invalid_argument("Rendering resolution scale or frame-time target is invalid.");
+            }
             (void)GlobalIlluminationModeName(settings.RequestedGlobalIllumination);
             (void)IrradynQualityName(settings.RequestedIrradynQuality);
         }
@@ -205,6 +277,26 @@ namespace Keire
                 ParseGlobalIlluminationMode(document.at("globalIllumination").get<std::string>());
             result.RequestedIrradynQuality = ParseIrradynQuality(document.at("irradynQuality").get<std::string>());
         }
+        else
+        {
+            result.RequestedRenderPath = RenderPath::ForwardPlus;
+        }
+        if (sourceSchemaVersion >= 5U)
+        {
+            result.RequestedAntiAliasing = ParseAntiAliasingMode(document.at("antiAliasing").get<std::string>());
+            result.RequestedDynamicResolution =
+                ParseDynamicResolutionMode(document.at("dynamicResolution").get<std::string>());
+            result.RenderScale = document.at("renderScale").get<float>();
+            result.MinimumDynamicResolutionScale = document.at("minimumDynamicResolutionScale").get<float>();
+            result.MaximumDynamicResolutionScale = document.at("maximumDynamicResolutionScale").get<float>();
+            result.DynamicResolutionTargetMilliseconds =
+                document.at("dynamicResolutionTargetMilliseconds").get<float>();
+        }
+        else
+        {
+            result.RequestedAntiAliasing = RenderAntiAliasingMode::None;
+            result.RequestedDynamicResolution = DynamicResolutionMode::Disabled;
+        }
         Validate(result);
         return result;
     }
@@ -236,6 +328,12 @@ namespace Keire
         }
         document["gpuOcclusion"] = GpuOcclusionModeName(settings.GpuOcclusion);
         document["renderPath"] = RenderPathName(settings.RequestedRenderPath);
+        document["antiAliasing"] = AntiAliasingModeName(settings.RequestedAntiAliasing);
+        document["dynamicResolution"] = DynamicResolutionModeName(settings.RequestedDynamicResolution);
+        document["renderScale"] = settings.RenderScale;
+        document["minimumDynamicResolutionScale"] = settings.MinimumDynamicResolutionScale;
+        document["maximumDynamicResolutionScale"] = settings.MaximumDynamicResolutionScale;
+        document["dynamicResolutionTargetMilliseconds"] = settings.DynamicResolutionTargetMilliseconds;
         document["globalIllumination"] = GlobalIlluminationModeName(settings.RequestedGlobalIllumination);
         document["irradynQuality"] = IrradynQualityName(settings.RequestedIrradynQuality);
         Detail::WriteTextFileAtomically(SettingsPath(projectRoot), document.dump(2) + '\n');
@@ -247,7 +345,16 @@ namespace Keire
         Validate(settings);
         RenderFeatureSelection result;
         result.RequestedPath = settings.RequestedRenderPath;
-        result.EffectivePath = settings.RequestedRenderPath;
+        result.EffectivePath =
+            settings.RequestedRenderPath == RenderPath::Automatic
+                ? (capabilities.DeferredHybrid ? RenderPath::DeferredHybrid : RenderPath::ForwardPlus)
+                : settings.RequestedRenderPath;
+        result.RequestedAntiAliasing = settings.RequestedAntiAliasing;
+        result.EffectiveAntiAliasing = settings.RequestedAntiAliasing;
+        result.AntiAliasingFallback = AntiAliasingFallbackReason::None;
+        result.RequestedDynamicResolution = settings.RequestedDynamicResolution;
+        result.EffectiveDynamicResolution = settings.RequestedDynamicResolution;
+        result.RenderScale = settings.RenderScale;
         result.RequestedGlobalIllumination = settings.RequestedGlobalIllumination;
         result.EffectiveGlobalIllumination = settings.RequestedGlobalIllumination;
         result.RequestedIrradynQuality = settings.RequestedIrradynQuality;
@@ -256,6 +363,62 @@ namespace Keire
         {
             result.EffectivePath = RenderPath::ForwardPlus;
             result.PathFallback = RenderPathFallbackReason::DeferredHybridUnavailable;
+        }
+
+        const bool temporalAvailable = capabilities.TemporalAntiAliasing;
+        const auto bestNonMultisampleFallback = [&capabilities, temporalAvailable]()
+        {
+            if (temporalAvailable)
+                return RenderAntiAliasingMode::Taa;
+            if (capabilities.Fxaa)
+                return RenderAntiAliasingMode::Fxaa;
+            return RenderAntiAliasingMode::None;
+        };
+        switch (result.RequestedAntiAliasing)
+        {
+        case RenderAntiAliasingMode::None:
+            break;
+        case RenderAntiAliasingMode::Fxaa:
+            if (!capabilities.Fxaa)
+            {
+                result.EffectiveAntiAliasing = RenderAntiAliasingMode::None;
+                result.AntiAliasingFallback = AntiAliasingFallbackReason::FxaaUnavailable;
+            }
+            break;
+        case RenderAntiAliasingMode::Taa:
+            if (!temporalAvailable)
+            {
+                result.EffectiveAntiAliasing =
+                    capabilities.Fxaa ? RenderAntiAliasingMode::Fxaa : RenderAntiAliasingMode::None;
+                result.AntiAliasingFallback = AntiAliasingFallbackReason::TemporalUnavailable;
+            }
+            break;
+        case RenderAntiAliasingMode::Msaa2:
+        case RenderAntiAliasingMode::Msaa4:
+        {
+            const bool supported =
+                result.RequestedAntiAliasing == RenderAntiAliasingMode::Msaa2 ? capabilities.Msaa2 : capabilities.Msaa4;
+            const bool deferredSupported =
+                result.EffectivePath != RenderPath::DeferredHybrid || capabilities.DeferredMultisample;
+            if (!supported || !deferredSupported)
+            {
+                result.EffectiveAntiAliasing = bestNonMultisampleFallback();
+                result.AntiAliasingFallback = supported ? AntiAliasingFallbackReason::DeferredMultisampleUnavailable
+                                                        : AntiAliasingFallbackReason::MultisampleUnavailable;
+            }
+            break;
+        }
+        }
+        // Dynamic resolution currently performs a bounded spatial presentation upscale. TAA stabilizes that image,
+        // but it is not advertised as TAAU until history is resolved directly into a native-resolution output.
+        result.TemporalUpsampling = false;
+        if (result.RequestedDynamicResolution == DynamicResolutionMode::Automatic)
+        {
+            if (!capabilities.DynamicResolution)
+            {
+                result.EffectiveDynamicResolution = DynamicResolutionMode::Disabled;
+                result.DynamicResolutionFallback = DynamicResolutionFallbackReason::Unsupported;
+            }
         }
 
         const bool irradynPathAvailable =
@@ -310,5 +473,21 @@ namespace Keire
             break;
         }
         return result;
+    }
+
+    RenderSampleCount ResolveRenderSurfaceSampleCount(const RenderFeatureSelection& selection) noexcept
+    {
+        switch (selection.EffectiveAntiAliasing)
+        {
+        case RenderAntiAliasingMode::Msaa2:
+            return RenderSampleCount::Two;
+        case RenderAntiAliasingMode::Msaa4:
+            return RenderSampleCount::Four;
+        case RenderAntiAliasingMode::None:
+        case RenderAntiAliasingMode::Fxaa:
+        case RenderAntiAliasingMode::Taa:
+            return RenderSampleCount::One;
+        }
+        return RenderSampleCount::One;
     }
 } // namespace Keire

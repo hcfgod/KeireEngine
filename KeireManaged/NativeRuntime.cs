@@ -322,6 +322,7 @@ internal static unsafe class NativeRuntime
 
 #pragma warning disable CS0649
     internal static delegate* unmanaged<byte, NativeString, void> WriteLogIcall;
+    internal static delegate* unmanaged<Vector3, Vector3, Color, float, void> DrawDebugLineIcall;
     internal static delegate* unmanaged<ulong, NativeString, void> RegisterProfileNameIcall;
     internal static delegate* unmanaged<ulong, double, double, void> RecordProfileSpanIcall;
     internal static delegate* unmanaged<ulong, double, void> SetProfileCounterIcall;
@@ -469,6 +470,9 @@ internal static unsafe class NativeRuntime
         using NativeString nativeMessage = message;
         WriteLogIcall(level, nativeMessage);
     }
+
+    internal static void DrawDebugLine(Vector3 start, Vector3 end, Color color, float duration) =>
+        DrawDebugLineIcall(start, end, color, duration);
 
     internal static void RegisterProfileName(ulong id, string name)
     {

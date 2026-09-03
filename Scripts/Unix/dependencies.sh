@@ -346,7 +346,6 @@ coral_metadata="$(bash "$SCRIPT_DIR/coral.sh" Debug 1 "$force" "$platform" "$arc
 printf '%s\n' "$coral_metadata"
 coral_source="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_SOURCE=/{print substr($0, index($0, "=") + 1)}')"
 coral_commit="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_COMMIT=/{print $2}')"
-coral_patch_digest="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_PATCH_DIGEST=/{print $2}')"
 coral_build_variant="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_BUILD_VARIANT=/{print $2}')"
 coral_nethost_library="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_NETHOST_LIBRARY=/{print substr($0, index($0, "=") + 1)}')"
 coral_nethost_runtime="$(printf '%s\n' "$coral_metadata" | awk -F= '/^CORAL_NETHOST_RUNTIME=/{print substr($0, index($0, "=") + 1)}')"
@@ -369,7 +368,7 @@ coral_release_dotnet_root="$(printf '%s\n' "$coral_release_metadata" | awk -F= '
 bash "$ROOT/Scripts/Unix/ffmpeg.sh" Debug "$base/Release" "$platform" "$architecture" "$toolset"
 bash "$ROOT/Scripts/Unix/ffmpeg.sh" Release "$base/Release" "$platform" "$architecture" "$toolset"
 
-coral_link="$ROOT/Build/Dependencies/coral-patched"
+coral_link="$ROOT/Build/Dependencies/coral"
 nethost_link="$ROOT/Build/Dependencies/coral-nethost"
 dotnet_sdk_link="$ROOT/Build/Dependencies/dotnet-sdk"
 mkdir -p "$ROOT/Build/Dependencies"
@@ -422,13 +421,12 @@ DependencyManifest = {
     LibunibreakCommit = "$libunibreak_commit",
     SodiumCommit = "$libsodium_commit",
     CoralCommit = "$coral_commit",
-    CoralPatchDigest = "$coral_patch_digest",
-    CoralSource = "../Build/Dependencies/coral-patched",
-    CoralInclude = "../Build/Dependencies/coral-patched/Coral.Native/Include",
-    CoralDebugLibrary = "../Build/Dependencies/coral-patched/Build/Debug/libCoral.Native.a",
-    CoralReleaseLibrary = "../Build/Dependencies/coral-patched/Build/Release/libCoral.Native.a",
-    CoralManagedDebug = "../Build/Dependencies/coral-patched/Build/Debug",
-    CoralManagedRelease = "../Build/Dependencies/coral-patched/Build/Release",
+    CoralSource = "../Build/Dependencies/coral",
+    CoralInclude = "../Build/Dependencies/coral/Coral.Native/Include",
+    CoralDebugLibrary = "../Build/Dependencies/coral/Build/Debug/libCoral.Native.a",
+    CoralReleaseLibrary = "../Build/Dependencies/coral/Build/Release/libCoral.Native.a",
+    CoralManagedDebug = "../Build/Dependencies/coral/Build/Debug",
+    CoralManagedRelease = "../Build/Dependencies/coral/Build/Release",
     CoralNetHostLibrary = "../Build/Dependencies/coral-nethost/$nethost_name",
     CoralNetHostRuntime = "../Build/Dependencies/coral-nethost/$nethost_runtime_name",
     SDL3Include = "$debug_install/include",

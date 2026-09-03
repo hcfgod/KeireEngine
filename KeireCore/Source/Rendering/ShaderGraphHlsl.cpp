@@ -10,6 +10,8 @@
 
 namespace Keire::Detail
 {
+    [[nodiscard]] std::string_view ShaderGraphSpatialLightingHlsl() noexcept;
+
     [[nodiscard]] std::string ShaderGraphCompiler::BuildHlsl()
     {
         ValidateIncludes();
@@ -28,6 +30,25 @@ namespace Keire::Detail
                 worldPositionOffset =
                     CoerceShaderGraphExpression(EvaluatePrepared(incoming->second), ShaderGraphValueType::Vector3).Code;
             }
+        std::optional<std::string> previousWorldPositionOffset;
+        if (worldPositionOffset)
+        {
+            previousWorldPositionOffset = *worldPositionOffset;
+            const auto replaceAll = [&](const std::string_view from, const std::string_view to)
+            {
+                std::size_t offset = 0;
+                while ((offset = previousWorldPositionOffset->find(from, offset)) != std::string::npos)
+                {
+                    previousWorldPositionOffset->replace(offset, from.size(), to);
+                    offset += to.size();
+                }
+            };
+            replaceAll("FrameParameters.x", "(FrameParameters.x - FrameParameters.y)");
+            replaceAll("instance.NormalMatrix", "Model");
+            replaceAll("instance.Model", "Model");
+            replaceAll("input.Position", "input.PreviousPosition");
+            replaceAll("world.xyz", "previousWorld.xyz");
+        }
         m_CurrentStage = ShaderGraphShaderStage::Fragment;
         m_Cache.clear();
         m_Visiting.clear();
@@ -170,6 +191,9 @@ struct VertexInput
     float4 Color : TEXCOORD3;
     float4 Tangent : TEXCOORD4;
     float2 UV1 : TEXCOORD5;
+#if defined(KEIRE_PASS_DEPTH_VELOCITY)
+    float3 PreviousPosition : TEXCOORD6;
+#endif
 };
 
 struct VertexOutput
@@ -184,6 +208,10 @@ struct VertexOutput
     float2 UV1 : TEXCOORD7;
     float3 ObjectPosition : TEXCOORD8;
     float ViewDepth : TEXCOORD9;
+#if defined(KEIRE_PASS_DEPTH_VELOCITY)
+    float4 CurrentClipPosition : TEXCOORD10;
+    float4 PreviousClipPosition : TEXCOORD11;
+#endif
     float4 Position : SV_Position;
 };
 
@@ -297,18 +325,57 @@ cbuffer ShadowData : register(b2, space3)
     float4 LocalShadowSampleBounds[20];
 };
 
+struct ShaderGraphReflectionProbe
+{
+    float4x4 WorldToLocal;
+    float4x4 LocalToWorld;
+    float4 ExtentsWeight;
+    float4 Parameters;
+};
+
 cbuffer EnvironmentData : register(b3, space3)
 {
     float4 DiffuseIrradiance[9];
     float4 EnvironmentParameters;
     float4 EnvironmentEncoding;
+    float4 LightmapScaleOffset;
+    float4 LightmapParameters;
+    float4 ShadowMaskParameters;
+    float4 ProbeIrradiance[9];
+    ShaderGraphReflectionProbe ReflectionProbes[2];
+    float4 CookieTransforms[8];
+    float4 CookieRotations[2];
+    float4 DirectionalCookieAndContact;
+    float4x4 SpatialViewProjection;
+    uint4 SpatialSelection;
 };
 )HLSL";
+            source << "Texture2DArray<float4> LightmapTexture : register(t" << textureIndex << ", space2);\n";
+            source << "SamplerState LightmapSampler : register(s" << textureIndex++ << ", space2);\n";
+            source << "Texture2DArray<float4> LightmapDirectionalityTexture : register(t" << textureIndex
+                   << ", space2);\n";
+            source << "SamplerState LightmapDirectionalitySampler : register(s" << textureIndex++ << ", space2);\n";
+            source << "Texture2DArray<float4> ShadowMaskTexture : register(t" << textureIndex << ", space2);\n";
+            source << "SamplerState ShadowMaskSampler : register(s" << textureIndex++ << ", space2);\n";
+            source << "TextureCubeArray<float4> ReflectionProbeTexture : register(t" << textureIndex << ", space2);\n";
+            source << "SamplerState ReflectionProbeSampler : register(s" << textureIndex++ << ", space2);\n";
+            source << "Texture2D<float4> CookieAtlasTexture : register(t" << textureIndex << ", space2);\n";
+            source << "SamplerState CookieAtlasSampler : register(s" << textureIndex++ << ", space2);\n";
             source << "StructuredBuffer<ShaderGraphLocalLight> ForwardPlusLights : register(t" << textureIndex++
                    << ", space2);\n";
             source << "StructuredBuffer<uint4> ForwardPlusTiles : register(t" << textureIndex++ << ", space2);\n";
             source << "StructuredBuffer<uint4> ForwardPlusLightIndices : register(t" << textureIndex++
                    << ", space2);\n";
+            source << R"HLSL(
+struct ShaderGraphSpatialSelectionRecord
+{
+    float4 ProbeIrradiance[9];
+    ShaderGraphReflectionProbe ReflectionProbes[2];
+    uint4 Metadata;
+};
+)HLSL";
+            source << "StructuredBuffer<ShaderGraphSpatialSelectionRecord> SpatialSelectionRecords : register(t"
+                   << textureIndex++ << ", space2);\n";
         }
         source << R"HLSL(
 struct ShaderGraphSurface
@@ -455,7 +522,8 @@ ShaderGraphBsdf MakeStandardShaderGraphBsdf(const float4 baseColor, const float 
     return result;
 }
 )HLSL";
-        source << R"HLSL(
+        if (!unlit)
+            source << R"HLSL(
 
 ShaderGraphBsdf MakeOpenPbrShaderGraphBsdf(
     const float4 baseColor, const float metallic, const float roughness, const float specularWeight,
@@ -744,28 +812,31 @@ return 1.0F;
     if (!soft)
 return depth <= textureValue.SampleLevel(samplerValue, float3(uv, layer), 0.0F) ? 1.0F : 0.0F;
     float visibility = 0.0F;
+    float totalWeight = 0.0F;
     [unroll]
     for (int y = -1; y <= 1; ++y)
     {
 [unroll]
 for (int x = -1; x <= 1; ++x)
 {
+    const float weight = (2.0F - abs((float)x)) * (2.0F - abs((float)y));
     const float2 unclampedUv = uv + float2(x, y) * inverseResolution;
     if (!clampSamples &&
         (any(unclampedUv < sampleBounds.xy) || any(unclampedUv > sampleBounds.zw)))
     {
-        visibility += 1.0F;
+        visibility += weight;
     }
     else
     {
         const float2 sampleUv = clamp(unclampedUv, sampleBounds.xy, sampleBounds.zw);
         const float storedDepth =
             textureValue.SampleLevel(samplerValue, float3(sampleUv, layer), 0.0F);
-        visibility += depth <= storedDepth ? 1.0F : 0.0F;
+        visibility += depth <= storedDepth ? weight : 0.0F;
     }
+    totalWeight += weight;
 }
     }
-    return visibility / 9.0F;
+    return visibility / max(totalWeight, 1.0F);
 }
 
 float EvaluateDirectionalShadow(const float3 worldPosition, const float viewDepth)
@@ -839,7 +910,19 @@ matrixIndex += face;
                                      LocalShadowSampleBounds[matrixIndex], true);
     return lerp(1.0F, visibility, saturate(LocalShadowParameters[lightIndex].y));
 }
+)HLSL";
+        if (!unlit)
+            source << R"HLSL(
 
+float3 SampleEnvironment(float3 direction, const float level);
+float3 EvaluateDiffuseEnvironment(float3 normal);
+float3 DecodeRgbe(const float4 sampleValue);
+
+)HLSL";
+        if (!unlit)
+            source << ShaderGraphSpatialLightingHlsl();
+        if (!unlit)
+            source << R"HLSL(
 float3 FresnelSchlickRoughness(const float noV, const float3 f0, const float roughness)
 {
     return f0 + (max((1.0F - roughness).xxx, f0) - f0) * pow(1.0F - noV, 5.0F);
@@ -995,8 +1078,19 @@ VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
         if (worldPositionOffset)
             source << "    world.xyz += " << *worldPositionOffset << ";\n";
         source << R"HLSL(
+#if defined(KEIRE_PASS_DEPTH_VELOCITY)
+    float4 previousWorld = mul(Model, float4(input.PreviousPosition, 1.0F));
+)HLSL";
+        if (previousWorldPositionOffset)
+            source << "    previousWorld.xyz += " << *previousWorldPositionOffset << ";\n";
+        source << R"HLSL(
+#endif
     const float4 viewPosition = mul(View, world);
     output.Position = mul(Projection, viewPosition);
+#if defined(KEIRE_PASS_DEPTH_VELOCITY)
+    output.CurrentClipPosition = output.Position;
+    output.PreviousClipPosition = mul(NormalMatrix, previousWorld);
+#endif
     output.Normal = SafeNormalize(mul((float3x3)instance.NormalMatrix, input.Normal), float3(0.0F, 0.0F, 1.0F));
     float3 tangent = mul((float3x3)instance.Model, input.Tangent.xyz);
     tangent -= output.Normal * dot(output.Normal, tangent);
@@ -1015,22 +1109,48 @@ VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
     return output;
 }
 )HLSL";
-        if (hasPixelDepthOffset)
-            source << R"HLSL(
+        source << R"HLSL(
 
+#if defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)
+struct ShaderGraphFragmentOutput
+{
+    float4 BaseColorMetallic : SV_Target0;
+    float4 NormalRoughness : SV_Target1;
+    float4 Material : SV_Target2;
+    float4 Lighting : SV_Target3;
+)HLSL";
+        if (hasPixelDepthOffset)
+            source << "    float Depth : SV_Depth;\n";
+        source << R"HLSL(};
+#elif defined(KEIRE_PASS_DEPTH_VELOCITY)
+struct ShaderGraphFragmentOutput
+{
+    float2 Velocity : SV_Target0;
+)HLSL";
+        if (hasPixelDepthOffset)
+            source << "    float Depth : SV_Depth;\n";
+        source << R"HLSL(};
+#elif defined(KEIRE_PASS_DECAL_DBUFFER)
+struct ShaderGraphFragmentOutput
+{
+    float4 BaseColor : SV_Target0;
+    float4 Normal : SV_Target1;
+    float4 Material : SV_Target2;
+)HLSL";
+        if (hasPixelDepthOffset)
+            source << "    float Depth : SV_Depth;\n";
+        source << R"HLSL(};
+#else
 struct ShaderGraphFragmentOutput
 {
     float4 Color : SV_Target0;
-    float Depth : SV_Depth;
-};
+)HLSL";
+        if (hasPixelDepthOffset)
+            source << "    float Depth : SV_Depth;\n";
+        source << R"HLSL(};
+#endif
 
 ShaderGraphFragmentOutput PSMain(VertexOutput input)
-{
-)HLSL";
-        else
-            source << R"HLSL(
-
-float4 PSMain(VertexOutput input) : SV_Target0
 {
 )HLSL";
         if (hasMaterialAttributes)
@@ -1067,12 +1187,15 @@ float4 PSMain(VertexOutput input) : SV_Target0
             source << R"HLSL(    const float3 viewDirection = SafeNormalize(input.ViewDirection, graphNormal);
     const float3 lightDirection =
 SafeNormalize(-DirectionalDirectionExposure.xyz, float3(0.0F, 1.0F, 0.0F));
+    const float2 lightmapUv = input.UV1 * LightmapScaleOffset.xy + LightmapScaleOffset.zw;
     float3 directLighting = EvaluateGraphDirectLighting(
 graphNormal, graphTangent, viewDirection, lightDirection,
 DirectionalColorIntensity.rgb * DirectionalColorIntensity.a, graphBaseColor.rgb, graphMetallic,
 graphRoughness, graphAnisotropy, graphSpecular, graphClearCoat, graphClearCoatRoughness, graphSheenColor,
 graphSheenRoughness, graphSubsurfaceColor, graphSubsurface, graphTransmission);
-    directLighting *= EvaluateDirectionalShadow(input.WorldPosition, input.ViewDepth);
+    directLighting *= EvaluateDirectionalShadow(input.WorldPosition, input.ViewDepth) *
+                      SampleSpatialMixedVisibility(lightmapUv, LightmapParameters.w) *
+                      EvaluateDirectionalSpatialCookie(input.WorldPosition);
     uint2 lightTile = 0U.xx;
     if (LocalLightCounts.x > 0.5F)
     {
@@ -1084,6 +1207,9 @@ lightTile = ForwardPlusTiles[tileIndex].xy;
     {
 const uint lightIndex = ForwardPlusLightIndex(lightTile.x + tileLightIndex);
 const ShaderGraphLocalLight light = ForwardPlusLights[lightIndex];
+const uint lightContribution = (uint)max(light.Parameters.w, 0.0F) >> 5U;
+if (lightContribution != SpatialSelection.y + 1U)
+    continue;
 const float3 toLight = light.PositionRange.xyz - input.WorldPosition;
 const float distanceSquared = dot(toLight, toLight);
 const float distanceToLight = sqrt(max(distanceSquared, 1.0e-8F));
@@ -1103,8 +1229,10 @@ if (light.Parameters.y > 0.5F)
     const float innerCosine = max(light.Parameters.x, outerCosine + 1.0e-4F);
     attenuation *= smoothstep(outerCosine, innerCosine, coneCosine);
 }
-const float shadow = lightIndex < 62U ? EvaluateLocalShadow(lightIndex, input.WorldPosition) : 1.0F;
-const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * shadow;
+float visibility = lightIndex < 62U ? EvaluateLocalShadow(lightIndex, input.WorldPosition) : 1.0F;
+visibility *= SampleSpatialMixedVisibility(lightmapUv, light.Parameters.z) *
+              EvaluateLocalSpatialCookie(light, input.WorldPosition);
+const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * visibility;
 directLighting += EvaluateGraphDirectLighting(
     graphNormal, graphTangent, viewDirection, localDirection, radiance, graphBaseColor.rgb, graphMetallic,
     graphRoughness, graphAnisotropy, graphSpecular, graphClearCoat, graphClearCoatRoughness, graphSheenColor,
@@ -1113,11 +1241,11 @@ directLighting += EvaluateGraphDirectLighting(
     const float noV = saturate(dot(graphNormal, viewDirection));
     const float3 f0 = lerp((0.08F * graphSpecular).xxx, graphBaseColor.rgb, graphMetallic);
     const float3 diffuseEnvironment =
-EvaluateDiffuseEnvironment(graphNormal) * graphBaseColor.rgb * (1.0F - graphMetallic) *
+EvaluateSpatialProbeDiffuse(graphNormal, lightmapUv) * graphBaseColor.rgb * (1.0F - graphMetallic) *
 (1.0F - graphTransmission) / Pi;
     const float3 reflectionDirection = reflect(-viewDirection, graphNormal);
     const float3 reflectionRadiance =
-SampleEnvironment(reflectionDirection, graphRoughness * EnvironmentParameters.w);
+SampleSpatialReflection(input.WorldPosition, reflectionDirection, graphRoughness);
     const float3 refractionDirection = refract(-viewDirection, graphNormal, rcp(graphIor));
     const float3 refractionRadiance =
 SampleEnvironment(refractionDirection, graphRoughness * EnvironmentParameters.w);
@@ -1133,8 +1261,8 @@ lerp(reflectedEnvironment, refractionRadiance, graphRefraction * (1.0F - graphMe
     const float3 flatAmbient =
 graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * AmbientColorIntensity.a;
     const float3 ambientLighting =
-(flatAmbient * (1.0F - graphTransmission) + diffuseEnvironment * EnvironmentParameters.y +
- specularEnvironment * EnvironmentParameters.z + transmittedEnvironment * EnvironmentParameters.y) * ao;
+(flatAmbient * (1.0F - graphTransmission) + diffuseEnvironment + specularEnvironment +
+ transmittedEnvironment * EnvironmentParameters.y) * ao;
     float3 graphColor =
 (ambientLighting + directLighting + graphEmission) * DirectionalDirectionExposure.w;
 )HLSL";
@@ -1151,24 +1279,93 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
                   "float3(input.UV0 + input.UV1, 0.0F);\n";
         source << "    if (!all(isfinite(" << materialBindingSentinel << ")))\n";
         source << "        graphColor += " << materialBindingSentinel << ".xyz;\n";
+        if (!unlit)
+        {
+            source << R"HLSL(
+    // Every lit permutation uses the same fixed binding ABI, including permutations whose constants eliminate a lobe.
+    if (!all(isfinite(ShadowMaskParameters)) || !all(isfinite(EnvironmentParameters)))
+    {
+        const float2 retentionUv = frac(input.UV0);
+        const float retentionShadow =
+            DirectionalShadowTexture.SampleLevel(DirectionalShadowSampler, float3(retentionUv, 0.0F), 0.0F) +
+            LocalShadowTexture.SampleLevel(LocalShadowSampler, float3(retentionUv, 0.0F), 0.0F);
+        const float4 retainedLightmap =
+            LightmapTexture.SampleLevel(LightmapSampler, float3(retentionUv, 0.0F), 0.0F);
+        const float4 retainedDirectionality =
+            LightmapDirectionalityTexture.SampleLevel(LightmapDirectionalitySampler, float3(retentionUv, 0.0F), 0.0F);
+        const float4 retainedMask =
+            ShadowMaskTexture.SampleLevel(ShadowMaskSampler, float3(retentionUv, 0.0F), 0.0F);
+        const float4 retainedReflection = ReflectionProbeTexture.SampleLevel(
+            ReflectionProbeSampler, float4(float3(0.0F, 0.0F, 1.0F), 0.0F), 0.0F);
+        graphColor += retentionShadow.xxx +
+                      EnvironmentTexture.SampleLevel(EnvironmentSampler, retentionUv, 0.0F).rgb +
+                      BrdfIntegrationLut.SampleLevel(BrdfIntegrationSampler, retentionUv, 0.0F).rrr +
+                      retainedLightmap.rgb + retainedDirectionality.rgb + retainedMask.rgb +
+                      retainedReflection.rgb +
+                      CookieAtlasTexture.SampleLevel(CookieAtlasSampler, retentionUv, 0.0F).rgb;
+    }
+)HLSL";
+        }
         source << "    const float alpha = saturate(graphBaseColor.a * graphOpacity);\n";
         source << "    if (SurfaceParameters.y > 0.5F && SurfaceParameters.y < 1.5F)\n";
         source << "        clip(alpha - SurfaceParameters.x);\n";
+        source << "    const float graphAbiRetention =\n";
+        source << "        all(isfinite(float4(graphColor, alpha))) ? 0.0F : graphColor.x;\n";
         const bool premultiplied =
             m_Definition.Output == ShaderGraphOutput::Transparent || m_Definition.Output == ShaderGraphOutput::Decal;
-        if (hasPixelDepthOffset)
+        source << "#if defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)\n";
+        source << "    ShaderGraphFragmentOutput output;\n";
+        source << "    output.BaseColorMetallic = float4(graphBaseColor.rgb, " << (unlit ? "0.0F" : "graphMetallic")
+               << ");\n";
+        source << "    output.BaseColorMetallic.rgb += graphAbiRetention.xxx;\n";
+        source << "    output.NormalRoughness = float4(SafeNormalize(" << (unlit ? "input.Normal" : "graphNormal")
+               << ", input.Normal) * 0.5F + 0.5F, " << (unlit ? "1.0F" : "graphRoughness") << ");\n";
+        source << "    output.Material = float4(" << (unlit ? "1.0F" : "ao") << ", "
+               << (unlit ? "0.5F" : "graphSpecular") << ", " << (unlit ? "1.0F" : "0.0F") << ", 1.0F);\n";
+        if (unlit)
         {
-            source << "    ShaderGraphFragmentOutput output;\n";
-            source << "    output.Color = float4("
-                   << (premultiplied ? "graphColor * alpha, alpha" : "graphColor, alpha") << ");\n";
+            source << "    output.Lighting = float4(0.0F, 0.0F, 0.0F, FrameParameters.w * 65536.0F);\n";
+        }
+        else
+        {
+            source << "    const uint lightmapLayer = ((uint)LightmapParameters.z & 1U) != 0U && "
+                      "LightmapParameters.x < 4095.0F ? (uint)LightmapParameters.x + 1U : 0U;\n";
+            source << "    const uint shadowMaskLayer = ((uint)LightmapParameters.z & 1U) != 0U && "
+                      "LightmapParameters.y < 4095.0F ? (uint)LightmapParameters.y + 1U : 0U;\n";
+            source << "    const uint spatialRecord = SpatialSelection.x != 0xffffffffU && "
+                      "SpatialSelection.x < 65535U ? SpatialSelection.x + 1U : 0U;\n";
+            source << "    const uint contribution = SpatialSelection.y < 255U ? SpatialSelection.y + 1U : 0U;\n";
+            source << "    const float2 payloadLightmapUv = "
+                      "input.UV1 * LightmapScaleOffset.xy + LightmapScaleOffset.zw;\n";
+            source << "    output.Lighting = float4(payloadLightmapUv, "
+                      "(float)(lightmapLayer + shadowMaskLayer * 4096U), "
+                      "(float)(spatialRecord + contribution * 65536U));\n";
+        }
+        source << "#elif defined(KEIRE_PASS_DEPTH_VELOCITY)\n";
+        source << "    ShaderGraphFragmentOutput output;\n";
+        source << "    const float2 currentNdc = input.CurrentClipPosition.xy / "
+                  "max(abs(input.CurrentClipPosition.w), 1.0e-6F);\n";
+        source << "    const float2 previousNdc = input.PreviousClipPosition.xy / "
+                  "max(abs(input.PreviousClipPosition.w), 1.0e-6F);\n";
+        source << "    output.Velocity = (currentNdc - previousNdc) * float2(0.5F, -0.5F);\n";
+        source << "    output.Velocity.x += graphAbiRetention;\n";
+        source << "#elif defined(KEIRE_PASS_DECAL_DBUFFER)\n";
+        source << "    ShaderGraphFragmentOutput output;\n";
+        source << "    output.BaseColor = float4(graphBaseColor.rgb, alpha);\n";
+        source << "    output.BaseColor.rgb += graphAbiRetention.xxx;\n";
+        source << "    output.Normal = float4(SafeNormalize(" << (unlit ? "input.Normal" : "graphNormal")
+               << ", input.Normal) * 0.5F + 0.5F, alpha);\n";
+        source << "    output.Material = float4(" << (unlit ? "0.0F" : "graphMetallic") << ", "
+               << (unlit ? "1.0F" : "graphRoughness") << ", " << (unlit ? "0.5F" : "graphSpecular") << ", alpha);\n";
+        source << "#else\n";
+        source << "    ShaderGraphFragmentOutput output;\n";
+        source << "    output.Color = float4(" << (premultiplied ? "graphColor * alpha, alpha" : "graphColor, alpha")
+               << ");\n";
+        source << "#endif\n";
+        if (hasPixelDepthOffset)
             source << "    output.Depth = saturate(input.Position.z + (" << pixelDepthOffset
                    << ") * max(fwidth(input.Position.z), 1.0e-7F));\n";
-            source << "    return output;\n";
-        }
-        else if (premultiplied)
-            source << "    return float4(graphColor * alpha, alpha);\n";
-        else
-            source << "    return float4(graphColor, alpha);\n";
+        source << "    return output;\n";
         source << "}\n";
         return source.str();
     }

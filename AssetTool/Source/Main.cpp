@@ -563,7 +563,26 @@ namespace
                {rendering.AmbientColor.Red, rendering.AmbientColor.Green, rendering.AmbientColor.Blue,
                 rendering.AmbientColor.Alpha}},
               {"ambientIntensity", rendering.AmbientIntensity},
-              {"exposure", rendering.Exposure}}}};
+              {"exposure", rendering.Exposure},
+              {"environment", rendering.Environment ? rendering.Environment.ToString() : std::string{}},
+              {"environmentRotationDegrees", rendering.EnvironmentRotationDegrees},
+              {"environmentDiffuseIntensity", rendering.EnvironmentDiffuseIntensity},
+              {"environmentSpecularIntensity", rendering.EnvironmentSpecularIntensity},
+              {"skyVisible", rendering.SkyVisible},
+              {"directionalShadowDistance", rendering.DirectionalShadowDistance},
+              {"directionalShadowCascadeCount", rendering.DirectionalShadowCascadeCount},
+              {"directionalShadowResolution", rendering.DirectionalShadowResolution},
+              {"directionalShadowSplitLambda", rendering.DirectionalShadowSplitLambda},
+              {"gpuOcclusion", static_cast<std::uint8_t>(rendering.GpuOcclusion)},
+              {"renderPath", static_cast<std::uint8_t>(rendering.RequestedRenderPath)},
+              {"antiAliasing", static_cast<std::uint8_t>(rendering.RequestedAntiAliasing)},
+              {"dynamicResolution", static_cast<std::uint8_t>(rendering.RequestedDynamicResolution)},
+              {"renderScale", rendering.RenderScale},
+              {"minimumDynamicResolutionScale", rendering.MinimumDynamicResolutionScale},
+              {"maximumDynamicResolutionScale", rendering.MaximumDynamicResolutionScale},
+              {"dynamicResolutionTargetMilliseconds", rendering.DynamicResolutionTargetMilliseconds},
+              {"globalIllumination", static_cast<std::uint8_t>(rendering.RequestedGlobalIllumination)},
+              {"irradynQuality", static_cast<std::uint8_t>(rendering.RequestedIrradynQuality)}}}};
         std::ofstream stream(output / "runtime-manifest.json", std::ios::binary | std::ios::trunc);
         stream << std::setprecision(9) << manifest.dump(2) << '\n';
         if (!stream)

@@ -219,6 +219,7 @@ std::unique_ptr<KeireEditor::EditorPlayModeCoordinator> EditorWorkspaceLayer::Cr
             m_SceneDocument->EndPlay();
             m_GameEditPresentation.Reset();
             m_GameRenderView.Reset();
+            m_GameDynamicResolution.Reset();
         },
         .ReportShutdownFailure = [](const std::string_view operation, const std::exception_ptr& failure)
         { ReportCoordinatorShutdownFailure("Play mode", operation, failure); },

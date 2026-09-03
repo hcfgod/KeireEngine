@@ -6,6 +6,7 @@
 
 #include <chrono>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
@@ -18,6 +19,9 @@
 
 namespace Keire
 {
+    inline constexpr std::uint32_t ShaderAssetSchemaVersion = 3;
+    inline constexpr std::size_t ShaderAssetPassRoleHardLimit = 32;
+
     enum class ShaderBinaryFormat : std::uint8_t
     {
         Dxil,
@@ -77,7 +81,8 @@ namespace Keire
         Occlusion,
         Emissive,
         Metallic,
-        Roughness
+        Roughness,
+        Specular
     };
 
     struct ShaderPropertyDefinition
@@ -139,11 +144,13 @@ namespace Keire
         ShaderBinaryFormat Format = ShaderBinaryFormat::SpirV;
         std::vector<std::byte> Vertex;
         std::vector<std::byte> Fragment;
+        /// Exact cooked material/program pass role. Historical shader assets migrate to "primary".
+        std::string PassRole = "primary";
     };
 
     struct ShaderAssetDefinition
     {
-        std::uint32_t SchemaVersion = 2;
+        std::uint32_t SchemaVersion = ShaderAssetSchemaVersion;
         std::filesystem::path Source;
         std::string VertexEntry = "VSMain";
         std::string FragmentEntry = "PSMain";
@@ -186,6 +193,7 @@ namespace Keire
         [[nodiscard]] std::size_t ResidentBytes() const noexcept override;
         [[nodiscard]] const ShaderAssetDefinition& Definition() const noexcept { return m_Definition; }
         [[nodiscard]] const ShaderVariant* Variant(ShaderBinaryFormat format) const noexcept;
+        [[nodiscard]] const ShaderVariant* Variant(ShaderBinaryFormat format, std::string_view passRole) const noexcept;
 
         [[nodiscard]] static Ref<ShaderAsset> Decode(std::span<const std::byte> bytes);
         [[nodiscard]] static std::vector<std::byte> Encode(const ShaderAssetDefinition& definition);

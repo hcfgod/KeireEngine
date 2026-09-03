@@ -74,3 +74,15 @@ TEST_CASE("plane-based frustum rejection matches homogeneous corner classificati
         }
     }
 }
+
+TEST_CASE("frustum edges reject fully outside bounds and retain boundary intersections")
+{
+    const Keire::Matrix4 clipFromLocal;
+    const Keire::MeshBounds fullyOutside{{1.001F, -0.25F, 0.25F}, {1.5F, 0.25F, 0.75F}};
+    const Keire::MeshBounds touchingEdge{{1.0F, -0.25F, 0.25F}, {1.5F, 0.25F, 0.75F}};
+    const Keire::MeshBounds partiallyInside{{0.99F, -0.25F, 0.25F}, {1.5F, 0.25F, 0.75F}};
+
+    CHECK_FALSE(Keire::RenderBackend::GeometryDetail::IntersectsFrustum(clipFromLocal, fullyOutside));
+    CHECK(Keire::RenderBackend::GeometryDetail::IntersectsFrustum(clipFromLocal, touchingEdge));
+    CHECK(Keire::RenderBackend::GeometryDetail::IntersectsFrustum(clipFromLocal, partiallyInside));
+}

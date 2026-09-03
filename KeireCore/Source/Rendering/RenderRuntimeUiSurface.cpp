@@ -68,8 +68,7 @@ namespace Keire::RenderBackend
         {
             RuntimeUiCameraOverlayPipeline = CreateRuntimeUiPipeline(false, false, SDL_GPU_SAMPLECOUNT_1, ColorFormat);
         }
-        auto* buffer = UploadBuffer(commands, std::as_bytes(std::span(geometry.Vertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
-        FrameTransientBuffers.push_back(buffer);
+        auto* buffer = UploadRuntimeUiBuffer(commands, std::as_bytes(std::span(geometry.Vertices)), "camera overlay");
 
         SDL_GPUColorTargetInfo color{};
         color.texture = surface.Resources.WriterColor(surface.ActiveWorksetSlot);

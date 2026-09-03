@@ -121,10 +121,14 @@ namespace Keire
 
         [[nodiscard]] SceneHandle Add(Ref<SceneRuntimeSession> session)
         {
-            if (!session || !session->RuntimeScene())
-                throw std::invalid_argument("SceneRuntimeWorld requires an active runtime scene.");
+            if (!session)
+                throw std::invalid_argument("SceneRuntimeWorld requires a runtime session.");
+            const auto runtimeScene = session->RuntimeScene();
+            const auto editScene = session->EditScene();
+            if (!runtimeScene && !editScene)
+                throw std::invalid_argument("SceneRuntimeWorld requires a runtime session with a source scene.");
             const auto handle = AllocateHandle();
-            const auto asset = session->RuntimeScene()->Asset();
+            const auto asset = runtimeScene ? runtimeScene->Asset() : editScene->Asset();
             Entries.push_back({handle, asset, std::move(session)});
             if (!Active)
                 Active = handle;

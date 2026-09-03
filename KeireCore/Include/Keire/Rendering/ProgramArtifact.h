@@ -14,10 +14,14 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t ProgramArtifactSchemaVersion = 1;
-    inline constexpr std::uint32_t MaterialProgramArtifactSchemaVersion = 1;
+    inline constexpr std::uint32_t ProgramArtifactSchemaVersion = 2;
+    inline constexpr std::uint32_t MaterialProgramArtifactSchemaVersion = 2;
+    inline constexpr std::uint32_t ProgramReflectionAbiVersion = 2;
     inline constexpr std::size_t ProgramVariantWarningThreshold = 128;
     inline constexpr std::size_t ProgramVariantHardLimit = 1024;
+    inline constexpr std::size_t ProgramBinaryHardLimit = 256;
+    inline constexpr std::size_t ProgramBinaryMaximumBytes = 64ULL * 1024ULL * 1024ULL;
+    inline constexpr std::size_t ProgramResourceHardLimit = 1024;
 
     enum class ProgramTarget : std::uint8_t
     {
@@ -94,7 +98,7 @@ namespace Keire
 
     struct ProgramReflection
     {
-        std::uint32_t AbiVersion = 1;
+        std::uint32_t AbiVersion = ProgramReflectionAbiVersion;
         std::vector<ProgramEntryPoint> EntryPoints;
         std::vector<ShaderPropertyDefinition> Properties;
         std::vector<ProgramResourceBinding> Resources;
@@ -105,6 +109,35 @@ namespace Keire
         bool operator==(const ProgramReflection&) const = default;
     };
 
+    enum class ProgramBackend : std::uint8_t
+    {
+        D3D12,
+        Vulkan,
+        Metal
+    };
+
+    enum class ProgramBinaryFormat : std::uint8_t
+    {
+        Dxil,
+        SpirV,
+        Metallib
+    };
+
+    struct ProgramStageBinary
+    {
+        /// Stable pass role. Material roles use MaterialPassName; non-material programs use "primary".
+        std::string PassRole = "primary";
+        ProgramBackend Backend = ProgramBackend::D3D12;
+        ProgramBinaryFormat Format = ProgramBinaryFormat::Dxil;
+        ProgramStage Stage = ProgramStage::None;
+        std::string EntryPoint;
+        std::string Sha256;
+        std::vector<std::byte> Bytes;
+        ProgramReflection Reflection;
+
+        bool operator==(const ProgramStageBinary&) const = default;
+    };
+
     struct ProgramArtifactVariant
     {
         std::vector<std::string> Keywords;
@@ -112,6 +145,7 @@ namespace Keire
         std::filesystem::path GeneratedSource;
         std::string Hlsl;
         std::string Manifest;
+        std::vector<ProgramStageBinary> Binaries;
 
         bool operator==(const ProgramArtifactVariant&) const = default;
     };
@@ -188,6 +222,9 @@ namespace Keire
 
     [[nodiscard]] KEIRE_API ProgramTarget ProgramTargetFromShaderGraph(ShaderGraphTarget target) noexcept;
     [[nodiscard]] KEIRE_API std::string_view ProgramTargetName(ProgramTarget target) noexcept;
+    [[nodiscard]] KEIRE_API std::string_view ProgramBackendName(ProgramBackend backend) noexcept;
+    [[nodiscard]] KEIRE_API std::string_view ProgramBinaryFormatName(ProgramBinaryFormat format) noexcept;
+    [[nodiscard]] KEIRE_API std::string_view MaterialPassName(MaterialPass pass) noexcept;
     [[nodiscard]] KEIRE_API ProgramArtifact CompileShaderGraphProgram(const ShaderGraphDefinition& definition,
                                                                       const ProgramCompileOptions& options = {});
     [[nodiscard]] KEIRE_API MaterialProgramArtifact CompileMaterialProgram(const MaterialGraphDefinition& definition,
@@ -197,4 +234,8 @@ namespace Keire
                               MaterialAuthoringMode authoringMode = MaterialAuthoringMode::SimpleSurface);
     KEIRE_API void ValidateProgramArtifact(const ProgramArtifact& artifact);
     KEIRE_API void ValidateMaterialProgramArtifact(const MaterialProgramArtifact& artifact);
+    /// Requires verified backend binaries for every declared stage in every variant/pass/backend lane.
+    KEIRE_API void ValidateCookedProgramArtifact(const ProgramArtifact& artifact);
+    /// Additionally requires every declared material pass to be complete for every backend lane.
+    KEIRE_API void ValidateCookedMaterialProgramArtifact(const MaterialProgramArtifact& artifact);
 } // namespace Keire

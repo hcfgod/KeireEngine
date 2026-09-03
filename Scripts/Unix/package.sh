@@ -57,7 +57,7 @@ cp -R "$ROOT/Build/Dependencies/ffmpeg/Release/install/share/licenses/ffmpeg" "$
 cp -R "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/Managed" "$stage/bin/"
 dependency_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
 cp "$dependency_install/lib/libassimp.a" "$dependency_install/lib/libzlibstatic.a" "$dependency_install/lib/libJolt.a" "$dependency_install/lib/libRecast.a" "$dependency_install/lib/libDetour.a" "$dependency_install/lib/libDetourCrowd.a" "$dependency_install/lib/libDetourTileCache.a" "$dependency_install/lib/libminiaudio.a" "$stage/lib/"
-cp "$ROOT/Build/Dependencies/coral-patched/Build/Release/libCoral.Native.a" "$stage/lib/"
+cp "$ROOT/Build/Dependencies/coral/Build/Release/libCoral.Native.a" "$stage/lib/"
 cp "$ROOT/Build/Dependencies/coral-nethost/libnethost.a" "$stage/lib/"
 cp "$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler" "$stage/bin/"
 find "$ROOT/Build/Tools/ShaderCompiler" -maxdepth 1 -type f \( -name '*.so*' -o -name '*.dylib' \) -exec cp {} "$stage/bin/" \;
@@ -94,7 +94,7 @@ cp "$ROOT/Vendor/assimp/LICENSE" "$stage/third-party/licenses/assimp-LICENSE.txt
 cp "$ROOT/Vendor/assimp/contrib/zlib/LICENSE" "$stage/third-party/licenses/assimp-zlib-LICENSE.txt"
 cp "$ROOT/Vendor/stb/LICENSE" "$stage/third-party/licenses/stb-LICENSE.txt"
 cp "$dependency_install/share/licenses/keire/Jolt-LICENSE.txt" "$dependency_install/share/licenses/keire/Recast-LICENSE.txt" "$dependency_install/share/licenses/keire/miniaudio-LICENSE.txt" "$stage/third-party/licenses/"
-cp "$ROOT/Build/Dependencies/coral-patched/LICENSE" "$stage/third-party/licenses/Coral-LICENSE.txt"
+cp "$ROOT/Build/Dependencies/coral/LICENSE" "$stage/third-party/licenses/Coral-LICENSE.txt"
 cp "$ROOT/Build/Dependencies/dotnet-sdk/LICENSE.txt" "$stage/third-party/licenses/dotnet-LICENSE.txt"
 cp "$ROOT/Build/Dependencies/dotnet-sdk/ThirdPartyNotices.txt" "$stage/third-party/licenses/dotnet-ThirdPartyNotices.txt"
 sdl_install="$dependency_install"

@@ -220,7 +220,19 @@ namespace
 TEST_CASE("built-in shader resource counts match each stage")
 {
     CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 3);
-    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 2);
+    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 3);
+    CHECK(Keire::Detail::DeferredGBufferShaderUniformBufferCount(true) == 3);
+    CHECK(Keire::Detail::DeferredGBufferShaderUniformBufferCount(false) == 0);
+    CHECK(Keire::Detail::DeferredGBufferShaderStorageBufferCount(true) == 1);
+    CHECK(Keire::Detail::DeferredGBufferShaderStorageBufferCount(false) == 0);
+    CHECK(Keire::Detail::DeferredLightingShaderUniformBufferCount(true) == 0);
+    CHECK(Keire::Detail::DeferredLightingShaderUniformBufferCount(false) == 3);
+    CHECK(Keire::Detail::DeferredLightingShaderSamplerCount(true) == 0);
+    CHECK(Keire::Detail::DeferredLightingShaderSamplerCount(false) == 16);
+    CHECK(Keire::Detail::DeferredLightingShaderStorageTextureCount(true) == 0);
+    CHECK(Keire::Detail::DeferredLightingShaderStorageTextureCount(false) == 0);
+    CHECK(Keire::Detail::DeferredLightingShaderStorageBufferCount(true) == 0);
+    CHECK(Keire::Detail::DeferredLightingShaderStorageBufferCount(false) == 4);
 }
 
 TEST_CASE("render CPU preparation timing aggregates every surface submitted in a frame")
@@ -418,6 +430,28 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(*decoded->Definition().MaximumWorldPositionDisplacementRadius == doctest::Approx(0.0F));
     CHECK(Keire::ShaderAsset::Encode(decoded->Definition()) == encoded);
 
+    auto multiPassDefinition = definition;
+    for (std::size_t index = 0; index < formats.size(); ++index)
+    {
+        multiPassDefinition.Variants.push_back({formats[index],
+                                                {std::byte{static_cast<unsigned char>(index + 21)}},
+                                                {std::byte{static_cast<unsigned char>(index + 31)}},
+                                                "deferredGBufferStandard"});
+    }
+    const auto multiPassEncoded = Keire::ShaderAsset::Encode(multiPassDefinition);
+    const auto multiPassDecoded = Keire::ShaderAsset::Decode(multiPassEncoded);
+    REQUIRE(multiPassDecoded->Definition().Variants.size() == 6U);
+    CHECK(multiPassDecoded->Variant(Keire::ShaderBinaryFormat::Dxil, "primary") != nullptr);
+    CHECK(multiPassDecoded->Variant(Keire::ShaderBinaryFormat::Dxil, "deferredGBufferStandard") != nullptr);
+    CHECK(multiPassDecoded->Variant(Keire::ShaderBinaryFormat::Dxil, "deferredGBufferExtended") == nullptr);
+
+    auto invalidPassRole = multiPassDefinition;
+    invalidPassRole.Variants.back().PassRole = "invalid-role";
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(invalidPassRole), std::invalid_argument);
+    auto duplicatePassLane = multiPassDefinition;
+    duplicatePassLane.Variants.push_back(duplicatePassLane.Variants.front());
+    CHECK_THROWS_AS((void)Keire::ShaderAsset::Encode(duplicatePassLane), std::invalid_argument);
+
     std::vector<std::uint8_t> canonicalBytes(encoded.size());
     std::ranges::transform(encoded, canonicalBytes.begin(),
                            [](const std::byte value) { return std::to_integer<std::uint8_t>(value); });
@@ -430,7 +464,9 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     std::ranges::transform(legacyUnsigned, legacyBytes.begin(),
                            [](const std::uint8_t value) { return std::byte(value); });
     const auto legacyDecoded = Keire::ShaderAsset::Decode(legacyBytes);
-    CHECK(legacyDecoded->Definition().SchemaVersion == 2U);
+    CHECK(legacyDecoded->Definition().SchemaVersion == Keire::ShaderAssetSchemaVersion);
+    CHECK(std::ranges::all_of(legacyDecoded->Definition().Variants,
+                              [](const Keire::ShaderVariant& variant) { return variant.PassRole == "primary"; }));
     CHECK_FALSE(legacyDecoded->Definition().MaximumWorldPositionDisplacementRadius);
     CHECK(legacyDecoded->Definition().OcclusionSupport == Keire::ShaderOcclusionSupport::None);
     const auto migratedDecoded = Keire::ShaderAsset::Decode(Keire::ShaderAsset::Encode(legacyDecoded->Definition()));
@@ -462,7 +498,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decodedLegacyManifest.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
 
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 5U);
+    CHECK(importer.Version == 7U);
     REQUIRE(importer.Cook);
     Keire::ShaderImporterSpecification missingReflection;
     missingReflection.Formats = {Keire::ShaderBinaryFormat::Dxil};
@@ -480,6 +516,12 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     const auto macOS = Keire::ShaderAsset::Decode(importer.Cook(encoded, Keire::AssetTargetPlatform::MacOS));
     REQUIRE(macOS->Definition().Variants.size() == 1);
     CHECK(macOS->Definition().Variants.front().Format == Keire::ShaderBinaryFormat::Msl);
+
+    const auto multiPassWindows =
+        Keire::ShaderAsset::Decode(importer.Cook(multiPassEncoded, Keire::AssetTargetPlatform::Windows));
+    REQUIRE(multiPassWindows->Definition().Variants.size() == 4U);
+    CHECK(multiPassWindows->Variant(Keire::ShaderBinaryFormat::Dxil, "primary") != nullptr);
+    CHECK(multiPassWindows->Variant(Keire::ShaderBinaryFormat::SpirV, "deferredGBufferStandard") != nullptr);
 
     auto excessive = definition;
     for (std::size_t index = 0; index < 16; ++index)
@@ -926,7 +968,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 22);
+    CHECK(importer.Version == 23);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());
@@ -1097,7 +1139,6 @@ TEST_CASE("animation source import can bake semantic pelvis translation in place
     context.SourceRoot = directory.Path;
     context.SourcePath = sourcePath;
     context.RelativePath = sourcePath.filename();
-    context.ImportSettings["contentType"] = std::string("animation");
     context.ImportSettings["animationMotion"] = std::string("inPlace");
     std::size_t sidecarReads = 0;
     context.ReadProjectFile = [&sidecarReads](const std::filesystem::path&) -> std::vector<std::byte>
@@ -1110,6 +1151,10 @@ TEST_CASE("animation source import can bake semantic pelvis translation in place
     { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
 
     const auto output = Keire::CreateMeshAssetImporter().ContextualImport(context, std::as_bytes(std::span(gltf)));
+    REQUIRE(output.PrimaryType);
+    CHECK(*output.PrimaryType == Keire::AnimationSourceAsset::StaticType());
+    CHECK(std::ranges::any_of(output.Diagnostics, [](const auto& diagnostic)
+                              { return diagnostic.Message.find("animation-only source") != std::string::npos; }));
     const auto clipOutput = std::ranges::find(output.SubAssets, Keire::AnimationClipAsset::StaticType(),
                                               &Keire::AssetGeneratedSubAsset::Type);
     REQUIRE(clipOutput != output.SubAssets.end());
@@ -1839,7 +1884,7 @@ TEST_CASE("shader importer accepts the current Starter 3D schema without lowerin
     REQUIRE(importer.ContextualImport);
     const auto output = importer.ContextualImport(context, ReadTestBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(output.Bytes);
-    CHECK(shader->Definition().SchemaVersion == 2U);
+    CHECK(shader->Definition().SchemaVersion == Keire::ShaderAssetSchemaVersion);
     CHECK(shader->Definition().InstanceAddressingAbiVersion == 2U);
     CHECK(Keire::HasShaderOcclusionSupport(shader->Definition().OcclusionSupport,
                                            Keire::ShaderOcclusionSupport::ConservativeBounds));

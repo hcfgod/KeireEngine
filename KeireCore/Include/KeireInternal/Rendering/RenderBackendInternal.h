@@ -19,7 +19,10 @@
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
+#include "KeireInternal/Rendering/MaterialPassRoutingInternal.h"
+#include "KeireInternal/Rendering/RenderBackendConversionsInternal.h"
 #include "KeireInternal/Rendering/RenderPipelineStateInternal.h"
+#include "KeireInternal/Rendering/RenderSceneRecordingTypesInternal.h"
 #include "KeireInternal/Rendering/RenderShaderDataInternal.h"
 #include "KeireInternal/Rendering/RenderStatisticsInternal.h"
 #include "KeireInternal/Rendering/RenderSurfaceStateInternal.h"
@@ -61,102 +64,6 @@ namespace Keire::Detail
 
 namespace Keire::RenderBackend
 {
-    [[nodiscard]] inline std::string LastSdlError()
-    {
-        const char* error = SDL_GetError();
-        return error && *error ? std::string(error) : std::string("SDL did not provide a diagnostic");
-    }
-    [[nodiscard]] inline bool ValidColor(const Color color) noexcept
-    {
-        const auto valid = [](const float value) { return std::isfinite(value) && value >= 0.0F && value <= 1.0F; };
-        return valid(color.Red) && valid(color.Green) && valid(color.Blue) && valid(color.Alpha);
-    }
-
-    [[nodiscard]] inline Vector3 Normalize(const Vector3 value) noexcept
-    {
-        const float length = std::sqrt(value.X * value.X + value.Y * value.Y + value.Z * value.Z);
-        return length > 0.000001F ? Vector3{value.X / length, value.Y / length, value.Z / length}
-                                  : Vector3{0.0F, -1.0F, 0.0F};
-    }
-
-    [[nodiscard]] inline std::uint64_t HashDependencyStamp(std::uint64_t seed, const std::uint64_t value) noexcept
-    {
-        return seed ^ (value + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U));
-    }
-
-    [[nodiscard]] inline std::uint64_t HashDependencyStamp(std::uint64_t seed, const AssetId value) noexcept
-    {
-        seed = HashDependencyStamp(seed, value.High());
-        return HashDependencyStamp(seed, value.Low());
-    }
-
-    [[nodiscard]] inline Color TemperatureColor(const float kelvin) noexcept
-    {
-        const float temperature = std::clamp(kelvin, 1000.0F, 20000.0F) / 100.0F;
-        const float red = temperature <= 66.0F
-                              ? 1.0F
-                              : std::clamp(1.2929362F * std::pow(temperature - 60.0F, -0.13320476F), 0.0F, 1.0F);
-        const float green = temperature <= 66.0F
-                                ? std::clamp(0.39008158F * std::log(temperature) - 0.63184144F, 0.0F, 1.0F)
-                                : std::clamp(1.1298909F * std::pow(temperature - 60.0F, -0.07551485F), 0.0F, 1.0F);
-        const float blue = temperature >= 66.0F ? 1.0F
-                           : temperature <= 19.0F
-                               ? 0.0F
-                               : std::clamp(0.5432068F * std::log(temperature - 10.0F) - 1.1962541F, 0.0F, 1.0F);
-        return {red, green, blue, 1.0F};
-    }
-
-    [[nodiscard]] inline SDL_GPUPresentMode ToSdlPresentMode(const RenderPresentMode mode) noexcept
-    {
-        switch (mode)
-        {
-        case RenderPresentMode::Mailbox:
-            return SDL_GPU_PRESENTMODE_MAILBOX;
-        case RenderPresentMode::Immediate:
-            return SDL_GPU_PRESENTMODE_IMMEDIATE;
-        case RenderPresentMode::VSync:
-        default:
-            return SDL_GPU_PRESENTMODE_VSYNC;
-        }
-    }
-
-    [[nodiscard]] constexpr std::uint32_t SdlAllowedFramesInFlight(const std::uint32_t requested) noexcept
-    {
-        return requested < 1U ? 1U : (requested > 3U ? 3U : requested);
-    }
-
-    [[nodiscard]] inline SDL_GPUSampleCount ToSdlSampleCount(const RenderSampleCount samples) noexcept
-    {
-        switch (samples)
-        {
-        case RenderSampleCount::Eight:
-            return SDL_GPU_SAMPLECOUNT_8;
-        case RenderSampleCount::Four:
-            return SDL_GPU_SAMPLECOUNT_4;
-        case RenderSampleCount::Two:
-            return SDL_GPU_SAMPLECOUNT_2;
-        case RenderSampleCount::One:
-        default:
-            return SDL_GPU_SAMPLECOUNT_1;
-        }
-    }
-
-    [[nodiscard]] inline RenderSampleCount FromSdlSampleCount(const SDL_GPUSampleCount samples) noexcept
-    {
-        switch (samples)
-        {
-        case SDL_GPU_SAMPLECOUNT_8:
-            return RenderSampleCount::Eight;
-        case SDL_GPU_SAMPLECOUNT_4:
-            return RenderSampleCount::Four;
-        case SDL_GPU_SAMPLECOUNT_2:
-            return RenderSampleCount::Two;
-        case SDL_GPU_SAMPLECOUNT_1:
-        default:
-            return RenderSampleCount::One;
-        }
-    }
-
     struct GpuMeshResources final
     {
         struct ShapeSample final
@@ -359,6 +266,7 @@ namespace Keire::RenderBackend
             SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
             MaterialAlphaMode AlphaMode = MaterialAlphaMode::Opaque;
             bool DoubleSided = false;
+            RuntimeMaterialPassRole PassRole = RuntimeMaterialPassRole::Primary;
             SDL_GPUGraphicsPipeline* Handle = nullptr;
         };
 
@@ -379,6 +287,7 @@ namespace Keire::RenderBackend
         };
 
         SDL_GPUGraphicsPipeline* Pipeline = nullptr;
+        std::map<RuntimeMaterialPassRole, SDL_GPUGraphicsPipeline*> PassPipelines;
         std::vector<Vector4> NumericProperties;
         std::vector<SDL_GPUTextureSamplerBinding> Textures;
         std::map<std::string, PropertyBinding, std::less<>> Properties;
@@ -398,6 +307,18 @@ namespace Keire::RenderBackend
         bool UsesVertexMaterialParameters = false;
         std::uint8_t SpatialLightingAbiVersion = 0;
         std::uint8_t InstanceAddressingAbiVersion = 0;
+
+        [[nodiscard]] SDL_GPUGraphicsPipeline* PassPipeline(const RuntimeMaterialPassRole role) const noexcept
+        {
+            const auto found = PassPipelines.find(role);
+            return found == PassPipelines.end() ? nullptr : found->second;
+        }
+
+        [[nodiscard]] bool HasDeferredGBufferPipeline() const noexcept
+        {
+            return PassPipeline(RuntimeMaterialPassRole::DeferredGBufferStandard) ||
+                   PassPipeline(RuntimeMaterialPassRole::DeferredGBufferExtended);
+        }
     };
 
     struct GpuMaterialBindingEntry final
@@ -446,18 +367,55 @@ namespace Keire::RenderBackend
         }
     };
 
+    struct GpuSkinPaletteResources final
+    {
+        SDL_GPUBuffer* Buffer = nullptr;
+        SDL_GPUTransferBuffer* Transfer = nullptr;
+        std::uint32_t Bytes = 0;
+
+        [[nodiscard]] bool Empty() const noexcept { return !Buffer && !Transfer && Bytes == 0; }
+    };
+
     struct GpuSkinOutputResources final
     {
         SDL_GPUBuffer* AssetVertices = nullptr;
         SDL_GPUBuffer* BuiltinVertices = nullptr;
+        SDL_GPUBuffer* PreviousAssetVertices = nullptr;
+        SDL_GPUBuffer* PreviousBuiltinVertices = nullptr;
+        GpuSkinPaletteResources Palette;
+        GpuSkinPaletteResources PreviousPalette;
+        std::uint64_t PoseGeneration = 0;
 
-        [[nodiscard]] bool Empty() const noexcept { return !AssetVertices && !BuiltinVertices; }
+        [[nodiscard]] bool Empty() const noexcept
+        {
+            return !AssetVertices && !BuiltinVertices && !PreviousAssetVertices && !PreviousBuiltinVertices &&
+                   Palette.Empty() && PreviousPalette.Empty();
+        }
     };
 
     struct GpuSkinInstanceResources final
     {
         std::vector<GpuSkinOutputResources> Outputs;
         std::uint64_t LastPreparedFrame = 0;
+        std::size_t LastPublishedOutputSlot = 0;
+        bool HasPublishedOutput = false;
+    };
+
+    [[nodiscard]] constexpr bool CanReusePreviousSkinOutput(const bool hasPublishedOutput,
+                                                            const std::size_t publishedOutputSlot,
+                                                            const std::size_t currentOutputSlot,
+                                                            const std::uint64_t publishedPoseGeneration,
+                                                            const std::uint64_t requestedPoseGeneration) noexcept
+    {
+        return hasPublishedOutput && publishedOutputSlot != currentOutputSlot && publishedPoseGeneration != 0 &&
+               publishedPoseGeneration == requestedPoseGeneration;
+    }
+
+    struct PendingGpuSkinOutputPublication final
+    {
+        GpuSkinInstanceResources* Instance = nullptr;
+        std::size_t OutputSlot = 0;
+        std::uint64_t PoseGeneration = 0;
     };
 
     struct GpuSkinResources final
@@ -500,80 +458,21 @@ namespace Keire::RenderBackend
         return frame == 0 || maximumFramesInFlight == 0 ? 0 : (frame - 1U) % maximumFramesInFlight;
     }
 
-    struct SceneLighting final
-    {
-        EntityId Entity;
-        Vector4 Direction{0.0F, -1.0F, 0.0F, 0.0F};
-        Color ColorAndIntensity{1.0F, 1.0F, 1.0F, 0.0F};
-        ShadowQuality Shadows = ShadowQuality::Disabled;
-        float ShadowStrength = 1.0F;
-        float ShadowBias = 0.005F;
-        AssetId Cookie;
-        Vector2 CookieScale{1.0F, 1.0F};
-        Vector2 CookieOffset;
-        float CookieRotationDegrees = 0.0F;
-        bool ContactShadows = false;
-        bool Enabled = false;
-    };
-
-    struct SceneDrawItem final
-    {
-        AssetId Mesh;
-        std::vector<AssetId> Materials;
-        std::map<std::string, MaterialPropertyValue, std::less<>> MaterialProperties;
-        std::map<std::size_t, std::map<std::string, MaterialPropertyValue, std::less<>>> MaterialInstanceProperties;
-        Matrix4 World;
-        Color Tint;
-        EntityId Entity;
-        AssetId Skin;
-        AssetId SkinSkeleton;
-        std::vector<Matrix4> SkinPalette;
-        bool CastShadows = true;
-        bool ReceiveShadows = true;
-        bool AlwaysVisible = false;
-        SkinningMethod Skinning = SkinningMethod::LinearBlend;
-        SDL_GPUBuffer* SkinnedAssetVertices = nullptr;
-        SDL_GPUBuffer* SkinnedBuiltinVertices = nullptr;
-        AssetId Scene;
-        std::uint32_t ContributionOrder = 0;
-        GpuVisibilityClass VisibilityClass = GpuVisibilityClass::StaticMesh;
-        std::uint64_t PoseGeneration = 0;
-        std::vector<MeshBounds> CurrentPoseSubmeshBounds;
-        std::uint64_t BoundsPoseGeneration = 0;
-        std::uint64_t BoundsFrameIndex = 0;
-
-        [[nodiscard]] bool HasFreshCurrentPoseBounds(const std::uint64_t frameIndex,
-                                                     const std::size_t submeshCount) const noexcept
-        {
-            return HasFreshCurrentPoseBounds(frameIndex) && CurrentPoseSubmeshBounds.size() == submeshCount;
-        }
-
-        [[nodiscard]] bool HasFreshCurrentPoseBounds(const std::uint64_t frameIndex) const noexcept
-        {
-            return PoseGeneration != 0 && BoundsPoseGeneration == PoseGeneration && BoundsFrameIndex == frameIndex &&
-                   !CurrentPoseSubmeshBounds.empty() && SkinnedAssetVertices;
-        }
-    };
-
     [[nodiscard]] inline std::optional<SceneDrawItem> VfxMeshDrawItem(const VfxRenderParticle& particle)
     {
         if (particle.Renderer != VfxRendererType::Mesh || !particle.Mesh || particle.Size <= 0.0F)
             return std::nullopt;
-        auto result =
-            SceneDrawItem{particle.Mesh,
-                          particle.Material ? std::vector<AssetId>{particle.Material} : std::vector<AssetId>{},
-                          {},
-                          {},
-                          Math::ComposeTransform(particle.Position, Math::EulerDegreesToQuaternion(particle.Rotation),
-                                                 {particle.Size, particle.Size, particle.Size}),
-                          particle.Tint,
-                          {},
-                          {},
-                          {},
-                          {},
-                          false,
-                          true,
-                          false};
+        SceneDrawItem result;
+        result.Mesh = particle.Mesh;
+        result.Materials = particle.Material ? std::vector<AssetId>{particle.Material} : std::vector<AssetId>{};
+        result.World = Math::ComposeTransform(particle.Position, Math::EulerDegreesToQuaternion(particle.Rotation),
+                                              {particle.Size, particle.Size, particle.Size});
+        result.PreviousWorld =
+            Math::ComposeTransform(particle.PreviousPosition, Math::EulerDegreesToQuaternion(particle.Rotation),
+                                   {particle.Size, particle.Size, particle.Size});
+        result.Tint = particle.Tint;
+        result.CastShadows = false;
+        result.ReceiveShadows = true;
         result.VisibilityClass = GpuVisibilityClassForDraw(false, true);
         return result;
     }
@@ -652,6 +551,8 @@ namespace Keire::RenderBackend
     {
         AssetId Scene;
         RenderCamera Camera;
+        Matrix4 UnjitteredProjection;
+        Matrix4 PreviousViewProjection;
         RenderEnvironmentSettings Environment;
         std::map<std::string, MaterialPropertyValue, std::less<>> GlobalMaterialProperties;
         SceneLighting Lighting;
@@ -667,7 +568,26 @@ namespace Keire::RenderBackend
         float MaterialDeltaSeconds = 0.0F;
         std::uint64_t AcceptedFrameId = 0;
         std::uint64_t FrameIndex = 0;
+        bool TemporalHistoryContinuous = false;
     };
+
+    [[nodiscard]] constexpr std::uint32_t DirectionalShadowResolutionForHint(const std::uint32_t projectResolution,
+                                                                             const ShadowResolutionHint hint) noexcept
+    {
+        const auto baseResolution = std::clamp(projectResolution, 256U, 8192U);
+        switch (hint)
+        {
+        case ShadowResolutionHint::Low:
+            return std::max(baseResolution / 4U, 256U);
+        case ShadowResolutionHint::Medium:
+            return std::max(baseResolution / 2U, 256U);
+        case ShadowResolutionHint::VeryHigh:
+            return std::min(baseResolution * 2U, 8192U);
+        case ShadowResolutionHint::High:
+        default:
+            return baseResolution;
+        }
+    }
 
     [[nodiscard]] inline SceneLighting ResolveLighting(const Ref<Scene>& scene)
     {
@@ -692,6 +612,7 @@ namespace Keire::RenderBackend
             result.ColorAndIntensity = {color.Red * temperature.Red, color.Green * temperature.Green,
                                         color.Blue * temperature.Blue, light->Intensity()};
             result.Shadows = light->Shadows();
+            result.ShadowResolution = light->ShadowResolution();
             result.ShadowStrength = light->ShadowStrength();
             result.ShadowBias = light->ShadowBias();
             result.Cookie = light->Cookie();
@@ -1032,12 +953,6 @@ namespace Keire::RenderBackend
         }
     };
 
-    enum class SceneDrawPhase : std::uint8_t
-    {
-        Opaque,
-        Transparent
-    };
-
     struct PreparedSceneDraw final
     {
         const SceneDrawItem* Item = nullptr;
@@ -1073,7 +988,9 @@ namespace Keire::RenderBackend
     {
         PreparedSceneDrawList Opaque;
         PreparedSceneDrawList Transparent;
+        PreparedSceneDrawList Decals;
     };
+
     struct PreparedGpuOccluderBatch final
     {
         std::uint32_t SceneBatchIndex = 0;
@@ -1159,7 +1076,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] std::shared_ptr<RenderSurfaceState> ResolveSurface(const RenderSurfaceToken& token);
         [[nodiscard]] std::shared_ptr<RenderSurfaceState>
         CreateSurfaceEpoch(const std::shared_ptr<RenderSurfaceState>& previous, std::uint32_t width,
-                           std::uint32_t height);
+                           std::uint32_t height, RenderSampleCount sampleCount);
         void RequestSurfaceRetirement(const std::shared_ptr<RenderSurfaceState>& surface) noexcept;
         void CollectRetiredSurfaceEpochs() noexcept;
         void ReleaseResources(SurfaceResources& resources) noexcept;
@@ -1169,10 +1086,15 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUShader* CreateShadowShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateToneMapShader(bool vertex) const;
         [[nodiscard]] SDL_GPUShader* CreateRuntimeUiShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateDeferredGBufferShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateDeferredLightingShader(bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateIrradynShader(bool vertex) const;
         void EnsureFrameUploadContext();
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(std::span<const std::byte> bytes, SDL_GPUBufferUsageFlags usage);
         [[nodiscard]] SDL_GPUBuffer* UploadBuffer(SDL_GPUCommandBuffer* commands, std::span<const std::byte> bytes,
                                                   SDL_GPUBufferUsageFlags usage);
+        [[nodiscard]] SDL_GPUBuffer* UploadRuntimeUiBuffer(SDL_GPUCommandBuffer* commands,
+                                                           std::span<const std::byte> bytes, const char* diagnostic);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(std::span<const RenderVertex> vertices);
         [[nodiscard]] SDL_GPUBuffer* UploadVertexBuffer(SDL_GPUCommandBuffer* commands,
                                                         std::span<const RenderVertex> vertices);
@@ -1351,12 +1273,38 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateGpuVfxMeshPipeline(SDL_GPUSampleCount samples);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthPipeline(bool depthBias);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline();
-        void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface);
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDeferredGBufferPipeline();
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDeferredLightingPipeline();
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateIrradynPipeline(bool additive);
+        [[nodiscard]] bool EnsureDeferredPipelines();
+        void ReleaseDeferredPipelines() noexcept;
+        void RecordDeferredDepthVelocity(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                         const SceneRenderPacket& packet, const ShadowFrameData& shadows,
+                                         const PreparedSceneDrawList& opaqueDraws, std::size_t firstBatch,
+                                         std::size_t batchCount, bool clearTargets);
+        void RecordDeferredGBuffer(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                   const SceneRenderPacket& packet, const ShadowFrameData& shadows,
+                                   const PreparedSceneDrawList& opaqueDraws, SceneDrawPhase phase,
+                                   std::size_t firstBatch, std::size_t batchCount, bool clearTargets);
+        void RecordDeferredDBuffer(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                   const SceneRenderPacket& packet, const ShadowFrameData& shadows,
+                                   const PreparedSceneDrawList& decalDraws, std::size_t firstBatch,
+                                   std::size_t batchCount, bool clearTargets);
+        void RecordDeferredLighting(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                    const SceneRenderPacket& packet, const ShadowFrameData& shadows);
+        void RecordIrradynTrace(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                const SceneRenderPacket& packet, bool temporalHistoryContinuous);
+        void RecordIrradynComposite(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
+                                    const SceneRenderPacket& packet);
+        void RecordToneMap(SDL_GPUCommandBuffer* commands, const RenderSurfaceState& surface,
+                           RenderAntiAliasingMode antiAliasing, bool temporalHistoryContinuous);
         [[nodiscard]] RenderPipelineSet& PipelinesFor(SDL_GPUSampleCount samples);
-        [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex) const;
+        [[nodiscard]] SDL_GPUShader* CreateAssetShader(const ShaderAssetDefinition& definition, bool vertex,
+                                                       std::string_view passRole = "primary") const;
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateAssetPipeline(const ShaderAssetDefinition& definition,
                                                                    SDL_GPUSampleCount samples,
-                                                                   MaterialSurfaceState surface);
+                                                                   MaterialSurfaceState surface,
+                                                                   std::string_view passRole = "primary");
 
         RenderSpecification Specification;
         Ref<WindowSystem> Windows;
@@ -1378,6 +1326,10 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* ShadowPipeline = nullptr;
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* DeferredGBufferPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* DeferredLightingPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* IrradynTracePipeline = nullptr;
+        SDL_GPUGraphicsPipeline* IrradynCompositePipeline = nullptr;
         SDL_GPUGraphicsPipeline* RuntimeUiPipeline = nullptr;
         SDL_GPUGraphicsPipeline* RuntimeUiCameraOverlayPipeline = nullptr;
         SDL_GPUGraphicsPipeline* RuntimeUiRenderTexturePipeline = nullptr;
@@ -1394,6 +1346,7 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* GpuOcclusionDebugBoundsPipeline = nullptr;
         SDL_GPUSampler* ShadowSampler = nullptr;
         SDL_GPUSampler* ToneMapSampler = nullptr;
+        SDL_GPUSampler* DeferredSampler = nullptr;
         SDL_GPUSampler* GpuOcclusionSampler = nullptr;
         SDL_GPUTexture* EmptyShadowTexture = nullptr;
         SDL_GPUBuffer* SpatialSelectionFallbackBuffer = nullptr;
@@ -1425,6 +1378,9 @@ namespace Keire::RenderBackend
         Detail::RuntimeUiTextLayoutCache RuntimeUiTextLayouts{512U, 131'072U};
         std::vector<RuntimeUiRenderTextureCacheEntry> RuntimeUiRenderTextureCache;
         std::vector<AssetId> FrameRuntimeUiRenderTextureTargets;
+        std::vector<std::vector<DynamicGpuBuffer>> RuntimeUiUploadBuffers;
+        std::vector<std::vector<SDL_GPUTransferBuffer*>> RuntimeUiUploadTransfers;
+        std::vector<std::size_t> RuntimeUiUploadCounts;
         std::unordered_map<AssetId, GpuLightingTextureEntry> LightingTextureCache;
         std::unordered_map<AssetId, AssetHandle<LightingSetAsset>> LightingSetCache;
         std::unordered_map<AssetId, AssetHandle<LightProbeVolumeAsset>> LightProbeVolumeCache;
@@ -1443,6 +1399,9 @@ namespace Keire::RenderBackend
         std::vector<std::uintptr_t> PendingUiTextureRetirements;
         std::vector<RuntimeUiDrawCommand> CaptureRuntimeUiCommands;
         std::vector<QueuedSceneRequest> CaptureRequests;
+        std::unordered_map<MotionHistoryKey, MotionHistoryEntry, MotionHistoryKeyHash> MotionHistory;
+        std::unordered_map<MotionHistoryKey, MotionHistoryEntry, MotionHistoryKeyHash> CameraMotionHistory;
+        std::unordered_map<MotionHistoryKey, SkinMotionHistoryEntry, MotionHistoryKeyHash> SkinMotionHistory;
         std::shared_ptr<RenderFramePacket> ActiveFrame;
         std::vector<SurfaceResources> PendingRetired;
         std::vector<GpuMeshResources> PendingRetiredMeshes;
@@ -1462,6 +1421,11 @@ namespace Keire::RenderBackend
         std::atomic<bool> GpuOcclusionCapability{false};
         bool GpuOcclusionPipelinesAttempted = false;
         bool SpatialSelectionPipelineAttempted = false;
+        bool DeferredPipelinesAttempted = false;
+        std::atomic<bool> DeferredCapability{false};
+        std::atomic<bool> Msaa2Capability{false};
+        std::atomic<bool> Msaa4Capability{false};
+        std::string DeferredPipelineFailure;
         SDL_GPUComputePipeline* VfxInitializePipeline = nullptr;
         SDL_GPUComputePipeline* VfxResetPipeline = nullptr;
         SDL_GPUComputePipeline* VfxKillPipeline = nullptr;
@@ -1488,10 +1452,12 @@ namespace Keire::RenderBackend
         std::unordered_map<AssetId, GpuVfxVolumeEntry> VfxVolumeCache;
         std::vector<InFlightFrame> InFlight;
         StaticSceneFrameGraph SceneFrameGraph;
+        StaticSceneFrameGraph DeferredSceneFrameGraph;
         RenderStatistics Statistics;
         std::uint64_t NextSurfaceId = 1;
         std::uint64_t SkinningStaticBuilds = 0;
         std::uint64_t SkinningOutputBuilds = 0;
+        std::vector<PendingGpuSkinOutputPublication> PendingGpuSkinOutputPublications;
         std::uint64_t GpuSubmissionSerial = 0;
         std::uint64_t ActiveGpuSubmissionSerial = 0;
         mutable std::mutex SurfaceMutex;

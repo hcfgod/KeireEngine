@@ -13,24 +13,6 @@ $ErrorActionPreference = "Stop"
 $Root = Get-RepositoryRoot
 $Lock = Get-DependencyLock
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
-$PatchRoot = Join-Path $Root "Patches\Coral"
-$PatchFiles = @(Get-ChildItem -LiteralPath $PatchRoot -Filter "*.patch" -File | Sort-Object Name)
-if ($PatchFiles.Count -eq 0) {
-    throw "The Kéire Coral patch set is empty."
-}
-
-$Hasher = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
-try {
-    foreach ($Patch in $PatchFiles) {
-        $Name = [Text.Encoding]::UTF8.GetBytes($Patch.Name + "`n")
-        $Hasher.AppendData($Name)
-        $Hasher.AppendData([IO.File]::ReadAllBytes($Patch.FullName))
-    }
-    $PatchDigest = [BitConverter]::ToString($Hasher.GetHashAndReset()).Replace("-", "").ToLowerInvariant()
-}
-finally {
-    $Hasher.Dispose()
-}
 
 function Resolve-KeirePinnedDotnetSdk {
     param([Parameter(Mandatory = $true)][string]$Version)
@@ -229,95 +211,87 @@ $BuildVariant = Get-KeireCoralBuildVariantKey -Architecture $Architecture `
     -NetHostIdentity $NetHost.Identity -WorkspaceIdentity $WorkspaceIdentity
 $BuildRoot = Join-Path $env:LOCALAPPDATA "KeireDependencyBuilds"
 $BuildContainerRoot = Split-Path $BuildRoot -Parent
-$CacheKey = "$($Lock.CORAL_COMMIT.Substring(0, 12))-$($PatchDigest.Substring(0, 16))-$BuildVariant"
-$Patched = Join-Path $BuildRoot "coral-$CacheKey"
-$Stamp = Join-Path $Patched "keire-coral-patch.stamp"
-$ExpectedStamp = "$($Lock.CORAL_COMMIT)|$PatchDigest|$BuildVariant|$($NetHost.RuntimeIdentifier)|$($NetHost.PackVersion)"
+$CacheKey = "$($Lock.CORAL_COMMIT.Substring(0, 12))-$BuildVariant"
+$Checkout = Join-Path $BuildRoot "coral-$CacheKey"
 New-Item -ItemType Directory -Force -Path $BuildRoot | Out-Null
 $BuildLock = Enter-KeireWorkspaceLock -RepositoryRoot $BuildRoot -CommandName "coral-build-$CacheKey" `
     -LockRelativePath ".locks\coral-$CacheKey.lock"
 try {
-$PatchedItem = Get-Item -LiteralPath $Patched -Force -ErrorAction SilentlyContinue
-if ($PatchedItem -and (-not $PatchedItem.PSIsContainer -or
-        (($PatchedItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
-    throw "Coral build cache is not an ordinary directory: $Patched"
-}
-$Prepared = (Test-Path -LiteralPath $Stamp) -and
-    ((Get-Content -LiteralPath $Stamp -Raw).Trim() -eq $ExpectedStamp)
-$NetHostLibrary = $NetHost.Library
-$NetHostRuntime = $NetHost.Runtime
-if (-not $Prepared) {
-    $TemporaryPatched = Join-Path $BuildRoot "coral-$CacheKey.tmp-$PID"
-    try {
-        if (Get-Item -LiteralPath $TemporaryPatched -Force -ErrorAction SilentlyContinue) {
-            Remove-KeireGeneratedDirectory -RepositoryRoot $BuildContainerRoot -AllowedRoot $BuildRoot `
-                -Path $TemporaryPatched -Description "temporary Coral build cache"
-        }
-        & git clone --quiet --no-hardlinks --shared $Source $TemporaryPatched
-        if ($LASTEXITCODE -ne 0) { throw "Could not create the Coral patch worktree." }
-        foreach ($Patch in $PatchFiles) {
-            & git -C $TemporaryPatched apply --whitespace=error-all $Patch.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Coral patch failed to apply: $($Patch.Name)" }
-        }
-        [IO.File]::WriteAllText((Join-Path $TemporaryPatched "keire-coral-patch.stamp"),
-            "$ExpectedStamp`n", [Text.UTF8Encoding]::new($false))
-        if (Test-Path -LiteralPath $Patched) {
-            Remove-KeireGeneratedDirectory -RepositoryRoot $BuildContainerRoot -AllowedRoot $BuildRoot `
-                -Path $Patched -Description "Coral build cache"
-        }
-        Move-Item -LiteralPath $TemporaryPatched -Destination $Patched
+    $CheckoutItem = Get-Item -LiteralPath $Checkout -Force -ErrorAction SilentlyContinue
+    if ($CheckoutItem -and (-not $CheckoutItem.PSIsContainer -or
+            (($CheckoutItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0))) {
+        throw "Coral build cache is not an ordinary directory: $Checkout"
     }
-    catch {
-        $Failure = $_
-        if (Get-Item -LiteralPath $TemporaryPatched -Force -ErrorAction SilentlyContinue) {
-            try {
+    if ($CheckoutItem) {
+        Assert-KeireLockedGitSource -Path $Checkout -ExpectedCommit $Lock.CORAL_COMMIT -Name "Coral build"
+    }
+    else {
+        $TemporaryCheckout = Join-Path $BuildRoot "coral-$CacheKey.tmp-$PID"
+        try {
+            if (Get-Item -LiteralPath $TemporaryCheckout -Force -ErrorAction SilentlyContinue) {
                 Remove-KeireGeneratedDirectory -RepositoryRoot $BuildContainerRoot -AllowedRoot $BuildRoot `
-                    -Path $TemporaryPatched -Description "temporary Coral build cache"
+                    -Path $TemporaryCheckout -Description "temporary Coral build cache"
             }
-            catch {
-                Write-Warning "Could not safely clean temporary Coral cache '$TemporaryPatched': $($_.Exception.Message)"
-            }
+            & git clone --quiet --no-hardlinks --no-checkout $Source $TemporaryCheckout
+            if ($LASTEXITCODE -ne 0) { throw "Could not clone the Coral build checkout." }
+            & git -C $TemporaryCheckout config core.autocrlf false
+            if ($LASTEXITCODE -ne 0) { throw "Could not configure deterministic Coral build line endings." }
+            & git -C $TemporaryCheckout checkout --quiet --detach $Lock.CORAL_COMMIT
+            if ($LASTEXITCODE -ne 0) { throw "Could not check out the locked Coral build commit." }
+            Assert-KeireLockedGitSource -Path $TemporaryCheckout -ExpectedCommit $Lock.CORAL_COMMIT `
+                -Name "Coral build"
+            Move-Item -LiteralPath $TemporaryCheckout -Destination $Checkout
         }
-        throw $Failure
+        catch {
+            $Failure = $_
+            if (Get-Item -LiteralPath $TemporaryCheckout -Force -ErrorAction SilentlyContinue) {
+                try {
+                    Remove-KeireGeneratedDirectory -RepositoryRoot $BuildContainerRoot -AllowedRoot $BuildRoot `
+                        -Path $TemporaryCheckout -Description "temporary Coral build cache"
+                }
+                catch {
+                    Write-Warning "Could not safely clean temporary Coral cache '$TemporaryCheckout': $($_.Exception.Message)"
+                }
+            }
+            throw $Failure
+        }
+        Write-Host "==> Coral build checkout prepared at $Checkout"
     }
-    Write-Host "==> Coral patch cache prepared at $Patched"
-}
-else {
-    Write-Host "==> Coral patch cache is current"
-}
 
-if ($Build) {
-    $Ninja = Get-NinjaExecutable
-    $NativeBuild = Join-Path $Patched "Build\$Configuration"
-    if ($Force -and (Test-Path -LiteralPath $NativeBuild)) {
-        Remove-KeireGeneratedDirectory -RepositoryRoot $BuildRoot -AllowedRoot $Patched -Path $NativeBuild `
-            -Description "Coral native build"
+    $NetHostLibrary = $NetHost.Library
+    $NetHostRuntime = $NetHost.Runtime
+
+    if ($Build) {
+        $Ninja = Get-NinjaExecutable
+        $NativeBuild = Join-Path $Checkout "Build\$Configuration"
+        if ($Force -and (Test-Path -LiteralPath $NativeBuild)) {
+            Remove-KeireGeneratedDirectory -RepositoryRoot $BuildRoot -AllowedRoot $Checkout -Path $NativeBuild `
+                -Description "Coral native build"
+        }
+        Initialize-KeireOrdinaryChildDirectory -Root $Checkout -Path $NativeBuild `
+            -Description "Coral native build path"
+        & cmake -S (Join-Path $Checkout "cmake") -B $NativeBuild -G Ninja "-DCMAKE_MAKE_PROGRAM=$Ninja" `
+            "-DCMAKE_BUILD_TYPE=$Configuration" "-DCORAL_TESTING=OFF" "-DCORAL_EXAMPLE=OFF" `
+            "-DDOTNET_EXE=$DotnetExecutable"
+        if ($LASTEXITCODE -ne 0) { throw "Coral configuration failed." }
+        & cmake --build $NativeBuild --target Coral.Native --parallel
+        if ($LASTEXITCODE -ne 0) { throw "Coral build failed." }
+        if (-not (Test-Path -LiteralPath (Join-Path $NativeBuild "Coral.Managed.dll"))) {
+            throw "Coral build did not produce Coral.Managed.dll."
+        }
+        Write-Host "==> Coral $Configuration build is ready"
     }
-    Initialize-KeireOrdinaryChildDirectory -Root $Patched -Path $NativeBuild `
-        -Description "Coral native build path"
-    & cmake -S (Join-Path $Patched "cmake") -B $NativeBuild -G Ninja "-DCMAKE_MAKE_PROGRAM=$Ninja" `
-        "-DCMAKE_BUILD_TYPE=$Configuration" "-DCORAL_TESTING=OFF" "-DCORAL_EXAMPLE=OFF" `
-        "-DDOTNET_EXE=$DotnetExecutable"
-    if ($LASTEXITCODE -ne 0) { throw "Patched Coral configuration failed." }
-    & cmake --build $NativeBuild --target Coral.Native --parallel
-    if ($LASTEXITCODE -ne 0) { throw "Patched Coral build failed." }
-    if (-not (Test-Path -LiteralPath (Join-Path $NativeBuild "Coral.Managed.dll"))) {
-        throw "Patched Coral build did not produce Coral.Managed.dll."
-    }
-    Write-Host "==> Patched Coral $Configuration build is ready"
-}
 }
 finally {
     Exit-KeireWorkspaceLock -Lock $BuildLock
 }
 
 [PSCustomObject]@{
-    Source = $Patched
+    Source = $Checkout
     Commit = $Lock.CORAL_COMMIT
-    PatchDigest = $PatchDigest
     BuildVariant = $BuildVariant
     Configuration = $Configuration
-    BuildDirectory = Join-Path $Patched "Build\$Configuration"
+    BuildDirectory = Join-Path $Checkout "Build\$Configuration"
     NetHostLibrary = $NetHostLibrary
     NetHostRuntime = $NetHostRuntime
     DotnetRoot = $DotnetSdk.Root

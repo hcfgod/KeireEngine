@@ -12,6 +12,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Keire
 {
@@ -117,6 +118,8 @@ namespace KeireEditor
 
         void Register(Keire::ComponentPropertyKind kind, Drawer drawer);
         void RegisterOverride(Keire::ComponentTypeId component, const std::string& propertyKey, Drawer drawer);
+        void RegisterIntegerChoices(Keire::ComponentTypeId component, const std::string& propertyKey,
+                                    std::vector<std::string> choices);
         [[nodiscard]] bool Draw(IPropertyEditor& editor, Keire::ComponentTypeId component,
                                 const Keire::ComponentProperty& property, Keire::ComponentPropertyValue& value) const;
         [[nodiscard]] bool EditComponent(IPropertyEditor& editor, const Keire::ComponentRegistration& registration,

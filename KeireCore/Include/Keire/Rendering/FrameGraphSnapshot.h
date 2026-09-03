@@ -9,6 +9,8 @@
 
 namespace Keire
 {
+    inline constexpr std::uint32_t FrameGraphSnapshotSchemaVersion = 2;
+
     enum class FrameGraphSnapshotResourceKind : std::uint8_t
     {
         Texture,
@@ -34,7 +36,32 @@ namespace Keire
         StorageRead,
         StorageWrite,
         CopySource,
-        Present
+        Present,
+        DepthStencilAttachment
+    };
+
+    enum class FrameGraphSnapshotTextureFormat : std::uint8_t
+    {
+        Undefined,
+        Rgba8Unorm,
+        Rgba8Srgb,
+        Rgba16Float,
+        Rg16Float,
+        R32Float,
+        D32Float
+    };
+
+    enum class FrameGraphSnapshotResourceUsage : std::uint16_t
+    {
+        None = 0,
+        Sampled = 1U << 0U,
+        ColorAttachment = 1U << 1U,
+        DepthStencilAttachment = 1U << 2U,
+        Storage = 1U << 3U,
+        TransferSource = 1U << 4U,
+        TransferDestination = 1U << 5U,
+        Present = 1U << 6U,
+        IndirectArguments = 1U << 7U
     };
 
     struct FrameGraphSnapshotTransition
@@ -67,6 +94,13 @@ namespace Keire
         std::uint64_t EstimatedBytes = 0;
         bool Imported = false;
         bool Used = false;
+        FrameGraphSnapshotTextureFormat TextureFormat = FrameGraphSnapshotTextureFormat::Undefined;
+        FrameGraphSnapshotResourceUsage Usage = FrameGraphSnapshotResourceUsage::None;
+        std::uint8_t SampleCount = 1;
+        std::uint8_t WidthScaleNumerator = 1;
+        std::uint8_t WidthScaleDenominator = 1;
+        std::uint8_t HeightScaleNumerator = 1;
+        std::uint8_t HeightScaleDenominator = 1;
     };
 
     struct FrameGraphSnapshot

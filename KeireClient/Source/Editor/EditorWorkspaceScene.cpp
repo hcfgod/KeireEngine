@@ -87,16 +87,15 @@ namespace
     }
 
     [[nodiscard]] Keire::UiSize PrepareRenderSurface(const Keire::Ref<Keire::RenderView>& view,
-                                                     const Keire::UiSize logicalSize, const float displayScale)
+                                                     const Keire::UiSize logicalSize, const float displayScale,
+                                                     const float renderScale)
     {
         if (!view || !view->Surface())
             return {};
         const float width = std::max(logicalSize.Width, 1.0F);
         const float height = std::max(logicalSize.Height, 1.0F);
-        const auto pixelWidth =
-            static_cast<std::uint32_t>(std::round(std::clamp(width * std::max(displayScale, 1.0F), 1.0F, 16384.0F)));
-        const auto pixelHeight =
-            static_cast<std::uint32_t>(std::round(std::clamp(height * std::max(displayScale, 1.0F), 1.0F, 16384.0F)));
+        const auto [pixelWidth, pixelHeight] =
+            Keire::Internal::ScaledRenderSurfaceExtent(width, height, displayScale, renderScale);
         view->Surface()->RequestSize(pixelWidth, pixelHeight);
         return {width, height};
     }
@@ -1288,7 +1287,9 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                                                                 : Keire::GpuOcclusionDebugView::None,
                                                0U);
             }
-            ui.SetTooltip("Game-camera GPU visibility: green is visible and red is culled.", {.Delayed = true});
+            ui.SetTooltip("Game-camera GPU bounds: green survived conservative visibility tests; red was safely "
+                          "occlusion-rejected. CPU-frustum-rejected objects are not submitted or outlined.",
+                          {.Delayed = true});
         }
         const auto playSession = m_SceneDocument->PlaySession();
         const bool playActive = playSession && playSession->State() != Keire::ScenePlayState::Stopped;
@@ -1348,7 +1349,15 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             previewSize.Width = std::min(available.Width, available.Height * requestedAspect);
             previewSize.Height = previewSize.Width / requestedAspect;
         }
-        const auto size = PrepareRenderSurface(m_GameRenderView, previewSize, Owner().MainWindow()->DisplayScale());
+        auto environment = SceneViewportSettings();
+        environment.SkyVisible =
+            selected && environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+        const auto featureSelection =
+            Keire::ResolveRenderFeatureSelection(environment, Owner().Renderer()->FeatureCapabilities());
+        const float effectiveRenderScale =
+            m_GameDynamicResolution.Update(environment, featureSelection, Owner().Renderer()->Statistics());
+        const auto size = PrepareRenderSurface(m_GameRenderView, previewSize, Owner().MainWindow()->DisplayScale(),
+                                               effectiveRenderScale);
         const float aspect = size.Width / std::max(size.Height, 1.0F);
         Keire::RenderCamera camera;
         if (selected)
@@ -1360,9 +1369,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             camera.FarPlane = selected->Camera->FarPlane();
         }
         m_GameRenderView->SetCamera(camera);
-        auto environment = SceneViewportSettings();
-        environment.SkyVisible =
-            selected && environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+        m_GameRenderView->Surface()->RequestSampleCount(Keire::ResolveRenderSurfaceSampleCount(featureSelection));
         const auto& materialTime = Owner().GetTime();
         std::optional<Keire::SceneRenderRequest> renderRequest =
             playActive ? Keire::Internal::CaptureRuntimeSceneRenderRequest(

@@ -74,7 +74,7 @@ verified preview release.
   download worker and update handoff. The download site presents the formats independently.
 - Catalog and artifact integrity are verified, but the current Windows Hub EXE is not Authenticode-signed and the RPM
   is not GPG-signed. Those facts are disclosed on the download surface and remain production-signing gaps.
-- The canonical documentation inventory contains 84 guides. Source validation checks inventory, authorities, local
+- The canonical documentation inventory contains 86 guides. Source validation checks inventory, authorities, local
   links/fragments, schema statements, release/platform claims, and the generated site.
 - The final Windows Debug source audit passed 738 Core tests/51,821 assertions, 199 Editor tests/2,696 assertions, 372
   Hub tests/3,808 assertions, the full Client compile gate, managed production API checks, 10 distribution-service
@@ -84,7 +84,7 @@ verified preview release.
   dynamic-buffer reallocations.
 - The website audit covers the unified Astro platform plus its static migration fallback. Navigation labels, heading
   hierarchy, social metadata, Windows/Linux roadmap status, automatic Marketplace publication language, readiness
-  dates, and all 84 fallback guide counts now agree with their authorities.
+  dates, and all 86 fallback guide counts now agree with their authorities.
 
 ## Executive Assessment
 
@@ -189,7 +189,7 @@ Windows, DEB, and RPM records and states the native-signing limitations explicit
 
 - The frozen Unity 6.3 VFX ledger contains 278 rows: 248 implemented and 30 disabled. This is substantial coverage, not
   a complete Unity parity claim.
-- The Unreal-inspired Material Ecosystem matrix contains 145 rows: 97 Complete, 9 Partial, and 39 Planned. The ledger
+- The Unreal-inspired Material Ecosystem matrix contains 145 rows: 98 Complete, 8 Partial, and 39 Planned. The ledger
   distinguishes current source capability from immutable 0.3.2 package evidence; Planned rows remain unsupported.
 - Current content authorities are project schema 4, scene schema 6, mesh schema 5, Shader source schema 5, VFX schema 5,
   Material source schema 5, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest
@@ -215,7 +215,7 @@ The current website grade is **A- (92/100)**. This is a source-and-build assessm
 launch. The unified Astro site has coherent navigation, responsive shared layouts, static-first public pages,
 server-rendered identity and Marketplace routes, canonical metadata, local search, a strict content-security policy,
 and explicit preview/launch labeling. The static migration fallback remains independently valid and now mirrors the
-84-guide inventory.
+86-guide inventory.
 
 | Website area | Grade | Score | Evidence and remaining risk |
 | --- | ---: | ---: | --- |
@@ -236,7 +236,7 @@ and explicit preview/launch labeling. The static migration fallback remains inde
 | Editor workspace and authoring | A- | Docking, documents, hierarchy/Inspector, asset browsing, targeted imports, previews, graph editors, settings, diagnostics, procedural profiles, and package management are implemented. The composition root remains intentionally centralized and needs further decomposition; full accessibility, localization, and collaborative-depot automation remain incomplete. |
 | Rendering | A- | SDL GPU isolation, D3D12/Vulkan formats, HDR/ACES, Forward+, shadows, lighting data, LODs, skinning, graph pipelines, last-good safety, and both rendered-output suites are substantial. Broader native GPU and long-session evidence remains open. |
 | Animation and rigging | B+ | Graph animation, retargeting, semantic rigs, arm/leg IK, procedural humanoid motion, terrain contacts, airborne states, and presentation interpolation are implemented. Procedural motion still needs broader rig/content tuning and long-session visual acceptance. |
-| Shader and material ecosystem | B | Shader/Material Graphs, functions, layers, persistent/dynamic instances, world-scoped collections, and live revisions exist. The 97/145 Complete matrix and 39 Planned rows make a full Unreal-parity claim inaccurate. |
+| Shader and material ecosystem | B | Shader/Material Graphs, functions, layers, persistent/dynamic instances, world-scoped collections, and live revisions exist. The 98/145 Complete matrix and 39 Planned rows make a full Unreal-parity claim inaccurate. |
 | VFX | B+ | Typed schema-4 graphs, ordered contexts/blocks, CPU/GPU execution, events, strips, resource operations, mesh/ribbon/volume output, diagnostics, and bounded pools cover 248/278 rows. The 30 disabled rows and incomplete GPU attribution remain. |
 | Managed scripting | A | Collectible generations, generation-safe handles, multi-scene worlds, native-asset residency, runtime UI, gameplay services, coroutines, last-good retention, and procedural callbacks are production-minded. Cross-platform reload soaks remain necessary. |
 | Assets and project packages | A | Stable metadata, isolated targeted imports, deterministic cooking, hardened archives, dependency resolution, selective import, executable-code consent, conflicts, journals, and recovery are implemented. Sustained production-corpus fuzzing remains gated. |
@@ -318,7 +318,7 @@ Production performance acceptance still requires:
    backup/restore, and legal gates
    while launch flags remain closed.
 4. Implement renderer timestamps and collect current named-hardware cold/warm and soak evidence.
-5. Prioritize the 39 Planned and 9 Partial material rows plus the 30 disabled VFX rows by production scenario.
+5. Prioritize the 39 Planned and 8 Partial material rows plus the 30 disabled VFX rows by production scenario.
 6. Establish native macOS/Metal validation before presenting macOS as supported.
 
 The correct public description is **production-oriented Kéire 0.4.2 technology preview with catalog-verified Windows

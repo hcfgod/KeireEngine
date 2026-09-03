@@ -115,6 +115,10 @@ if (Animator.TryGetFloat(Entity, "Speed", out float speed))
     UpdateSpeedDisplay(speed);
 ```
 
+Animator writes are queued for the next scene animation boundary. Reads return the last fully evaluated immutable
+snapshot, so a value written in `Awake`, `Start`, or `Update` becomes observable from a later callback after that
+boundary; they intentionally do not expose a partially applied controller state in the same callback.
+
 Parameter names and types must match the controller. Prefer constants in gameplay code that accesses the same names
 from several places:
 

@@ -50,16 +50,15 @@ namespace
     }
 
     [[nodiscard]] Keire::UiSize PrepareRenderSurface(const Keire::Ref<Keire::RenderView>& view,
-                                                     const Keire::UiSize logicalSize, const float displayScale)
+                                                     const Keire::UiSize logicalSize, const float displayScale,
+                                                     const float renderScale)
     {
         if (!view || !view->Surface())
             return {};
         const float width = std::max(logicalSize.Width, 1.0F);
         const float height = std::max(logicalSize.Height, 1.0F);
-        const auto pixelWidth =
-            static_cast<std::uint32_t>(std::round(std::clamp(width * std::max(displayScale, 1.0F), 1.0F, 16384.0F)));
-        const auto pixelHeight =
-            static_cast<std::uint32_t>(std::round(std::clamp(height * std::max(displayScale, 1.0F), 1.0F, 16384.0F)));
+        const auto [pixelWidth, pixelHeight] =
+            Keire::Internal::ScaledRenderSurfaceExtent(width, height, displayScale, renderScale);
         view->Surface()->RequestSize(pixelWidth, pixelHeight);
         return {width, height};
     }
@@ -143,6 +142,7 @@ void KeireEditor::SceneViewportPanel::Shutdown(const std::filesystem::path& proj
     m_RenderView.Reset();
     m_CameraPreviewView.Reset();
     m_UiPresentation.Reset();
+    m_DynamicResolution.Reset();
 }
 void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
 {
@@ -186,6 +186,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     Keire::UiItemState imageState;
     Keire::UiItemRect imageRect;
     Keire::RenderCamera camera;
+    float effectiveRenderScale = 1.0F;
     std::optional<SceneViewportCenteredStateLayout> centeredStateLayout;
     const auto renderScene = hasScene ? activeScene : Keire::Ref<Keire::Scene>{};
     if (!hasScene || !m_RenderView)
@@ -208,7 +209,12 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     }
     else
     {
-        size = PrepareRenderSurface(m_RenderView, available, m_Controller.SceneViewportDisplayScale());
+        const auto& environment = m_Controller.SceneViewportSettings();
+        const auto featureSelection =
+            Keire::ResolveRenderFeatureSelection(environment, renderer->FeatureCapabilities());
+        effectiveRenderScale = m_DynamicResolution.Update(environment, featureSelection, renderer->Statistics());
+        size = PrepareRenderSurface(m_RenderView, available, m_Controller.SceneViewportDisplayScale(),
+                                    effectiveRenderScale);
     }
     const bool playActive = document.PlaySession() && document.PlaySession()->State() != Keire::ScenePlayState::Stopped;
     const float aspect = size.Width / std::max(size.Height, 1.0F);
@@ -220,6 +226,13 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         else
             camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
         m_RenderView->SetCamera(camera);
+        auto environment = m_Controller.SceneViewportSettings();
+        if (const auto sceneCamera = SelectGameCamera(renderScene))
+            environment.SkyVisible =
+                environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+        const auto featureSelection =
+            Keire::ResolveRenderFeatureSelection(environment, renderer->FeatureCapabilities());
+        m_RenderView->Surface()->RequestSampleCount(Keire::ResolveRenderSurfaceSampleCount(featureSelection));
         if (assetSystem)
         {
             if (!m_UiPresentation)
@@ -241,10 +254,6 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                                              m_Gizmos->Settings().OcclusionDebugMip);
         m_Gizmos->SetOcclusionDebugView(renderSurface->OcclusionDebugView());
         m_Gizmos->SetOcclusionDebugMip(renderSurface->OcclusionDebugMip());
-        auto environment = m_Controller.SceneViewportSettings();
-        if (const auto sceneCamera = SelectGameCamera(renderScene))
-            environment.SkyVisible =
-                environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
         Keire::SceneRenderRequest renderRequest{renderScene, m_RenderView, !playActive, environment};
         const auto& materialTime = m_Controller.SceneViewportTime();
         renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
@@ -425,8 +434,15 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         const float previewHeight = cameraPreviewRect.Size().Height;
         if (const auto sceneCamera = SelectGameCamera(renderScene))
         {
+            auto environment = m_Controller.SceneViewportSettings();
+            environment.SkyVisible =
+                environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+            const auto featureSelection =
+                Keire::ResolveRenderFeatureSelection(environment, renderer->FeatureCapabilities());
+            m_CameraPreviewView->Surface()->RequestSampleCount(
+                Keire::ResolveRenderSurfaceSampleCount(featureSelection));
             (void)PrepareRenderSurface(m_CameraPreviewView, {previewWidth, previewHeight},
-                                       m_Controller.SceneViewportDisplayScale());
+                                       m_Controller.SceneViewportDisplayScale(), effectiveRenderScale);
             Keire::RenderCamera previewCamera;
             previewCamera.View = Keire::Math::Inverse(sceneCamera->Transform->WorldMatrix());
             previewCamera.Projection = sceneCamera->Camera->ProjectionMatrix(previewAspect);
@@ -434,9 +450,6 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             previewCamera.NearPlane = sceneCamera->Camera->NearPlane();
             previewCamera.FarPlane = sceneCamera->Camera->FarPlane();
             m_CameraPreviewView->SetCamera(previewCamera);
-            auto environment = m_Controller.SceneViewportSettings();
-            environment.SkyVisible =
-                environment.SkyVisible && sceneCamera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
             Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
             const auto& materialTime = m_Controller.SceneViewportTime();
             renderRequest.MaterialTimeSeconds = static_cast<float>(materialTime.TimeSinceStartup().Seconds());
@@ -463,7 +476,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         }
     }
     const std::string viewportStatus = std::to_string(activeScene->ObjectCount()) + " objects  |  EDITOR CAMERA  |  " +
-                                       (playActive ? "Play (temporary)" : "Edit") +
+                                       (playActive ? "Play (temporary)" : "Edit") + "  |  " +
+                                       std::to_string(static_cast<int>(effectiveRenderScale * 100.0F)) + "% SCALE" +
                                        (document.EditingScene()->Dirty() ? "  |  Unsaved" : "");
     const Keire::UiPosition statusPosition{imageRect.Minimum.X + 12.0F, imageRect.Maximum.Y - 24.0F};
     const float statusWidth =

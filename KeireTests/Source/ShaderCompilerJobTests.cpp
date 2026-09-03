@@ -102,20 +102,32 @@ TEST_CASE("shader compile manifests produce order-independent content-addressed 
     manifest.Stage = Keire::ShaderCompileStage::Fragment;
     manifest.EntryPoint = "PSMain";
     manifest.Target = {Keire::ShaderCompilePlatform::Linux, Keire::ShaderCompileArchitecture::X86_64,
-                       Keire::ShaderCompileBinaryFormat::SpirV};
+                       Keire::ShaderCompileBinaryFormat::SpirV, Keire::ShaderCompileBackend::Vulkan};
     manifest.Defines = {{"USE_FOG", "1"}, {"ALPHA_MODE", "MASK"}};
     manifest.Dependencies = {{"Shaders/Lighting.hlsli", std::string(64, 'c')},
                              {"Shaders/Common.hlsli", std::string(64, 'd')}};
 
     const auto workKey = Keire::ShaderCompileWorkKey(manifest);
+    const auto encoded = Keire::EncodeShaderCompileManifestCbor(manifest);
     CHECK(Keire::IsShaderCompileWorkKey(workKey));
     CHECK(workKey.size() == 64U);
+
+    auto inferredBackend = manifest;
+    inferredBackend.Target = {Keire::ShaderCompilePlatform::Linux, Keire::ShaderCompileArchitecture::X86_64,
+                              Keire::ShaderCompileBinaryFormat::SpirV};
+    CHECK(Keire::CanonicalizeShaderCompileManifest(inferredBackend).Target.Backend ==
+          Keire::ShaderCompileBackend::Vulkan);
+    CHECK(Keire::ShaderCompileWorkKey(inferredBackend) == workKey);
 
     std::ranges::reverse(manifest.Defines);
     std::ranges::reverse(manifest.Dependencies);
     CHECK(Keire::ShaderCompileWorkKey(manifest) == workKey);
+    CHECK(Keire::EncodeShaderCompileManifestCbor(manifest) == encoded);
 
     manifest.DebugInformation = true;
+    CHECK(Keire::ShaderCompileWorkKey(manifest) != workKey);
+    manifest.DebugInformation = false;
+    manifest.PassRole = "depthVelocity";
     CHECK(Keire::ShaderCompileWorkKey(manifest) != workKey);
 }
 
@@ -134,7 +146,11 @@ TEST_CASE("shader compile manifests reject ambiguous unsafe or incompatible jobs
     CHECK_THROWS_AS(Keire::ValidateShaderCompileManifest(invalid), std::invalid_argument);
     invalid = manifest;
     invalid.Target = {Keire::ShaderCompilePlatform::Linux, Keire::ShaderCompileArchitecture::X86_64,
-                      Keire::ShaderCompileBinaryFormat::Dxil};
+                      Keire::ShaderCompileBinaryFormat::Dxil, Keire::ShaderCompileBackend::D3D12};
+    CHECK_THROWS_AS(Keire::ValidateShaderCompileManifest(invalid), std::invalid_argument);
+    invalid = manifest;
+    invalid.Target = {Keire::ShaderCompilePlatform::Windows, Keire::ShaderCompileArchitecture::X86_64,
+                      Keire::ShaderCompileBinaryFormat::Dxil, Keire::ShaderCompileBackend::Vulkan};
     CHECK_THROWS_AS(Keire::ValidateShaderCompileManifest(invalid), std::invalid_argument);
 
     Keire::ShaderCompilationRequest request;

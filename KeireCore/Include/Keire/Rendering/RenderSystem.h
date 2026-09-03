@@ -129,7 +129,23 @@ namespace Keire
     enum class RenderPath : std::uint8_t
     {
         ForwardPlus,
-        DeferredHybrid
+        DeferredHybrid,
+        Automatic
+    };
+
+    enum class RenderAntiAliasingMode : std::uint8_t
+    {
+        None,
+        Fxaa,
+        Taa,
+        Msaa2,
+        Msaa4
+    };
+
+    enum class DynamicResolutionMode : std::uint8_t
+    {
+        Disabled,
+        Automatic
     };
 
     enum class GlobalIlluminationMode : std::uint8_t
@@ -154,6 +170,22 @@ namespace Keire
         DeferredHybridUnavailable
     };
 
+    enum class AntiAliasingFallbackReason : std::uint8_t
+    {
+        None,
+        FxaaUnavailable,
+        TemporalUnavailable,
+        MultisampleUnavailable,
+        DeferredMultisampleUnavailable
+    };
+
+    enum class DynamicResolutionFallbackReason : std::uint8_t
+    {
+        None,
+        Unsupported,
+        RequiresTemporalAntiAliasing
+    };
+
     enum class GlobalIlluminationFallbackReason : std::uint8_t
     {
         None,
@@ -171,15 +203,29 @@ namespace Keire
         bool RealtimeGlobalIllumination = false;
         bool IrradynGlobalIllumination = false;
         bool IrradynRequiresDeferredHybrid = true;
+        bool Fxaa = false;
+        bool TemporalAntiAliasing = false;
+        bool Msaa2 = false;
+        bool Msaa4 = false;
+        bool DeferredMultisample = false;
+        bool DynamicResolution = false;
 
         auto operator<=>(const RenderFeatureCapabilities&) const noexcept = default;
     };
 
     struct RenderFeatureSelection
     {
-        RenderPath RequestedPath = RenderPath::ForwardPlus;
+        RenderPath RequestedPath = RenderPath::Automatic;
         RenderPath EffectivePath = RenderPath::ForwardPlus;
         RenderPathFallbackReason PathFallback = RenderPathFallbackReason::None;
+        RenderAntiAliasingMode RequestedAntiAliasing = RenderAntiAliasingMode::Taa;
+        RenderAntiAliasingMode EffectiveAntiAliasing = RenderAntiAliasingMode::None;
+        AntiAliasingFallbackReason AntiAliasingFallback = AntiAliasingFallbackReason::TemporalUnavailable;
+        DynamicResolutionMode RequestedDynamicResolution = DynamicResolutionMode::Disabled;
+        DynamicResolutionMode EffectiveDynamicResolution = DynamicResolutionMode::Disabled;
+        DynamicResolutionFallbackReason DynamicResolutionFallback = DynamicResolutionFallbackReason::None;
+        float RenderScale = 1.0F;
+        bool TemporalUpsampling = false;
         GlobalIlluminationMode RequestedGlobalIllumination = GlobalIlluminationMode::Disabled;
         GlobalIlluminationMode EffectiveGlobalIllumination = GlobalIlluminationMode::Disabled;
         GlobalIlluminationFallbackReason GlobalIlluminationFallback = GlobalIlluminationFallbackReason::None;
@@ -300,6 +346,7 @@ namespace Keire
         [[nodiscard]] std::uint32_t OcclusionDebugMip() const noexcept;
 
         void RequestSize(std::uint32_t width, std::uint32_t height);
+        void RequestSampleCount(RenderSampleCount sampleCount);
         void SetClearColor(Color color);
         void SetOcclusionDebugView(GpuOcclusionDebugView view, std::uint32_t mip = 0);
 
@@ -322,7 +369,7 @@ namespace Keire
         float FarPlane = 1000.0F;
     };
 
-    inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 4;
+    inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 5;
 
     struct RenderEnvironmentSettings
     {
@@ -340,7 +387,13 @@ namespace Keire
         std::uint32_t DirectionalShadowResolution = 2048;
         float DirectionalShadowSplitLambda = 0.65F;
         GpuOcclusionMode GpuOcclusion = GpuOcclusionMode::Automatic;
-        RenderPath RequestedRenderPath = RenderPath::ForwardPlus;
+        RenderPath RequestedRenderPath = RenderPath::Automatic;
+        RenderAntiAliasingMode RequestedAntiAliasing = RenderAntiAliasingMode::Taa;
+        DynamicResolutionMode RequestedDynamicResolution = DynamicResolutionMode::Disabled;
+        float RenderScale = 1.0F;
+        float MinimumDynamicResolutionScale = 0.67F;
+        float MaximumDynamicResolutionScale = 1.0F;
+        float DynamicResolutionTargetMilliseconds = 16.667F;
         GlobalIlluminationMode RequestedGlobalIllumination = GlobalIlluminationMode::Disabled;
         IrradynQuality RequestedIrradynQuality = IrradynQuality::Balanced;
 
@@ -354,6 +407,8 @@ namespace Keire
                                                  const RenderEnvironmentSettings& settings);
     [[nodiscard]] KEIRE_API RenderFeatureSelection ResolveRenderFeatureSelection(
         const RenderEnvironmentSettings& settings, const RenderFeatureCapabilities& capabilities);
+    [[nodiscard]] KEIRE_API RenderSampleCount
+    ResolveRenderSurfaceSampleCount(const RenderFeatureSelection& selection) noexcept;
 
     class KEIRE_API RenderView final : public RefCounted
     {
@@ -429,6 +484,26 @@ namespace Keire
     {
         bool CpuVfxSimulation = true;
         bool GpuVfxSimulation = false;
+        /// The active backend passed the complete Deferred Hybrid pipeline and attachment probe.
+        bool DeferredHybrid = false;
+        /// Baked lighting sets, reflection probes, light probes, and mixed-light masks are available.
+        bool BakedGlobalIllumination = false;
+        /// Dynamic spatial-light selection and environment response are available.
+        bool RealtimeGlobalIllumination = false;
+        /// Irradyn's staged reduced-resolution trace, scene-cache, history, and composite path is available.
+        bool IrradynGlobalIllumination = false;
+        /// FXAA is available in the final tone-map pass.
+        bool Fxaa = false;
+        /// Motion-vector-reprojected temporal anti-aliasing is available on Forward+ and Deferred Hybrid surfaces.
+        bool TemporalAntiAliasing = false;
+        /// Two-sample hardware coverage is available for the active color/depth formats.
+        bool Msaa2 = false;
+        /// Four-sample hardware coverage is available for the active color/depth formats.
+        bool Msaa4 = false;
+        /// Deferred Hybrid can retain its data/GI passes while using a multisampled forward coverage subpass.
+        bool DeferredMultisample = false;
+        /// Automatic dynamic resolution is available.
+        bool DynamicResolution = false;
         bool TransparentPass = false;
         bool DynamicSpritePackets = false;
         bool TexturedSpritePackets = false;
@@ -598,6 +673,7 @@ namespace Keire
         void RequestGpuVfxPipelineWarmup();
 
         [[nodiscard]] RenderMode Mode() const noexcept;
+        [[nodiscard]] RenderFeatureCapabilities FeatureCapabilities() const noexcept;
         [[nodiscard]] RenderCapabilities Capabilities() const noexcept;
         [[nodiscard]] RenderStatistics Statistics() const noexcept;
         [[nodiscard]] std::vector<RenderFrameTimeline> RecentFrameTimelines() const;

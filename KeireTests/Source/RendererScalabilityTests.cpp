@@ -251,6 +251,19 @@ TEST_CASE("GPU occlusion allocation retry uses bounded backoff and sparse warnin
     }
 }
 
+TEST_CASE("GPU occlusion Automatic retries unprofitable workloads with bounded adaptive backoff")
+{
+    namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;
+
+    CHECK(Policy::AutomaticUnprofitableRetryDelay(0U) == 60U);
+    CHECK(Policy::AutomaticUnprofitableRetryDelay(1U) == 120U);
+    CHECK(Policy::AutomaticUnprofitableRetryDelay(2U) == 240U);
+    CHECK(Policy::AutomaticUnprofitableRetryDelay(3U) == 480U);
+    CHECK(Policy::AutomaticUnprofitableRetryDelay(4U) == 960U);
+    CHECK(Policy::AutomaticUnprofitableRetryDelay(5U) == 1920U);
+    CHECK(Policy::AutomaticUnprofitableRetryDelay(100U) == Policy::AutomaticRetryMaximumFrames);
+}
+
 TEST_CASE("GPU visibility bounds retain conservative candidates when normal classification is unavailable")
 {
     namespace Policy = Keire::RenderBackend::GpuOcclusionPolicy;

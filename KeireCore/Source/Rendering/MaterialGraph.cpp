@@ -1220,6 +1220,7 @@ namespace Keire
         result.Version = 10;
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {std::string(MaterialAssetSourceExtension)};
+        result.PreviousNames = {"Keire.MaterialGraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
         {
             if (!context.Asset || !context.ResolveSubAssetId)

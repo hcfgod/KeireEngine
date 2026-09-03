@@ -64,8 +64,15 @@ namespace Keire
                                  {"lastPass", resource.LastPass},
                                  {"physicalAliasSlot", resource.PhysicalAliasSlot},
                                  {"compatibilityKey", resource.CompatibilityKey},
-                                 {"estimatedBytes", resource.EstimatedBytes}});
-        const Json document{{"schemaVersion", 1},
+                                 {"estimatedBytes", resource.EstimatedBytes},
+                                 {"textureFormat", Number(resource.TextureFormat)},
+                                 {"usage", Number(resource.Usage)},
+                                 {"sampleCount", resource.SampleCount},
+                                 {"widthScaleNumerator", resource.WidthScaleNumerator},
+                                 {"widthScaleDenominator", resource.WidthScaleDenominator},
+                                 {"heightScaleNumerator", resource.HeightScaleNumerator},
+                                 {"heightScaleDenominator", resource.HeightScaleDenominator}});
+        const Json document{{"schemaVersion", FrameGraphSnapshotSchemaVersion},
                             {"frame", snapshot.Frame},
                             {"activeTransientBytes", snapshot.ActiveTransientBytes},
                             {"theoreticalUnaliasedBytes", snapshot.TheoreticalUnaliasedBytes},

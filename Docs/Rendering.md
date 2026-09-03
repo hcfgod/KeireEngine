@@ -12,8 +12,9 @@ point-light face; requests that do not fit remain fully lit. Every tile reserves
 sampling is clamped to that tile's texel-center bounds so soft PCF cannot read a neighboring light or point face. Point
 and spot components expose Disabled, Hard, and Soft authoring modes plus strength, bias, and resolution.
 Directional cascade centers snap in the light-space basis to whole shadow texels, and each projection reserves a
-two-texel filter guard band. PCF taps outside a map are treated as lit instead of clamping an edge depth, preventing
-camera or light rotation from exposing rectangular cascade borders.
+two-texel filter guard band. A Directional Light's resolution hint scales the project shadow-resolution base by 0.25x,
+0.5x, 1x, or 2x for Low through Very High, clamped to the validated 256-8192 range. PCF taps outside a map are treated
+as lit instead of clamping an edge depth, preventing camera or light rotation from exposing rectangular cascade borders.
 The engine-owned default material uses the same receiver contract, so primitives without an assigned material receive
 directional, point, and spot shadows instead of falling through an unshadowed compatibility path.
 Shadow layer, quality, strength, and receiver bias occupy a dedicated shadow uniform block; enabling shadows never
@@ -24,6 +25,9 @@ closer to the light along that shadow-map sample.
 Realtime shadows do not require **Bake Lighting**. Baking produces static indirect lightmaps, probe data, reflection
 cubemaps, and Mixed-light shadow masks. Starter scenes angle their Directional Light downward; rotating it close to the
 horizon intentionally produces very long cast shadows.
+
+Soft directional and local shadows use a weighted 3x3 tent PCF footprint. Local atlas guard texels keep that footprint
+inside the selected spot tile or point-light face, including animated/skinned silhouettes.
 
 Directional, point, and spot lights can opt into short-range contact refinement and texture cookies. The renderer packs
 up to eight active cookies into one deterministic 4x2 atlas, keeping the spatial PBR shader within SDL's portable
@@ -57,6 +61,11 @@ light-probe volumes. Mesh schema v5 carries UV1 plus explicit primitive topology
 radiance that contributes to offline GI. Static renderers use UV1 (with deterministic UV0 fallback); dynamic renderers
 interpolate nearby probe-volume coefficients.
 
+LightingSet schema 2 also declares whether the bake owns static diffuse indirect, static specular indirect, and
+stationary direct channels. Hybrid and Irradyn plans must replace or exclude an owned channel rather than adding a
+second estimate. Schema-1 lighting sets migrate in memory to the historical all-baked ownership contract; publication
+always writes schema 2.
+
 Reflection Probe components author oriented boxes, blend distance, importance, intensity, resolution, and box
 projection. The renderer deterministically selects the two strongest containing probes for each draw, blends their
 prefiltered specular response, and intersects the reflection ray with each oriented local box when box projection is
@@ -73,6 +82,44 @@ mixed direct light, approximate indirect bounces, emissive-to-GI sources, reflec
 published together so a scene never observes a partially updated lighting set.
 
 ## Static-scene submission contracts
+
+Project rendering settings schema 5 stores Automatic/Forward+/Deferred-Hybrid path intent, None/FXAA/TAA/MSAA 2x/4x
+anti-aliasing intent, a static render scale, bounded automatic dynamic-resolution settings, and requested GI/Irradyn
+quality. Capability resolution returns requested and effective values plus specific path, anti-aliasing,
+dynamic-resolution, and GI fallback reasons. Older settings migrate without silently enabling temporal or
+dynamic-resolution behavior.
+
+The renderer publishes its live FXAA, exact 2x/4x MSAA, temporal-AA, deferred-multisample, and dynamic-resolution
+capabilities after backend probing. Scene, Game, and runtime view owners resolve the requested settings and switch the
+surface sample contract before UI, presentation, or readback work captures the surface epoch. None and FXAA use a
+single-sample surface; supported MSAA requests create the matching multisample epoch for either render path. Deferred
+Hybrid keeps single-sample depth, velocity, GBuffer, DBuffer, and Irradyn inputs while a multisampled forward coverage
+subpass shades opaque geometry, decals, transparency, and VFX into HDR and resolves once before Irradyn. FXAA executes
+as part of the tone-map pass. TAA on both Forward+ and Deferred Hybrid jitters each accepted camera frame, reprojects
+the published per-surface history with object/deformation velocity, clamps history to the current 3x3 neighborhood,
+and rejects history after discontinuities, resizes, path changes, or device recreation. Motion excludes the temporal
+jitter itself, and the frame graph keeps velocity live through tone mapping; the resolved image therefore does not
+follow the sample sequence. Directional cascade fitting uses the unjittered projection so temporal samples cannot move
+shadow texel bounds. Reduced render scale is presented with spatial upscaling; it is not advertised as TAAU.
+
+Irradyn is a staged Deferred-Hybrid GI path. After opaque, forward-only, transparent, and VFX rendering, a reduced-
+resolution trace pass gathers the fully lit HDR scene with depth-tested screen-space visibility rays. This means local
+and directional lights, their shadows and cookies, DBuffer decals, baked/environment lighting, and visible emissive
+radiance feed the same indirect-light estimate instead of being approximated again in the deferred-lighting shader.
+The trace reprojects a separately owned Irradyn history through the velocity buffer, rejects depth discontinuities,
+clamps stale energy, and retains a small bounded feedback term for stable multi-bounce response. A second pass performs
+depth/normal-aware bilateral upsampling and additively composites diffuse indirect before tone mapping.
+
+Screen-space data is supplemented by a render-thread-owned, incrementally updated scene-card cache. Opaque and masked
+meshes contribute conservative world bounds; authored world-position displacement expands those bounds. Forward-only
+opaque surfaces use the hair participation path, transparent surfaces inject reduced-density radiance, and CPU/GPU VFX
+are aggregated by renderer class so ribbons behave like low-density hair while volumetric particles inject
+low-frequency volume energy. The cache is hard-capped at 2,048 entries with deterministic least-recently-updated
+eviction, while a frame samples only its nearest 8, 12, or 16 cards. These paths intentionally approximate
+translucency, hair, fog, and VFX rather than pretending that every fragment is an opaque surface. Performance,
+Balanced, and Quality bound rays, visibility steps, and card updates to target 1.5 ms, 2.5 ms, and 4.0 ms p95
+respectively at 1080p on the project baseline GPUs; `render-benchmark` remains the authority for measured hardware
+results.
 
 The renderer consumes mesh schema v5 as ordered LOD, submesh, material-slot, UV1, and primitive-topology records.
 Schema v1 and v2 meshes decode as one LOD with one submesh and one slot; schema v3 carries the production LOD structure
@@ -94,11 +141,54 @@ The private frame graph executes resource upload, directional shadows, VFX simul
 occluder depth, HZB construction, unified visibility classification, Forward+ light-list compaction, spatial-lighting
 selection, VFX expansion, opaque/mask, sky, transparency, ACES tone-map, overlay, readback, and presentation passes.
 Its compiler validates transient reads, derives deterministic hazard order, records resource lifetimes, aliases
-compatible non-overlapping transients, and emits every resource transition before invoking a backend pass. SDL_GPU
-consumes those transitions at copy, render, and presentation encoder boundaries and performs the native
-D3D12/Vulkan/Metal barriers. It is an internal backend contract, not a public render-graph API. Each surface materializes
-the compiled physical texture slots in a graph-owned transient heap; HDR scene color is resolved through that heap
-rather than through an independently allocated attachment.
+compatible non-overlapping transients, and emits every resource transition before invoking a backend pass. Transient
+textures declare an exact portable format, usage set, sample count, and relative extent. Alias keys are derived from
+those compatibility fields rather than authored as magic numbers, while the physical allocation unions usage flags
+from every non-overlapping logical occupant. SDL_GPU allocation fails closed when the active backend cannot support the
+compiled format/usage contract. Inspection JSON schema 2 exposes the same typed metadata.
+
+The separately compiled Deferred Hybrid graph adds depth/velocity, standard and extended GBuffer, DBuffer decal,
+deferred-lighting, and forward-only opaque-tail passes before the common transparent/post-processing tail. Its standard
+layout uses sRGB base-color/metallic, floating-point normal/roughness, packed material, a floating-point baked/spatial
+lighting payload, floating-point velocity, and a sampleable depth attachment. Cooked shader asset schema 3 and renderer
+pipeline lookup address binaries by the exact
+pass-role/backend pair, so forward, depth/velocity, and deferred GBuffer lanes coexist without format-order ambiguity.
+Generated Surface and Unlit Shader Graphs publish those three lanes; Hair, Eye, transparent, and unsupported opaque
+materials retain their exact forward lanes. Recording submits deferred-capable materials to the GBuffer and only the
+remaining opaque work to the forward tail, so fallback work is never duplicated.
+
+Portable built-in standard-GBuffer and fullscreen deferred-lighting shaders are generated as DXIL, SPIR-V, and MSL.
+Their SDL_GPU pipeline set is created transactionally only when every MRT format and the sampleable depth contract are
+supported. Successful probing publishes the public `DeferredHybrid` capability, and requested or Automatic selection
+uses the live deferred graph for single-sample and supported multisample surfaces. Multisample mode retains the exact
+single-sample deferred data attachments and uses the forward coverage subpass for the final shaded geometry. Probe
+failure or missing per-surface resources retains Forward+ without leaking partially created handles; shutdown and
+device recovery invalidate the complete set before a replacement device can advertise it.
+
+The lighting resolve reconstructs world position from sampled depth, composites the three DBuffer channels, evaluates
+metallic/roughness/specular direct lighting, and consumes the same bounded Forward+ tile/light/index buffers as the
+forward path. Its fourth GBuffer target carries transformed lightmap UVs, one-based lightmap and mixed-shadow-mask
+layers, a frame-owned spatial-selection record, and additive-scene identity. The resolve uses that payload for baked
+directional lightmaps, SH9 light probes, two box-projected reflection probes, environment IBL, eight-channel mixed-light
+masks, packed directional/local cookies, and bounded screen-space contact-shadow refinement. Local lights are filtered
+to the owning additive contribution. Point and spot attenuation, cones, directional cascades, local shadow-atlas
+layers, ambient occlusion, exposure, and Unlit bypass therefore remain coherent across both paths. Empty GBuffer pixels
+are discarded so the sky remains intact. Decal-domain Mesh Renderer submissions are removed from the
+opaque/transparent lists on an active
+deferred surface and recorded through their exact `decalDBuffer` lane with depth testing and alpha-composited DBuffer
+targets. During Deferred Hybrid MSAA, their explicit forward-transparent lane supplies multisampled visible coverage
+while the DBuffer lane remains available to Irradyn's single-sample scene data.
+
+Shader Graph generator version 10 publishes camera, object, skin-deformation, and world-position-offset motion in the
+depth/velocity lane. Capture keeps bounded
+per-surface-epoch history keyed by scene/entity and a separate camera history; first frames, skipped frames, recreated
+surfaces, and entities without stable identity use the current transform as the previous transform, producing zero
+instead of stale velocity. Skinned draws retain a consecutive-frame palette and produce paired current/previous vertex
+streams through both compute and CPU fallback skinning. Generated velocity vertex shaders evaluate Time-driven offset
+at `time - deltaTime` over the previous deformed position before applying previous object and camera transforms. CPU
+mesh VFX uses its authored previous position. Depth/velocity recording expands an
+instanced batch into deterministic single-instance draws so every instance receives its own previous model while the
+regular GBuffer and forward passes retain batching.
 
 Point and spot lights are serializable registry components. Scene packets cap visible local lights at 4,096 and build
 deterministic 16x16 tile lists with 128 lights per tile and explicit overflow statistics. The renderer uploads the full
@@ -170,7 +260,9 @@ its baked-lighting associations and adds geometry, local lights, probes, and ind
 Opaque and transparent preparation is global, with contribution order then entity ID providing deterministic ties.
 Submitting a second independent request to the same surface remains an error, preserving one clear/tone-map/present
 operation per surface. Runtime UI submissions append in call order until the frame ends, so later additive-scene
-presentations draw above earlier ones; a null tree contributes nothing and does not clear prior commands.
+presentations draw above earlier ones; a null tree contributes nothing and does not clear prior commands. Runtime UI
+vertex uploads use a high-water pool partitioned by accepted frame slot, so steady screen, camera, world, and
+render-texture targets reuse GPU buffers and staging transfers after warm-up instead of allocating every frame.
 
 Runtime contribution order is session load order. Persistent sessions retain their positions, while an unloaded and
 later reloaded session appends. The active session supplies the primary camera, clear mode, environment, and the
@@ -191,6 +283,24 @@ Scene color is linear RGBA16F. Multisampling resolves in HDR before a fullscreen
 display surface. The renderer selects D32, D24, then D16 depth and falls back through 4x, 2x, then 1x sampling when a
 requested format is unsupported. A hidden, minimized, zero-sized, or unavailable swapchain skips presentation safely.
 Viewport surfaces keep their last valid image through transient zero-sized layout changes.
+
+## Resolution Scaling
+
+`Render Scale` controls the internal 3D surface size from 50% through 100%; the final image is spatially scaled to the
+full Scene, Game, or player presentation rectangle. Camera aspect ratio, UI layout, pointer routing, and presentation
+viewport remain based on the full logical size. This contract is independent of None, FXAA, TAA, and supported MSAA
+modes.
+
+`Dynamic Resolution: Automatic` starts at the lesser of Render Scale and Maximum Scale. Every eight completed renderer
+frames it compares the configured target against GPU timestamps when the backend provides them, otherwise against
+completed frame latency divided by the outstanding-frame count. It lowers scale quickly above the target, raises it
+conservatively below the target, quantizes changes to 1/32 increments, and clamps every result to the authored minimum
+and maximum. A dead band and completed-frame cadence prevent resize churn. Disabling dynamic resolution immediately
+returns to the authored static Render Scale.
+
+The same settings drive Scene view, Game view, camera preview, and cooked players. Runtime manifests preserve the full
+render environment rather than reconstructing defaults. The Scene camera preview is an optional second complete render
+surface and starts hidden; its toolbar camera button enables it when a live authored-camera comparison is useful.
 
 ## Views And Cameras
 
@@ -218,8 +328,9 @@ Raw `RenderView` clients must provide finite camera matrices and color plus clip
 - `Q`, `W`, `E`, and `R`: select View, Move, Rotate, and Scale tools while the Scene viewport is active.
 - `X`, `Y`, and `Z`: snap orientation; `Persp/Ortho` toggles projection.
 
-The Scene toolbar camera button toggles a live 16:9 preview of the selected primary/highest-priority game Camera. It
-uses a separate renderer-owned view and therefore matches the Game camera without changing the editor camera.
+The Scene toolbar camera button toggles an on-demand live 16:9 preview of the selected primary/highest-priority game
+Camera. It uses a separate renderer-owned view and therefore matches the Game camera without changing the editor
+camera; keeping it hidden avoids submitting the scene twice while it is not needed.
 
 The Scene toolbar exposes Global/Local space, snapping, position/rotation/scale increments, and a Gizmos toggle.
 Move, Rotate, and Scale handles operate directly on the selected Transform and record one scene undo step per drag.

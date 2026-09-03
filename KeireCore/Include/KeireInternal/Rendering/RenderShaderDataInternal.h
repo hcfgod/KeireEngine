@@ -2,6 +2,7 @@
 
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/RenderingAssets.h"
+#include "KeireInternal/Rendering/IrradynSceneCacheInternal.h"
 
 #include <SDL3/SDL.h>
 
@@ -243,6 +244,47 @@ namespace Keire::RenderBackend
         Vector4 FrameParameters;
     };
 
+    struct DeferredLightingUniforms final
+    {
+        Vector4 ClearColor;
+        Vector4 AmbientColorIntensity;
+        Vector4 DirectionalColorIntensity;
+        Vector4 DirectionalDirectionExposure;
+        Matrix4 InverseViewProjection;
+        Matrix4 View;
+        Matrix4 ViewProjection;
+        Vector4 CameraPositionAndLocalLightCount;
+        Vector4 ForwardPlusGrid;
+        Vector4 ContactShadowParameters;
+        /// Environment diffuse, environment specular, baked lighting, and reserved.
+        Vector4 GlobalIlluminationChannels;
+    };
+
+    static_assert(sizeof(DeferredLightingUniforms) == sizeof(float) * 80U);
+
+    struct IrradynUniforms final
+    {
+        Matrix4 InverseViewProjection;
+        Matrix4 View;
+        /// Stage, strength, ray count, and visibility-ray step count.
+        Vector4 StageStrengthRaysSteps;
+        /// Screen radius, maximum world distance, history weight, and history validity.
+        Vector4 RadiusDistanceHistory;
+        /// Frame index, scene-card count, visibility thickness, and reserved.
+        Vector4 FrameCardsThickness;
+        /// Requested trace-resolution divisor and low-frequency receiver strength; remaining lanes are reserved.
+        Vector4 TraceLayout;
+    };
+
+    static_assert(sizeof(IrradynUniforms) == sizeof(float) * 48U);
+
+    struct IrradynSceneCacheUniforms final
+    {
+        std::array<IrradynSceneCard, MaximumIrradynSceneCards> Cards;
+    };
+
+    static_assert(sizeof(IrradynSceneCacheUniforms) == sizeof(float) * 12U * MaximumIrradynSceneCards);
+
     struct AssetLocalLightUniforms final
     {
         Vector4 Counts;
@@ -255,6 +297,18 @@ namespace Keire::RenderBackend
         Vector4 Parameters;
         Vector4 Encoding;
     };
+
+    struct DeferredSpatialLightingUniforms final
+    {
+        AssetEnvironmentUniforms Environment;
+        std::array<Vector4, 8> CookieTransforms;
+        std::array<Vector4, 2> CookieRotations;
+        Vector4 DirectionalCookieAndContact;
+        /// One-based contribution index, one-based directional mixed-mask channel, lightmap RGBE, reflection RGBE.
+        Vector4 Context;
+    };
+
+    static_assert(sizeof(DeferredSpatialLightingUniforms) == sizeof(float) * 92U);
 
     struct AssetReflectionProbeUniform final
     {
@@ -284,6 +338,7 @@ namespace Keire::RenderBackend
     {
         Vector4 LightmapScaleOffset;
         Vector4 LightmapParameters;
+        /// Renderer count, lightmap RGBE flag, reflection RGBE flag, and reserved.
         Vector4 ShadowMaskParameters;
         std::array<Vector4, 9> ProbeIrradiance;
         std::array<AssetReflectionProbeUniform, 2> ReflectionProbes;

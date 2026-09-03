@@ -233,14 +233,14 @@ namespace KeireRenderTests::Detail
             const std::string materialManifest = "{\"schemaVersion\":1,\"shader\":\"" + Shader.ToString() +
                                                  "\",\"properties\":{\"Tint\":[1,1,1,1],\"MainTexture\":\"" +
                                                  Texture.ToString() + "\"}}";
-            MaterialPath = Root / "Assets/Material.keirematerial";
+            MaterialPath = Root / "Assets/Material.keiremateriallegacy";
             Material =
-                Database->CreateAsset("Material.keirematerial", materialImporter,
+                Database->CreateAsset("Material.keiremateriallegacy", materialImporter,
                                       std::as_bytes(std::span(materialManifest.data(), materialManifest.size())));
             const std::string legacyMaterialManifest =
                 "{\"schemaVersion\":1,\"shader\":\"" + LegacyShader.ToString() + "\",\"properties\":{}}";
             LegacyMaterial = Database->CreateAsset(
-                "LegacyMaterial.keirematerial", materialImporter,
+                "LegacyMaterial.keiremateriallegacy", materialImporter,
                 std::as_bytes(std::span(legacyMaterialManifest.data(), legacyMaterialManifest.size())));
 
             if (includeShaderGraph)

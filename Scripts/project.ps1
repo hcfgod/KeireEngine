@@ -31,7 +31,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
 $GeneratorWasProvided = $PSBoundParameters.ContainsKey("Generator")
 $TargetWasProvided = $PSBoundParameters.ContainsKey("Target")
 # Windows PowerShell 5 otherwise uses the active OEM code page for interactive
@@ -69,10 +68,27 @@ function Invoke-CheckedCommand {
     }
 }
 
+function Invoke-IsolatedWindowsPowerShell {
+    param([Parameter(Mandatory = $true)][string[]]$Arguments)
+
+    $previousModulePath = [string]$env:PSModulePath
+    $windowsModulePath = Join-Path $env:WINDIR "System32\WindowsPowerShell\v1.0\Modules"
+    $remainingModulePaths = @($previousModulePath -split [IO.Path]::PathSeparator | Where-Object {
+            $_ -and -not [string]::Equals($_, $windowsModulePath, [StringComparison]::OrdinalIgnoreCase)
+        })
+    try {
+        $env:PSModulePath = (@($windowsModulePath) + $remainingModulePaths) -join [IO.Path]::PathSeparator
+        & powershell.exe @Arguments
+    }
+    finally {
+        $env:PSModulePath = $previousModulePath
+    }
+}
+
 function Invoke-ProjectCommand {
     param([string]$SelectedCommand)
     $workspaceLock = $null
-    if ($SelectedCommand -ne "help") {
+    if ($SelectedCommand -notin @("help", "stage-editor", "stage-hub")) {
         $workspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot (Get-RepositoryRoot) -CommandName $SelectedCommand
     }
     try {
@@ -121,16 +137,30 @@ function Invoke-ProjectCommand {
         }
         "stage-editor" {
             Invoke-CheckedCommand {
-                & (Join-Path $WindowsScripts "package-editor.ps1") -Generator $Generator `
-                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
-                    -AllowDirty -DevelopmentStage
+                $arguments = @(
+                    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                    (Join-Path $WindowsScripts "package-editor.ps1"),
+                    "-Generator", $Generator, "-Architecture", $Architecture, "-Toolset", $Toolset,
+                    "-AllowDirty", "-DevelopmentStage"
+                )
+                if ($CI) { $arguments += "-CI" }
+                if ($Update) { $arguments += "-Update" }
+                if ($Force) { $arguments += "-Generate" }
+                Invoke-IsolatedWindowsPowerShell $arguments
             } "Editor development stage"
         }
         "stage-hub" {
             Invoke-CheckedCommand {
-                & (Join-Path $WindowsScripts "package-hub.ps1") -Generator $Generator `
-                    -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Force `
-                    -AllowDirty -StageOnly -DevelopmentStage
+                $arguments = @(
+                    "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                    (Join-Path $WindowsScripts "package-hub.ps1"),
+                    "-Generator", $Generator, "-Architecture", $Architecture, "-Toolset", $Toolset,
+                    "-AllowDirty", "-StageOnly", "-DevelopmentStage"
+                )
+                if ($CI) { $arguments += "-CI" }
+                if ($Update) { $arguments += "-Update" }
+                if ($Force) { $arguments += "-Generate" }
+                Invoke-IsolatedWindowsPowerShell $arguments
             } "Standalone Hub development stage"
         }
         "package" {

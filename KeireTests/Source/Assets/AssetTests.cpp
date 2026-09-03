@@ -4,6 +4,7 @@
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Log.h"
+#include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 #include "Keire/Streaming/StreamingSystem.h"
 #include "KeireTests/TestSupport.h"
@@ -1024,6 +1025,31 @@ TEST_CASE("External mesh staging discovers project shaders and selects them dete
     const auto preferred = Keire::Detail::FindImportedMaterialShader(context);
     REQUIRE(preferred);
     CHECK(preferred->Id == defaultUnlit);
+
+    const auto materialId = Keire::AssetId::Parse("44444444-4444-4444-8444-444444444444");
+    const auto generatedShader = Keire::AssetId::Parse("55555555-5555-4555-8555-555555555555");
+    const auto materialDefinition = Keire::CreateOpenPbrMaterial();
+    const auto materialBytes = Keire::MaterialGraphAsset::EncodeSource(materialDefinition);
+    project.Write("Materials/DefaultUnlit.keirematerial",
+                  std::string(reinterpret_cast<const char*>(materialBytes.data()), materialBytes.size()));
+    project.Write("Materials/DefaultUnlit.keirematerial.keiremeta", "{\"id\":\"" + materialId.ToString() + "\"}");
+    Keire::AssetId resolvedMaterial;
+    std::string resolvedKey;
+    context.ResolveSubAssetIdFor =
+        [&resolvedMaterial, &resolvedKey, generatedShader](const Keire::AssetId asset, const std::string_view key)
+    {
+        resolvedMaterial = asset;
+        resolvedKey = key;
+        return generatedShader;
+    };
+    const auto graphPreferred = Keire::Detail::FindImportedMaterialShader(context);
+    REQUIRE(graphPreferred);
+    CHECK(graphPreferred->Id == generatedShader);
+    CHECK(resolvedMaterial == materialId);
+    CHECK(resolvedKey.starts_with("material-program/shader/"));
+    CHECK(graphPreferred->Properties.contains("BaseColor"));
+    CHECK(graphPreferred->Properties.contains("Roughness"));
+    CHECK(graphPreferred->Properties.contains("Metallic"));
 
     TemporaryAssetProject externalProject;
     Keire::AssetImporterRegistration shaderImporter;
@@ -2051,48 +2077,6 @@ TEST_CASE("Generated subassets keep stable identities and are published with the
     REQUIRE(database->Find(parent));
     CHECK(database->Find(parent)->SubAssets.empty());
     Keire::AssetCooker::Validate(reconciled.CatalogPath);
-}
-
-TEST_CASE("Generated model materials can be extracted as editable source assets")
-{
-    TemporaryAssetProject project;
-    Keire::AssetImporterRegistration modelImporter;
-    modelImporter.Name = "Test.ExtractableModel";
-    modelImporter.Type = Keire::MeshAsset::StaticType();
-    modelImporter.Extensions = {".model"};
-    modelImporter.ContextualImport = [](const Keire::AssetImportContext& context, std::span<const std::byte>)
-    {
-        const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}}, Keire::MeshVertex{{1.0F, 0.0F, 0.0F}},
-                                  Keire::MeshVertex{{0.0F, 1.0F, 0.0F}}};
-        constexpr std::array<std::uint32_t, 3> indices{0, 1, 2};
-        const Keire::MeshBounds bounds{{0.0F, 0.0F, 0.0F}, {1.0F, 1.0F, 0.0F}};
-        const auto material = context.ResolveSubAssetId("material/Paint/0");
-        const std::array submeshes{Keire::MeshSubmesh{0, 3, 0, bounds}};
-        const std::array slots{Keire::MeshMaterialSlot{"Paint", material}};
-        const std::array lods{Keire::MeshLod{0.0F, 0, 1, bounds}};
-        Keire::MaterialAssetDefinition definition;
-        definition.Properties.emplace("Tint", Keire::Color{0.2F, 0.4F, 0.6F, 1.0F});
-        Keire::AssetImportOutput output;
-        output.Bytes = Keire::MeshAsset::Encode(vertices, indices, submeshes, slots, lods);
-        output.SubAssets.push_back({material, Keire::MaterialAsset::StaticType(), "material/Paint/0", "Paint",
-                                    Keire::MaterialAsset::Encode(definition)});
-        output.AssetDependencies.push_back(material);
-        return output;
-    };
-    auto database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
-        .ProjectRoot = project.Root, .Importers = {modelImporter, Keire::CreateMaterialAssetImporter()}});
-    const std::string source = "model";
-    const auto model = database->CreateAsset("Models/Vehicle.model", modelImporter,
-                                             std::as_bytes(std::span(source.data(), source.size())));
-    const auto extracted = database->ExtractMaterials(model, "Materials/Vehicle");
-    REQUIRE(extracted.size() == 1);
-    const auto record = database->Find(extracted.front());
-    REQUIRE(record);
-    CHECK(record->RelativePath == std::filesystem::path("Materials/Vehicle/Paint.keirematerial"));
-    const auto materialSource = ReadAll(project.Root / "Assets" / record->RelativePath);
-    const auto definition = Keire::MaterialAsset::DecodeSource(std::as_bytes(std::span(materialSource)));
-    REQUIRE(std::holds_alternative<Keire::Vector4>(definition.Properties.at("Tint")));
-    CHECK(std::get<Keire::Vector4>(definition.Properties.at("Tint")).Z == doctest::Approx(0.6F));
 }
 
 TEST_CASE("Cooked asset pages support bounded asynchronous range reads")

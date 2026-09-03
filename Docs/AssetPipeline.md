@@ -57,6 +57,14 @@ When a registered importer is a newer compatible version, a successful import at
 and normalized import settings are preserved. Failed imports do not touch metadata. Committed sample metadata is kept
 at current successful versions, so opening or reimporting the Sandbox does not dirty tracked files.
 
+Importer registrations may declare previous names for source-compatibility. Resolution first requires the current name,
+type, and version contract; if that does not match, the database prefers an extension-selected registration that
+declares the historical name and remains type/version compatible. If an extension has since been reassigned, it searches
+all registrations and accepts the historical name only when exactly one compatible owner exists; ambiguous matches fail
+closed. This keeps renamed importers usable without letting a historical name select an unrelated importer. It is
+required for the Material overhaul because historical Material Graph metadata used `Keire.MaterialGraph`, while
+historical flat materials used `Keire.Material`, which is now the canonical graph-material importer name.
+
 Rename moves source and metadata as one rollback-capable operation. Duplicate copies bytes and creates a new identity.
 Delete is represented by `MoveToTrash()`, which moves both files under `Library/Trash/<asset-id>` for recovery. Public
 operations confine destinations below the configured source root.
@@ -120,9 +128,10 @@ to reject every missing dependency.
 
 Interactive editors may call `ImportAll(AssetImportPolicy::KeepLastGood)`. Each source receives an `AssetImportStatus`;
 a failed new source stays visible but is omitted from the runtime catalog, while an existing asset keeps its last
-successful runtime revision. Structured diagnostics are mirrored to the editor Console and the rotating Core/Client
-logs; failed shaders expose the full bounded diagnostic list in Inspector. `Strict` remains the default and is
-mandatory for cooking and release packaging.
+successful runtime revision. Successful sources from that same batch are merged into the active catalog immediately;
+one broken file cannot hide unrelated newly generated mesh, material, skeleton, rig, or animation subassets. Structured
+diagnostics are mirrored to the editor Console and the rotating Core/Client logs; failed shaders expose the full bounded
+diagnostic list in Inspector. `Strict` remains the default and is mandatory for cooking and release packaging.
 
 The editor runs external import, explicit refresh, material refresh, cook, receipt replay, and Project/Inspector source
 mutations in the private `KeireAssetWorker` process rather than on the UI thread. The worker mutation protocol supports
@@ -138,6 +147,10 @@ New assets are validated and immediately published through a targeted import in 
 do not wait for a second source-watcher operation before appearing in the Asset Browser. External file and folder
 imports use the same targeted publication for the staged identities and their dependency closure; unrelated runtime
 packs remain mounted and are not recooked.
+
+Lighting bake publication uses the same narrow transaction. The worker writes the scene's generated LightingSet
+reference, then imports the scene and every baked artifact with fail-fast semantics. Publication failure restores the
+original scene source, so the source document and active catalog cannot disagree about the baked-lighting identity.
 
 Command-line imports and cooks allow the worker deadline to be adjusted with
 `--worker-timeout-seconds <seconds>`. The default remains 600 seconds; the value must be greater than zero. This keeps

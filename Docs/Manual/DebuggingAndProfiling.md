@@ -78,12 +78,14 @@ In the Profiler and Render Graph panel:
 4. Investigate persistent fallback events by their typed reason. Direct draws must remain visually complete.
 5. Warm the scene and confirm buffer reallocations settle to zero; compare frame P95/P99 with identical content and path.
 
-The Scene and Game overlays identify their camera and show that surface's camera-local visibility result. Their FPS,
-category timing, dispatch, indirect-draw, and CPU-preparation rows are the same completed frame aggregate, not separate
-per-camera performance measurements. The Render Graph shows the most recently finalized frame aggregate while the next
-frame is being prepared, and the Profiler publishes that same completed workload after presentation. Dispatch and
-indirect-draw values therefore remain nonzero and internally consistent through editor UI recording instead of briefly
-displaying reset values. When the mode is Disabled,
+The Scene and Game overlays identify their camera and show that surface's camera-local visibility result. During Play,
+the Profiler and Render Graph select and label the authored Game camera's occlusion result; in Edit they select the free
+Scene editor camera. Renderer submission and CPU-visibility totals remain explicitly labeled all-surface aggregates.
+The overlays' FPS, category timing, dispatch, indirect-draw, and CPU-preparation rows are likewise completed-frame
+aggregates, not separate per-camera performance measurements. The Render Graph shows the most recently finalized frame
+aggregate while the next frame is being prepared, and the Profiler publishes that same completed workload after
+presentation. Dispatch and indirect-draw values therefore remain nonzero and internally consistent through editor UI
+recording instead of briefly displaying reset values. When the mode is Disabled,
 visibility readback is explicitly unavailable; a pending readback is reserved for an active surface that has not yet
 produced its asynchronous result. The FPS overlay is drawn by its owning viewport in both Edit and Play modes, so it
 cannot create a detached ImGui fallback window. Its advanced view includes **Application** and **Editor/User** so an

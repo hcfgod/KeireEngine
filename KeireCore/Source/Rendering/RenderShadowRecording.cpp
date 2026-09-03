@@ -98,6 +98,7 @@ namespace Keire::RenderBackend
             MeshBounds Bounds;
             bool Cullable = true;
             bool CoarseCullable = false;
+            bool UsesCurrentPoseBounds = false;
         };
         std::vector<PreparedShadowCaster> shadowCasters;
         shadowCasters.reserve(packet.DrawItems.size());
@@ -120,8 +121,25 @@ namespace Keire::RenderBackend
                 bounds = lod.Bounds;
                 coarseCullable = mesh.LodBoundsEncloseSubmeshes.front();
             }
+            const bool freshPoseBounds = item.HasFreshCurrentPoseBounds(packet.FrameIndex, mesh.Submeshes.size());
+            if (freshPoseBounds && submeshCount > 0)
+            {
+                bounds = item.CurrentPoseSubmeshBounds[firstSubmesh];
+                for (std::uint32_t offset = 1; offset < submeshCount; ++offset)
+                {
+                    const auto& submeshBounds = item.CurrentPoseSubmeshBounds[firstSubmesh + offset];
+                    bounds.Minimum.X = std::min(bounds.Minimum.X, submeshBounds.Minimum.X);
+                    bounds.Minimum.Y = std::min(bounds.Minimum.Y, submeshBounds.Minimum.Y);
+                    bounds.Minimum.Z = std::min(bounds.Minimum.Z, submeshBounds.Minimum.Z);
+                    bounds.Maximum.X = std::max(bounds.Maximum.X, submeshBounds.Maximum.X);
+                    bounds.Maximum.Y = std::max(bounds.Maximum.Y, submeshBounds.Maximum.Y);
+                    bounds.Maximum.Z = std::max(bounds.Maximum.Z, submeshBounds.Maximum.Z);
+                }
+                coarseCullable = true;
+            }
             shadowCasters.push_back({std::addressof(item), std::addressof(mesh), firstSubmesh, submeshCount, bounds,
-                                     !item.AlwaysVisible && !item.SkinnedAssetVertices, coarseCullable});
+                                     !item.AlwaysVisible && (!item.SkinnedAssetVertices || freshPoseBounds),
+                                     coarseCullable, freshPoseBounds});
         }
 
         const auto ensureTexture = [&](SDL_GPUTexture*& texture, std::uint32_t& currentResolution,
@@ -171,8 +189,11 @@ namespace Keire::RenderBackend
                 bool objectBound = false;
                 for (std::uint32_t offset = 0; offset < caster.SubmeshCount; ++offset)
                 {
-                    const auto& submesh = mesh.Submeshes[caster.FirstSubmesh + offset];
-                    if (caster.Cullable && !IntersectsFrustum(frustum, submesh.Bounds))
+                    const auto submeshIndex = caster.FirstSubmesh + offset;
+                    const auto& submesh = mesh.Submeshes[submeshIndex];
+                    const auto& bounds =
+                        caster.UsesCurrentPoseBounds ? item.CurrentPoseSubmeshBounds[submeshIndex] : submesh.Bounds;
+                    if (caster.Cullable && !IntersectsFrustum(frustum, bounds))
                     {
                         ++Statistics.CulledShadowSubmeshes;
                         continue;
@@ -223,7 +244,8 @@ namespace Keire::RenderBackend
         if (packet.Lighting.Enabled && packet.Lighting.Shadows != ShadowQuality::Disabled)
         {
             const auto cascadeCount = std::clamp(packet.Environment.DirectionalShadowCascadeCount, 1U, 4U);
-            const auto resolution = packet.Environment.DirectionalShadowResolution;
+            const auto resolution = DirectionalShadowResolutionForHint(packet.Environment.DirectionalShadowResolution,
+                                                                       packet.Lighting.ShadowResolution);
             ensureTexture(surface.ActiveWorkset().DirectionalShadow,
                           surface.ActiveWorkset().DirectionalShadowResolution,
                           surface.ActiveWorkset().DirectionalShadowLayers, resolution, cascadeCount);
@@ -233,7 +255,7 @@ namespace Keire::RenderBackend
             const auto splits = BuildPracticalCascadeSplits(nearPlane, shadowDistance, cascadeCount,
                                                             packet.Environment.DirectionalShadowSplitLambda);
             const auto inverseViewProjection =
-                Math::Inverse(Math::Multiply(packet.Camera.Projection, packet.Camera.View));
+                Math::Inverse(Math::Multiply(packet.UnjitteredProjection, packet.Camera.View));
             std::array<Vector3, 4> nearCorners{};
             std::array<Vector3, 4> farCorners{};
             constexpr std::array<Vector2, 4> coordinates{Vector2{-1.0F, -1.0F}, Vector2{1.0F, -1.0F},

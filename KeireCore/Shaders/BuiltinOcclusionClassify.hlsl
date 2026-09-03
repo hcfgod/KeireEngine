@@ -155,6 +155,7 @@ float SampleHierarchy(uint level, float2 uv)
         return;
     }
     float3 worldCorners[8];
+    float4 clipCorners[8];
     float3 worldMinimum = float3(3.402823466e+38F, 3.402823466e+38F, 3.402823466e+38F);
     float3 worldMaximum = -worldMinimum;
     [unroll] for (uint corner = 0U; corner < 8U; ++corner)
@@ -174,6 +175,13 @@ float SampleHierarchy(uint level, float2 uv)
     }
     worldMinimum -= displacementRadius.xxx;
     worldMaximum += displacementRadius.xxx;
+    bool allBehindCamera = true;
+    bool allOutsideLeft = true;
+    bool allOutsideRight = true;
+    bool allOutsideBottom = true;
+    bool allOutsideTop = true;
+    bool allOutsideNear = true;
+    bool allOutsideFar = true;
     [unroll] for (uint corner = 0U; corner < 8U; ++corner)
     {
         const float3 worldPosition =
@@ -184,7 +192,31 @@ float SampleHierarchy(uint level, float2 uv)
                 : worldCorners[corner];
         const float4 world = float4(worldPosition, 1.0F);
         const float4 clip = mul(ViewProjection, world);
-        if (clip.w <= 0.00001F || any(isnan(clip)) || any(isinf(clip)))
+        if (any(isnan(clip)) || any(isinf(clip)))
+        {
+            StoreVisibility(candidate, 1U);
+            return;
+        }
+        clipCorners[corner] = clip;
+        allBehindCamera = allBehindCamera && clip.w <= 0.00001F;
+        allOutsideLeft = allOutsideLeft && clip.x < -clip.w;
+        allOutsideRight = allOutsideRight && clip.x > clip.w;
+        allOutsideBottom = allOutsideBottom && clip.y < -clip.w;
+        allOutsideTop = allOutsideTop && clip.y > clip.w;
+        allOutsideNear = allOutsideNear && clip.z < 0.0F;
+        allOutsideFar = allOutsideFar && clip.z > clip.w;
+    }
+    if (allBehindCamera || allOutsideLeft || allOutsideRight || allOutsideBottom || allOutsideTop || allOutsideNear ||
+        allOutsideFar)
+    {
+        StoreVisibility(candidate, 0U);
+        return;
+    }
+
+    [unroll] for (uint corner = 0U; corner < 8U; ++corner)
+    {
+        const float4 clip = clipCorners[corner];
+        if (clip.w <= 0.00001F)
         {
             ambiguous = true;
             break;
@@ -201,9 +233,14 @@ float SampleHierarchy(uint level, float2 uv)
         nearestDepth = min(nearestDepth, ndc.z);
     }
 
-    if (ambiguous || any(maximumPixel < 0.0F.xx) || any(minimumPixel > ViewportBiasLevels.xy))
+    if (ambiguous)
     {
         StoreVisibility(candidate, 1U);
+        return;
+    }
+    if (any(maximumPixel < 0.0F.xx) || any(minimumPixel > ViewportBiasLevels.xy))
+    {
+        StoreVisibility(candidate, 0U);
         return;
     }
 

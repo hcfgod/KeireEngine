@@ -93,7 +93,7 @@ namespace Keire::RenderBackend
         static_assert(sizeof(GpuMeshVertex) == 96);
         static_assert(sizeof(GpuRenderVertex) == 48);
 
-        const auto createOutput = [this](const std::uint32_t vertexCount)
+        const auto skinBufferSizes = [](const std::uint32_t vertexCount)
         {
             const auto assetBytes = static_cast<std::uint64_t>(vertexCount) * sizeof(GpuMeshVertex);
             const auto builtinBytes = static_cast<std::uint64_t>(vertexCount) * sizeof(GpuRenderVertex);
@@ -102,22 +102,59 @@ namespace Keire::RenderBackend
             {
                 throw std::invalid_argument("Skinned mesh output exceeds SDL's 32-bit buffer limit.");
             }
+            return std::pair{static_cast<std::uint32_t>(assetBytes), static_cast<std::uint32_t>(builtinBytes)};
+        };
+        const auto createSkinBuffer = [this](const std::uint32_t bytes)
+        {
+            SDL_GPUBufferCreateInfo createInfo{};
+            createInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
+            createInfo.size = bytes;
+            auto* buffer = SDL_CreateGPUBuffer(Device, &createInfo);
+            if (!buffer)
+                throw std::runtime_error("SDL_CreateGPUBuffer(skin cache) failed: " + LastSdlError());
+            return buffer;
+        };
+        const auto releasePalette = [this](GpuSkinPaletteResources& palette)
+        {
+            if (palette.Transfer)
+                SDL_ReleaseGPUTransferBuffer(Device, palette.Transfer);
+            if (palette.Buffer)
+                SDL_ReleaseGPUBuffer(Device, palette.Buffer);
+            palette = {};
+        };
+        const auto createPalette = [this](const std::uint32_t bytes)
+        {
+            GpuSkinPaletteResources result;
+            SDL_GPUBufferCreateInfo bufferInformation{};
+            bufferInformation.usage = SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ;
+            bufferInformation.size = bytes;
+            result.Buffer = SDL_CreateGPUBuffer(Device, &bufferInformation);
+            if (!result.Buffer)
+                throw std::runtime_error("SDL_CreateGPUBuffer(skin palette) failed: " + LastSdlError());
+
+            SDL_GPUTransferBufferCreateInfo transferInformation{};
+            transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+            transferInformation.size = bytes;
+            result.Transfer = SDL_CreateGPUTransferBuffer(Device, &transferInformation);
+            if (!result.Transfer)
+            {
+                SDL_ReleaseGPUBuffer(Device, result.Buffer);
+                throw std::runtime_error("SDL_CreateGPUTransferBuffer(skin palette) failed: " + LastSdlError());
+            }
+            result.Bytes = bytes;
+            return result;
+        };
+        const auto createOutput = [this, &createPalette, &createSkinBuffer, &releasePalette,
+                                   &skinBufferSizes](const std::uint32_t vertexCount, const std::uint32_t paletteBytes)
+        {
+            const auto [assetBytes, builtinBytes] = skinBufferSizes(vertexCount);
 
             GpuSkinOutputResources result;
-            const auto createBuffer = [this](const std::uint32_t bytes)
-            {
-                SDL_GPUBufferCreateInfo createInfo{};
-                createInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX | SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_WRITE;
-                createInfo.size = bytes;
-                auto* buffer = SDL_CreateGPUBuffer(Device, &createInfo);
-                if (!buffer)
-                    throw std::runtime_error("SDL_CreateGPUBuffer(skin cache) failed: " + LastSdlError());
-                return buffer;
-            };
             try
             {
-                result.AssetVertices = createBuffer(static_cast<std::uint32_t>(assetBytes));
-                result.BuiltinVertices = createBuffer(static_cast<std::uint32_t>(builtinBytes));
+                result.AssetVertices = createSkinBuffer(assetBytes);
+                result.BuiltinVertices = createSkinBuffer(builtinBytes);
+                result.Palette = createPalette(paletteBytes);
                 return result;
             }
             catch (const GpuDeviceLostError&)
@@ -127,18 +164,74 @@ namespace Keire::RenderBackend
             catch (const std::exception& error)
             {
                 ThrowIfDeviceLost("skinning output-buffer creation", error.what());
+                releasePalette(result.Palette);
                 if (result.BuiltinVertices)
                     SDL_ReleaseGPUBuffer(Device, result.BuiltinVertices);
                 if (result.AssetVertices)
                     SDL_ReleaseGPUBuffer(Device, result.AssetVertices);
+                if (result.PreviousBuiltinVertices)
+                    SDL_ReleaseGPUBuffer(Device, result.PreviousBuiltinVertices);
+                if (result.PreviousAssetVertices)
+                    SDL_ReleaseGPUBuffer(Device, result.PreviousAssetVertices);
                 throw;
             }
             catch (...)
             {
+                releasePalette(result.Palette);
                 if (result.BuiltinVertices)
                     SDL_ReleaseGPUBuffer(Device, result.BuiltinVertices);
                 if (result.AssetVertices)
                     SDL_ReleaseGPUBuffer(Device, result.AssetVertices);
+                if (result.PreviousBuiltinVertices)
+                    SDL_ReleaseGPUBuffer(Device, result.PreviousBuiltinVertices);
+                if (result.PreviousAssetVertices)
+                    SDL_ReleaseGPUBuffer(Device, result.PreviousAssetVertices);
+                throw;
+            }
+        };
+        const auto ensurePreviousOutput =
+            [this, &createPalette, &createSkinBuffer, &releasePalette, &skinBufferSizes](
+                GpuSkinOutputResources& output, const std::uint32_t vertexCount, const std::uint32_t paletteBytes)
+        {
+            if (output.PreviousAssetVertices && output.PreviousBuiltinVertices && !output.PreviousPalette.Empty())
+                return;
+            if (output.PreviousAssetVertices || output.PreviousBuiltinVertices || !output.PreviousPalette.Empty())
+                throw std::logic_error("Skinned mesh previous-output resources are only partially initialized.");
+
+            const auto [assetBytes, builtinBytes] = skinBufferSizes(vertexCount);
+            SDL_GPUBuffer* asset = nullptr;
+            SDL_GPUBuffer* builtin = nullptr;
+            GpuSkinPaletteResources palette;
+            try
+            {
+                asset = createSkinBuffer(assetBytes);
+                builtin = createSkinBuffer(builtinBytes);
+                palette = createPalette(paletteBytes);
+                output.PreviousAssetVertices = asset;
+                output.PreviousBuiltinVertices = builtin;
+                output.PreviousPalette = std::exchange(palette, {});
+            }
+            catch (const GpuDeviceLostError&)
+            {
+                throw;
+            }
+            catch (const std::exception& error)
+            {
+                ThrowIfDeviceLost("skinning previous-output buffer creation", error.what());
+                releasePalette(palette);
+                if (builtin)
+                    SDL_ReleaseGPUBuffer(Device, builtin);
+                if (asset)
+                    SDL_ReleaseGPUBuffer(Device, asset);
+                throw;
+            }
+            catch (...)
+            {
+                releasePalette(palette);
+                if (builtin)
+                    SDL_ReleaseGPUBuffer(Device, builtin);
+                if (asset)
+                    SDL_ReleaseGPUBuffer(Device, asset);
                 throw;
             }
         };
@@ -147,6 +240,8 @@ namespace Keire::RenderBackend
         {
             item.SkinnedAssetVertices = nullptr;
             item.SkinnedBuiltinVertices = nullptr;
+            item.PreviousSkinnedAssetVertices = nullptr;
+            item.PreviousSkinnedBuiltinVertices = nullptr;
             item.CurrentPoseSubmeshBounds.clear();
             item.BoundsPoseGeneration = 0;
             item.BoundsFrameIndex = 0;
@@ -260,7 +355,10 @@ namespace Keire::RenderBackend
                 cache.Skin->Skeleton() != item.SkinSkeleton ||
                 cache.Resources.VertexCount != cache.Mesh->Vertices().size() ||
                 cache.Resources.MaximumBoneIndex >= item.SkinPalette.size() ||
-                !std::ranges::all_of(item.SkinPalette, [](const Matrix4& matrix) { return Math::IsFinite(matrix); }))
+                item.PreviousSkinPalette.size() != item.SkinPalette.size() ||
+                !std::ranges::all_of(item.SkinPalette, [](const Matrix4& matrix) { return Math::IsFinite(matrix); }) ||
+                !std::ranges::all_of(item.PreviousSkinPalette,
+                                     [](const Matrix4& matrix) { return Math::IsFinite(matrix); }))
             {
                 continue;
             }
@@ -299,58 +397,63 @@ namespace Keire::RenderBackend
             if (!useCompute)
             {
                 std::vector<MeshVertex> deformed(cache.Mesh->Vertices().size());
+                std::vector<MeshVertex> previousDeformed(cache.Mesh->Vertices().size());
                 SkinMeshCpu(cache.Mesh->Vertices(), cache.Skin->Influences8(), item.SkinPalette, item.Skinning,
                             deformed);
+                SkinMeshCpu(cache.Mesh->Vertices(), cache.Skin->Influences8(), item.PreviousSkinPalette, item.Skinning,
+                            previousDeformed);
                 const auto& sourceBounds = cache.Mesh->Bounds();
                 const auto sourceMagnitude =
                     std::max({1.0F, std::abs(sourceBounds.Minimum.X), std::abs(sourceBounds.Minimum.Y),
                               std::abs(sourceBounds.Minimum.Z), std::abs(sourceBounds.Maximum.X),
                               std::abs(sourceBounds.Maximum.Y), std::abs(sourceBounds.Maximum.Z)});
                 const auto maximumCoordinate = sourceMagnitude * 8.0F;
-                const auto validDeformation =
-                    std::ranges::all_of(deformed,
-                                        [maximumCoordinate](const MeshVertex& vertex)
-                                        {
-                                            return Math::IsFinite(vertex.Position) && Math::IsFinite(vertex.Normal) &&
-                                                   Math::IsFinite(vertex.Tangent) &&
-                                                   std::abs(vertex.Position.X) <= maximumCoordinate &&
-                                                   std::abs(vertex.Position.Y) <= maximumCoordinate &&
-                                                   std::abs(vertex.Position.Z) <= maximumCoordinate;
-                                        });
-                if (!validDeformation)
-                    continue;
-                std::vector<RenderVertex> builtinVertices;
-                builtinVertices.reserve(deformed.size());
-                for (const auto& vertex : deformed)
+                const auto validDeformation = [maximumCoordinate](const std::span<const MeshVertex> vertices)
                 {
-                    builtinVertices.push_back(
-                        {vertex.Position,
-                         {vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue},
-                         vertex.Normal});
-                }
+                    return std::ranges::all_of(vertices,
+                                               [maximumCoordinate](const MeshVertex& vertex)
+                                               {
+                                                   return Math::IsFinite(vertex.Position) &&
+                                                          Math::IsFinite(vertex.Normal) &&
+                                                          Math::IsFinite(vertex.Tangent) &&
+                                                          std::abs(vertex.Position.X) <= maximumCoordinate &&
+                                                          std::abs(vertex.Position.Y) <= maximumCoordinate &&
+                                                          std::abs(vertex.Position.Z) <= maximumCoordinate;
+                                               });
+                };
+                if (!validDeformation(deformed) || !validDeformation(previousDeformed))
+                    continue;
+                const auto makeBuiltinVertices = [](const std::span<const MeshVertex> vertices)
+                {
+                    std::vector<RenderVertex> result;
+                    result.reserve(vertices.size());
+                    for (const auto& vertex : vertices)
+                    {
+                        result.push_back({vertex.Position,
+                                          {vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue},
+                                          vertex.Normal});
+                    }
+                    return result;
+                };
+                const auto builtinVertices = makeBuiltinVertices(deformed);
+                const auto previousBuiltinVertices = makeBuiltinVertices(previousDeformed);
                 item.SkinnedAssetVertices = UploadMeshVertexBuffer(commands, deformed);
-                item.SkinnedBuiltinVertices = UploadVertexBuffer(commands, builtinVertices);
                 FrameTransientBuffers.push_back(item.SkinnedAssetVertices);
+                item.SkinnedBuiltinVertices = UploadVertexBuffer(commands, builtinVertices);
                 FrameTransientBuffers.push_back(item.SkinnedBuiltinVertices);
+                item.PreviousSkinnedAssetVertices = UploadMeshVertexBuffer(commands, previousDeformed);
+                FrameTransientBuffers.push_back(item.PreviousSkinnedAssetVertices);
+                item.PreviousSkinnedBuiltinVertices = UploadVertexBuffer(commands, previousBuiltinVertices);
+                FrameTransientBuffers.push_back(item.PreviousSkinnedBuiltinVertices);
                 commitCurrentPoseBounds();
                 continue;
             }
 
-            std::vector<GpuSkinMatrix> palette;
-            palette.reserve(item.SkinPalette.size());
-            for (const auto& matrix : item.SkinPalette)
-            {
-                const auto& elements = matrix.Elements;
-                palette.push_back({
-                    {elements[0], elements[1], elements[2], elements[3]},
-                    {elements[4], elements[5], elements[6], elements[7]},
-                    {elements[8], elements[9], elements[10], elements[11]},
-                    {elements[12], elements[13], elements[14], elements[15]},
-                });
-            }
-            auto* paletteBuffer =
-                UploadBuffer(commands, std::as_bytes(std::span(palette)), SDL_GPU_BUFFERUSAGE_COMPUTE_STORAGE_READ);
-            FrameTransientBuffers.push_back(paletteBuffer);
+            const auto paletteMatrixCount = static_cast<std::uint64_t>(cache.Resources.MaximumBoneIndex) + 1U;
+            const auto paletteBytes64 = paletteMatrixCount * sizeof(GpuSkinMatrix);
+            if (paletteBytes64 > std::numeric_limits<std::uint32_t>::max())
+                throw std::invalid_argument("Skin palette exceeds SDL's 32-bit buffer limit.");
+            const auto paletteBytes = static_cast<std::uint32_t>(paletteBytes64);
 
             const GpuSkinInstanceKey instanceKey{item.Scene ? item.Scene : packet.Scene, item.Entity, surface};
             auto [instanceIterator, instanceInserted] = cache.Resources.Instances.try_emplace(instanceKey);
@@ -358,30 +461,95 @@ namespace Keire::RenderBackend
             if (instanceInserted)
                 instance.Outputs.resize(Specification.MaximumFramesInFlight);
             instance.LastPreparedFrame = Statistics.Frame;
-            auto& output =
-                instance.Outputs[SkinningOutputSlot(ActiveGpuSubmissionSerial, Specification.MaximumFramesInFlight)];
+            const auto outputSlot = SkinningOutputSlot(ActiveGpuSubmissionSerial, Specification.MaximumFramesInFlight);
+            auto& output = instance.Outputs[outputSlot];
             if (output.Empty())
             {
-                output = createOutput(cache.Resources.VertexCount);
+                output = createOutput(cache.Resources.VertexCount, paletteBytes);
                 ++SkinningOutputBuilds;
             }
             item.SkinnedAssetVertices = output.AssetVertices;
             item.SkinnedBuiltinVertices = output.BuiltinVertices;
 
-            const std::array writeBindings{SDL_GPUStorageBufferReadWriteBinding{item.SkinnedAssetVertices, false},
-                                           SDL_GPUStorageBufferReadWriteBinding{item.SkinnedBuiltinVertices, false}};
-            auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, writeBindings.data(),
-                                                 static_cast<std::uint32_t>(writeBindings.size()));
-            if (!pass)
-                throw std::runtime_error("SDL_BeginGPUComputePass(skin cache) failed: " + LastSdlError());
-            SDL_BindGPUComputePipeline(pass, SkinningPipeline);
-            const std::array readBindings{mesh.AssetVertices, cache.Resources.Influences, paletteBuffer};
-            SDL_BindGPUComputeStorageBuffers(pass, 0, readBindings.data(),
-                                             static_cast<std::uint32_t>(readBindings.size()));
+            bool reusedPreviousOutput = false;
+            if (instance.HasPublishedOutput && instance.LastPublishedOutputSlot < instance.Outputs.size())
+            {
+                const auto& previousOutput = instance.Outputs[instance.LastPublishedOutputSlot];
+                reusedPreviousOutput =
+                    CanReusePreviousSkinOutput(true, instance.LastPublishedOutputSlot, outputSlot,
+                                               previousOutput.PoseGeneration, item.PreviousPoseGeneration);
+                if (reusedPreviousOutput)
+                {
+                    item.PreviousSkinnedAssetVertices = previousOutput.AssetVertices;
+                    item.PreviousSkinnedBuiltinVertices = previousOutput.BuiltinVertices;
+                }
+            }
+            if (!reusedPreviousOutput)
+            {
+                ensurePreviousOutput(output, cache.Resources.VertexCount, paletteBytes);
+                item.PreviousSkinnedAssetVertices = output.PreviousAssetVertices;
+                item.PreviousSkinnedBuiltinVertices = output.PreviousBuiltinVertices;
+            }
+
+            const auto uploadPalette = [&](const std::span<const Matrix4> source, GpuSkinPaletteResources& destination)
+            {
+                if (source.size() < paletteMatrixCount || destination.Bytes != paletteBytes || !destination.Buffer ||
+                    !destination.Transfer)
+                {
+                    throw std::logic_error("Skinned mesh palette resources do not match the active skin.");
+                }
+                auto* mapped =
+                    static_cast<GpuSkinMatrix*>(SDL_MapGPUTransferBuffer(Device, destination.Transfer, true));
+                if (!mapped)
+                    throw std::runtime_error("SDL_MapGPUTransferBuffer(skin palette) failed: " + LastSdlError());
+                for (std::size_t index = 0; index < paletteMatrixCount; ++index)
+                {
+                    const auto& elements = source[index].Elements;
+                    mapped[index] = {
+                        {elements[0], elements[1], elements[2], elements[3]},
+                        {elements[4], elements[5], elements[6], elements[7]},
+                        {elements[8], elements[9], elements[10], elements[11]},
+                        {elements[12], elements[13], elements[14], elements[15]},
+                    };
+                }
+                SDL_UnmapGPUTransferBuffer(Device, destination.Transfer);
+
+                const SDL_GPUTransferBufferLocation sourceLocation{destination.Transfer, 0};
+                const SDL_GPUBufferRegion destinationRegion{destination.Buffer, 0, paletteBytes};
+                auto* copy = SDL_BeginGPUCopyPass(commands);
+                if (!copy)
+                    throw std::runtime_error("SDL_BeginGPUCopyPass(skin palette) failed: " + LastSdlError());
+                SDL_UploadToGPUBuffer(copy, &sourceLocation, &destinationRegion, true);
+                SDL_EndGPUCopyPass(copy);
+                return destination.Buffer;
+            };
+            auto* paletteBuffer = uploadPalette(item.SkinPalette, output.Palette);
             const SkinDispatch dispatch{cache.Resources.VertexCount, cache.Resources.MaximumInfluences};
-            SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
-            SDL_DispatchGPUCompute(pass, (dispatch.VertexCount + 63U) / 64U, 1, 1);
-            SDL_EndGPUComputePass(pass);
+            const auto recordSkinning =
+                [&](SDL_GPUBuffer* assetOutput, SDL_GPUBuffer* builtinOutput, SDL_GPUBuffer* selectedPalette)
+            {
+                const std::array writeBindings{SDL_GPUStorageBufferReadWriteBinding{assetOutput, false},
+                                               SDL_GPUStorageBufferReadWriteBinding{builtinOutput, false}};
+                auto* pass = SDL_BeginGPUComputePass(commands, nullptr, 0, writeBindings.data(),
+                                                     static_cast<std::uint32_t>(writeBindings.size()));
+                if (!pass)
+                    throw std::runtime_error("SDL_BeginGPUComputePass(skin cache) failed: " + LastSdlError());
+                SDL_BindGPUComputePipeline(pass, SkinningPipeline);
+                const std::array readBindings{mesh.AssetVertices, cache.Resources.Influences, selectedPalette};
+                SDL_BindGPUComputeStorageBuffers(pass, 0, readBindings.data(),
+                                                 static_cast<std::uint32_t>(readBindings.size()));
+                SDL_PushGPUComputeUniformData(commands, 0, &dispatch, sizeof(dispatch));
+                SDL_DispatchGPUCompute(pass, (dispatch.VertexCount + 63U) / 64U, 1, 1);
+                SDL_EndGPUComputePass(pass);
+            };
+            recordSkinning(item.SkinnedAssetVertices, item.SkinnedBuiltinVertices, paletteBuffer);
+            if (!reusedPreviousOutput)
+            {
+                auto* previousPaletteBuffer = uploadPalette(item.PreviousSkinPalette, output.PreviousPalette);
+                recordSkinning(item.PreviousSkinnedAssetVertices, item.PreviousSkinnedBuiltinVertices,
+                               previousPaletteBuffer);
+            }
+            PendingGpuSkinOutputPublications.push_back({&instance, outputSlot, item.PoseGeneration});
             commitCurrentPoseBounds();
         }
     }

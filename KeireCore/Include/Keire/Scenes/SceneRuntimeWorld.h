@@ -67,6 +67,8 @@ namespace Keire
         SceneRuntimeWorld(const SceneRuntimeWorld&) = delete;
         SceneRuntimeWorld& operator=(const SceneRuntimeWorld&) = delete;
 
+        /// Registers an owned session. A stopped session may be adopted before Play so Awake and OnEnable can query
+        /// the runtime world after the session publishes its cloned scene.
         [[nodiscard]] SceneHandle Adopt(Ref<SceneRuntimeSession> session);
         [[nodiscard]] Ref<SceneRuntimeLoadOperation> Load(AssetId scene, SceneLoadMode mode = SceneLoadMode::Single,
                                                           AssetPriority priority = AssetPriority::High);

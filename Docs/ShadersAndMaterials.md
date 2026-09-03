@@ -86,9 +86,9 @@ published runtime assets.
 
 Shader Graph schema 6 stores its explicit target definition and retains the finite, non-negative maximum
 world-position-displacement radius introduced by schema 5. Schemas 1–5 migrate in memory; old Fullscreen outputs infer
-the Fullscreen target and other old graphs infer Material. Generated shader contract 7 publishes target/stage
-metadata and the validated displacement bound in a schema-2 shader manifest. Compute target graphs serialize and
-validate today but compilation fails explicitly until the compute-program artifact ABI is available.
+the Fullscreen target and other old graphs infer Material. Generated shader contract 8 publishes target/stage metadata,
+the validated displacement bound, and exact pass roles in a schema-3 shader manifest. Compute target graphs serialize
+and validate today but compilation fails explicitly until the compute-program artifact ABI is available.
 
 Compilation reports active and total nodes, unused work, texture samples, estimated ALU instructions, and variant
 count. The editor previews the last-good result on a sphere, plane, cube, or selected mesh and provides exposure and
@@ -99,7 +99,11 @@ Saving stages generated HLSL and manifests outside the asset root, compiles thro
 transactionally replaces `Assets/Generated/ShaderGraphs/<graph-id>/`. Each keyword variant is a stable generated
 `ShaderAsset`. Legacy Surface graphs retain a private default `MaterialAsset` for preview and compatibility; program
 targets publish only shader variants. DXIL, SPIR-V, and MSL outputs pass the same reflection and ABI validation as raw
-shaders.
+shaders. Cooked shader asset schema 3 identifies every binary lane by both its exact material/program pass role and
+backend format. Schema-1/2 assets migrate in memory to the `primary` role, while new multi-pass assets may carry
+coexisting roles such as `primary` and `deferredGBufferStandard` without ambiguous first-format selection. The version-7
+shader importer compiles each bounded role/format lane with its optional pass define, rejects duplicate roles or defines
+and collisions with global defines, and keeps reflection selection independent of manifest order.
 
 ## Materials Using Custom Shader Graphs
 
@@ -188,18 +192,33 @@ earlier Material-Graph-to-template layout and must not be used as evidence that 
 
 ## Render Path And Global Illumination Selection
 
-Project Rendering settings store requested intent separately from effective runtime support. `Forward+` is the current
-production render path. `Deferred Hybrid` requests standard or extended GBuffer passes while retaining the compiled
-forward escape pass required by Hair, Eye, transparency, unsupported closure features, and backend fallback. Simple
-OpenPBR and Unlit surfaces publish the standard GBuffer contract; closure/layer authoring publishes the extended
-contract; Hair and Eye are forward-only. Decal, volume, shadow, surface-cache, bake, depth/velocity, and selection
-passes remain explicit artifact entries rather than hidden shader conventions.
+Project Rendering settings store requested intent separately from effective runtime support. `Deferred Hybrid` is a
+live production path whose active backend passes the exact GBuffer, sampled-depth, shader,
+and pipeline probe. It retains the compiled forward escape pass required by Hair, Eye, transparency, unsupported
+closure features, and backend fallback. Simple OpenPBR and Unlit surfaces publish the standard GBuffer contract;
+closure/layer authoring may publish the extended contract; Hair and Eye are forward-only. Decal, volume, shadow,
+surface-cache, bake, depth/velocity, and selection passes remain explicit artifact entries rather than hidden shader
+conventions. Automatic prefers Deferred Hybrid when that runtime capability is present. Explicit Deferred Hybrid on
+unsupported hardware or missing surface resources resolves to Forward+ without changing saved project intent. With
+MSAA, its deferred data lanes remain single-sample and final visible geometry uses the matching multisampled forward
+lane, so materials do not require multisampled GBuffer formats.
 
-Global illumination intent is `Disabled`, `Baked`, `Realtime`, experimental `Irradyn`, or `Hybrid`, with an independent
+Generated Shader Graph version 10 gives Surface, Unlit, Hair, and Eye depth/velocity lanes a real previous-frame
+camera/object contract. Surface displacement can use Time or Delta Time, and the velocity lane re-evaluates it at the
+previous time over a second vertex stream containing the previous skinned position. Lit generated materials advertise
+spatial-lighting ABI v3, consume the fixed lightmap/probe/reflection/cookie resources in forward shading, and encode the
+same frame-owned selection into the deferred GBuffer. Decal output publishes both `decalDBuffer` and
+`forwardTransparent`: the deferred renderer routes
+scene decal geometry exclusively into the depth-tested, alpha-composited DBuffer list, while Forward+ and MSAA retain a
+visible fallback lane. Deferred lighting applies the authored decal opacity independently to base color, normal, and
+metallic/roughness/specular channels before evaluating the shared tiled point/spot light data and shadow atlases.
+
+Global illumination intent is `Disabled`, `Baked`, `Realtime`, `Irradyn`, or `Hybrid`, with an independent
 Irradyn Performance/Balanced/Quality choice. The capability resolver returns the requested and effective modes plus a
-specific fallback reason. The current runtime advertises neither Deferred Hybrid nor the new GI backends, so selecting
-them is preserved as project intent but executes through the safe Forward+/disabled fallback. No setting is evidence
-that the corresponding backend has shipped.
+specific fallback reason. Selecting a GI mode without an available backend is preserved as project intent but executes
+through the documented GI fallback. Irradyn is advertised only when the active backend passes the complete Deferred
+Hybrid pipeline and the surface owns the required single-sample spatial-lighting resources; those resources remain
+present when final coverage uses MSAA.
 
 ## Renderer And Compiler Boundary
 
@@ -216,10 +235,11 @@ completion. Process-aware leases preserve work owned by another live Editor, whi
 after a one-hour grace period. Cleanup ignores links, files, and non-Kéire names. Compiler discovery is
 executable-relative, with `KEIRE_SHADER_COMPILER` as an intentional override.
 
-Compilation service adapters use a schema-1 canonical job manifest. The manifest fingerprints the exact toolchain,
-source, include closure, defines, stage, entry point, target platform/architecture/binary format, debug policy, and
-program ABI, then derives a lowercase SHA-256 work key. Policy (`LocalOnly`, `RemotePreferred`, or `RemoteRequired`) and
-interactive/background priority do not enter the key, so scheduling cannot change artifact identity. The remote queue
+Compilation service adapters use a schema-2 canonical compile-unit manifest. The manifest fingerprints the exact
+toolchain, source, include closure, defines, logical pass, stage, entry point, target platform/architecture,
+D3D12/Vulkan/Metal backend, output format, optimization/debug policy, and program ABI. Its work key is the lowercase
+SHA-256 of a domain-separated deterministic CBOR encoding. Policy (`LocalOnly`, `RemotePreferred`, or `RemoteRequired`)
+and interactive/background priority do not enter the key, so scheduling cannot change artifact identity. The remote queue
 foundation is feature-flagged off by default, owner-readable under forced RLS, and writable only through service-role
 coordinator RPCs. Priority leases use `SKIP LOCKED`, bounded renewals, retry exhaustion, private artifact storage, and
 lease-token-checked completion. The desktop configuration remains publishable-key-only; networkless compiler executors
@@ -233,9 +253,10 @@ never receive Supabase credentials.
 bash Scripts/project.sh bootstrap --generator ninja --toolset clang
 ```
 
-Cooking retains only formats needed by the requested target: DXIL plus SPIR-V for Windows, SPIR-V for Linux, and MSL
-for macOS. Host imports retain every supported format. Shader and material dependencies cook through the ordinary asset
-closure, so a material cannot package without its selected graph, generated shader variant, and textures.
+Cooking retains every pass role but only the formats needed by the requested target: DXIL plus SPIR-V for Windows,
+SPIR-V for Linux, and MSL for macOS. A cook fails if any role lacks a required target lane. Host imports retain every
+supported format. Shader and material dependencies cook through the ordinary asset closure, so a material cannot
+package without its selected graph, generated shader variant, and textures.
 
 ## Examples And Validation
 

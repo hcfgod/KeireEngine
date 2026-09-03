@@ -714,7 +714,8 @@ namespace Keire
         {
             owner->RequireOwner("RequestSurfaceSize");
             if (surface.m_Impl->State->RequestedWidth != width || surface.m_Impl->State->RequestedHeight != height)
-                surface.m_Impl->State = owner->CreateSurfaceEpoch(surface.m_Impl->State, width, height);
+                surface.m_Impl->State = owner->CreateSurfaceEpoch(surface.m_Impl->State, width, height,
+                                                                  surface.m_Impl->State->Specification.SampleCount);
         }
     }
 

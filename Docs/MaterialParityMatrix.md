@@ -8,7 +8,7 @@ implemented engine/editor path and focused evidence. `Partial` means the shipped
 instead of silently degrading. `Planned` is not a supported feature. Counts are useful for planning, but production
 scenarios and executable validation decide milestone acceptance.
 
-Current ledger: **145 rows — 97 Complete, 9 Partial, and 39 Planned**.
+Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 
 ## Capability Matrix
 

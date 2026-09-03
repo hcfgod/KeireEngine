@@ -195,6 +195,8 @@ namespace Keire
 
         static void RuntimeWriteLog(const std::uint8_t level, const Coral::String message) noexcept;
 
+        static void RuntimeDrawDebugLine(Vector3 start, Vector3 end, Color color, float duration) noexcept;
+
         static void RuntimeRegisterProfileName(const std::uint64_t id, const Coral::String name) noexcept;
 
         static void RuntimeRecordProfileSpan(const std::uint64_t id, const double startMicroseconds,

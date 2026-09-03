@@ -475,7 +475,7 @@ function Set-DependencyJunction {
     New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null
 }
 
-$coralLink = Join-Path $Root "Build\Dependencies\coral-patched"
+$coralLink = Join-Path $Root "Build\Dependencies\coral"
 $dotnetLink = Join-Path $Root "Build\Dependencies\coral-nethost"
 $dotnetSdkLink = Join-Path $Root "Build\Dependencies\dotnet-sdk"
 Set-DependencyJunction $coralLink $coralDebug.Source
@@ -512,13 +512,12 @@ DependencyManifest = {
     LibunibreakCommit = "$($Lock.LIBUNIBREAK_COMMIT)",
     SodiumCommit = "$($Lock.LIBSODIUM_COMMIT)",
     CoralCommit = "$($coralDebug.Commit)",
-    CoralPatchDigest = "$($coralDebug.PatchDigest)",
-    CoralSource = "../Build/Dependencies/coral-patched",
-    CoralInclude = "../Build/Dependencies/coral-patched/Coral.Native/Include",
-    CoralDebugLibrary = "../Build/Dependencies/coral-patched/Build/Debug/Coral.Native.lib",
-    CoralReleaseLibrary = "../Build/Dependencies/coral-patched/Build/Release/Coral.Native.lib",
-    CoralManagedDebug = "../Build/Dependencies/coral-patched/Build/Debug",
-    CoralManagedRelease = "../Build/Dependencies/coral-patched/Build/Release",
+    CoralSource = "../Build/Dependencies/coral",
+    CoralInclude = "../Build/Dependencies/coral/Coral.Native/Include",
+    CoralDebugLibrary = "../Build/Dependencies/coral/Build/Debug/Coral.Native.lib",
+    CoralReleaseLibrary = "../Build/Dependencies/coral/Build/Release/Coral.Native.lib",
+    CoralManagedDebug = "../Build/Dependencies/coral/Build/Debug",
+    CoralManagedRelease = "../Build/Dependencies/coral/Build/Release",
     CoralNetHostLibrary = "../Build/Dependencies/coral-nethost/nethost.lib",
     CoralNetHostRuntime = "../Build/Dependencies/coral-nethost/nethost.dll",
     SDL3Include = "$debugInstall/include",

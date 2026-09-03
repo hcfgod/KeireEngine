@@ -373,6 +373,7 @@ namespace Keire
         virtual ~IScriptRuntimeServices() = default;
 
         virtual void WriteManagedLog(ManagedLogLevel level, std::string_view message) noexcept = 0;
+        virtual void DrawManagedDebugLine(Vector3, Vector3, Color, float) noexcept {}
         virtual void RecordManagedProfileSpan(std::string_view, double, double) noexcept {}
         virtual void SetManagedProfileCounter(std::string_view, double) noexcept {}
         [[nodiscard]] virtual float ManagedDeltaTime() const noexcept = 0;

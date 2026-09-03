@@ -168,17 +168,19 @@ namespace Keire::RenderBackend
         resources.DispatchSucceeded = false;
         resources.RecordCount = 0;
         resources.SpatialMaskCount = 0;
-        if (!commands || !occlusion.Enabled || !occlusion.Resources || !EnsureSpatialSelectionPipeline())
+        if (!commands)
             return false;
 
         const auto deviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
-        const auto& visibility = *occlusion.Resources;
+        const bool useGpuSelection = occlusion.Enabled && occlusion.Resources && EnsureSpatialSelectionPipeline();
+        const auto* visibility = useGpuSelection ? occlusion.Resources : nullptr;
         const auto expectedMaskCount =
             static_cast<std::uint64_t>(packet.ReflectionProbes.size()) + packet.LightProbeVolumes.size();
         if (expectedMaskCount > std::numeric_limits<std::uint32_t>::max() ||
-            !visibility.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration) ||
-            !visibility.SpatialVolumeVisibilityMask.Buffer ||
-            visibility.SpatialVolumeVisibilityCount != expectedMaskCount)
+            (useGpuSelection && (!visibility->OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot, surface.Epoch,
+                                                      deviceGeneration) ||
+                                 !visibility->SpatialVolumeVisibilityMask.Buffer ||
+                                 visibility->SpatialVolumeVisibilityCount != expectedMaskCount)))
         {
             return false;
         }
@@ -273,22 +275,26 @@ namespace Keire::RenderBackend
             std::vector<GpuSpatialSelectionDraw> gpuDraws;
             std::vector<GpuSpatialReflectionCandidate> gpuReflections;
             std::vector<GpuSpatialLightProbeCandidate> gpuLightProbes;
+            std::vector<AssetSpatialSelectionRecord> cpuRecords;
             gpuDraws.reserve(draws.Opaque.Draws.size() + draws.Transparent.Draws.size());
+            cpuRecords.reserve(draws.Opaque.Draws.size() + draws.Transparent.Draws.size());
 
             const auto prepareDraw = [&](PreparedSceneDraw& draw)
             {
                 const auto* material =
                     draw.Material ? ResolveAssetMaterial(draw.Material, ToSdlSampleCount(surface.ActualSamples))
                                   : nullptr;
-                if (!material || material->SpatialLightingAbiVersion != 3U || !draw.Item || draw.Item->AlwaysVisible ||
-                    !HasShaderOcclusionSupport(material->OcclusionSupport, ShaderOcclusionSupport::ConservativeBounds))
+                if (!material || material->SpatialLightingAbiVersion != 3U || !draw.Item ||
+                    (useGpuSelection && (draw.Item->AlwaysVisible ||
+                                         !HasShaderOcclusionSupport(material->OcclusionSupport,
+                                                                    ShaderOcclusionSupport::ConservativeBounds))))
                 {
                     return;
                 }
                 const auto& item = *draw.Item;
                 const auto submeshCount = ResolveMesh(item.Mesh).Submeshes.size();
                 const bool freshPoseBounds = item.HasFreshCurrentPoseBounds(packet.FrameIndex, submeshCount);
-                if (RequiresConservativeCpuVisibility(item.VisibilityClass, freshPoseBounds) ||
+                if ((useGpuSelection && RequiresConservativeCpuVisibility(item.VisibilityClass, freshPoseBounds)) ||
                     !Math::IsFinite(item.World))
                 {
                     return;
@@ -317,9 +323,9 @@ namespace Keire::RenderBackend
                     const auto weight = ReflectionWeight(worldPosition, probe);
                     if (weight <= 0.0F)
                         continue;
-                    if (!DisplacementBounds::WhollyContained(draw.Submesh.Bounds, item.World, probe.WorldToLocal,
-                                                             probe.BoxExtents,
-                                                             material->MaximumWorldPositionDisplacementRadius))
+                    if (useGpuSelection && !DisplacementBounds::WhollyContained(
+                                               draw.Submesh.Bounds, item.World, probe.WorldToLocal, probe.BoxExtents,
+                                               material->MaximumWorldPositionDisplacementRadius))
                         return;
 
                     auto cubeIndex = probe.CubeIndex;
@@ -375,9 +381,9 @@ namespace Keire::RenderBackend
                         data->Definition(), Math::TransformPoint(volume.WorldToLocal, worldPosition));
                     if (!coefficients)
                         continue;
-                    if (!DisplacementBounds::WhollyContained(draw.Submesh.Bounds, item.World, volume.WorldToLocal,
-                                                             volume.BoxExtents,
-                                                             material->MaximumWorldPositionDisplacementRadius))
+                    if (useGpuSelection && !DisplacementBounds::WhollyContained(
+                                               draw.Submesh.Bounds, item.World, volume.WorldToLocal, volume.BoxExtents,
+                                               material->MaximumWorldPositionDisplacementRadius))
                         return;
 
                     GpuSpatialLightProbeCandidate gpu;
@@ -399,6 +405,38 @@ namespace Keire::RenderBackend
                                           return left.StableId < right.StableId;
                                       return left.Gpu.Metadata[0] < right.Gpu.Metadata[0];
                                   });
+
+                if (!useGpuSelection)
+                {
+                    if (cpuRecords.size() >= 65535U)
+                        return;
+                    AssetSpatialSelectionRecord record;
+                    if (!reflections.empty())
+                    {
+                        const auto selectedImportance = reflections.front().Importance;
+                        const auto selectedCount =
+                            reflections.size() > 1U && reflections[1].Importance == selectedImportance ? 2U : 1U;
+                        float totalWeight = 0.0F;
+                        for (std::size_t index = 0; index < selectedCount; ++index)
+                            totalWeight += reflections[index].Weight;
+                        for (std::size_t index = 0; index < selectedCount; ++index)
+                        {
+                            record.ReflectionProbes[index] = reflections[index].Gpu.Descriptor;
+                            record.ReflectionProbes[index].ExtentsWeight.W =
+                                totalWeight > 1.0e-6F ? reflections[index].Weight / totalWeight : 0.0F;
+                            record.Metadata[0] |= index == 0U ? AssetSpatialSelectionHasReflectionProbe0
+                                                              : AssetSpatialSelectionHasReflectionProbe1;
+                        }
+                    }
+                    if (!lightProbes.empty())
+                    {
+                        record.ProbeIrradiance = lightProbes.front().Gpu.ProbeIrradiance;
+                        record.Metadata[0] |= AssetSpatialSelectionHasLightProbe;
+                    }
+                    draw.SpatialSelectionRecordIndex = static_cast<std::uint32_t>(cpuRecords.size());
+                    cpuRecords.push_back(record);
+                    return;
+                }
 
                 if (reflections.size() > MaximumSpatialSelectionCandidatesPerDraw ||
                     lightProbes.size() > MaximumSpatialSelectionCandidatesPerDraw ||
@@ -422,8 +460,61 @@ namespace Keire::RenderBackend
                 prepareDraw(draw);
             for (auto& draw : draws.Transparent.Draws)
                 prepareDraw(draw);
-            if (gpuDraws.empty())
+            if (useGpuSelection ? gpuDraws.empty() : cpuRecords.empty())
                 return false;
+
+            if (!useGpuSelection)
+            {
+                const auto bytes = std::as_bytes(std::span(cpuRecords));
+                const auto required = GrowCapacity(bytes.size());
+                if (!resources.OutputRecords.Buffer || resources.OutputRecords.CapacityBytes < required)
+                {
+                    SDL_GPUBufferCreateInfo information{};
+                    information.usage = SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ;
+                    information.size = required;
+                    auto* replacement = SDL_CreateGPUBuffer(Device, &information);
+                    if (!replacement)
+                        throw std::runtime_error("SDL_CreateGPUBuffer(CPU spatial selection) failed: " +
+                                                 LastSdlError());
+                    Retire(std::exchange(resources.OutputRecords.Buffer, replacement));
+                    resources.OutputRecords.CapacityBytes = required;
+                }
+                const auto uploadCapacity = GrowCapacity(bytes.size());
+                if (!resources.Upload || resources.UploadCapacityBytes < uploadCapacity)
+                {
+                    SDL_GPUTransferBufferCreateInfo information{};
+                    information.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+                    information.size = uploadCapacity;
+                    auto* replacement = SDL_CreateGPUTransferBuffer(Device, &information);
+                    if (!replacement)
+                    {
+                        throw std::runtime_error("SDL_CreateGPUTransferBuffer(CPU spatial selection) failed: " +
+                                                 LastSdlError());
+                    }
+                    Retire(std::exchange(resources.Upload, replacement));
+                    resources.UploadCapacityBytes = uploadCapacity;
+                }
+                auto* mapped = static_cast<std::byte*>(SDL_MapGPUTransferBuffer(Device, resources.Upload, true));
+                if (!mapped)
+                    throw std::runtime_error("SDL_MapGPUTransferBuffer(CPU spatial selection) failed: " +
+                                             LastSdlError());
+                std::memcpy(mapped, bytes.data(), bytes.size());
+                SDL_UnmapGPUTransferBuffer(Device, resources.Upload);
+                auto* copy = SDL_BeginGPUCopyPass(commands);
+                if (!copy)
+                    throw std::runtime_error("SDL_BeginGPUCopyPass(CPU spatial selection) failed: " + LastSdlError());
+                const SDL_GPUTransferBufferLocation source{resources.Upload, 0U};
+                const SDL_GPUBufferRegion destination{resources.OutputRecords.Buffer, 0U,
+                                                      static_cast<std::uint32_t>(bytes.size())};
+                SDL_UploadToGPUBuffer(copy, &source, &destination, true);
+                SDL_EndGPUCopyPass(copy);
+                resources.RecordCount = static_cast<std::uint32_t>(cpuRecords.size());
+                resources.SpatialMaskCount = 0U;
+                resources.DispatchSucceeded = true;
+                resources.TakeOwnership(packet.AcceptedFrameId, surface.ActiveWorksetSlot, surface.Epoch,
+                                        deviceGeneration);
+                return true;
+            }
 
             const std::array<GpuSpatialReflectionCandidate, 1> emptyReflection{};
             const std::array<GpuSpatialLightProbeCandidate, 1> emptyLightProbe{};
@@ -531,6 +622,8 @@ namespace Keire::RenderBackend
                                                    const PreparedGpuOcclusion& occlusion)
     {
         auto& resources = surface.ActiveWorkset().SpatialSelection;
+        if (resources.DispatchSucceeded && resources.SpatialMaskCount == 0U)
+            return;
         resources.DispatchSucceeded = false;
         const auto deviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
         if (!commands || !SpatialSelectionPipeline || !occlusion.Enabled || !occlusion.Resources ||

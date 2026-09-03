@@ -99,7 +99,7 @@ function Copy-PlayerSupportLicenses {
     $sources = [ordered]@{
         'Keire-LICENSE.txt' = Join-Path $sourceRoot 'LICENSE.txt'
         'Keire-THIRD_PARTY_NOTICES.md' = Join-Path $sourceRoot 'THIRD_PARTY_NOTICES.md'
-        'Coral-LICENSE.txt' = Join-Path $sourceRoot 'Build\Dependencies\coral-patched\LICENSE'
+        'Coral-LICENSE.txt' = Join-Path $sourceRoot 'Build\Dependencies\coral\LICENSE'
         'dotnet-LICENSE.txt' = Join-Path $sourceRoot 'Build\Dependencies\dotnet-sdk\LICENSE.txt'
         'dotnet-ThirdPartyNotices.txt' = Join-Path $sourceRoot 'Build\Dependencies\dotnet-sdk\ThirdPartyNotices.txt'
         'SDL-LICENSE.txt' = Join-Path $dependencyInstall 'licenses\SDL3\LICENSE.txt'

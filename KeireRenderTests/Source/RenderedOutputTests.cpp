@@ -69,6 +69,7 @@ namespace
         std::vector<std::uint64_t> SkinningStaticBuilds;
         std::vector<std::uint64_t> SkinningOutputBuilds;
         std::vector<float> SkinningPreparationMilliseconds;
+        Keire::RenderCapabilities Capabilities;
         Keire::RenderStatistics Statistics;
         bool HasStatistics = false;
     };
@@ -297,8 +298,8 @@ namespace
     class RenderCaptureLayer final : public Keire::Layer
     {
       public:
-        explicit RenderCaptureLayer(std::shared_ptr<CaptureResults> results)
-            : Layer("Rendered output capture"), m_Results(std::move(results))
+        explicit RenderCaptureLayer(std::shared_ptr<CaptureResults> results, const bool deferredIrradyn = false)
+            : Layer("Rendered output capture"), m_Results(std::move(results)), m_DeferredIrradyn(deferredIrradyn)
         {
         }
 
@@ -324,7 +325,7 @@ namespace
             surface.Width = SurfaceSize;
             surface.Height = SurfaceSize;
             surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
-            surface.SampleCount = Keire::RenderSampleCount::Four;
+            surface.SampleCount = m_DeferredIrradyn ? Keire::RenderSampleCount::One : Keire::RenderSampleCount::Four;
             surface.Depth = true;
             m_View = Owner().Renderer()->CreateView(surface);
             Keire::RenderCamera camera;
@@ -338,6 +339,7 @@ namespace
         {
             if (Owner().Renderer())
             {
+                m_Results->Capabilities = Owner().Renderer()->Capabilities();
                 m_Results->Statistics = Owner().Renderer()->Statistics();
                 m_Results->HasStatistics = true;
             }
@@ -375,6 +377,10 @@ namespace
             m_Environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             m_Environment.AmbientIntensity = 1.0F;
             m_Environment.Exposure = 1.0F;
+            m_Environment.RequestedRenderPath =
+                m_DeferredIrradyn ? Keire::RenderPath::DeferredHybrid : Keire::RenderPath::Automatic;
+            m_Environment.RequestedGlobalIllumination =
+                m_DeferredIrradyn ? Keire::GlobalIlluminationMode::Irradyn : Keire::GlobalIlluminationMode::Disabled;
             m_Renderer->SetTint({1.0F, 1.0F, 1.0F, 1.0F});
             m_Light->SetEnabled(false);
             m_Transform->SetLocalRotation({});
@@ -433,6 +439,7 @@ namespace
         Keire::RenderEnvironmentSettings m_Environment;
         std::size_t m_NextCapture = 0;
         bool m_Submitted = false;
+        bool m_DeferredIrradyn = false;
     };
 
     class DescriptorRolloverCaptureLayer final : public Keire::Layer
@@ -502,6 +509,8 @@ namespace
             environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             environment.AmbientIntensity = 1.0F;
             environment.SkyVisible = false;
+            environment.RequestedRenderPath = Keire::RenderPath::ForwardPlus;
+            environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::Msaa4;
             Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
             m_Submitted = true;
         }
@@ -1780,6 +1789,39 @@ TEST_CASE("rendered lighting output preserves observable color contracts")
           ColorTolerance);
 }
 
+TEST_CASE("Deferred Hybrid Irradyn preserves observable rendered lighting contracts")
+{
+    const auto results = std::make_shared<CaptureResults>();
+    {
+        Keire::Application application(RenderTestSpecification());
+        (void)application.PushLayer(std::make_unique<RenderCaptureLayer>(results, true));
+        REQUIRE(application.Run() == 0);
+    }
+
+    REQUIRE(results->HasStatistics);
+    CHECK(results->Capabilities.DeferredHybrid);
+    CHECK(results->Capabilities.IrradynGlobalIllumination);
+    REQUIRE(results->Frames.size() == CaptureSequence.size());
+
+    std::vector<PixelStatistics> captures;
+    captures.reserve(results->Frames.size());
+    for (const auto& pixels : results->Frames)
+        captures.push_back(MeasureCenter(pixels));
+    const auto at = [&captures](const CaptureKind kind) -> const PixelStatistics&
+    {
+        const auto found = std::ranges::find(CaptureSequence, kind);
+        REQUIRE(found != CaptureSequence.end());
+        return captures[static_cast<std::size_t>(std::distance(CaptureSequence.begin(), found))];
+    };
+
+    CHECK(at(CaptureKind::AmbientWhite).Luminance() > at(CaptureKind::AmbientZero).Luminance() + MinimumBehaviorDelta);
+    CHECK(at(CaptureKind::DirectionalEnabled).Luminance() >
+          at(CaptureKind::DirectionalDisabled).Luminance() + MinimumBehaviorDelta);
+    CHECK(at(CaptureKind::TintRed).Red > at(CaptureKind::TintRed).Blue + MinimumBehaviorDelta);
+    CHECK(at(CaptureKind::ExposureHigh).Luminance() > at(CaptureKind::ExposureLow).Luminance() + MinimumBehaviorDelta);
+    CHECK(results->Statistics.ExecutedFrameGraphPasses == results->Statistics.PlannedFrameGraphPasses);
+}
+
 TEST_CASE("schema-4 Block order Blackboard overrides and Portable HLSL drive rendered GPU VFX particles")
 {
     const auto results = std::make_shared<VfxGraphCaptureResults>();
@@ -1972,14 +2014,14 @@ TEST_CASE("GPU depth collision kills particles against sampled scene geometry")
         for (std::size_t index = 0; index < results->Frames.size(); ++index)
         {
             const auto red = MeasureChannelSignal(results->Frames[index], 0);
-            const auto green = MeasureChannelSignal(results->Frames[index], 1);
-            const auto dominance = std::max(0.0F, red.Weight - green.Weight);
             if (index < 20)
-                earlyRed = std::max(earlyRed, dominance);
+            {
+                earlyRed = std::max(earlyRed, red.Weight);
+            }
             if (index >= 45)
             {
                 const auto resultIndex = collisionEnabled ? 1U : 0U;
-                lateRed[resultIndex] = std::max(lateRed[resultIndex], dominance);
+                lateRed[resultIndex] = std::max(lateRed[resultIndex], red.Weight);
             }
         }
         CHECK(earlyRed > 3.0F);

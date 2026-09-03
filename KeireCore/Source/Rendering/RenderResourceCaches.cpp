@@ -8,6 +8,7 @@
 
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
+#include "KeireInternal/Rendering/TemporalAntiAliasingInternal.h"
 
 #include <algorithm>
 #include <bit>
@@ -47,6 +48,38 @@ namespace Keire::RenderBackend
             frame.Surfaces.clear();
             frame.PresentationSurface = {};
             frame.EditorUi.reset();
+        }
+
+        [[nodiscard]] std::vector<RuntimeMaterialPassRole> RuntimePassRoles(const ShaderAssetDefinition& definition)
+        {
+            std::vector<RuntimeMaterialPassRole> result;
+            for (const auto& variant : definition.Variants)
+            {
+                const auto role = RuntimeMaterialPassRoleFromName(variant.PassRole);
+                if (role != RuntimeMaterialPassRole::Unsupported && std::ranges::find(result, role) == result.end())
+                    result.push_back(role);
+            }
+            std::ranges::sort(result);
+            return result;
+        }
+
+        [[nodiscard]] constexpr SDL_GPUSampleCount PipelineSamplesForRole(const SDL_GPUSampleCount requestedSamples,
+                                                                          const RuntimeMaterialPassRole role) noexcept
+        {
+            switch (role)
+            {
+            case RuntimeMaterialPassRole::DepthVelocity:
+            case RuntimeMaterialPassRole::DeferredGBufferStandard:
+            case RuntimeMaterialPassRole::DeferredGBufferExtended:
+            case RuntimeMaterialPassRole::DecalDBuffer:
+                return SDL_GPU_SAMPLECOUNT_1;
+            case RuntimeMaterialPassRole::Primary:
+            case RuntimeMaterialPassRole::ForwardOpaque:
+            case RuntimeMaterialPassRole::ForwardTransparent:
+            case RuntimeMaterialPassRole::Unsupported:
+                return requestedSamples;
+            }
+            return requestedSamples;
         }
     } // namespace
 
@@ -149,10 +182,26 @@ namespace Keire::RenderBackend
                 const auto minimumUsefulCull = std::max(16U, pending.Candidates / 50U);
                 if (diagnostics.RequestedMode == GpuOcclusionMode::Automatic && diagnostics.Culled < minimumUsefulCull)
                 {
-                    (*surface)->GpuOcclusionAutomaticActive = false;
-                    (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
-                    (*surface)->GpuOcclusionAutomaticCooldownFrames = 60U;
-                    (*surface)->GpuOcclusionValidationCooldown = false;
+                    // Only the first retiring readback from this active interval schedules a retry. Additional
+                    // in-flight results must not accelerate the adaptive backoff.
+                    if ((*surface)->GpuOcclusionAutomaticActive)
+                    {
+                        (*surface)->GpuOcclusionAutomaticActive = false;
+                        (*surface)->GpuOcclusionAutomaticQualifyingFrames = 0;
+                        (*surface)->GpuOcclusionAutomaticCooldownFrames =
+                            GpuOcclusionPolicy::AutomaticUnprofitableRetryDelay(
+                                (*surface)->GpuOcclusionAutomaticUnprofitableActivations);
+                        if ((*surface)->GpuOcclusionAutomaticUnprofitableActivations !=
+                            std::numeric_limits<std::uint32_t>::max())
+                        {
+                            ++(*surface)->GpuOcclusionAutomaticUnprofitableActivations;
+                        }
+                        (*surface)->GpuOcclusionValidationCooldown = false;
+                    }
+                }
+                else if (diagnostics.RequestedMode == GpuOcclusionMode::Automatic)
+                {
+                    (*surface)->GpuOcclusionAutomaticUnprofitableActivations = 0;
                 }
             }
             std::uint64_t retiredMeshBytes = 0;
@@ -275,42 +324,6 @@ namespace Keire::RenderBackend
         PublishGpuOcclusionReadbackStatistics();
     }
 
-    void RenderSharedState::PublishGpuOcclusionReadbackStatistics()
-    {
-        Statistics.GpuOcclusionCandidates = 0;
-        Statistics.GpuOcclusionVisible = 0;
-        Statistics.GpuOcclusionCulled = 0;
-        Statistics.GpuOcclusionCandidateTriangles = 0;
-        Statistics.GpuOcclusionCulledTriangles = 0;
-        Statistics.GpuOcclusionReadbackAge = 0;
-        Statistics.GpuOcclusionReadbackValid = false;
-        for (const auto& surface : LiveSurfaces())
-        {
-            auto& diagnostics = surface->GpuOcclusionDiagnostics;
-            if (diagnostics.State == GpuOcclusionSurfaceState::Active && diagnostics.ReadbackValid)
-            {
-                const auto age =
-                    Statistics.Frame >= diagnostics.SourceFrame ? Statistics.Frame - diagnostics.SourceFrame : 0U;
-                diagnostics.ReadbackAge = age > std::numeric_limits<std::uint32_t>::max()
-                                              ? std::numeric_limits<std::uint32_t>::max()
-                                              : static_cast<std::uint32_t>(age);
-                Statistics.GpuOcclusionCandidates += diagnostics.Candidates;
-                Statistics.GpuOcclusionVisible += diagnostics.Visible;
-                Statistics.GpuOcclusionCulled += diagnostics.Culled;
-                Statistics.GpuOcclusionCandidateTriangles += surface->GpuOcclusionLatestCandidateTriangles;
-                Statistics.GpuOcclusionCulledTriangles += surface->GpuOcclusionLatestCandidateTriangles -
-                                                          std::min(surface->GpuOcclusionLatestCandidateTriangles,
-                                                                   surface->GpuOcclusionLatestVisibleTriangles);
-                Statistics.GpuOcclusionReadbackAge =
-                    std::max(Statistics.GpuOcclusionReadbackAge, diagnostics.ReadbackAge);
-                Statistics.GpuOcclusionReadbackValid = true;
-            }
-            surface->PublishGpuOcclusionDiagnosticsSnapshot();
-        }
-        if (!Statistics.GpuOcclusionReadbackValid)
-            Statistics.GpuOcclusionReadbackAge = std::numeric_limits<std::uint32_t>::max();
-    }
-
     void RenderSharedState::BeginFrame()
     {
         RequireOwner("BeginFrame");
@@ -325,12 +338,27 @@ namespace Keire::RenderBackend
         CaptureRuntimeUiCommands.clear();
         CaptureFrameStartedAt = std::chrono::steady_clock::now();
         CaptureFrameId = NextFrameId++;
+        const auto retireStaleMotion = [this](auto& history)
+        {
+            constexpr std::uint64_t retentionFrames = 2U;
+            std::erase_if(history,
+                          [this](const auto& entry)
+                          {
+                              return CaptureFrameId > entry.second.Frame &&
+                                     CaptureFrameId - entry.second.Frame > retentionFrames;
+                          });
+        };
+        retireStaleMotion(MotionHistory);
+        retireStaleMotion(CameraMotionHistory);
+        retireStaleMotion(SkinMotionHistory);
         CaptureStatistics = {};
         CaptureStatistics.Frame = CaptureFrameId;
         CaptureStatistics.AllowedFramesInFlight = Specification.MaximumFramesInFlight;
-        CaptureStatistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(SceneFrameGraph.Compiled.Order.size());
+        const auto& frameGraph =
+            DeferredCapability.load(std::memory_order_acquire) ? DeferredSceneFrameGraph : SceneFrameGraph;
+        CaptureStatistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(frameGraph.Compiled.Order.size());
         CaptureStatistics.TransientResourceAllocations =
-            static_cast<std::uint32_t>(SceneFrameGraph.Compiled.TransientAllocations.size());
+            static_cast<std::uint32_t>(frameGraph.Compiled.TransientAllocations.size());
     }
 
     void RenderSharedState::PrepareFrameForExecution(const std::shared_ptr<RenderFramePacket>& frame)
@@ -417,6 +445,7 @@ namespace Keire::RenderBackend
                 surface.GpuOcclusionAutomaticQualifyingFrames = 0;
                 surface.GpuOcclusionAutomaticMinimumFrames = 0;
                 surface.GpuOcclusionAutomaticCooldownFrames = 0;
+                surface.GpuOcclusionAutomaticUnprofitableActivations = 0;
                 surface.GpuOcclusionValidationCooldown = false;
                 surface.GpuOcclusionValidationFallbackEventPending = false;
                 surface.GpuOcclusionLatestCandidateTriangles = 0;
@@ -479,10 +508,10 @@ namespace Keire::RenderBackend
 
         auto surfaceLease = std::static_pointer_cast<RenderSurfaceState>(
             RenderSystemInternalAccess::SurfaceLease(*request.View->Surface()));
-        auto& surface = *surfaceLease;
-        const auto owner = surface.Owner.lock();
+        const auto owner = surfaceLease ? surfaceLease->Owner.lock() : std::shared_ptr<RenderSharedState>{};
         if (owner.get() != this)
             throw std::invalid_argument("SceneRenderRequest surface belongs to another renderer.");
+
         const auto surfaceToken = CaptureSurfaceToken(surfaceLease);
         if (std::ranges::any_of(
                 PendingSceneRequests, [&surfaceToken](const PendingSceneRequest& pending)
@@ -614,9 +643,43 @@ namespace Keire::RenderBackend
         const auto& primaryContribution = request.PrimaryContributionIndex == 0
                                               ? request.Scene
                                               : request.AdditionalScenes[request.PrimaryContributionIndex - 1U].Scene;
+        const bool deferredAvailable = DeferredCapability.load(std::memory_order_acquire);
+        RenderFeatureCapabilities featureCapabilities{};
+        featureCapabilities.DeferredHybrid = deferredAvailable;
+        featureCapabilities.BakedGlobalIllumination = true;
+        featureCapabilities.RealtimeGlobalIllumination = true;
+        featureCapabilities.IrradynGlobalIllumination = deferredAvailable;
+        featureCapabilities.IrradynRequiresDeferredHybrid = true;
+        featureCapabilities.Fxaa = true;
+        featureCapabilities.TemporalAntiAliasing = true;
+        featureCapabilities.Msaa2 = Msaa2Capability.load(std::memory_order_acquire);
+        featureCapabilities.Msaa4 = Msaa4Capability.load(std::memory_order_acquire);
+        featureCapabilities.DeferredMultisample = deferredAvailable;
+        featureCapabilities.DynamicResolution = true;
+        const auto featureSelection = ResolveRenderFeatureSelection(request.Environment, featureCapabilities);
+        const bool temporalAntiAliasing = featureSelection.EffectiveAntiAliasing == RenderAntiAliasingMode::Taa;
         SceneRenderPacket packet;
         packet.Scene = primaryContribution->Asset();
         packet.Camera = camera;
+        packet.UnjitteredProjection = camera.Projection;
+        const auto unjitteredViewProjection = Math::Multiply(camera.Projection, camera.View);
+        Vector2 temporalJitterNdc{};
+        if (temporalAntiAliasing)
+        {
+            temporalJitterNdc = TemporalAntiAliasing::TemporalJitterNdc(acceptedFrameId, surface.RequestedWidth,
+                                                                        surface.RequestedHeight);
+            packet.Camera.Projection =
+                TemporalAntiAliasing::ApplyTemporalProjectionJitter(packet.Camera.Projection, temporalJitterNdc);
+        }
+        const auto viewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
+        const MotionHistoryKey cameraHistoryKey{{}, {}, surfaceToken.Id, surfaceToken.Epoch};
+        const auto previousCamera = CameraMotionHistory.find(cameraHistoryKey);
+        packet.TemporalHistoryContinuous = previousCamera != CameraMotionHistory.end() && acceptedFrameId != 0U &&
+                                           previousCamera->second.Frame == acceptedFrameId - 1U;
+        packet.PreviousViewProjection = packet.TemporalHistoryContinuous
+                                            ? TemporalAntiAliasing::ApplyTemporalProjectionJitter(
+                                                  previousCamera->second.Transform, temporalJitterNdc)
+                                            : viewProjection;
         packet.Environment = request.Environment;
         packet.GlobalMaterialProperties = std::move(request.GlobalMaterialProperties);
         if (request.DrawSceneContributions)
@@ -684,11 +747,19 @@ namespace Keire::RenderBackend
                     skinSkeleton = animator->Skeleton();
                     poseGeneration = animator->PoseGeneration();
                 }
+                const auto world = transform->PresentationWorldMatrix();
+                const MotionHistoryKey historyKey{sceneAsset, entity.Id(), surfaceToken.Id, surfaceToken.Epoch};
+                const auto previous = MotionHistory.find(historyKey);
+                const auto previousWorld = previous != MotionHistory.end() && acceptedFrameId != 0U &&
+                                                   previous->second.Frame == acceptedFrameId - 1U
+                                               ? previous->second.Transform
+                                               : world;
                 packet.DrawItems.push_back({renderer->Mesh(),
                                             {renderer->Materials().begin(), renderer->Materials().end()},
                                             renderer->MaterialProperties(),
                                             {},
-                                            transform->PresentationWorldMatrix(),
+                                            world,
+                                            previousWorld,
                                             renderer->Tint(),
                                             entity.Id(),
                                             skin,
@@ -703,6 +774,15 @@ namespace Keire::RenderBackend
                 item.ContributionOrder = contributionOrder;
                 item.VisibilityClass = GpuVisibilityClassForDraw(static_cast<bool>(item.Skin), false);
                 item.PoseGeneration = poseGeneration;
+                if (!item.SkinPalette.empty())
+                {
+                    const auto previousSkin = SkinMotionHistory.find(historyKey);
+                    const bool consecutive = previousSkin != SkinMotionHistory.end() && acceptedFrameId != 0U &&
+                                             previousSkin->second.Frame == acceptedFrameId - 1U &&
+                                             previousSkin->second.Palette.size() == item.SkinPalette.size();
+                    item.PreviousSkinPalette = consecutive ? previousSkin->second.Palette : item.SkinPalette;
+                    item.PreviousPoseGeneration = consecutive ? previousSkin->second.PoseGeneration : poseGeneration;
+                }
             }
             for (const auto& particle : vfx.Particles())
             {
@@ -736,7 +816,7 @@ namespace Keire::RenderBackend
             std::scoped_lock lock(PublicationMutex);
             LastCapturedPrimaryScene = packet.Scene;
             LastCapturedPrimaryBakedLighting = packet.BakedLighting;
-            LastCapturedCamera = packet.Camera;
+            LastCapturedCamera = camera;
             LastCapturedEnvironment = packet.Environment;
             LastCapturedClearColor = camera.ClearColor;
             LastCapturedDrawContributionOrder.clear();
@@ -774,7 +854,83 @@ namespace Keire::RenderBackend
                                   {light.Position.X + radius, light.Position.Y + radius, light.Position.Z + radius}};
                               return !GeometryDetail::IntersectsFrustum(lightFrustum, bounds);
                           }));
-        CaptureRequests.push_back({std::move(packet), surfaceToken, camera.ClearColor});
+        struct MotionHistoryUpdate final
+        {
+            MotionHistoryKey Key;
+            MotionHistoryEntry Next;
+            std::optional<MotionHistoryEntry> Previous;
+        };
+        std::vector<MotionHistoryUpdate> motionUpdates;
+        motionUpdates.reserve(packet.DrawItems.size());
+        for (const auto& item : packet.DrawItems)
+        {
+            if (item.Entity)
+            {
+                const MotionHistoryKey key{item.Scene, item.Entity, surfaceToken.Id, surfaceToken.Epoch};
+                const auto previous = MotionHistory.find(key);
+                motionUpdates.push_back({key,
+                                         {item.World, acceptedFrameId},
+                                         previous != MotionHistory.end()
+                                             ? std::optional<MotionHistoryEntry>{previous->second}
+                                             : std::nullopt});
+            }
+        }
+        struct SkinMotionHistoryUpdate final
+        {
+            MotionHistoryKey Key;
+            SkinMotionHistoryEntry Next;
+            std::optional<SkinMotionHistoryEntry> Previous;
+        };
+        std::vector<SkinMotionHistoryUpdate> skinMotionUpdates;
+        skinMotionUpdates.reserve(packet.DrawItems.size());
+        for (const auto& item : packet.DrawItems)
+        {
+            if (!item.Entity || !item.Skin || item.SkinPalette.empty())
+                continue;
+            const MotionHistoryKey key{item.Scene, item.Entity, surfaceToken.Id, surfaceToken.Epoch};
+            const auto previous = SkinMotionHistory.find(key);
+            skinMotionUpdates.push_back({key,
+                                         {item.SkinPalette, item.PoseGeneration, acceptedFrameId},
+                                         previous != SkinMotionHistory.end()
+                                             ? std::optional<SkinMotionHistoryEntry>{previous->second}
+                                             : std::nullopt});
+        }
+        const auto previousCameraHistory = CameraMotionHistory.find(cameraHistoryKey);
+        const auto cameraRollback = previousCameraHistory != CameraMotionHistory.end()
+                                        ? std::optional<MotionHistoryEntry>{previousCameraHistory->second}
+                                        : std::nullopt;
+        try
+        {
+            CameraMotionHistory.insert_or_assign(cameraHistoryKey,
+                                                 MotionHistoryEntry{unjitteredViewProjection, acceptedFrameId});
+            for (const auto& update : motionUpdates)
+                MotionHistory.insert_or_assign(update.Key, update.Next);
+            for (const auto& update : skinMotionUpdates)
+                SkinMotionHistory.insert_or_assign(update.Key, update.Next);
+            CaptureRequests.push_back({std::move(packet), surfaceToken, camera.ClearColor});
+        }
+        catch (...)
+        {
+            if (cameraRollback)
+                CameraMotionHistory.find(cameraHistoryKey)->second = *cameraRollback;
+            else
+                CameraMotionHistory.erase(cameraHistoryKey);
+            for (auto update = motionUpdates.rbegin(); update != motionUpdates.rend(); ++update)
+            {
+                if (update->Previous)
+                    MotionHistory.find(update->Key)->second = *update->Previous;
+                else
+                    MotionHistory.erase(update->Key);
+            }
+            for (auto update = skinMotionUpdates.rbegin(); update != skinMotionUpdates.rend(); ++update)
+            {
+                if (update->Previous)
+                    SkinMotionHistory.find(update->Key)->second = *update->Previous;
+                else
+                    SkinMotionHistory.erase(update->Key);
+            }
+            throw;
+        }
         CpuPreparation.Accumulate(
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - preparationStarted).count());
     }
@@ -1009,6 +1165,8 @@ namespace Keire::RenderBackend
             return BlackDataTexture;
         case ShaderTextureSemantic::Roughness:
             return WhiteDataTexture;
+        case ShaderTextureSemantic::Specular:
+            return WhiteDataTexture;
         case ShaderTextureSemantic::Generic:
         default:
             return CheckerboardTexture;
@@ -1055,10 +1213,30 @@ namespace Keire::RenderBackend
                 {
                     if (!explicitSurface && shader->Definition().Blend)
                         surface.AlphaMode = MaterialAlphaMode::Blend;
-                    auto replacement = CreateAssetPipeline(shader->Definition(), samples, surface);
+                    std::vector<GpuShaderEntry::Pipeline> replacements;
+                    const auto roles = RuntimePassRoles(shader->Definition());
+                    if (roles.empty())
+                        throw std::runtime_error("Shader asset has no executable runtime material pass role.");
+                    replacements.reserve(roles.size());
+                    try
+                    {
+                        for (const auto role : roles)
+                        {
+                            const auto roleSamples = PipelineSamplesForRole(samples, role);
+                            replacements.push_back({roleSamples, surface.AlphaMode, surface.DoubleSided, role,
+                                                    CreateAssetPipeline(shader->Definition(), roleSamples, surface,
+                                                                        RuntimeMaterialPassName(role))});
+                        }
+                    }
+                    catch (...)
+                    {
+                        for (const auto& replacement : replacements)
+                            SDL_ReleaseGPUGraphicsPipeline(Device, replacement.Handle);
+                        throw;
+                    }
                     for (const auto& pipeline : entry.Pipelines)
                         Retire(pipeline.Handle);
-                    entry.Pipelines = {{samples, surface.AlphaMode, surface.DoubleSided, replacement}};
+                    entry.Pipelines = std::move(replacements);
                     entry.LastGood = shader;
                     entry.LoadedRevision = revision;
                 }
@@ -1074,22 +1252,42 @@ namespace Keire::RenderBackend
             return nullptr;
         if (!explicitSurface && entry.LastGood->Definition().Blend)
             surface.AlphaMode = MaterialAlphaMode::Blend;
-        auto pipeline = std::ranges::find_if(entry.Pipelines,
-                                             [&](const GpuShaderEntry::Pipeline& candidate)
-                                             {
-                                                 return candidate.Samples == samples &&
-                                                        candidate.AlphaMode == surface.AlphaMode &&
-                                                        candidate.DoubleSided == surface.DoubleSided;
-                                             });
-        if (pipeline == entry.Pipelines.end())
+        const auto roles = RuntimePassRoles(entry.LastGood->Definition());
+        std::vector<RuntimeMaterialPassRole> missingRoles;
+        for (const auto role : roles)
         {
+            const auto roleSamples = PipelineSamplesForRole(samples, role);
+            const auto pipeline = std::ranges::find_if(entry.Pipelines,
+                                                       [&](const GpuShaderEntry::Pipeline& candidate)
+                                                       {
+                                                           return candidate.Samples == roleSamples &&
+                                                                  candidate.AlphaMode == surface.AlphaMode &&
+                                                                  candidate.DoubleSided == surface.DoubleSided &&
+                                                                  candidate.PassRole == role;
+                                                       });
+            if (pipeline == entry.Pipelines.end())
+                missingRoles.push_back(role);
+        }
+        if (!missingRoles.empty())
+        {
+            std::vector<GpuShaderEntry::Pipeline> replacements;
             try
             {
-                entry.Pipelines.push_back({samples, surface.AlphaMode, surface.DoubleSided,
-                                           CreateAssetPipeline(entry.LastGood->Definition(), samples, surface)});
+                replacements.reserve(missingRoles.size());
+                for (const auto role : missingRoles)
+                {
+                    const auto roleSamples = PipelineSamplesForRole(samples, role);
+                    replacements.push_back({roleSamples, surface.AlphaMode, surface.DoubleSided, role,
+                                            CreateAssetPipeline(entry.LastGood->Definition(), roleSamples, surface,
+                                                                RuntimeMaterialPassName(role))});
+                }
+                entry.Pipelines.insert(entry.Pipelines.end(), std::make_move_iterator(replacements.begin()),
+                                       std::make_move_iterator(replacements.end()));
             }
             catch (const std::exception& error)
             {
+                for (const auto& replacement : replacements)
+                    SDL_ReleaseGPUGraphicsPipeline(Device, replacement.Handle);
                 ThrowIfDeviceLost("shader pipeline creation", error.what());
                 KEIRE_CORE_ERROR("Shader pipeline creation failed for id={}: {}", id.ToString(), error.what());
                 return nullptr;
@@ -1157,14 +1355,25 @@ namespace Keire::RenderBackend
         auto surface = material->Definition().Surface;
         if (material->Definition().SchemaVersion < 2 && shader->LastGood->Definition().Blend)
             surface.AlphaMode = MaterialAlphaMode::Blend;
-        const auto pipeline = std::ranges::find_if(shader->Pipelines,
-                                                   [&](const GpuShaderEntry::Pipeline& candidate)
-                                                   {
-                                                       return candidate.Samples == samples &&
-                                                              candidate.AlphaMode == surface.AlphaMode &&
-                                                              candidate.DoubleSided == surface.DoubleSided;
-                                                   });
-        if (pipeline == shader->Pipelines.end())
+        const auto pipelineForRole = [&](const RuntimeMaterialPassRole role) -> SDL_GPUGraphicsPipeline*
+        {
+            const auto roleSamples = PipelineSamplesForRole(samples, role);
+            const auto pipeline = std::ranges::find_if(shader->Pipelines,
+                                                       [&](const GpuShaderEntry::Pipeline& candidate)
+                                                       {
+                                                           return candidate.Samples == roleSamples &&
+                                                                  candidate.AlphaMode == surface.AlphaMode &&
+                                                                  candidate.DoubleSided == surface.DoubleSided &&
+                                                                  candidate.PassRole == role;
+                                                       });
+            return pipeline == shader->Pipelines.end() ? nullptr : pipeline->Handle;
+        };
+        const auto forwardRole = IsTransparentMaterial(surface.AlphaMode) ? RuntimeMaterialPassRole::ForwardTransparent
+                                                                          : RuntimeMaterialPassRole::ForwardOpaque;
+        auto* forwardPipeline = pipelineForRole(forwardRole);
+        if (!forwardPipeline)
+            forwardPipeline = pipelineForRole(RuntimeMaterialPassRole::Primary);
+        if (!forwardPipeline)
         {
             binding->LastAttemptedDependencyStamp = stamp;
             return finishDependencyCheck(binding->Binding.Pipeline ? &binding->Binding : nullptr);
@@ -1225,7 +1434,12 @@ namespace Keire::RenderBackend
         try
         {
             ResolvedAssetMaterial result;
-            result.Pipeline = pipeline->Handle;
+            result.Pipeline = forwardPipeline;
+            for (const auto role : RuntimePassRoles(shader->LastGood->Definition()))
+            {
+                if (auto* pipeline = pipelineForRole(role))
+                    result.PassPipelines.emplace(role, pipeline);
+            }
             result.Surface = surface;
             const auto& definition = shader->LastGood->Definition();
             result.Topology = definition.Topology;

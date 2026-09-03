@@ -56,11 +56,11 @@ staged `Keire.Managed.dll`, runs the verified .NET 10 SDK on a cancellable worke
 atomically publishes `Library/ScriptAssemblies/Active` only after a successful build. A failed or cancelled build
 leaves the previous active directory untouched.
 
-The application-owned patched Coral host discovers hostfxr through nethost and accepts an explicit bundled .NET root.
+The application-owned Coral fork discovers hostfxr through nethost and accepts an explicit bundled .NET root.
 Reload creates a candidate collectible context, loads `Keire.Managed` and gameplay DLLs, validates the Behaviour type
 registry, instantiates stable-ID script components through the normal scene lifecycle, migrates live Behaviour objects
 through the before/after reload hooks, retains the reload request's migration payload, and swaps only after preparation
-succeeds. The Kéire Coral patch scopes unload-time reflection caches and handle tracking to the retiring load context
+succeeds. The Kéire Coral fork scopes unload-time reflection caches and handle tracking to the retiring load context
 so an overlapping candidate remains valid. Failure or cancellation unloads the candidate and leaves the active
 generation intact. Cook builds runtime `.keireasm` definitions and
 publishes DLL/PDB/deps files under cooked content; standalone startup loads those DLLs from the manifest. Packaged games

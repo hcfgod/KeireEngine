@@ -66,6 +66,7 @@ namespace KeireHub::Detail
 #if defined(_WIN32)
     void SetInstallMutationTransientRenameFailuresForTesting(std::size_t failureCount) noexcept;
     void SetInstallMutationTransientDeleteFailuresForTesting(std::size_t failureCount) noexcept;
+    void SetInstallMutationTransientDirectoryNotEmptyFailuresForTesting(std::size_t failureCount) noexcept;
 #endif
 #endif
 } // namespace KeireHub::Detail

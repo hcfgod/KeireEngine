@@ -627,16 +627,21 @@ namespace Keire::RenderBackend
                 }
                 auto target =
                     std::ranges::find(RuntimeUiRenderTextureCache, asset, &RuntimeUiRenderTextureCacheEntry::Asset);
-                if (target == RuntimeUiRenderTextureCache.end() || target->DeviceGeneration != frame.DeviceGeneration ||
-                    !target->HasPublished || !target->Published)
+                const bool targetExists = target != RuntimeUiRenderTextureCache.end();
+                const auto bindingKind = ResolveRuntimeUiRenderTextureBinding(
+                    targetExists, targetExists && target->DeviceGeneration == frame.DeviceGeneration,
+                    targetExists && target->HasPublished, targetExists && target->Published);
+                if (bindingKind == RuntimeUiRenderTextureBindingKind::Published)
                 {
-                    throw std::logic_error(
-                        "Runtime UI Image references a logical RenderTexture with no published output. Submit its "
-                        "UIDocument target in the same frame before sampling it.");
+                    target->LastUsedFrame = frame.Id;
+                    PreparedRuntimeUiTextures.push_back(
+                        {asset, {target->Published, WhiteTexture.Sampler}, frame.Id, frame.DeviceGeneration});
                 }
-                target->LastUsedFrame = frame.Id;
-                PreparedRuntimeUiTextures.push_back(
-                    {asset, {target->Published, WhiteTexture.Sampler}, frame.Id, frame.DeviceGeneration});
+                else
+                {
+                    PreparedRuntimeUiTextures.push_back(
+                        {asset, {BlackTexture.Texture, BlackTexture.Sampler}, frame.Id, frame.DeviceGeneration});
+                }
             }
         };
         prepareCommands(frame.RuntimeUiCommands);
@@ -692,10 +697,21 @@ namespace Keire::RenderBackend
                     if (writer)
                         SDL_ReleaseGPUTexture(Device, writer);
             }
+            for (auto& slot : RuntimeUiUploadBuffers)
+                for (auto& buffer : slot)
+                    if (buffer.Buffer)
+                        SDL_ReleaseGPUBuffer(Device, buffer.Buffer);
+            for (auto& slot : RuntimeUiUploadTransfers)
+                for (auto* transfer : slot)
+                    if (transfer)
+                        SDL_ReleaseGPUTransferBuffer(Device, transfer);
         }
         RuntimeUiRenderTextureCache.clear();
         FrameRuntimeUiRenderTextureTargets.clear();
         PreparedRuntimeUiTextures.clear();
+        RuntimeUiUploadBuffers.clear();
+        RuntimeUiUploadTransfers.clear();
+        RuntimeUiUploadCounts.clear();
     }
 
 } // namespace Keire::RenderBackend

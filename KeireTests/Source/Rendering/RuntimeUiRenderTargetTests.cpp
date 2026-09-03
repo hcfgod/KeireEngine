@@ -373,6 +373,17 @@ TEST_CASE("Runtime UI render-texture packets are frame-owned and requalified aft
     CHECK(Keire::RenderBackend::RuntimeUiRenderTextureOwnershipValid(frame.RuntimeUiRenderTextures.front(), frame));
 }
 
+TEST_CASE("Runtime UI render-texture sampling uses a placeholder while its producer is streaming")
+{
+    using enum Keire::RenderBackend::RuntimeUiRenderTextureBindingKind;
+
+    CHECK(Keire::RenderBackend::ResolveRuntimeUiRenderTextureBinding(false, false, false, false) == Placeholder);
+    CHECK(Keire::RenderBackend::ResolveRuntimeUiRenderTextureBinding(true, false, true, true) == Placeholder);
+    CHECK(Keire::RenderBackend::ResolveRuntimeUiRenderTextureBinding(true, true, false, true) == Placeholder);
+    CHECK(Keire::RenderBackend::ResolveRuntimeUiRenderTextureBinding(true, true, true, false) == Placeholder);
+    CHECK(Keire::RenderBackend::ResolveRuntimeUiRenderTextureBinding(true, true, true, true) == Published);
+}
+
 TEST_CASE("Runtime UI render textures order producers before same-frame image consumers and reject cycles")
 {
     const auto first = Keire::AssetId::Generate();
@@ -639,6 +650,8 @@ TEST_CASE("Runtime UI renderer statistics are bounded value snapshots")
     CHECK(published.RuntimeUiRenderer.ImageAtlasEntries == 0U);
     CHECK(published.RuntimeUiRenderer.ImageAtlasBytes == 0U);
     CHECK(published.RuntimeUiRenderer.RepaintCpuMilliseconds == doctest::Approx(0.5F));
+    CHECK(published.RuntimeUiRenderer.UploadBufferPoolSize == 0U);
+    CHECK(published.RuntimeUiRenderer.UploadBufferReallocations == 0U);
 }
 
 TEST_CASE("World runtime UI submissions are root-filtered and accepted into bounded headless frame packets")

@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop -Scope Local -Force
 
 function Get-KeireWorkspaceIdentity {
     param([Parameter(Mandatory = $true)][string]$RepositoryRoot)

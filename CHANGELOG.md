@@ -5,6 +5,116 @@ versions.
 
 ## Unreleased
 
+- Made anti-aliasing independent of render-path and GI selection. Forward+ now records the motion-vector prepass and
+  owns temporal history for TAA; velocity excludes projection jitter and remains live through tone mapping, fixing the
+  visible Halton-pattern screen shake. Deferred Hybrid now supports hardware 2x/4x MSAA by retaining single-sample
+  depth/GBuffer/DBuffer/Irradyn data while shading final geometry through a multisampled forward coverage subpass and
+  resolving before GI. Materials reuse single-sample data-pass pipelines, path changes retain matching depth
+  attachments, and the editor reports these combinations as supported when the GPU exposes the requested sample count.
+
+- Fixed the Windows project batch launcher's quick Editor and Hub Dist staging options by running their nested package
+  scripts in fresh Windows PowerShell command scopes that own the shared workspace lock and import hashing and JSON
+  commands within that scope. The child process now prefers its own built-in module directory over an inherited
+  PowerShell 7 module path and restores the caller environment afterward.
+
+- Fixed GPU occlusion's near-viewport-edge classification so wholly off-screen bounds are rejected instead of being
+  reported as conservatively visible, clarified that a visible result means "not safely rejected" rather than
+  guaranteed pixels, and stopped normal Automatic profitability standby from presenting as a renderer failure. The
+  Profiler and Render Graph now follow the Game camera during Play, identify their camera-local visibility source, and
+  label renderer submission and CPU-visibility totals as all-surface aggregates.
+  Repeatedly unprofitable Automatic workloads now use bounded adaptive retries instead of cycling every 60 frames.
+  TAA now treats unwritten background and forward-tail motion as zero and excludes projection jitter from camera
+  velocity, eliminating static-scene crawl where no geometry velocity was written. Runtime UI vertex uploads now reuse frame-slot-owned buffers across screen,
+  camera, world, and render-texture targets, removing the per-frame GPU allocation churn that could exhaust D3D12
+  resources during long editor sessions.
+- Replaced Irradyn's inline deferred-lighting sample loop with a reduced-resolution trace/history pass and a
+  depth/normal-aware bilateral composite. Fully lit scene color now carries local lights, shadows, cookies, decals,
+  environment/baked lighting, and emission into GI; a bounded incremental scene-card cache supplies conservative WPO
+  surface bounds and low-frequency transparent, hair, volume, and CPU/GPU VFX participation. Per-slot Irradyn history
+  follows fence-safe surface publication and is invalidated across discontinuity, resize, path change, and recovery.
+- Moved Kéire's .NET 10 hosting, collectible-load-context, reflection-identity, managed-reference, pointer-marshalling,
+  and macOS arm64 fixes into the `hcfgod/Coral` fork. Dependency setup now consumes the immutable fork commit directly
+  and no longer hashes, applies, or stages a private patch stack; managed and native Coral regression suites cover the
+  forked C# interop behavior.
+- Fixed Window menu panel entries so selecting a checked panel hides it, while reopening a hidden panel also focuses
+  it.
+- Runtime UI images now use a black placeholder while their logical RenderTexture producer is still streaming, rather
+  than terminating the editor during an otherwise valid asset-catalog refresh.
+
+- Directional Light shadow-resolution hints now scale the project cascade-map base instead of being ignored, Soft
+  shadows use a tighter weighted footprint to preserve animated silhouettes, and the inspector explains realtime,
+  mixed, and baked shadow behavior.
+
+- Reused frame-slot-owned GPU skin-palette buffers and upload staging across animated frames, removing per-frame GPU
+  allocation churn from current- and previous-pose compute skinning while retaining fence-safe motion-vector history.
+- Fixed `Debug.DrawLine` in live managed Play sessions by routing it through the production native runtime bridge
+  instead of the retired test-only `RuntimeBridge`, preventing the first line submission from disabling the script.
+- Fixed Editor Play startup so the primary runtime session is registered with `SceneRuntimeWorld` before managed
+  `Awake` and `OnEnable` callbacks run. Active-scene lookups such as `SceneManager.FindByName` now see the cloned Play
+  scene during those callbacks instead of incorrectly reporting that authored entities are missing.
+- Added production TAA with an eight-sample jitter cycle, frame-owned per-surface history,
+  motion-vector reprojection, neighborhood clamping, transactional history publication, and invalidation across
+  discontinuity, resize, render-path changes, and device recovery. Shadow cascade fitting remains unjittered, both
+  Forward+ and Deferred Hybrid execute the same temporal resolve contract, and reduced render scale remains honestly
+  identified as spatial upscaling rather than TAAU.
+- Fixed historical Material Graph and flat-material metadata after their extensions and importer names were reused by
+  the material overhaul. Importer selection now resolves one globally unique compatible previous-name owner and rejects
+  ambiguous matches. The built-in Forward+ fallback also consumes the environment SH9 diffuse term, preventing faces
+  outside direct-light coverage from going black while Deferred Hybrid receives the same environment lighting.
+- Made render resolution settings operational end to end. Static Render Scale now sizes Scene, Game, camera-preview,
+  and standalone-player 3D surfaces while presentation remains at the authored viewport size. Automatic dynamic
+  resolution uses completed GPU timing or queue-latency evidence, bounded hysteresis, and spatial presentation
+  upscaling, so it works independently of AA mode instead of being coupled to temporal AA. Cooked player
+  manifests now preserve the complete render environment, path, AA, GI/Irradyn, occlusion, resolution, and shadow
+  contract. The optional duplicate Scene camera preview starts disabled, and profiler attribution separates runtime UI
+  recording from tone mapping.
+- Fixed live render-setting application in the editor and runtime. Renderer-owned FXAA/MSAA capabilities now reach
+  Project Settings, view owners switch their surface sample contract before UI, presentation, or readback recording,
+  and single-sample Deferred Hybrid surfaces can activate Irradyn instead of remaining on the viewport's former fixed
+  MSAA Forward+ path. FXAA now runs in the tone-map pass, unavailable hardware sample counts report the exact effective
+  fallback, and weighted 5x5 tent filtering improves directional and local soft-shadow silhouettes.
+- Fixed the production validation blockers found in the packaged editor. Deferred lighting now stays within SDL_GPU's
+  sixteen-sampler graphics contract by using an analytic integrated BRDF and an exactly representable floating-point
+  GBuffer selection payload, allowing the complete D3D12 and Vulkan pipeline transaction to publish Deferred Hybrid
+  and Irradyn. Keep-last-good imports merge every successful source into the active catalog even when a sibling source
+  fails, animation-only model files automatically publish their skeleton/rig/clip assets, lighting bakes publish the
+  scene and generated artifacts as one targeted transaction, and imported materials prefer the starter OpenPBR graph's
+  generated shader and declared PBR texture properties. The Directional Light Inspector now exposes contact shadows,
+  resolution, bake mode, indirect intensity, and typed cookie transform controls. Importer registrations now carry
+  extension- and type-qualified previous names, so projects created before the Material/Material Graph importer rename
+  continue to import without confusing the two historically overlapping identities.
+- Completed Deferred Hybrid spatial-lighting parity. A fourth floating-point GBuffer payload carries lightmap UV/layers,
+  mixed-shadow-mask layers, frame-owned probe selection, and additive-scene identity into the fullscreen resolve. The
+  resolve now evaluates baked directional lightmaps, SH9 probe volumes, two box-projected reflection probes, environment
+  IBL, eight-channel mixed-light masks, packed directional/point/spot cookies, and screen-space contact shadows while
+  preserving directional cascades, local shadow atlases, DBuffer decals, and contribution-local light lists. CPU
+  spatial selection remains deterministic when GPU classification is unavailable.
+- Advanced Shader Graph generation to version 10 and added deforming velocity. Depth/velocity lanes consume previous
+  skinned positions from paired CPU/GPU skinning outputs, evaluate previous-frame world-position offset including Time,
+  and combine those results with bounded per-surface previous object/camera history. First, skipped, recreated, and
+  discontinuous frames fail to zero motion instead of reading stale deformation data.
+- Added a live, capability-selected Deferred Hybrid path. Portable built-in GBuffer and
+  fullscreen lighting shaders compile to DXIL, SPIR-V, and MSL; Shader Graph materials compile exact depth/velocity,
+  standard-GBuffer, and forward lanes; and command recording routes unsupported opaque materials through the forward
+  tail without drawing deferred-capable materials twice. Exact MRT/depth probing publishes `DeferredHybrid` only after
+  the complete pipeline transaction succeeds, while unsupported devices, missing resources, shutdown, and device
+  recovery retain the deterministic Forward+ fallback. Deferred MSAA keeps those data lanes single-sample and shades
+  final coverage through the multisampled forward lane. Project Settings now reports the active renderer capability.
+- Upgraded cooked shader assets to schema 3 with an exact pass-role/backend lane identity, bounded per-stage payloads,
+  and complete per-role target cooking. Schema-1/2 assets migrate in memory to the `primary` role, the shader importer
+  is version 7, pass defines are unique and cannot collide with global defines, and renderer pipeline creation now fails
+  closed when the requested material pass is absent instead of selecting the first matching backend format.
+- Replaced the static scene frame graph's magic transient compatibility key with typed texture format, usage,
+  multisample, and relative-size descriptors. The allocator now derives alias compatibility, unions physical usages,
+  validates invalid depth/color combinations, exposes schema-2 inspection metadata, and materializes exact SDL_GPU
+  textures. Added a separately compiled 22-pass Deferred Hybrid graph covering depth/velocity, standard and extended
+  GBuffer passes, DBuffer decals, deferred lighting, and the forward-only opaque tail; runtime selection now activates
+  it only when the complete backend and surface contract is available.
+- Added the production renderer contract milestone: rendering settings schema 5 now supports Automatic path selection,
+  None/FXAA/TAA/TAAU/MSAA 2x/4x requests, bounded static/dynamic resolution intent, and explicit capability fallbacks;
+  program artifact schema 2 carries digest-verified pass/stage/backend binaries and reflection; shader compile manifest
+  schema 2 uses exact D3D12/Vulkan/Metal targets and domain-separated canonical-CBOR work keys; and LightingSet schema
+  2 declares baked indirect/direct contribution ownership with in-memory schema-1 migration.
 - Overhauled materials around one canonical `.keirematerial` schema-7 source that owns its OpenPBR surface program,
   domain, shading model, simple/closure/layer authoring mode, bounded closure budget, parameters, and render state.
   Materials now compile through a renderer-neutral reflected program artifact and explicit material-pass contract,

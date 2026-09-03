@@ -40,13 +40,13 @@ target_directory="$root/Build/Bin/$configuration-$system-$output_architecture/$t
 
 coral_configuration=Debug
 [[ "$configuration" == Release || "$configuration" == Profile || "$configuration" == Dist ]] && coral_configuration=Release
-coral_directory="$root/Build/Dependencies/coral-patched/Build/$coral_configuration"
+coral_directory="$root/Build/Dependencies/coral/Build/$coral_configuration"
 managed_directory="$target_directory/Managed"
 dotnet_root="$root/Build/Dependencies/dotnet-sdk"
 files=(Coral.Managed.dll Coral.Managed.deps.json Coral.Managed.runtimeconfig.json)
 for file in "${files[@]}"; do
   [[ -f "$coral_directory/$file" ]] || {
-    printf 'The patched Coral runtime output is missing: %s\n' "$file" >&2
+    printf 'The Coral runtime output is missing: %s\n' "$file" >&2
     exit 1
   }
 done

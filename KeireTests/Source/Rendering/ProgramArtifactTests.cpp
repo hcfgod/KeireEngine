@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <ranges>
 #include <stdexcept>
 #include <vector>
@@ -113,4 +114,35 @@ TEST_CASE("material source contracts reject incompatible domains and closure bou
     auto material = Keire::CreateOpenPbrMaterial();
     material.MaximumClosures = Keire::MaximumMaterialClosureCount + 1;
     CHECK_THROWS_AS(Keire::ValidateMaterialGraph(material), std::invalid_argument);
+}
+
+TEST_CASE("cooked material programs require digest-verified complete pass stage backend lanes")
+{
+    auto artifact = Keire::CompileMaterialProgram(Keire::CreateOpenPbrMaterial());
+    REQUIRE(artifact.Succeeded());
+    REQUIRE(artifact.Program.Variants.size() == 1);
+    constexpr std::string_view digest = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+    const std::vector<std::byte> bytes{std::byte{0x61}, std::byte{0x62}, std::byte{0x63}};
+    for (const auto& pass : artifact.Passes)
+    {
+        for (const auto stage : {Keire::ProgramStage::Vertex, Keire::ProgramStage::Fragment})
+        {
+            Keire::ProgramReflection reflection;
+            const auto entryPoint = stage == Keire::ProgramStage::Vertex ? "VSMain" : "PSMain";
+            reflection.EntryPoints.push_back({stage, entryPoint});
+            artifact.Program.Variants.front().Binaries.push_back({std::string(Keire::MaterialPassName(pass.Pass)),
+                                                                  Keire::ProgramBackend::D3D12,
+                                                                  Keire::ProgramBinaryFormat::Dxil, stage, entryPoint,
+                                                                  std::string(digest), bytes, std::move(reflection)});
+        }
+    }
+    CHECK_NOTHROW(Keire::ValidateCookedMaterialProgramArtifact(artifact));
+
+    auto corrupted = artifact;
+    corrupted.Program.Variants.front().Binaries.front().Bytes.front() = std::byte{0x7a};
+    CHECK_THROWS_AS(Keire::ValidateCookedMaterialProgramArtifact(corrupted), std::invalid_argument);
+
+    auto incomplete = artifact;
+    incomplete.Program.Variants.front().Binaries.pop_back();
+    CHECK_THROWS_AS(Keire::ValidateCookedMaterialProgramArtifact(incomplete), std::invalid_argument);
 }

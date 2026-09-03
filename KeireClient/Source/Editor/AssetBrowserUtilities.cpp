@@ -299,6 +299,8 @@ namespace KeireEditor
             return "Legacy Material";
         if (extension == ".keireshadergraph")
             return "Shader Graph";
+        if (extension == ".keireshadergraphinstance")
+            return "Legacy Shader Graph Instance";
         if (extension == Keire::ShaderSubgraphAssetSourceExtension)
             return "Shader Subgraph";
         if (extension == Keire::MaterialFunctionAssetSourceExtension)

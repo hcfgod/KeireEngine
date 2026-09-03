@@ -229,6 +229,7 @@ namespace
             Keire::RenderEnvironmentSettings environment;
             environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             environment.AmbientIntensity = 1.0F;
+            environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
             Owner().Renderer()->Submit({m_Scene, m_View, false, environment, {}, m_Snapshot});
         }
 

@@ -216,9 +216,8 @@ namespace Keire::RenderBackend
                 {
                     if (!RuntimeUiPipeline)
                         RuntimeUiPipeline = CreateRuntimeUiPipeline();
-                    runtimeUiBuffer = UploadBuffer(commands, std::as_bytes(std::span(runtimeUiGeometry.Vertices)),
-                                                   SDL_GPU_BUFFERUSAGE_VERTEX);
-                    FrameTransientBuffers.push_back(runtimeUiBuffer);
+                    runtimeUiBuffer = UploadRuntimeUiBuffer(
+                        commands, std::as_bytes(std::span(runtimeUiGeometry.Vertices)), "screen overlay");
                 }
                 AccumulateRuntimeUiRepaint(Statistics, runtimeUiRepaintStarted);
             }
@@ -306,17 +305,28 @@ namespace Keire::RenderBackend
                 ++Statistics.Passes;
             }
         }
-        Statistics.UiRecordingMilliseconds =
+        Statistics.UiRecordingMilliseconds +=
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - uiRecordingStarted).count();
     }
 
     void RenderSharedState::RecordRuntimeUiWorldPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface)
     {
-        auto* colorTarget = surface.ActiveWorkset().MultisampleHdrColor ? surface.ActiveWorkset().MultisampleHdrColor
-                                                                        : surface.ActiveWorkset().HdrColor;
+        // Deferred multisample resolves before Irradyn runs. World panels must then load the single-sample HDR result
+        // so they preserve the Irradyn composite instead of resolving stale pre-Irradyn multisample color over it.
+        const bool deferredMultisample = surface.ActiveFeatureSelection.EffectivePath == RenderPath::DeferredHybrid &&
+                                         surface.ActiveWorkset().MultisampleHdrColor;
+        auto* colorTarget = deferredMultisample ? surface.ActiveWorkset().HdrColor
+                                                : (surface.ActiveWorkset().MultisampleHdrColor
+                                                       ? surface.ActiveWorkset().MultisampleHdrColor
+                                                       : surface.ActiveWorkset().HdrColor);
+        auto* const panelDepth =
+            deferredMultisample ? surface.ActiveWorkset().Depth
+                                : (surface.ActiveWorkset().MultisampleDepth ? surface.ActiveWorkset().MultisampleDepth
+                                                                            : surface.ActiveWorkset().Depth);
         if (!ActiveFrame || !commands || !colorTarget)
             return;
-        auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
+        auto& pipelines =
+            PipelinesFor(deferredMultisample ? SDL_GPU_SAMPLECOUNT_1 : ToSdlSampleCount(surface.ActualSamples));
         struct PreparedWorldPanel final
         {
             const CapturedRuntimeUiWorldPanel* Panel = nullptr;
@@ -333,7 +343,7 @@ namespace Keire::RenderBackend
                 throw std::logic_error(
                     "World-surface runtime UI packet does not belong to the active frame slot and device generation.");
             }
-            if (panel.DepthTest && !surface.ActiveWorkset().Depth)
+            if (panel.DepthTest && !panelDepth)
                 throw std::logic_error("Depth-tested world-surface runtime UI lost its surface depth attachment.");
             auto geometry = Keire::RenderBackend::BuildRuntimeUiWorldGeometry(panel, surface.Width, surface.Height);
             if (!geometry.Vertices.empty())
@@ -362,20 +372,20 @@ namespace Keire::RenderBackend
                     pipelines.RuntimeUiWorldOverlay = pipeline;
             }
             auto* buffer =
-                UploadBuffer(commands, std::as_bytes(std::span(geometry.Vertices)), SDL_GPU_BUFFERUSAGE_VERTEX);
-            FrameTransientBuffers.push_back(buffer);
+                UploadRuntimeUiBuffer(commands, std::as_bytes(std::span(geometry.Vertices)), "world surface");
 
             SDL_GPUColorTargetInfo color{};
             color.texture = colorTarget;
             color.load_op = SDL_GPU_LOADOP_LOAD;
-            const bool resolve = surface.ActiveWorkset().MultisampleHdrColor && panelIndex + 1U == prepared.size();
+            const bool resolve = !deferredMultisample && surface.ActiveWorkset().MultisampleHdrColor &&
+                                 panelIndex + 1U == prepared.size();
             color.store_op = resolve ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
             color.resolve_texture = resolve ? surface.ActiveWorkset().HdrColor : nullptr;
             SDL_GPUDepthStencilTargetInfo depth{};
             SDL_GPUDepthStencilTargetInfo* depthPointer = nullptr;
             if (panel.DepthTest)
             {
-                depth.texture = surface.ActiveWorkset().Depth;
+                depth.texture = panelDepth;
                 depth.load_op = SDL_GPU_LOADOP_LOAD;
                 depth.store_op = SDL_GPU_STOREOP_STORE;
                 depth.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
@@ -465,9 +475,8 @@ namespace Keire::RenderBackend
             SDL_GPUBuffer* buffer = nullptr;
             if (!geometry.Vertices.empty())
             {
-                buffer = UploadBuffer(renderCommands, std::as_bytes(std::span(geometry.Vertices)),
-                                      SDL_GPU_BUFFERUSAGE_VERTEX);
-                FrameTransientBuffers.push_back(buffer);
+                buffer = UploadRuntimeUiBuffer(renderCommands, std::as_bytes(std::span(geometry.Vertices)),
+                                               "render texture");
             }
 
             SDL_GPUColorTargetInfo color{};
@@ -517,7 +526,8 @@ namespace Keire::RenderBackend
     {
         if (!ValidColor(Specification.SwapchainClearColor))
             throw std::invalid_argument("Render swapchain clear color must contain finite values in 0..1.");
-        SceneFrameGraph = BuildStaticSceneFrameGraph();
+        SceneFrameGraph = BuildStaticSceneFrameGraph(RenderPath::ForwardPlus);
+        DeferredSceneFrameGraph = BuildStaticSceneFrameGraph(RenderPath::DeferredHybrid);
         if (Specification.MaximumFramesInFlight < 1 || Specification.MaximumFramesInFlight > 3)
             throw std::invalid_argument("MaximumFramesInFlight must be in the range 1..3.");
         if (Specification.DeviceLossRecoveryAttempts > 3)
@@ -773,7 +783,8 @@ namespace Keire::RenderBackend
 
     std::shared_ptr<RenderSurfaceState>
     RenderSharedState::CreateSurfaceEpoch(const std::shared_ptr<RenderSurfaceState>& previous,
-                                          const std::uint32_t width, const std::uint32_t height)
+                                          const std::uint32_t width, const std::uint32_t height,
+                                          const RenderSampleCount sampleCount)
     {
         RequireOwner("CreateSurfaceEpoch");
         if (!previous)
@@ -783,6 +794,7 @@ namespace Keire::RenderBackend
         replacement->Specification = previous->Specification;
         replacement->Specification.Width = width;
         replacement->Specification.Height = height;
+        replacement->Specification.SampleCount = sampleCount;
         replacement->Id = previous->Id;
         replacement->Epoch = previous->Epoch + 1U;
         replacement->RequestedWidth = width;
@@ -885,6 +897,8 @@ namespace Keire::RenderBackend
                 SDL_ReleaseGPUTexture(Device, workset.DirectionalShadow);
             if (workset.Depth)
                 SDL_ReleaseGPUTexture(Device, workset.Depth);
+            if (workset.MultisampleDepth)
+                SDL_ReleaseGPUTexture(Device, workset.MultisampleDepth);
             if (workset.SampledDepth)
                 SDL_ReleaseGPUTexture(Device, workset.SampledDepth);
             if (workset.MultisampleHdrColor)
@@ -894,6 +908,12 @@ namespace Keire::RenderBackend
                     SDL_ReleaseGPUTexture(Device, texture);
         }
         for (auto* texture : resources.FinalOutputs)
+            if (texture)
+                SDL_ReleaseGPUTexture(Device, texture);
+        for (auto* texture : resources.TemporalHistories)
+            if (texture)
+                SDL_ReleaseGPUTexture(Device, texture);
+        for (auto* texture : resources.IrradynHistories)
             if (texture)
                 SDL_ReleaseGPUTexture(Device, texture);
         resources = {};
@@ -1047,7 +1067,8 @@ namespace Keire::RenderBackend
     {
         SDL_GPUShaderCreateInfo information{};
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        information.num_samplers = vertex ? 0U : 1U;
+        information.num_samplers = vertex ? 0U : 3U;
+        information.num_uniform_buffers = vertex ? 0U : 1U;
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)
         {
@@ -1141,7 +1162,7 @@ namespace Keire::RenderBackend
 
             SDL_GPUColorTargetDescription color{};
             color.format = targetFormat != SDL_GPU_TEXTUREFORMAT_INVALID ? targetFormat
-                           : worldSurface ? SceneColorFormat
+                           : worldSurface                                ? SceneColorFormat
                                           : SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow);
             color.blend_state.enable_blend = true;
             color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;

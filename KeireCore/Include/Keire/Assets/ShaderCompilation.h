@@ -2,6 +2,7 @@
 
 #include "Keire/Api.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -9,8 +10,8 @@
 
 namespace Keire
 {
-    inline constexpr std::uint32_t ShaderCompileManifestSchemaVersion = 1;
-    inline constexpr std::uint32_t ShaderCompileProgramAbiVersion = 1;
+    inline constexpr std::uint32_t ShaderCompileManifestSchemaVersion = 2;
+    inline constexpr std::uint32_t ShaderCompileProgramAbiVersion = 2;
 
     enum class ShaderCompilationPolicy : std::uint8_t
     {
@@ -50,7 +51,24 @@ namespace Keire
     {
         Dxil,
         SpirV,
-        Msl
+        Msl,
+        Metallib
+    };
+
+    enum class ShaderCompileBackend : std::uint8_t
+    {
+        D3D12,
+        Vulkan,
+        Metal,
+        /// Source-compatible authoring default. Canonicalization always resolves this to an exact backend.
+        Automatic
+    };
+
+    enum class ShaderCompileOptimization : std::uint8_t
+    {
+        Debug,
+        Development,
+        Shipping
     };
 
     struct ShaderCompileTarget
@@ -58,6 +76,7 @@ namespace Keire
         ShaderCompilePlatform Platform = ShaderCompilePlatform::Windows;
         ShaderCompileArchitecture Architecture = ShaderCompileArchitecture::X86_64;
         ShaderCompileBinaryFormat Format = ShaderCompileBinaryFormat::Dxil;
+        ShaderCompileBackend Backend = ShaderCompileBackend::Automatic;
 
         bool operator==(const ShaderCompileTarget&) const = default;
     };
@@ -91,6 +110,9 @@ namespace Keire
         std::vector<ShaderCompileDependency> Dependencies;
         bool WarningsAsErrors = false;
         bool DebugInformation = false;
+        /// Stable logical role such as "primary", "depthVelocity", or "deferredGBufferStandard".
+        std::string PassRole = "primary";
+        ShaderCompileOptimization Optimization = ShaderCompileOptimization::Development;
 
         bool operator==(const ShaderCompileManifest&) const = default;
     };
@@ -107,7 +129,10 @@ namespace Keire
     KEIRE_API void ValidateShaderCompileManifest(const ShaderCompileManifest& manifest);
     KEIRE_API void ValidateShaderCompilationRequest(const ShaderCompilationRequest& request);
     [[nodiscard]] KEIRE_API ShaderCompileManifest CanonicalizeShaderCompileManifest(ShaderCompileManifest manifest);
+    /// Human-readable canonical JSON for diagnostics. Work keys are derived from the canonical CBOR encoding below.
     [[nodiscard]] KEIRE_API std::string EncodeShaderCompileManifest(const ShaderCompileManifest& manifest);
+    [[nodiscard]] KEIRE_API std::vector<std::byte>
+    EncodeShaderCompileManifestCbor(const ShaderCompileManifest& manifest);
     [[nodiscard]] KEIRE_API std::string ShaderCompileWorkKey(const ShaderCompileManifest& manifest);
     [[nodiscard]] KEIRE_API bool IsShaderCompileWorkKey(std::string_view value) noexcept;
 } // namespace Keire

@@ -637,7 +637,7 @@ namespace Keire
         {
             if (!node.Id || !identities.insert(node.Id).second || node.Kind > ShaderGraphNodeKind::FuzzSlab ||
                 node.ValueType > ShaderGraphValueType::Bsdf || node.Name.size() > MaximumGraphText ||
-                node.TextureSemantic > ShaderTextureSemantic::Roughness || node.Pins.empty() ||
+                node.TextureSemantic > ShaderTextureSemantic::Specular || node.Pins.empty() ||
                 node.Pins.size() > MaximumGraphPinsPerNode || !Math::IsFinite(node.EditorPosition) ||
                 !ValueMatchesType(node.Value, node.ValueType))
                 throw std::invalid_argument("Shader Graph node identity, type, position, or pins are invalid.");

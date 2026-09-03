@@ -9,6 +9,21 @@
 
 namespace Keire::RenderBackend
 {
+    enum class RuntimeUiRenderTextureBindingKind : std::uint8_t
+    {
+        Published,
+        Placeholder
+    };
+
+    [[nodiscard]] constexpr RuntimeUiRenderTextureBindingKind
+    ResolveRuntimeUiRenderTextureBinding(const bool cacheEntryExists, const bool deviceGenerationMatches,
+                                         const bool hasPublishedOutput, const bool publishedTextureExists) noexcept
+    {
+        return cacheEntryExists && deviceGenerationMatches && hasPublishedOutput && publishedTextureExists
+                   ? RuntimeUiRenderTextureBindingKind::Published
+                   : RuntimeUiRenderTextureBindingKind::Placeholder;
+    }
+
     struct PreparedRuntimeUiTextureBinding final
     {
         AssetId Asset;

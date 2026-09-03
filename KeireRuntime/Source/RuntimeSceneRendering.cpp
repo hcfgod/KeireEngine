@@ -18,6 +18,10 @@ namespace KeireRuntime
         if (!renderer || !world || !view)
             return;
 
+        const auto featureSelection =
+            Keire::ResolveRenderFeatureSelection(environment, renderer->FeatureCapabilities());
+        view->Surface()->RequestSampleCount(Keire::ResolveRenderSurfaceSampleCount(featureSelection));
+
         for (const auto& session : world->Sessions())
         {
             if (const auto presentation =

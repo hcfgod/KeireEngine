@@ -17,7 +17,7 @@ license_names=(
     nlohmann-json-LICENSE.MIT.txt dear-imgui-LICENSE.txt zstandard-LICENSE.txt entt-LICENSE.txt glm-COPYING.txt
 )
 license_paths=(
-    LICENSE.txt THIRD_PARTY_NOTICES.md Build/Dependencies/coral-patched/LICENSE
+    LICENSE.txt THIRD_PARTY_NOTICES.md Build/Dependencies/coral/LICENSE
     Build/Dependencies/dotnet-sdk/LICENSE.txt Build/Dependencies/dotnet-sdk/ThirdPartyNotices.txt
     "Build/Dependencies/$fixture_system-x86_64-clang/Release/install/licenses/SDL3/LICENSE.txt"
     Vendor/assimp/LICENSE Vendor/assimp/contrib/zlib/LICENSE Vendor/stb/LICENSE
@@ -101,7 +101,7 @@ grep -q 'regular non-symbolic file' "$fixture/error"
 rm -f -- "$source_root/Managed/Keire.Managed.dll"
 mv "$fixture/Keire.Managed.dll" "$source_root/Managed/Keire.Managed.dll"
 
-rm -f -- "$license_source/Build/Dependencies/coral-patched/LICENSE"
+rm -f -- "$license_source/Build/Dependencies/coral/LICENSE"
 if KEIRE_PLAYER_SUPPORT_RUNTIME_SOURCE="$source_root" \
     KEIRE_PLAYER_SUPPORT_RUNTIME_DESTINATION="$fixture/license-stage" \
     bash "$root/Scripts/Unix/player-support.sh" 2> "$fixture/error"; then
@@ -109,7 +109,7 @@ if KEIRE_PLAYER_SUPPORT_RUNTIME_SOURCE="$source_root" \
     exit 1
 fi
 grep -q 'regular non-symbolic file' "$fixture/error"
-printf restored > "$license_source/Build/Dependencies/coral-patched/LICENSE"
+printf restored > "$license_source/Build/Dependencies/coral/LICENSE"
 
 publication="$fixture/publication"
 printf first > "$fixture/first.keireplayersupport"

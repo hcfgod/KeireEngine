@@ -16,6 +16,7 @@ namespace KeireEditor
     {
         Unavailable,
         Disabled,
+        Standby,
         WaitingForReadback,
         Active,
         Fallback
@@ -33,6 +34,26 @@ namespace KeireEditor
         bool ReadbackFresh = false;
         bool Warning = false;
     };
+
+    struct GpuOcclusionPanelSurface final
+    {
+        std::optional<Keire::GpuOcclusionSurfaceDiagnostics> Diagnostics;
+        std::string_view Label = "All render surfaces aggregate";
+    };
+
+    [[nodiscard]] inline GpuOcclusionPanelSurface
+    SelectGpuOcclusionPanelSurface(const bool playActive,
+                                   const std::optional<Keire::GpuOcclusionSurfaceDiagnostics>& gameSurface,
+                                   const std::optional<Keire::GpuOcclusionSurfaceDiagnostics>& sceneSurface)
+    {
+        if (playActive && gameSurface)
+            return {*gameSurface, "Game camera (Play)"};
+        if (sceneSurface)
+            return {*sceneSurface, "Scene editor camera"};
+        if (gameSurface)
+            return {*gameSurface, "Game camera (Edit)"};
+        return {};
+    }
 
     [[nodiscard]] inline constexpr std::string_view GpuOcclusionModeName(const Keire::GpuOcclusionMode mode) noexcept
     {
@@ -160,11 +181,11 @@ namespace KeireEditor
 
         if (!statistics.GpuOcclusionEnabled)
         {
-            result.State = GpuOcclusionDiagnosticState::Disabled;
-            result.Status = "GPU occlusion disabled";
+            result.State = GpuOcclusionDiagnosticState::Standby;
+            result.Status = "GPU occlusion inactive for the last completed frame";
             result.Visibility = "Direct draws remain active";
             result.Pyramid = "HZB idle";
-            result.Readback = "Visibility readback unavailable while GPU occlusion is disabled";
+            result.Readback = "Visibility readback unavailable while GPU occlusion is inactive";
             result.Recording = "Occlusion recording 0.0 ms";
             result.Warning = statistics.GpuOcclusionFallbackActive;
             return result;
@@ -180,8 +201,8 @@ namespace KeireEditor
                 : static_cast<std::uint32_t>(static_cast<std::uint64_t>(statistics.GpuOcclusionCulled) * 100U /
                                              statistics.GpuOcclusionCandidates);
         result.Visibility = std::to_string(statistics.GpuOcclusionCandidates) + " candidates / " +
-                            std::to_string(statistics.GpuOcclusionVisible) + " visible / " +
-                            std::to_string(statistics.GpuOcclusionCulled) + " culled (" +
+                            std::to_string(statistics.GpuOcclusionVisible) + " conservatively visible / " +
+                            std::to_string(statistics.GpuOcclusionCulled) + " occlusion-rejected (" +
                             std::to_string(culledPercent) + "%)";
         result.Pyramid = "Last completed frame: " + std::to_string(statistics.GpuOcclusionPyramidMipCount) +
                          " HZB mips / " + std::to_string(statistics.GpuOcclusionSafeOccluders) + " safe occluders / " +
@@ -201,6 +222,7 @@ namespace KeireEditor
                                   ? "Visibility readback current"
                                   : "Visibility readback " + std::to_string(statistics.GpuOcclusionReadbackAge) +
                                         (statistics.GpuOcclusionReadbackAge == 1U ? " frame old" : " frames old");
+            result.Readback += "; visible means not safely rejected, not guaranteed to produce on-screen pixels";
         }
         else
         {
@@ -272,8 +294,9 @@ namespace KeireEditor
                                        : static_cast<std::uint32_t>(static_cast<std::uint64_t>(diagnostics.Culled) *
                                                                     100U / diagnostics.Candidates);
         result.Visibility = std::to_string(diagnostics.Candidates) + " candidates / " +
-                            std::to_string(diagnostics.Visible) + " visible / " + std::to_string(diagnostics.Culled) +
-                            " culled (" + std::to_string(culledPercent) + "%)";
+                            std::to_string(diagnostics.Visible) + " conservatively visible / " +
+                            std::to_string(diagnostics.Culled) + " occlusion-rejected (" +
+                            std::to_string(culledPercent) + "%)";
         result.Pyramid = std::to_string(diagnostics.PyramidMipCount) + " HZB mips / " +
                          std::to_string(diagnostics.SafeOccluders) + " safe occluders";
         if (!diagnostics.ReadbackValid)
@@ -305,6 +328,7 @@ namespace KeireEditor
                 (diagnostics.ReadbackAge == 0U ? " (current)"
                                                : " (" + std::to_string(diagnostics.ReadbackAge) +
                                                      (diagnostics.ReadbackAge == 1U ? " frame old)" : " frames old)"));
+            result.Readback += "; visible means not safely rejected, not guaranteed to produce on-screen pixels";
         }
         else
             result.Readback = "Visibility readback pending; counters are not synchronized";
@@ -324,10 +348,13 @@ namespace KeireEditor
             result.Warning = diagnostics.RequestedMode == Keire::GpuOcclusionMode::Forced;
             break;
         case Keire::GpuOcclusionSurfaceState::Idle:
-            result.State = GpuOcclusionDiagnosticState::Disabled;
+            result.State = GpuOcclusionDiagnosticState::Standby;
             result.Status = diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::None
                                 ? "GPU occlusion idle; surface was not rendered in the last completed frame"
-                                : "GPU occlusion idle: " + reason;
+                            : diagnostics.RequestedMode == Keire::GpuOcclusionMode::Automatic
+                                ? "GPU occlusion Automatic standby: " + reason +
+                                      " (direct raster draws; use Forced to validate this scene)"
+                                : "GPU occlusion standby: " + reason;
             result.Readback = "Visibility readback unavailable while GPU occlusion is idle";
             break;
         case Keire::GpuOcclusionSurfaceState::Active:
@@ -345,8 +372,10 @@ namespace KeireEditor
             if (diagnostics.RequestedMode == Keire::GpuOcclusionMode::Automatic &&
                 diagnostics.FallbackReason == Keire::GpuOcclusionFallbackReason::BelowAutomaticThreshold)
             {
-                result.State = GpuOcclusionDiagnosticState::Disabled;
-                result.Status = "GPU occlusion idle: " + reason + " (direct draws; use Forced to validate this scene)";
+                result.State = GpuOcclusionDiagnosticState::Standby;
+                result.Status = "GPU occlusion Automatic standby: " + reason +
+                                " (direct raster draws; use Forced to validate this scene)";
+                result.Readback = "Visibility readback unavailable while GPU occlusion is on standby";
             }
             else
             {
@@ -354,7 +383,8 @@ namespace KeireEditor
                 result.Status = "GPU occlusion fallback: " + reason + " (direct draws)";
                 result.Warning = true;
             }
-            result.Readback = "Visibility readback unavailable while direct-draw fallback is active";
+            if (result.State == GpuOcclusionDiagnosticState::Fallback)
+                result.Readback = "Visibility readback unavailable while direct-draw fallback is active";
             break;
         }
         if (!diagnostics.PyramidValid && diagnostics.State == Keire::GpuOcclusionSurfaceState::Active)

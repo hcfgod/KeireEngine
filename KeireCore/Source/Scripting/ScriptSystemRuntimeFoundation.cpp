@@ -229,6 +229,14 @@ namespace Keire
         }
     }
 
+    void ScriptSystem::Impl::RuntimeDrawDebugLine(const Vector3 start, const Vector3 end, const Color color,
+                                                  const float duration) noexcept
+    {
+        if (!CurrentRuntime || !CurrentRuntime->Specification.RuntimeServices)
+            return;
+        CurrentRuntime->Specification.RuntimeServices->DrawManagedDebugLine(start, end, color, duration);
+    }
+
     void ScriptSystem::Impl::RuntimeRegisterProfileName(const std::uint64_t id, const Coral::String name) noexcept
     {
         if (!CurrentRuntime || id == 0)

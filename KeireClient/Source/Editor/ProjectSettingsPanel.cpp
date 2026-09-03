@@ -25,6 +25,38 @@ namespace KeireEditor
                 return "Forward+";
             case Keire::RenderPath::DeferredHybrid:
                 return "Deferred Hybrid";
+            case Keire::RenderPath::Automatic:
+                return "Automatic";
+            }
+            return "Unsupported";
+        }
+
+        [[nodiscard]] constexpr const char* AntiAliasingName(const Keire::RenderAntiAliasingMode mode) noexcept
+        {
+            switch (mode)
+            {
+            case Keire::RenderAntiAliasingMode::None:
+                return "None";
+            case Keire::RenderAntiAliasingMode::Fxaa:
+                return "FXAA";
+            case Keire::RenderAntiAliasingMode::Taa:
+                return "TAA";
+            case Keire::RenderAntiAliasingMode::Msaa2:
+                return "MSAA 2x";
+            case Keire::RenderAntiAliasingMode::Msaa4:
+                return "MSAA 4x";
+            }
+            return "Unsupported";
+        }
+
+        [[nodiscard]] constexpr const char* DynamicResolutionName(const Keire::DynamicResolutionMode mode) noexcept
+        {
+            switch (mode)
+            {
+            case Keire::DynamicResolutionMode::Disabled:
+                return "Disabled";
+            case Keire::DynamicResolutionMode::Automatic:
+                return "Automatic";
             }
             return "Unsupported";
         }
@@ -34,15 +66,15 @@ namespace KeireEditor
             switch (mode)
             {
             case Keire::GlobalIlluminationMode::Disabled:
-                return "Disabled";
+                return "Disabled (Direct Only)";
             case Keire::GlobalIlluminationMode::Baked:
-                return "Baked";
+                return "Baked Indirect";
             case Keire::GlobalIlluminationMode::Realtime:
-                return "Realtime";
+                return "Realtime Environment";
             case Keire::GlobalIlluminationMode::Irradyn:
-                return "Irradyn (Experimental)";
+                return "Irradyn Dynamic GI";
             case Keire::GlobalIlluminationMode::Hybrid:
-                return "Baked + Irradyn Hybrid";
+                return "Hybrid (Baked + Irradyn)";
             }
             return "Unsupported";
         }
@@ -466,7 +498,8 @@ namespace KeireEditor
         bool changed = false;
         bool commit = false;
         ui.Text("Render Pipeline");
-        constexpr std::array renderPaths{Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid};
+        constexpr std::array renderPaths{Keire::RenderPath::Automatic, Keire::RenderPath::ForwardPlus,
+                                         Keire::RenderPath::DeferredHybrid};
         if (auto combo = ui.BeginCombo("Render Path", RenderPathName(settings.RequestedRenderPath)); combo)
         {
             for (const auto path : renderPaths)
@@ -479,11 +512,73 @@ namespace KeireEditor
                 }
             }
         }
+        if (settings.RequestedRenderPath == Keire::RenderPath::Automatic)
+            ui.TextColored(theme.MutedText, "Automatic selects the best production path supported by the device.");
+        else if (settings.RequestedRenderPath == Keire::RenderPath::ForwardPlus)
+            ui.TextColored(theme.MutedText, "Forward+ supports every material fallback.");
+        else
+            ui.TextColored(theme.MutedText,
+                           "Deferred Hybrid uses GBuffer passes and a forward tail for specialized materials.");
+
+        constexpr std::array antiAliasingModes{Keire::RenderAntiAliasingMode::None, Keire::RenderAntiAliasingMode::Fxaa,
+                                               Keire::RenderAntiAliasingMode::Taa, Keire::RenderAntiAliasingMode::Msaa2,
+                                               Keire::RenderAntiAliasingMode::Msaa4};
+        if (auto combo = ui.BeginCombo("Anti-Aliasing", AntiAliasingName(settings.RequestedAntiAliasing)); combo)
+        {
+            for (const auto mode : antiAliasingModes)
+            {
+                if (ui.Selectable(AntiAliasingName(mode), settings.RequestedAntiAliasing == mode))
+                {
+                    settings.RequestedAntiAliasing = mode;
+                    changed = true;
+                    commit = true;
+                }
+            }
+        }
+        ui.TextColored(theme.MutedText,
+                       "Every AA mode works with Forward+ and Deferred Hybrid. TAA uses motion vectors; MSAA uses "
+                       "hardware coverage while Deferred Hybrid retains its deferred lighting and GI data.");
+        changed |= ui.SliderFloat("Render Scale", settings.RenderScale, 0.5F, 1.0F);
+        commit |= ui.LastItemState().DeactivatedAfterEdit;
+        constexpr std::array dynamicResolutionModes{Keire::DynamicResolutionMode::Disabled,
+                                                    Keire::DynamicResolutionMode::Automatic};
+        if (auto combo =
+                ui.BeginCombo("Dynamic Resolution", DynamicResolutionName(settings.RequestedDynamicResolution));
+            combo)
+        {
+            for (const auto mode : dynamicResolutionModes)
+            {
+                if (ui.Selectable(DynamicResolutionName(mode), settings.RequestedDynamicResolution == mode))
+                {
+                    settings.RequestedDynamicResolution = mode;
+                    changed = true;
+                    commit = true;
+                }
+            }
+        }
+        if (settings.RequestedDynamicResolution == Keire::DynamicResolutionMode::Automatic)
+        {
+            const bool minimumChanged =
+                ui.SliderFloat("Minimum Scale", settings.MinimumDynamicResolutionScale, 0.5F, 1.0F);
+            if (minimumChanged)
+            {
+                settings.MaximumDynamicResolutionScale =
+                    std::max(settings.MinimumDynamicResolutionScale, settings.MaximumDynamicResolutionScale);
+                changed = true;
+            }
+            commit |= ui.LastItemState().DeactivatedAfterEdit;
+            changed |= ui.SliderFloat("Maximum Scale", settings.MaximumDynamicResolutionScale,
+                                      settings.MinimumDynamicResolutionScale, 1.0F);
+            commit |= ui.LastItemState().DeactivatedAfterEdit;
+            changed |=
+                ui.SliderFloat("Target Frame Time (ms)", settings.DynamicResolutionTargetMilliseconds, 8.0F, 50.0F);
+            commit |= ui.LastItemState().DeactivatedAfterEdit;
+        }
         ui.TextColored(
             theme.MutedText,
-            settings.RequestedRenderPath == Keire::RenderPath::ForwardPlus
-                ? "Forward+ is the current production path and supports every material fallback."
-                : "Deferred Hybrid uses GBuffer passes while retaining forward passes for specialized materials.");
+            settings.RequestedDynamicResolution == Keire::DynamicResolutionMode::Automatic
+                ? "Automatic resolution uses spatial presentation upscaling with every supported anti-aliasing mode."
+                : "Render Scale changes the internal 3D resolution; presentation remains at the viewport size.");
 
         constexpr std::array illuminationModes{
             Keire::GlobalIlluminationMode::Disabled, Keire::GlobalIlluminationMode::Baked,
@@ -522,9 +617,23 @@ namespace KeireEditor
                 }
             }
         }
-        const auto currentRuntime = Keire::ResolveRenderFeatureSelection(settings, {});
+        ui.TextColored(theme.MutedText,
+                       "GI controls indirect light and reflections. Each Light's Bake Mode controls direct light "
+                       "and whether its shadow can move.");
+        ui.TextColored(theme.MutedText,
+                       "Rendering changes apply immediately and are saved when the edited control is committed.");
+        const auto currentRuntime =
+            Keire::ResolveRenderFeatureSelection(settings, m_Controller.ProjectRenderFeatureCapabilities());
         if (currentRuntime.PathFallback != Keire::RenderPathFallbackReason::None)
             ui.TextColored(theme.Warning, "Deferred Hybrid is not available in this runtime; Forward+ will be used.");
+        if (currentRuntime.AntiAliasingFallback != Keire::AntiAliasingFallbackReason::None)
+        {
+            ui.TextColored(theme.Warning,
+                           "The requested anti-aliasing mode is not available with the effective render path; using " +
+                               std::string(AntiAliasingName(currentRuntime.EffectiveAntiAliasing)) + '.');
+        }
+        if (currentRuntime.DynamicResolutionFallback != Keire::DynamicResolutionFallbackReason::None)
+            ui.TextColored(theme.Warning, "Dynamic resolution is not available with the effective renderer settings.");
         if (currentRuntime.GlobalIlluminationFallback != Keire::GlobalIlluminationFallbackReason::None)
         {
             ui.TextColored(theme.Warning,

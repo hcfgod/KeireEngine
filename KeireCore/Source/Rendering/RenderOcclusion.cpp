@@ -100,6 +100,13 @@ namespace
         return Keire::RenderBackend::PublishGpuOcclusionFallback(surface, requested, reason);
     }
 
+    void PublishStandby(Keire::RenderBackend::RenderSurfaceState& surface, const Keire::GpuOcclusionMode requested,
+                        const Keire::GpuOcclusionFallbackReason reason)
+    {
+        (void)PublishFallback(surface, requested, reason);
+        surface.GpuOcclusionDiagnostics.State = Keire::GpuOcclusionSurfaceState::Idle;
+    }
+
     [[nodiscard]] Keire::RenderBackend::GpuVisibilityClass
     ResolvedVisibilityClass(const Keire::RenderBackend::SceneDrawItem& item) noexcept
     {
@@ -151,7 +158,6 @@ namespace Keire::RenderBackend
                 ++Statistics.GpuOcclusionSkinnedMeshCandidates;
             else
                 ++Statistics.GpuOcclusionStaticMeshCandidates;
-
             if (HasGpuVisibilityFlag(
                     GpuVisibilityFlagsForDraw(visibilityClass, item.AlwaysVisible,
                                               item.HasFreshCurrentPoseBounds(packet.FrameIndex, submeshCount)),
@@ -179,6 +185,7 @@ namespace Keire::RenderBackend
             surface.GpuOcclusionAutomaticQualifyingFrames = 0;
             surface.GpuOcclusionAutomaticMinimumFrames = 0;
             surface.GpuOcclusionAutomaticCooldownFrames = 0;
+            surface.GpuOcclusionAutomaticUnprofitableActivations = 0;
             surface.GpuOcclusionValidationCooldown = false;
             surface.GpuOcclusionValidationFallbackEventPending = false;
             Policy::ResetAllocationRetry(surface.GpuOcclusionAllocationRetry);
@@ -278,7 +285,6 @@ namespace Keire::RenderBackend
         std::uint64_t depthTriangles = 0;
         bool oversizedBatch = false;
         bool legacyShaderAbi = false;
-
         candidates.reserve(draws.Opaque.Draws.size());
         inputInstances.reserve(draws.Opaque.Draws.size());
         preparedBatches.reserve(draws.Opaque.Batches.size());
@@ -320,7 +326,6 @@ namespace Keire::RenderBackend
                 oversizedBatch = true;
                 continue;
             }
-
             const auto candidateFirst = static_cast<std::uint32_t>(candidates.size());
             for (std::uint32_t instance = 0; instance < sceneBatch.Count; ++instance)
             {
@@ -343,7 +348,6 @@ namespace Keire::RenderBackend
                 inputInstances.push_back({instanceDraw.Item->World, Transpose(Math::Inverse(instanceDraw.Item->World)),
                                           instanceDraw.Item->Tint});
             }
-
             const auto chunkFirst = static_cast<std::uint32_t>(chunks.size());
             for (std::uint32_t first = 0; first < sceneBatch.Count; first += GpuOcclusionScanBlockSize)
             {
@@ -463,7 +467,6 @@ namespace Keire::RenderBackend
                 oversizedBatch = true;
                 continue;
             }
-
             const auto candidateFirst = static_cast<std::uint32_t>(candidates.size());
             const auto submeshCount = ResolveMesh(draw.Item->Mesh).Submeshes.size();
             candidates.push_back({{draw.Submesh.Bounds.Minimum.X, draw.Submesh.Bounds.Minimum.Y,
@@ -491,7 +494,6 @@ namespace Keire::RenderBackend
         }
 
         prepared.CandidateCount = static_cast<std::uint32_t>(candidates.size());
-
         const auto cameraWorld = Math::TransformPoint(Math::Inverse(packet.Camera.View), {});
         const auto cameraInsideSphere = [&](const Vector3 center, const float radius) noexcept
         {
@@ -553,7 +555,6 @@ namespace Keire::RenderBackend
                                 GpuVisibilityConsumer::SpatialVolumeMask, spatialOutputIndex, cameraInside);
             ++spatialOutputIndex;
         }
-
         std::vector<std::vector<CpuVfxVisibilityInput>> cpuVfxVisibility(packet.VfxSnapshots.size());
         std::vector<std::vector<GpuVfxVisibilityInput>> gpuVfxVisibility(packet.VfxSnapshots.size());
         const auto hasConservativeBounds = [&](const VfxGpuEmitter& emitter)
@@ -579,7 +580,6 @@ namespace Keire::RenderBackend
             cpuInputs.reserve(snapshot.Particles().size());
             for (const auto& particle : snapshot.Particles())
                 cpuInputs.push_back({particle.Renderer});
-
             auto& gpuInputs = gpuVfxVisibility[snapshotIndex];
             gpuInputs.reserve(snapshot.GpuEmitters().size());
             for (const auto& emitter : snapshot.GpuEmitters())
@@ -594,7 +594,6 @@ namespace Keire::RenderBackend
         vfxSnapshots.reserve(packet.VfxSnapshots.size());
         for (std::size_t snapshotIndex = 0; snapshotIndex < packet.VfxSnapshots.size(); ++snapshotIndex)
             vfxSnapshots.push_back({cpuVfxVisibility[snapshotIndex], gpuVfxVisibility[snapshotIndex]});
-
         prepared.VfxCandidateFirst = static_cast<std::uint32_t>(candidates.size());
         const auto remainingCandidateCapacity =
             MaximumGpuOcclusionCandidates - static_cast<std::uint32_t>(candidates.size());
@@ -634,23 +633,31 @@ namespace Keire::RenderBackend
             diagnostics.SafeOccluders += occluder.InstanceCount;
             diagnostics.EligibleSafeOccluders += occluder.InstanceCount;
         }
-
         const bool visibilityBoundsRequested =
             surface.GpuOcclusionDebugMode.load(std::memory_order_acquire) == GpuOcclusionDebugView::VisibilityBounds;
         const bool debugBoundsOnly = Policy::RequiresConservativeVisibilityDebugUpload(
             visibilityBoundsRequested, prepared.CandidateCount, !prepared.Occluders.empty());
-
         if (prepared.CandidateCount == 0)
         {
             const auto reason = oversizedBatch    ? GpuOcclusionFallbackReason::OversizedBatch
                                 : legacyShaderAbi ? GpuOcclusionFallbackReason::LegacyShaderAbi
                                                   : GpuOcclusionFallbackReason::NoEligibleCandidates;
+            if (reason == GpuOcclusionFallbackReason::NoEligibleCandidates && draws.Opaque.Draws.empty())
+            {
+                PublishStandby(surface, requested, reason);
+                return {};
+            }
             Statistics.GpuOcclusionFallbacks += PublishFallback(surface, requested, reason) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
             return {};
         }
         if (prepared.Occluders.empty())
         {
+            if (effective == GpuOcclusionMode::Automatic && !debugBoundsOnly)
+            {
+                PublishStandby(surface, requested, GpuOcclusionFallbackReason::NoSafeOccluders);
+                return {};
+            }
             Statistics.GpuOcclusionFallbacks +=
                 PublishFallback(surface, requested, GpuOcclusionFallbackReason::NoSafeOccluders) ? 1U : 0U;
             Statistics.GpuOcclusionFallbackActive = true;
@@ -663,9 +670,7 @@ namespace Keire::RenderBackend
             if (surface.GpuOcclusionAutomaticCooldownFrames > 0U)
             {
                 --surface.GpuOcclusionAutomaticCooldownFrames;
-                Statistics.GpuOcclusionFallbacks +=
-                    PublishFallback(surface, requested, GpuOcclusionFallbackReason::BelowAutomaticThreshold) ? 1U : 0U;
-                Statistics.GpuOcclusionFallbackActive = true;
+                PublishStandby(surface, requested, GpuOcclusionFallbackReason::BelowAutomaticThreshold);
                 return {};
             }
             const auto coveredCells = static_cast<std::uint32_t>(std::ranges::count(occluderCoverage, true));
@@ -718,9 +723,7 @@ namespace Keire::RenderBackend
             }
             if (!surface.GpuOcclusionAutomaticActive)
             {
-                Statistics.GpuOcclusionFallbacks +=
-                    PublishFallback(surface, requested, GpuOcclusionFallbackReason::BelowAutomaticThreshold) ? 1U : 0U;
-                Statistics.GpuOcclusionFallbackActive = true;
+                PublishStandby(surface, requested, GpuOcclusionFallbackReason::BelowAutomaticThreshold);
                 return {};
             }
         }

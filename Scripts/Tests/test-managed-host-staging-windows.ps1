@@ -65,7 +65,7 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-managed-host-" + [guid]:
 try {
     New-Item -ItemType Directory -Force (Join-Path $fixture "Scripts\Windows"),
         (Join-Path $fixture "Build\Bin\Release-windows-x86_64\KeireClient"),
-        (Join-Path $fixture "Build\Dependencies\coral-patched\Build\Release"),
+        (Join-Path $fixture "Build\Dependencies\coral\Build\Release"),
         (Join-Path $fixture "Build\Dependencies\coral-nethost"),
         (Join-Path $fixture "Build\Dependencies\dotnet-sdk\host\fxr\10.0.1"),
         (Join-Path $fixture "Build\Dependencies\dotnet-sdk\shared\Microsoft.NETCore.App\10.0.1"),
@@ -75,7 +75,7 @@ try {
         (Join-Path $fixture "Scripts\Windows\stage-managed-host.ps1")
 
     foreach ($file in @("Coral.Managed.dll", "Coral.Managed.deps.json", "Coral.Managed.runtimeconfig.json")) {
-        $file | Set-Content (Join-Path $fixture "Build\Dependencies\coral-patched\Build\Release\$file") -Encoding ASCII
+        $file | Set-Content (Join-Path $fixture "Build\Dependencies\coral\Build\Release\$file") -Encoding ASCII
     }
     "managed-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Managed.dll") -Encoding ASCII
     "editor-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Editor.Managed.dll") -Encoding ASCII

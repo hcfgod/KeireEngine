@@ -68,7 +68,7 @@ copy_player_support_licenses() {
     )
     local sources=(
         "$source_root/LICENSE.txt" "$source_root/THIRD_PARTY_NOTICES.md"
-        "$source_root/Build/Dependencies/coral-patched/LICENSE"
+        "$source_root/Build/Dependencies/coral/LICENSE"
         "$source_root/Build/Dependencies/dotnet-sdk/LICENSE.txt"
         "$source_root/Build/Dependencies/dotnet-sdk/ThirdPartyNotices.txt"
         "$dependency_install/licenses/SDL3/LICENSE.txt"
