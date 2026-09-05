@@ -925,7 +925,7 @@ namespace Keire::RenderBackend
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
         information.num_uniform_buffers = Detail::BuiltinShaderUniformBufferCount(vertex);
         information.num_storage_buffers = vertex ? 1U : 0U;
-        information.num_samplers = vertex ? 0U : 2U;
+        information.num_samplers = vertex ? 0U : 5U;
 
         const auto formats = SDL_GetGPUShaderFormats(Device);
         if (formats & SDL_GPU_SHADERFORMAT_DXIL)
@@ -1162,7 +1162,7 @@ namespace Keire::RenderBackend
 
             SDL_GPUColorTargetDescription color{};
             color.format = targetFormat != SDL_GPU_TEXTUREFORMAT_INVALID ? targetFormat
-                           : worldSurface                                ? SceneColorFormat
+                           : worldSurface ? SceneColorFormat
                                           : SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow);
             color.blend_state.enable_blend = true;
             color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;

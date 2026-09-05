@@ -66,7 +66,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
   artifacts, exact pass-role/backend cooked shader lanes, typed transient texture allocation, a validated 24-pass
   Deferred Hybrid graph with capability-selected live recording, portable GBuffer/deferred-lighting pipelines,
   reflection/IBL, baked lightmaps and probes, cookies, contact shadows, mixed-light masks, deforming motion vectors, and
-  explicit baked-versus-realtime lighting ownership. Forward+ and Deferred Hybrid TAA use jittered projection,
+  explicit baked-versus-realtime lighting ownership. Default meshes share Forward+/Deferred PBR lighting and consistent
+  HDR exposure, including the deferred MSAA coverage pass. Forward+ and Deferred Hybrid TAA use jittered projection,
   jitter-independent motion-vector reprojection, neighborhood-clamped per-surface history, and unjittered
   shadow-cascade fitting. Deferred Hybrid MSAA retains single-sample deferred/GI data while shading final geometry
   through a hardware-multisampled coverage subpass. Staged Irradyn traces fully lit
@@ -250,6 +251,11 @@ state. Source assets live
 under `Assets/`; generated and imported state lives under `Library/`; build output follows the selected build profile.
 Stable asset IDs allow content to move inside `Assets/` without rewriting every reference.
 
+Create a Material to author an OpenPBR surface directly, then create Material Instances from the selected material
+to vary its parameters and keywords. A separate Shader Graph is needed only for specialized shader targets or legacy
+template workflows. Editor Play supports explicit `Assets.LoadRuntime` residency leases; dispose each operation when
+it is no longer needed.
+
 Current authoring and runtime contracts include:
 
 | Contract | Current schema | Compatibility policy |
@@ -259,7 +265,7 @@ Current authoring and runtime contracts include:
 | Static mesh | 5 | Earlier payloads remain readable; schema 5 preserves triangle-, line-, and point-list submeshes. |
 | Cooked shader asset | 3 | Schemas 1–2 migrate to the `primary` pass role; schema 3 keys each binary by exact role and backend format. |
 | Shader Graph source | 6 | Schemas 1–5 migrate in memory; publication emits canonical target-based schema 6. |
-| Material Graph source | 6 | Schemas 1–5 migrate in memory; publication emits canonical schema 6 with an authoritative OpenPBR/slab surface graph. |
+| Material Graph source | 7 | Schemas 1–6 migrate in memory; publication emits canonical schema 7 with a self-contained OpenPBR/slab surface graph. |
 | VFX source | 5 | Schemas 1–4 migrate in memory; graph and compatibility payloads remain distinct execution sources. |
 | Cooked runtime manifest | 4 | Older builds require a recook; newer unsupported schemas fail before partial startup. |
 | Asset package archive | 1 | `KEIRASPK1` archives are deterministic, bounded, inventoried, hashed, and signature-verifiable. |
@@ -267,6 +273,11 @@ Current authoring and runtime contracts include:
 
 These numbers are implementation contracts, not marketing versions. The docs website is generated from the repository
 Markdown, and its source validation checks these values against the corresponding code so schema drift fails the build.
+
+Shader Graph generator 11 (importer 20) refreshes generated programs for consistent shadow reception, spot cookies,
+and box-projected reflections. Existing graph sources need no manual migration; rebuild cooked content to include
+these fixes. Ninja builds through the repository launchers refresh fingerprinted shader headers before compilation,
+including edits to shared HLSL includes; unchanged shader output keeps its timestamp.
 
 ## C# Gameplay Scripting
 

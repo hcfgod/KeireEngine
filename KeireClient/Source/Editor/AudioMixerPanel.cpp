@@ -207,6 +207,7 @@ namespace KeireEditor
                 StopTransientPreview();
             return;
         }
+        ui.SetNextWindowSize({1040.0F, 640.0F});
         auto panel = ui.BeginPanel(m_Registration);
         if (!m_Registration.Visible())
         {

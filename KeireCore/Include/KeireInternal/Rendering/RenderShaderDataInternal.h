@@ -350,6 +350,18 @@ namespace Keire::RenderBackend
         std::array<std::uint32_t, 4> SpatialSelection{InvalidAssetSpatialSelectionIndex, 0U, 0U, 0U};
     };
 
+    struct BuiltInSpatialLightingUniforms final
+    {
+        Vector4 LightmapScaleOffset;
+        Vector4 LightmapParameters;
+        /// Renderer count, lightmap RGBE flag, reflection RGBE flag, and reserved.
+        Vector4 ShadowMaskParameters;
+        Vector4 CameraPositionExposure;
+        Vector4 AmbientColorIntensity;
+        Vector4 DirectionalDirectionEnabled;
+        Vector4 DirectionalColorIntensity;
+    };
+
     struct AssetEnvironmentSpatialUniforms final
     {
         AssetEnvironmentUniforms Environment;
@@ -366,6 +378,7 @@ namespace Keire::RenderBackend
     static_assert(sizeof(AssetEnvironmentUniforms) == sizeof(float) * 44);
     static_assert(sizeof(AssetSpatialSelectionRecord) == sizeof(float) * 120);
     static_assert(alignof(AssetSpatialSelectionRecord) == 16);
+    static_assert(sizeof(BuiltInSpatialLightingUniforms) == sizeof(float) * 28);
     static_assert(sizeof(AssetSpatialLightingUniforms) == sizeof(float) * 192);
     static_assert(sizeof(AssetEnvironmentSpatialUniforms) == sizeof(float) * 236);
 

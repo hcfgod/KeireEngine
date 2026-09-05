@@ -17,8 +17,8 @@
 #include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInput.h"
-#include "KeireInternal/Scripting/ManagedRuntimeRenderingServices.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -108,7 +108,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                    private KeireEditor::ILightingPanelController,
                                    private KeireEditor::IAssetBrowserController,
                                    private KeireEditor::IViewportAssetDropCommands,
-                                   private Keire::Detail::ManagedRuntimeSceneServices
+                                   private Keire::Detail::ManagedRuntimeApplicationServices
 {
   public:
     explicit EditorWorkspaceLayer(bool smoke, bool initializeProject = false, bool smokePlay = false,
@@ -273,7 +273,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) override;
     bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) override;
     bool CreateAssetBrowserMaterialParameterCollection(std::string_view name) override;
-    bool CreateAssetBrowserMaterialInstance(std::string_view name) override;
+    bool CreateAssetBrowserMaterialInstance(std::string_view name, Keire::AssetId parent) override;
     bool CreateAssetBrowserPrefab(std::string_view name) override;
     bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) override;
     void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) override;
@@ -514,7 +514,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool CreateShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate);
     [[nodiscard]] bool CreateReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose);
     [[nodiscard]] bool CreateMaterialParameterCollection(std::string_view name);
-    [[nodiscard]] bool CreateMaterialInstance(std::string_view name);
+    [[nodiscard]] bool CreateMaterialInstance(std::string_view name, Keire::AssetId parent);
     [[nodiscard]] bool CreatePrefabFromSelection(std::string_view name);
     [[nodiscard]] bool CreatePrefabVariant(Keire::AssetId basePrefab, std::string_view name);
     void CreatePrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder);

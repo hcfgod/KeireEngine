@@ -60,6 +60,8 @@ case "$GENERATOR" in
         ninja_arguments=(-C "$ROOT" -f build.ninja)
         [[ "$PROFILE_BUILD" == 1 ]] && ninja_arguments+=(-d stats)
         ninja_arguments+=("${TARGET}_${CONFIGURATION}")
+        # Refresh fingerprinted headers before Ninja examines dependencies; its prebuild stamp has no shader inputs.
+        bash "$ROOT/Scripts/Unix/prepare-generated-content.sh"
         ninja "${ninja_arguments[@]}"
         ;;
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; gmake -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;

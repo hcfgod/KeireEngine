@@ -992,8 +992,10 @@ namespace
     {
       public:
         ShadowCaptureLayer(const Keire::AssetId mesh, const Keire::AssetId material,
-                           std::shared_ptr<CaptureResults> results)
-            : Layer("Shadow capture"), m_Mesh(mesh), m_Material(material), m_Results(std::move(results))
+                           std::shared_ptr<CaptureResults> results,
+                           const Keire::RenderPath renderPath = Keire::RenderPath::Automatic)
+            : Layer("Shadow capture"), m_Mesh(mesh), m_Material(material), m_Results(std::move(results)),
+              m_RenderPath(renderPath)
         {
         }
 
@@ -1083,6 +1085,7 @@ namespace
             environment.AmbientIntensity = 0.3F;
             environment.DirectionalShadowCascadeCount = 2;
             environment.DirectionalShadowResolution = 1024;
+            environment.RequestedRenderPath = m_RenderPath;
             Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
             ++m_Frame;
         }
@@ -1096,14 +1099,17 @@ namespace
         Keire::Ref<Keire::DirectionalLightComponent> m_Light;
         Keire::Ref<Keire::MeshRendererComponent> m_Caster;
         std::uint32_t m_Frame = 0;
+        Keire::RenderPath m_RenderPath;
     };
 
     class LocalShadowCaptureLayer final : public Keire::Layer
     {
       public:
         LocalShadowCaptureLayer(const Keire::AssetId mesh, const Keire::AssetId material,
-                                std::shared_ptr<CaptureResults> results)
-            : Layer("Local shadow capture"), m_Mesh(mesh), m_Material(material), m_Results(std::move(results))
+                                std::shared_ptr<CaptureResults> results,
+                                const Keire::RenderPath renderPath = Keire::RenderPath::Automatic)
+            : Layer("Local shadow capture"), m_Mesh(mesh), m_Material(material), m_Results(std::move(results)),
+              m_RenderPath(renderPath)
         {
         }
 
@@ -1213,6 +1219,7 @@ namespace
             Keire::RenderEnvironmentSettings environment;
             environment.AmbientColor = {0.05F, 0.05F, 0.05F, 1.0F};
             environment.AmbientIntensity = 0.2F;
+            environment.RequestedRenderPath = m_RenderPath;
             Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
             ++m_Frame;
         }
@@ -1239,6 +1246,7 @@ namespace
         Keire::Ref<Keire::SpotLightComponent> m_Spot;
         Keire::Ref<Keire::MeshRendererComponent> m_Caster;
         std::uint32_t m_Frame = 0;
+        Keire::RenderPath m_RenderPath;
     };
 
     class LocalShadowAtlasEdgeCaptureLayer final : public Keire::Layer
@@ -2225,6 +2233,46 @@ TEST_CASE("point and spot shadow maps occlude a separate receiving mesh")
     CHECK(std::abs(unshadowed.Blue - spotWithoutCaster.Blue) <= ColorTolerance);
     CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumShadowDelta);
     CHECK(MaximumDarkening(results->Frames[3], results->Frames[4]) >= MinimumShadowDelta);
+}
+
+TEST_CASE("default editor meshes receive directional shadows in both render paths")
+{
+    for (const auto path : {Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid})
+    {
+        CAPTURE(static_cast<int>(path));
+        const auto results = std::make_shared<CaptureResults>();
+        {
+            Keire::Application application(RenderTestSpecification());
+            (void)application.PushLayer(
+                std::make_unique<ShadowCaptureLayer>(Keire::AssetId{}, Keire::AssetId{}, results, path));
+            REQUIRE(application.Run() == 0);
+        }
+        REQUIRE(results->Frames.size() == 3);
+        REQUIRE(results->ShadowDepth.size() == 2);
+        CHECK(MaximumDifference(results->ShadowDepth[0], results->ShadowDepth[1]) >= MinimumShadowDepthDelta);
+        CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumShadowDelta);
+    }
+}
+
+TEST_CASE("default editor meshes receive point and spot shadows in both render paths")
+{
+    for (const auto path : {Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid})
+    {
+        CAPTURE(static_cast<int>(path));
+        const auto results = std::make_shared<CaptureResults>();
+        {
+            Keire::Application application(RenderTestSpecification());
+            (void)application.PushLayer(
+                std::make_unique<LocalShadowCaptureLayer>(Keire::AssetId{}, Keire::AssetId{}, results, path));
+            REQUIRE(application.Run() == 0);
+        }
+        REQUIRE(results->Frames.size() == 5);
+        REQUIRE(results->ShadowDepth.size() == 4);
+        CHECK(MaximumDifference(results->ShadowDepth[0], results->ShadowDepth[1]) >= MinimumShadowDepthDelta);
+        CHECK(MaximumDifference(results->ShadowDepth[2], results->ShadowDepth[3]) >= MinimumShadowDepthDelta);
+        CHECK(MaximumDarkening(results->Frames[1], results->Frames[2]) >= MinimumShadowDelta);
+        CHECK(MaximumDarkening(results->Frames[3], results->Frames[4]) >= MinimumShadowDelta);
+    }
 }
 
 TEST_CASE("soft point-shadow PCF does not bleed between adjacent atlas faces")

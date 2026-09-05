@@ -42,6 +42,10 @@ Assert-True ($buildScript.Contains('Enter-GeneratedContentLock -Name "native-bui
              $buildScript.Contains('copy-file-if-changed.ps1')) `
     "Windows launcher builds serialize shared checkout outputs"
 Assert-True (Test-Path -LiteralPath $copyScript -PathType Leaf) "Content-aware runtime staging script exists"
+Assert-True ($buildScript.IndexOf('prepare-generated-content.ps1') -gt 0 -and
+             $buildScript.IndexOf('prepare-generated-content.ps1') -lt
+             $buildScript.IndexOf('& (Get-NinjaExecutable)')) `
+    "Ninja launcher refreshes generated shader inputs before dependency evaluation"
 
 foreach ($generatorName in @(
         "builtin-shaders.ps1",

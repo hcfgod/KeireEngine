@@ -582,7 +582,9 @@ namespace KeireEditor
             return canvas;
         };
 
-        if (includeTemplateParameters)
+        const bool hasCompatibilityBindings = Definition().Shader.Asset || !Definition().Properties.empty() ||
+                                              !Definition().Nodes.empty() || !Definition().Connections.empty();
+        if (includeTemplateParameters && hasCompatibilityBindings)
         {
             NodeGraphNode output;
             output.Id = addIdentity(result.NodeIdentities, Definition().OutputNode, 0x4d474f5554505554ULL);

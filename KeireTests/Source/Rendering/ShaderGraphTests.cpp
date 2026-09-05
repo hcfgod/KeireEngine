@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 19);
+    CHECK(importer.Version == 20);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -174,7 +174,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 10);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 11);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -192,7 +192,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 10, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 11, source schema 6") != std::string::npos);
     REQUIRE(manifest.at("passes").size() == 3U);
     CHECK(manifest.at("passes")[0].at("role") == "depthVelocity");
     CHECK(manifest.at("passes")[1].at("role") == "deferredGBufferStandard");

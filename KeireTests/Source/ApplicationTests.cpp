@@ -1,6 +1,8 @@
 #include "Keire/Application.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Ui/RuntimeUi.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
@@ -8,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -18,6 +21,36 @@
 
 namespace
 {
+    class AssetLeaseTestLayer final : public Keire::Layer
+    {
+      public:
+        explicit AssetLeaseTestLayer(std::function<void()> check) : Layer("Asset leases"), m_Check(std::move(check)) {}
+
+      protected:
+        void OnUpdate(const Keire::Time&) override
+        {
+            Owner().RequestExit();
+            m_Check();
+        }
+
+      private:
+        std::function<void()> m_Check;
+    };
+
+    class EditorAssetLeaseServices final : public Keire::Detail::ManagedRuntimeApplicationServices
+    {
+      public:
+        EditorAssetLeaseServices() : ManagedRuntimeApplicationServices(true) {}
+        using ManagedRuntimeApplicationServices::BindManagedApplication;
+        using ManagedRuntimeApplicationServices::UnbindManagedApplication;
+        void WriteManagedLog(Keire::ManagedLogLevel, std::string_view) noexcept override {}
+        float ManagedDeltaTime() const noexcept override { return 0.0F; }
+        Keire::Vector2 ReadManagedInput(std::string_view) noexcept override { return {}; }
+
+      protected:
+        Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId = {}) const noexcept override { return {}; }
+        Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override { return {}; }
+    };
     void UseApplicationDummyVideoDriver()
     {
 #if defined(_WIN32)
@@ -1124,3 +1157,53 @@ TEST_CASE("Application closes an active profiler frame before waiting at a mid-f
     CHECK(probe.Updates == 2);
 }
 #endif
+
+TEST_CASE("editor application asset leases preserve generations and become inert on unbind")
+{
+    UseApplicationDummyVideoDriver();
+    auto specification = HiddenApplicationSpecification("editor asset leases");
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog.clear();
+    specification.Assets.Decoders.push_back(Keire::CreateMeshAssetDecoder());
+    Keire::Application application(specification);
+    EditorAssetLeaseServices services;
+    const auto asset = Keire::AssetId::Generate();
+    const auto type = Keire::MeshAsset::StaticType();
+    const auto load = [&](const std::uint64_t generation)
+    { return services.BeginManagedRuntimeAssetLoad(generation, asset, type, Keire::AssetPriority::Normal); };
+    CHECK(load(1) == 0);
+    (void)application.PushLayer(std::make_unique<AssetLeaseTestLayer>(
+        [&]
+        {
+            services.BindManagedApplication(application);
+            CHECK(services.ManagedApplication().IsEditor);
+            CHECK(load(0) == 0);
+            const auto first = load(1);
+            const auto second = load(2);
+            REQUIRE(first != 0);
+            REQUIRE(second != 0);
+            CHECK(first != second);
+            (void)application.Assets()->PumpCompletions();
+            REQUIRE(services.ManagedRuntimeAsset(first));
+            CHECK(services.ManagedRuntimeAsset(first)->State == Keire::AssetState::Failed);
+            services.ReleaseManagedRuntimeAssets(1);
+            CHECK_FALSE(services.ManagedRuntimeAsset(first));
+            CHECK(services.ManagedRuntimeAsset(second));
+            CHECK_FALSE(services.ReleaseManagedRuntimeAsset(first));
+            CHECK(services.ReleaseManagedRuntimeAsset(second));
+            const auto third = load(2);
+            REQUIRE(third != 0);
+            services.UnbindManagedApplication();
+            CHECK_FALSE(services.ManagedRuntimeAsset(third));
+            CHECK(load(2) == 0);
+            services.BindManagedApplication(application);
+            const auto rebound = load(3);
+            REQUIRE(rebound != 0);
+            CHECK(rebound != third);
+            application.Assets()->Close();
+            CHECK(load(3) == 0);
+            services.UnbindManagedApplication();
+        }));
+    CHECK(application.Run() == 0);
+    SDL_FlushEvents(SDL_EVENT_FIRST, SDL_EVENT_LAST);
+}

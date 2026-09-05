@@ -10,4 +10,10 @@ namespace KeireEditor
         // stable busId picker is the single authoring control and commits both fields transactionally.
         return component != Keire::AudioSourceComponent::StaticType() || property != "bus";
     }
+
+    bool IsMeshRendererBakedLightingProperty(const std::string_view property) noexcept
+    {
+        return property == "staticLighting" || property == "giReceive" || property == "lightmapScale" ||
+               property == "preserveLightmapUvs";
+    }
 } // namespace KeireEditor

@@ -224,7 +224,10 @@ streams and previous-time world-position offset. A missing or discontinuous hist
 therefore fail-zero. Decal-domain scene draws form a third prepared list and execute only through the DBuffer role
 on an active deferred surface. Fullscreen lighting consumes those DBuffer attachments together with the already-owned
 Forward+ storage buffers and directional/local shadow resources, avoiding a second light-list lifetime or ordering
-contract. Its fourth GBuffer attachment transports baked-lighting layers, mixed-mask layers, spatial-selection record,
+contract. The material attachment alpha preserves occupancy and shadow reception: 0 is empty, 0.75 is occupied with
+reception disabled, and 1 is occupied with reception enabled (the legacy default). Lighting gates dynamic, contact,
+and mixed-mask visibility on this flag without suppressing cookies. Its fourth GBuffer attachment transports
+baked-lighting layers, mixed-mask layers, spatial-selection record,
 and additive contribution; the resolve binds the contribution's lighting arrays and evaluates SH/lightmap diffuse,
 two-probe box-projected specular IBL, cookies, contact shadows, and mixed-light masks. When GPU spatial classification is
 unavailable, preparation uploads the same bounded record ABI from deterministic CPU selection.
@@ -1670,6 +1673,9 @@ Native presentation assets cross the managed boundary as canonical `Asset` subcl
 fallback use, revision, and a copied diagnostic; it never publishes an `Asset`, decoder, or graphics/audio resource.
 Managed `AssetLoadOperation<T>.Dispose` removes one token idempotently, application unbind clears the table, and retiring a
 script generation releases all tokens tagged with that generation before the collectible context is discarded.
+The editor workspace binds these application services during attachment and unbinds after managed-runtime shutdown.
+Editor Play therefore uses the same asset lease ownership and generation cleanup as a packaged player, while its
+scene and input overrides continue to use the active editor play session.
 
 Strict cooking builds and loads runtime managed assemblies before decoding the managed type catalog and validating
 managed-data semantics. Scene Behaviour and managed-data references participate in the normal cook graph, so closure

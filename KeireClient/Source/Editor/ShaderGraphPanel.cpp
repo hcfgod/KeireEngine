@@ -173,6 +173,8 @@ namespace KeireEditor
 
     void ShaderGraphPanel::Draw(Keire::UiFrame& ui)
     {
+        if (m_Registration.Visible())
+            ui.SetNextWindowSize({1040.0F, 640.0F});
         if (auto panel = ui.BeginPanel(m_Registration); panel)
         {
             auto& document = m_Controller.ShaderGraphState();
@@ -320,9 +322,13 @@ namespace KeireEditor
                                             std::to_string(statistics.EstimatedAluInstructions) + " ALU  |  " +
                                             std::to_string(statistics.VariantCount) + " variants");
 
+        const auto target = document.Definition().Target.Target;
+        ui.Text("Shader Target: " + std::string(Keire::ShaderGraphTargetName(target)));
+        if (target != Keire::ShaderGraphTarget::Material)
+            return;
         auto output = document.Definition().Output;
         auto outputIndex = static_cast<std::size_t>(output);
-        if (auto combo = ui.BeginCombo("Shader Target", OutputNames[outputIndex]); combo)
+        if (auto combo = ui.BeginCombo("Surface Output", OutputNames[outputIndex]); combo)
             for (std::size_t index = 0; index < OutputNames.size(); ++index)
                 if (ui.Selectable(OutputNames[index], index == outputIndex))
                     try

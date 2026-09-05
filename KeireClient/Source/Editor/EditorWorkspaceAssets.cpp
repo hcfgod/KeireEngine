@@ -302,9 +302,9 @@ bool EditorWorkspaceLayer::CreateAssetBrowserMaterialParameterCollection(const s
     return CreateMaterialParameterCollection(name);
 }
 
-bool EditorWorkspaceLayer::CreateAssetBrowserMaterialInstance(const std::string_view name)
+bool EditorWorkspaceLayer::CreateAssetBrowserMaterialInstance(const std::string_view name, const Keire::AssetId parent)
 {
-    return CreateMaterialInstance(name);
+    return CreateMaterialInstance(name, parent);
 }
 
 bool EditorWorkspaceLayer::CreateAssetBrowserPrefab(const std::string_view name)

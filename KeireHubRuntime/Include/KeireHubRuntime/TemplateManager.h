@@ -16,6 +16,8 @@
 
 namespace KeireHub
 {
+    [[nodiscard]] HubStatus ValidateProjectDestinationRoot(const std::filesystem::path& destination,
+                                                           const std::filesystem::path& forbiddenRoot);
     [[nodiscard]] bool IsValidProjectName(std::string_view name) noexcept;
 
     struct TemplateManagerServices final

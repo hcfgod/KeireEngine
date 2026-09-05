@@ -1217,7 +1217,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Material";
-        result.Version = 10;
+        result.Version = ShaderGraphGeneratedShaderVersion;
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {std::string(MaterialAssetSourceExtension)};
         result.PreviousNames = {"Keire.MaterialGraph"};
@@ -1357,7 +1357,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.MaterialInstance";
-        result.Version = 2;
+        result.Version = 3;
         result.Type = MaterialInstanceAsset::StaticType();
         result.Extensions = {std::string(MaterialInstanceAssetSourceExtension)};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
@@ -1376,6 +1376,7 @@ namespace Keire
             const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
             MaterialAssetDefinition material;
             std::optional<ShaderGraphDefinition> instanceVariantGraph;
+            bool instanceVariantStandalone = false;
             AssetId instanceVariantOwner;
             std::string instanceVariantTarget = "default";
             std::map<std::string, std::string, std::less<>> instanceVariantDefaults;
@@ -1433,19 +1434,26 @@ namespace Keire
                         output.AssetDependencies.insert(output.AssetDependencies.end(),
                                                         imported.AssetDependencies.begin(),
                                                         imported.AssetDependencies.end());
-                        const auto templateSource = context.ResolveAssetSource(graph.Shader.Asset);
-                        if (!templateSource || templateSource->Type != ShaderGraphAsset::StaticType())
-                            throw std::runtime_error("Material Instance parent Shader Graph template is unavailable.");
-                        const auto shaderTemplate = ShaderGraphAsset::DecodeSource(
-                            context.ReadProjectFile(sourcePrefix / templateSource->RelativePath));
-                        instanceVariantGraph = ComposeMaterialGraphShader(graph, shaderTemplate);
+                        instanceVariantGraph = graph.SurfaceGraph;
+                        instanceVariantStandalone = !graph.Shader.Asset;
+                        if (graph.Shader.Asset)
+                        {
+                            const auto templateSource = context.ResolveAssetSource(graph.Shader.Asset);
+                            if (!templateSource || templateSource->Type != ShaderGraphAsset::StaticType())
+                                throw std::runtime_error(
+                                    "Material Instance parent Shader Graph template is unavailable.");
+                            const auto shaderTemplate = ShaderGraphAsset::DecodeSource(
+                                context.ReadProjectFile(sourcePrefix / templateSource->RelativePath));
+                            instanceVariantGraph = ComposeMaterialGraphShader(graph, shaderTemplate);
+                        }
                         instanceVariantOwner = parent;
                         instanceVariantTarget = graph.Shader.Target;
                         instanceVariantDefaults = graph.Shader.Keywords;
                     }
                     else
                         material = BakeMaterialGraph(graph, resolveShader);
-                    output.AssetDependencies.push_back(graph.Shader.Asset);
+                    if (graph.Shader.Asset)
+                        output.AssetDependencies.push_back(graph.Shader.Asset);
                     break;
                 }
                 if (source->Type == MaterialAsset::StaticType())
@@ -1480,8 +1488,11 @@ namespace Keire
                         selection.KeywordOverrides.insert_or_assign(name, value);
                 const std::array selections{selection};
                 const auto resolved = ResolveShaderGraphInstance(*instanceVariantGraph, selections);
-                material.Shader = context.ResolveSubAssetIdFor(
-                    instanceVariantOwner, MaterialGraphVariantKey(instanceVariantTarget, resolved.Keywords));
+                const auto variantKey = instanceVariantStandalone
+                                            ? "material-program/" + MakeShaderGraphVariantSubAssetKey(
+                                                                        instanceVariantTarget, resolved.Keywords)
+                                            : MaterialGraphVariantKey(instanceVariantTarget, resolved.Keywords);
+                material.Shader = context.ResolveSubAssetIdFor(instanceVariantOwner, variantKey);
                 if (!material.Shader)
                     throw std::runtime_error("Material Instance selected an unavailable static-parameter variant.");
             }

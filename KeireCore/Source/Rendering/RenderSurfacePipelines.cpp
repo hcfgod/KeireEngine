@@ -1166,22 +1166,34 @@ namespace Keire::RenderBackend
 
             SDL_GPUVertexBufferDescription vertexBuffer{};
             vertexBuffer.slot = 0;
-            vertexBuffer.pitch = sizeof(GpuRenderVertex);
+            vertexBuffer.pitch = sizeof(GpuMeshVertex);
             vertexBuffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
 
-            std::array<SDL_GPUVertexAttribute, 3> attributes{};
+            std::array<SDL_GPUVertexAttribute, 6> attributes{};
             attributes[0].location = 0;
             attributes[0].buffer_slot = 0;
             attributes[0].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[0].offset = offsetof(GpuRenderVertex, Position);
+            attributes[0].offset = offsetof(GpuMeshVertex, Position);
             attributes[1].location = 1;
             attributes[1].buffer_slot = 0;
             attributes[1].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[1].offset = offsetof(GpuRenderVertex, Color);
+            attributes[1].offset = offsetof(GpuMeshVertex, Normal);
             attributes[2].location = 2;
             attributes[2].buffer_slot = 0;
-            attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3;
-            attributes[2].offset = offsetof(GpuRenderVertex, Normal);
+            attributes[2].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+            attributes[2].offset = offsetof(GpuMeshVertex, UV0);
+            attributes[3].location = 3;
+            attributes[3].buffer_slot = 0;
+            attributes[3].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+            attributes[3].offset = offsetof(GpuMeshVertex, VertexColor);
+            attributes[4].location = 4;
+            attributes[4].buffer_slot = 0;
+            attributes[4].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4;
+            attributes[4].offset = offsetof(GpuMeshVertex, Tangent);
+            attributes[5].location = 5;
+            attributes[5].buffer_slot = 0;
+            attributes[5].format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2;
+            attributes[5].offset = offsetof(GpuMeshVertex, UV1);
 
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
@@ -1204,7 +1216,7 @@ namespace Keire::RenderBackend
             information.target_info.depth_stencil_format = DepthFormat;
             information.target_info.has_depth_stencil_target = true;
 
-            KEIRE_CORE_INFO("Creating built-in pipeline (primitive={}, samples={}, color={}, depth={}, attributes=3).",
+            KEIRE_CORE_INFO("Creating built-in pipeline (primitive={}, samples={}, color={}, depth={}, attributes=6).",
                             static_cast<std::uint32_t>(primitive), static_cast<std::uint32_t>(samples),
                             static_cast<std::uint32_t>(SceneColorFormat), static_cast<std::uint32_t>(DepthFormat));
             SDL_GPUGraphicsPipeline* pipeline = SDL_CreateGPUGraphicsPipeline(Device, &information);

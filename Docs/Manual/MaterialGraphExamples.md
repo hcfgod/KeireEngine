@@ -1,7 +1,7 @@
 # Material Graph Examples
 
-A Material Graph selects a Shader Graph and publishes an assignable surface. These examples assume the selected shader
-exposes compatible surface inputs; the reflected Material Output and pin-filtered palette are authoritative.
+A new Material owns its OpenPBR surface graph and publishes an assignable surface without a separate Shader Graph.
+These examples use the surface inputs shown by Material Output; the pin-filtered palette is authoritative.
 
 ## Example 1: Base Texture With Damage Flash
 
@@ -15,7 +15,7 @@ flowchart LR
     Blend --> Output["Material Output<br/>Base Color"]
 ```
 
-1. Create a Material Graph against a Lit/PBR Shader Graph.
+1. Create a Material and open its OpenPBR surface graph.
 2. Add Base Texture, Damage Color, and Damage properties.
 3. Sample Base Texture and interpolate toward Damage Color using Damage.
 4. Connect the result to Base Color, save, and assign the Material Graph to a Mesh Renderer.

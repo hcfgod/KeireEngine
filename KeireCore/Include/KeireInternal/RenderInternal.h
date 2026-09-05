@@ -22,7 +22,7 @@ namespace Keire::Detail
 {
     class UiContextAccess;
 
-    [[nodiscard]] constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool) noexcept { return 3U; }
+    [[nodiscard]] constexpr std::uint32_t BuiltinShaderUniformBufferCount(const bool) noexcept { return 4U; }
 
     [[nodiscard]] constexpr std::uint32_t DeferredGBufferShaderUniformBufferCount(const bool vertex) noexcept
     {

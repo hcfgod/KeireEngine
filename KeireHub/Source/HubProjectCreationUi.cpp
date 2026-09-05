@@ -43,7 +43,8 @@ namespace KeireHub
     HubCreateProjectRequest DrawHubCreateProjectDialog(Keire::UiFrame& ui, const HubProductSnapshot& snapshot,
                                                        std::string& templateId, std::string& editorId,
                                                        std::string& projectName, std::string& projectLocation,
-                                                       bool& openAfterCreation, const bool folderDialogPending)
+                                                       bool& openAfterCreation, const bool folderDialogPending,
+                                                       const std::filesystem::path& distributionRoot)
     {
         HubCreateProjectRequest request;
         const auto tokens = HubDesignTokens::For(snapshot.Settings.Appearance, HubSystemPrefersDark());
@@ -166,12 +167,15 @@ namespace KeireHub
             std::error_code error;
             const bool parentAvailable =
                 !projectLocation.empty() && std::filesystem::is_directory(parentDirectory, error);
+            if (error == std::errc::no_such_file_or_directory)
+                error.clear();
             const bool parentCreatable = !parentAvailable && !error && CanCreateDirectory(parentDirectory, error);
             const bool conflict =
                 validName && (parentAvailable || parentCreatable) && std::filesystem::exists(destination, error);
             const bool templateAvailable =
                 selectedTemplate != snapshot.Templates.end() && selectedEditor != snapshot.Editors.end() &&
                 EvaluateTemplateCompatibility(*selectedTemplate, compatibilityInput(*selectedEditor)).Compatible();
+            const auto destinationAllowed = ValidateProjectDestinationRoot(destination, distributionRoot);
             if (!validName)
                 ui.TextColored({0.96F, 0.38F, 0.42F, 1.0F},
                                "Use 1-128 bytes with no reserved characters or surrounding whitespace.");
@@ -182,6 +186,8 @@ namespace KeireHub
                                "Choose an absolute project location beneath an existing folder.");
             else if (conflict)
                 ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, "The destination already exists.");
+            else if (!destinationAllowed)
+                ui.TextWrapped(destinationAllowed.Error().Message);
             else if (!templateAvailable)
                 ui.TextColored({0.96F, 0.72F, 0.28F, 1.0F}, "Locate or install a compatible editor first.");
             else if (snapshot.ProjectCreationBusy)
@@ -192,7 +198,7 @@ namespace KeireHub
                 ui.TextColored({0.32F, 0.84F, 0.58F, 1.0F}, "Ready to create and validate.");
 
             const bool canCreate = validName && !error && (parentAvailable || parentCreatable) && !conflict &&
-                                   templateAvailable && !snapshot.ProjectCreationBusy;
+                                   templateAvailable && !snapshot.ProjectCreationBusy && destinationAllowed;
             if (auto disabled = ui.BeginDisabled(!canCreate); disabled)
                 if (HubPrimaryButton(ui, tokens, "Create project", {142.0F, 38.0F}))
                 {

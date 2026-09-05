@@ -1393,7 +1393,8 @@ namespace
         {
             const auto request = KeireHub::DrawHubCreateProjectDialog(
                 ui, m_ProductSnapshot, m_CreateTemplateId, m_CreateEditorId, m_CreateName, m_CreateLocation,
-                m_CreateOpenAfterCreation, static_cast<bool>(m_FolderDialog));
+                m_CreateOpenAfterCreation, static_cast<bool>(m_FolderDialog),
+                KeireHub::ResolveHubDistributionRoot(m_Executable));
             if (request.Action == KeireHub::HubCreateProjectAction::Browse)
             {
                 BrowseForFolder(FolderTarget::CreateLocation, Keire::Detail::PathFromUtf8(m_CreateLocation));

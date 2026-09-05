@@ -1193,8 +1193,8 @@ graphNormal, graphTangent, viewDirection, lightDirection,
 DirectionalColorIntensity.rgb * DirectionalColorIntensity.a, graphBaseColor.rgb, graphMetallic,
 graphRoughness, graphAnisotropy, graphSpecular, graphClearCoat, graphClearCoatRoughness, graphSheenColor,
 graphSheenRoughness, graphSubsurfaceColor, graphSubsurface, graphTransmission);
-    directLighting *= EvaluateDirectionalShadow(input.WorldPosition, input.ViewDepth) *
-                      SampleSpatialMixedVisibility(lightmapUv, LightmapParameters.w) *
+    directLighting *= min(EvaluateDirectionalShadow(input.WorldPosition, input.ViewDepth),
+                          SampleSpatialMixedVisibility(lightmapUv, LightmapParameters.w)) *
                       EvaluateDirectionalSpatialCookie(input.WorldPosition);
     uint2 lightTile = 0U.xx;
     if (LocalLightCounts.x > 0.5F)
@@ -1230,7 +1230,7 @@ if (light.Parameters.y > 0.5F)
     attenuation *= smoothstep(outerCosine, innerCosine, coneCosine);
 }
 float visibility = lightIndex < 62U ? EvaluateLocalShadow(lightIndex, input.WorldPosition) : 1.0F;
-visibility *= SampleSpatialMixedVisibility(lightmapUv, light.Parameters.z) *
+visibility = min(visibility, SampleSpatialMixedVisibility(lightmapUv, light.Parameters.z)) *
               EvaluateLocalSpatialCookie(light, input.WorldPosition);
 const float3 radiance = light.ColorIntensity.rgb * light.ColorIntensity.a * attenuation * visibility;
 directLighting += EvaluateGraphDirectLighting(
@@ -1252,14 +1252,14 @@ SampleEnvironment(refractionDirection, graphRoughness * EnvironmentParameters.w)
     const float3 absorption = exp(-max(1.0F - graphBaseColor.rgb, 0.0F.xxx) * graphThickness);
     const float3 transmittedEnvironment = refractionRadiance * absorption * graphTransmission;
     const float2 integratedBrdf =
-BrdfIntegrationLut.SampleLevel(BrdfIntegrationSampler, float2(noV, graphRoughness), 0.0F).rg;
+ApproximateSpatialIntegratedBrdf(noV, graphRoughness);
     const float3 reflectedEnvironment =
 reflectionRadiance *
 (FresnelSchlickRoughness(noV, f0, graphRoughness) * integratedBrdf.x + integratedBrdf.y);
     const float3 specularEnvironment =
 lerp(reflectedEnvironment, refractionRadiance, graphRefraction * (1.0F - graphMetallic));
     const float3 flatAmbient =
-graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * AmbientColorIntensity.a;
+graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * AmbientColorIntensity.a / Pi;
     const float3 ambientLighting =
 (flatAmbient * (1.0F - graphTransmission) + diffuseEnvironment + specularEnvironment +
  transmittedEnvironment * EnvironmentParameters.y) * ao;
@@ -1321,7 +1321,8 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
         source << "    output.NormalRoughness = float4(SafeNormalize(" << (unlit ? "input.Normal" : "graphNormal")
                << ", input.Normal) * 0.5F + 0.5F, " << (unlit ? "1.0F" : "graphRoughness") << ");\n";
         source << "    output.Material = float4(" << (unlit ? "1.0F" : "ao") << ", "
-               << (unlit ? "0.5F" : "graphSpecular") << ", " << (unlit ? "1.0F" : "0.0F") << ", 1.0F);\n";
+               << (unlit ? "0.5F" : "graphSpecular") << ", " << (unlit ? "1.0F" : "0.0F")
+               << ", SurfaceParameters.z > 0.5F ? 1.0F : 0.75F);\n";
         if (unlit)
         {
             source << "    output.Lighting = float4(0.0F, 0.0F, 0.0F, FrameParameters.w * 65536.0F);\n";

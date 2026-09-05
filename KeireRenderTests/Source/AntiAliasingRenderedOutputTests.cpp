@@ -181,6 +181,7 @@ namespace
                                                      Keire::ComponentRegistry::CreateDefault());
             auto object = m_Scene->CreateEntity("Static cube");
             m_Renderer = object.AddComponent<Keire::MeshRendererComponent>();
+            object.GetComponent<Keire::TransformComponent>()->SetLocalEulerAngles({17.0F, 31.0F, 9.0F});
 
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Temporal anti-aliasing stability";
@@ -238,7 +239,7 @@ namespace
 
       private:
         static constexpr std::array Paths{Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid};
-        static constexpr std::size_t FramesPerPath = 14U;
+        static constexpr std::size_t FramesPerPath = 40U;
 
         std::shared_ptr<TemporalStabilityResults> m_Results;
         Keire::Ref<Keire::Scene> m_Scene;
@@ -293,9 +294,36 @@ TEST_CASE("every supported anti-aliasing mode renders across paths and requested
         CAPTURE(result.Requested.Path);
         CAPTURE(result.Requested.AntiAliasing);
         CAPTURE(result.Requested.GlobalIllumination);
+        CHECK(result.Selection.EffectivePath == result.Requested.Path);
+        CHECK(result.Selection.PathFallback == Keire::RenderPathFallbackReason::None);
         CHECK(result.Selection.EffectiveAntiAliasing == result.Requested.AntiAliasing);
         CHECK(result.Selection.AntiAliasingFallback == Keire::AntiAliasingFallbackReason::None);
+        if (result.Requested.Path == Keire::RenderPath::ForwardPlus &&
+            result.Requested.GlobalIllumination == Keire::GlobalIlluminationMode::Irradyn)
+        {
+            CHECK(result.Selection.EffectiveGlobalIllumination == Keire::GlobalIlluminationMode::Realtime);
+            CHECK(result.Selection.GlobalIlluminationFallback ==
+                  Keire::GlobalIlluminationFallbackReason::IrradynRequiresDeferredHybrid);
+        }
+        else if (result.Requested.Path == Keire::RenderPath::ForwardPlus &&
+                 result.Requested.GlobalIllumination == Keire::GlobalIlluminationMode::Hybrid)
+        {
+            CHECK(result.Selection.EffectiveGlobalIllumination == Keire::GlobalIlluminationMode::Realtime);
+            CHECK(result.Selection.GlobalIlluminationFallback ==
+                  Keire::GlobalIlluminationFallbackReason::HybridUnavailable);
+        }
+        else
+        {
+            CHECK(result.Selection.EffectiveGlobalIllumination == result.Requested.GlobalIllumination);
+            CHECK(result.Selection.GlobalIlluminationFallback == Keire::GlobalIlluminationFallbackReason::None);
+        }
         CHECK(result.SurfaceSamples == Keire::ResolveRenderSurfaceSampleCount(result.Selection));
+        if (result.Requested.Path == Keire::RenderPath::DeferredHybrid &&
+            (result.Requested.AntiAliasing == Keire::RenderAntiAliasingMode::Msaa2 ||
+             result.Requested.AntiAliasing == Keire::RenderAntiAliasingMode::Msaa4))
+        {
+            CHECK(result.SurfaceSamples != Keire::RenderSampleCount::One);
+        }
         REQUIRE(result.Pixels.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4U));
         CHECK(HasVisibleRgb(result.Pixels));
     }
@@ -309,12 +337,12 @@ TEST_CASE("static TAA output remains spatially stable in Forward+ and Deferred H
     REQUIRE(application.Run() == 0);
     for (const auto& pathFrames : results->Frames)
     {
-        REQUIRE(pathFrames.size() == 14U);
+        REQUIRE(pathFrames.size() == 40U);
         float minimumX = std::numeric_limits<float>::max();
         float minimumY = std::numeric_limits<float>::max();
         float maximumX = std::numeric_limits<float>::lowest();
         float maximumY = std::numeric_limits<float>::lowest();
-        for (const auto& frame : std::span(pathFrames).last(4U))
+        for (const auto& frame : std::span(pathFrames).last(8U))
         {
             REQUIRE(frame.size() == static_cast<std::size_t>(SurfaceSize * SurfaceSize * 4U));
             const auto [x, y] = LuminanceCentroid(frame);
@@ -323,7 +351,9 @@ TEST_CASE("static TAA output remains spatially stable in Forward+ and Deferred H
             maximumX = std::max(maximumX, x);
             maximumY = std::max(maximumY, y);
         }
-        CHECK(maximumX - minimumX < 0.35F);
-        CHECK(maximumY - minimumY < 0.35F);
+        INFO("TAA centroid X motion: ", maximumX - minimumX);
+        INFO("TAA centroid Y motion: ", maximumY - minimumY);
+        CHECK(maximumX - minimumX < 0.1F);
+        CHECK(maximumY - minimumY < 0.1F);
     }
 }

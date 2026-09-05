@@ -633,7 +633,7 @@ namespace KeireEditor
         const auto pointer = ui.PointerState();
         bool selectionActivated = false;
         bool pointerConsumed = false;
-        const bool hovered = viewport.Contains(pointer.Position);
+        const bool hovered = !pointerBlocked && viewport.Contains(pointer.Position);
         const bool selectionRequested =
             hovered && !pointerBlocked && pointer.LeftPressed && m_Drag.ActiveAxis == Axis::None &&
             m_ColliderDrag.Handle == ColliderHandle::None && m_UiWorldPanelDrag.Handle == SceneUiRectHandle::None;

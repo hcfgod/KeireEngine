@@ -126,6 +126,7 @@ namespace KeireEditor
                                                                       Keire::UiPosition position,
                                                                       const std::filesystem::path& fallback);
     [[nodiscard]] std::string AssetTypeName(const Keire::AssetSourceRecord& record);
+    [[nodiscard]] bool IsMaterialGraphSourcePath(const std::filesystem::path& path) noexcept;
     [[nodiscard]] AssetBrowserOpenAction ResolveAssetBrowserOpenAction(const std::filesystem::path& path) noexcept;
     [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(std::span<const std::byte> bytes);
     [[nodiscard]] Keire::AssetId DecodeSingleAssetPayload(std::span<const std::byte> bytes);

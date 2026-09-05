@@ -219,8 +219,8 @@ namespace
 
 TEST_CASE("built-in shader resource counts match each stage")
 {
-    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 3);
-    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 3);
+    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(true) == 4);
+    CHECK(Keire::Detail::BuiltinShaderUniformBufferCount(false) == 4);
     CHECK(Keire::Detail::DeferredGBufferShaderUniformBufferCount(true) == 3);
     CHECK(Keire::Detail::DeferredGBufferShaderUniformBufferCount(false) == 0);
     CHECK(Keire::Detail::DeferredGBufferShaderStorageBufferCount(true) == 1);

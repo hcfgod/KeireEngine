@@ -107,6 +107,18 @@ namespace KeireEditor::ShaderGraphPreviewInternal
                 }
             }
         }
+        if (result.HasNormal)
+        {
+            // Material normals are tangent-space values, including the neutral (0, 0, 1) default.
+            const auto n = Normalize(normal);
+            const auto tangent = Normalize(Cross({0.0F, 1.0F, 0.0F}, n), {1.0F, 0.0F, 0.0F});
+            const auto bitangent = Cross(n, tangent);
+            const auto mapped = result.Normal;
+            result.Normal = Normalize({tangent.X * mapped.X + bitangent.X * mapped.Y + n.X * mapped.Z,
+                                       tangent.Y * mapped.X + bitangent.Y * mapped.Y + n.Y * mapped.Z,
+                                       tangent.Z * mapped.X + bitangent.Z * mapped.Y + n.Z * mapped.Z},
+                                      n);
+        }
         result.BaseColor.X = Clamp01(result.BaseColor.X);
         result.BaseColor.Y = Clamp01(result.BaseColor.Y);
         result.BaseColor.Z = Clamp01(result.BaseColor.Z);

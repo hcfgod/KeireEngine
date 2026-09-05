@@ -824,3 +824,82 @@ TEST_CASE("Legacy Material Graph migration rejects destination conflicts without
     const std::string existingText{std::istreambuf_iterator<char>(existing), std::istreambuf_iterator<char>()};
     CHECK(existingText == sentinel);
 }
+
+TEST_CASE("Standalone OpenPBR instances inherit parameters and select their parent program variants")
+{
+    auto root = Keire::CreateOpenPbrMaterial();
+    auto keyword =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Keyword, Keire::ShaderGraphValueType::Scalar);
+    keyword.Symbol = "DETAIL";
+    root.SurfaceGraph.Keywords.push_back({"DETAIL", {}, "false", true});
+    root.SurfaceGraph.Nodes.push_back(std::move(keyword));
+    ConnectGraph(root.SurfaceGraph, root.SurfaceGraph.Nodes.back(), "Enabled", root.SurfaceGraph.Nodes.front(),
+                 "ClearCoat");
+    const auto rootId = Keire::AssetId::Generate();
+    const auto parentId = Keire::AssetId::Generate();
+    const auto childId = Keire::AssetId::Generate();
+    const auto defaultShader = Keire::AssetId::Generate();
+    const auto detailShader = Keire::AssetId::Generate();
+    const auto rootMaterial = Keire::AssetId::Generate();
+    const auto childMaterial = Keire::AssetId::Generate();
+    Keire::MaterialInstanceDefinition parent;
+    parent.Parent = rootId;
+    parent.Properties.emplace("Roughness", 0.8F);
+    Keire::MaterialInstanceDefinition child;
+    child.Parent = parentId;
+    child.Properties.emplace("BaseColor", Keire::Color{0.1F, 0.7F, 0.4F, 1.0F});
+    child.KeywordOverrides.emplace("DETAIL", "true");
+    const auto rootBytes = Keire::MaterialGraphAsset::EncodeSource(root);
+    const auto parentBytes = Keire::MaterialInstanceAsset::EncodeSource(parent);
+    Keire::AssetImportContext context;
+    context.Asset = childId;
+    context.ProjectRoot = std::filesystem::absolute("Build/StandaloneInstanceTest");
+    context.SourceRoot = context.ProjectRoot / "Assets";
+    context.ReadProjectFile = [&](const std::filesystem::path& path)
+    {
+        if (path == "Assets/Root.keirematerial")
+            return rootBytes;
+        if (path == "Assets/Parent.keirematerialinstance")
+            return parentBytes;
+        throw std::logic_error("Unexpected standalone material dependency");
+    };
+    context.ResolveAssetSource = [&](Keire::AssetId id) -> std::optional<Keire::AssetImportSource>
+    {
+        REQUIRE(id);
+        if (id == rootId)
+            return Keire::AssetImportSource{id, Keire::MaterialGraphAsset::StaticType(), "Root.keirematerial"};
+        if (id == parentId)
+            return Keire::AssetImportSource{id, Keire::MaterialInstanceAsset::StaticType(),
+                                            "Parent.keirematerialinstance"};
+        return std::nullopt;
+    };
+    context.ResolveSubAssetId = [&](std::string_view key)
+    {
+        CHECK(key == "material/default");
+        return childMaterial;
+    };
+    context.ResolveSubAssetIdFor = [&](Keire::AssetId owner, std::string_view key)
+    {
+        CHECK(owner == rootId);
+        if (key == "material/default")
+            return rootMaterial;
+        const std::array<std::string, 0> disabled;
+        if (key == "material-program/" + Keire::MakeShaderGraphVariantSubAssetKey("default", disabled))
+            return defaultShader;
+        const std::array enabled{std::string("DETAIL")};
+        CHECK(key == "material-program/" + Keire::MakeShaderGraphVariantSubAssetKey("default", enabled));
+        return detailShader;
+    };
+    const auto imported = Keire::CreateMaterialInstanceAssetImporter().ContextualImport(
+        context, Keire::MaterialInstanceAsset::EncodeSource(child));
+    REQUIRE(imported.SubAssets.size() == 1);
+    const auto material = Keire::MaterialAsset::Decode(imported.SubAssets.front().Bytes)->Definition();
+    CHECK(material.Shader == detailShader);
+    CHECK(std::get<float>(material.Properties.at("Roughness")) == doctest::Approx(0.8F));
+    CHECK(std::get<Keire::Color>(material.Properties.at("BaseColor")) == Keire::Color{0.1F, 0.7F, 0.4F, 1.0F});
+    CHECK(std::ranges::find(imported.AssetDependencies, Keire::AssetId{}) == imported.AssetDependencies.end());
+    child.Properties["Missing"] = 1.0F;
+    CHECK_THROWS_AS(Keire::CreateMaterialInstanceAssetImporter().ContextualImport(
+                        context, Keire::MaterialInstanceAsset::EncodeSource(child)),
+                    std::invalid_argument);
+}

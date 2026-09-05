@@ -12,13 +12,14 @@ source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shade
   "$ROOT/KeireCore/Shaders/BuiltinDeferredLighting.hlsl" "$ROOT/KeireCore/Shaders/BuiltinIrradyn.hlsl")
 prefixes=(BuiltinUnlit BuiltinSky BuiltinGrid BuiltinShadow BuiltinToneMap BuiltinRuntimeUi \
   BuiltinDeferredGBuffer BuiltinDeferredLighting BuiltinIrradyn)
+include_files=("$ROOT/KeireCore/Shaders/BuiltinLighting.hlsli")
 generated="$ROOT/Build/Generated/Keire/BuiltinUnlitShaders.h"
 stamp="$ROOT/Build/Generated/Keire/BuiltinRenderingShaders.stamp"
 lock="$ROOT/Build/Generated/.locks/builtin-rendering.lock"
 
 [[ -x "$compiler" ]] || { printf 'KeireShaderCompiler is required before generating built-in rendering shaders.\n' >&2; exit 1; }
 fingerprint="$(generated_content_fingerprint builtin-rendering-v2 "${BASH_SOURCE[0]}" "$cache_helper" \
-  "$compiler" "${source_files[@]}")"
+  "$compiler" "${source_files[@]}" "${include_files[@]}")"
 generated_content_is_current "$generated" "$stamp" "$fingerprint" && exit 0
 
 mkdir -p "$(dirname "$generated")"
@@ -40,7 +41,7 @@ files=(vertex.dxil fragment.dxil vertex.spv fragment.spv vertex.metal fragment.m
 for source_index in "${!source_files[@]}"; do
   for index in "${!names[@]}"; do
     "$compiler" "${source_files[$source_index]}" -s HLSL -d "${destinations[$index]}" -t "${stages[$index]}" \
-      -e "${entries[$index]}" \
+      -e "${entries[$index]}" -I "$ROOT/KeireCore/Shaders" \
       -o "$temporary/${prefixes[$source_index]}-${files[$index]}"
   done
 done

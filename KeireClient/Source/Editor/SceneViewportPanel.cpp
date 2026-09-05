@@ -535,7 +535,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         }
     }
     const bool pointerBlocked =
-        toolbarRect.Contains(ui.PointerState().Position) ||
+        !imageState.Hovered || toolbarRect.Contains(ui.PointerState().Position) ||
         (orientationLayout.ButtonCount > 0U && orientationRect.Contains(ui.PointerState().Position)) ||
         (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
     if (renderScene)

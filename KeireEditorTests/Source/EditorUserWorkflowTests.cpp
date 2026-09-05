@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
+#include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/NamedAssetCreation.h"
 
 #include <doctest/doctest.h>
@@ -9,11 +10,26 @@
 #include <ranges>
 #include <span>
 
+TEST_CASE("New Material Graph documents focus the canvas on their OpenPBR surface")
+{
+    KeireEditor::MaterialGraphDocument document({
+        .Persist = [](const Keire::AssetId, const std::span<const std::byte>) {},
+    });
+    const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000031");
+    document.Open(asset, Keire::MaterialGraphAsset::EncodeSource(Keire::CreateOpenPbrMaterial()), 1);
+    const auto canvas = document.BuildCanvasModel(true);
+    CHECK(std::ranges::none_of(canvas.Nodes, [](const KeireEditor::NodeGraphNode& node)
+                               { return node.Label == "Template Defaults"; }));
+}
+
 TEST_CASE("Asset Browser double-click routes material and shader authoring assets internally")
 {
     using enum KeireEditor::AssetBrowserOpenAction;
 
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerial") == MaterialGraph);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialgraph") == MaterialGraph);
+    CHECK(KeireEditor::IsMaterialGraphSourcePath("Materials/Surface.KEIREMATERIAL"));
+    CHECK(KeireEditor::IsMaterialGraphSourcePath("Materials/Surface.KEIREMATERIALGRAPH"));
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keiremateriallegacy") == Material);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Materials/Surface.keirematerialinstance") == MaterialInstance);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Shaders/Surface.keireshadergraph") == ShaderGraph);

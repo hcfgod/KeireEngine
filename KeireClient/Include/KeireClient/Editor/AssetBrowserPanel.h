@@ -55,7 +55,7 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserShaderGraph(std::string_view name, Keire::ShaderGraphTemplate graphTemplate) = 0;
         virtual bool CreateAssetBrowserReusableGraph(std::string_view name, Keire::ShaderGraphPurpose purpose) = 0;
         virtual bool CreateAssetBrowserMaterialParameterCollection(std::string_view name) = 0;
-        virtual bool CreateAssetBrowserMaterialInstance(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserMaterialInstance(std::string_view name, Keire::AssetId parent) = 0;
         virtual bool CreateAssetBrowserPrefab(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPrefabVariant(Keire::AssetId basePrefab, std::string_view name) = 0;
         virtual void CreateAssetBrowserPrefabFromObject(Keire::AssetId object, const std::filesystem::path& folder) = 0;

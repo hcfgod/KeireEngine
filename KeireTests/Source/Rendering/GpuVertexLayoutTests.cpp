@@ -1,3 +1,4 @@
+#include "Keire/Rendering/ShaderGraph.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include <doctest/doctest.h>
@@ -33,6 +34,36 @@ TEST_CASE("GPU skinning vertex storage uses explicit 16-byte lanes")
     CHECK(offsetof(GpuRenderVertex, Position) == 0);
     CHECK(offsetof(GpuRenderVertex, Color) == 16);
     CHECK(offsetof(GpuRenderVertex, Normal) == 32);
+}
+
+TEST_CASE("built-in surface shaders preserve asset UVs and consume baked lightmaps")
+{
+    std::ifstream forwardStream("KeireCore/Shaders/BuiltinUnlit.hlsl", std::ios::binary);
+    REQUIRE(forwardStream.good());
+    const std::string forwardShader{std::istreambuf_iterator<char>(forwardStream), std::istreambuf_iterator<char>()};
+    CHECK(forwardShader.find("float4 VertexColor : TEXCOORD3") != std::string::npos);
+    CHECK(forwardShader.find("float2 UV1 : TEXCOORD5") != std::string::npos);
+    CHECK(forwardShader.find("Texture2DArray<float4> LightmapTexture") != std::string::npos);
+    CHECK(forwardShader.find("EvaluateBakedDiffuse(input)") != std::string::npos);
+    CHECK(forwardShader.find("#include \"BuiltinLighting.hlsli\"") != std::string::npos);
+    CHECK(forwardShader.find("Texture2D<float4> EnvironmentTexture : register(t4, space2)") != std::string::npos);
+    CHECK(forwardShader.find("CameraPositionExposure.w") != std::string::npos);
+    CHECK(forwardShader.find("return float4(saturate(") == std::string::npos);
+    CHECK(sizeof(Keire::RenderBackend::BuiltInSpatialLightingUniforms) == sizeof(float) * 28U);
+    CHECK(offsetof(Keire::RenderBackend::BuiltInSpatialLightingUniforms, CameraPositionExposure) ==
+          sizeof(float) * 12U);
+
+    std::ifstream deferredStream("KeireCore/Shaders/BuiltinDeferredGBuffer.hlsl", std::ios::binary);
+    REQUIRE(deferredStream.good());
+    const std::string deferredShader{std::istreambuf_iterator<char>(deferredStream), std::istreambuf_iterator<char>()};
+    CHECK(deferredShader.find("float4 VertexColor : TEXCOORD3") != std::string::npos);
+    CHECK(deferredShader.find("float2 UV1 : TEXCOORD5") != std::string::npos);
+    CHECK(deferredShader.find("output.LightmapUV = input.UV1") != std::string::npos);
+    CHECK(deferredShader.find("output.PackedLayers = lightmapLayer + shadowMaskLayer * 4096U") != std::string::npos);
+    std::ifstream lightingStream("KeireCore/Shaders/BuiltinDeferredLighting.hlsl", std::ios::binary);
+    REQUIRE(lightingStream.good());
+    const std::string lightingShader{std::istreambuf_iterator<char>(lightingStream), std::istreambuf_iterator<char>()};
+    CHECK(lightingShader.find("#include \"BuiltinLighting.hlsli\"") != std::string::npos);
 }
 
 TEST_CASE("Editor grid shader reconstructs an infinite plane and writes scene depth")
@@ -83,12 +114,43 @@ TEST_CASE("deferred local shadows sample packed atlas tiles from the physical te
     const std::string shader{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
     const auto localShadow = shader.find("float EvaluateLocalShadow");
     REQUIRE(localShadow != std::string::npos);
-    const auto localShadowEnd = shader.find("float3 FresnelSchlick", localShadow);
+    const auto localShadowEnd = shader.find("float3 EvaluateProbeDiffuse", localShadow);
     REQUIRE(localShadowEnd != std::string::npos);
     const auto implementation = shader.substr(localShadow, localShadowEnd - localShadow);
 
     CHECK(implementation.find("LocalShadowTexture, LocalShadowSampler, uv, 0.0F") != std::string::npos);
     CHECK(implementation.find("LocalShadowTexture, LocalShadowSampler, uv, matrixIndex") == std::string::npos);
+}
+
+TEST_CASE("lighting projection and shadow flags agree between built-in and generated shaders")
+{
+    const auto compilation = Keire::CompileShaderGraph(Keire::CreateDefaultShaderGraph());
+    REQUIRE(compilation.Succeeded());
+    REQUIRE(compilation.Variants.size() == 1U);
+    const auto& generated = compilation.Variants.front().Hlsl;
+    std::ifstream stream("KeireCore/Shaders/BuiltinDeferredLighting.hlsl", std::ios::binary);
+    REQUIRE(stream.good());
+    const std::string deferred{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+    for (const auto* shader : {&generated, &deferred})
+    {
+        // Parallel rays on a probe boundary must not produce 0/0 or select a zero-distance exit face.
+        CHECK(shader->find("sign(localDirection) *") == std::string::npos);
+        for (const auto axis : {"x", "y", "z"})
+        {
+            CHECK(shader->find(std::string("abs(localDirection.") + axis + ") < 1.0e-5F ? 1.0e30F") !=
+                  std::string::npos);
+        }
+        CHECK(shader->find("uv = float2(dot(fromLight, tangent), dot(fromLight, bitangent)) / (2.0F * coneRadius)") !=
+              std::string::npos);
+    }
+    CHECK(generated.find("SurfaceParameters.z > 0.5F ? 1.0F : 0.75F") != std::string::npos);
+    CHECK(generated.find("if (SurfaceParameters.z < 0.5F || ((uint)LightmapParameters.z & 1U)") != std::string::npos);
+    CHECK(generated.find("min(visibility, SampleSpatialMixedVisibility") != std::string::npos);
+    CHECK(generated.find("AmbientColorIntensity.rgb * AmbientColorIntensity.a / Pi") != std::string::npos);
+    CHECK(generated.find("ApproximateSpatialIntegratedBrdf(noV, graphRoughness)") != std::string::npos);
+    CHECK(deferred.find("const bool receiveShadows = material.a > 0.875F") != std::string::npos);
+    CHECK(deferred.find("if (receiveShadows && DirectionalCookieAndContact.y") != std::string::npos);
+    CHECK(deferred.find("if (receiveShadows && ((uint)max(light.Parameters.w") != std::string::npos);
 }
 
 TEST_CASE("CPU mesh VFX particles enter material-aware scene rendering")

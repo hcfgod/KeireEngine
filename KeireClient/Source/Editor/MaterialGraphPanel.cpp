@@ -129,6 +129,8 @@ namespace KeireEditor
 
     void MaterialGraphPanel::Draw(Keire::UiFrame& ui)
     {
+        if (m_Registration.Visible())
+            ui.SetNextWindowSize({1040.0F, 640.0F});
         if (auto panel = ui.BeginPanel(m_Registration); panel)
         {
             if (!m_Controller.MaterialGraphState().IsOpen())
@@ -569,14 +571,17 @@ namespace KeireEditor
         if (auto combo = ui.BeginCombo("Add Node", "Choose material node..."); combo)
             if (DrawExpressionCreationMenu(ui, std::nullopt))
                 return;
-        ui.SameLine();
-        if (auto combo = ui.BeginCombo("Add Override", "Choose compatibility parameter..."); combo)
-            for (const auto& property : document.Definition().Properties)
-                if (ui.Selectable(property.Name, false))
-                {
-                    AddValueNode(property);
-                    return;
-                }
+        if (!document.Definition().Properties.empty())
+        {
+            ui.SameLine();
+            if (auto combo = ui.BeginCombo("Add Override", "Choose compatibility parameter..."); combo)
+                for (const auto& property : document.Definition().Properties)
+                    if (ui.Selectable(property.Name, false))
+                    {
+                        AddValueNode(property);
+                        return;
+                    }
+        }
         ui.SameLine();
         if (ui.Button("Frame All"))
             m_Canvas.Focus(model.Nodes, ui.ContentAvailable());

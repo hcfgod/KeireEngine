@@ -72,6 +72,7 @@ namespace KeireEditor
             PendingCreateKind = kind;
             PendingCreateFolder = CurrentFolder;
             CreateNameBuffer = defaultName;
+            CreateError.clear();
             OpenNamedCreatePopup = true;
         }
         void RequestPackageCreate(AssetPackageSelection selection, std::string displayName)
@@ -465,7 +466,10 @@ namespace KeireEditor
             if (ui.MenuItem("Material Parameter Collection"))
                 RequestNamedCreate(NamedCreateKind::MaterialParameterCollection, "GlobalMaterialParameters");
             if (ui.MenuItem("Material Instance"))
+            {
+                PendingVariantBase = Selection.empty() ? Keire::AssetId{} : Selection.back();
                 RequestNamedCreate(NamedCreateKind::MaterialInstance, "NewMaterialInstance");
+            }
             const auto managedTypes = editor.AssetBrowserManagedAssetTypes();
             const bool hasAuthorableManagedTypes =
                 std::ranges::any_of(managedTypes, [](const auto& type) { return !type.MenuPath.empty(); });
@@ -1237,6 +1241,7 @@ namespace KeireEditor
         std::string Search;
         std::string RenameBuffer;
         std::string CreateNameBuffer;
+        std::string CreateError;
         std::string TrashError;
         std::filesystem::path PendingCreateFolder;
         NamedCreateKind PendingCreateKind = NamedCreateKind::None;

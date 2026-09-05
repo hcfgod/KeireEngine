@@ -42,6 +42,11 @@ if [[ $FORCE -eq 1 || $UPDATE -eq 1 || ! -f "$ROOT/$generated" || ! -f "$stamp" 
 fi
 activate_linux_toolchain "$ROOT" "$TOOLSET"
 
+# Refresh fingerprinted headers before Ninja examines dependencies; its prebuild stamp has no shader inputs.
+if [[ "$GENERATOR" == ninja ]]; then
+    bash "$ROOT/Scripts/Unix/prepare-generated-content.sh"
+fi
+
 case "$GENERATOR" in
     ninja) printf '==> Building %s %s for %s with Ninja\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; ninja_profile=(); [[ "$PROFILE_BUILD" == 1 ]] && ninja_profile=(-d stats); ninja -j "$(build_parallel_jobs)" -C "$ROOT" -f build.ninja "${ninja_profile[@]}" "${TARGET}_${CONFIGURATION}" ;;
     gmake) printf '==> Building %s %s for %s with GNU Make\n' "$TARGET" "$CONFIGURATION" "$ARCHITECTURE"; make -j "$(build_parallel_jobs)" -C "$ROOT" "config=$(printf '%s' "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')" "$TARGET" ;;

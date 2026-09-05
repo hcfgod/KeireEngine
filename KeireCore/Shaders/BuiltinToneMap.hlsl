@@ -74,6 +74,12 @@ float3 ApplyFxaa(const float2 uv, const float3 center)
     return lumaResultB < lumaMinimum || lumaResultB > lumaMaximum ? resultA : resultB;
 }
 
+float2 ClampSceneUv(const float2 uv)
+{
+    const float2 halfTexel = ToneMapParameters.xy * 0.5F;
+    return clamp(uv, halfTexel, 1.0F.xx - halfTexel);
+}
+
 float3 ApplyTaa(const float2 uv, const float3 center)
 {
     if (ToneMapParameters.w < 0.5F)
@@ -92,27 +98,33 @@ float3 ApplyTaa(const float2 uv, const float3 center)
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
-            const float3 sampleValue = SampleToneMapped(uv + ToneMapParameters.xy * float2(x, y));
+            const float3 sampleValue = SampleToneMapped(ClampSceneUv(uv + ToneMapParameters.xy * float2(x, y)));
             neighborhoodMinimum = min(neighborhoodMinimum, sampleValue);
             neighborhoodMaximum = max(neighborhoodMaximum, sampleValue);
         }
     }
 
-    const float3 history = clamp(TemporalHistoryTexture.SampleLevel(TemporalHistorySampler, previousUv, 0.0F).rgb,
-                                 neighborhoodMinimum, neighborhoodMaximum);
+    const float3 neighborhoodExtent = neighborhoodMaximum - neighborhoodMinimum;
+    const float3 clippingPadding = max(neighborhoodExtent * 0.5F, 0.02F.xxx);
+    const float3 rawHistory = TemporalHistoryTexture.SampleLevel(TemporalHistorySampler, previousUv, 0.0F).rgb;
+    const float3 history = clamp(rawHistory, neighborhoodMinimum - clippingPadding,
+                                 neighborhoodMaximum + clippingPadding);
+    const float3 nearestNeighborhood = clamp(rawHistory, neighborhoodMinimum, neighborhoodMaximum);
+    const float historyMismatch = max(max(abs(rawHistory.r - nearestNeighborhood.r),
+                                          abs(rawHistory.g - nearestNeighborhood.g)),
+                                      abs(rawHistory.b - nearestNeighborhood.b));
     const float velocityPixels = length(velocity / max(ToneMapParameters.xy, 1.0e-6F.xx));
-    const float luminanceDifference = abs(Luminance(history) - Luminance(center));
     const float motionWeight = lerp(0.92F, 0.72F, saturate(velocityPixels * (1.0F / 32.0F)));
-    const float historyWeight = motionWeight * (1.0F - saturate(luminanceDifference * 4.0F));
-    return lerp(center, history, historyWeight);
+    const float historyValidity = 1.0F - saturate(historyMismatch * 32.0F);
+    return lerp(center, history, motionWeight * historyValidity);
 }
 
 float4 PSMain(const VertexOutput input) : SV_Target0
 {
+    const bool taa = ToneMapParameters.z > 1.5F;
     const float4 hdr = HdrSceneTexture.SampleLevel(HdrSceneSampler, input.UV, 0.0F);
     const float3 toneMapped = AcesFitted(max(hdr.rgb, 0.0F.xxx));
-    const float3 color = ToneMapParameters.z > 1.5F
-                             ? ApplyTaa(input.UV, toneMapped)
+    const float3 color = taa ? ApplyTaa(input.UV, toneMapped)
                              : ToneMapParameters.z > 0.5F ? ApplyFxaa(input.UV, toneMapped) : toneMapped;
     return float4(color, saturate(hdr.a));
 }

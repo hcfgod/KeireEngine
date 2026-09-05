@@ -706,12 +706,17 @@ Assert-True ($ciWorkflow.Contains("Scripts/Windows/coral.ps1") -and
 $processSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Source\Process.cpp") -Raw
 Assert-True ($processSource.Contains('CommandLineToArgvW(GetCommandLineW()') -and $processSource.Contains('WideCharToMultiByte(CP_UTF8')) "Shared UTF-8 Windows process command line"
 $menuScript = Get-Content (Join-Path $Windows "..\project.ps1") -Raw
+$batchLauncher = Get-Content (Join-Path $Windows "..\project.bat") -Raw
 Assert-True ($menuScript.Contains('$script:Target = $Project.CLIENT_TARGET')) "Post-rename client target refresh"
+Assert-True ($batchLauncher.Contains('%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe') -and
+             $batchLauncher.Contains('"%WINDOWS_POWERSHELL%" -NoProfile -ExecutionPolicy Bypass')) `
+    "Windows batch launcher selects the compatible system PowerShell host explicitly"
 Assert-True (-not $menuScript.Contains('Import-Module Microsoft.PowerShell.Utility')) `
     "Windows batch launcher leaves utility-module autoloading available to nested build and package scripts"
-Assert-True ($windowsCommon.Contains(
-        'Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop -Scope Local -Force')) `
-    "Windows build and package scripts import required hashing and JSON commands in their own command scope"
+Assert-True ($windowsCommon.Contains('Join-Path $PSHOME "Modules\Microsoft.PowerShell.Utility') -and
+             $windowsCommon.Contains(
+                 'Import-Module $keirePowerShellUtilityModule -ErrorAction Stop -Scope Global -Force')) `
+    "Windows build and package scripts use the active host's compatible utility module across dot-source scopes"
 Assert-True ($menuScript.Contains('"package-editor"') -and $menuScript.Contains('"package-hub"') -and
              $menuScript.Contains('$Configuration = "Dist"')) "Dist product package launcher commands"
 Assert-True ($menuScript.Contains('"stage-editor"') -and $menuScript.Contains('"stage-hub"') -and
@@ -1552,6 +1557,10 @@ Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              $builtinShaderScript.Contains('BuiltinDeferredLighting') -and
              $builtinShaderScript.Contains('BuiltinIrradyn')) `
     "First-party built-in shader generation"
+Assert-True ($builtinShaderScript.Contains('BuiltinLighting.hlsli') -and
+             $builtinShaderScript.Contains('+ $Includes') -and
+             $builtinShaderScript.Contains("'-I', `$Temporary")) `
+    "Shared built-in lighting includes are fingerprinted and passed to the compiler"
 $renderSource = (Get-ChildItem (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering') -File |
     Where-Object { $_.Name -like 'Render*.cpp' -or $_.Name -like 'Render*.h' } |
     Get-Content -Raw) -join "`n"

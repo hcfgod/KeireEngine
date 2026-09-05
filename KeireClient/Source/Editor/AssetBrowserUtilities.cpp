@@ -363,7 +363,7 @@ namespace KeireEditor
             return AssetBrowserOpenAction::UiDocument;
         if (extension == ".keirestyle")
             return AssetBrowserOpenAction::UiStyleSheet;
-        if (extension == ".keirematerial")
+        if (extension == ".keirematerial" || extension == ".keirematerialgraph")
             return AssetBrowserOpenAction::MaterialGraph;
         if (extension == ".keiremateriallegacy")
             return AssetBrowserOpenAction::Material;
@@ -382,6 +382,14 @@ namespace KeireEditor
         if (extension == ".keireprefab")
             return AssetBrowserOpenAction::Prefab;
         return AssetBrowserOpenAction::External;
+    }
+
+    bool IsMaterialGraphSourcePath(const std::filesystem::path& path) noexcept
+    {
+        auto extension = path.extension().string();
+        std::ranges::transform(extension, extension.begin(), [](const unsigned char character)
+                               { return static_cast<char>(std::tolower(character)); });
+        return extension == Keire::MaterialAssetSourceExtension || extension == ".keirematerialgraph";
     }
 
     std::vector<Keire::AssetId> DecodeAssetPayload(const std::span<const std::byte> bytes)

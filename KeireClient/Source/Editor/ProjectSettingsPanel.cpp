@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/GpuOcclusionDiagnostics.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
+#include "KeireClient/Editor/RenderFeatureDiagnostics.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
@@ -624,6 +625,18 @@ namespace KeireEditor
                        "Rendering changes apply immediately and are saved when the edited control is committed.");
         const auto currentRuntime =
             Keire::ResolveRenderFeatureSelection(settings, m_Controller.ProjectRenderFeatureCapabilities());
+        ui.TextColored(theme.MutedText,
+                       "Active: " + std::string(RenderPathName(currentRuntime.EffectivePath)) + " | " +
+                           std::string(AntiAliasingName(currentRuntime.EffectiveAntiAliasing)) + " | " +
+                           std::string(GlobalIlluminationName(currentRuntime.EffectiveGlobalIllumination)));
+        if (currentRuntime.EffectivePath == Keire::RenderPath::DeferredHybrid &&
+            (currentRuntime.EffectiveAntiAliasing == Keire::RenderAntiAliasingMode::Msaa2 ||
+             currentRuntime.EffectiveAntiAliasing == Keire::RenderAntiAliasingMode::Msaa4))
+        {
+            ui.TextColored(theme.MutedText,
+                           "Deferred Hybrid remains active; MSAA uses its forward coverage lane while deferred data "
+                           "and GI passes stay enabled.");
+        }
         if (currentRuntime.PathFallback != Keire::RenderPathFallbackReason::None)
             ui.TextColored(theme.Warning, "Deferred Hybrid is not available in this runtime; Forward+ will be used.");
         if (currentRuntime.AntiAliasingFallback != Keire::AntiAliasingFallbackReason::None)
@@ -636,9 +649,9 @@ namespace KeireEditor
             ui.TextColored(theme.Warning, "Dynamic resolution is not available with the effective renderer settings.");
         if (currentRuntime.GlobalIlluminationFallback != Keire::GlobalIlluminationFallbackReason::None)
         {
-            ui.TextColored(theme.Warning,
-                           "The requested GI mode is not available in this runtime; rendering uses " +
-                               std::string(GlobalIlluminationName(currentRuntime.EffectiveGlobalIllumination)) + '.');
+            ui.TextColored(theme.Warning, BuildGlobalIlluminationFallbackMessage(
+                                              currentRuntime.GlobalIlluminationFallback,
+                                              GlobalIlluminationName(currentRuntime.EffectiveGlobalIllumination)));
         }
         ui.TextColored(theme.MutedText,
                        "Requested and effective modes remain separate so capability fallback is explicit and safe.");

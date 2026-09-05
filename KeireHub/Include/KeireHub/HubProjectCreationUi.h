@@ -29,5 +29,6 @@ namespace KeireHub
     [[nodiscard]] HubCreateProjectRequest
     DrawHubCreateProjectDialog(Keire::UiFrame& ui, const HubProductSnapshot& snapshot, std::string& templateId,
                                std::string& editorId, std::string& projectName, std::string& projectLocation,
-                               bool& openAfterCreation, bool folderDialogPending);
+                               bool& openAfterCreation, bool folderDialogPending,
+                               const std::filesystem::path& distributionRoot);
 } // namespace KeireHub

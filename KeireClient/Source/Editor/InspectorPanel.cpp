@@ -27,11 +27,6 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
-#include <limits>
-#include <map>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -823,7 +818,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         ui.Spacing();
                         auto& rendererExpanded = expansion("mesh-renderer");
                         if (auto card =
-                                ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 282.0F : 38.0F}, true);
+                                ui.BeginChild("MeshRendererCard", {0.0F, rendererExpanded ? 426.0F : 38.0F}, true);
                             card)
                         {
                             const auto registration = scene->Components()->Find(renderer->Type());
@@ -955,6 +950,12 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     m_Controller.RecordInspectorUndo("Change Shadow Receiving");
                                     setComponentProperty(renderer->Type(), "receiveShadows", receiveShadows);
                                 }
+                                ui.Separator();
+                                ui.TextColored(theme.MutedText, "Baked Lighting");
+                                if (registration)
+                                    DrawMeshRendererBakedLightingProperties(ui, renderer, *registration, sceneDocument,
+                                                                            scene, editTargets, multiEditing,
+                                                                            editingComponentOrdinal, entity.Id());
                                 if (ui.Button("Reset Renderer"))
                                 {
                                     m_Controller.RecordInspectorUndo();

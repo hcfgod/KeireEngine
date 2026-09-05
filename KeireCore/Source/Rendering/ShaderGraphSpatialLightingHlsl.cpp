@@ -4,7 +4,17 @@ namespace Keire::Detail
 {
     [[nodiscard]] std::string_view ShaderGraphSpatialLightingHlsl() noexcept
     {
-        return R"HLSL(float3 DecodeSpatialLightingSample(const float4 sampleValue, const bool rgbe)
+        return R"HLSL(float2 ApproximateSpatialIntegratedBrdf(const float noV, const float roughness)
+{
+    // Match the portable deferred resolve, which reserves its sampler budget for scene lighting resources.
+    const float4 scale = float4(-1.0F, -0.0275F, -0.572F, 0.022F);
+    const float4 bias = float4(1.0F, 0.0425F, 1.04F, -0.04F);
+    const float4 fit = roughness * scale + bias;
+    const float grazing = min(fit.x * fit.x, exp2(-9.28F * saturate(noV))) * fit.x + fit.y;
+    return float2(-1.04F, 1.04F) * grazing + fit.zw;
+}
+
+float3 DecodeSpatialLightingSample(const float4 sampleValue, const bool rgbe)
 {
     return rgbe ? DecodeRgbe(sampleValue) : sampleValue.rgb;
 }
@@ -74,9 +84,16 @@ float3 BoxProjectedSpatialReflection(const ShaderGraphReflectionProbe probe, con
         return reflectionDirection;
     const float3 localPosition = mul(probe.WorldToLocal, float4(worldPosition, 1.0F)).xyz;
     const float3 localDirection = mul((float3x3)probe.WorldToLocal, reflectionDirection);
-    const float3 safeDirection = sign(localDirection) * max(abs(localDirection), 1.0e-5F.xxx);
+    // sign(0) is zero: choose a nonzero sign even for rays parallel to a box face.
+    const float3 directionSign = float3(localDirection.x < 0.0F ? -1.0F : 1.0F,
+                                         localDirection.y < 0.0F ? -1.0F : 1.0F,
+                                         localDirection.z < 0.0F ? -1.0F : 1.0F);
+    const float3 safeDirection = directionSign * max(abs(localDirection), 1.0e-5F.xxx);
     const float3 boundary = sign(safeDirection) * probe.ExtentsWeight.xyz;
-    const float3 distances = (boundary - localPosition) / safeDirection;
+    const float3 distances = float3(
+        abs(localDirection.x) < 1.0e-5F ? 1.0e30F : (boundary.x - localPosition.x) / safeDirection.x,
+        abs(localDirection.y) < 1.0e-5F ? 1.0e30F : (boundary.y - localPosition.y) / safeDirection.y,
+        abs(localDirection.z) < 1.0e-5F ? 1.0e30F : (boundary.z - localPosition.z) / safeDirection.z);
     const float distanceToBox = min(distances.x, min(distances.y, distances.z));
     const float3 hitWorld =
         mul(probe.LocalToWorld, float4(localPosition + localDirection * distanceToBox, 1.0F)).xyz;
@@ -160,15 +177,27 @@ float EvaluateLocalSpatialCookie(const ShaderGraphLocalLight light, const float3
     float3 bitangent;
     SpatialLightBasis(direction, tangent, bitangent);
     const float3 fromLight = worldPosition - light.PositionRange.xyz;
-    const float3 unitDirection = SafeNormalize(fromLight, direction);
-    const float2 uv = float2(0.5F + atan2(dot(unitDirection, tangent), dot(unitDirection, direction)) / (2.0F * Pi),
-                             0.5F - asin(clamp(dot(unitDirection, bitangent), -1.0F, 1.0F)) / Pi);
+    float2 uv;
+    if (light.Parameters.y > 0.5F)
+    {
+        const float forward = max(dot(fromLight, direction), 1.0e-4F);
+        const float coneRadius = forward * max(sqrt(max(1.0F - light.DirectionOuter.w * light.DirectionOuter.w, 0.0F)) /
+                                                   max(abs(light.DirectionOuter.w), 1.0e-4F),
+                                               1.0e-4F);
+        uv = float2(dot(fromLight, tangent), dot(fromLight, bitangent)) / (2.0F * coneRadius) + 0.5F.xx;
+    }
+    else
+    {
+        const float3 unitDirection = SafeNormalize(fromLight, direction);
+        uv = float2(0.5F + atan2(dot(unitDirection, tangent), dot(unitDirection, direction)) / (2.0F * Pi),
+                    0.5F - asin(clamp(dot(unitDirection, bitangent), -1.0F, 1.0F)) / Pi);
+    }
     return SampleSpatialCookie(uv, encoded);
 }
 
 float SampleSpatialMixedVisibility(const float2 lightmapUv, const float oneBasedChannel)
 {
-    if (((uint)LightmapParameters.z & 1U) == 0U || oneBasedChannel < 0.5F)
+    if (SurfaceParameters.z < 0.5F || ((uint)LightmapParameters.z & 1U) == 0U || oneBasedChannel < 0.5F)
         return 1.0F;
     const uint channel = min((uint)oneBasedChannel - 1U, 7U);
     const uint layer = (uint)max(LightmapParameters.y, 0.0F) * 2U + (channel >> 2U);

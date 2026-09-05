@@ -155,9 +155,18 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
 
         const std::string auxiliaryText = "worker auxiliary source";
         const auto auxiliaryBytes = std::as_bytes(std::span(auxiliaryText));
+        auto bakeScene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                        Keire::SceneAsset::EmptyDefinition("Worker Created"));
+        auto receiver = bakeScene->CreateEntity("Static Receiver").AddComponent<Keire::MeshRendererComponent>();
+        receiver->SetStaticLighting(true);
+        receiver->SetGIReceive(Keire::GIReceiveMode::Lightmaps);
+        auto definition = bakeScene->Snapshot();
+        definition.Lighting.LightmapResolution = 64;
+        definition.Lighting.MaximumLightmapResolution = 64;
+        definition.Lighting.SamplesPerTexel = 1;
+        bakeScene->Close();
         operations.QueueCreateAssetWithAuxiliary(
-            "Scenes/WorkerCreated.keirescene",
-            Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Worker Created")), {}, {},
+            "Scenes/WorkerCreated.keirescene", Keire::SceneAsset::Encode(definition), {}, {},
             {{"Shaders/WorkerAuxiliary.hlsl", std::vector<std::byte>(auxiliaryBytes.begin(), auxiliaryBytes.end())}});
         const auto createDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (operations.Busy() && std::chrono::steady_clock::now() < createDeadline)
@@ -214,6 +223,10 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         CHECK(std::ranges::find(baked->Result.MutatedAssets, baked->Result.CreatedAsset) !=
               baked->Result.MutatedAssets.end());
         const auto bakedCatalog = Keire::Detail::LoadCatalog(baked->Result.Import.CatalogPath);
+        CHECK(baked->Result.MutatedAssets.size() == 4);
+        for (const auto asset : baked->Result.MutatedAssets)
+            CHECK(std::ranges::find(bakedCatalog.Entries, asset, &Keire::Detail::CatalogEntry::Id) !=
+                  bakedCatalog.Entries.end());
         CHECK(std::ranges::find(bakedCatalog.Entries, baked->Result.CreatedAsset, &Keire::Detail::CatalogEntry::Id) !=
               bakedCatalog.Entries.end());
 

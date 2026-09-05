@@ -1,5 +1,9 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
+#include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClient/Editor/InspectorPropertyEditor.h"
+#include "KeireClient/Editor/InspectorPropertyVisibility.h"
+#include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
 #include <exception>
@@ -60,6 +64,45 @@ namespace KeireEditor
             m_Controller.ReportInspectorAssetError(std::string("Component operation failed: ") + error.what());
         }
         return removed;
+    }
+
+    void InspectorPanel::DrawMeshRendererBakedLightingProperties(
+        Keire::UiFrame& ui, const Keire::Ref<Keire::MeshRendererComponent>& renderer,
+        const Keire::ComponentRegistration& registration, SceneDocument& sceneDocument,
+        const Keire::Ref<Keire::Scene>& scene, const std::span<const Keire::AssetId> editTargets,
+        const bool multiEditing, const std::size_t componentOrdinal, const Keire::EntityId entity)
+    {
+        auto& propertyDrawers = m_Controller.InspectorPropertyDrawers();
+        const auto records = m_Controller.InspectorAssetRecords();
+        const auto assets = m_Controller.InspectorAssetSystem();
+        const auto managedAssetTypes = m_Controller.InspectorManagedAssetTypes();
+        const auto resolveManagedType = [this](const Keire::AssetId asset)
+        { return m_Controller.InspectorManagedDataType(asset); };
+        InspectorPropertyEditor propertyEditor(ui, records, assets, scene, *m_AssetPicker, managedAssetTypes,
+                                               resolveManagedType);
+        const auto values = registration.Serialize(*renderer);
+        for (const auto& property : registration.Properties)
+        {
+            if (!IsMeshRendererBakedLightingProperty(property.Key))
+                continue;
+            const auto found = values.find(property.Key);
+            if (found == values.end())
+            {
+                ui.TextColored(m_Controller.InspectorTheme().Error,
+                               "The Mesh Renderer omitted a baked-lighting property.");
+                continue;
+            }
+            auto candidate = found->second;
+            if (!propertyDrawers.Draw(propertyEditor, registration.Type, property, candidate))
+                continue;
+            m_Controller.RecordInspectorUndo("Change " + property.DisplayName,
+                                             "mesh-renderer." + property.Key + "." + entity.ToString());
+            if (multiEditing)
+                sceneDocument.SetComponentsProperty(editTargets, registration.Type, property.Key, candidate,
+                                                    componentOrdinal);
+            else
+                sceneDocument.SetComponentProperty(entity, registration.Type, property.Key, std::move(candidate));
+        }
     }
 
 } // namespace KeireEditor

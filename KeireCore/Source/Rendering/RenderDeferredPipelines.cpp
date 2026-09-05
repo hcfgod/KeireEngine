@@ -175,12 +175,15 @@ namespace Keire::RenderBackend
             fragment = CreateDeferredGBufferShader(false);
             SDL_GPUVertexBufferDescription vertexBuffer{};
             vertexBuffer.slot = 0;
-            vertexBuffer.pitch = sizeof(GpuRenderVertex);
+            vertexBuffer.pitch = sizeof(GpuMeshVertex);
             vertexBuffer.input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX;
             const std::array attributes{
-                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuRenderVertex, Position)},
-                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuRenderVertex, Color)},
-                SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuRenderVertex, Normal)}};
+                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuMeshVertex, Position)},
+                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuMeshVertex, Normal)},
+                SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(GpuMeshVertex, UV0)},
+                SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, VertexColor)},
+                SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, Tangent)},
+                SDL_GPUVertexAttribute{5, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(GpuMeshVertex, UV1)}};
             std::array<SDL_GPUColorTargetDescription, 4> colors{};
             colors[0].format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
             colors[1].format = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;

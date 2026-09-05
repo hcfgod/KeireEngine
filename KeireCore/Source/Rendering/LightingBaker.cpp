@@ -249,13 +249,16 @@ namespace Keire
         void PublishArtifacts(const LightingBakeRequest& request, const std::span<const Artifact> artifacts,
                               LightingBakeResult& result)
         {
+            // Scanners ignore sidecars without sources, but assign new identities to sources without sidecars.
+            // Publish every stable identity first so an editor scan cannot race first-time bake publication.
+            for (const auto& artifact : artifacts)
+                WriteMetadata(request.ProjectRoot / artifact.Output.RelativePath, artifact.Output, artifact.Importer);
             Report(request, LightingBakePhase::Publishing, 0, artifacts.size(), "Publishing baked lighting assets");
             for (std::size_t index = 0; index < artifacts.size(); ++index)
             {
                 const auto& artifact = artifacts[index];
                 const auto destination = request.ProjectRoot / artifact.Output.RelativePath;
                 Detail::WriteFileAtomically(destination, artifact.Bytes);
-                WriteMetadata(destination, artifact.Output, artifact.Importer);
                 result.Assets.push_back(artifact.Output);
                 Report(request, LightingBakePhase::Publishing, index + 1U, artifacts.size(),
                        "Published " + artifact.Output.RelativePath.filename().string());

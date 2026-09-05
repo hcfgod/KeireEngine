@@ -112,7 +112,6 @@ namespace KeireEditor
                 keys[index].Time = static_cast<float>(time);
                 changed = true;
             }
-            ui.SameLine();
             Keire::UiColor color{keys[index].Value.Red, keys[index].Value.Green, keys[index].Value.Blue,
                                  keys[index].Value.Alpha};
             if (ui.ColorEdit("Color", color))

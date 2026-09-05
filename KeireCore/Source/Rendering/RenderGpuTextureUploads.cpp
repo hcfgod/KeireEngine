@@ -247,4 +247,29 @@ namespace Keire::RenderBackend
         }
     }
 
+    const GpuTextureResources& RenderSharedState::DefaultTexture(const ShaderTextureSemantic semantic) const noexcept
+    {
+        switch (semantic)
+        {
+        case ShaderTextureSemantic::BaseColor:
+            return WhiteTexture;
+        case ShaderTextureSemantic::Normal:
+            return FlatNormalTexture;
+        case ShaderTextureSemantic::MetallicRoughness:
+        case ShaderTextureSemantic::Occlusion:
+            return NeutralOrmTexture;
+        case ShaderTextureSemantic::Emissive:
+            return BlackTexture;
+        case ShaderTextureSemantic::Metallic:
+            return BlackDataTexture;
+        case ShaderTextureSemantic::Roughness:
+            return WhiteDataTexture;
+        case ShaderTextureSemantic::Specular:
+            return WhiteDataTexture;
+        case ShaderTextureSemantic::Generic:
+        default:
+            return CheckerboardTexture;
+        }
+    }
+
 } // namespace Keire::RenderBackend

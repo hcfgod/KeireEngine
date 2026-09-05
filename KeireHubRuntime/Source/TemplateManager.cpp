@@ -386,6 +386,26 @@ namespace KeireHub
         }
     } // namespace
 
+    HubStatus ValidateProjectDestinationRoot(const std::filesystem::path& destination,
+                                             const std::filesystem::path& forbiddenRoot)
+    {
+        std::error_code error;
+        const auto root = std::filesystem::weakly_canonical(forbiddenRoot, error);
+        if (error || !std::filesystem::is_directory(root, error) || error)
+            return HubStatus::Failure(TemplateError(HubErrorCode::InvalidArgument,
+                                                    "A protected project-destination root could not be validated.", {},
+                                                    error.message()));
+        const auto target = std::filesystem::weakly_canonical(destination, error);
+        if (error)
+            return HubStatus::Failure(TemplateError(
+                HubErrorCode::InvalidArgument, "The project destination could not be inspected.", {}, error.message()));
+        if (IsSameOrWithin(root, target))
+            return HubStatus::Failure(TemplateError(HubErrorCode::InvalidArgument,
+                                                    "Projects cannot be created inside the installed Hub directory.",
+                                                    {}, Detail::PathToUtf8(root)));
+        return HubStatus::Success();
+    }
+
     bool IsValidProjectName(const std::string_view name) noexcept
     {
         if (name.empty() || name.size() > 128 || name == "." || name == ".." ||
@@ -493,19 +513,9 @@ namespace KeireHub
         destination = parent / destination.filename();
         for (const auto& forbiddenRoot : request.ForbiddenDestinationRoots)
         {
-            const auto canonicalRoot = std::filesystem::weakly_canonical(forbiddenRoot, error);
-            if (error || !std::filesystem::is_directory(canonicalRoot))
-            {
-                return HubResult<TemplateCreationPlan>::Failure(TemplateError(
-                    HubErrorCode::InvalidArgument, "A protected project-destination root could not be validated.",
-                    request.ProjectName, error.message()));
-            }
-            if (IsSameOrWithin(canonicalRoot, destination))
-            {
-                return HubResult<TemplateCreationPlan>::Failure(TemplateError(
-                    HubErrorCode::InvalidArgument, "Projects cannot be created inside the installed Hub directory.",
-                    request.ProjectName, Detail::PathToUtf8(canonicalRoot)));
-            }
+            const auto protectedRoot = ValidateProjectDestinationRoot(destination, forbiddenRoot);
+            if (!protectedRoot)
+                return HubResult<TemplateCreationPlan>::Failure(protectedRoot.Error());
         }
         if (std::filesystem::exists(destination, error) || error)
             return HubResult<TemplateCreationPlan>::Failure(TemplateError(HubErrorCode::DestinationConflict,

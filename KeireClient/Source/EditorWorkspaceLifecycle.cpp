@@ -56,6 +56,7 @@ void EditorWorkspaceLayer::OnDetach() noexcept
                 break;
             case Phase::ManagedRuntime:
                 m_ManagedRuntimeCoordinator->DetachRuntimeServices();
+                UnbindManagedApplication();
                 break;
             case Phase::MaterialDraft:
                 m_DocumentCoordinator->CommitMaterialDraft();

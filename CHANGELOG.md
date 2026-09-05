@@ -5,6 +5,45 @@ versions.
 
 ## Unreleased
 
+- Fixed Deferred Hybrid ignoring `Receive Shadows` for default and graph materials, including contact and mixed-mask
+  visibility. Graph mixed masks now combine with dynamic shadows using minimum visibility instead of double-darkening.
+  Corrected Forward+ spot-cookie cone projection and parallel-axis box-projected reflections. Graph generator 11 and
+  importer 20 invalidate stale generated programs. Ninja launcher builds refresh fingerprinted shader headers before
+  dependency evaluation on Windows, Linux, and macOS.
+  Graph Forward+ ambient and environment-specular lighting now use Deferred's diffuse normalization and BRDF fit.
+
+- Aligned default-mesh Forward+ lighting with Deferred Hybrid's dielectric PBR response, including environment
+  reflections and diffuse normalization. Exposure now scales every lighting contribution once, HDR highlights are
+  preserved until tone mapping, and disabling shadow reception no longer changes the surface's shading model.
+  Shared built-in lighting math and rendered lighting/exposure comparisons guard both graphics backends.
+
+- Fixed first-time lighting-bake publication racing the editor's source scanner by publishing stable asset metadata
+  before generated source files become visible.
+
+- Fixed standalone OpenPBR Material Instance imports and keyword variants, Editor Play runtime asset loading,
+  and neutral-normal sphere preview lighting. Asset creation dialogs retain their parent selection and report
+  failures inline; dialog clicks no longer reach scene gizmos. VFX gradient colors remain accessible, specialized
+  shader headers show their actual target, and authoring windows open at a usable size. Hub project creation now
+  rejects protected installation folders during preflight and accepts creatable missing parent folders.
+
+- Exposed Mesh Renderer baked-lighting authoring in the Inspector, including static-lighting participation, GI receive
+  mode, lightmap scale, and UV preservation. Project Settings now explains the exact GI compatibility fallback instead
+  of reporting every unavailable Irradyn or baked-lighting combination as a generic runtime limitation.
+
+- Kept brand-new self-contained Materials focused on their OpenPBR surface graph by hiding the empty legacy
+  `Template Defaults` node and compatibility-override picker. Migrated Shader Graph and raw-shader materials retain
+  those controls whenever compatibility bindings are present.
+
+- Restored built-in Material editor routing for existing `.keirematerialgraph` project assets. Historical schema
+  sources now open and save through the Material Graph canvas instead of invoking the operating-system app chooser;
+  newly authored materials continue to use the canonical `.keirematerial` extension.
+
+- Fixed residual TAA presentation shaking in Forward+ and Deferred Hybrid by retaining spatially valid history across
+  sub-pixel edge changes instead of treating each jittered luminance change as a disocclusion. Project Settings now
+  reports the effective rendering, anti-aliasing, and GI modes and explicitly identifies Deferred Hybrid's MSAA
+  forward-coverage lane. Windows build tooling now skips a stale `py.exe` launcher and preserves the MSVC tool path
+  when a host process supplies duplicate `PATH` variables with different casing.
+
 - Made anti-aliasing independent of render-path and GI selection. Forward+ now records the motion-vector prepass and
   owns temporal history for TAA; velocity excludes projection jitter and remains live through tone mapping, fixing the
   visible Halton-pattern screen shake. Deferred Hybrid now supports hardware 2x/4x MSAA by retaining single-sample

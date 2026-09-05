@@ -118,6 +118,49 @@ namespace Keire::RenderBackend
             surface.ActiveFeatureSelection.EffectivePath == RenderPath::DeferredHybrid && workset.Depth &&
             workset.GBufferBaseColorMetallic && workset.GBufferNormalRoughness && workset.GBufferMaterial &&
             workset.GBufferLighting && workset.DBufferBaseColor && workset.DBufferNormal && workset.DBufferMaterial;
+        const auto illumination = ResolveGlobalIlluminationPolicy(
+            surface.ActiveFeatureSelection.EffectiveGlobalIllumination, packet.Environment.RequestedIrradynQuality);
+        struct BuiltInSpatialBatchContext final
+        {
+            std::unordered_set<AssetId> LightmappedRenderers;
+            bool HasSpatialVolumes = false;
+        };
+        std::vector<BuiltInSpatialBatchContext> builtInSpatialBatchContexts;
+        builtInSpatialBatchContexts.reserve(std::max<std::size_t>(packet.SpatialContributions.size(), 1U));
+        const auto appendBuiltInSpatialBatchContext = [&](const AssetId bakedLighting,
+                                                          const std::size_t reflectionProbeCount,
+                                                          const std::size_t lightProbeVolumeCount)
+        {
+            BuiltInSpatialBatchContext context;
+            if (illumination.BakedLighting)
+            {
+                const auto lightingSet = ResolveLightingSet(bakedLighting);
+                if (lightingSet)
+                {
+                    context.LightmappedRenderers.reserve(lightingSet->Definition().Renderers.size());
+                    for (const auto& renderer : lightingSet->Definition().Renderers)
+                        context.LightmappedRenderers.insert(renderer.Renderer);
+                }
+                context.HasSpatialVolumes = reflectionProbeCount != 0U || lightProbeVolumeCount != 0U;
+            }
+            builtInSpatialBatchContexts.push_back(std::move(context));
+        };
+        for (const auto& contribution : packet.SpatialContributions)
+        {
+            appendBuiltInSpatialBatchContext(contribution.BakedLighting, contribution.ReflectionProbes.size(),
+                                             contribution.LightProbeVolumes.size());
+        }
+        if (builtInSpatialBatchContexts.empty())
+        {
+            appendBuiltInSpatialBatchContext(packet.BakedLighting, packet.ReflectionProbes.size(),
+                                             packet.LightProbeVolumes.size());
+        }
+        const auto builtInSpatialBatchContextFor =
+            [&](const std::uint32_t contributionOrder) -> const BuiltInSpatialBatchContext&
+        {
+            return builtInSpatialBatchContexts[std::min<std::size_t>(contributionOrder,
+                                                                     builtInSpatialBatchContexts.size() - 1U)];
+        };
         for (const auto& item : packet.DrawItems)
         {
             const auto& mesh = ResolveMesh(item.Mesh);
@@ -278,8 +321,13 @@ namespace Keire::RenderBackend
             for (const auto& draw : list.Draws)
             {
                 const auto* material = draw.Material ? ResolveAssetMaterial(draw.Material, samples) : nullptr;
-                const bool usesBuiltInInstancing =
-                    !material && !draw.Item->SkinnedAssetVertices && !draw.Item->SkinnedBuiltinVertices;
+                const auto& spatialBatchContext = builtInSpatialBatchContextFor(draw.Item->ContributionOrder);
+                const bool requiresUniqueBuiltInSpatialData =
+                    spatialBatchContext.HasSpatialVolumes ||
+                    spatialBatchContext.LightmappedRenderers.contains(draw.Item->Entity.Value());
+                const bool usesBuiltInInstancing = !material && !requiresUniqueBuiltInSpatialData &&
+                                                   !draw.Item->SkinnedAssetVertices &&
+                                                   !draw.Item->SkinnedBuiltinVertices;
                 instanceKeys.push_back(
                     {draw.Item->Mesh, draw.Material, draw.SubmeshIndex, draw.Surface.AlphaMode,
                      draw.Item->ReceiveShadows, draw.Item->CastShadows,
@@ -385,8 +433,7 @@ namespace Keire::RenderBackend
         environmentUniforms.Encoding = {static_cast<float>(environment.EnvironmentLayout) +
                                             (environment.HdrEncoded ? 16.0F : 0.0F),
                                         0.0F, 0.0F, 0.0F};
-        auto builtInEnvironmentUniforms = environmentUniforms;
-        builtInEnvironmentUniforms.Parameters.Z = packet.Environment.Exposure;
+        const auto cameraPosition = Math::TransformPoint(Math::Inverse(camera.View), {});
         const std::array environmentBindings{
             SDL_GPUTextureSamplerBinding{environment.Texture, environment.Sampler},
             SDL_GPUTextureSamplerBinding{BrdfIntegrationLut.Texture, BrdfIntegrationLut.Sampler}};
@@ -713,7 +760,26 @@ namespace Keire::RenderBackend
             if (!selectedPipeline)
                 continue;
             const auto instanceCount = batch.Count;
-            bool gpuSpatialSelectionValid = false;
+            const auto& spatial = surface.ActiveWorkset().SpatialSelection;
+            const auto& visibility = surface.ActiveWorkset().GpuOcclusion;
+            const bool selectionOwned =
+                spatial.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot, surface.Epoch, deviceGeneration) &&
+                spatial.DispatchSucceeded && spatial.OutputRecords.Buffer;
+            const bool cpuSelection = selectionOwned && spatial.SpatialMaskCount == 0U;
+            const bool gpuSelection = selectionOwned && spatial.SpatialMaskCount != 0U &&
+                                      visibility.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot,
+                                                         surface.Epoch, deviceGeneration) &&
+                                      visibility.SpatialVolumeVisibilityMask.Buffer &&
+                                      visibility.SpatialVolumeVisibilityCount == spatial.SpatialMaskCount;
+            const bool consumesSpatialSelection =
+                ((material && material->SpatialLightingAbiVersion == 3U) || builtInDeferredGBuffer) &&
+                (phase == SceneDrawPhase::Opaque || phase == SceneDrawPhase::Transparent ||
+                 phase == SceneDrawPhase::DeferredGBufferStandard || phase == SceneDrawPhase::DeferredGBufferExtended ||
+                 phase == SceneDrawPhase::DeferredForwardOpaqueTail);
+            const bool gpuSpatialSelectionValid =
+                consumesSpatialSelection && batch.Count == 1U &&
+                draw.SpatialSelectionRecordIndex != InvalidAssetSpatialSelectionIndex &&
+                draw.SpatialSelectionRecordIndex < spatial.RecordCount && (cpuSelection || gpuSelection);
             if (material)
             {
                 SDL_BindGPUGraphicsPipeline(pass, selectedPipeline);
@@ -724,26 +790,6 @@ namespace Keire::RenderBackend
                         throw std::logic_error(
                             "The mandatory device-generation spatial-selection fallback buffer is unavailable.");
                     }
-                    const auto& spatial = surface.ActiveWorkset().SpatialSelection;
-                    const auto& visibility = surface.ActiveWorkset().GpuOcclusion;
-                    const bool selectionOwned = spatial.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot,
-                                                                surface.Epoch, deviceGeneration) &&
-                                                spatial.DispatchSucceeded && spatial.OutputRecords.Buffer;
-                    const bool cpuSelection = selectionOwned && spatial.SpatialMaskCount == 0U;
-                    const bool gpuSelection = selectionOwned && spatial.SpatialMaskCount != 0U &&
-                                              visibility.OwnedBy(packet.AcceptedFrameId, surface.ActiveWorksetSlot,
-                                                                 surface.Epoch, deviceGeneration) &&
-                                              visibility.SpatialVolumeVisibilityMask.Buffer &&
-                                              visibility.SpatialVolumeVisibilityCount == spatial.SpatialMaskCount;
-                    const bool consumesSpatialSelection = phase == SceneDrawPhase::Opaque ||
-                                                          phase == SceneDrawPhase::Transparent ||
-                                                          phase == SceneDrawPhase::DeferredGBufferStandard ||
-                                                          phase == SceneDrawPhase::DeferredGBufferExtended ||
-                                                          phase == SceneDrawPhase::DeferredForwardOpaqueTail;
-                    gpuSpatialSelectionValid = consumesSpatialSelection && batch.Count == 1U &&
-                                               draw.SpatialSelectionRecordIndex != InvalidAssetSpatialSelectionIndex &&
-                                               draw.SpatialSelectionRecordIndex < spatial.RecordCount &&
-                                               (cpuSelection || gpuSelection);
                     const std::array storageBuffers{forwardPlusBuffers[0], forwardPlusBuffers[1], forwardPlusBuffers[2],
                                                     gpuSpatialSelectionValid ? spatial.OutputRecords.Buffer
                                                                              : SpatialSelectionFallbackBuffer};
@@ -917,6 +963,26 @@ namespace Keire::RenderBackend
                                                  camera.Projection, tint, lighting, packet.Environment,
                                                  item.ReceiveShadows, usesInstancing);
                 object.Parameters.Z = static_cast<float>(std::min(item.ContributionOrder, 65534U) + 1U);
+                const auto selectedSpatialUniforms = spatialUniforms(item);
+                const BuiltInSpatialLightingUniforms builtInSpatialUniforms{
+                    selectedSpatialUniforms.LightmapScaleOffset,
+                    selectedSpatialUniforms.LightmapParameters,
+                    selectedSpatialUniforms.ShadowMaskParameters,
+                    {cameraPosition.X, cameraPosition.Y, cameraPosition.Z, packet.Environment.Exposure},
+                    {packet.Environment.AmbientColor.Red, packet.Environment.AmbientColor.Green,
+                     packet.Environment.AmbientColor.Blue, packet.Environment.AmbientIntensity},
+                    {lighting.Direction.X, lighting.Direction.Y, lighting.Direction.Z, lighting.Enabled ? 1.0F : 0.0F},
+                    {lighting.ColorAndIntensity.Red, lighting.ColorAndIntensity.Green, lighting.ColorAndIntensity.Blue,
+                     lighting.ColorAndIntensity.Alpha}};
+                if (builtInDeferredGBuffer)
+                {
+                    object.LightDirection = selectedSpatialUniforms.LightmapScaleOffset;
+                    object.LightColor = {
+                        selectedSpatialUniforms.LightmapParameters.X, selectedSpatialUniforms.LightmapParameters.Y,
+                        selectedSpatialUniforms.LightmapParameters.Z, selectedSpatialUniforms.LightmapParameters.W};
+                    object.Parameters.W =
+                        gpuSpatialSelectionValid ? static_cast<float>(draw.SpatialSelectionRecordIndex + 1U) : 0.0F;
+                }
                 const auto& builtInShadows = item.ReceiveShadows ? shadowUniforms : disabledShadowUniforms;
                 const std::array shadowBindings{
                     SDL_GPUTextureSamplerBinding{surface.ActiveWorkset().DirectionalShadow
@@ -930,15 +996,20 @@ namespace Keire::RenderBackend
                 SDL_BindGPUGraphicsPipeline(pass, selectedPipeline);
                 if (!builtInDeferredGBuffer)
                 {
+                    SDL_PushGPUVertexUniformData(commands, 3, &builtInSpatialUniforms, sizeof(builtInSpatialUniforms));
                     SDL_PushGPUFragmentUniformData(commands, 0, &builtInShadows, sizeof(builtInShadows));
                     SDL_PushGPUFragmentUniformData(commands, 1, &localLights, sizeof(localLights));
-                    SDL_PushGPUFragmentUniformData(commands, 2, &builtInEnvironmentUniforms,
-                                                   sizeof(builtInEnvironmentUniforms));
-                    SDL_BindGPUFragmentSamplers(pass, 0, shadowBindings.data(),
-                                                static_cast<std::uint32_t>(shadowBindings.size()));
+                    SDL_PushGPUFragmentUniformData(commands, 2, &environmentUniforms, sizeof(environmentUniforms));
+                    SDL_PushGPUFragmentUniformData(commands, 3, &builtInSpatialUniforms,
+                                                   sizeof(builtInSpatialUniforms));
+                    const auto& spatialBindings = spatialContextFor(item.ContributionOrder).Bindings;
+                    const std::array builtInBindings{shadowBindings[0], shadowBindings[1], spatialBindings[0],
+                                                     spatialBindings[1], environmentBindings[0]};
+                    SDL_BindGPUFragmentSamplers(pass, 0, builtInBindings.data(),
+                                                static_cast<std::uint32_t>(builtInBindings.size()));
                 }
                 const SDL_GPUBufferBinding vertexBinding{
-                    item.SkinnedBuiltinVertices ? item.SkinnedBuiltinVertices : mesh.Vertices, 0};
+                    item.SkinnedAssetVertices ? item.SkinnedAssetVertices : mesh.AssetVertices, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
                 if (usesInstancing)
                 {

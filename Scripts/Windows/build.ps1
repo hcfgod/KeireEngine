@@ -140,6 +140,9 @@ switch ($Generator) {
     "ninja" {
         Initialize-KeireGeneratedBuild "build.ninja"
         Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
+        # Ninja's prebuild stamp has no shader inputs. Refresh content before Ninja examines header dependencies;
+        # the generators' fingerprints keep unchanged builds cheap and preserve generated-header timestamps.
+        & (Join-Path $PSScriptRoot "prepare-generated-content.ps1")
         Write-Host "==> Building $Target $Configuration for $Architecture with Ninja"
         $ninjaArguments = @("-C", $Root, "-f", "build.ninja")
         if ($ProfileBuild) { $ninjaArguments += @("-d", "stats") }

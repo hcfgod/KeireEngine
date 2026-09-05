@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/LightingPanel.h"
 
+#include "KeireClient/Editor/LightingBakeDiagnostics.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
 #include <algorithm>
@@ -140,14 +141,32 @@ namespace KeireEditor
         ui.Spacing();
         ui.Separator();
         ui.Text("Bake Targets");
-        ui.TextColored(theme.MutedText, std::to_string(scene->Query<Keire::ReflectionProbeComponent>().size()) +
-                                            " reflection probe(s), " +
-                                            std::to_string(scene->Query<Keire::LightProbeVolumeComponent>().size()) +
-                                            " light-probe volume(s)");
+        const auto targets = SummarizeLightingBakeTargets(*scene);
+        ui.TextColored(theme.MutedText, std::to_string(targets.LightmapReceivers) + " lightmap receiver(s), " +
+                                            std::to_string(targets.ReflectionProbes) + " reflection probe(s), " +
+                                            std::to_string(targets.LightProbeVolumes) + " light-probe volume(s)");
+        if (targets.TotalTargets() == 0U)
+        {
+            ui.TextColored(theme.Warning,
+                           "No eligible bake targets. For a mesh lightmap, enable both Static Lighting and Receive GI: "
+                           "Lightmaps in its Mesh Renderer.");
+        }
+        if (targets.StaticRenderersUsingProbes != 0U)
+        {
+            ui.TextColored(theme.Warning, std::to_string(targets.StaticRenderersUsingProbes) +
+                                              " static renderer(s) still receive Light Probes instead of Lightmaps.");
+        }
+        if (targets.NonStaticRenderersUsingLightmaps != 0U)
+        {
+            ui.TextColored(theme.Warning, std::to_string(targets.NonStaticRenderersUsingLightmaps) +
+                                              " renderer(s) request Lightmaps but have Static Lighting disabled.");
+        }
         ui.TextColored(theme.MutedText, scene->BakedLighting() ? "Lighting set: " + scene->BakedLighting().ToString()
                                                                : "Lighting set: not baked");
         const auto busy = m_Controller.LightingBakeBusy();
-        if (auto disabled = ui.BeginDisabled(busy || !m_Controller.LightingSceneDocument().Asset()); disabled)
+        if (auto disabled =
+                ui.BeginDisabled(busy || targets.TotalTargets() == 0U || !m_Controller.LightingSceneDocument().Asset());
+            disabled)
         {
             if (ui.Button("Bake Lighting"))
             {

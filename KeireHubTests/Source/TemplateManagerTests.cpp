@@ -492,3 +492,15 @@ TEST_CASE("Template preflight resolves required packages and accounts for disk s
     REQUIRE_FALSE(insufficient);
     CHECK(insufficient.Error().Code == HubErrorCode::InsufficientDiskSpace);
 }
+
+TEST_CASE("Project destination UI preflight rejects protected roots before creating missing parents")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto root = temporary.Path() / "Hub";
+    std::filesystem::create_directories(root);
+    CHECK_FALSE(ValidateProjectDestinationRoot(root, root));
+    CHECK_FALSE(ValidateProjectDestinationRoot(root / "Missing" / "Project", root));
+    CHECK(ValidateProjectDestinationRoot(temporary.Path() / "HubProjects" / "Project", root));
+    CHECK_FALSE(ValidateProjectDestinationRoot(temporary.Path() / "Project", temporary.Path() / "AbsentHub"));
+    CHECK_FALSE(std::filesystem::exists(root / "Missing"));
+}

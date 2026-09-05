@@ -28,6 +28,7 @@ assert_true grep -F -q 'kill -0 "$owner"' "$helper"
 assert_true grep -F -q 'generated_content_read_pid "$lock/pid"' "$helper"
 assert_false grep -F -q '< "$lock/pid"' "$helper"
 for platform in Linux Mac; do
+  assert_true grep -F -q 'bash "$ROOT/Scripts/Unix/prepare-generated-content.sh"' "$ROOT/Scripts/$platform/build.sh"
   assert_true grep -F -q 'generated_content_acquire_lock "$build_lock" 7200' "$ROOT/Scripts/$platform/build.sh"
   assert_true grep -F -q 'generated_content_release_lock "$build_lock"' "$ROOT/Scripts/$platform/build.sh"
 done

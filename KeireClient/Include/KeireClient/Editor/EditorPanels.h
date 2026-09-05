@@ -328,6 +328,13 @@ namespace KeireEditor
                                              const Keire::Ref<Keire::Component>& component,
                                              const Keire::ComponentRegistration& registration,
                                              SceneDocument& sceneDocument, const Keire::Ref<Keire::Scene>& scene);
+        void DrawMeshRendererBakedLightingProperties(Keire::UiFrame& ui,
+                                                     const Keire::Ref<Keire::MeshRendererComponent>& renderer,
+                                                     const Keire::ComponentRegistration& registration,
+                                                     SceneDocument& sceneDocument,
+                                                     const Keire::Ref<Keire::Scene>& scene,
+                                                     std::span<const Keire::AssetId> editTargets, bool multiEditing,
+                                                     std::size_t componentOrdinal, Keire::EntityId entity);
         void DrawDirectionalLightAdvancedProperties(Keire::UiFrame& ui,
                                                     const Keire::Ref<Keire::DirectionalLightComponent>& light,
                                                     SceneDocument& sceneDocument,

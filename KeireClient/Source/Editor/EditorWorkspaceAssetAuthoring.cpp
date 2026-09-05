@@ -491,7 +491,7 @@ bool EditorWorkspaceLayer::CreateMaterialParameterCollection(const std::string_v
     }
 }
 
-bool EditorWorkspaceLayer::CreateMaterialInstance(const std::string_view name)
+bool EditorWorkspaceLayer::CreateMaterialInstance(const std::string_view name, const Keire::AssetId parentAsset)
 {
     if (!m_AssetDatabase || !m_AssetOperations)
         return false;
@@ -501,7 +501,7 @@ bool EditorWorkspaceLayer::CreateMaterialInstance(const std::string_view name)
             (void)m_AssetOperations->PreemptBackgroundImports();
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Material Instance name must be one non-empty path component.");
-        const auto parent = m_AssetDatabase->Find(m_SelectedAsset);
+        const auto parent = m_AssetDatabase->Find(parentAsset);
         if (!parent || (parent->Type != Keire::MaterialAsset::StaticType() &&
                         parent->Type != Keire::MaterialGraphAsset::StaticType() &&
                         parent->Type != Keire::MaterialInstanceAsset::StaticType()))

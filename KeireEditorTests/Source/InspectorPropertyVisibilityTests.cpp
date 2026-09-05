@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/InspectorComponentUtilities.h"
 #include "KeireClient/Editor/InspectorPropertyVisibility.h"
+#include "KeireClient/Editor/RenderFeatureDiagnostics.h"
 
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/ECS/Components/UiDocumentComponent.h"
@@ -34,4 +35,33 @@ TEST_CASE("Inspector Add Component hides retired scene UI components")
     }
     CHECK_FALSE(KeireEditor::IsRetiredSceneUiComponent(Keire::UiDocumentComponent::StaticType()));
     CHECK_FALSE(KeireEditor::IsRetiredSceneUiComponent(Keire::TransformComponent::StaticType()));
+}
+
+TEST_CASE("Mesh Renderer Inspector identifies every baked-lighting authoring property")
+{
+    CHECK(KeireEditor::IsMeshRendererBakedLightingProperty("staticLighting"));
+    CHECK(KeireEditor::IsMeshRendererBakedLightingProperty("giReceive"));
+    CHECK(KeireEditor::IsMeshRendererBakedLightingProperty("lightmapScale"));
+    CHECK(KeireEditor::IsMeshRendererBakedLightingProperty("preserveLightmapUvs"));
+    CHECK_FALSE(KeireEditor::IsMeshRendererBakedLightingProperty("mesh"));
+    CHECK_FALSE(KeireEditor::IsMeshRendererBakedLightingProperty("castShadows"));
+}
+
+TEST_CASE("Project Settings explains every global-illumination fallback")
+{
+    using enum Keire::GlobalIlluminationFallbackReason;
+
+    CHECK(KeireEditor::BuildGlobalIlluminationFallbackMessage(None, "Disabled").empty());
+    CHECK_EQ(KeireEditor::BuildGlobalIlluminationFallbackMessage(BakedUnavailable, "Disabled (Direct Only)"),
+             "Baked indirect lighting is unavailable on the active renderer. Rendering uses Disabled (Direct Only).");
+    CHECK_EQ(KeireEditor::BuildGlobalIlluminationFallbackMessage(RealtimeUnavailable, "Disabled (Direct Only)"),
+             "Realtime environment lighting is unavailable on the active renderer. Rendering uses Disabled (Direct "
+             "Only).");
+    CHECK_EQ(KeireEditor::BuildGlobalIlluminationFallbackMessage(IrradynUnavailable, "Realtime Environment"),
+             "Irradyn Dynamic GI is unavailable on the active renderer. Rendering uses Realtime Environment.");
+    CHECK_EQ(KeireEditor::BuildGlobalIlluminationFallbackMessage(IrradynRequiresDeferredHybrid, "Realtime Environment"),
+             "Irradyn Dynamic GI requires Deferred Hybrid; the selected render path remains active. Rendering uses "
+             "Realtime Environment.");
+    CHECK_EQ(KeireEditor::BuildGlobalIlluminationFallbackMessage(HybridUnavailable, "Baked Indirect"),
+             "Hybrid GI requires both baked lighting and Irradyn on Deferred Hybrid. Rendering uses Baked Indirect.");
 }

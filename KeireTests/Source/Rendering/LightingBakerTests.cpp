@@ -117,3 +117,47 @@ TEST_CASE("lighting bake fingerprint changes with dependency or quality inputs")
     request.Definition.Lighting.SamplesPerTexel = 2;
     CHECK(Keire::LightingBaker::Fingerprint(request) != baseline);
 }
+
+TEST_CASE("lighting bake publishes stable metadata before sources become visible to asset scans")
+{
+    TemporaryLightingProject project;
+    const auto sceneId = Keire::AssetId::Generate();
+    Keire::LightingBakeRequest request;
+    request.Scene = sceneId;
+    request.Definition = LightingScene(sceneId);
+    request.ProjectRoot = project.Root;
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{
+        .ProjectRoot = project.Root, .Importers = Keire::CreateBuiltinAssetImporters()});
+    bool sawPreparedMetadata = false;
+    request.Progress = [&](const Keire::LightingBakeProgress& progress)
+    {
+        if (progress.Phase != Keire::LightingBakePhase::Publishing)
+            return;
+        if (progress.Completed == 0)
+        {
+            std::size_t metadataCount = 0;
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(project.Root / "Assets"))
+            {
+                if (!entry.is_regular_file())
+                    continue;
+                CHECK(entry.path().extension() == ".keiremeta");
+                ++metadataCount;
+            }
+            CHECK(metadataCount == progress.Total);
+            sawPreparedMetadata = true;
+        }
+        CHECK(database->Refresh() == progress.Completed);
+    };
+    const auto baked = Keire::LightingBaker::Bake(request);
+    CHECK(sawPreparedMetadata);
+    REQUIRE(baked.Assets.size() == 6);
+    for (const auto& output : baked.Assets)
+    {
+        const auto record = database->Find(output.RelativePath.lexically_relative("Assets"));
+        REQUIRE(record);
+        CHECK(record->Id == output.Id);
+        CHECK(record->Type == output.Type);
+    }
+    CHECK_NOTHROW(database->ImportAll());
+    database.Reset();
+}

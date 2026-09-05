@@ -15,6 +15,7 @@ $Sources = @(
     @{ Prefix = "BuiltinIrradyn"; Path = (Join-Path $Root "KeireCore\Shaders\BuiltinIrradyn.hlsl") }
 )
 $Generated = Join-Path $Root "Build\Generated\Keire\BuiltinUnlitShaders.h"
+$Includes = @((Join-Path $Root "KeireCore\Shaders\BuiltinLighting.hlsli"))
 $Stamp = Join-Path $Root "Build\Generated\Keire\BuiltinRenderingShaders.stamp"
 $CacheHelper = Join-Path $PSScriptRoot "generated-content-cache.ps1"
 . $CacheHelper
@@ -23,7 +24,7 @@ if (-not (Test-Path -LiteralPath $Compiler -PathType Leaf)) {
     throw "KeireShaderCompiler is required before generating built-in rendering shaders."
 }
 
-$FingerprintInputs = @($PSCommandPath, $CacheHelper, $Compiler) + @($Sources | ForEach-Object { $_.Path })
+$FingerprintInputs = @($PSCommandPath, $CacheHelper, $Compiler) + @($Sources | ForEach-Object { $_.Path }) + $Includes
 $Fingerprint = Get-GeneratedContentFingerprint -Schema "builtin-rendering-v2" -Inputs $FingerprintInputs
 if (Test-GeneratedContentCurrent -Output $Generated -Stamp $Stamp -Fingerprint $Fingerprint) {
     return
@@ -47,13 +48,16 @@ try {
         @{ Name = "FragmentMsl"; Stage = "fragment"; Entry = "PSMain"; Destination = "MSL"; File = "fragment.metal" }
     )
 
+    foreach ($Include in $Includes) {
+        Copy-Item -LiteralPath $Include -Destination $Temporary
+    }
     foreach ($Source in $Sources) {
         $StagedSource = Join-Path $Temporary "$($Source.Prefix).hlsl"
         Copy-Item -LiteralPath $Source.Path -Destination $StagedSource
         foreach ($Variant in $Variants) {
             $Output = Join-Path $Temporary "$($Source.Prefix)-$($Variant.File)"
             $CompilerArguments = @($StagedSource, '-s', 'HLSL', '-d', $Variant.Destination, '-t', $Variant.Stage,
-                                   '-e', $Variant.Entry, '-o', $Output)
+                                   '-e', $Variant.Entry, '-I', $Temporary, '-o', $Output)
             & $Compiler @CompilerArguments
             if ($LASTEXITCODE -ne 0) {
                 throw "$($Source.Prefix) $($Variant.Name) shader compilation failed."

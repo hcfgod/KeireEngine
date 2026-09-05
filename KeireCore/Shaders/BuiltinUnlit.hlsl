@@ -1,18 +1,20 @@
 struct VertexInput
 {
     float3 Position : TEXCOORD0;
-    float3 Color : TEXCOORD1;
-    float3 Normal : TEXCOORD2;
+    float3 Normal : TEXCOORD1;
+    float2 UV0 : TEXCOORD2;
+    float4 VertexColor : TEXCOORD3;
+    float4 Tangent : TEXCOORD4;
+    float2 UV1 : TEXCOORD5;
 };
 
 struct VertexOutput
 {
-    float4 AmbientColor : TEXCOORD0;
-    float4 DirectColor : TEXCOORD1;
     float3 WorldPosition : TEXCOORD2;
     float3 WorldNormal : TEXCOORD3;
     float4 BaseColor : TEXCOORD4;
     float ViewDepth : TEXCOORD5;
+    float2 LightmapUV : TEXCOORD6;
     float4 Position : SV_Position;
 };
 
@@ -71,15 +73,41 @@ cbuffer LocalLightConstants : register(b1, space3)
 cbuffer EnvironmentConstants : register(b2, space3)
 {
     float4 DiffuseIrradiance[9];
-    // Rotation, diffuse intensity, exposure, and reserved.
+    // Rotation, diffuse intensity, specular intensity, and maximum environment mip.
     float4 EnvironmentParameters;
     float4 EnvironmentEncoding;
+};
+
+cbuffer VertexSpatialLightingConstants : register(b3, space1)
+{
+    float4 VertexLightmapScaleOffset;
+    float4 VertexLightmapParameters;
+    float4 VertexShadowMaskParameters;
+};
+
+cbuffer FragmentSpatialLightingConstants : register(b3, space3)
+{
+    float4 FragmentLightmapScaleOffset;
+    float4 FragmentLightmapParameters;
+    float4 FragmentShadowMaskParameters;
+    float4 CameraPositionExposure;
+    float4 AmbientColorIntensity;
+    float4 DirectionalDirectionEnabled;
+    float4 DirectionalColorIntensity;
 };
 
 Texture2DArray<float> DirectionalShadowTexture : register(t0, space2);
 SamplerState DirectionalShadowSampler : register(s0, space2);
 Texture2DArray<float> LocalShadowTexture : register(t1, space2);
 SamplerState LocalShadowSampler : register(s1, space2);
+Texture2DArray<float4> LightmapTexture : register(t2, space2);
+SamplerState LightmapSampler : register(s2, space2);
+Texture2DArray<float4> LightmapDirectionalityTexture : register(t3, space2);
+SamplerState LightmapDirectionalitySampler : register(s3, space2);
+Texture2D<float4> EnvironmentTexture : register(t4, space2);
+SamplerState EnvironmentSampler : register(s4, space2);
+
+#include "BuiltinLighting.hlsli"
 
 VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
 {
@@ -102,23 +130,9 @@ VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
     output.WorldPosition = worldPosition.xyz;
     output.WorldNormal = worldNormal;
     output.ViewDepth = viewPosition.z;
-    const float4 baseColor = float4(input.Color, 1.0F) * tint;
+    const float4 baseColor = input.VertexColor * tint;
     output.BaseColor = baseColor;
-    if (LightingParameters.x < 0.5F)
-    {
-        output.AmbientColor = baseColor;
-        output.DirectColor = 0.0F.xxxx;
-        return output;
-    }
-
-    output.AmbientColor = float4(baseColor.rgb * AmbientAndExposure.rgb * AmbientAndExposure.a, baseColor.a);
-    output.DirectColor = 0.0F.xxxx;
-    if (LightDirection.w > 0.5F)
-    {
-        const float diffuse = saturate(dot(worldNormal, normalize(-LightDirection.xyz)));
-        output.DirectColor =
-            float4(baseColor.rgb * LightColor.rgb * LightColor.a * diffuse * AmbientAndExposure.a, 0.0F);
-    }
+    output.LightmapUV = input.UV1 * VertexLightmapScaleOffset.xy + VertexLightmapScaleOffset.zw;
     return output;
 }
 
@@ -209,37 +223,37 @@ float SampleLocalShadow(const uint lightIndex, const float3 worldPosition)
     return lerp(1.0F, visibility, saturate(LocalShadowParameters[lightIndex].y));
 }
 
-float3 RotateEnvironmentDirection(float3 direction)
-{
-    const float rotation = radians(EnvironmentParameters.x);
-    const float sineRotation = sin(rotation);
-    const float cosineRotation = cos(rotation);
-    direction.xz = float2(direction.x * cosineRotation - direction.z * sineRotation,
-                          direction.x * sineRotation + direction.z * cosineRotation);
-    return direction;
-}
 
-float3 EvaluateEnvironmentDiffuse(float3 normal)
+float3 EvaluateBakedDiffuse(const VertexOutput input)
 {
-    normal = normalize(RotateEnvironmentDirection(normal));
-    const float x = normal.x;
-    const float y = normal.y;
-    const float z = normal.z;
-    return max(DiffuseIrradiance[0].rgb * 0.282095F + DiffuseIrradiance[1].rgb * (0.488603F * y) +
-                   DiffuseIrradiance[2].rgb * (0.488603F * z) +
-                   DiffuseIrradiance[3].rgb * (0.488603F * x) +
-                   DiffuseIrradiance[4].rgb * (1.092548F * x * y) +
-                   DiffuseIrradiance[5].rgb * (1.092548F * y * z) +
-                   DiffuseIrradiance[6].rgb * (0.315392F * (3.0F * y * y - 1.0F)) +
-                   DiffuseIrradiance[7].rgb * (1.092548F * x * z) +
-                   DiffuseIrradiance[8].rgb * (0.546274F * (z * z - x * x)),
-               0.0F.xxx);
+    const bool hasLightmap = ((uint)round(max(FragmentLightmapParameters.z, 0.0F)) & 1U) != 0U;
+    if (!hasLightmap || FragmentLightmapParameters.x >= 4095.0F)
+        return 0.0F.xxx;
+    const float layer = FragmentLightmapParameters.x;
+    const float4 lightmapSample =
+        LightmapTexture.SampleLevel(LightmapSampler, float3(input.LightmapUV, layer), 0.0F);
+    float3 irradiance = FragmentShadowMaskParameters.y > 0.5F ? DecodeRgbe(lightmapSample) : lightmapSample.rgb;
+    const float4 directionality = LightmapDirectionalityTexture.SampleLevel(
+        LightmapDirectionalitySampler, float3(input.LightmapUV, layer), 0.0F);
+    const float3 dominantDirection = SafeNormalize(directionality.xyz * 2.0F - 1.0F, input.WorldNormal);
+    const float directionalResponse = saturate(dot(normalize(input.WorldNormal), dominantDirection)) * 2.0F;
+    irradiance *= lerp(1.0F, directionalResponse, saturate(directionality.w));
+    return saturate(input.BaseColor.rgb) * irradiance / Pi;
 }
 
 float4 PSMain(VertexOutput input) : SV_Target0
 {
+    const float3 normal = SafeNormalize(input.WorldNormal, float3(0.0F, 0.0F, 1.0F));
+    const float3 viewDirection = SafeNormalize(CameraPositionExposure.xyz - input.WorldPosition, normal);
+    const float3 baseColor = saturate(input.BaseColor.rgb);
+    // Match the default GBuffer surface: dielectric, roughness 0.65, specular level 0.5, AO 1.
+    const float roughness = 0.65F;
     const float shadow = SampleDirectionalShadow(input.WorldPosition, input.ViewDepth);
-    float3 localLighting = 0.0F.xxx;
+    float3 directLighting = EvaluateDirectLighting(
+        normal, viewDirection,
+        SafeNormalize(-DirectionalDirectionEnabled.xyz, float3(0.0F, 1.0F, 0.0F)),
+        DirectionalColorIntensity.rgb * DirectionalColorIntensity.a * DirectionalDirectionEnabled.w * shadow,
+        baseColor, 0.0F, roughness, 0.5F);
     const uint localLightCount = min((uint)max(LocalLightCounts.x, 0.0F), 62U);
     for (uint lightIndex = 0U; lightIndex < localLightCount; ++lightIndex)
     {
@@ -255,17 +269,27 @@ float4 PSMain(VertexOutput input) : SV_Target0
         float attenuation = rangeFade * rangeFade / max(distanceSquared, 0.01F);
         if (LocalLights[lightIndex].Parameters.y > 0.5F)
         {
-            const float coneCosine = dot(normalize(LocalLights[lightIndex].DirectionOuter.xyz), -direction);
-            attenuation *= smoothstep(LocalLights[lightIndex].DirectionOuter.w, LocalLights[lightIndex].Parameters.x,
-                                      coneCosine);
+            const float coneCosine = dot(SafeNormalize(LocalLights[lightIndex].DirectionOuter.xyz,
+                                                       float3(0.0F, 0.0F, 1.0F)), -direction);
+            attenuation *= smoothstep(LocalLights[lightIndex].DirectionOuter.w,
+                                      max(LocalLights[lightIndex].Parameters.x,
+                                          LocalLights[lightIndex].DirectionOuter.w + 1.0e-4F), coneCosine);
         }
-        const float diffuse = saturate(dot(normalize(input.WorldNormal), direction));
-        localLighting += input.BaseColor.rgb * LocalLights[lightIndex].ColorIntensity.rgb *
-                         LocalLights[lightIndex].ColorIntensity.a * attenuation * diffuse *
-                         SampleLocalShadow(lightIndex, input.WorldPosition);
+        const float3 radiance = LocalLights[lightIndex].ColorIntensity.rgb *
+                                LocalLights[lightIndex].ColorIntensity.a * attenuation *
+                                SampleLocalShadow(lightIndex, input.WorldPosition);
+        directLighting += EvaluateDirectLighting(normal, viewDirection, direction, radiance,
+                                                 baseColor, 0.0F, roughness, 0.5F);
     }
-    const float3 environmentDiffuse = input.BaseColor.rgb * EvaluateEnvironmentDiffuse(input.WorldNormal) *
-                                      EnvironmentParameters.y * EnvironmentParameters.z / 3.14159265F;
-    return float4(saturate(input.AmbientColor.rgb + environmentDiffuse + input.DirectColor.rgb * shadow + localLighting),
-                  input.AmbientColor.a);
+    const bool hasLightmap = ((uint)round(max(FragmentLightmapParameters.z, 0.0F)) & 1U) != 0U;
+    const float3 diffuse = hasLightmap ? EvaluateBakedDiffuse(input)
+                                      : baseColor * EvaluateEnvironmentDiffuse(normal) * EnvironmentParameters.y / Pi;
+    const float noV = saturate(dot(normal, viewDirection));
+    const float2 integratedBrdf = ApproximateIntegratedBrdf(noV, roughness);
+    const float3 reflectionRadiance = SampleEnvironment(reflect(-viewDirection, normal),
+                                                        roughness * EnvironmentParameters.w) * EnvironmentParameters.z;
+    const float3 specular = reflectionRadiance *
+                           (FresnelSchlickRoughness(noV, 0.04F.xxx, roughness) * integratedBrdf.x + integratedBrdf.y);
+    const float3 ambient = baseColor * AmbientColorIntensity.rgb * AmbientColorIntensity.a / Pi;
+    return float4((ambient + diffuse + specular + directLighting) * CameraPositionExposure.w, input.BaseColor.a);
 }

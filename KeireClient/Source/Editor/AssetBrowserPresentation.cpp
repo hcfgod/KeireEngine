@@ -62,7 +62,7 @@ namespace KeireEditor::Detail
         case NamedAssetCreationKind::MaterialParameterCollection:
             return controller.CreateAssetBrowserMaterialParameterCollection(name);
         case NamedAssetCreationKind::MaterialInstance:
-            return controller.CreateAssetBrowserMaterialInstance(name);
+            return controller.CreateAssetBrowserMaterialInstance(name, variantBase);
         case NamedAssetCreationKind::Prefab:
             return controller.CreateAssetBrowserPrefab(name);
         case NamedAssetCreationKind::PrefabVariant:

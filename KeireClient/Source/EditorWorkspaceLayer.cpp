@@ -318,8 +318,9 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                                            const bool validateDeviceLoss
 #endif
                                            )
-    : Layer("EditorWorkspaceLayer"), m_AssetBrowserPanel(std::make_unique<KeireEditor::AssetBrowserPanel>(
-                                         static_cast<KeireEditor::IAssetBrowserController&>(*this))),
+    : Layer("EditorWorkspaceLayer"), ManagedRuntimeApplicationServices(true),
+      m_AssetBrowserPanel(
+          std::make_unique<KeireEditor::AssetBrowserPanel>(static_cast<KeireEditor::IAssetBrowserController&>(*this))),
       m_ConsolePanel(std::make_unique<KeireEditor::ConsolePanel>([this](const std::string_view text)
                                                                  { Owner().Windows()->SetClipboardText(text); })),
       m_DiagnosticsPanel(std::make_unique<KeireEditor::DiagnosticsPanel>()),
@@ -530,6 +531,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
     registerLightChoices(Keire::DirectionalLightComponent::StaticType());
     registerLightChoices(Keire::PointLightComponent::StaticType());
     registerLightChoices(Keire::SpotLightComponent::StaticType());
+    m_PropertyDrawers->RegisterIntegerChoices(Keire::MeshRendererComponent::StaticType(), "giReceive",
+                                              {"Light Probes", "Lightmaps", "Disabled"});
     const auto registerAssetPicker = [this](const std::string_view key, const Keire::AssetTypeId type)
     {
         m_PropertyDrawers->RegisterOverride(
@@ -745,6 +748,7 @@ void EditorWorkspaceLayer::UpdateSmokePlayValidation()
 
 void EditorWorkspaceLayer::OnAttach()
 {
+    BindManagedApplication(Owner());
     m_ManagedRuntimeDiagnostics.Reset();
     m_ManagedRuntimeDiagnosticSource.Reset();
     auto& workspace = Owner().GetUiWorkspace();

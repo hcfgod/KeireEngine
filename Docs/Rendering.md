@@ -17,6 +17,15 @@ two-texel filter guard band. A Directional Light's resolution hint scales the pr
 as lit instead of clamping an edge depth, preventing camera or light rotation from exposing rectangular cascade borders.
 The engine-owned default material uses the same receiver contract, so primitives without an assigned material receive
 directional, point, and spot shadows instead of falling through an unshadowed compatibility path.
+Its Forward+ and Deferred Hybrid paths share dielectric GGX lighting and environment sampling, with roughness 0.65,
+specular level 0.5, and diffuse irradiance normalized by pi. Direct, ambient, environment, and baked light remain linear
+HDR, receive exposure once after accumulation, and enter the same tone-map pass. The default Forward+ shader no longer
+switches to unlit shading when `Receive Shadows` is disabled. The deferred MSAA coverage pass uses this same forward response.
+Deferred default and graph materials carry shadow reception through the GBuffer: disabling it bypasses dynamic,
+contact, and mixed-mask visibility without changing direct-light energy or cookie modulation. Graph materials combine
+dynamic and mixed-mask shadows using their minimum visibility, so overlapping shadows do not multiply their darkness.
+Standard graph materials also share Deferred's flat-ambient normalization and analytic environment-specular BRDF fit.
+The BRDF LUT binding remains available for compatibility with authored shader programs.
 Shadow layer, quality, strength, and receiver bias occupy a dedicated shadow uniform block; enabling shadows never
 changes the light's color or intensity. A receiving surface does not darken merely because it is also submitted to the
 shadow pass. Visible shadowing requires another surface of the caster, or separate `Cast Shadows` geometry, to be
@@ -34,6 +43,8 @@ up to eight active cookies into one deterministic 4x2 atlas, keeping the spatial
 16-sampler limit. Directional and spot lights also expose cookie scale, offset, and rotation. `Realtime` lights remain
 entirely dynamic, `Baked` lights are excluded from runtime direct-light lists, and `Mixed` lights combine realtime direct
 lighting with one of eight packed baked shadow-mask channels.
+Graph spot cookies use the same cone-projected UVs as Deferred; point cookies retain spherical UVs. Box-projected
+reflections ignore parallel exit planes and keep denominators nonzero, including exactly axis-aligned reflection rays.
 
 ## Image-based lighting
 
@@ -80,6 +91,8 @@ reuses them without recomputation, while missing or corrupt artifacts rebuild th
 path is always available and is the explicit fallback when the requested GPU bake backend is unavailable. Baked and
 mixed direct light, approximate indirect bounces, emissive-to-GI sources, reflection probes, and light-probe volumes are
 published together so a scene never observes a partially updated lighting set.
+Generated asset sidecars are written before their sources so a concurrent editor scan cannot assign unrelated IDs
+between texture publication and metadata publication.
 
 ## Static-scene submission contracts
 
@@ -96,11 +109,13 @@ single-sample surface; supported MSAA requests create the matching multisample e
 Hybrid keeps single-sample depth, velocity, GBuffer, DBuffer, and Irradyn inputs while a multisampled forward coverage
 subpass shades opaque geometry, decals, transparency, and VFX into HDR and resolves once before Irradyn. FXAA executes
 as part of the tone-map pass. TAA on both Forward+ and Deferred Hybrid jitters each accepted camera frame, reprojects
-the published per-surface history with object/deformation velocity, clamps history to the current 3x3 neighborhood,
-and rejects history after discontinuities, resizes, path changes, or device recreation. Motion excludes the temporal
-jitter itself, and the frame graph keeps velocity live through tone mapping; the resolved image therefore does not
-follow the sample sequence. Directional cascade fitting uses the unjittered projection so temporal samples cannot move
-shadow texel bounds. Reduced render scale is presented with spatial upscaling; it is not advertised as TAAU.
+the published per-surface history with object/deformation velocity, and clamps history to a padded current 3x3
+neighborhood. Once history passes that spatial validity check, expected sub-pixel edge luminance changes do not reject
+it again; this lets the Halton sequence converge instead of presenting its sample motion. History is rejected after
+discontinuities, resizes, path changes, or device recreation, and its weight decreases with screen-space velocity.
+Motion excludes the temporal jitter itself, and the frame graph keeps velocity live through tone mapping. Directional
+cascade fitting uses the unjittered projection so temporal samples cannot move shadow texel bounds. Reduced render
+scale is presented with spatial upscaling; it is not advertised as TAAU.
 
 Irradyn is a staged Deferred-Hybrid GI path. After opaque, forward-only, transparent, and VFX rendering, a reduced-
 resolution trace pass gathers the fully lit HDR scene with depth-tested screen-space visibility rays. This means local

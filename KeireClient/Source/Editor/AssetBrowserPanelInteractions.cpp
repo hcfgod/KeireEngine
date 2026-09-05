@@ -25,8 +25,18 @@ namespace KeireEditor
             const bool submitCreate = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
             if (PendingCreateKind == NamedCreateKind::MaterialGraph)
                 MaterialGraphCreation.Draw(ui, editor.AssetBrowserRecords(), editor.AssetBrowserTheme());
-            const auto canCreate = PendingCreateKind != NamedCreateKind::MaterialGraph ||
-                                   static_cast<bool>(MaterialGraphCreation.Shader());
+            const auto records = editor.AssetBrowserRecords();
+            const auto parent = std::ranges::find(records, PendingVariantBase, &Keire::AssetSourceRecord::Id);
+            const bool validParent =
+                parent != records.end() && (parent->Type == Keire::MaterialAsset::StaticType() ||
+                                            parent->Type == Keire::MaterialGraphAsset::StaticType() ||
+                                            parent->Type == Keire::MaterialInstanceAsset::StaticType());
+            const auto canCreate = (PendingCreateKind != NamedCreateKind::MaterialGraph ||
+                                    static_cast<bool>(MaterialGraphCreation.Shader())) &&
+                                   (PendingCreateKind != NamedCreateKind::MaterialInstance || validParent);
+            if (PendingCreateKind == NamedCreateKind::MaterialInstance)
+                ui.Text(validParent ? "Parent: " + parent->RelativePath.generic_string()
+                                    : "Cancel and select a Material or Material Instance to use as the parent.");
             if (auto disabled = ui.BeginDisabled(!canCreate); disabled)
             {
                 const bool createButton = ui.Button("Create");
@@ -51,6 +61,8 @@ namespace KeireEditor
                             throw;
                         }
                         CurrentFolder = previousFolder;
+                        if (!created)
+                            CreateError = editor.AssetBrowserStatus();
                         if (created)
                         {
                             PendingCreateKind = NamedCreateKind::None;
@@ -65,6 +77,7 @@ namespace KeireEditor
                     }
                     catch (const std::exception& error)
                     {
+                        CreateError = error.what();
                         editor.ReportAssetBrowserError(std::string("Asset creation failed: ") + error.what());
                     }
                 }
@@ -81,6 +94,8 @@ namespace KeireEditor
                 CreateNameBuffer.clear();
                 ui.CloseCurrentPopup();
             }
+            if (!CreateError.empty())
+                ui.TextWrapped(CreateError);
         }
 
         if (OpenRenamePopup)

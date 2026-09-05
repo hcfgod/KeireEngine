@@ -1,5 +1,10 @@
 $ErrorActionPreference = "Stop"
-Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop -Scope Local -Force
+# This file is dot-sourced by launcher and package scripts. Keep the required utility commands available after the
+# dot-source scope returns. Resolve the module from the active host so a PowerShell 7 module injected earlier in
+# PSModulePath cannot shadow Windows PowerShell's compatible in-box module.
+$keirePowerShellUtilityModule = Join-Path $PSHOME "Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1"
+Import-Module $keirePowerShellUtilityModule -ErrorAction Stop -Scope Global -Force
+Remove-Variable keirePowerShellUtilityModule
 
 function Get-KeireWorkspaceIdentity {
     param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
@@ -540,9 +545,23 @@ function Get-PythonInvocation {
         if ($candidate.Name -eq "python" -and
             $command.Source -like "*\Microsoft\WindowsApps\python.exe") { continue }
         $prefixArguments = @($candidate.PrefixArguments)
-        & $command.Source @prefixArguments -c "import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)" `
-            2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        $probeExitCode = 1
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            # A stale py.exe launcher writes a NativeCommandError when no Python installation is registered.
+            # Probe failures must fall through to the next candidate even when the caller uses Stop semantics.
+            $ErrorActionPreference = "Continue"
+            & $command.Source @prefixArguments -c `
+                "import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)" 2>$null | Out-Null
+            $probeExitCode = $LASTEXITCODE
+        }
+        catch {
+            $probeExitCode = 1
+        }
+        finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        if ($probeExitCode -eq 0) {
             return [PSCustomObject]@{
                 Executable = $command.Source
                 PrefixArguments = $prefixArguments
@@ -1479,13 +1498,16 @@ function Enter-VSDeveloperEnvironment {
     if ($LASTEXITCODE -ne 0) {
         throw "Visual Studio developer environment setup failed with exit code $LASTEXITCODE."
     }
+    # Environment blocks can contain duplicate names with different casing. Cmd updates the first PATH entry in that
+    # case, so preserve the first case-insensitive occurrence instead of letting a stale `Path` entry overwrite it.
+    $importedNames = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($line in $output) {
         $separator = $line.IndexOf("=")
         if ($separator -gt 0) {
-            [System.Environment]::SetEnvironmentVariable(
-                $line.Substring(0, $separator),
-                $line.Substring($separator + 1),
-                "Process")
+            $name = $line.Substring(0, $separator)
+            if ($importedNames.Add($name)) {
+                [System.Environment]::SetEnvironmentVariable($name, $line.Substring($separator + 1), "Process")
+            }
         }
     }
     [System.Environment]::SetEnvironmentVariable("KEIRE_VSDEV_ENVIRONMENT_KEY", $environmentKey, "Process")

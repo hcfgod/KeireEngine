@@ -4,6 +4,10 @@ These examples describe supported graph shapes without depending on a screen pos
 search-first palette and choose the compatible texture, coordinate, math, color, or procedural node shown by the open
 template. Pin-started search is the quickest way to see only valid choices for a destination.
 
+For ordinary scene surfaces, create a Material and author its OpenPBR graph directly; no separate Shader Graph is
+required. The surface examples below describe the compatible legacy Material shader target. Specialized Shader Graph
+targets such as UI expose their own output pins and display their target in the graph header.
+
 ## Example 1: Tint A Tiled Surface
 
 Use this as the first Lit/PBR graph because every connection has an obvious preview result.

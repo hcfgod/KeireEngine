@@ -720,3 +720,27 @@ TEST_CASE("Shader Graph hero example imports compiled shader and runtime materia
     CHECK(std::ranges::find(runtimeMaterial->AssetDependencies, material->Definition().Shader) !=
           runtimeMaterial->AssetDependencies.end());
 }
+
+TEST_CASE("Material sphere previews preserve geometric lighting with neutral tangent normals")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    KeireEditor::ShaderGraphPreviewRequest request{.Output = graph.Output,
+                                                   .Mesh = Keire::ShaderGraphPreviewMesh::Sphere,
+                                                   .Definition = &graph,
+                                                   .Width = 96,
+                                                   .Height = 96};
+    const auto neutral = KeireEditor::RenderShaderGraphPreview(request);
+    const auto red = [&](std::size_t x, std::size_t y) { return std::to_integer<int>(neutral[(y * 96 + x) * 4]); };
+    CHECK(std::abs(red(33, 33) - red(63, 63)) > 10);
+    auto normal =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Vector3);
+    normal.Value = Keire::Vector3{0.0F, 0.0F, 1.0F};
+    const auto input = std::ranges::find(graph.Nodes.front().Pins, "Normal", &Keire::ShaderGraphPin::Name);
+    REQUIRE(input != graph.Nodes.front().Pins.end());
+    graph.Connections.push_back(
+        {Keire::AssetId::Generate(), {normal.Id, normal.Pins.front().Id}, {graph.Nodes.front().Id, input->Id}});
+    graph.Nodes.push_back(std::move(normal));
+    CHECK(KeireEditor::RenderShaderGraphPreview(request) == neutral);
+    graph.Nodes.back().Value = Keire::Vector3{0.7F, 0.0F, 0.7F};
+    CHECK(KeireEditor::RenderShaderGraphPreview(request) != neutral);
+}
