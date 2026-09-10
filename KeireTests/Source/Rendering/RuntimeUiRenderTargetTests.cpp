@@ -10,6 +10,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
@@ -484,14 +485,25 @@ TEST_CASE("Runtime UI fallback glyph atlas is bounded reused and frame-generatio
     CHECK(firstAtlas == secondAtlas);
     CHECK(firstAtlas->Width >= 256U);
     CHECK(firstAtlas->Height >= 128U);
-    CHECK(firstAtlas->Glyphs.size() == 95U);
+    CHECK(firstAtlas->Glyphs.size() == 224U);
     CHECK(firstAtlas->Pixels.size() ==
           static_cast<std::size_t>(firstAtlas->Width) * static_cast<std::size_t>(firstAtlas->Height) * 4U);
     CHECK(Keire::RenderBackend::RuntimeUiFallbackGlyph(static_cast<std::uint8_t>('A')).Advance > 0.0F);
     CHECK(Keire::RenderBackend::RuntimeUiFontBindingId(Keire::AssetId::Generate()) ==
           Keire::RenderBackend::RuntimeUiFallbackFontId);
-    CHECK(&Keire::RenderBackend::RuntimeUiFallbackGlyph(0xffU) ==
+    CHECK(&Keire::RenderBackend::RuntimeUiFallbackGlyph(0U) ==
           &Keire::RenderBackend::RuntimeUiFallbackGlyph(static_cast<std::uint8_t>('?')));
+    const auto& accented = Keire::RenderBackend::RuntimeUiFallbackGlyph(0xe9U);
+    CHECK(accented.Width > 0.0F);
+    CHECK(accented.UvMinimum != Keire::RenderBackend::RuntimeUiFallbackGlyph('?').UvMinimum);
+    const std::array accentedText{Keire::RuntimeUiDrawCommand{.Type = Keire::RuntimeUiDrawType::Text,
+                                                              .Rect = {0.0F, 0.0F, 100.0F, 40.0F},
+                                                              .ClipRect = {0.0F, 0.0F, 100.0F, 40.0F},
+                                                              .Text = "\xc3\xa9",
+                                                              .FontSize = 12.0F}};
+    const auto accentedGeometry = Keire::RenderBackend::BuildRuntimeUiGeometry(accentedText);
+    REQUIRE(accentedGeometry.Vertices.size() == 6U);
+    CHECK(accentedGeometry.Vertices.front().UV == accented.UvMinimum);
 
     Keire::RenderBackend::RenderFramePacket frame;
     frame.DeviceGeneration = 8U;
@@ -644,7 +656,7 @@ TEST_CASE("Runtime UI renderer statistics are bounded value snapshots")
     renderer.RuntimeUiRenderer = {};
     CHECK(published.RuntimeUiRenderer.RenderedVertices == 24U);
     CHECK(published.RuntimeUiRenderer.DrawBatches == 4U);
-    CHECK(published.RuntimeUiRenderer.GlyphAtlasEntries == 95U);
+    CHECK(published.RuntimeUiRenderer.GlyphAtlasEntries == 224U);
     CHECK(published.RuntimeUiRenderer.GlyphAtlasBytes ==
           Keire::RenderBackend::RuntimeUiFallbackGlyphAtlas()->Pixels.size());
     CHECK(published.RuntimeUiRenderer.ImageAtlasEntries == 0U);

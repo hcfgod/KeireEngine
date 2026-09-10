@@ -211,6 +211,45 @@ TEST_CASE("empty spatial selections retain UINT_MAX sentinels for CPU fallback d
     CHECK(uniforms.SpatialSelection[3] == 0U);
 }
 
+TEST_CASE("spatial selection rejects contribution ranges outside an otherwise current mask")
+{
+    const auto expected = Ownership();
+    const std::array mask{0U};
+    const std::array reflections{Reflection(1U, 1U, 1, 1.0F, 1.0F)};
+    const std::array probes{LightProbe(2U, 1U, 1, 3.0F)};
+    SpatialDrawSelectionInput input{
+        .VisibilityMask = {mask, expected}, .ExpectedOwnership = expected, .ExpectedVisibilityCount = 1U};
+    SUBCASE("Reflection range exceeds the mask")
+    {
+        input.Contribution = {0U, 2U, 0U, 0U};
+        input.ReflectionProbes = reflections;
+    }
+    SUBCASE("Light volume range exceeds the mask")
+    {
+        input.Contribution = {0U, 0U, 1U, 1U};
+        input.LightProbeVolumes = probes;
+    }
+    SUBCASE("Contribution range arithmetic cannot wrap into the mask")
+    {
+        input.Contribution = {1U, std::numeric_limits<std::uint32_t>::max(), 0U, 0U};
+        input.ReflectionProbes = reflections;
+    }
+    const auto result = SelectSpatialLightingForDraw(input);
+    CHECK_FALSE(result.MaskUsable);
+    CHECK(result.UsedFailVisible);
+    CHECK((result.Record.Metadata[0] & AssetSpatialSelectionUsedFailVisible) != 0U);
+    if (!input.ReflectionProbes.empty())
+    {
+        CHECK(result.Record.Metadata[1] == 1U);
+        CHECK(result.Record.ReflectionProbes[0].ExtentsWeight.W == doctest::Approx(1.0F));
+    }
+    else
+    {
+        CHECK(result.Record.Metadata[3] == 1U);
+        CHECK(result.Record.ProbeIrradiance[0].X == doctest::Approx(3.0F));
+    }
+}
+
 TEST_CASE("spatial selection frame resources require exact frame ownership")
 {
     GpuSpatialSelectionFrameResources resources;

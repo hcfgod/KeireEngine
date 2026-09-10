@@ -21,8 +21,10 @@ TEST_CASE("Shader Graph selection duplication remaps topology and contained auth
     second.Pins.push_back({Keire::AssetId::Generate(), "In", Keire::ShaderGraphValueType::Scalar,
                            Keire::ShaderGraphPinDirection::Input, 0.0F});
     definition.Nodes = {first, second};
-    definition.Connections.push_back(
-        {Keire::AssetId::Generate(), {first.Id, first.Pins.front().Id}, {second.Id, second.Pins.front().Id}, {}});
+    definition.Connections.push_back({Keire::AssetId::Generate(),
+                                      {first.Id, first.Pins.front().Id},
+                                      {second.Id, second.Pins.front().Id},
+                                      {{110.0F, 15.0F}}});
     definition.Authoring.NodeAnnotations.push_back({first.Id, "Source", true, true});
     const auto commentId = Keire::AssetId::Generate();
     definition.Authoring.Comments.push_back({commentId,
@@ -53,6 +55,84 @@ TEST_CASE("Shader Graph selection duplication remaps topology and contained auth
     CHECK(copiedConnection.Output.Node == duplicated[0]);
     CHECK(copiedConnection.Input.Node == duplicated[1]);
     CHECK(copiedConnection.Id != definition.Connections.front().Id);
+    REQUIRE(copiedConnection.RoutingPoints.size() == 1);
+    CHECK(copiedConnection.RoutingPoints.front() == Keire::Vector2{142.0F, 47.0F});
+    CHECK(definition.Connections.front().RoutingPoints.front() == Keire::Vector2{110.0F, 15.0F});
+}
+
+TEST_CASE("Shader and Material Graph duplication allocates resource-safe parameter symbols")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto parameter =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    parameter.Symbol = "Roughness";
+    parameter.Name = "Surface Roughness";
+    parameter.Value = 0.25F;
+    parameter.ParameterMetadata.Description = "Keep author metadata";
+    auto occupied =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Scalar);
+    occupied.Symbol = "Roughness_Copy";
+    graph.Nodes.push_back(parameter);
+    graph.Nodes.push_back(occupied);
+    graph.Resources.push_back({Keire::AssetId::Generate(), "Reserved sampler", "Roughness_Copy2",
+                               Keire::ShaderGraphResourceKind::Sampler, Keire::SamplerDescription{}});
+    const std::array selection{parameter.Id};
+
+    SUBCASE("Shader Graph")
+    {
+        const auto first = KeireEditor::DuplicateShaderGraphSelection(graph, selection);
+        const auto second = KeireEditor::DuplicateShaderGraphSelection(graph, selection);
+        REQUIRE(first.size() == 1);
+        REQUIRE(second.size() == 1);
+        CHECK(graph.Nodes[3].Symbol == "Roughness_Copy3");
+        CHECK(graph.Nodes[4].Symbol == "Roughness_Copy4");
+    }
+    SUBCASE("Material Graph surface expressions")
+    {
+        Keire::MaterialShaderReference shader;
+        shader.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+        shader.Asset = Keire::AssetId::Generate();
+        auto material = Keire::CreateMaterialGraph(shader, {});
+        material.SurfaceGraph = graph;
+        const auto first = KeireEditor::DuplicateMaterialGraphSelection(material, selection);
+        const auto second = KeireEditor::DuplicateMaterialGraphSelection(material, selection);
+        REQUIRE(first.size() == 1);
+        REQUIRE(second.size() == 1);
+        CHECK_NOTHROW(Keire::ValidateMaterialGraph(material));
+        graph = material.SurfaceGraph;
+        CHECK(graph.Nodes[3].Symbol == "Roughness_Copy3");
+        CHECK(graph.Nodes[4].Symbol == "Roughness_Copy4");
+    }
+    CHECK(graph.Nodes[1] == parameter);
+    CHECK(graph.Nodes.back().Name == parameter.Name);
+    CHECK(graph.Nodes.back().Value == parameter.Value);
+    CHECK(graph.Nodes.back().ParameterMetadata == parameter.ParameterMetadata);
+    CHECK(graph.Nodes.back().Pins.front().Id != parameter.Pins.front().Id);
+    CHECK_NOTHROW(Keire::ValidateShaderGraph(graph));
+}
+
+TEST_CASE("Graph duplication detaches a contained child from an unselected outer comment")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    const auto node = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant);
+    graph.Nodes.push_back(node);
+    Keire::GraphComment outer{.Id = Keire::AssetId::Generate(), .Title = "Outer"};
+    Keire::GraphComment inner{
+        .Id = Keire::AssetId::Generate(), .Title = "Inner", .Parent = outer.Id, .Members = {node.Id}};
+    outer.Members = {inner.Id, graph.Nodes.front().Id};
+    graph.Authoring.Comments = {outer, inner};
+    REQUIRE_NOTHROW(Keire::ValidateShaderGraph(graph));
+    const std::array selection{node.Id};
+
+    const auto copied = KeireEditor::DuplicateShaderGraphSelection(graph, selection);
+
+    REQUIRE(copied.size() == 1);
+    REQUIRE(graph.Authoring.Comments.size() == 3);
+    CHECK_FALSE(graph.Authoring.Comments.back().Parent);
+    CHECK(graph.Authoring.Comments.back().Members == copied);
+    CHECK(graph.Authoring.Comments[0] == outer);
+    CHECK(graph.Authoring.Comments[1] == inner);
+    CHECK_NOTHROW(Keire::ValidateShaderGraph(graph));
 }
 
 TEST_CASE("Graph duplication preserves mandatory output and VFX Context anchors")
@@ -95,6 +175,7 @@ TEST_CASE("VFX graph duplication remaps internal pins and cables")
     system.Nodes = {first, second};
     system.Connections.push_back(
         {Keire::AssetId::Generate(), first.Id, first.Pins.front().Id, second.Id, second.Pins.front().Id});
+    system.Connections.back().RoutingPoints.push_back({100.0F, 50.0F});
     definition.Systems.push_back(system);
 
     const std::array selection{first.Id, second.Id};
@@ -107,6 +188,8 @@ TEST_CASE("VFX graph duplication remaps internal pins and cables")
     CHECK(copied.InputNode == duplicated[1]);
     CHECK(copied.OutputPin != first.Pins.front().Id);
     CHECK(copied.InputPin != second.Pins.front().Id);
+    REQUIRE(copied.RoutingPoints.size() == 1);
+    CHECK(copied.RoutingPoints.front() == Keire::Vector2{132.0F, 82.0F});
 }
 
 TEST_CASE("Shader Graph extraction creates typed boundaries and rewires the parent through one function call")

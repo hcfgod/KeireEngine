@@ -4,6 +4,7 @@ $ErrorActionPreference = "Stop"
 $started = [Diagnostics.Stopwatch]::StartNew()
 $runFast = $Suite -in @("All", "Fast")
 $runIntegration = $Suite -in @("All", "Integration")
+if ($runFast) { & (Join-Path $PSScriptRoot "test-run-routing-windows.ps1") }
 $Windows = Resolve-Path (Join-Path $PSScriptRoot "..\Windows")
 . (Join-Path $Windows "common.ps1")
 
@@ -404,6 +405,7 @@ finally {
     Remove-Item $workspaceLockFixture -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item $workspaceLockExternal -Recurse -Force -ErrorAction SilentlyContinue
 }
+& (Join-Path $PSScriptRoot "test-workspace-lock-contention-windows.ps1")
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "check-repository-layout.py")
 if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
 & (Join-Path $PSScriptRoot "test-generated-content-cache-windows.ps1")
@@ -626,6 +628,7 @@ function Enter-WindowsToolEnvironment {
     return "msc"
 }
 function Get-ManagedHostStagingTargets { return @() }
+function Get-NinjaExecutable { return (Get-Command ninja.cmd).Source }
 '@ | Set-Content (Join-Path $fixtureWindows "common.ps1") -Encoding UTF8
     @'
 function Enter-GeneratedContentLock {
@@ -652,6 +655,8 @@ Set-Content -LiteralPath (Join-Path $root "build.ninja") -Encoding ASCII -Value 
 Set-Content -LiteralPath (Join-Path $root "Build\Generated\ninja.stamp") -Encoding ASCII `
     -Value "ninja|x86_64|msc|off|False|fixture-toolchain|fixture-fingerprint"
 '@ | Set-Content (Join-Path $fixtureWindows "generate.ps1") -Encoding UTF8
+    '$global:LASTEXITCODE = 0' | Set-Content `
+        (Join-Path $fixtureWindows "prepare-generated-content.ps1") -Encoding UTF8
     "@echo off`r`nexit /b 0`r`n" | Set-Content (Join-Path $fixtureTools "ninja.cmd") -Encoding ASCII
     $env:PATH = "$fixtureTools;$savedBuildOrderPath"
     $global:LASTEXITCODE = 0
@@ -860,6 +865,8 @@ Assert-True (-not $securityWorkflow.Contains("continue-on-error")) "Strict advan
 $python = Get-PythonInvocation
 & $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-text-integrity.py")
 if ($LASTEXITCODE -ne 0) { throw "Versioned text integrity validation failed." }
+& $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\test-text-integrity.py")
+if ($LASTEXITCODE -ne 0) { throw "Text integrity regression tests failed." }
 & $python.Executable @($python.PrefixArguments) (Join-Path (Get-RepositoryRoot) "Scripts\Tests\check-source-budgets.py")
 if ($LASTEXITCODE -ne 0) { throw "Source-file budget validation failed." }
 & $python.Executable @($python.PrefixArguments) `
@@ -1785,6 +1792,11 @@ Assert-True ($packageConfig.Contains('@PROJECT_NAMESPACE@ImGui.lib') -and
     $packageConfig.Contains('"${_jolt_sdk_library}" "${_recast_sdk_libraries}" "${_miniaudio_sdk_library}"') -and
     $packageConfig.Contains('SDL3::SDL3-static')) "Private archive CMake transitive link"
 Assert-True (-not $packageConfig.Contains('include;${_core_sdk_prefix}/third-party')) "SDK omits general third-party include path"
+foreach ($library in @("harfbuzz", "freetype", "fribidi", "unibreak")) {
+    Assert-True ($packageConfig.Contains("/lib/$library.lib") -and $packageConfig.Contains("/lib/lib$library.a")) `
+        "SDK CMake exports the private $library archive on Windows and Unix"
+}
+Assert-True ($packageConfig.Contains('"${_text_sdk_libraries}"')) "SDK Core transitively links text dependencies"
 $publicLogHeader = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Log.h") -Raw
 Assert-True (-not $publicLogHeader.Contains("spdlog/") -and -not $publicLogHeader.Contains("fmt::") -and $publicLogHeader.Contains("KEIRE_COMPILED_LOG_LEVEL")) "Public logging boundary is engine-owned"
 $commonPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
@@ -1823,6 +1835,15 @@ try {
     New-Item -ItemType Directory -Force (Split-Path $publicBuildHeader) | Out-Null
     New-Item -ItemType File -Force $publicBuildHeader | Out-Null
     Assert-WindowsPackageStage $packageStage Client Hub Core Core
+    foreach ($path in @("lib\harfbuzz.lib", "lib\freetype.lib", "lib\fribidi.lib", "lib\unibreak.lib",
+            "third-party\licenses\FreeType-LICENSE.txt", "third-party\licenses\HarfBuzz-LICENSE.txt",
+            "third-party\licenses\FriBidi-LICENSE.txt", "third-party\licenses\libunibreak-LICENSE.txt")) {
+        $missingTextDependency = Join-Path $packageStage $path
+        Remove-Item -LiteralPath $missingTextDependency -Force
+        Assert-Throws { Assert-WindowsPackageStage $packageStage Client Hub Core Core } `
+            "SDK stage rejects missing text dependency $path"
+        New-Item -ItemType File -Path $missingTextDependency | Out-Null
+    }
     $unexpectedPackageRuntime = Join-Path $packageStage "bin\avdevice-63.dll"
     New-Item -ItemType File -Force $unexpectedPackageRuntime | Out-Null
     Assert-Throws { Assert-WindowsPackageStage $packageStage Client Hub Core Core } `

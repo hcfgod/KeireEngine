@@ -57,6 +57,8 @@ cp -R "$ROOT/Build/Dependencies/ffmpeg/Release/install/share/licenses/ffmpeg" "$
 cp -R "$ROOT/Build/Bin/$CONFIGURATION-$system-$output_arch/$CLIENT_TARGET/Managed" "$stage/bin/"
 dependency_install="$ROOT/Build/Dependencies/$system-$output_arch-$TOOLSET/Release/install"
 cp "$dependency_install/lib/libassimp.a" "$dependency_install/lib/libzlibstatic.a" "$dependency_install/lib/libJolt.a" "$dependency_install/lib/libRecast.a" "$dependency_install/lib/libDetour.a" "$dependency_install/lib/libDetourCrowd.a" "$dependency_install/lib/libDetourTileCache.a" "$dependency_install/lib/libminiaudio.a" "$stage/lib/"
+cp "$dependency_install/lib/libharfbuzz.a" "$dependency_install/lib/libfreetype.a" \
+  "$dependency_install/lib/libfribidi.a" "$dependency_install/lib/libunibreak.a" "$stage/lib/"
 cp "$ROOT/Build/Dependencies/coral/Build/Release/libCoral.Native.a" "$stage/lib/"
 cp "$ROOT/Build/Dependencies/coral-nethost/libnethost.a" "$stage/lib/"
 cp "$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler" "$stage/bin/"
@@ -94,6 +96,10 @@ cp "$ROOT/Vendor/assimp/LICENSE" "$stage/third-party/licenses/assimp-LICENSE.txt
 cp "$ROOT/Vendor/assimp/contrib/zlib/LICENSE" "$stage/third-party/licenses/assimp-zlib-LICENSE.txt"
 cp "$ROOT/Vendor/stb/LICENSE" "$stage/third-party/licenses/stb-LICENSE.txt"
 cp "$dependency_install/share/licenses/keire/Jolt-LICENSE.txt" "$dependency_install/share/licenses/keire/Recast-LICENSE.txt" "$dependency_install/share/licenses/keire/miniaudio-LICENSE.txt" "$stage/third-party/licenses/"
+cp "$dependency_install/share/licenses/keire/FreeType-LICENSE.txt" \
+  "$dependency_install/share/licenses/keire/HarfBuzz-LICENSE.txt" \
+  "$dependency_install/share/licenses/keire/FriBidi-LICENSE.txt" \
+  "$dependency_install/share/licenses/keire/libunibreak-LICENSE.txt" "$stage/third-party/licenses/"
 cp "$ROOT/Build/Dependencies/coral/LICENSE" "$stage/third-party/licenses/Coral-LICENSE.txt"
 cp "$ROOT/Build/Dependencies/dotnet-sdk/LICENSE.txt" "$stage/third-party/licenses/dotnet-LICENSE.txt"
 cp "$ROOT/Build/Dependencies/dotnet-sdk/ThirdPartyNotices.txt" "$stage/third-party/licenses/dotnet-ThirdPartyNotices.txt"
@@ -118,6 +124,21 @@ dotnet_runtime="$(basename "$dotnet_runtime")"
 platform_name=Linux; [[ "$PLATFORM" == Mac ]] && platform_name=macOS
 if [[ "$TOOLSET" == clang ]]; then compiler="Clang $(clang++ -dumpversion)"; else compiler="GCC $(g++ -dumpfullversion -dumpversion)"; fi
 printf '{\n  "project": "%s",\n  "version": "%s",\n  "commit": "%s",\n  "dirty": %s,\n  "developmentArtifact": %s,\n  "platform": "%s",\n  "architecture": "%s",\n  "configuration": "%s",\n  "generator": "%s",\n  "toolset": "%s",\n  "compiler": "%s",\n  "spdlog": "%s",\n  "doctest": "%s",\n  "sdl": "%s",\n  "json": "%s",\n  "imgui": "%s",\n  "zstd": "%s",\n  "entt": "%s",\n  "glm": "%s",\n  "sdlShadercross": "%s",\n  "dxc": "%s",\n  "spirvCross": "%s",\n  "spirvHeaders": "%s",\n  "spirvTools": "%s",\n  "assimp": "%s",\n  "stb": "%s",\n  "jolt": "%s",\n  "recast": "%s",\n  "miniaudio": "%s",\n  "coral": "%s",\n  "dotnetRuntime": "%s"\n}\n' "$(json_escape "$PROJECT_IDENTIFIER")" "$(json_escape "$PROJECT_VERSION")" "$(json_escape "$commit")" "$dirty" "$development_artifact" "$(json_escape "$platform_name")" "$(architecture_output_name "$ARCHITECTURE")" "$(json_escape "$CONFIGURATION")" "$(json_escape "$GENERATOR")" "$(json_escape "$TOOLSET")" "$(json_escape "$compiler")" "$(json_escape "$spdlog")" "$(json_escape "$doctest")" "$(json_escape "$sdl")" "$(json_escape "$json")" "$(json_escape "$imgui")" "$(json_escape "$zstd")" "$(json_escape "$entt")" "$(json_escape "$glm")" "$(json_escape "$shadercross")" "$(json_escape "$dxc")" "$(json_escape "$spirv_cross")" "$(json_escape "$spirv_headers")" "$(json_escape "$spirv_tools")" "$(json_escape "$assimp")" "$(json_escape "$stb")" "$(json_escape "$jolt")" "$(json_escape "$recast")" "$(json_escape "$miniaudio")" "$(json_escape "$coral")" "$(json_escape "$dotnet_runtime")" > "$stage/build-manifest.json"
+python3 - "$stage/build-manifest.json" \
+  "$(config_value "$ROOT/Config/Dependencies.lock" FREETYPE_COMMIT)" \
+  "$(config_value "$ROOT/Config/Dependencies.lock" HARFBUZZ_COMMIT)" \
+  "$(config_value "$ROOT/Config/Dependencies.lock" FRIBIDI_COMMIT)" \
+  "$(config_value "$ROOT/Config/Dependencies.lock" LIBUNIBREAK_COMMIT)" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+manifest = json.loads(path.read_text(encoding="utf-8"))
+for key, value in zip(("freeType", "harfBuzz", "friBidi", "libunibreak"), sys.argv[2:]):
+    manifest[key] = value
+path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+PY
 validate_package_stage "$stage" "$CLIENT_TARGET" "$HUB_TARGET" "$CORE_TARGET" "$PROJECT_NAMESPACE"
 if [[ "$PLATFORM" == Mac ]]; then
   validate_macos_macho_minimum "$stage" "$macos_deployment_target" "$stage/bin/Managed/Dotnet"
@@ -344,6 +365,8 @@ if [[ "$PLATFORM" == Mac ]]; then
 fi
 cxx=g++; [[ "$TOOLSET" == clang ]] && cxx=clang++
 gameplay_libraries=("$validation_root/sdk/lib/libJolt.a" "$validation_root/sdk/lib/libRecast.a" "$validation_root/sdk/lib/libDetour.a" "$validation_root/sdk/lib/libDetourCrowd.a" "$validation_root/sdk/lib/libDetourTileCache.a" "$validation_root/sdk/lib/libminiaudio.a" "$validation_root/sdk/lib/libCoral.Native.a" "$validation_root/sdk/lib/libnethost.a")
+gameplay_libraries+=("$validation_root/sdk/lib/libharfbuzz.a" "$validation_root/sdk/lib/libfreetype.a"
+  "$validation_root/sdk/lib/libfribidi.a" "$validation_root/sdk/lib/libunibreak.a")
 macos_sdl_frameworks=(-framework Cocoa -framework CoreVideo -framework IOKit -framework CoreFoundation
   -framework CoreAudio -framework AudioToolbox -framework ForceFeedback -framework GameController
   -framework CoreHaptics -framework Carbon -framework Metal -framework QuartzCore

@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ShaderGraphDocument.h"
 #include "KeireClient/Editor/ShaderGraphPreview.h"
+#include "KeireClient/Editor/ShaderGraphPreviewTextureSampling.h"
+#include "KeireClientInternal/Editor/ShaderGraphPreviewEvaluatorInternal.h"
 
 #include <doctest/doctest.h>
 
@@ -11,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <map>
 #include <optional>
 #include <span>
@@ -367,6 +370,65 @@ TEST_CASE("Shader Graph document validates interactive cables and replacement wa
     CHECK(canvas.Connection(canvas.Connections.front().Id) == document.Definition().Connections.front().Id);
 }
 
+TEST_CASE("Shader Graph live apply republishes culling bounds and stable property identities without HLSL changes")
+{
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "Shader metadata edits"});
+    std::vector<Keire::Ref<Keire::ShaderAsset>> published;
+    KeireEditor::ShaderGraphDocument document(
+        {.LiveApply = [&published](Keire::AssetId, const Keire::ShaderGraphDefinition&,
+                                   const Keire::ShaderGraphCompilation&,
+                                   const std::span<const Keire::Ref<Keire::ShaderAsset>> shaders)
+         { published.insert(published.end(), shaders.begin(), shaders.end()); },
+         .Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    document.Create(Keire::AssetId::Generate(), Keire::CreateDefaultShaderGraph(), undo);
+    auto offset =
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Vector3);
+    offset.Symbol = "Offset";
+    offset.Value = Keire::Vector3{0.1F, 0.0F, 0.0F};
+    REQUIRE(document.AddNode(offset));
+    const auto& master = document.Definition().Nodes.front();
+    const auto input = std::ranges::find(master.Pins, "WorldPositionOffset", &Keire::ShaderGraphPin::Name);
+    REQUIRE(input != master.Pins.end());
+    REQUIRE(document.AddConnection({{}, {offset.Id, offset.Pins.front().Id}, {master.Id, input->Id}}));
+    DrainCompilation(document);
+    REQUIRE(published.size() == 1);
+    CHECK_FALSE(published.back()->Definition().MaximumWorldPositionDisplacementRadius);
+    REQUIRE(published.back()->Definition().Properties.size() == 1);
+    CHECK(published.back()->Definition().Properties.front().Id == offset.Id);
+    const auto originalHlsl = document.Compilation().Variants.front().Hlsl;
+
+    REQUIRE(document.Edit("Set displacement bound", [](Keire::ShaderGraphDefinition& graph)
+                          { graph.MaximumWorldPositionDisplacementRadius = 2.0F; }));
+    DrainCompilation(document);
+    REQUIRE(published.size() == 2);
+    REQUIRE(published.back()->Definition().MaximumWorldPositionDisplacementRadius);
+    CHECK(*published.back()->Definition().MaximumWorldPositionDisplacementRadius == doctest::Approx(2.0F));
+    CHECK(document.Compilation().Variants.front().Hlsl == originalHlsl);
+
+    const auto replacementId = Keire::AssetId::Generate();
+    REQUIRE(document.Edit("Replace parameter identity",
+                          [&](Keire::ShaderGraphDefinition& graph)
+                          {
+                              auto parameter = std::ranges::find(graph.Nodes, offset.Id, &Keire::ShaderGraphNode::Id);
+                              REQUIRE(parameter != graph.Nodes.end());
+                              parameter->Id = replacementId;
+                              for (auto& connection : graph.Connections)
+                                  if (connection.Output.Node == offset.Id)
+                                      connection.Output.Node = replacementId;
+                          }));
+    DrainCompilation(document);
+    REQUIRE(published.size() == 3);
+    REQUIRE(published.back()->Definition().Properties.size() == 1);
+    CHECK(published.back()->Definition().Properties.front().Id == replacementId);
+    CHECK(document.Compilation().Variants.front().Hlsl == originalHlsl);
+    REQUIRE(document.Undo());
+    DrainCompilation(document);
+    REQUIRE(published.size() == 4);
+    CHECK(published.back()->Definition().Properties.front().Id == offset.Id);
+    document.Close();
+}
+
 TEST_CASE("Shader Graph live preview renders every built-in shape and custom meshes")
 {
     const std::array properties{
@@ -499,6 +561,160 @@ TEST_CASE("Shader Graph live preview samples supplied material textures")
     CHECK(textured != fallback);
     const auto center = (48U * request.Width + 48U) * 4U;
     CHECK(std::to_integer<std::uint8_t>(textured[center]) > std::to_integer<std::uint8_t>(textured[center + 1U]));
+}
+
+TEST_CASE("Shader Graph texture preview decodes sRGB color without changing linear alpha")
+{
+    Keire::TextureImportSettings settings;
+    settings.Mips = Keire::TextureMipPolicy::None;
+    Keire::TextureMipLevel mip{1, 1, {std::byte{128}, std::byte{10}, std::byte{255}, std::byte{128}}};
+    float expectedRed = 0.2158605F;
+    float expectedGreen = 0.00303527F;
+    SUBCASE("sRGB") {}
+    SUBCASE("Linear")
+    {
+        settings.ColorSpace = Keire::TextureColorSpace::Linear;
+        expectedRed = 128.0F / 255.0F;
+        expectedGreen = 10.0F / 255.0F;
+    }
+    const auto asset = Keire::AssetId::Generate();
+    const std::array textures{KeireEditor::ShaderGraphPreviewTexture{
+        asset, Keire::CreateRef<Keire::Texture2DAsset>(settings, std::vector{mip})}};
+    const auto sample = KeireEditor::Detail::SampleShaderGraphPreviewTexture(textures, asset, {0.5F, 0.5F});
+    REQUIRE(sample);
+    CHECK(sample->X == doctest::Approx(expectedRed));
+    CHECK(sample->Y == doctest::Approx(expectedGreen));
+    CHECK(sample->Z == doctest::Approx(1.0F));
+    CHECK(sample->W == doctest::Approx(128.0F / 255.0F));
+}
+
+TEST_CASE("Shader Graph texture preview honors each axis address mode")
+{
+    Keire::TextureImportSettings settings;
+    settings.Mips = Keire::TextureMipPolicy::None;
+    settings.ColorSpace = Keire::TextureColorSpace::Linear;
+    settings.Sampler.Magnification = Keire::TextureFilter::Nearest;
+    const Keire::TextureMipLevel mip{2,
+                                     2,
+                                     {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255},
+                                      std::byte{0}, std::byte{0}, std::byte{255}, std::byte{0}, std::byte{255},
+                                      std::byte{0}, std::byte{255}, std::byte{255}, std::byte{255}, std::byte{0},
+                                      std::byte{255}}};
+    Keire::Vector2 uv{1.25F, -0.25F};
+    Keire::Vector2 expected{0.0F, 1.0F};
+    SUBCASE("Repeat") {}
+    SUBCASE("Clamp U while V repeats")
+    {
+        settings.Sampler.AddressU = Keire::TextureAddressMode::Clamp;
+        expected = {1.0F, 1.0F};
+    }
+    SUBCASE("Mirror positive and negative coordinates")
+    {
+        settings.Sampler.AddressU = Keire::TextureAddressMode::Mirror;
+        settings.Sampler.AddressV = Keire::TextureAddressMode::Mirror;
+        expected = {1.0F, 0.0F};
+    }
+    SUBCASE("Mirror across multiple periods")
+    {
+        settings.Sampler.AddressU = Keire::TextureAddressMode::Mirror;
+        settings.Sampler.AddressV = Keire::TextureAddressMode::Mirror;
+        uv = {-1.25F, 2.25F};
+        expected = {1.0F, 0.0F};
+    }
+    const auto asset = Keire::AssetId::Generate();
+    const std::array textures{KeireEditor::ShaderGraphPreviewTexture{
+        asset, Keire::CreateRef<Keire::Texture2DAsset>(settings, std::vector{mip})}};
+    const auto sample = KeireEditor::Detail::SampleShaderGraphPreviewTexture(textures, asset, uv);
+    REQUIRE(sample);
+    CHECK(sample->X == expected.X);
+    CHECK(sample->Y == expected.Y);
+}
+
+TEST_CASE("Shader Graph texture preview filters decoded texels and applies address modes at seams")
+{
+    Keire::TextureImportSettings settings;
+    settings.Mips = Keire::TextureMipPolicy::None;
+    const Keire::TextureMipLevel mip{2,
+                                     1,
+                                     {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{128},
+                                      std::byte{128}, std::byte{128}, std::byte{255}}};
+    Keire::Vector2 uv{0.5F, 0.5F};
+    float expectedRed = 0.2158605F * 0.5F;
+    float expectedAlpha = 0.5F;
+    SUBCASE("Bilinear midpoint") {}
+    SUBCASE("Repeat seam") { uv.X = 0.0F; }
+    SUBCASE("Clamp seam")
+    {
+        uv.X = 0.0F;
+        settings.Sampler.AddressU = Keire::TextureAddressMode::Clamp;
+        expectedRed = expectedAlpha = 0.0F;
+    }
+    SUBCASE("Mirror seam")
+    {
+        uv.X = 1.0F;
+        settings.Sampler.AddressU = Keire::TextureAddressMode::Mirror;
+        expectedRed = 0.2158605F;
+        expectedAlpha = 1.0F;
+    }
+    const auto asset = Keire::AssetId::Generate();
+    const std::array textures{KeireEditor::ShaderGraphPreviewTexture{
+        asset, Keire::CreateRef<Keire::Texture2DAsset>(settings, std::vector{mip})}};
+    const auto sample = KeireEditor::Detail::SampleShaderGraphPreviewTexture(textures, asset, uv);
+    REQUIRE(sample);
+    CHECK(sample->X == doctest::Approx(expectedRed));
+    CHECK(sample->W == doctest::Approx(expectedAlpha));
+}
+
+TEST_CASE("Shader Graph texture preview handles HDR and non-finite coordinates deterministically")
+{
+    Keire::TextureImportSettings settings;
+    settings.Mips = Keire::TextureMipPolicy::None;
+    settings.Semantic = Keire::TextureSemantic::Environment;
+    settings.HighDynamicRange = true;
+    const auto asset = Keire::AssetId::Generate();
+    Keire::TextureMipLevel mip{1, 1, {std::byte{128}, std::byte{64}, std::byte{32}, std::byte{130}}};
+    float expected = 2.0F;
+    SUBCASE("RGBE radiance") {}
+    SUBCASE("Zero exponent encodes black")
+    {
+        mip.Pixels[3] = std::byte{0};
+        expected = 0.0F;
+    }
+    const std::array textures{KeireEditor::ShaderGraphPreviewTexture{
+        asset, Keire::CreateRef<Keire::Texture2DAsset>(settings, std::vector{mip})}};
+    const auto sample = KeireEditor::Detail::SampleShaderGraphPreviewTexture(
+        textures, asset, {std::numeric_limits<float>::max(), -std::numeric_limits<float>::max()});
+    REQUIRE(sample);
+    CHECK(sample->X == expected);
+    CHECK(sample->Y == expected * 0.5F);
+    CHECK(sample->Z == expected * 0.25F);
+    CHECK(sample->W == 1.0F);
+    for (const float invalid : {std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+                                std::numeric_limits<float>::quiet_NaN()})
+    {
+        CHECK_FALSE(KeireEditor::Detail::SampleShaderGraphPreviewTexture(textures, asset, {invalid, 0.0F}));
+        CHECK_FALSE(KeireEditor::Detail::SampleShaderGraphPreviewTexture(textures, asset, {0.0F, invalid}));
+    }
+}
+
+TEST_CASE("Shader Graph missing-texture preview tolerates overflowing UV expressions")
+{
+    auto graph = Keire::CreateDefaultShaderGraph(Keire::ShaderGraphOutput::Unlit);
+    auto texture = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::TextureSample);
+    const auto color = std::ranges::find(graph.Nodes.front().Pins, "Color", &Keire::ShaderGraphPin::Name);
+    const auto output = std::ranges::find(texture.Pins, "RGBA", &Keire::ShaderGraphPin::Name);
+    REQUIRE(color != graph.Nodes.front().Pins.end());
+    REQUIRE(output != texture.Pins.end());
+    graph.Connections.push_back(
+        {Keire::AssetId::Generate(), {texture.Id, output->Id}, {graph.Nodes.front().Id, color->Id}});
+    const auto uv = std::ranges::find(texture.Pins, "UV", &Keire::ShaderGraphPin::Name);
+    REQUIRE(uv != texture.Pins.end());
+    uv->DefaultValue = Keire::Vector2{std::numeric_limits<float>::max(), std::numeric_limits<float>::max()};
+    graph.Nodes.push_back(texture);
+    KeireEditor::ShaderGraphPreviewRequest request{.Output = graph.Output, .Definition = &graph};
+    KeireEditor::ShaderGraphPreviewInternal::ShaderGraphPreviewEvaluator evaluator(request);
+    const auto result = evaluator.Resolve({}, {0.0F, 0.0F, 1.0F}, {});
+    CHECK(result.BaseColor.X == doctest::Approx(0.88F));
 }
 
 TEST_CASE("Shader Graph live preview evaluates deep expression chains without recursive dispatcher frames")

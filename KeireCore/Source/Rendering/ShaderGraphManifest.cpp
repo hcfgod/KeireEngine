@@ -53,6 +53,8 @@ namespace Keire::Detail
         {
             Json result{
                 {"name", property.Name}, {"displayName", property.DisplayName}, {"category", property.Category}};
+            if (property.Id)
+                result["id"] = property.Id.ToString();
             const auto graphType = static_cast<ShaderGraphValueType>(property.Type);
             result["type"] = PropertyTypeName(graphType);
             if (property.Type == ShaderPropertyType::Texture2D)

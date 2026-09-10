@@ -34,7 +34,7 @@
     },
     {
       "id": "keire.3d-starter",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "displayName": "3D Starter",
       "description": "A practical 3D starting point with a camera, directional light, rendering settings, an unlit shader, and retained-mode UI Toolkit examples.",
       "category": "core",
@@ -109,7 +109,7 @@
         {
           "path": "Assets/UI/Starter.keirestyle",
           "sizeBytes": 1370,
-          "sha256": "9ee0921d828dfcb345d395fe0a2b33838e5020cf4e3db6befa4657744a81aba9"
+          "sha256": "1b1b6361b6a1b3b786e25c9a0becaf93cae29aa758d2c7b1b22f567e4e1b071e"
         },
         {
           "path": "Assets/UI/Starter.keirestyle.keiremeta",

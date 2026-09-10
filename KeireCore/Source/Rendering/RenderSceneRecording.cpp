@@ -6,7 +6,7 @@
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "KeireInternal/Rendering/RenderGeometryMathInternal.h"
-#include "KeireInternal/Rendering/TransparencyInternal.h"
+#include "KeireInternal/Rendering/SceneDrawOrderInternal.h"
 #include "KeireInternal/Vfx/VfxGpuValidationInternal.h"
 
 #include <algorithm>
@@ -20,7 +20,6 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
-#include <tuple>
 #include <unordered_set>
 #include <vector>
 
@@ -258,36 +257,26 @@ namespace Keire::RenderBackend
             }
         }
 
-        const auto sortDraws = [](std::vector<PreparedSceneDraw>& draws)
+        const auto sortDraws = [](std::vector<PreparedSceneDraw>& draws, const bool backToFront)
         {
-            std::ranges::stable_sort(
-                draws,
-                [](const PreparedSceneDraw& left, const PreparedSceneDraw& right)
-                {
-                    const bool blended = IsTransparentMaterial(left.Surface.AlphaMode);
-                    if (blended && left.Depth != right.Depth)
-                        return Detail::TransparentBackToFront(left.Depth, right.Depth);
-                    if (!blended)
-                    {
-                        const auto leftKey =
-                            std::tie(left.Surface.AlphaMode, left.Material, left.Item->Mesh, left.SubmeshIndex,
-                                     left.Item->ReceiveShadows, left.Item->CastShadows, left.Depth);
-                        const auto rightKey =
-                            std::tie(right.Surface.AlphaMode, right.Material, right.Item->Mesh, right.SubmeshIndex,
-                                     right.Item->ReceiveShadows, right.Item->CastShadows, right.Depth);
-                        if (leftKey != rightKey)
-                            return leftKey < rightKey;
-                    }
-                    if (left.Item->ContributionOrder != right.Item->ContributionOrder)
-                        return left.Item->ContributionOrder < right.Item->ContributionOrder;
-                    if (left.Item->Entity != right.Item->Entity)
-                        return left.Item->Entity < right.Item->Entity;
-                    return left.SubmeshIndex < right.SubmeshIndex;
-                });
+            const auto key = [](const PreparedSceneDraw& draw)
+            {
+                return Detail::SceneDrawOrderKey{.AlphaMode = draw.Surface.AlphaMode,
+                                                 .Material = draw.Material,
+                                                 .Mesh = draw.Item->Mesh,
+                                                 .SubmeshIndex = draw.SubmeshIndex,
+                                                 .ReceiveShadows = draw.Item->ReceiveShadows,
+                                                 .CastShadows = draw.Item->CastShadows,
+                                                 .Depth = draw.Depth,
+                                                 .ContributionOrder = draw.Item->ContributionOrder,
+                                                 .Entity = draw.Item->Entity.Value()};
+            };
+            std::ranges::stable_sort(draws, [&](const PreparedSceneDraw& left, const PreparedSceneDraw& right)
+                                     { return Detail::SceneDrawLess(key(left), key(right), backToFront); });
         };
-        sortDraws(result.Opaque.Draws);
-        sortDraws(result.Transparent.Draws);
-        sortDraws(result.Decals.Draws);
+        sortDraws(result.Opaque.Draws, false);
+        sortDraws(result.Transparent.Draws, true);
+        sortDraws(result.Decals.Draws, true);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         {
             std::scoped_lock lock(PublicationMutex);

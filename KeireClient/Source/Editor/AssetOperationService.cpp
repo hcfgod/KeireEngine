@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 
@@ -38,6 +39,13 @@ namespace KeireEditor
             return "unknown";
         }
     } // namespace
+
+    bool AssetOperationContext::CanAdoptSceneCopy(const Keire::AssetId currentAsset,
+                                                  const Keire::SceneDefinition& currentDefinition) const
+    {
+        return SourceSceneAsset && currentAsset == SourceSceneAsset && SceneSnapshot && SourceSceneSnapshot &&
+               Keire::SceneAsset::Encode(currentDefinition) == Keire::SceneAsset::Encode(*SourceSceneSnapshot);
+    }
 
     AssetOperationService::AssetOperationService(const std::filesystem::path& workerExecutable,
                                                  const std::filesystem::path& projectRoot)
@@ -214,6 +222,21 @@ namespace KeireEditor
     void AssetOperationService::QueueMutation(Keire::Detail::AssetWorkerMutation mutation,
                                               AssetOperationContext context)
     {
+        if (!context.UndoName.empty() && !context.MutationUndo)
+        {
+            using Kind = Keire::Detail::AssetWorkerMutationKind;
+            const bool inferredReverse = mutation.Kind == Kind::DuplicateAsset ||
+                                         mutation.Kind == Kind::DuplicateFolder ||
+                                         mutation.Kind == Kind::CreateFolder || mutation.Kind == Kind::TrashAsset ||
+                                         mutation.Kind == Kind::TrashFolder;
+            if (!inferredReverse || context.MutationPhase != AssetMutationPhase::Initial)
+                throw std::invalid_argument("This named asset mutation requires an explicit undo state.");
+            auto state = std::make_shared<AssetMutationUndoState>();
+            state->Forward = mutation;
+            state->Name = context.UndoName;
+            state->RevealResult = context.FollowUp == AssetOperationFollowUp::Reveal;
+            context.MutationUndo = std::move(state);
+        }
         PendingOperation operation;
         operation.Request.Kind = Keire::Detail::AssetWorkerOperationKind::Mutate;
         operation.Request.Mutation = std::move(mutation);

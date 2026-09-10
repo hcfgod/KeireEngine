@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/AssetBrowserPresentation.h"
 
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
 
 #include <algorithm>
@@ -133,9 +134,9 @@ namespace KeireEditor::Detail
         const auto bytes = std::filesystem::file_size(assetRoot / record.RelativePath, error);
         const auto status = database.ImportStatus(record.Id);
         std::ostringstream text;
-        text << record.RelativePath.filename().string() << '\n'
+        text << Keire::Detail::PathToUtf8(record.RelativePath.filename()) << '\n'
              << AssetTypeName(record) << '\n'
-             << "Assets/" << record.RelativePath.generic_string() << '\n';
+             << "Assets/" << Keire::Detail::PathToUtf8(record.RelativePath) << '\n';
         if (!error)
             text << bytes << " bytes\n";
         text << "ID: " << record.Id.ToString() << '\n' << "Importer: " << record.Importer;

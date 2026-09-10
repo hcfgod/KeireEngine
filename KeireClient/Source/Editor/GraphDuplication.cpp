@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/GraphDuplication.h"
 
+#include "KeireInternal/Rendering/ShaderGraphCompilerInternal.h"
+
 #include <algorithm>
 #include <cctype>
 #include <limits>
@@ -7,6 +9,7 @@
 #include <memory>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 
 namespace KeireEditor
@@ -72,6 +75,8 @@ namespace KeireEditor
                 duplicate.Id = Remapped(identities, comment.Id);
                 if (identities.contains(comment.Parent))
                     duplicate.Parent = Remapped(identities, comment.Parent);
+                else
+                    duplicate.Parent = {};
                 Offset(duplicate.Position, offset);
                 for (auto& member : duplicate.Members)
                     member = Remapped(identities, member);
@@ -98,7 +103,8 @@ namespace KeireEditor
             }
         }
 
-        void DuplicateShaderConnections(Keire::ShaderGraphDefinition& definition, const IdentityMap& identities)
+        void DuplicateShaderConnections(Keire::ShaderGraphDefinition& definition, const IdentityMap& identities,
+                                        const Keire::Vector2 offset)
         {
             const auto sourceConnections = definition.Connections;
             for (const auto& connection : sourceConnections)
@@ -111,6 +117,8 @@ namespace KeireEditor
                 duplicate.Output.Pin = Remapped(identities, connection.Output.Pin);
                 duplicate.Input.Node = Remapped(identities, connection.Input.Node);
                 duplicate.Input.Pin = Remapped(identities, connection.Input.Pin);
+                for (auto& point : duplicate.RoutingPoints)
+                    Offset(point, offset);
                 definition.Connections.push_back(std::move(duplicate));
             }
         }
@@ -150,6 +158,22 @@ namespace KeireEditor
             for (std::size_t suffix = 2; !used.insert(result).second; ++suffix)
                 result = base + std::to_string(suffix);
             return result;
+        }
+
+        [[nodiscard]] std::string UniqueParameterSymbol(const std::string_view requested,
+                                                        const std::set<std::string, std::less<>>& occupied)
+        {
+            if (!occupied.contains(requested))
+                return std::string(requested);
+            for (std::size_t index = 1; index <= occupied.size() + 2U; ++index)
+            {
+                const auto suffix = std::string("_Copy") + (index == 1 ? std::string{} : std::to_string(index));
+                const auto candidate =
+                    std::string(requested.substr(0, Keire::Detail::MaximumShaderGraphText - suffix.size())) + suffix;
+                if (!occupied.contains(candidate))
+                    return candidate;
+            }
+            throw std::invalid_argument("Shader Graph could not allocate a unique parameter symbol.");
         }
 
         void RemoveExtractedAuthoring(Keire::GraphAuthoringMetadata& metadata, const std::set<Keire::AssetId>& selected,
@@ -315,9 +339,29 @@ namespace KeireEditor
         }
     } // namespace
 
+    void ResolveGraphParameterSymbols(Keire::ShaderGraphDefinition& definition,
+                                      const std::span<const Keire::AssetId> selection)
+    {
+        const std::set selected(selection.begin(), selection.end());
+        std::set<std::string, std::less<>> occupied;
+        for (const auto& resource : definition.Resources)
+            occupied.insert(resource.Symbol);
+        for (const auto& node : definition.Nodes)
+            if (node.Kind == Keire::ShaderGraphNodeKind::Parameter && !selected.contains(node.Id))
+                occupied.insert(node.Symbol);
+        for (auto& node : definition.Nodes)
+        {
+            if (node.Kind != Keire::ShaderGraphNodeKind::Parameter || !selected.contains(node.Id))
+                continue;
+            node.Symbol = UniqueParameterSymbol(node.Symbol, occupied);
+            occupied.insert(node.Symbol);
+        }
+    }
+
     std::vector<Keire::AssetId> DuplicateShaderGraphSelection(Keire::ShaderGraphDefinition& definition,
                                                               const std::span<const Keire::AssetId> selection,
-                                                              const Keire::Vector2 offset)
+                                                              const Keire::Vector2 offset,
+                                                              const GraphParameterDuplication parameters)
     {
         const std::set selected(selection.begin(), selection.end());
         IdentityMap identities;
@@ -331,14 +375,17 @@ namespace KeireEditor
             result.push_back(node.Id);
             definition.Nodes.push_back(std::move(node));
         }
-        DuplicateShaderConnections(definition, identities);
+        if (parameters == GraphParameterDuplication::UniqueSymbols)
+            ResolveGraphParameterSymbols(definition, result);
+        DuplicateShaderConnections(definition, identities, offset);
         DuplicateAuthoring(definition.Authoring, identities, offset);
         return result;
     }
 
     std::vector<Keire::AssetId> DuplicateMaterialGraphSelection(Keire::MaterialGraphDefinition& definition,
                                                                 const std::span<const Keire::AssetId> selection,
-                                                                const Keire::Vector2 offset)
+                                                                const Keire::Vector2 offset,
+                                                                const GraphParameterDuplication parameters)
     {
         const std::set selected(selection.begin(), selection.end());
         IdentityMap identities;
@@ -379,9 +426,13 @@ namespace KeireEditor
             duplicate.Output = {Remapped(identities, connection.Output.Node),
                                 Remapped(identities, connection.Output.Pin)};
             duplicate.Input = {Remapped(identities, connection.Input.Node), Remapped(identities, connection.Input.Pin)};
+            for (auto& point : duplicate.RoutingPoints)
+                Offset(point, offset);
             definition.Connections.push_back(std::move(duplicate));
         }
-        DuplicateShaderConnections(definition.SurfaceGraph, identities);
+        if (parameters == GraphParameterDuplication::UniqueSymbols)
+            ResolveGraphParameterSymbols(definition.SurfaceGraph, result);
+        DuplicateShaderConnections(definition.SurfaceGraph, identities, offset);
         DuplicateAuthoring(definition.Authoring, identities, offset);
         DuplicateAuthoring(definition.SurfaceGraph.Authoring, identities, offset);
         return result;
@@ -446,6 +497,8 @@ namespace KeireEditor
                 duplicate.OutputBlock = Remapped(identities, connection.OutputBlock);
             if (connection.InputBlock)
                 duplicate.InputBlock = Remapped(identities, connection.InputBlock);
+            for (auto& point : duplicate.RoutingPoints)
+                Offset(point, offset);
             foundSystem->Connections.push_back(std::move(duplicate));
         }
         DuplicateAuthoring(foundSystem->Authoring, identities, offset);

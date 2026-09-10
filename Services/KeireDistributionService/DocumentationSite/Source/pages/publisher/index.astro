@@ -109,14 +109,14 @@ const activeValidationStates = new Set(["created", "uploading", "uploaded", "lea
             <div class="section-heading">
                 <div>
                     <p class="eyebrow">Approved publishing</p>
-                    <h1>From exact package bytes to a trusted release.</h1>
+                    <h1>Share what you’ve made.</h1>
                 </div>
                 <p>Draft metadata, resumable private uploads, automated validation, staff moderation, queued metadata signing, and immutable publication are explicit states.</p>
             </div>
 
             {!enabled ? (
                 <div class="empty-state">
-                    <h2>Publisher workflows are staged privately.</h2>
+                    <h2>Publishing is still in preparation.</h2>
                     <p>The portal remains behind <code>publisher_portal_enabled</code>. No package can be submitted while the staging gate is disabled.</p>
                 </div>
             ) : !user ? (

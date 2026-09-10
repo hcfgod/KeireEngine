@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/NamedAssetCreation.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <doctest/doctest.h>
 
@@ -9,6 +10,23 @@
 #include <filesystem>
 #include <ranges>
 #include <span>
+#include <string>
+
+TEST_CASE("asset browser displays and searches Unicode filenames as UTF-8")
+{
+    const std::string name = "Workshop Caf\xc3\xa9";
+    const auto path = Keire::Detail::PathFromUtf8("Scenes/" + name + ".keirescene");
+    CHECK(KeireEditor::DisplayName(path) == name);
+    std::array<Keire::AssetSourceRecord, 2> records;
+    records[0].RelativePath = path;
+    records[1].RelativePath = "Scenes/Plain.keirescene";
+    KeireEditor::AssetBrowserRecordViewCache cache;
+    REQUIRE(cache.Refresh(records, 1, "Scenes", "Caf\xc3\xa9"));
+    REQUIRE(cache.Records().size() == 1);
+    CHECK(cache.Records().front() == &records[0]);
+    CHECK(cache.Refresh(records, 1, "Scenes", "Missing"));
+    CHECK(cache.Records().empty());
+}
 
 TEST_CASE("New Material Graph documents focus the canvas on their OpenPBR surface")
 {

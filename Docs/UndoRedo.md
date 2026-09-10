@@ -8,7 +8,9 @@
 
 Create one `UndoContext` for each independently editable document or tool. Scene, Input Actions, Project asset, and
 theme histories therefore do not invalidate each other's redo stacks. Close a context when its document closes; all
-commands and captured state are released, and retained context references become safely inert.
+commands and captured state are released, and retained context references become safely inert. `ContextCount()` and
+`MaximumContexts` count only open contexts, so closing a document immediately frees its slot even while another caller
+retains its context.
 
 ```cpp
 auto history = application.Undo()->CreateContext({.Name = "Material Inspector"});
@@ -21,12 +23,16 @@ history->Execute(Keire::CreateUndoCommand(
 `Execute` runs Redo first and records only after it succeeds. `RecordApplied` records a UI edit that was already
 previewed. A failed operation leaves the redo stack and existing history unchanged. Commands can reject stale targets
 through their availability callback, and custom `UndoCommand` implementations may merge adjacent continuous edits.
+Recording a new edit also discards redo history and its byte accounting when that edit merges into an existing command.
 
 ## Transactions
 
 Use `BeginTransaction` when several operations must appear as one history item. Transactions may nest. Commit collapses
 the children into one command; cancel rolls applied children back in reverse order. If rollback follows a child failure,
-the original exception remains the one observed by the caller.
+the original exception remains the one observed by the caller. Cancellation attempts every child rollback even when a
+callback throws and then reports the first failure; the transaction is already inactive and cannot be retried. Correct
+document restoration still depends on successful inverse callbacks. Closing a context rolls back its pending work and
+makes retained transaction handles report inactive. Rejected thread or nesting-order operations leave transactions active.
 
 ```cpp
 bool manifestCreated = false;
@@ -47,6 +53,9 @@ on the application construction thread; rejected worker-thread calls leave both 
 
 The editor routes `Ctrl/Cmd+Z` to Undo and `Ctrl/Cmd+R`, `Ctrl/Cmd+Shift+Z`, and `Ctrl+Y` to Redo, alongside the Edit
 menu, in the focused document context.
+Inspector Duplicate and Move to Trash retain their mutation state through the asset worker and enter Project asset
+history only after successful publication. Undo restores a trashed asset with its original identity; redo retains the
+same history entry instead of recording another command. Failed worker mutations do not add history entries.
 Project asset operations, scene edits, Input Actions authoring, and theme previews use this shared service. Continuous
 Transform and Mesh Renderer tint drags merge into one history entry. Docking geometry remains layout state rather than
 document history.

@@ -1,5 +1,6 @@
 #include "KeireInternal/Build/PlayerSupport.h"
 
+#include "Keire/BuildInfo.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <doctest/doctest.h>
@@ -134,6 +135,51 @@ namespace
         return manifest;
     }
 } // namespace
+
+TEST_CASE("Player support prefers the editor bundle and falls back to compatible installed modules")
+{
+    TemporaryDirectory directory;
+    const auto installedRoot = directory.Path / "a-installed";
+    const auto executable = directory.Path / "z-editor" / "Editor.exe";
+    const auto version = std::string(Keire::GetBuildInfo().Version);
+    const auto bundled = executable.parent_path() / "BuildSupport" / version / "windows-x86_64-bundled";
+    const auto installed = installedRoot / version / "windows-x86_64-installed";
+    auto manifest = WindowsManifest();
+    manifest.EngineVersion = version;
+    const auto publish = [&manifest](const std::filesystem::path& destination)
+    {
+        std::filesystem::create_directories(destination / "Development");
+        Keire::Detail::WriteTextFileAtomically(destination / "Development/KeireRuntime.exe", "runtime");
+        Keire::Detail::WriteTextFileAtomically(destination / "manifest.json",
+                                               Keire::Detail::EncodePlayerSupportManifest(manifest));
+    };
+    publish(installed);
+    publish(bundled);
+    auto expected = bundled;
+    SUBCASE("bundled support takes precedence even when the installed path sorts first") {}
+    SUBCASE("incompatible bundled modules do not prevent installed support")
+    {
+        manifest.ModuleFingerprint = "different-modules";
+        publish(bundled);
+        expected = installed;
+    }
+    SUBCASE("incomplete bundled payload does not prevent installed support")
+    {
+        REQUIRE(std::filesystem::remove(bundled / "Development/KeireRuntime.exe"));
+        expected = installed;
+    }
+    SUBCASE("missing bundled support does not prevent installed support")
+    {
+        REQUIRE(std::filesystem::remove(bundled / "manifest.json"));
+        expected = installed;
+    }
+    const auto resolved = Keire::Detail::ResolvePlayerSupport(
+        executable, Keire::PlayerPlatform::Windows, Keire::PlayerArchitecture::X86_64,
+        Keire::PlayerBuildConfiguration::Development, "modules", installedRoot);
+    CHECK(resolved.InstallationRoot == expected);
+    CHECK_FALSE(resolved.DevelopmentFallback);
+    CHECK(resolved.Variant.Configuration == Keire::PlayerBuildConfiguration::Development);
+}
 
 TEST_CASE("Player support manifests load target variants and confined paths")
 {
@@ -306,9 +352,12 @@ TEST_CASE("Windows player support manifests require app-local VC runtime files")
 
     auto legacyManifest = WindowsManifest();
     legacyManifest.SchemaVersion = 1;
-    std::erase_if(legacyManifest.Files, [](const auto& file)
-                  { return Keire::Detail::PathToUtf8(file.Path).find("VCRUNTIME140") != std::string::npos ||
-                           Keire::Detail::PathToUtf8(file.Path).find("MSVCP140") != std::string::npos; });
+    std::erase_if(legacyManifest.Files,
+                  [](const auto& file)
+                  {
+                      return Keire::Detail::PathToUtf8(file.Path).find("VCRUNTIME140") != std::string::npos ||
+                             Keire::Detail::PathToUtf8(file.Path).find("MSVCP140") != std::string::npos;
+                  });
     CHECK_NOTHROW(Keire::Detail::ValidatePlayerSupportManifest(legacyManifest));
 }
 

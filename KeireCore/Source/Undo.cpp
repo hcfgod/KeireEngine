@@ -188,8 +188,8 @@ namespace Keire
 
             if (!UndoStack.empty() && UndoStack.back()->TryMerge(*command))
             {
-                RecalculateBytes();
                 RedoStack.clear();
+                RecalculateBytes();
                 Trim();
                 return;
             }
@@ -271,6 +271,8 @@ namespace Keire
 
             auto state = std::move(context->m_Impl->Transactions.back());
             context->m_Impl->Transactions.pop_back();
+            Active = false;
+            Context.Reset();
             if (commit)
             {
                 if (!state.Commands.empty())
@@ -279,8 +281,6 @@ namespace Keire
             }
             else
                 context->m_Impl->Rollback(state.Commands);
-            Active = false;
-            Context.Reset();
         }
 
         void CancelNoexcept() noexcept
@@ -313,7 +313,10 @@ namespace Keire
     }
     void UndoTransaction::Commit() { m_Impl->Finish(true); }
     void UndoTransaction::Cancel() { m_Impl->Finish(false); }
-    bool UndoTransaction::Active() const noexcept { return m_Impl && m_Impl->Active; }
+    bool UndoTransaction::Active() const noexcept
+    {
+        return m_Impl && m_Impl->Active && m_Impl->Context && m_Impl->Context->IsOpen();
+    }
 
     UndoContext::UndoContext(std::unique_ptr<Impl> implementation) : m_Impl(std::move(implementation)) {}
     UndoContext::~UndoContext() { Close(); }
@@ -473,7 +476,12 @@ namespace Keire
 
         void Prune()
         {
-            std::erase_if(Contexts, [](const WeakRef<UndoContext>& context) { return context.Expired(); });
+            std::erase_if(Contexts,
+                          [](const WeakRef<UndoContext>& weak)
+                          {
+                              const auto context = weak.Lock();
+                              return !context || !context->IsOpen();
+                          });
         }
 
         UndoSpecification Specification;
@@ -501,8 +509,12 @@ namespace Keire
     bool UndoService::IsOpen() const noexcept { return m_Impl->Open; }
     std::size_t UndoService::ContextCount() const noexcept
     {
-        return static_cast<std::size_t>(std::ranges::count_if(m_Impl->Contexts, [](const WeakRef<UndoContext>& context)
-                                                              { return !context.Expired(); }));
+        return static_cast<std::size_t>(std::ranges::count_if(m_Impl->Contexts,
+                                                              [](const WeakRef<UndoContext>& weak)
+                                                              {
+                                                                  const auto context = weak.Lock();
+                                                                  return context && context->IsOpen();
+                                                              }));
     }
 
     void UndoService::Close() noexcept

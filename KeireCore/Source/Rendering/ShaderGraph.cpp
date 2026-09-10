@@ -5,6 +5,7 @@
 #include "KeireInternal/Rendering/ShaderGraphIdentity.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <deque>
 #include <iterator>
@@ -538,6 +539,7 @@ namespace Keire
                                       binding->second.DefaultValue, binding->second.Type, destinationPin->Type);
                                   return true;
                               });
+                RemoveGraphAuthoringNodeReferences(result.Authoring, std::array{callId});
                 std::erase_if(result.Nodes, [&](const ShaderGraphNode& node) { return node.Id == callId; });
                 result.Nodes.insert(result.Nodes.end(), std::make_move_iterator(clonedNodes.begin()),
                                     std::make_move_iterator(clonedNodes.end()));

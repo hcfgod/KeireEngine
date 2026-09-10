@@ -1,5 +1,7 @@
 #include "KeireHub/HubPathMigration.h"
 
+#include "KeireInternal/FileSystem.h"
+
 #include <array>
 #include <string_view>
 #include <system_error>
@@ -18,7 +20,7 @@ namespace KeireHub
             return {.Code = HubErrorCode::MigrationFailed,
                     .Message = "Kéire Hub could not migrate its legacy storage directory.",
                     .Retryable = true,
-                    .AffectedItem = path.filename().string(),
+                    .AffectedItem = Keire::Detail::PathToUtf8(path.filename()),
                     .TechnicalDetails = error.message()};
         }
 
@@ -50,7 +52,7 @@ namespace KeireHub
                         {.Code = HubErrorCode::MigrationFailed,
                          .Message = "Kéire Hub found both corrected and legacy storage directories.",
                          .Retryable = false,
-                         .AffectedItem = canonical.filename().string(),
+                         .AffectedItem = Keire::Detail::PathToUtf8(canonical.filename()),
                          .TechnicalDetails = "The Hub refused to merge two non-empty storage roots automatically."});
                 }
                 std::filesystem::remove(canonical, error);
@@ -86,7 +88,7 @@ namespace KeireHub
                 return error ? HubStatus::Failure(MigrationError(legacy, error))
                              : HubStatus::Failure({.Code = HubErrorCode::MigrationFailed,
                                                    .Message = "Kéire Hub found an invalid legacy storage directory.",
-                                                   .AffectedItem = legacy.filename().string()});
+                                                   .AffectedItem = Keire::Detail::PathToUtf8(legacy.filename())});
             }
 
             std::vector<std::filesystem::path> children;
@@ -100,7 +102,7 @@ namespace KeireHub
                         {.Code = HubErrorCode::MigrationFailed,
                          .Message = "Kéire Hub found conflicting corrected and legacy preference data.",
                          .Retryable = false,
-                         .AffectedItem = destination.filename().string(),
+                         .AffectedItem = Keire::Detail::PathToUtf8(destination.filename()),
                          .TechnicalDetails = "The Hub refused to overwrite an existing preference area."});
                 }
                 if (error)
@@ -145,6 +147,8 @@ namespace KeireHub
         std::filesystem::path legacyRoot;
         for (const auto& component : canonicalRoot)
             legacyRoot /= component == CanonicalComponent ? LegacyComponent : component;
+        if (legacyRoot == canonicalRoot)
+            return HubStatus::Success();
         if (const auto status = MergeDisjointDirectory(legacyRoot, canonicalRoot); !status)
             return status;
 

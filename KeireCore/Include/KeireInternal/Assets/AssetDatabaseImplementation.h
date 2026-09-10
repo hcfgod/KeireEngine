@@ -8,6 +8,7 @@
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetImportOutputCache.h"
 #include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/Assets/AssetSourceDiscovery.h"
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -33,19 +34,6 @@
 
 namespace Keire
 {
-    namespace Detail
-    {
-        struct AssetFileSignature final
-        {
-            std::uint64_t Modified = 0;
-            std::uintmax_t Size = 0;
-            std::uint64_t MetadataModified = 0;
-            std::uintmax_t MetadataSize = 0;
-
-            [[nodiscard]] bool operator==(const AssetFileSignature&) const noexcept = default;
-        };
-    } // namespace Detail
-
     namespace
     {
         using Json = nlohmann::json;
@@ -1200,9 +1188,12 @@ namespace Keire
             std::unordered_map<AssetId, FileSignature> Signatures;
         };
 
-        [[nodiscard]] ScanResult Scan(const bool digestSources = true) const
+        [[nodiscard]] ScanResult Scan(const bool digestSources = true,
+                                      Detail::AssetSourceDiscovery* discovery = nullptr) const
         {
             ScanResult result;
+            if (discovery)
+                discovery->BeginScan();
             std::vector<std::filesystem::path> sources;
             std::error_code error;
             for (std::filesystem::recursive_directory_iterator
@@ -1226,6 +1217,12 @@ namespace Keire
             for (const auto& source : sources)
             {
                 const auto relative = source.lexically_relative(SourceRoot).lexically_normal();
+                if (discovery && !SourceFiles->Exists(Detail::PathWithSuffix(relative, ".keiremeta")) &&
+                    !discovery->Ready(relative, SourceFiles->Signature(relative), std::chrono::steady_clock::now(),
+                                      Specification.ChangeDebounce))
+                {
+                    continue;
+                }
                 auto record = ReadMetadata(*SourceFiles, relative, Specification.MaximumSourceBytes, digestSources,
                                            InferImporter(source));
                 if (!identities.insert(record.Id).second)
@@ -1249,6 +1246,8 @@ namespace Keire
                                                                    metadataSignature.Modified, metadataSignature.Size});
                 result.Records.push_back(std::move(record));
             }
+            if (discovery)
+                discovery->EndScan();
             std::ranges::sort(result.Records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
             return result;
         }
@@ -1276,6 +1275,7 @@ namespace Keire
             ChangeMonitor = std::jthread(
                 [this](const std::stop_token stop)
                 {
+                    Detail::AssetSourceDiscovery discovery;
                     std::unique_lock monitorLock(ChangeMonitorMutex);
                     while (!stop.stop_requested())
                     {
@@ -1297,7 +1297,7 @@ namespace Keire
                                 // reconciliation walk with asset transactions so moves, trash operations, and
                                 // atomic publications never race an open monitor iterator.
                                 std::scoped_lock operation(*OperationMutex);
-                                scanned = Scan(verifyDigests);
+                                scanned = Scan(verifyDigests, &discovery);
                             }
                             monitorLock.lock();
                             if (revision == SourceRevision.load(std::memory_order_acquire))

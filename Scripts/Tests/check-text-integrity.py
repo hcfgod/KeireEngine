@@ -15,11 +15,13 @@ BINARY_SUFFIXES = {
     ".ico",
     ".jpeg",
     ".jpg",
+    ".mp4",
     ".obj",
     ".png",
     ".res",
     ".ttf",
     ".wav",
+    ".webp",
     ".zip",
 }
 EXCLUDED_PREFIXES = ("Build/", "Vendor/", "Tools/")

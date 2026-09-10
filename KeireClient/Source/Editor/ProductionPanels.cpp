@@ -164,14 +164,14 @@ namespace
     {
         std::ifstream stream(path, std::ios::binary | std::ios::ate);
         if (!stream)
-            throw std::runtime_error("Could not open prefab source: " + path.string());
+            throw std::runtime_error("Could not open prefab source: " + Keire::Detail::PathToUtf8(path));
         const auto size = stream.tellg();
         if (size < 0 || size > static_cast<std::streamoff>(64U * 1024U * 1024U))
             throw std::runtime_error("Prefab source size is invalid.");
         std::vector<std::byte> result(static_cast<std::size_t>(size));
         stream.seekg(0);
         if (!result.empty() && !stream.read(reinterpret_cast<char*>(result.data()), size))
-            throw std::runtime_error("Could not read prefab source: " + path.string());
+            throw std::runtime_error("Could not read prefab source: " + Keire::Detail::PathToUtf8(path));
         return result;
     }
 } // namespace
@@ -204,7 +204,7 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
             const auto record = std::ranges::find(m_AssetRecords, entry.Scene, &Keire::AssetSourceRecord::Id);
             const bool valid = record != m_AssetRecords.end() && record->Type == Keire::SceneAsset::StaticType();
             const auto indexLabel = entry.Enabled ? std::to_string(enabledBuildIndex++) : std::string("-");
-            const auto sceneLabel = valid ? record->RelativePath.generic_string()
+            const auto sceneLabel = valid ? Keire::Detail::PathToUtf8(record->RelativePath)
                                           : std::string("Missing scene: ").append(entry.Scene.ToString());
             auto id = ui.PushId(entry.Scene.ToString());
             if (ui.Checkbox("##BuildSceneEnabled", entry.Enabled))
@@ -357,9 +357,9 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
         {
             const auto startup =
                 std::ranges::find(m_AssetRecords, enabledScenes.front(), &Keire::AssetSourceRecord::Id);
-            ui.TextColored(m_Theme.Success,
-                           "Startup Scene: " + (startup != m_AssetRecords.end() ? startup->RelativePath.generic_string()
-                                                                                : enabledScenes.front().ToString()));
+            ui.TextColored(m_Theme.Success, "Startup Scene: " + (startup != m_AssetRecords.end()
+                                                                     ? Keire::Detail::PathToUtf8(startup->RelativePath)
+                                                                     : enabledScenes.front().ToString()));
         }
         else
         {
@@ -649,7 +649,7 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
         const auto scriptStatus = scripts ? scripts->BuildStatus() : Keire::ManagedBuildStatus{};
         ui.Text("Managed build: " + ManagedBuildStateName(scriptStatus.State));
         if (!scriptStatus.ActiveAssemblyDirectory.empty())
-            ui.Text("Assemblies: " + scriptStatus.ActiveAssemblyDirectory.generic_string());
+            ui.Text("Assemblies: " + Keire::Detail::PathToUtf8(scriptStatus.ActiveAssemblyDirectory));
         for (const auto& diagnostic : scriptStatus.Diagnostics)
         {
             const auto color = diagnostic.Severity == Keire::ManagedDiagnosticSeverity::Error     ? m_Theme.Error
@@ -663,7 +663,7 @@ void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)
             }
             if (!diagnostic.Source.empty())
             {
-                auto location = diagnostic.Source.generic_string();
+                auto location = Keire::Detail::PathToUtf8(diagnostic.Source);
                 location += ':';
                 location += std::to_string(diagnostic.Line);
                 location += ' ';
@@ -757,7 +757,7 @@ void EditorWorkspaceLayer::UpdateManagedBuild()
             std::string message;
             if (!diagnostic.Source.empty())
             {
-                message = diagnostic.Source.generic_string();
+                message = Keire::Detail::PathToUtf8(diagnostic.Source);
                 if (diagnostic.Line > 0)
                     message += ':' + std::to_string(diagnostic.Line);
                 if (diagnostic.Column > 0)

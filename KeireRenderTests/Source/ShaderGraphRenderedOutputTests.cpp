@@ -30,6 +30,17 @@ namespace
 {
     constexpr std::uint32_t SurfaceSize = 96;
 
+    [[nodiscard]] std::array<int, 3> MaximumChannelDominance(const std::vector<std::uint8_t>& pixels)
+    {
+        std::array<int, 3> result{-255, -255, -255};
+        for (std::size_t offset = 0; offset + 3 < pixels.size(); offset += 4)
+            for (std::size_t channel = 0; channel < result.size(); ++channel)
+                result[channel] = std::max(result[channel], static_cast<int>(pixels[offset + channel]) -
+                                                                std::max(pixels[offset + (channel + 1) % 3],
+                                                                         pixels[offset + (channel + 2) % 3]));
+        return result;
+    }
+
     [[nodiscard]] bool ContainsDominantChannel(const std::vector<std::uint8_t>& pixels, const std::size_t channel)
     {
         constexpr std::uint8_t minimumDelta = 24;
@@ -92,6 +103,16 @@ namespace
         specification.ManageLogging = false;
         specification.SuspendWhenMainWindowMinimized = false;
         return specification;
+    }
+
+    [[nodiscard]] Keire::RenderEnvironmentSettings ShaderBindingTestEnvironment()
+    {
+        Keire::RenderEnvironmentSettings environment;
+        // Keep binding colors above the low-light tone-mapping region after PBR diffuse normalization.
+        environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
+        environment.AmbientIntensity = 1.0F;
+        environment.SkyVisible = false;
+        return environment;
     }
 
     class LiveShaderGraphFixture final
@@ -221,6 +242,7 @@ namespace
     {
         std::vector<std::uint8_t> Initial;
         std::vector<std::uint8_t> Revised;
+        std::vector<std::uint8_t> LastFrame;
         bool RevisionPublished = false;
     };
 
@@ -284,17 +306,15 @@ namespace
                     Owner().RequestExit();
                     return;
                 }
+                if (!pixels.empty())
+                    m_Results->LastFrame = std::move(pixels);
             }
             if (++m_FrameCount > 120)
             {
                 Owner().RequestExit();
                 return;
             }
-            Keire::RenderEnvironmentSettings environment;
-            environment.AmbientColor = {0.08F, 0.09F, 0.12F, 1.0F};
-            environment.AmbientIntensity = 0.45F;
-            environment.SkyVisible = false;
-            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            Owner().Renderer()->Submit({m_Scene, m_View, false, ShaderBindingTestEnvironment()});
             m_Submitted = true;
         }
 
@@ -371,11 +391,7 @@ namespace
                 Owner().RequestExit();
                 return;
             }
-            Keire::RenderEnvironmentSettings environment;
-            environment.AmbientColor = {0.08F, 0.09F, 0.12F, 1.0F};
-            environment.AmbientIntensity = 0.45F;
-            environment.SkyVisible = false;
-            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            Owner().Renderer()->Submit({m_Scene, m_View, false, ShaderBindingTestEnvironment()});
             m_Submitted = true;
         }
 
@@ -533,6 +549,8 @@ TEST_CASE("live Shader Graph shader and parameter revisions update assigned scen
         REQUIRE(application.Run() == 0);
     }
 
+    const auto dominance = MaximumChannelDominance(results->LastFrame);
+    INFO("Last frame channel dominance R/G/B: ", dominance[0], "/", dominance[1], "/", dominance[2]);
     CHECK(results->RevisionPublished);
     REQUIRE_FALSE(results->Initial.empty());
     REQUIRE_FALSE(results->Revised.empty());
@@ -553,6 +571,8 @@ TEST_CASE("per-renderer material property blocks reach Shader Graph GPU bindings
         REQUIRE(application.Run() == 0);
     }
 
+    const auto dominance = MaximumChannelDominance(*pixels);
+    INFO("Last frame channel dominance R/G/B: ", dominance[0], "/", dominance[1], "/", dominance[2]);
     REQUIRE_FALSE(pixels->empty());
     CHECK(ContainsDominantChannel(*pixels, 0));
 }

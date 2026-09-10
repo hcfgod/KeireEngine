@@ -15,7 +15,7 @@ namespace Keire::RenderBackend
 {
     inline constexpr AssetId RuntimeUiFallbackFontId{0x4b45495245554946ULL, 0x4f4e540000000001ULL};
     inline constexpr std::uint8_t RuntimeUiFirstFallbackGlyph = 32U;
-    inline constexpr std::uint8_t RuntimeUiLastFallbackGlyph = 126U;
+    inline constexpr std::uint8_t RuntimeUiLastFallbackGlyph = 255U;
 
     struct RuntimeUiGlyph final
     {

@@ -69,8 +69,9 @@ namespace Keire::Detail
     [[nodiscard]] PlayerSupportManifest DecodePlayerSupportManifest(std::string_view text);
     [[nodiscard]] std::string EncodePlayerSupportManifest(const PlayerSupportManifest& manifest);
     void ValidatePlayerSupportManifest(const PlayerSupportManifest& manifest);
-    [[nodiscard]] ResolvedPlayerSupport ResolvePlayerSupport(const std::filesystem::path& executable,
-                                                             PlayerPlatform platform, PlayerArchitecture architecture,
-                                                             PlayerBuildConfiguration configuration,
-                                                             const std::string& moduleFingerprint);
+    [[nodiscard]] ResolvedPlayerSupport
+    ResolvePlayerSupport(const std::filesystem::path& executable, PlayerPlatform platform,
+                         PlayerArchitecture architecture, PlayerBuildConfiguration configuration,
+                         const std::string& moduleFingerprint,
+                         const std::filesystem::path& installedSupportRoot = PlayerSupportStorageRoot());
 } // namespace Keire::Detail

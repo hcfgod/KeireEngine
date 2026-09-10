@@ -14,10 +14,12 @@ namespace Keire
 {
     namespace
     {
-        [[nodiscard]] bool IsTextureSample(const ShaderGraphNodeKind kind) noexcept
+        [[nodiscard]] std::size_t TextureSampleCount(const ShaderGraphNodeKind kind) noexcept
         {
-            return kind == ShaderGraphNodeKind::TextureSample || kind == ShaderGraphNodeKind::TextureSampleLevel ||
-                   kind == ShaderGraphNodeKind::TriplanarSample;
+            if (kind == ShaderGraphNodeKind::TriplanarSample)
+                return 3;
+            return kind == ShaderGraphNodeKind::TextureSample || kind == ShaderGraphNodeKind::TextureSampleLevel ? 1
+                                                                                                                 : 0;
         }
 
         [[nodiscard]] std::string QualitySuffix(const ShaderGraphQualityTier quality)
@@ -42,6 +44,81 @@ namespace Keire
         [[nodiscard]] bool Contains(const std::span<const std::string> values, const std::string_view value)
         {
             return std::ranges::find(values, value) != values.end();
+        }
+
+        [[nodiscard]] ShaderGraphAnalysis AnalyzeFromRoot(const ShaderGraphDefinition& definition, const AssetId root,
+                                                          const ShaderGraphAnalysisLimits& limits)
+        {
+            ShaderGraphAnalysis result;
+            result.Statistics.NodeCount = definition.Nodes.size();
+            result.Statistics.ConnectionCount = definition.Connections.size();
+            std::unordered_map<AssetId, std::vector<AssetId>> dependencies;
+            for (const auto& connection : definition.Connections)
+                dependencies[connection.Input.Node].push_back(connection.Output.Node);
+            std::unordered_set<AssetId> reachable;
+            std::unordered_map<AssetId, std::vector<AssetId>> dependents;
+            std::unordered_map<AssetId, std::size_t> remainingDependencies;
+            std::unordered_map<AssetId, std::size_t> depths;
+            std::vector<AssetId> pending{root};
+            std::vector<AssetId> ready;
+            while (!pending.empty())
+            {
+                const auto node = pending.back();
+                pending.pop_back();
+                if (!reachable.insert(node).second)
+                    continue;
+                depths.emplace(node, 1);
+                const auto& inputs = dependencies[node];
+                remainingDependencies.emplace(node, inputs.size());
+                if (inputs.empty())
+                    ready.push_back(node);
+                for (const auto input : inputs)
+                {
+                    dependents[input].push_back(node);
+                    pending.push_back(input);
+                }
+            }
+
+            // Shared inputs must contribute their longest path before a dependent's depth is finalized.
+            while (!ready.empty())
+            {
+                const auto node = ready.back();
+                ready.pop_back();
+                for (const auto dependent : dependents[node])
+                {
+                    depths[dependent] = std::max(depths[dependent], depths[node] + 1);
+                    if (--remainingDependencies[dependent] == 0)
+                        ready.push_back(dependent);
+                }
+            }
+            result.MaximumDependencyDepth = depths.at(root);
+            result.Statistics.ReachableNodeCount = reachable.size();
+            result.Statistics.UnusedNodeCount = definition.Nodes.size() - reachable.size();
+            for (const auto& node : definition.Nodes)
+            {
+                if (!reachable.contains(node.Id))
+                    continue;
+                if (const auto* descriptor = FindShaderGraphNodeDescriptor(node.TypeId))
+                    result.Statistics.EstimatedAluInstructions += descriptor->EstimatedAluInstructions;
+                result.Statistics.TextureSampleCount += TextureSampleCount(node.Kind);
+            }
+            result.Statistics.VariantCount = 1;
+            for (const auto& keyword : definition.Keywords)
+            {
+                const auto choices = keyword.Options.empty() ? 2U : keyword.Options.size();
+                if (result.Statistics.VariantCount > std::numeric_limits<std::size_t>::max() / choices)
+                {
+                    result.Statistics.VariantCount = std::numeric_limits<std::size_t>::max();
+                    break;
+                }
+                result.Statistics.VariantCount *= choices;
+            }
+            result.WithinLimits =
+                result.Statistics.ReachableNodeCount <= limits.MaximumReachableNodes &&
+                result.Statistics.EstimatedAluInstructions <= limits.MaximumEstimatedAluInstructions &&
+                result.Statistics.TextureSampleCount <= limits.MaximumTextureSamples &&
+                result.MaximumDependencyDepth <= limits.MaximumDependencyDepth;
+            return result;
         }
     } // namespace
 
@@ -162,52 +239,8 @@ namespace Keire
             limits.MaximumDependencyDepth == 0 || limits.MaximumDependencyDepth > 1024)
             throw std::invalid_argument("Shader Graph analysis limits are invalid.");
 
-        ShaderGraphAnalysis result;
-        result.Statistics.NodeCount = definition.Nodes.size();
-        result.Statistics.ConnectionCount = definition.Connections.size();
         const auto master = std::ranges::find(definition.Nodes, ShaderGraphNodeKind::Master, &ShaderGraphNode::Kind);
-        std::unordered_map<AssetId, std::vector<AssetId>> dependencies;
-        for (const auto& connection : definition.Connections)
-            dependencies[connection.Input.Node].push_back(connection.Output.Node);
-        std::unordered_set<AssetId> reachable;
-        std::vector<std::pair<AssetId, std::size_t>> pending{{master->Id, 1}};
-        while (!pending.empty())
-        {
-            const auto [nodeId, depth] = pending.back();
-            pending.pop_back();
-            if (!reachable.insert(nodeId).second)
-                continue;
-            result.MaximumDependencyDepth = std::max(result.MaximumDependencyDepth, depth);
-            if (const auto found = dependencies.find(nodeId); found != dependencies.end())
-                for (const auto dependency : found->second)
-                    pending.emplace_back(dependency, depth + 1);
-        }
-        result.Statistics.ReachableNodeCount = reachable.size();
-        result.Statistics.UnusedNodeCount = definition.Nodes.size() - reachable.size();
-        for (const auto& node : definition.Nodes)
-        {
-            if (!reachable.contains(node.Id))
-                continue;
-            if (const auto* descriptor = FindShaderGraphNodeDescriptor(node.TypeId))
-                result.Statistics.EstimatedAluInstructions += descriptor->EstimatedAluInstructions;
-            result.Statistics.TextureSampleCount += IsTextureSample(node.Kind) ? 1U : 0U;
-        }
-        result.Statistics.VariantCount = 1;
-        for (const auto& keyword : definition.Keywords)
-        {
-            const auto choices = keyword.Options.empty() ? 2U : keyword.Options.size();
-            if (result.Statistics.VariantCount > std::numeric_limits<std::size_t>::max() / choices)
-            {
-                result.Statistics.VariantCount = std::numeric_limits<std::size_t>::max();
-                break;
-            }
-            result.Statistics.VariantCount *= choices;
-        }
-        result.WithinLimits = result.Statistics.ReachableNodeCount <= limits.MaximumReachableNodes &&
-                              result.Statistics.EstimatedAluInstructions <= limits.MaximumEstimatedAluInstructions &&
-                              result.Statistics.TextureSampleCount <= limits.MaximumTextureSamples &&
-                              result.MaximumDependencyDepth <= limits.MaximumDependencyDepth;
-        return result;
+        return AnalyzeFromRoot(definition, master->Id, limits);
     }
 
     void ValidateShaderGraphNodePreview(const ShaderGraphDefinition& definition,
@@ -233,10 +266,11 @@ namespace Keire
             throw std::invalid_argument("Shader Graph node preview requires a numeric or color output pin.");
 
         const auto analysis =
-            AnalyzeShaderGraph(definition, {.MaximumReachableNodes = request.MaximumReachableNodes,
-                                            .MaximumEstimatedAluInstructions = request.MaximumEstimatedAluInstructions,
-                                            .MaximumTextureSamples = 64,
-                                            .MaximumDependencyDepth = request.MaximumReachableNodes});
+            AnalyzeFromRoot(definition, request.Node,
+                            {.MaximumReachableNodes = request.MaximumReachableNodes,
+                             .MaximumEstimatedAluInstructions = request.MaximumEstimatedAluInstructions,
+                             .MaximumTextureSamples = 64,
+                             .MaximumDependencyDepth = request.MaximumReachableNodes});
         if (!analysis.WithinLimits)
             throw std::invalid_argument("Shader Graph node preview exceeds its evaluation budget.");
     }

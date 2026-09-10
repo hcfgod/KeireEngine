@@ -255,6 +255,26 @@ function Remove-KeireStaleWorkspaceLock {
     return $true
 }
 
+function New-KeireExclusiveLockDirectory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    # New-Item's existence check and directory creation are separate operations. An atomic rename must decide
+    # ownership so two waiting Windows processes cannot both claim the same freshly released directory.
+    $candidate = "$Path.claim.$([Guid]::NewGuid().ToString('N'))"
+    [IO.Directory]::CreateDirectory($candidate) | Out-Null
+    try {
+        try {
+            [IO.Directory]::Move($candidate, $Path)
+            return $true
+        }
+        catch [IO.IOException] { return $false }
+        catch [UnauthorizedAccessException] { return $false }
+    }
+    finally {
+        if ([IO.Directory]::Exists($candidate)) { [IO.Directory]::Delete($candidate, $false) }
+    }
+}
+
 function Enter-KeireWorkspaceLock {
     param(
         [Parameter(Mandatory = $true)][string]$RepositoryRoot,
@@ -290,7 +310,9 @@ function Enter-KeireWorkspaceLock {
 
     $inheritedToken = [Environment]::GetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN")
     $existingLockItem = Get-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-    if ($existingLockItem -and (($existingLockItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+    $existingAttributes = if ($existingLockItem) { [int]$existingLockItem.Attributes } else { -1 }
+    if ($existingAttributes -eq -1) { $existingLockItem = $null }
+    if ($existingLockItem -and (($existingAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
         throw "Workspace lock path must not be a reparse point: '$lockPath'."
     }
     if ($existingLockItem -and $existingLockItem.PSIsContainer) {
@@ -304,38 +326,43 @@ function Enter-KeireWorkspaceLock {
     $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
     $reportedWait = $false
     while ($true) {
-        try {
-            New-Item -ItemType Directory -Path $lockPath -ErrorAction Stop | Out-Null
-            break
+        if ($reportedWait -and [DateTime]::UtcNow -ge $deadline) {
+            throw "Timed out after $timeoutSeconds seconds waiting for '$lockPath'. Confirm the reported owner is no longer running before removing the lock."
         }
-        catch [System.IO.IOException] {}
-        catch [System.UnauthorizedAccessException] {}
+        if (New-KeireExclusiveLockDirectory -Path $lockPath) { break }
 
         $existingLockItem = Get-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
-        if (-not $existingLockItem -or -not $existingLockItem.PSIsContainer -or
-            (($existingLockItem.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        if (-not $existingLockItem) { continue }
+        # FileSystemInfo returns attributes=-1 if the owner removes the directory after Get-Item.
+        $existingAttributes = [int]$existingLockItem.Attributes
+        if ($existingAttributes -eq -1) { continue }
+        if (-not $existingLockItem.PSIsContainer -or
+            (($existingAttributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
             throw "Workspace lock path is not a directory: '$lockPath'. Remove it manually after confirming no project command is running."
         }
 
         $owner = Get-KeireWorkspaceLockOwner -LockPath $lockPath
         if (-not $reportedWait) {
             $summary = "host=$($owner.host), platform=$($owner.platform), pid=$($owner.pid), command=$($owner.command), started=$($owner.started)"
-            Write-Host "==> Waiting for another Kéire project command ($summary)."
+            Write-Host "==> Waiting for another project command ($summary)."
             Write-Host "    Shared workspace lock: $lockPath"
             $reportedWait = $true
         }
 
         $heartbeatPath = Join-Path $lockPath "heartbeat"
         $leasePath = if (Test-Path -LiteralPath $heartbeatPath -PathType Leaf) { $heartbeatPath } else { $lockPath }
-        $firstWrite = (Get-Item -LiteralPath $leasePath -Force).LastWriteTimeUtc
+        $lease = Get-Item -LiteralPath $leasePath -Force -ErrorAction SilentlyContinue
+        if (-not $lease) { continue }
+        $firstWrite = $lease.LastWriteTimeUtc
         if (([DateTime]::UtcNow - $firstWrite).TotalSeconds -ge $staleSeconds) {
             Start-Sleep -Milliseconds 250
-            if (Test-Path -LiteralPath $leasePath) {
-                $secondWrite = (Get-Item -LiteralPath $leasePath -Force).LastWriteTimeUtc
+            $lease = Get-Item -LiteralPath $leasePath -Force -ErrorAction SilentlyContinue
+            if ($lease) {
+                $secondWrite = $lease.LastWriteTimeUtc
                 if ($secondWrite -eq $firstWrite -and ([DateTime]::UtcNow - $secondWrite).TotalSeconds -ge $staleSeconds) {
                     $quarantinePath = "$lockPath.stale.$token"
                     if (Remove-KeireStaleWorkspaceLock -LockPath $lockPath -QuarantinePath $quarantinePath) {
-                        Write-Host "==> Recovered expired Kéire workspace lock."
+                        Write-Host "==> Recovered expired workspace lock."
                         continue
                     }
                 }
@@ -815,6 +842,9 @@ function Get-WindowsRequiredPackagePaths {
         "third-party\licenses\fmt-LICENSE.rst", "third-party\licenses\doctest-LICENSE.txt",
         "third-party\licenses\nlohmann-json-LICENSE.MIT.txt", "third-party\licenses\dear-imgui-LICENSE.txt", "third-party\licenses\zstandard-LICENSE.txt", "third-party\licenses\entt-LICENSE.txt", "third-party\licenses\glm-COPYING.txt", "third-party\licenses\SDL-shadercross-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-LICENSE.txt", "third-party\licenses\DirectXShaderCompiler-ThirdPartyNotices.txt", "third-party\licenses\SPIRV-Cross-LICENSE.txt", "third-party\licenses\SPIRV-Headers-LICENSE.txt", "third-party\licenses\SPIRV-Tools-LICENSE.txt", "third-party\licenses\assimp-LICENSE.txt", "third-party\licenses\assimp-zlib-LICENSE.txt", "third-party\licenses\stb-LICENSE.txt", "third-party\licenses\Jolt-LICENSE.txt", "third-party\licenses\Recast-LICENSE.txt", "third-party\licenses\miniaudio-LICENSE.txt",
         "lib\assimp.lib", "lib\zlibstatic.lib", "lib\Jolt.lib", "lib\Recast.lib", "lib\Detour.lib", "lib\DetourCrowd.lib", "lib\DetourTileCache.lib", "lib\miniaudio.lib", "lib\Coral.Native.lib", "lib\nethost.lib",
+        "lib\harfbuzz.lib", "lib\freetype.lib", "lib\fribidi.lib", "lib\unibreak.lib",
+        "third-party\licenses\FreeType-LICENSE.txt", "third-party\licenses\HarfBuzz-LICENSE.txt",
+        "third-party\licenses\FriBidi-LICENSE.txt", "third-party\licenses\libunibreak-LICENSE.txt",
         "third-party\licenses\Coral-LICENSE.txt", "third-party\licenses\dotnet-LICENSE.txt", "third-party\licenses\dotnet-ThirdPartyNotices.txt",
         "third-party\SDL3\include\SDL3\SDL.h",
         "third-party\SDL3\lib\SDL3-static.lib", "third-party\SDL3\cmake\SDL3Config.cmake",
@@ -903,8 +933,23 @@ function Invoke-WindowsExecutableCapture {
     $standardError = [IO.Path]::GetTempFileName()
     $process = $null
     try {
-        $process = Start-Process -FilePath $Path -ArgumentList $Arguments -PassThru `
-            -RedirectStandardOutput $standardOutput -RedirectStandardError $standardError
+        $startOptions = @{
+            FilePath = $Path
+            PassThru = $true
+            WindowStyle = "Hidden"
+            RedirectStandardOutput = $standardOutput
+            RedirectStandardError = $standardError
+        }
+        if ($Arguments.Count -gt 0) {
+            # Start-Process joins ArgumentList without quoting. Preserve each raw argument using the Windows CRT
+            # rules, including empty values, embedded quotes, and backslashes before a closing quote.
+            $quotedArguments = foreach ($argument in $Arguments) {
+                $escaped = [regex]::Replace($argument, '(\\*)"', '$1$1\"')
+                '"' + [regex]::Replace($escaped, '(\\+)$', '$1$1') + '"'
+            }
+            $startOptions.ArgumentList = $quotedArguments -join ' '
+        }
+        $process = Start-Process @startOptions
         # Cache the native handle before a short-lived child can exit. Without this, Windows PowerShell 5.1 can
         # return a Process object whose ExitCode remains null even after WaitForExit reports completion.
         [void]$process.Handle

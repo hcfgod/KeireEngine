@@ -4,6 +4,7 @@
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireInternal/Rendering/RenderStatisticsInternal.h"
+#include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
@@ -498,7 +499,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decodedLegacyManifest.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
 
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 7U);
+    CHECK(importer.Version == 8U);
     REQUIRE(importer.Cook);
     Keire::ShaderImporterSpecification missingReflection;
     missingReflection.Formats = {Keire::ShaderBinaryFormat::Dxil};
@@ -1892,6 +1893,30 @@ TEST_CASE("shader importer accepts the current Starter 3D schema without lowerin
                                            Keire::ShaderOcclusionSupport::DepthOnlyGeometryMatch));
     REQUIRE(shader->Definition().MaximumWorldPositionDisplacementRadius);
     CHECK(*shader->Definition().MaximumWorldPositionDisplacementRadius == doctest::Approx(0.0F));
+}
+
+TEST_CASE("Starter HUD reserves enough height for its wrapped instructions")
+{
+    const auto source = std::filesystem::current_path() / "KeireHubContent/Templates/Payloads/Starter3D/Assets/UI";
+    const auto tree = Keire::CreateRef<Keire::UiVisualTreeAsset>(
+        Keire::UiVisualTreeAsset::ParseSource(ReadTestBytes(source / "StarterHud.keireui")));
+    const auto card = Keire::CreateRef<Keire::UiVisualTreeAsset>(
+        Keire::UiVisualTreeAsset::ParseSource(ReadTestBytes(source / "StarterCard.keireui")));
+    const auto style = Keire::CreateRef<Keire::UiStyleSheetAsset>(
+        Keire::UiStyleSheetAsset::ParseSource(ReadTestBytes(source / "Starter.keirestyle")));
+    const auto document = Keire::CreateRef<Keire::UiDocument>(
+        tree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{style},
+        [card](Keire::AssetId) -> Keire::Ref<const Keire::UiVisualTreeAsset> { return card; });
+    document->Tree()->Layout(1920.0F, 1080.0F);
+    const auto commands = document->Tree()->DrawCommands();
+    const auto instructions = std::ranges::find_if(
+        commands, [](const auto& command)
+        { return command.Type == Keire::RuntimeUiDrawType::Text && command.Text.starts_with("Double-click"); });
+    REQUIRE(instructions != commands.end());
+    const auto layout = Keire::Detail::BuildRuntimeUiTextLayout(
+        {.Text = instructions->Text, .FontSize = instructions->FontSize, .AvailableWidth = instructions->Rect.Width});
+    CHECK(layout.Lines.size() == 2U);
+    CHECK(layout.Height <= instructions->Rect.Height);
 }
 
 TEST_CASE("camera and mesh renderer components validate renderer-neutral authoring data")

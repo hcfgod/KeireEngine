@@ -11,6 +11,10 @@ SDK validation requires `KeireAssetTool`, the platform `KeireZstd` archive, the 
 in `build-manifest.json`. Direct consumers link Core, ImGui, Zstd, then SDL; CMake consumers continue naming only
 `Keire::Core`.
 
+The SDK also stages the locked FreeType, HarfBuzz, FriBidi, and libunibreak archives and license files on Windows and
+Unix. Package manifests record their lock identities. Both direct consumer link commands and the CMake `Keire::Core`
+target include these private text dependencies; package-stage regressions reject each missing archive or license.
+
 Rendering/shader changes additionally run canonical shader/material tests, target-variant stripping, component
 serialization, project-aware rendered smoke, and real compilation of the sample HLSL through the pinned host compiler.
 Conditional native GPU checks cover D3D12, Vulkan, or Metal where available; deterministic logic remains testable in
@@ -32,8 +36,11 @@ recovery generation, retry, no-touch-lost-generation, rendered-window, UI-comman
 assertions. The Release/Dist package gate independently runs the staged cooked runtime and rejects reports that do not
 prove a rendered native window loop; Release and Dist never contain the injection options.
 Its five-minute wall-clock watchdog leaves room for cold post-loss pipeline reconstruction; the Editor uses a
-three-minute watchdog. Fast frame loops therefore cannot expire either gate while asynchronous scene or managed work is
-still progressing. The device-loss launcher keeps writable tool state under the clone's ignored `Build/Cache/DeviceLoss`
+four-minute watchdog, with up to three minutes for initial Play startup or the first GPU occlusion/VFX frame.
+Scene-loading steps retain a one-minute limit and interaction steps retain a fifteen-second limit. The packaging
+launcher also bounds the entire Editor process to five minutes. Fast frame loops therefore cannot expire either gate
+while asynchronous scene or managed work is still progressing. The device-loss launcher keeps writable tool state
+under the clone's ignored `Build/Cache/DeviceLoss`
 directory by default and accepts `-CacheRoot` when a CI worker provides a separate same-drive cache.
 `Scripts/Windows/render-benchmark.ps1` runs the Release runtime with VSync on and off,
 using 300 warm-up and 2,000 measured frames; it rejects stale/missing artifacts, wrong identity or presentation mode,
@@ -74,7 +81,9 @@ structural changes, Play/Pause/Step/Stop isolation, callback faults, v1 migratio
 Asset Browser changes cover bounded thumbnail requests, deterministic cache keys, cancellation, provider invalidation,
 owner-thread image upload, revision-keyed visible views across a 50,000-record catalog, and project-local List/Grid
 preferences. Tray behavior is tested through backend-independent lifecycle checks where the native platform cannot
-expose a deterministic tray.
+expose a deterministic tray. Hub window restoration also covers hidden/minimized placement, repeat activation, and
+native show/restore/raise failures with successful retries. A native Hub-to-Editor-to-Hub walkthrough verifies the
+platform window is restored automatically after the final tracked Editor exits.
 
 Asset-package parser changes run the canonical archive round trips, path and bound rejection cases, cancellation and
 cleanup tests, plus a deterministic mutation corpus spanning truncation, distributed bit flips, and trailing data.
@@ -93,6 +102,11 @@ The interactive menu reports failures and remains open for another command.
 Direct test executables and top-level launcher commands therefore have identical pass/fail semantics. Both script
 regression harnesses create an isolated child that exits with a known nonzero code and require the launcher to return
 that exact code.
+
+`Scripts/Tests/test-run-routing-windows.ps1` exercises Hub and Editor UI-smoke routing with real child executables,
+rejects conflicting smoke modes before building, and verifies exact process argument forwarding for empty values,
+spaces, Unicode, quotes, and trailing backslashes. It runs in the fast Windows regression suite. The installer
+regression matrices require PowerShell 7 (`pwsh.exe`) on `PATH`, including when launched from Windows PowerShell 5.1.
 
 ## Baseline Validation
 

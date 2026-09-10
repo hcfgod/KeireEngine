@@ -559,6 +559,8 @@ namespace
       protected:
         void OnAttach() override
         {
+            // Cold driver compilation is setup and must not consume the ownership/recovery observation budget.
+            m_Deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
             Owner().Renderer()->RequestGpuVfxPipelineWarmup();
             constexpr std::array scenarios{VfxMaskScenario::VisibleSprite, VfxMaskScenario::OccludedSprite,
                                            VfxMaskScenario::WholeRibbon};
@@ -606,7 +608,7 @@ namespace
         void OnUpdate(const Keire::Time&) override
         {
             const auto renderer = Owner().Renderer();
-            if (std::chrono::steady_clock::now() - m_Started > std::chrono::seconds(30))
+            if (std::chrono::steady_clock::now() > m_Deadline)
             {
                 m_Results->TimedOut = true;
                 Owner().RequestExit();
@@ -624,6 +626,8 @@ namespace
             }
             if (!renderer->Statistics().VfxPipelinesReady)
                 return;
+            if (m_Phase == Phase::Warmup)
+                m_Deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
             if (m_Phase == Phase::AwaitRecoveredPipelines)
             {
                 SubmitAll(*renderer);
@@ -766,7 +770,7 @@ namespace
         Keire::RenderEnvironmentSettings m_Environment;
         Phase m_Phase = Phase::Warmup;
         std::uint32_t m_SubmittedFrames = 0U;
-        std::chrono::steady_clock::time_point m_Started = std::chrono::steady_clock::now();
+        std::chrono::steady_clock::time_point m_Deadline{};
     };
 #endif
 } // namespace

@@ -148,7 +148,9 @@ $dependencyInstall = Join-Path $Root "Build\Dependencies\windows-$outputArchitec
 Copy-Item (Join-Path $dependencyInstall "lib\assimp.lib"), (Join-Path $dependencyInstall "lib\zlibstatic.lib"), `
     (Join-Path $dependencyInstall "lib\Jolt.lib"), (Join-Path $dependencyInstall "lib\Recast.lib"), `
     (Join-Path $dependencyInstall "lib\Detour.lib"), (Join-Path $dependencyInstall "lib\DetourCrowd.lib"), `
-    (Join-Path $dependencyInstall "lib\DetourTileCache.lib"), (Join-Path $dependencyInstall "lib\miniaudio.lib") "$stage\lib\"
+    (Join-Path $dependencyInstall "lib\DetourTileCache.lib"), (Join-Path $dependencyInstall "lib\miniaudio.lib"), `
+    (Join-Path $dependencyInstall "lib\harfbuzz.lib"), (Join-Path $dependencyInstall "lib\freetype.lib"), `
+    (Join-Path $dependencyInstall "lib\fribidi.lib"), (Join-Path $dependencyInstall "lib\unibreak.lib") "$stage\lib\"
 $coralConfiguration = if ($Configuration -eq "Dist") { "Release" } else { $Configuration }
 Copy-Item "$Root\Build\Dependencies\coral\Build\$coralConfiguration\Coral.Native.lib" "$stage\lib\"
 Copy-Item "$Root\Build\Dependencies\coral-nethost\nethost.lib" "$stage\lib\"
@@ -185,7 +187,11 @@ Copy-Item "$Root\Vendor\assimp\contrib\zlib\LICENSE" "$stage\third-party\license
 Copy-Item "$Root\Vendor\stb\LICENSE" "$stage\third-party\licenses\stb-LICENSE.txt"
 Copy-Item "$dependencyInstall\share\licenses\keire\Jolt-LICENSE.txt", `
     "$dependencyInstall\share\licenses\keire\Recast-LICENSE.txt", `
-    "$dependencyInstall\share\licenses\keire\miniaudio-LICENSE.txt" "$stage\third-party\licenses\"
+    "$dependencyInstall\share\licenses\keire\miniaudio-LICENSE.txt", `
+    "$dependencyInstall\share\licenses\keire\FreeType-LICENSE.txt", `
+    "$dependencyInstall\share\licenses\keire\HarfBuzz-LICENSE.txt", `
+    "$dependencyInstall\share\licenses\keire\FriBidi-LICENSE.txt", `
+    "$dependencyInstall\share\licenses\keire\libunibreak-LICENSE.txt" "$stage\third-party\licenses\"
 Copy-Item "$Root\Build\Dependencies\coral\LICENSE" "$stage\third-party\licenses\Coral-LICENSE.txt"
 Copy-Item "$Root\Build\Dependencies\dotnet-sdk\LICENSE.txt" "$stage\third-party\licenses\dotnet-LICENSE.txt"
 Copy-Item "$Root\Build\Dependencies\dotnet-sdk\ThirdPartyNotices.txt" `
@@ -219,6 +225,10 @@ $commit = Get-GitHeadCommit $Root "unknown"
 $dotnetRuntimeVersion = (Get-ChildItem "$Root\Build\Dependencies\dotnet-sdk\shared\Microsoft.NETCore.App" -Directory |
     Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 $manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; developmentArtifact=$developmentArtifact; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT; jolt=$Lock.JOLT_COMMIT; recast=$Lock.RECAST_COMMIT; miniaudio=$Lock.MINIAUDIO_COMMIT; coral=$Lock.CORAL_COMMIT; dotnetRuntime=$dotnetRuntimeVersion }
+$manifest["freeType"] = $Lock.FREETYPE_COMMIT
+$manifest["harfBuzz"] = $Lock.HARFBUZZ_COMMIT
+$manifest["friBidi"] = $Lock.FRIBIDI_COMMIT
+$manifest["libunibreak"] = $Lock.LIBUNIBREAK_COMMIT
 $manifest | ConvertTo-Json | Set-Content "$stage\build-manifest.json" -Encoding UTF8
 Assert-WindowsPackageStage $stage $Project.CLIENT_TARGET $Project.HUB_TARGET $Project.CORE_TARGET $Project.PROJECT_NAMESPACE
 if (-not $DevelopmentStage) {
@@ -246,6 +256,10 @@ if ($parsedManifest.jolt -ne $Lock.JOLT_COMMIT -or $parsedManifest.recast -ne $L
 if ($parsedManifest.coral -ne $Lock.CORAL_COMMIT -or
     -not ([string]$parsedManifest.dotnetRuntime).StartsWith("10.", [StringComparison]::Ordinal)) {
     throw "Packaged managed-runtime identities do not match the dependency lock."
+}
+if ($parsedManifest.freeType -ne $Lock.FREETYPE_COMMIT -or $parsedManifest.harfBuzz -ne $Lock.HARFBUZZ_COMMIT -or
+    $parsedManifest.friBidi -ne $Lock.FRIBIDI_COMMIT -or $parsedManifest.libunibreak -ne $Lock.LIBUNIBREAK_COMMIT) {
+    throw "Packaged text-runtime identities do not match the dependency lock."
 }
 if ($parsedManifest.sdlShadercross -ne $Lock.SDL_SHADERCROSS_COMMIT -or
     $parsedManifest.dxc -ne $Lock.SDL_SHADERCROSS_DXC_COMMIT -or
@@ -451,6 +465,10 @@ try {
         (Join-Path $sdkRoot "lib\DetourCrowd.lib"),
         (Join-Path $sdkRoot "lib\DetourTileCache.lib"),
         (Join-Path $sdkRoot "lib\miniaudio.lib"),
+        (Join-Path $sdkRoot "lib\harfbuzz.lib"),
+        (Join-Path $sdkRoot "lib\freetype.lib"),
+        (Join-Path $sdkRoot "lib\fribidi.lib"),
+        (Join-Path $sdkRoot "lib\unibreak.lib"),
         (Join-Path $sdkRoot "lib\Coral.Native.lib"),
         (Join-Path $sdkRoot "lib\nethost.lib")
     )

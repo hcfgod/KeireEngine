@@ -22,7 +22,7 @@
     --sl-color-bg-nav: rgba(5, 9, 21, 0.86);
     --sl-color-bg-sidebar: #070c19;
     --sl-content-width: 54rem;
-    --sl-text-5xl: clamp(3.4rem, 8vw, 6.7rem);
+    --sl-text-5xl: clamp(2.5rem, 5vw, 4.25rem);
 }
 
 :root[data-theme="light"] {
@@ -47,10 +47,7 @@ html {
 }
 
 body {
-    background-image:
-        radial-gradient(circle at 72% -12%, rgba(34, 111, 255, 0.16), transparent 34rem),
-        radial-gradient(circle at 12% 34%, rgba(0, 174, 255, 0.055), transparent 27rem);
-    background-attachment: fixed;
+    background-image: none;
     letter-spacing: -0.004em;
 }
 

@@ -35,11 +35,13 @@ paused work, requeues resumable downloads, and turns interrupted mutation phases
 
 Optional Hub identity is a separate adapter boundary. `SupabaseAccountClient` owns bounded Auth/PostgREST request and
 response contracts over the private native HTTP transport; `HubAccountWorkflow` owns asynchronous session rotation and
-publishes immutable account snapshots. `DesktopOAuthClient` is a provider adapter for a public authorization-code PKCE
-client: the website consent callback forwards only a single-use code and state through a typed Hub activation, the Hub
-verifies state and ID-token nonce, and the Hub exchanges the code itself. Website cookies, passwords, browser refresh
-tokens, and service-role credentials never enter the desktop process. Browser SSO is configuration- and feature-gated,
-with the existing email flow retained as a staged fallback. Only publishable desktop configuration enters packages.
+publishes immutable account snapshots. `HubAccountIntegration` ticks only after a successful start; stopping it cancels
+pending refresh and marketplace work and leaves later ticks inert. `DesktopOAuthClient` is a provider adapter for a
+public authorization-code PKCE client: the website consent callback forwards only a single-use code and state through
+a typed Hub activation, the Hub verifies state and ID-token nonce, and the Hub exchanges the code itself. Website
+cookies, passwords, browser refresh tokens, and service-role credentials never enter the desktop process. Browser SSO
+is configuration- and feature-gated, with the existing email flow retained as a staged fallback. Only publishable
+desktop configuration enters packages.
 Refresh-token persistence records whether the session came from browser OAuth or direct Supabase Auth inside the
 protected payload. Rotation therefore returns browser sessions to the public-client OAuth token endpoint with the
 configured `client_id`, while direct email sessions retain the Auth endpoint. Persistence is delegated to DPAPI on
@@ -462,6 +464,9 @@ content-addressed, digest-verified, and disposable; source scenes retain only st
 than retaining process-global history. Commands own forward/inverse behavior and availability checks; nested
 transactions preserve all-or-nothing semantics. Contexts close during layer teardown, and the service closes before
 scene and asset services so no history callback can observe a partially destroyed document service.
+Only open undo contexts consume service capacity. Finishing a transaction releases its active state before command
+callbacks run, so rollback failures cannot leave a consumed transaction reporting active; context closure also makes
+retained transaction handles inactive.
 
 Prefab source editing swaps in a dedicated `SceneDocument` and retains the active scene document, including its undo
 context, until Prefab Mode closes. Stable-ID source replacement validates imported bytes before atomic publication and
@@ -492,6 +497,9 @@ This removes memory-mapped access to a live publisher path. A rejected candidate
 source snapshot metadata, and the captured managed exception, then unloads only the candidate context. Windows package
 entrypoints also share the repository workspace lock; cooked runtime smoke tests execute against an invocation-unique
 content copy that is removed after validation, so parallel direct invocations cannot share mutable validation state.
+Windows claims the lock directory by atomically renaming a unique empty sibling; an existence check followed by
+directory creation cannot establish exclusive ownership. Waiters tolerate the current owner releasing its directory
+or heartbeat during inspection. The owner/heartbeat protocol remains compatible with the Unix launcher.
 
 ## GPU VFX And Media Import Boundaries
 
@@ -700,7 +708,10 @@ shares the explicit frame length under the existing named-mutex channel. Decodin
 truncation, trailing bytes, invalid UTF-8/control text, relative or traversing paths, invalid identifiers, and surplus
 fields. The primary polls validated actions on its owner thread. `WindowSystem` tracks weak tray ownership and closes
 every surviving native tray before SDL shutdown. Activation dispatch reuses normal page navigation, project opening,
-and compatible Build Support import paths. An unavailable editor catalog ID, unsupported offline package type, or
+window restoration, and compatible Build Support import paths. The Hub shows a hidden window before restoring its
+native placement and raising it; restoring while hidden can leave the platform window minimized. The last tracked
+Editor exit and tray activation share this path with explicit failure propagation. An unavailable editor catalog ID,
+unsupported offline package type, or
 missing version-specific Asset Tool records a warning notification and queues nothing. Layer teardown, explicit Quit,
 and exceptional application shutdown therefore converge on the same idempotent cleanup path.
 
@@ -719,6 +730,8 @@ copy cached hierarchy views before invoking component code so structural mutatio
 
 The editor owns authoring selection, undo/redo, atomic source writes, dirty decisions, and recovery files. Runtime scene
 activation is refreshed only after source validation/import succeeds. JSON remains private to the scene importer.
+`SceneDocument` resets its recovery timer and detects availability when its recovery path changes, including after
+Save As adopts a new scene identity. Changing that path preserves the previous scene's recovery file.
 
 Scene schema v6 stores stable entities and component records, prefab instance/override state, entity layers and tags, scene
 lighting-bake settings, and an optional baked-lighting identity. The public ECS surface owns stable IDs, weak `Entity`
@@ -1001,8 +1014,9 @@ atlas realizations are device-generation qualified; recovery abandons old-device
 retried immutable frame. Ordered fallback faces are selected per glyph run, and each shaped glyph records its exact
 face index. Each face uses at most eight deterministic atlas pages; immutable geometry batches and logical leases bind
 the exact face/page pair, so mixed-script labels and recovery retries cannot sample another page or device generation.
-A deterministic high-resolution 95-character atlas remains the no-family/unavailable-face
-fallback. Nested clip intersections are resolved into immutable commands before capture, so text and image geometry
+A deterministic high-resolution Latin-1 atlas with 224 codepoint slots remains the no-family/unavailable-face
+fallback; absent optional glyphs use the question-mark replacement. Nested clip intersections are resolved into immutable
+commands before capture, so text and image geometry
 are clipped deterministically on screen, render-texture, and world targets. Renderer statistics truthfully report
 glyph-atlas occupancy and bytes; ordinary UI images remain independent texture leases and therefore do not count as an
 image atlas.
@@ -1031,7 +1045,9 @@ shading model, authoring mode, closure budget, compilation diagnostics, dirty li
 `ShaderGraphDocument` owns target-based Material, UI, Fullscreen, VFX, Custom Graphics, and Compute programs.
 `MaterialDocument` and `MaterialInspectorPanel` remain available only for `.keiremateriallegacy` raw/custom-shader
 sources. `MaterialInstanceAsset` stores only inherited property and surface overrides and is edited through the
-Inspector. Every path publishes behind the same runtime material boundary. Material file
+Inspector. Compatibility material opens and shader replacement build and validate a candidate before replacing
+document state; shader replacement retains only overrides that pass the runtime material validator.
+Every path publishes behind the same runtime material boundary. Material file
 snapshots enter the project-assets undo context; the workspace and asset-operation service coordinate persistence.
 Continuous numeric/color edits update a development-only in-memory asset revision for immediate rendering and share a
 property-scoped undo command until the UI edit boundary. The final serialized source is written once and its catalog
@@ -1143,6 +1159,10 @@ publishes a validated source-index snapshot beside the development catalog; the 
 instead of hashing the project again. Cancellation is cooperative until publication. Shutdown waits 250 ms, terminates
 an unresponsive worker, and lets the existing publication journal recover before another operation exposes records.
 Native process handles and protocol JSON remain implementation details.
+Named duplicate, create-folder, and trash requests retain an editor-owned mutation state until the successful worker
+result supplies the inverse asset or trash identity. The workspace then records the applied command in Project asset
+history. Undo and redo reuse that state; failed completions never enter history. Other named mutations require an
+explicit inverse plan before they can be queued.
 Every database owner also acquires the same crash-released project file lock for publication and source mutation. Cooked
 directory swaps carry a versioned sibling journal, so startup either finalizes a fully published catalog or restores the
 previous directory. New scene, material, and input-action sources use the external-import staging transaction rather
@@ -1181,7 +1201,9 @@ signing-hook isolation, staged layout validation, and atomic directory publicati
 profile choices and supervises `KeireAssetTool build-player`; it does not duplicate build logic or pass unsaved scene
 state to the child. `KeireRuntime` retains explicit `--content` mounting while packaged startup discovers a validated
 relative layout from `PlayerBuild.json`. Platform packs remain separate from projects and install transactionally under
-the per-user preference root. Packaged runtime views are designated as native presentation surfaces and blitted directly
+the per-user preference root. Discovery searches compatible Editor-bundled modules before per-user installations and
+sorts candidates within each location, preventing older same-version development runtimes from shadowing the bundle.
+Packaged runtime views are designated as native presentation surfaces and blitted directly
 to the swapchain. `RuntimeUiTree` remains the shared Game UI layout, interaction, and draw-command model: editor previews
 adapt those commands to editor UI, while standalone players submit them to a dedicated SDL_GPU compositor and do not
 initialize or frame Dear ImGui. Windows assembly patches the copied PE template to the GUI subsystem without changing
@@ -1232,6 +1254,12 @@ host runtime format plus SPIR-V reflection, while ordinary asset imports continu
 format. CPU preview jobs own immutable graph/property snapshots, are canceled by a shared generation token, publish a
 quick reduced-resolution image first, and refine only when the graph remains unchanged; UI resources are created only
 on the editor thread.
+
+Runtime shader equivalence includes displacement bounds and stable property identities as well as generated HLSL.
+Material composition transfers the bound with an overridden World Position Offset expression, and generated graph
+pruning removes stale annotation and comment membership without mutating the source graph. Draw queues own their
+sorting policy: transparent and decal queues sort by depth even when a decal's authored alpha mode is opaque, with
+contribution, entity, and submesh identities providing deterministic ties.
 
 Schema-4 Shader Graphs may carry an independently versioned renderer-neutral resource contract. It preserves portable
 sampler values, array/cube/3D texture references, and aligned bounded read-only buffer views; validation shares graph
@@ -1497,6 +1525,9 @@ reconciliation away from the application thread and publishes a complete immutab
 revision. The owner thread discards stale candidates, debounces changed identities, and atomically updates its record
 snapshot. Explicit asset mutations advance the revision and wake reconciliation, preventing an older background scan
 from overwriting a newer editor transaction.
+Before assigning metadata to a source that has no sidecar, the monitor observes an unchanged size and modification
+time for `ChangeDebounce`. Candidates that disappear are forgotten, so native save-dialog validation files do not
+reserve asset identities or leave orphan sidecars. Explicit database refresh and creation bypass this discovery wait.
 
 Forward+ retains its deterministic CPU fallback while caching the projected grid and GPU storage uploads by viewport,
 camera, and local-light content. An empty visible-light set uses one cached dummy tile and does not depend on camera or

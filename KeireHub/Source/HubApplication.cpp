@@ -36,6 +36,7 @@
 #include "KeireHub/HubTemplateWorkflow.h"
 #include "KeireHub/HubUpdateHandoffWorkflow.h"
 #include "KeireHub/HubUpdateIntegration.h"
+#include "KeireHub/HubWindowVisibility.h"
 #include "KeireHub/HubWorkflowError.h"
 #include "KeireHubInternal/HubNoticeUi.h"
 #include "KeireHubRuntime/EditorProcessTracker.h"
@@ -1194,10 +1195,7 @@ namespace
                     ReportUnexpected("The Hub could not refresh its project state.", error);
                 }
             }
-            const auto window = Owner().MainWindow();
-            window->Restore();
-            window->SetVisible(true);
-            window->Raise();
+            KeireHub::RestoreHubWindow(*Owner().MainWindow());
         }
         void RequestEditorInstall(const std::string_view packageOrVersion) override
         {

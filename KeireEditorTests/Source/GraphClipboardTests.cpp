@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/GraphClipboard.h"
+#include "KeireClient/Editor/GraphDuplication.h"
 
 #include <doctest/doctest.h>
 
@@ -74,6 +75,75 @@ TEST_CASE("Graph clipboard rejects malformed wrong-kind and oversized input befo
     const std::string oversized(KeireEditor::MaximumGraphFragmentBytes + 1U, 'x');
     CHECK_THROWS_AS((void)KeireEditor::PasteShaderGraphFragment(target, oversized), std::invalid_argument);
     CHECK(target == original);
+}
+
+TEST_CASE("Graph clipboard preserves nested groups and excludes unrelated empty comments")
+{
+    auto source = Keire::CreateDefaultShaderGraph();
+    const auto node = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant);
+    source.Nodes.push_back(node);
+    Keire::GraphComment outer{.Id = Keire::AssetId::Generate(), .Title = "Outer"};
+    Keire::GraphComment inner{
+        .Id = Keire::AssetId::Generate(), .Title = "Inner", .Parent = outer.Id, .Members = {node.Id}};
+    outer.Members = {inner.Id};
+    const Keire::GraphComment empty{.Id = Keire::AssetId::Generate(), .Title = "Unrelated"};
+    source.Authoring.Comments = {outer, inner, empty};
+    const std::array selection{node.Id};
+    auto target = Keire::CreateDefaultShaderGraph();
+
+    SUBCASE("Shader Graph")
+    {
+        const auto fragment = KeireEditor::CopyShaderGraphFragment(source, selection);
+        REQUIRE(KeireEditor::PasteShaderGraphFragment(target, fragment).size() == 1);
+        REQUIRE(KeireEditor::PasteShaderGraphFragment(target, fragment).size() == 1);
+    }
+    SUBCASE("Material Graph")
+    {
+        auto materialSource = MaterialGraph();
+        materialSource.SurfaceGraph = source;
+        auto materialTarget = MaterialGraph();
+        const auto fragment = KeireEditor::CopyMaterialGraphFragment(materialSource, selection);
+        REQUIRE(KeireEditor::PasteMaterialGraphFragment(materialTarget, fragment).size() == 1);
+        REQUIRE(KeireEditor::PasteMaterialGraphFragment(materialTarget, fragment).size() == 1);
+        CHECK_NOTHROW(Keire::ValidateMaterialGraph(materialTarget));
+        target = materialTarget.SurfaceGraph;
+    }
+    REQUIRE(target.Authoring.Comments.size() == 4);
+    CHECK(target.Authoring.Comments[0].Id != outer.Id);
+    CHECK(target.Authoring.Comments[1].Id != inner.Id);
+    CHECK(target.Authoring.Comments[2].Id != target.Authoring.Comments[0].Id);
+    CHECK(target.Authoring.Comments[1].Parent == target.Authoring.Comments[0].Id);
+    CHECK(target.Authoring.Comments[3].Parent == target.Authoring.Comments[2].Id);
+    CHECK_NOTHROW(Keire::ValidateShaderGraph(target));
+}
+
+TEST_CASE("Shader Graph clipboard preserves a parameter symbol when the destination has no collision")
+{
+    auto source = Keire::CreateDefaultShaderGraph();
+    const auto parameter = SurfaceParameter("SurfaceRoughness");
+    source.Nodes.push_back(parameter);
+    const std::array selection{parameter.Id};
+    const auto fragment = KeireEditor::CopyShaderGraphFragment(source, selection);
+    auto target = Keire::CreateDefaultShaderGraph();
+    REQUIRE(KeireEditor::PasteShaderGraphFragment(target, fragment).size() == 1);
+    CHECK(target.Nodes.back().Symbol == parameter.Symbol);
+}
+
+TEST_CASE("Shader Graph duplication and paste keep collision suffixes within the symbol length limit")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    const auto parameter = SurfaceParameter(std::string(128, 'A'));
+    graph.Nodes.push_back(parameter);
+    graph.Nodes.push_back(SurfaceParameter(std::string(123, 'A') + "_Copy"));
+    const std::array selection{parameter.Id};
+    SUBCASE("Duplicate") { REQUIRE(KeireEditor::DuplicateShaderGraphSelection(graph, selection).size() == 1); }
+    SUBCASE("Paste")
+    {
+        const auto fragment = KeireEditor::CopyShaderGraphFragment(graph, selection);
+        REQUIRE(KeireEditor::PasteShaderGraphFragment(graph, fragment).size() == 1);
+    }
+    CHECK(graph.Nodes.back().Symbol == std::string(122, 'A') + "_Copy2");
+    CHECK_NOTHROW(Keire::ValidateShaderGraph(graph));
 }
 
 TEST_CASE("Shader Graph clipboard gives pasted parameters deterministic unique symbols")

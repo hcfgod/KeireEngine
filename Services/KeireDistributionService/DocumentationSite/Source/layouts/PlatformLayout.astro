@@ -2,6 +2,8 @@
 import PlatformFooter from "../components/PlatformFooter.astro";
 import PlatformHeader from "../components/PlatformHeader.astro";
 import "../styles/platform.css";
+import "../styles/product.css";
+import RevealMotion from "../components/RevealMotion.astro";
 
 interface Props {
     title: string;
@@ -16,7 +18,7 @@ const {
     title,
     description,
     active,
-    image = "/assets/hero-cinematic.png",
+    image = "/assets/outpost/arrival.webp",
     robots = "index,follow",
     structuredData,
 } = Astro.props;
@@ -60,5 +62,6 @@ if (Astro.locals.user && Astro.locals.supabase) {
         <PlatformHeader active={active} signedIn={Boolean(Astro.locals.user)} staffRole={staffRole} />
         <main id="main"><slot /></main>
         <PlatformFooter />
+        <RevealMotion />
     </body>
 </html>

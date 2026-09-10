@@ -1613,6 +1613,7 @@ grep -q '^    if: always()$' "$security_workflow" || fail 'Security activation s
 grep -q 'ENABLE_ADVANCED_SECURITY' "$security_workflow" || fail 'Advanced security opt-in variable is missing'
 ! grep -q 'continue-on-error' "$security_workflow" || fail 'Advanced security checks are not strict'
 python3 "$ROOT/Scripts/Tests/check-text-integrity.py"
+python3 "$ROOT/Scripts/Tests/test-text-integrity.py"
 python3 "$ROOT/Scripts/Tests/check-source-budgets.py"
 python3 "$ROOT/Scripts/Tests/check-render-test-boundary.py"
 python3 "$ROOT/Scripts/Tests/check-diagnostic-bundle-integration.py"
@@ -1652,7 +1653,9 @@ for path in bin/Managed/Coral.Managed.dll bin/Managed/Keire.Managed.dll bin/Mana
   third-party/licenses/dotnet-ThirdPartyNotices.txt third-party/licenses/Jolt-LICENSE.txt \
   third-party/licenses/Recast-LICENSE.txt third-party/licenses/miniaudio-LICENSE.txt lib/libJolt.a \
   lib/libRecast.a lib/libDetour.a lib/libDetourCrowd.a lib/libDetourTileCache.a lib/libminiaudio.a \
-  lib/libCoral.Native.a lib/libnethost.a; do
+  lib/libCoral.Native.a lib/libnethost.a lib/libharfbuzz.a lib/libfreetype.a lib/libfribidi.a lib/libunibreak.a \
+  third-party/licenses/FreeType-LICENSE.txt third-party/licenses/HarfBuzz-LICENSE.txt \
+  third-party/licenses/FriBidi-LICENSE.txt third-party/licenses/libunibreak-LICENSE.txt; do
   mkdir -p "$package_stage/$(dirname "$path")"; : > "$package_stage/$path"
 done
 : > "$package_stage/include/Core/Ui.h"
@@ -1661,6 +1664,13 @@ done
 mkdir -p "$package_stage/include/Core/Build"
 : > "$package_stage/include/Core/Build/PlayerBuild.h"
 assert_true validate_package_stage "$package_stage" Client Hub Core Core
+for path in lib/libharfbuzz.a lib/libfreetype.a lib/libfribidi.a lib/libunibreak.a \
+  third-party/licenses/FreeType-LICENSE.txt third-party/licenses/HarfBuzz-LICENSE.txt \
+  third-party/licenses/FriBidi-LICENSE.txt third-party/licenses/libunibreak-LICENSE.txt; do
+  rm "$package_stage/$path"
+  assert_false validate_package_stage "$package_stage" Client Hub Core Core
+  : > "$package_stage/$path"
+done
 assert_true assert_package_generated_data_free "$package_stage"
 for generated_path in \
   samples/KeireSandbox/Build/generated.make \

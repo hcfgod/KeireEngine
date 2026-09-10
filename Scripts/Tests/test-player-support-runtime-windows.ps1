@@ -123,7 +123,7 @@ try {
     catch {
         if (-not $_.Exception.Message.Contains('non-reparse directory')) { throw }
     }
-    Remove-Item -LiteralPath $junction -Force
+    [IO.Directory]::Delete($junction, $false)
 
     $missingLicense = Join-Path $licenseSource $licenseSources['Coral-LICENSE.txt']
     Remove-Item -LiteralPath $missingLicense -Force
@@ -156,7 +156,7 @@ try {
     catch {
         if (-not $_.Exception.Message.Contains('non-reparse directory')) { throw }
     }
-    Remove-Item -LiteralPath $vcRuntimeDirectory -Force
+    [IO.Directory]::Delete($vcRuntimeDirectory, $false)
     Move-Item -LiteralPath $realVCRuntimeDirectory -Destination $vcRuntimeDirectory
 
     $publication = Join-Path $fixture 'publication'

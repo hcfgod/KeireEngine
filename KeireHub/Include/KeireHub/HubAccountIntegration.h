@@ -49,6 +49,7 @@ namespace KeireHub
         std::uint64_t m_HandledMarketplaceCompletion = 0;
         std::uint64_t m_NextMarketplaceLeaseRefresh = 0;
         std::optional<bool> m_LeasedSignedIn;
+        bool m_Started = false;
         bool m_RefreshPending = false;
     };
 } // namespace KeireHub

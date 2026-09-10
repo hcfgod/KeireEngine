@@ -113,13 +113,18 @@ fragment is available.
 Protected output or Context anchors are not duplicated. The new nodes become the ordered selection after the single
 transaction commits.
 
+Parameter symbols receive bounded unique suffixes when duplicating, or when pasting into a document with a symbol
+collision. Display names and parameter defaults stay intact. Copied groups retain their internal nesting and become
+root groups when their parent is outside the selection. Cable routing points move by the same offset as their nodes;
+unrelated empty comments are excluded.
+
 ## Schema Migration
 
-Kéire 0.4.0 introduced the shared schema-4 graph metadata and VFX schema 5. The current Shader Graph and Material
-Graph source schemas are 6. Shader schema 6 adds explicit UI, Fullscreen, VFX, Custom Graphics, and Compute program
-targets while retaining Legacy Surface as a migration target. Material schema 6 promotes `surfaceGraph` to the
-authoritative OpenPBR/slab material program. Schemas 1–5 migrate in memory. Schema migration follows the same
-fail-before-mutation rule across all three formats:
+Kéire 0.4.0 introduced the shared schema-4 graph metadata and VFX schema 5. The current Shader Graph source schema is
+6 and Material Graph source schema is 7. Shader schema 6 adds explicit UI, Fullscreen, VFX, Custom Graphics, and Compute
+program targets while retaining Legacy Surface as a migration target. Material schema 7 stores `surfaceGraph` as the
+authoritative OpenPBR/slab material program. Shader schemas 1–5 and Material schemas 1–6 migrate in memory. Schema
+migration follows the same fail-before-mutation rule across all three formats:
 
 1. supported historical sources decode and migrate in memory;
 2. opening or previewing does not rewrite the source file;

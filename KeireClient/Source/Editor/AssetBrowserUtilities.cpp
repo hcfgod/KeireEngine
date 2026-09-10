@@ -29,7 +29,8 @@ namespace KeireEditor
         for (const auto& record : records)
         {
             if (record.RelativePath.parent_path() == folder &&
-                (search.empty() || record.RelativePath.filename().string().find(search) != std::string::npos))
+                (search.empty() ||
+                 Keire::Detail::PathToUtf8(record.RelativePath.filename()).find(search) != std::string::npos))
             {
                 visible.push_back(&record);
             }
@@ -55,8 +56,8 @@ namespace KeireEditor
 
     std::string DisplayName(const std::filesystem::path& path)
     {
-        const auto stem = path.stem().string();
-        return stem.empty() ? path.filename().string() : stem;
+        const auto stem = Keire::Detail::PathToUtf8(path.stem());
+        return stem.empty() ? Keire::Detail::PathToUtf8(path.filename()) : stem;
     }
 
     std::string ElideAssetDisplayName(const std::string_view name, const float maximumWidth,

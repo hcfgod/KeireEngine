@@ -422,7 +422,7 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
             const auto editingScene = m_SceneDocument->EditingScene();
             if (record && editingScene && record->Type == Keire::SceneAsset::StaticType())
             {
-                const auto expectedName = record->RelativePath.stem().string();
+                const auto expectedName = Keire::Detail::PathToUtf8(record->RelativePath.stem());
                 if (!expectedName.empty() && editingScene->Name() != expectedName)
                 {
                     editingScene->SetName(expectedName);
@@ -877,7 +877,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 if (sceneRecord && editingScene && sceneRecord->Type == Keire::SceneAsset::StaticType())
                 {
                     const bool wasDirty = editingScene->Dirty();
-                    const auto expectedName = sceneRecord->RelativePath.stem().string();
+                    const auto expectedName = Keire::Detail::PathToUtf8(sceneRecord->RelativePath.stem());
                     if (!expectedName.empty() && editingScene->Name() != expectedName)
                     {
                         editingScene->SetName(expectedName);
@@ -1060,11 +1060,8 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                     if (!completion->Context.SceneSnapshot)
                         throw std::runtime_error("Scene copy completion omitted its captured scene definition.");
                     const auto editing = m_SceneDocument->EditingScene();
-                    const bool sameDocument =
-                        editing && m_SceneDocument->Asset() == completion->Context.SourceSceneAsset;
                     const bool unchanged =
-                        sameDocument && Keire::SceneAsset::Encode(editing->Snapshot()) ==
-                                            Keire::SceneAsset::Encode(*completion->Context.SceneSnapshot);
+                        editing && completion->Context.CanAdoptSceneCopy(m_SceneDocument->Asset(), editing->Snapshot());
                     if (!unchanged)
                     {
                         m_SceneDocument->SetStatus(
@@ -1087,7 +1084,8 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                         if (const auto undo = Owner().Undo())
                         {
                             m_SceneDocument->SetUndoContext(undo->CreateContext(
-                                {.Name = "Scene: " + completion->Context.SceneSource.stem().string()}));
+                                {.Name =
+                                     "Scene: " + Keire::Detail::PathToUtf8(completion->Context.SceneSource.stem())}));
                         }
                         m_ActiveUndoContext = m_SceneDocument->UndoContext();
                         if (const auto scenes = Owner().Scenes())
@@ -1102,7 +1100,7 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 const auto record = m_AssetDatabase->Find(created);
                 if (!record)
                     throw std::runtime_error("Created asset is absent from the published source index.");
-                m_AssetStatus = "Created and published " + record->RelativePath.generic_string() + ".";
+                m_AssetStatus = "Created and published " + Keire::Detail::PathToUtf8(record->RelativePath) + ".";
             }
             if (completion->Context.Generation > 0)
                 m_MaterialDocument->MarkCatalogRefreshApplied(completion->Context.Generation);

@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -95,6 +96,38 @@ TEST_CASE("Material Graph source and cooked serialization are deterministic")
     auto duplicate = definition;
     duplicate.Properties.push_back(duplicate.Properties.front());
     CHECK_THROWS_AS(Keire::ValidateMaterialGraph(duplicate), std::invalid_argument);
+}
+
+TEST_CASE("New materials use the blend mask and sidedness defaults of their shading contract")
+{
+    using Model = Keire::MaterialShadingModel;
+    using Domain = Keire::MaterialDomain;
+    using Alpha = Keire::MaterialAlphaMode;
+    struct Defaults
+    {
+        Model Shading;
+        Domain SurfaceDomain;
+        Alpha AlphaMode;
+        bool DoubleSided;
+    };
+    const std::array cases{Defaults{Model::OpenPbrLit, Domain::Surface, Alpha::Opaque, false},
+                           Defaults{Model::Unlit, Domain::Surface, Alpha::Opaque, false},
+                           Defaults{Model::Eye, Domain::Surface, Alpha::Opaque, false},
+                           Defaults{Model::Hair, Domain::Surface, Alpha::Mask, true},
+                           Defaults{Model::Water, Domain::Surface, Alpha::Blend, false},
+                           Defaults{Model::ThinTranslucent, Domain::Surface, Alpha::Blend, false},
+                           Defaults{Model::ParticipatingMedia, Domain::Volume, Alpha::Blend, false},
+                           Defaults{Model::OpenPbrLit, Domain::Decal, Alpha::Blend, true}};
+    for (const auto& expected : cases)
+    {
+        CAPTURE(static_cast<int>(expected.Shading));
+        CAPTURE(static_cast<int>(expected.SurfaceDomain));
+        const auto material = Keire::CreateOpenPbrMaterial(expected.Shading, expected.SurfaceDomain);
+        CHECK(material.Surface.AlphaMode == expected.AlphaMode);
+        CHECK(material.Surface.DoubleSided == expected.DoubleSided);
+        CHECK(material.Surface.AlphaCutoff == doctest::Approx(0.5F));
+        CHECK(Keire::MaterialGraphAsset::DecodeSource(Keire::MaterialGraphAsset::EncodeSource(material)) == material);
+    }
 }
 
 TEST_CASE("Material Graph schema three migrates in memory and explicit save publishes schema six")
@@ -264,6 +297,71 @@ TEST_CASE("Material Graph surface outputs inherit the selected Shader Graph temp
         }
         CHECK_NOTHROW(Keire::ValidateShaderGraph(material));
     }
+}
+
+TEST_CASE("Material Graph composition retains valid comments when overridden template nodes are pruned")
+{
+    auto definition = SampleMaterialGraph();
+    definition.Properties.clear();
+    auto shaderTemplate = Keire::CreateDefaultShaderGraph();
+    shaderTemplate.Nodes.push_back(
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Color));
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes.back(), "Value", shaderTemplate.Nodes.front(), "BaseColor");
+    const auto replacedNode = shaderTemplate.Nodes.back().Id;
+    shaderTemplate.Authoring.NodeAnnotations.push_back({replacedNode, "Template color"});
+    shaderTemplate.Authoring.NodeAnnotations.push_back({shaderTemplate.Nodes.front().Id, "Output"});
+    Keire::GraphComment comment;
+    comment.Id = Keire::AssetId::Generate();
+    comment.Members = {replacedNode, shaderTemplate.Nodes.front().Id};
+    shaderTemplate.Authoring.Comments.push_back(comment);
+
+    definition.SurfaceGraph.Nodes.push_back(
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Color));
+    ConnectGraph(definition.SurfaceGraph, definition.SurfaceGraph.Nodes.back(), "Value",
+                 definition.SurfaceGraph.Nodes.front(), "BaseColor");
+    const auto originalTemplate = shaderTemplate;
+    const auto originalMaterial = definition;
+    const auto composed = Keire::ComposeMaterialGraphShader(definition, shaderTemplate);
+    CHECK(shaderTemplate == originalTemplate);
+    CHECK(definition == originalMaterial);
+    REQUIRE(composed.Authoring.NodeAnnotations.size() == 1);
+    CHECK(composed.Authoring.NodeAnnotations.front().Node == shaderTemplate.Nodes.front().Id);
+    REQUIRE(composed.Authoring.Comments.size() == 1);
+    CHECK(composed.Authoring.Comments.front().Members == std::vector{shaderTemplate.Nodes.front().Id});
+    CHECK(Keire::CompileShaderGraph(composed).Succeeded());
+}
+
+TEST_CASE("Material Graph composition uses the displacement bound belonging to the active vertex expression")
+{
+    auto definition = SampleMaterialGraph();
+    definition.Properties.clear();
+    auto shaderTemplate = Keire::CreateDefaultShaderGraph();
+    shaderTemplate.MaximumWorldPositionDisplacementRadius = 0.25F;
+    shaderTemplate.Nodes.push_back(
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Vector3));
+    shaderTemplate.Nodes.back().Value = Keire::Vector3{0.25F, 0.0F, 0.0F};
+    ConnectGraph(shaderTemplate, shaderTemplate.Nodes.back(), "Value", shaderTemplate.Nodes.front(),
+                 "WorldPositionOffset");
+    definition.SurfaceGraph.MaximumWorldPositionDisplacementRadius = 4.0F;
+    CHECK(Keire::ComposeMaterialGraphShader(definition, shaderTemplate).MaximumWorldPositionDisplacementRadius ==
+          doctest::Approx(0.25F));
+
+    definition.SurfaceGraph.Nodes.push_back(
+        Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant, Keire::ShaderGraphValueType::Vector3));
+    definition.SurfaceGraph.Nodes.back().Value = Keire::Vector3{3.0F, 0.0F, 0.0F};
+    ConnectGraph(definition.SurfaceGraph, definition.SurfaceGraph.Nodes.back(), "Value",
+                 definition.SurfaceGraph.Nodes.front(), "WorldPositionOffset");
+    const auto composed = Keire::ComposeMaterialGraphShader(definition, shaderTemplate);
+    CHECK(composed.MaximumWorldPositionDisplacementRadius == doctest::Approx(4.0F));
+    const auto compilation = Keire::CompileShaderGraph(composed);
+    REQUIRE(compilation.Succeeded());
+    const auto manifest = nlohmann::json::parse(compilation.Variants.front().Manifest);
+    CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(4.0F));
+
+    definition.SurfaceGraph.MaximumWorldPositionDisplacementRadius = 0.0F;
+    const auto unbounded = Keire::ComposeMaterialGraphShader(definition, shaderTemplate);
+    CHECK(unbounded.MaximumWorldPositionDisplacementRadius == 0.0F);
+    CHECK(shaderTemplate.MaximumWorldPositionDisplacementRadius == doctest::Approx(0.25F));
 }
 
 TEST_CASE("Material Graph importer publishes composed shader variants and instance parameters")
@@ -628,7 +726,7 @@ TEST_CASE("Material Graph baking resolves an exact Shader Graph variant and publ
     CHECK(std::get<float>(material.Properties.at("Roughness")) == doctest::Approx(0.45F));
 
     const auto importer = Keire::CreateMaterialGraphAssetImporter();
-    CHECK(importer.Version == Keire::ShaderGraphGeneratedShaderVersion);
+    CHECK(importer.Version == Keire::ShaderGraphGeneratedShaderVersion + 1);
     const auto materialId = Keire::AssetId::Parse("a4000000-0000-4000-8000-000000000001");
     const auto variantOwner = Keire::AssetId::Parse("a4500000-0000-4000-8000-000000000001");
     auto shaderGraph = Keire::CreateDefaultShaderGraph();

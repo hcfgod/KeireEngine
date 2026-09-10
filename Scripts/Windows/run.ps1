@@ -29,6 +29,10 @@ $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $outputArchitecture = Get-ArchitectureOutputName $Architecture
+if (([int]$SmokeWindow.IsPresent + [int]$SmokeUi.IsPresent + [int]$SmokeProject.IsPresent +
+        [int]$SmokePlay.IsPresent) -gt 1) {
+    throw "Choose only one smoke mode."
+}
 if ($SmokePlayDeviceLoss -and -not $SmokePlay) {
     throw "-SmokePlayDeviceLoss requires -SmokePlay."
 }
@@ -57,9 +61,15 @@ try {
         $runtimeDirectory = Get-MSVCASanRuntimeDirectory $majorVersion $Architecture
         $env:PATH = "$runtimeDirectory;$env:PATH"
     }
-    if ($SmokeUi -and -not $Editor) {
-        Write-Host "==> Running project hub UI smoke $Configuration for $Architecture"
-        & $HubExe --smoke-ui
+    if ($SmokeUi) {
+        if ($Editor -or $ProjectPath) {
+            Write-Host "==> Running editor UI smoke $Configuration for $Architecture"
+            & $ClientExe --smoke-ui
+        }
+        else {
+            Write-Host "==> Running project hub UI smoke $Configuration for $Architecture"
+            & $HubExe --smoke-ui
+        }
     }
     elseif ($SmokeProject) {
         $smokeProjectPath = if ($ProjectPath) { $ProjectPath } else { Join-Path $Root "Samples\KeireSandbox" }

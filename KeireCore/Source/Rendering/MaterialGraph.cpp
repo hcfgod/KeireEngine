@@ -568,33 +568,17 @@ namespace Keire
                     if (connection.Input.Node == input && reachable.insert(connection.Output.Node).second)
                         pending.push_back(connection.Output.Node);
             }
+            std::vector<AssetId> removedNodes;
+            for (const auto& node : definition.Nodes)
+                if (!reachable.contains(node.Id))
+                    removedNodes.push_back(node.Id);
+            RemoveGraphAuthoringNodeReferences(definition.Authoring, removedNodes);
             std::erase_if(definition.Nodes, [&](const ShaderGraphNode& node) { return !reachable.contains(node.Id); });
             std::erase_if(
                 definition.Connections, [&](const ShaderGraphConnection& connection)
                 { return !reachable.contains(connection.Output.Node) || !reachable.contains(connection.Input.Node); });
         }
     } // namespace
-
-    MaterialPropertyValue DefaultMaterialGraphValue(const ShaderPropertyDefinition& property)
-    {
-        switch (property.Type)
-        {
-        case ShaderPropertyType::Scalar:
-            return property.DefaultValue.X;
-        case ShaderPropertyType::Vector2:
-            return Vector2{property.DefaultValue.X, property.DefaultValue.Y};
-        case ShaderPropertyType::Vector3:
-            return Vector3{property.DefaultValue.X, property.DefaultValue.Y, property.DefaultValue.Z};
-        case ShaderPropertyType::Vector4:
-            return property.DefaultValue;
-        case ShaderPropertyType::Color:
-            return Color{property.DefaultValue.X, property.DefaultValue.Y, property.DefaultValue.Z,
-                         property.DefaultValue.W};
-        case ShaderPropertyType::Texture2D:
-            return property.DefaultTexture;
-        }
-        throw std::invalid_argument("Shader property type cannot be represented by a Material Graph.");
-    }
 
     MaterialGraphDefinition CreateOpenPbrMaterial(const MaterialShadingModel shadingModel, const MaterialDomain domain,
                                                   const MaterialAuthoringMode authoringMode)
@@ -618,6 +602,13 @@ namespace Keire
             : shadingModel == MaterialShadingModel::Water || shadingModel == MaterialShadingModel::ThinTranslucent
                 ? ShaderGraphOutput::Transparent
                 : ShaderGraphOutput::Surface;
+        if (result.SurfaceGraph.Output == ShaderGraphOutput::Transparent ||
+            result.SurfaceGraph.Output == ShaderGraphOutput::Decal)
+            result.Surface.AlphaMode = MaterialAlphaMode::Blend;
+        else if (result.SurfaceGraph.Output == ShaderGraphOutput::Hair)
+            result.Surface.AlphaMode = MaterialAlphaMode::Mask;
+        result.Surface.DoubleSided = result.SurfaceGraph.Output == ShaderGraphOutput::Decal ||
+                                     result.SurfaceGraph.Output == ShaderGraphOutput::Hair;
         result.SurfaceGraph.Nodes.clear();
         auto master = CreateDefaultShaderGraph(result.SurfaceGraph.Output).Nodes.front();
         master.Name = "Material Output";
@@ -871,6 +862,9 @@ namespace Keire
                                   return true;
                               });
                 composed.Input = {templateMaster->Id, targetPin->Id};
+                if (targetPin->Name == "WorldPositionOffset")
+                    result.MaximumWorldPositionDisplacementRadius =
+                        definition.SurfaceGraph.MaximumWorldPositionDisplacementRadius;
             }
             if (!connectionIds.insert(composed.Id).second)
                 throw std::invalid_argument("Material Graph expression connection collides with its template.");
@@ -895,30 +889,6 @@ namespace Keire
     }
 
     MaterialGraphAsset::MaterialGraphAsset(MaterialGraphDefinition definition) : m_Definition(std::move(definition)) {}
-
-    std::size_t MaterialGraphAsset::ResidentBytes() const noexcept
-    {
-        std::size_t result = sizeof(*this) + m_Definition.Shader.Target.size();
-        for (const auto& [name, option] : m_Definition.Shader.Keywords)
-            result += name.size() + option.size();
-        for (const auto& property : m_Definition.Properties)
-            result += sizeof(property) + property.Name.size();
-        for (const auto& node : m_Definition.Nodes)
-            result += sizeof(node) + node.Name.size();
-        result += m_Definition.Connections.size() * sizeof(MaterialGraphConnection);
-        for (const auto& connection : m_Definition.Connections)
-            result += connection.RoutingPoints.capacity() * sizeof(Vector2);
-        result += m_Definition.SurfaceGraph.Nodes.size() * sizeof(ShaderGraphNode);
-        result += m_Definition.SurfaceGraph.Connections.size() * sizeof(ShaderGraphConnection);
-        for (const auto& connection : m_Definition.SurfaceGraph.Connections)
-            result += connection.RoutingPoints.capacity() * sizeof(Vector2);
-        for (const auto& annotation : m_Definition.Authoring.NodeAnnotations)
-            result += sizeof(annotation) + annotation.Text.capacity();
-        for (const auto& comment : m_Definition.Authoring.Comments)
-            result += sizeof(comment) + comment.Title.capacity() + comment.Description.capacity() +
-                      comment.Members.capacity() * sizeof(AssetId);
-        return result;
-    }
 
     Ref<MaterialGraphAsset> MaterialGraphAsset::Decode(const std::span<const std::byte> bytes)
     {
@@ -959,17 +929,6 @@ namespace Keire
     MaterialInstanceAsset::MaterialInstanceAsset(MaterialInstanceDefinition definition)
         : m_Definition(std::move(definition))
     {
-    }
-
-    std::size_t MaterialInstanceAsset::ResidentBytes() const noexcept
-    {
-        std::size_t result = sizeof(*this);
-        for (const auto& [name, value] : m_Definition.Properties)
-        {
-            (void)value;
-            result += name.size() + sizeof(MaterialPropertyValue);
-        }
-        return result;
     }
 
     Ref<MaterialInstanceAsset> MaterialInstanceAsset::Decode(const std::span<const std::byte> bytes)
@@ -1217,7 +1176,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Material";
-        result.Version = ShaderGraphGeneratedShaderVersion;
+        result.Version = ShaderGraphGeneratedShaderVersion + 1; // Includes material composition fixes.
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {std::string(MaterialAssetSourceExtension)};
         result.PreviousNames = {"Keire.MaterialGraph"};

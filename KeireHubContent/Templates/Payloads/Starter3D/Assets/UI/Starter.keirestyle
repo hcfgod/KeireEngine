@@ -30,7 +30,7 @@
   vertical-align: center;
 }
 
-.starter-copy { width: 100%; height: 32px; color: #a7bdd8ff; font-size: 18px; text-align: center; vertical-align: center; }
+.starter-copy { width: 100%; height: 56px; color: #a7bdd8ff; font-size: 18px; text-align: center; vertical-align: center; }
 .starter-actions { width: 100%; height: 48px; gap: 8px; flex-direction: row; justify-content: center; }
 Button.primary { width: 180px; height: 48px; background-color: #245f9eff; color: #ffffffff; font-size: 18px; border-radius: 8px; text-align: center; vertical-align: center; }
 Button.primary:hover { background-color: #3384d6ff; }

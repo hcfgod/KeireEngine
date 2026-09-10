@@ -330,15 +330,18 @@ const releaseStatus = previewDownloadMetadata?.releaseStatus;
 const activeCatalogVersion = releaseStatus?.activeCatalogVersion;
 const downloadsPage = await readFile(path.join(siteRoot, "Source", "pages", "downloads", "index.astro"), "utf8");
 for (const contract of [
-    `Kéire ${projectVersion} is the current Windows release target`,
-    "Package links are populated exclusively from the active, signed distribution catalog",
-    `Signed ${activeCatalogVersion} Windows and Linux x86-64 packages remain active`,
-    "a Windows-only activation will retain Linux 0.4.2 instead of hiding it",
-    "Every link shown here has an active catalog record and verified artifact hash",
-    "Use DEB on Ubuntu or Debian and RPM on Rocky Linux, Fedora, or openSUSE",
-    "The EXE is not yet Authenticode-signed",
-    "Hub 0.4.1 cannot launch an unsigned 0.4.2 installer through in-app Update",
-    "existing 0.4.1 users must download and run 0.4.2 manually",
+    'import { releaseStatus } from "../../lib/release-status"',
+    "releaseStatus.availableVersion",
+    "releaseStatus.sourceVersion",
+    'data-platform="windows"',
+    'data-platform="linux"',
+    'data-platform="macos"',
+    'src="/assets/downloads.js"',
+    "DEB for Ubuntu or Debian",
+    "RPM for Fedora, Rocky Linux, and openSUSE",
+    "The current EXE is not Authenticode-signed",
+    "Hub 0.4.1 users need to download and run 0.4.2 manually",
+    "Linux packages are validated independently of Windows",
 ]) {
     assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
 }
@@ -566,8 +569,8 @@ for (const horizon of ['id: "now"', 'id: "next"', 'id: "later"']) {
 assert(roadmapPage.includes("Windows + Linux x86-64") &&
     !roadmapModel.includes("current Windows technology preview") && !roadmapModel.includes("offline signing"),
     "The roadmap contains stale platform or Marketplace publication labels.");
-assert(roadmapPage.includes(`${projectVersion} current`) &&
-    roadmapPage.includes(`${activeCatalogVersion} sequence 17 active`) &&
+assert(roadmapPage.includes("releaseStatus.sourceVersion") &&
+    roadmapPage.includes("releaseStatus.availableVersion") &&
     roadmapModel.includes(`Kéire ${projectVersion} current source`) &&
     roadmapModel.includes("Catalog-verified Windows, DEB, and RPM packages"),
     "The roadmap must identify the current release and its active signed package boundary.");
@@ -589,18 +592,16 @@ const platformFooter = await readFile(path.join(siteRoot, "Source", "components"
 assert(platformFooter.includes('href="/roadmap/"') && platformFooter.includes('href="/changelog/"') &&
     platformFooter.includes('href="/community/"') && platformFooter.includes('href="/policies/"'),
     "Roadmap, changelog, Community, and policies must remain reachable from the global footer.");
-assert(platformFooter.includes(`Kéire ${projectVersion}`) &&
-    platformFooter.includes("current pre-1.0 source") &&
-    platformFooter.includes(releaseStatus.state === "active"
-        ? `${projectVersion} packages are active`
-        : `${projectVersion} Windows validation is in progress`) &&
-    platformFooter.includes(`signed ${activeCatalogVersion} packages remain active`),
+assert(platformFooter.includes("releaseStatus.sourceVersion") &&
+    platformFooter.includes("pre-1.0 source") &&
+    platformFooter.includes("releaseStatus.preparing") &&
+    platformFooter.includes("releaseStatus.availableVersion"),
     "The global footer must identify the current release and catalog-controlled availability.");
 const platformHome = await readFile(path.join(siteRoot, "Source", "pages", "index.astro"), "utf8");
-assert(platformHome.includes(`softwareVersion: "${projectVersion}"`) &&
-    platformHome.includes(`Kéire ${projectVersion} current source`) &&
-    platformHome.includes(`Check Hub ${projectVersion} availability`),
-    "Home metadata and calls to action must identify the current release.");
+assert(platformHome.includes("softwareVersion: releaseStatus.availableVersion") &&
+    platformHome.includes("releaseStatus.sourceVersion") &&
+    platformHome.includes('href="/downloads/"'),
+    "Home metadata must distinguish available software from current source.");
 const changelogIndex = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "index.astro"), "utf8");
 const changelogDetail = await readFile(path.join(siteRoot, "Source", "pages", "changelog", "[version].astro"), "utf8");
 const changelogModel = await readFile(path.join(siteRoot, "Source", "lib", "changelog.ts"), "utf8");
@@ -629,7 +630,7 @@ const marketplacePolicy = await readFile(
     path.join(siteRoot, "Source", "pages", "policies", "marketplace", "index.astro"), "utf8");
 const publisherPolicy = await readFile(
     path.join(siteRoot, "Source", "pages", "policies", "publisher", "index.astro"), "utf8");
-assert(marketplacePage.includes(`Products remain free for Kéire ${projectVersion}`) &&
+assert(marketplacePage.includes("Browse free assets, tools, and examples for Kéire") &&
     marketplacePolicy.includes(`Free products in Kéire ${projectVersion}`) &&
     marketplacePolicy.includes(`zero minor-unit price for Kéire ${projectVersion}`) &&
     publisherPolicy.includes(`Native plugins remain prohibited for Kéire ${projectVersion}`),

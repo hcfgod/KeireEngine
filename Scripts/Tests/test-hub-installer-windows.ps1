@@ -129,13 +129,14 @@ foreach ($contract in @('$installWorkerTarget', 'KEIRE_INSTALL_WORKER_INTERRUPT_
 }
 
 & (Join-Path $PSScriptRoot "prepare-install-worker-runtime-windows.ps1")
+$runtimeShell = (Get-Command pwsh.exe -CommandType Application -ErrorAction Stop).Source
 $workerRuntime = Join-Path $PSScriptRoot "test-install-worker-runtime-windows.ps1"
-& (Join-Path $PSHOME "pwsh.exe") -NoProfile -File $workerRuntime -Product hub
+& $runtimeShell -NoProfile -File $workerRuntime -Product hub
 if ($LASTEXITCODE -ne 0) {
     throw "The Hub install-worker process matrix failed."
 }
 $nsisRuntime = Join-Path $PSScriptRoot "test-nsis-worker-runtime-windows.ps1"
-& (Join-Path $PSHOME "pwsh.exe") -NoProfile -File $nsisRuntime -Product hub
+& $runtimeShell -NoProfile -File $nsisRuntime -Product hub
 if ($LASTEXITCODE -ne 0) {
     throw "The Hub worker-authority NSIS runtime matrix failed."
 }

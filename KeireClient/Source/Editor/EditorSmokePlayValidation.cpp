@@ -465,14 +465,16 @@ namespace KeireEditor
         void CheckDeadline(Keire::Application& application, const Keire::Ref<Keire::SceneRuntimeWorld>& world)
         {
             const auto now = std::chrono::steady_clock::now();
-            if (now - ValidationStartedAt > std::chrono::minutes(3))
+            if (now - ValidationStartedAt > std::chrono::minutes(4))
                 Fail(application, world, "Editor Play additive validation exceeded its total deadline");
 
-            const auto phaseDeadline = Current == Phase::WaitForPlay ? std::chrono::seconds(180)
+            // Cold native pipeline creation can exceed a minute before the first occlusion frame retires.
+            // Keep interaction deadlines short while allowing startup and GPU VFX warm-up their own budget.
+            const auto phaseDeadline = Current == Phase::WaitForPlay || Current == Phase::ObserveOcclusionGameView
+                                           ? std::chrono::seconds(180)
                                        : Current == Phase::WaitForAdditiveLoad || Current == Phase::WaitForInitialUi ||
                                                Current == Phase::WaitForReload || Current == Phase::WaitForReloadedUi ||
-                                               Current == Phase::WaitForOcclusionLoad ||
-                                               Current == Phase::ObserveOcclusionGameView
+                                               Current == Phase::WaitForOcclusionLoad
                                            ? std::chrono::seconds(60)
                                            : std::chrono::seconds(15);
             if (now - PhaseStartedAt > phaseDeadline)

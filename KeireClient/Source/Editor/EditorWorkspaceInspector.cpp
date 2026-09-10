@@ -437,7 +437,7 @@ void EditorWorkspaceLayer::RenameInspectorAsset(const Keire::AssetId asset, cons
         throw std::invalid_argument("Cannot rename an unknown asset.");
     MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
                         .Asset = asset,
-                        .Destination = record->RelativePath.parent_path() / std::string(name)},
+                        .Destination = record->RelativePath.parent_path() / Keire::Detail::PathFromUtf8(name)},
                        {.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
                         .Asset = asset,
                         .Destination = record->RelativePath},

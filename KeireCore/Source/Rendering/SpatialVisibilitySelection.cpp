@@ -110,6 +110,12 @@ namespace Keire::RenderBackend
         SpatialDrawSelectionResult result;
         result.MaskUsable = CanConsumeSpatialVisibilityMask(input.VisibilityMask, input.ExpectedOwnership,
                                                             input.ExpectedVisibilityCount);
+        const auto rangeFitsMask = [&](const std::uint32_t first, const std::uint32_t count)
+        { return static_cast<std::uint64_t>(first) + count <= input.VisibilityMask.Values.size(); };
+        result.MaskUsable =
+            result.MaskUsable &&
+            rangeFitsMask(input.Contribution.ReflectionProbeFirst, input.Contribution.ReflectionProbeCount) &&
+            rangeFitsMask(input.Contribution.LightProbeVolumeFirst, input.Contribution.LightProbeVolumeCount);
         if (result.MaskUsable)
         {
             result.MaskUsable = std::ranges::all_of(input.ReflectionProbes,

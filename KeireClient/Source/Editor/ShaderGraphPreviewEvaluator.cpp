@@ -155,8 +155,12 @@ namespace KeireEditor::ShaderGraphPreviewInternal
             if (texture.Texture)
                 if (const auto sample = Detail::SampleShaderGraphPreviewTexture(m_Textures, texture.Texture, uv))
                     return {.Data = *sample, .Type = Keire::ShaderGraphValueType::Color};
-            const bool alternate =
-                ((static_cast<int>(std::floor(uv.X * 10.0F)) + static_cast<int>(std::floor(uv.Y * 10.0F))) & 1) != 0;
+            const auto alternateAxis = [](const float coordinate)
+            {
+                return std::isfinite(coordinate) &&
+                       std::fmod(std::floor(static_cast<double>(coordinate) * 10.0), 2.0) != 0.0;
+            };
+            const bool alternate = alternateAxis(uv.X) != alternateAxis(uv.Y);
             const float checker = alternate ? 0.58F : 0.88F;
             Keire::Vector4 sample{checker, checker, checker, 1.0F};
             switch (texture.TextureSemantic)

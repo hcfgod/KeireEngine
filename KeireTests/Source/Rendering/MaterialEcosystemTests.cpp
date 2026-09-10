@@ -61,12 +61,24 @@ TEST_CASE("function calls expand deterministically and compile through the norma
 {
     const auto functionId = Keire::AssetId::Parse("f15d11a7-b04e-424a-b5c2-31df2002092e");
     const auto function = Keire::CreateDefaultGraphFunction(Keire::ShaderGraphPurpose::MaterialFunction);
-    const auto graph = CallFunction(functionId, function.Body);
+    auto graph = CallFunction(functionId, function.Body);
+    graph.Authoring.NodeAnnotations.push_back({graph.Nodes.back().Id, "Reusable surface"});
+    graph.Authoring.NodeAnnotations.push_back({graph.Nodes.front().Id, "Output"});
+    Keire::GraphComment comment;
+    comment.Id = Keire::AssetId::Generate();
+    comment.Members = {graph.Nodes.back().Id, graph.Nodes.front().Id};
+    graph.Authoring.Comments.push_back(comment);
+    const auto source = graph;
     const auto resolve = [&](const Keire::AssetId asset) -> std::optional<Keire::ShaderGraphDefinition>
     { return asset == functionId ? std::optional(function.Body) : std::nullopt; };
 
     const auto first = Keire::ExpandShaderGraphFunctions(graph, resolve);
     const auto second = Keire::ExpandShaderGraphFunctions(graph, resolve);
+    CHECK(graph == source);
+    REQUIRE(first.Authoring.NodeAnnotations.size() == 1);
+    CHECK(first.Authoring.NodeAnnotations.front().Node == graph.Nodes.front().Id);
+    REQUIRE(first.Authoring.Comments.size() == 1);
+    CHECK(first.Authoring.Comments.front().Members == std::vector{graph.Nodes.front().Id});
     CHECK(Keire::ShaderGraphAsset::EncodeSource(first) == Keire::ShaderGraphAsset::EncodeSource(second));
     CHECK(Keire::ShaderGraphReferencedAssets(first).empty());
     CHECK(std::ranges::none_of(first.Nodes,

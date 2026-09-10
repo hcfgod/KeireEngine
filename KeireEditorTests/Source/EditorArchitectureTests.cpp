@@ -835,13 +835,14 @@ TEST_CASE("scene document owns atomic save and recovery lifecycle")
 TEST_CASE("scene document keeps the source path name authoritative after discarding dirty edits")
 {
     const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000067");
-    const auto source = std::filesystem::path("Assets/Scenes/RenamedScene.keirescene");
+    const std::string expectedName = "RenamedScene-Caf\xc3\xa9";
+    const auto source = Keire::Detail::PathFromUtf8("Assets/Scenes/" + expectedName + ".keirescene");
     const auto staleDefinition = Keire::SceneAsset::EmptyDefinition("OriginalScene");
     auto scene = Keire::CreateRef<Keire::Scene>(asset, staleDefinition);
     scene->MarkSaved();
     KeireEditor::SceneDocument document;
     document.Open(scene, asset, source);
-    CHECK(document.EditingScene()->Name() == "RenamedScene");
+    CHECK(document.EditingScene()->Name() == expectedName);
     CHECK_FALSE(document.Dirty());
     (void)document.CreateEntity("Unsaved unrelated edit");
     CHECK(document.Dirty());
@@ -849,7 +850,7 @@ TEST_CASE("scene document keeps the source path name authoritative after discard
     auto reopened = Keire::CreateRef<Keire::Scene>(asset, staleDefinition);
     reopened->MarkSaved();
     document.Open(reopened, asset, source);
-    CHECK(document.EditingScene()->Name() == "RenamedScene");
+    CHECK(document.EditingScene()->Name() == expectedName);
     CHECK_FALSE(document.Dirty());
     document.Close();
 }

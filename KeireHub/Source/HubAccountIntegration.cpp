@@ -140,6 +140,7 @@ namespace KeireHub
     HubStatus HubAccountIntegration::Start(const std::filesystem::path& configurationPath,
                                            const std::filesystem::path& sessionPath, const HubSettings& settings)
     {
+        Stop();
         m_ConfigurationPath = configurationPath;
         m_SessionPath = sessionPath;
         m_MarketplaceCacheRoot = Keire::GetPreferenceDirectory() / "Hub" / "MarketplacePackages";
@@ -147,11 +148,16 @@ namespace KeireHub
         m_LeasedSignedIn.reset();
         m_NextMarketplaceLeaseRefresh = 0;
         m_RefreshPending = false;
-        return m_Workflow.Start(m_ConfigurationPath, m_SessionPath, settings);
+        auto status = m_Workflow.Start(m_ConfigurationPath, m_SessionPath, settings);
+        m_Started = static_cast<bool>(status);
+        return status;
     }
 
     void HubAccountIntegration::Stop() noexcept
     {
+        m_Started = false;
+        m_RefreshPending = false;
+        m_PendingMarketplaceProduct.clear();
         try
         {
             if (!m_MarketplaceCacheRoot.empty())
@@ -162,6 +168,7 @@ namespace KeireHub
         }
         m_Marketplace.Stop();
         m_Workflow.Stop();
+        m_MarketplaceCacheRoot.clear();
     }
 
     void HubAccountIntegration::RequestRefresh() noexcept { m_RefreshPending = true; }
@@ -170,6 +177,8 @@ namespace KeireHub
                                           const std::filesystem::path& executable,
                                           const HubDistributionWorkflow* distribution)
     {
+        if (!m_Started)
+            return HubStatus::Success();
         if (m_RefreshPending && !m_Workflow.Snapshot()->Busy)
         {
             auto status = m_Workflow.Start(m_ConfigurationPath, m_SessionPath, settings);

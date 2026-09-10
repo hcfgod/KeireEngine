@@ -1,12 +1,20 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import ProductMedia from "../../components/ProductMedia.astro";
+import ShowcaseFilm from "../../components/ShowcaseFilm.astro";
 export const prerender = true;
+const frames = [
+    { name: "arrival", title: "A place to arrive.", alt: "The outpost courtyard, barracks, and watchtower.", text: "A compact environment built from modular models, with a clear route through the scene." },
+    { name: "materials", title: "Make the surface your own.", alt: "Material variations beside the outpost workshop.", text: "Paired Shader and Material Graphs bring different surface treatments into the same lighting." },
+    { name: "vehicle", title: "Details that belong together.", alt: "A vehicle displayed in the outpost yard.", text: "Model geometry, atlas textures, and light work together in a scene you can walk through." },
+    { name: "effects", title: "Give a moment some life.", alt: "An effect demonstration in the outpost.", text: "Scene effects are authored in Kéire and run alongside the environment." },
+    { name: "editor", title: "The scene behind the shot.", alt: "The Outpost open in the Kéire editor.", text: "The same project is editable in Kéire. Its objects, materials, and scripts remain available to inspect." },
+    { name: "graph", title: "Follow an idea through the graph.", alt: "A Kéire graph used by the showcase.", text: "The authoring tools expose how the result is built, from graph inputs to the surface in the scene." },
+];
 ---
-<PlatformLayout title="Showcase" description="See the Kéire Sandbox, shader and material graphs, VFX, gameplay, and production sample projects.">
-    <section class="platform-section"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">Built with current systems</p><h1>Samples that explain the pipeline.</h1></div><p>The shipped Sandbox is both a visual test scene and an honest reference project: basic assets first, advanced graphs and effects after the foundations are clear.</p></div><div class="editorial-grid">
-        <article class="editorial-panel"><span class="editorial-panel__index">S</span><h3>Kéire Sandbox</h3><p>A complete project with organized scenes, prefabs, scripts, input, audio, materials, shaders, VFX, and reproducible validation content.</p></article>
-        <article class="editorial-panel"><span class="editorial-panel__index">G</span><h3>Shader + Material Lab</h3><p>Custom shader graphs define reusable shading interfaces; material graphs bind textures, values, functions, and instances to them.</p></article>
-        <article class="editorial-panel"><span class="editorial-panel__index">V</span><h3>VFX Starter Effects</h3><p>CPU and GPU effects demonstrate spawn contexts, events, attributes, outputs, bounds, diagnostics, and performance budgets.</p></article>
-        <article class="editorial-panel"><span class="editorial-panel__index">C#</span><h3>Gameplay foundations</h3><p>Small managed behaviours show lifecycle, serialized fields, component access, input, events, reloading, and player builds.</p></article>
-    </div></div></section>
+<PlatformLayout title="Showcase" description="Explore Kéire Outpost: a real scene built with Kéire, with a guided camera tour, material experiments, and visual effects.">
+    <section class="platform-section platform-shell"><div class="section-heading" data-reveal><div><p class="eyebrow">Made with Kéire</p><h1>Welcome to<br />the Outpost.</h1></div><p>A small world with a lot going on. Explore the scene, look closer at the details, and see the tools behind the final frame.</p></div><ProductMedia name="arrival" alt="The Outpost courtyard, barracks, aircraft, and tank, rendered in Kéire." priority /></section>
+    <section class="platform-section platform-section--line"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">A closer look</p><h2>From the whole world<br />to the smallest detail.</h2></div><p>These images show Kéire’s renderer and editor. The outpost uses owned POLYGON War art alongside original scene composition and Kéire sample graphs and effects.</p></div><div class="showcase-gallery">{frames.map(frame => <article data-reveal><ProductMedia name={frame.name} alt={frame.alt} /><h3>{frame.title}</h3><p>{frame.text}</p></article>)}</div></div></section>
+    <section class="platform-section platform-shell" id="tour"><div class="section-heading"><div><p class="eyebrow">Take a short tour</p><h2>See the scene<br />in motion.</h2></div><p>A 55-second, silent tour through the Outpost. Press Play when you’re ready to look around.</p></div><ShowcaseFilm /></section>
+    <section class="platform-section platform-shell"><div class="open-development"><div><p class="eyebrow">Start your own experiment</p><h2>What would<br />you make here?</h2></div><div><p>The Outpost is a private demonstration project. Kéire’s included Sandbox gives you a starting point with editable graphs, effects, and gameplay examples.</p><div class="actions"><a class="button" href="/downloads/">Get Kéire Hub ↗</a><a class="text-action" href="/docs/reference/getting-started/">Open the getting-started guide →</a></div></div></div></section>
 </PlatformLayout>

@@ -80,6 +80,7 @@ namespace KeireEditor
         AssetOperationFollowUp FollowUp = AssetOperationFollowUp::None;
         std::string UndoName;
         std::optional<Keire::SceneDefinition> SceneSnapshot;
+        std::optional<Keire::SceneDefinition> SourceSceneSnapshot;
         Keire::AssetId SourceSceneAsset;
         std::filesystem::path SceneSource;
         std::shared_ptr<AssetMutationUndoState> MutationUndo;
@@ -89,6 +90,9 @@ namespace KeireEditor
         std::filesystem::path ManagedSourceRoot;
         Keire::AssetId ParentSource;
         std::string Reason;
+
+        [[nodiscard]] bool CanAdoptSceneCopy(Keire::AssetId currentAsset,
+                                             const Keire::SceneDefinition& currentDefinition) const;
     };
 
     struct AssetOperationCompletion
@@ -128,6 +132,8 @@ namespace KeireEditor
                                            std::vector<AssetCreationAuxiliarySource> auxiliarySources);
         void QueueExtractMaterials(Keire::AssetId model, std::filesystem::path relativeDirectory,
                                    AssetOperationContext context = {});
+        /// Named duplicate/create/trash requests retain undo state until their result supplies the inverse identity.
+        /// Other named mutations and undo/redo phases require an explicit MutationUndo state.
         void QueueMutation(Keire::Detail::AssetWorkerMutation mutation, AssetOperationContext context = {});
         void QueueCook(Keire::AssetBuildProfile profile, std::filesystem::path output);
         void QueueLightingBake(Keire::AssetId scene, bool force, AssetOperationContext context = {});

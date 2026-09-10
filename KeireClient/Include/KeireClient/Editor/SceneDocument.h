@@ -105,6 +105,7 @@ namespace KeireEditor
         [[nodiscard]] Keire::Ref<Keire::SaveFileDialogOperation> TakeSaveDialog() noexcept;
         void SetUndoContext(Keire::Ref<Keire::UndoContext> undo) noexcept;
         void SetIdentity(Keire::AssetId asset, std::filesystem::path source);
+        /// Changing the recovery target resets its timer and detects snapshots belonging to the new target.
         void SetRecoveryPath(std::filesystem::path path);
         void SetStatus(std::string status);
         void Save();

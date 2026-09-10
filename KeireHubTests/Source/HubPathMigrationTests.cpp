@@ -4,7 +4,40 @@
 
 #include <doctest/doctest.h>
 
+#include <filesystem>
+#include <string>
+
 using namespace KeireHub;
+
+TEST_CASE("Hub preference migration preserves custom roots without legacy path components")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto preference = temporary.Path() / "CustomPreferences";
+    const auto settings = preference / "Hub" / "settings.json";
+    KeireHubTests::WriteText(settings, "existing preferences");
+
+    REQUIRE(MigrateLegacyHubPreferenceRoot(preference));
+    CHECK(KeireHubTests::ReadText(settings) == "existing preferences");
+    REQUIRE(MigrateLegacyHubPreferenceRoot(preference));
+    CHECK(KeireHubTests::ReadText(settings) == "existing preferences");
+}
+
+TEST_CASE("Hub preference migration reports Unicode conflicts while preserving both directories")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto canonical = temporary.Path() / std::filesystem::path(u8"Kéire");
+    const auto legacy = temporary.Path() / std::filesystem::path(u8"K\u00c3\u00a9ire");
+    const auto filename = std::filesystem::path(u8"設定.json");
+    KeireHubTests::WriteText(canonical / filename, "current preferences");
+    KeireHubTests::WriteText(legacy / filename, "legacy preferences");
+
+    const auto migrated = MigrateLegacyHubPreferenceRoot(canonical);
+    REQUIRE_FALSE(migrated);
+    CHECK(migrated.Error().Code == HubErrorCode::MigrationFailed);
+    CHECK(migrated.Error().AffectedItem == "設定.json");
+    CHECK(KeireHubTests::ReadText(canonical / filename) == "current preferences");
+    CHECK(KeireHubTests::ReadText(legacy / filename) == "legacy preferences");
+}
 
 TEST_CASE("Hub migrates legacy mojibake preference and configured storage roots")
 {

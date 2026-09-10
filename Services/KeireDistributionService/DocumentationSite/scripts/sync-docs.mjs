@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { renderMermaidSVG } from "beautiful-mermaid";
 
 import { allDocSources, docGroups, sourcePathToSlug } from "../doc-library.mjs";
+import { syncShowcaseMedia } from "./showcase-media.mjs";
 
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryRoot = path.resolve(siteRoot, "..", "..", "..");
@@ -202,6 +203,7 @@ function destinationFor(sourcePath) {
 
 async function main() {
     assertGeneratedDestination();
+    await syncShowcaseMedia(siteRoot);
     const actualSources = await collectMarkdown(sourceRoot);
     const expectedSources = [...allDocSources].sort((left, right) => left.localeCompare(right));
     if (JSON.stringify(actualSources) !== JSON.stringify(expectedSources)) {

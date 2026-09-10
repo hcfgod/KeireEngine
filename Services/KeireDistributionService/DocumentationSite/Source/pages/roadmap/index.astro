@@ -1,6 +1,7 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import { roadmapHorizons } from "../../lib/roadmap";
+import { releaseStatus } from "../../lib/release-status";
 
 export const prerender = true;
 
@@ -18,8 +19,8 @@ const structuredData = {
         <div class="platform-shell roadmap-hero__grid">
             <div class="roadmap-hero__copy">
                 <p class="eyebrow">Product direction</p>
-                <h1>The path from Kéire 0.4.4 to a production-proven engine.</h1>
-                <p class="lead">Kéire is building outward from a reliable engine, Editor, and Hub foundation. This roadmap describes the outcomes we are pursuing—not fictional precision or a percentage masquerading as readiness.</p>
+                <h1>See where Kéire is heading.</h1>
+                <p class="lead">We’re improving the engine, Editor, and Hub around the work of making a game. Here’s what we’re working on now, what comes next, and what still needs proving.</p>
                 <div class="actions">
                     <a class="button" href="/changelog/0.4.4/">Review the 0.4.4 candidate</a>
                     <a class="button button--secondary" href="/docs/reference/production-readiness-review/">Read the production review</a>
@@ -27,11 +28,11 @@ const structuredData = {
             </div>
             <aside class="roadmap-current" aria-label="Current Kéire release direction">
                 <span>Current focus</span>
-                <strong>Validate the 0.4.4 Windows hardening candidate without relabeling Linux evidence.</strong>
+                <strong>Make everyday development more reliable, with each platform tested before release.</strong>
                 <dl>
-                    <div><dt>Source</dt><dd>0.4.4 current</dd></div>
-                    <div><dt>Packages</dt><dd>0.4.2 sequence 17 active</dd></div>
-                    <div><dt>Public platforms</dt><dd>Windows + Linux x86-64 at 0.4.2</dd></div>
+                    <div><dt>Source</dt><dd>{releaseStatus.sourceVersion}</dd></div>
+                    <div><dt>Packages</dt><dd>{releaseStatus.availableVersion}</dd></div>
+                    <div><dt>Public platforms</dt><dd>Windows + Linux x86-64</dd></div>
                     <div><dt>Priority</dt><dd>Reliability and evidence</dd></div>
                 </dl>
             </aside>

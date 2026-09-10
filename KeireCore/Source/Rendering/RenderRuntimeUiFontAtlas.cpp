@@ -110,6 +110,10 @@ namespace Keire::RenderBackend
             {
                 const ImFontGlyph* glyph =
                     baked != nullptr ? baked->FindGlyphNoFallback(static_cast<ImWchar>(character)) : nullptr;
+                // Latin-1 contains control codes and optional font characters. Keep their replacement explicit
+                // while preserving the embedded font's accented letters and punctuation.
+                if (glyph == nullptr && character > 126U && baked != nullptr)
+                    glyph = baked->FindGlyphNoFallback(static_cast<ImWchar>('?'));
                 if (glyph == nullptr)
                     throw std::runtime_error("The embedded runtime UI fallback font omitted a required ASCII glyph.");
 
@@ -134,8 +138,7 @@ namespace Keire::RenderBackend
     const RuntimeUiGlyph& RuntimeUiFallbackGlyph(const std::uint8_t character) noexcept
     {
         constexpr auto fallback = static_cast<std::uint8_t>('?');
-        const auto resolved =
-            character >= RuntimeUiFirstFallbackGlyph && character <= RuntimeUiLastFallbackGlyph ? character : fallback;
+        const auto resolved = character >= RuntimeUiFirstFallbackGlyph ? character : fallback;
         return RuntimeUiFallbackGlyphAtlas()->Glyphs[resolved - RuntimeUiFirstFallbackGlyph];
     }
 

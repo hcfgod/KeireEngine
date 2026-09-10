@@ -840,6 +840,8 @@ namespace Keire
                 if (found == types.end())
                     throw std::invalid_argument("Shader property type is invalid: " + typeName);
                 ShaderPropertyDefinition definition;
+                if (property.contains("id"))
+                    definition.Id = AssetId::Parse(property.at("id").get<std::string>());
                 definition.Name = property.at("name").get<std::string>();
                 definition.Type = found->second;
                 definition.DisplayName = property.value("displayName", std::string{});
@@ -1258,7 +1260,7 @@ namespace Keire
             throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 7;
+        result.Version = 8;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =

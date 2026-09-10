@@ -92,6 +92,8 @@ namespace KeireEditor
                                                        const Keire::ShaderGraphCompilation& compilation)
         {
             if (previousDefinition.Target != definition.Target || previousDefinition.Output != definition.Output ||
+                previousDefinition.MaximumWorldPositionDisplacementRadius !=
+                    definition.MaximumWorldPositionDisplacementRadius ||
                 previous.Variants.size() != compilation.Variants.size() ||
                 previous.Properties.size() != compilation.Properties.size())
             {
@@ -108,7 +110,8 @@ namespace KeireEditor
             {
                 const auto& left = previous.Properties[index];
                 const auto& right = compilation.Properties[index];
-                if (left.Name != right.Name || left.Type != right.Type || left.TextureSemantic != right.TextureSemantic)
+                if (left.Id != right.Id || left.Name != right.Name || left.Type != right.Type ||
+                    left.TextureSemantic != right.TextureSemantic)
                     return false;
             }
             return true;

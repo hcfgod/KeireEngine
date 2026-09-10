@@ -1,86 +1,49 @@
 ---
 import PlatformLayout from "../layouts/PlatformLayout.astro";
-
+import ProductMedia from "../components/ProductMedia.astro";
+import { releaseStatus } from "../lib/release-status";
 export const prerender = true;
-
 const structuredData = [
-    {
-        "@context": "https://schema.org",
-        "@type": "Organization",
-        name: "Kéire Engine",
-        url: "https://keireengine.duckdns.org/",
-        logo: "https://keireengine.duckdns.org/assets/keire.png",
-        sameAs: ["https://github.com/hcfgod/KeireEngine"],
-    },
-    {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        name: "Kéire Engine",
-        applicationCategory: "DeveloperApplication",
-        operatingSystem: "Windows, Linux",
-        softwareVersion: "0.4.4",
-        offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-    },
+    { "@context": "https://schema.org", "@type": "Organization", name: "Kéire Engine",
+      url: "https://keireengine.duckdns.org/", logo: "https://keireengine.duckdns.org/assets/keire.png",
+      sameAs: ["https://github.com/hcfgod/KeireEngine"] },
+    { "@context": "https://schema.org", "@type": "SoftwareApplication", name: "Kéire Engine",
+      applicationCategory: "DeveloperApplication", operatingSystem: "Windows, Linux",
+      softwareVersion: releaseStatus.availableVersion, offers: { "@type": "Offer", price: "0", priceCurrency: "USD" } },
 ];
 ---
-
-<PlatformLayout title="Kéire Engine"
-    description="Kéire is an open C++20 game engine with a project-first Hub, deterministic content systems, and production-minded authoring tools."
-    structuredData={structuredData}>
-    <section class="hero-platform">
-        <img class="hero-platform__art" src="/assets/hero-cinematic.png" width="1536" height="1024" alt=""
-             fetchpriority="high" decoding="async" />
-        <div class="platform-shell">
-            <div class="hero-platform__copy" data-reveal>
-                <p class="eyebrow">Open game technology · Kéire 0.4.4 current source</p>
-                <h1 class="display-title">Build worlds.<br /><span>Own the system.</span></h1>
-                <p class="lead">A transparent engine, focused editor, and project-first Hub for developers who want modern workflows without surrendering control of their pipeline.</p>
-                <div class="actions">
-                    <a class="button" href="/downloads/">Download Kéire Hub</a>
-                    <a class="button button--secondary" href="/docs/reference/getting-started/">Start building</a>
-                    <a class="button button--quiet" href="https://github.com/hcfgod/KeireEngine">Inspect the source ↗</a>
-                </div>
-            </div>
-            <div class="evidence-strip" aria-label="Current release evidence" data-reveal style="--reveal-index: 2">
-                <div><strong>C++20 foundations</strong><span>Explicit ownership and lifecycle</span></div>
-                <div><strong>Windows + Linux</strong><span>Validated x86-64 editor targets</span></div>
-                <div><strong>30.83 → 4.99 ms</strong><span>Distribution Showcase average frame</span></div>
-                <div><strong>MIT licensed</strong><span>Open development, pre-1.0</span></div>
-            </div>
+<PlatformLayout title="Kéire Engine" description="Make a world of your own with Kéire: an open-source game engine, visual editor, and C# scripting. Start with Kéire Hub." structuredData={structuredData}>
+    <section class="outpost-hero platform-shell">
+        <div class="outpost-hero__heading" data-reveal>
+            <div><p class="eyebrow"><span class="status-dot"></span> Open source. Yours to build with.</p>
+                <h1>Make a world<br />of <em>your own.</em></h1></div>
+            <div class="outpost-hero__intro"><p>A scene, a character, an idea you can’t leave alone. Bring it to life with Kéire’s visual editor, C# scripting, and open C++ engine.</p>
+                <div class="actions"><a class="button" href="/downloads/">Download Kéire Hub <span aria-hidden="true">↗</span></a><a class="text-action" href="/docs/reference/getting-started/">Get started <span aria-hidden="true">→</span></a></div>
+                <p class="hero-footnote">Free &amp; MIT licensed · Windows and Linux · Pre-1.0</p></div>
+        </div>
+        <a class="outpost-hero__scene" href="/showcase/" aria-label="Explore the Kéire Outpost showcase">
+            <ProductMedia name="arrival" alt="A stylized outpost with barracks, a watchtower, and a vehicle yard, rendered in Kéire." priority />
+            <div class="scene-caption"><span><small>Built with Kéire</small><strong>The Outpost</strong></span><span class="scene-caption__link">Explore the scene <span aria-hidden="true">↗</span></span></div>
+        </a>
+        <div class="product-facts"><span>Visual scene editing</span><span>Shader &amp; Material Graphs</span><span>C# gameplay</span><span>Source you can explore</span></div>
+    </section>
+    <section class="platform-section platform-shell">
+        <div class="section-heading" data-reveal><div><p class="eyebrow">From the first idea</p><h2>A little less setup.<br />A lot more making.</h2></div><p>Keep your projects, tools, and creative work connected. Start small, press Play often, and grow from there.</p></div>
+        <div class="making-steps">
+            <article data-reveal><span>01 / Get ready</span><h3>A home for your projects.</h3><p>Install an Editor, choose a starting point, and open your project from Kéire Hub.</p><a href="/downloads/">Meet Kéire Hub →</a></article>
+            <article data-reveal><span>02 / Make it yours</span><h3>Build with the result in view.</h3><p>Arrange a scene, shape a material, and add behavior with C#. Your tools stay close to your work.</p><a href="/features/">Explore the editor →</a></article>
+            <article data-reveal><span>03 / Bring it to life</span><h3>Press Play. Keep creating.</h3><p>Try your ideas in the editor, follow the diagnostics, and build a standalone player when you’re ready.</p><a href="/docs/reference/manual/player-builds-and-packages/">Build a player →</a></article>
         </div>
     </section>
-
     <section class="platform-section platform-section--line">
-        <div class="platform-shell">
-            <div class="section-heading" data-reveal>
-                <div><p class="eyebrow">One deliberate workflow</p><h2>From a blank project to a validated player.</h2></div>
-                <p>Kéire connects installation, authoring, simulation, content cooking, packaging, and diagnosis through boundaries you can inspect and reason about.</p>
-            </div>
-            <div class="editorial-grid">
-                <article class="editorial-panel" data-reveal style="--reveal-index: 1"><span class="editorial-panel__index">01</span><h3>Hub owns projects and toolchains.</h3><p>Keep editor versions independent, resolve compatible components, and observe resumable tasks without mixing engine binaries into project content.</p></article>
-                <article class="editorial-panel" data-reveal style="--reveal-index: 2"><span class="editorial-panel__index">02</span><h3>Author with live context.</h3><p>Scenes, shaders, materials, animation, audio, input, C#, and VFX stay connected to diagnostics and recoverable state.</p></article>
-                <article class="editorial-panel" data-reveal style="--reveal-index: 3"><span class="editorial-panel__index">03</span><h3>Ship deterministic content.</h3><p>Typed identities, stable manifests, explicit package sources, and bounded archives make release output inspectable.</p></article>
-                <article class="editorial-panel" data-reveal style="--reveal-index: 4"><span class="editorial-panel__index">04</span><h3>Keep last-good state.</h3><p>Transactional imports, project recovery journals, compilation diagnostics, and safe upgrades are product behavior—not cleanup work postponed until launch.</p></article>
-            </div>
-        </div>
+        <div class="platform-shell"><div class="section-heading" data-reveal><div><p class="eyebrow">Inside the Outpost</p><h2>One small world.<br />Room to experiment.</h2></div><p>The Outpost brings models, materials, lighting, and effects into one Kéire project. Take a closer look at how the scene comes together.</p></div><ProductMedia name="vehicle" alt="The Outpost tank with textured tracks, with the workshop and watchtower behind it." caption="Models, materials, and lighting in the same Kéire scene." /><a class="text-action film-followup" href="/showcase/">Explore the images and tour →</a></div>
     </section>
-
-    <section class="platform-section">
-        <div class="platform-shell">
-            <div class="section-heading"><div><p class="eyebrow">How work moves</p><h2>Clear owners at every boundary.</h2></div><p>The Hub, Editor, asset pipeline, and runtime collaborate through versioned contracts instead of hidden shared state.</p></div>
-            <div class="workflow-line">
-                <article><small>01 / Discover</small><h3>Choose the right Editor</h3><p>Hub resolves a verified release and keeps project compatibility visible.</p></article>
-                <article><small>02 / Author</small><h3>Build with immediate feedback</h3><p>Focused tools expose validation where the graph, asset, or scene failed.</p></article>
-                <article><small>03 / Validate</small><h3>Cook exact inputs</h3><p>Build fingerprints bind assets, scripts, packages, platform, and renderer capability.</p></article>
-                <article><small>04 / Recover</small><h3>Fail without corruption</h3><p>Atomic publication and journals preserve the last state known to be valid.</p></article>
-            </div>
-        </div>
+    <section class="platform-section platform-shell feature-story" data-reveal>
+        <ProductMedia name="materials" alt="Material examples in the Outpost workshop." caption="Material experiments, in the same scene." />
+        <div><p class="eyebrow">Tools for the details</p><h2>Find the look.<br />Make it move.</h2><p>Build reusable shaders and materials with graphs. Add animation, layer in VFX, and connect the moment to your gameplay code.</p><a class="button button--secondary" href="/features/">Explore the tools ↗</a></div>
     </section>
-
-    <section class="platform-section platform-section--line">
-        <div class="platform-shell cta-band">
-            <div><p class="eyebrow">Build in the open</p><h2>Kéire is substantial, early, and honest about both.</h2></div>
-            <div class="actions"><a class="button" href="/downloads/">Check Hub 0.4.4 availability</a><a class="button button--secondary" href="/roadmap/">Read the roadmap</a></div>
-        </div>
-    </section>
+    <section class="platform-section platform-section--line"><div class="platform-shell open-development" data-reveal>
+        <div><p class="eyebrow">An engine you can get to know</p><h2>Made in the open.<br />Still taking shape.</h2></div>
+        <div><p>Kéire is an independent, pre-1.0 engine. You can read the code, follow what’s changing, and help make it better. Check the release notes and current limits before choosing it for your project.</p><p class="release-note">Source {releaseStatus.sourceVersion} · Available packages {releaseStatus.availableVersion}</p><div class="actions"><a class="text-action" href="/roadmap/">Follow the roadmap →</a><a class="text-action" href="https://github.com/hcfgod/KeireEngine">Explore the source ↗</a></div></div>
+    </div></section>
 </PlatformLayout>

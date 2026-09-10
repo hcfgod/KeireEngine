@@ -18,6 +18,7 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <exception>
 #include <filesystem>
@@ -30,6 +31,96 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+TEST_CASE("material shader changes retain only overrides valid for the replacement shader")
+{
+    const auto firstShader = Keire::AssetId::Generate();
+    const auto nextShader = Keire::AssetId::Generate();
+    Keire::ShaderAssetDefinition first;
+    first.Source = "Assets/Shaders/First.hlsl";
+    first.Properties = {{"ChangedType", Keire::ShaderPropertyType::Scalar},
+                        {"NarrowerRange", Keire::ShaderPropertyType::Scalar},
+                        {"Unchanged", Keire::ShaderPropertyType::Scalar},
+                        {"Removed", Keire::ShaderPropertyType::Scalar},
+                        {"Packed", Keire::ShaderPropertyType::Vector4}};
+    auto next = first;
+    next.Source = "Assets/Shaders/Next.hlsl";
+    next.Properties[0].Type = Keire::ShaderPropertyType::Vector3;
+    next.Properties[0].DefaultValue = {0.1F, 0.2F, 0.3F, 0.0F};
+    next.Properties[1].Maximum = 0.5F;
+    next.Properties[4].Type = Keire::ShaderPropertyType::Color;
+    next.Properties.erase(next.Properties.begin() + 3);
+    const KeireEditor::MaterialDocument::ShaderResolver resolver =
+        [&](const Keire::AssetId shader) -> std::optional<Keire::ShaderAssetDefinition>
+    { return shader == firstShader ? first : next; };
+    Keire::MaterialAssetDefinition definition;
+    definition.Shader = firstShader;
+    definition.Properties = {{"ChangedType", 0.7F},
+                             {"NarrowerRange", 0.8F},
+                             {"Unchanged", 0.4F},
+                             {"Removed", 0.9F},
+                             {"Packed", Keire::Vector4{0.1F, 0.2F, 0.3F, 1.0F}}};
+    KeireEditor::MaterialDocument document;
+    document.Open(Keire::MaterialAsset::EncodeSource(definition), resolver);
+
+    REQUIRE(document.SetShader(nextShader, resolver));
+
+    CHECK(document.Shader() == nextShader);
+    CHECK(document.Definition().Properties.size() == 2);
+    CHECK(std::get<Keire::Vector3>(document.Property("ChangedType")) == Keire::Vector3{0.1F, 0.2F, 0.3F});
+    CHECK(std::get<float>(document.Property("NarrowerRange")) == 0.0F);
+    CHECK(std::get<float>(document.Property("Unchanged")) == 0.4F);
+    CHECK(std::get<Keire::Color>(document.Property("Packed")) == Keire::Color{0.1F, 0.2F, 0.3F, 1.0F});
+    CHECK_NOTHROW(Keire::ValidateMaterialAgainstShader(document.Definition(), next));
+    KeireEditor::MaterialDocument restored;
+    CHECK_NOTHROW(restored.Open(document.SaveSource(), resolver));
+    CHECK(Keire::MaterialAsset::EncodeSource(restored.Definition()) ==
+          Keire::MaterialAsset::EncodeSource(document.Definition()));
+}
+
+TEST_CASE("failed material opens and shader changes preserve the active draft")
+{
+    const auto shader = Keire::AssetId::Generate();
+    const auto material = Keire::AssetId::Generate();
+    Keire::ShaderAssetDefinition shaderDefinition;
+    shaderDefinition.Source = "Assets/Shaders/Material.hlsl";
+    shaderDefinition.Properties = {{"Roughness", Keire::ShaderPropertyType::Scalar}};
+    const KeireEditor::MaterialDocument::ShaderResolver resolver =
+        [&](Keire::AssetId) -> std::optional<Keire::ShaderAssetDefinition> { return shaderDefinition; };
+    Keire::MaterialAssetDefinition definition;
+    definition.Shader = shader;
+    const auto source = Keire::MaterialAsset::EncodeSource(definition);
+    KeireEditor::MaterialDocument document;
+    const std::filesystem::path path = "Assets/Materials/Active.keirematerial";
+    document.OpenAsset(material, path, source, resolver);
+    REQUIRE(document.SetProperty("Roughness", 0.25F));
+    document.CaptureDraft();
+    const auto before = document.Definition();
+    const auto draft = document.SaveSource();
+
+    SUBCASE("An opened material has a property type mismatch")
+    {
+        definition.Properties["Roughness"] = Keire::Vector3{1.0F, 2.0F, 3.0F};
+        const auto invalid = Keire::MaterialAsset::EncodeSource(definition);
+        CHECK_THROWS_AS(
+            document.OpenAsset(Keire::AssetId::Generate(), "Assets/Materials/Invalid.keirematerial", invalid, resolver),
+            std::invalid_argument);
+    }
+    SUBCASE("A replacement shader has invalid declarations")
+    {
+        shaderDefinition.Properties.push_back(shaderDefinition.Properties.front());
+        CHECK_THROWS_AS((void)document.SetShader(Keire::AssetId::Generate(), resolver), std::invalid_argument);
+    }
+    CHECK(document.Asset() == material);
+    CHECK(document.SourcePath() == path);
+    CHECK(document.Shader() == shader);
+    CHECK(Keire::MaterialAsset::EncodeSource(document.Definition()) == Keire::MaterialAsset::EncodeSource(before));
+    CHECK(document.SaveSource() == draft);
+    CHECK(document.LastChangedProperty() == "Roughness");
+    CHECK(document.Dirty());
+    CHECK(std::ranges::equal(document.DraftSource(), draft));
+    CHECK(std::ranges::equal(document.BaselineSource(), source));
+}
 
 namespace
 {

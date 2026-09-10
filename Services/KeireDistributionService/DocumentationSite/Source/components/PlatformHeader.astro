@@ -55,7 +55,10 @@ const { active, signedIn = false, staffRole = null } = Astro.props;
         if (event.target instanceof HTMLAnchorElement) setNavigationOpen(false);
     });
     document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape") setNavigationOpen(false);
+        if (event.key === "Escape" && toggle?.getAttribute("aria-expanded") === "true") {
+            setNavigationOpen(false);
+            if (toggle instanceof HTMLElement) toggle.focus();
+        }
     });
     document.addEventListener("click", (event) => {
         if (!(event.target instanceof Node)) return;

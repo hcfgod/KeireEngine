@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 20);
+    CHECK(importer.Version == 21);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -320,6 +320,39 @@ TEST_CASE("Shader Graph v3 lowers multi-output nodes and parameter authoring met
     CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
 }
 
+TEST_CASE("Shader Graph manifests preserve stable property identities and validate explicit IDs")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    const auto first = Parameter("First", Keire::ShaderGraphValueType::Scalar, 0.5F);
+    const auto second = Parameter("Second", Keire::ShaderGraphValueType::Color, Keire::Color{});
+    graph.Nodes.insert(graph.Nodes.end(), {first, second});
+    const auto compilation = Keire::CompileShaderGraph(graph);
+    REQUIRE(compilation.Succeeded());
+    auto manifest = nlohmann::json::parse(compilation.Variants.front().Manifest);
+    const auto decode = [](const nlohmann::json& source)
+    {
+        const auto text = source.dump();
+        return Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(text)));
+    };
+    const auto decoded = decode(manifest);
+    REQUIRE(decoded.Properties.size() == 2);
+    CHECK(decoded.Properties[0].Id == first.Id);
+    CHECK(decoded.Properties[1].Id == second.Id);
+
+    auto legacy = manifest;
+    for (auto& property : legacy["properties"])
+        property.erase("id");
+    const auto decodedLegacy = decode(legacy);
+    REQUIRE(decodedLegacy.Properties.size() == 2);
+    CHECK_FALSE(decodedLegacy.Properties[0].Id);
+    CHECK_FALSE(decodedLegacy.Properties[1].Id);
+
+    manifest["properties"][1]["id"] = first.Id.ToString();
+    CHECK_THROWS_AS((void)decode(manifest), std::invalid_argument);
+    manifest["properties"][1]["id"] = "invalid-id";
+    CHECK_THROWS_AS((void)decode(manifest), std::invalid_argument);
+}
+
 TEST_CASE("Shader Graph compiles every output model to bounded runtime shader manifests")
 {
     constexpr std::array outputs{Keire::ShaderGraphOutput::Surface,   Keire::ShaderGraphOutput::Transparent,
@@ -491,10 +524,13 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
     { return ReadBytes(root / relative); };
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 7);
+    CHECK(importer.Version == 8);
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
+    REQUIRE(shader->Definition().Properties.size() == compilation.Properties.size());
+    for (std::size_t index = 0; index < compilation.Properties.size(); ++index)
+        CHECK(shader->Definition().Properties[index].Id == compilation.Properties[index].Id);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil, "forwardOpaque") != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV, "forwardOpaque") != nullptr);
     CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl, "forwardOpaque") != nullptr);

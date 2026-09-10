@@ -95,13 +95,21 @@ count. The editor previews the last-good result on a sphere, plane, cube, or sel
 environment controls. Parameter-only edits take a material fast path; shader-affecting edits compile on a
 generation-checked background job, and stale completions are discarded.
 
+Software previews sample texture mip zero using the imported magnification filter and per-axis repeat, clamp, or
+mirror addressing. sRGB colors are decoded before bilinear filtering; alpha and linear/data textures remain linear.
+These previews do not estimate screen-space derivatives for mip selection or anisotropic filtering.
+
+Dependency depth follows the longest path through shared inputs. Node-preview budgets count the selected node and
+its upstream inputs, including disconnected work; triplanar sampling counts three texture reads. Changing a shader's
+displacement bound or a parameter's stable ID refreshes live shader metadata even when its HLSL is unchanged.
+
 Saving stages generated HLSL and manifests outside the asset root, compiles through the normal shader importer, and
 transactionally replaces `Assets/Generated/ShaderGraphs/<graph-id>/`. Each keyword variant is a stable generated
 `ShaderAsset`. Legacy Surface graphs retain a private default `MaterialAsset` for preview and compatibility; program
 targets publish only shader variants. DXIL, SPIR-V, and MSL outputs pass the same reflection and ABI validation as raw
 shaders. Cooked shader asset schema 3 identifies every binary lane by both its exact material/program pass role and
 backend format. Schema-1/2 assets migrate in memory to the `primary` role, while new multi-pass assets may carry
-coexisting roles such as `primary` and `deferredGBufferStandard` without ambiguous first-format selection. The version-7
+coexisting roles such as `primary` and `deferredGBufferStandard` without ambiguous first-format selection. The version-8
 shader importer compiles each bounded role/format lane with its optional pass define, rejects duplicate roles or defines
 and collisions with global defines, and keeps reflection selection independent of manifest order.
 
@@ -126,13 +134,19 @@ undo/redo, and fallback recovery are serialized deterministically. The optional 
 reflected uniform bindings without crowding the primary surface canvas. Composition is validated against the selected
 Shader Graph while editing. Edits autosave after 500 ms of inactivity; the normal source-change monitor then performs
 one targeted compile and hot reload, so the Save button is only an immediate flush for a still-dirty document.
+
+Duplicating Shader or Material Graph parameters creates unique symbols while preserving their display metadata and
+defaults. Nested comment groups and cable routing move with copied expressions; clipboard transfers omit unrelated
+empty comments and detach groups from parents outside the selection. Compatibility material shader changes retain
+only overrides accepted by the replacement shader's declarations and ranges. Failed opens preserve the active draft.
 Parameter and texture defaults are also baked into an immutable development material immediately and published to the
 loaded runtime-material identity used by scene renderers; topology changes still complete through the validated
 background shader compile. Asset Browser thumbnails are invalidated with the live revision, bypass an unchanged-digest
 disk-cache entry, and regenerate after the replacement runtime material is ready. A failed import leaves the previously
 published material usable.
 
-Shader Graph parameters publish stable property IDs. Compatibility bindings resolve those IDs before display names,
+Shader Graph parameters publish stable property IDs through generated manifests and imported shader assets. Older
+manifests without IDs remain readable. Compatibility bindings resolve those IDs before display names,
 so a template rename retains its value. Unknown properties, type changes, output-contract mismatches, duplicate
 symbols, cycles, invalid static parameters, and colliding identities produce `MAT` or underlying graph diagnostics
 instead of silently changing the material. Schema-1/2/3/4/5/6 sources upgrade in memory to schema 7 while retaining
@@ -161,6 +175,10 @@ Function expansion is deterministic. Generated node, pin, and connection identit
 source identities, so identical source produces identical generated shader text. Expansion is recursive but bounded;
 missing assets, wrong-purpose references, stale interfaces, cycles, and excessive depth fail with recoverable graph
 diagnostics. The source graph is never mutated during expansion.
+
+Function expansion and material composition remove comment references to nodes eliminated from their generated
+graphs. Original source comments remain intact. When a material replaces a template's World Position Offset input,
+its surface graph supplies the displacement bound; an unbounded replacement disables displaced occlusion.
 
 Material Parameter Collections open in the Inspector. Parameters have stable IDs, shader-safe names, display names,
 descriptions, categories, sort order, types, and finite defaults. The editor supports explicit add, edit, remove,

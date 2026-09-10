@@ -5,6 +5,60 @@ versions.
 
 ## Unreleased
 
+- Hub returns from the tray as a restored window after its final tracked Editor closes, instead of remaining minimized.
+- Scene Save As clears recovery warnings inherited from the original document and resets the new recovery timer,
+  while preserving the original recovery file. Asset Inspector rename, duplicate, and trash controls fit narrow panels.
+- Windows Editor UI smoke runs without a project, project-selected UI smokes target the Editor, and conflicting smoke
+  modes fail before building. Captured child commands preserve spaces, Unicode, empty arguments, quotes, and trailing
+  backslashes. Installer and Player Support regression harnesses also run correctly from Windows PowerShell 5.1.
+- Asset Tool packaging, import, conversion, and validation messages preserve UTF-8 paths containing accented characters.
+- Inspector Duplicate and Move to Trash now register their successful worker mutations in Project asset undo history.
+- Rendered Editor Play validation allows cold GPU VFX pipeline warm-up without relaxing its interaction deadlines
+  or removing the overall watchdog.
+- SDK packages include FreeType, HarfBuzz, FriBidi, and libunibreak archives, licenses, and lock identities. Direct
+  and CMake consumers receive the text dependencies needed by the managed entrypoint and runtime UI.
+
+- Shader and Material Graph duplication allocates unique parameter symbols, keeps nested comment groups valid, and
+  offsets cable routing with the copied nodes. Clipboard transfers preserve complete nested groups and exclude
+  unrelated empty comments.
+- Software material previews decode sRGB textures before filtering, preserve linear alpha, and honor nearest/linear
+  magnification and repeat/clamp/mirror addressing. Extreme or non-finite UVs no longer reach invalid integer casts.
+- Compatibility material shader changes discard overrides rejected by the new shader's types or ranges. Failed
+  material opens and invalid replacement shaders preserve the active document and its unsaved draft.
+- Spatial-lighting selection rejects probe contribution ranges outside the current visibility mask and uses its
+  conservative visible fallback.
+
+- Fixed undo merges retaining discarded redo byte counts and closed document histories consuming the undo context
+  limit. Transaction handles now report inactive after cancellation failures or context shutdown.
+
+- Fixed graph dependency-depth and node-preview budget analysis, including triplanar sample counts. Material
+  composition and reusable-function expansion now remove stale comment references without changing source graphs.
+- Composed materials retain the displacement bound of their active vertex expression. Live Shader Graph edits also
+  refresh compiled culling metadata and stable parameter IDs when generated HLSL stays unchanged. Generated shader
+  manifests preserve parameter IDs through import. Material importer 12, Shader Graph importer 21, and shader
+  importer 8 refresh existing generated assets.
+- Fixed inconsistent draw sorting when opaque-state decals share transparent queues; transparent and decal queues
+  now use one deterministic back-to-front ordering policy.
+- New water, thin-translucent, volume, decal, and hair materials initialize compatible blending, masking, and
+  sidedness defaults instead of inheriting opaque surface defaults.
+- Hub startup accepts existing custom preference directories that need no legacy migration, and migration conflict
+  messages preserve Unicode filenames while leaving both conflicting directories intact.
+- Hub smoke startup no longer ticks an unstarted account service into an invalid marketplace session path. Stopped
+  account integrations remain inactive until explicitly started again.
+
+- Native runtime UI's embedded fallback font preserves Latin-1 accents, and Starter HUD instructions have room for
+  both wrapped lines.
+- Player builds prefer the current Editor's bundled Build Support over an older same-version user installation,
+  with compatible installed modules still available when the bundle is absent or unsuitable.
+- Fixed a Windows workspace-lock race that could let queued build/package commands both claim ownership and fail
+  during handoff. Lock-directory claims are atomic and waiting tolerates a concurrent release.
+- Fixed intermittent Windows scene Save As failures caused by the asset monitor assigning metadata to the native
+  dialog's temporary validation file. Background discovery waits for new sources to stabilize before assigning IDs.
+- Scene Save As now adopts an unchanged document under its new name, preserves edits made while the copy is saving,
+  and preserves Unicode scene names.
+- Fixed Unicode asset names in Project search, cards, tooltips, and the asset inspector. Scene creation, rename,
+  duplicate, and active scene-name synchronization preserve UTF-8 names on Windows, including after reopening a scene.
+
 - Fixed Deferred Hybrid ignoring `Receive Shadows` for default and graph materials, including contact and mixed-mask
   visibility. Graph mixed masks now combine with dynamic shadows using minimum visibility instead of double-darkening.
   Corrected Forward+ spot-cookie cone projection and parallel-axis box-projected reflections. Graph generator 11 and

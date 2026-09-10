@@ -1,4 +1,5 @@
 #include "KeireClientInternal/Editor/AssetBrowserPanelInternal.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
 
@@ -35,7 +36,7 @@ namespace KeireEditor
                                     static_cast<bool>(MaterialGraphCreation.Shader())) &&
                                    (PendingCreateKind != NamedCreateKind::MaterialInstance || validParent);
             if (PendingCreateKind == NamedCreateKind::MaterialInstance)
-                ui.Text(validParent ? "Parent: " + parent->RelativePath.generic_string()
+                ui.Text(validParent ? "Parent: " + Keire::Detail::PathToUtf8(parent->RelativePath)
                                     : "Cancel and select a Material or Material Instance to use as the parent.");
             if (auto disabled = ui.BeginDisabled(!canCreate); disabled)
             {
@@ -125,7 +126,8 @@ namespace KeireEditor
                     if (!record)
                         throw std::runtime_error("Asset no longer exists.");
                     const auto destination =
-                        record->RelativePath.parent_path() / (RenameBuffer + record->RelativePath.extension().string());
+                        record->RelativePath.parent_path() /
+                        Keire::Detail::PathFromUtf8(RenameBuffer + record->RelativePath.extension().string());
                     editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
                                                .Asset = Renaming,
                                                .Destination = destination},
@@ -175,7 +177,7 @@ namespace KeireEditor
                     if (RenameBuffer.empty() || RenameBuffer == "." || RenameBuffer == ".." ||
                         RenameBuffer.find_first_of("/\\") != std::string::npos)
                         throw std::invalid_argument("Folder name must be one non-empty path component.");
-                    const auto destination = RenamingFolder.parent_path() / RenameBuffer;
+                    const auto destination = RenamingFolder.parent_path() / Keire::Detail::PathFromUtf8(RenameBuffer);
                     editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveFolder,
                                                .Source = RenamingFolder,
                                                .Destination = destination},
@@ -215,7 +217,7 @@ namespace KeireEditor
         if (auto package = ui.BeginPopupModal("Create Asset Package"); package)
         {
             ui.Text(PendingPackageSelection.Folder
-                        ? "Package folder: Assets/" + PendingPackageSelection.Folder->generic_string()
+                        ? "Package folder: Assets/" + Keire::Detail::PathToUtf8(*PendingPackageSelection.Folder)
                         : "Package " + std::to_string(PendingPackageSelection.Assets.size()) + " selected asset(s)");
             (void)ui.InputText("Display name", PendingPackageDraft.DisplayName);
             (void)ui.InputText("Package ID", PendingPackageDraft.PackageId);
@@ -256,7 +258,8 @@ namespace KeireEditor
             if (record.Type == Keire::PrefabAsset::StaticType() && ui.MenuItem("Create Variant..."))
             {
                 PendingVariantBase = record.Id;
-                RequestNamedCreate(NamedCreateKind::PrefabVariant, record.RelativePath.stem().string() + "Variant");
+                RequestNamedCreate(NamedCreateKind::PrefabVariant,
+                                   Keire::Detail::PathToUtf8(record.RelativePath.stem()) + "Variant");
             }
             if (ui.MenuItem("Configure External Editor..."))
                 editor.ConfigureAssetBrowserExternalEditor();
@@ -284,8 +287,8 @@ namespace KeireEditor
             if (ui.MenuItem("Reveal in File Explorer"))
                 Detail::RevealAssetBrowserPath(editor, AssetRoot / record.RelativePath);
             if (ui.MenuItem("Copy Relative Path"))
-                Detail::CopyAssetBrowserText(editor,
-                                             (std::filesystem::path("Assets") / record.RelativePath).generic_string());
+                Detail::CopyAssetBrowserText(
+                    editor, Keire::Detail::PathToUtf8(std::filesystem::path("Assets") / record.RelativePath));
             if (ui.MenuItem("Copy Asset ID"))
                 Detail::CopyAssetBrowserText(editor, record.Id.ToString());
         }
@@ -314,7 +317,7 @@ namespace KeireEditor
             if (ui.MenuItem("Copy"))
                 SetFolderClipboard(ClipboardMode::Copy, FolderSelection);
             if (ui.MenuItem("Create Asset Package...", false, FolderSelection.size() == 1))
-                RequestPackageCreate({.Folder = folder}, folder.filename().string());
+                RequestPackageCreate({.Folder = folder}, Keire::Detail::PathToUtf8(folder.filename()));
             if (ui.MenuItem("Paste Into", false, ClipboardModeValue != ClipboardMode::Empty))
                 Paste(folder, editor);
             if (ui.MenuItem("Delete"))
@@ -342,7 +345,8 @@ namespace KeireEditor
             if (ui.MenuItem("Reveal in File Explorer"))
                 Detail::RevealAssetBrowserPath(editor, AssetRoot / folder);
             if (ui.MenuItem("Copy Relative Path"))
-                Detail::CopyAssetBrowserText(editor, (std::filesystem::path("Assets") / folder).generic_string());
+                Detail::CopyAssetBrowserText(editor,
+                                             Keire::Detail::PathToUtf8(std::filesystem::path("Assets") / folder));
         }
     }
 } // namespace KeireEditor

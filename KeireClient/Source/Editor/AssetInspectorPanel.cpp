@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
+#include "KeireClient/Editor/AssetInspectorFileActions.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -12,6 +13,7 @@
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Rendering/ShaderGraph.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
 #include <cmath>
@@ -32,7 +34,7 @@ namespace
     {
         std::ifstream input(path, std::ios::binary);
         if (!input)
-            throw std::runtime_error("Cannot open asset: " + path.string());
+            throw std::runtime_error("Cannot open asset: " + Keire::Detail::PathToUtf8(path));
         const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
         std::vector<std::byte> bytes(characters.size());
         std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
@@ -40,7 +42,7 @@ namespace
     }
     [[nodiscard]] std::string FormatAssetDiagnostic(const Keire::AssetImportDiagnostic& diagnostic)
     {
-        auto result = diagnostic.RelativePath.generic_string();
+        auto result = Keire::Detail::PathToUtf8(diagnostic.RelativePath);
         if (diagnostic.Line != 0)
         {
             result += ':' + std::to_string(diagnostic.Line);
@@ -148,7 +150,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     if (m_EditingAsset != record->Id)
     {
         m_EditingAsset = record->Id;
-        m_AssetName = record->RelativePath.filename().string();
+        m_AssetName = Keire::Detail::PathToUtf8(record->RelativePath.filename());
         m_OriginalImportSettings = importer && importer->Name == record->Importer
                                        ? EditableImportSettings(*importer, record->ImportSettings)
                                        : Keire::AssetImportSettings{};
@@ -221,7 +223,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     ui.TextColored(theme.Accent, "PREVIEW");
     const float previewSize = std::clamp(ui.ContentAvailable().Width, 96.0F, 220.0F);
     ui.Image(m_PreviewImage, {previewSize, previewSize});
-    ui.Text(record->RelativePath.generic_string());
+    ui.Text(Keire::Detail::PathToUtf8(record->RelativePath));
     ui.TextColored(theme.MutedText, "Asset ID");
     ui.Text(record->Id.ToString());
     ui.TextColored(theme.MutedText, "Importer");
@@ -508,7 +510,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         if (record->SourceDependencies.empty())
             ui.Text("No dependency records are available; reimport to refresh.");
         for (const auto& dependency : record->SourceDependencies)
-            ui.Text(dependency.RelativePath.generic_string() + "  " + dependency.Digest.substr(0, 12));
+            ui.Text(Keire::Detail::PathToUtf8(dependency.RelativePath) + "  " + dependency.Digest.substr(0, 12));
         if (ui.Button("Reimport Shader"))
             m_Controller.ImportInspectorAssets();
         if (!assetStatus.empty())
@@ -552,7 +554,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 throw std::runtime_error("The inherited shader interface is still loading.");
 
             ui.TextColored(theme.MutedText, "Parent");
-            ui.Text(parentRecord->RelativePath.generic_string());
+            ui.Text(Keire::Detail::PathToUtf8(parentRecord->RelativePath));
             Keire::MaterialAuthoringDefinition authoring;
             authoring.Shader.Asset = parent->Definition().Shader;
             authoring.Surface = instance.Surface.value_or(parent->Definition().Surface);
@@ -955,8 +957,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             ui.TextColored(theme.MutedText, assetStatus);
     }
     ui.Separator();
-    (void)ui.InputText("Name", m_AssetName);
-    if (ui.Button("Rename") && !m_AssetName.empty())
+    const auto fileAction = DrawAssetInspectorFileActions(ui, m_AssetName);
+    if (fileAction == AssetInspectorFileAction::Rename)
     {
         try
         {
@@ -968,21 +970,20 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             m_Controller.ReportInspectorAssetError(std::string("Asset rename failed: ") + error.what());
         }
     }
-    ui.SameLine();
-    if (ui.Button("Duplicate"))
+    if (fileAction == AssetInspectorFileAction::Duplicate)
     {
         try
         {
-            const auto stem = record->RelativePath.stem().string();
+            const auto stem = Keire::Detail::PathToUtf8(record->RelativePath.stem());
             const auto extension = record->RelativePath.extension().string();
             auto copyName = stem;
             copyName.append(" Copy").append(extension);
-            auto destination = record->RelativePath.parent_path() / copyName;
+            auto destination = record->RelativePath.parent_path() / Keire::Detail::PathFromUtf8(copyName);
             for (std::size_t copy = 2; database->Find(destination); ++copy)
             {
                 copyName = stem;
                 copyName.append(" Copy ").append(std::to_string(copy)).append(extension);
-                destination = record->RelativePath.parent_path() / copyName;
+                destination = record->RelativePath.parent_path() / Keire::Detail::PathFromUtf8(copyName);
             }
             m_Controller.DuplicateInspectorAsset(record->Id, destination);
             m_Controller.SetInspectorAssetStatus("Duplicating asset in the isolated asset worker.");
@@ -992,8 +993,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             m_Controller.ReportInspectorAssetError(std::string("Asset duplication failed: ") + error.what());
         }
     }
-    ui.SameLine();
-    if (ui.Button("Move to Trash"))
+    if (fileAction == AssetInspectorFileAction::Trash)
     {
         try
         {

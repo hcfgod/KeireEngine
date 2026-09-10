@@ -177,6 +177,9 @@ To open an existing project directly on Windows:
 ./Scripts/project.ps1 run -Generator ninja -Configuration Debug -Toolset msc -Editor -ProjectPath "C:\Projects\MyGame"
 ```
 
+For a short rendered UI check, add `-SmokeUi` to the Windows `run` command. It checks the Hub by default;
+`-Editor -SmokeUi` checks the Editor without requiring a project. Choose one smoke mode per invocation.
+
 See [Getting Started](Docs/GettingStarted.md) for prerequisites, supported IDE generators, troubleshooting, and the
 complete workstation workflow.
 
@@ -207,6 +210,12 @@ On Windows, `Scripts\project.bat stage-editor` and `Scripts\project.bat stage-hu
 iteration loop. They update the runnable layouts under `Build\Distributions` without running the release test matrix
 or creating and re-extracting archives; the corresponding `package-*` commands remain the release gates. Development
 staging defaults to Ninja so repeated runs retain compatible incremental outputs.
+The equivalent PowerShell commands are `./Scripts/project.ps1 stage-editor -Toolset msc` and
+`./Scripts/project.ps1 stage-hub -Toolset msc`. Open `Launch-KeireHub.cmd` inside its `Build\Distributions` folder to
+test the Hub. To open a project directly in the staged Editor, run `Launch-KeireEditor.cmd --project "C:\path\to\project"`
+from the Editor distribution folder.
+Player exports prefer the Editor's bundled Build Support when compatible, so a same-version module installed by an
+older development build cannot override it. Installed modules remain the fallback for other targets or configurations.
 
 Supported build configurations are `Debug`, `Release`, `Dist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`.
 Available generators and sanitizer support vary by host platform and toolchain; `doctor` and `help` report the valid
@@ -250,11 +259,22 @@ A Kéire project is a directory with one `ProjectSettings/Project.keireproject` 
 state. Source assets live
 under `Assets/`; generated and imported state lives under `Library/`; build output follows the selected build profile.
 Stable asset IDs allow content to move inside `Assets/` without rewriting every reference.
+Use File > Save Scene As to create a separate scene at a new path under `Assets/`. Background discovery waits for
+new external files to stabilize before assigning asset IDs; explicit asset creation and refresh remain immediate.
+The editor switches to the saved copy when the source document is unchanged. If you edit while the copy is saving,
+the editor keeps those edits in the original document and leaves the saved copy available in Project.
+Recovery warnings follow the saved copy's own recovery file. Asset Inspector file actions use full-width rows so
+Rename, Duplicate, and Move to Trash remain accessible in narrow panels.
+Inspector Duplicate and Move to Trash participate in Project asset undo/redo after their operations finish.
 
 Create a Material to author an OpenPBR surface directly, then create Material Instances from the selected material
 to vary its parameters and keywords. A separate Shader Graph is needed only for specialized shader targets or legacy
 template workflows. Editor Play supports explicit `Assets.LoadRuntime` residency leases; dispose each operation when
 it is no longer needed.
+
+Material previews respect imported texture color space, filtering, and addressing at mip zero. Graph duplication
+preserves nested comment groups and assigns unique parameter symbols; see [Shaders and Materials](Docs/ShadersAndMaterials.md)
+for preview limits and authoring behavior.
 
 Current authoring and runtime contracts include:
 
@@ -274,7 +294,7 @@ Current authoring and runtime contracts include:
 These numbers are implementation contracts, not marketing versions. The docs website is generated from the repository
 Markdown, and its source validation checks these values against the corresponding code so schema drift fails the build.
 
-Shader Graph generator 11 (importer 20) refreshes generated programs for consistent shadow reception, spot cookies,
+Shader Graph generator 11 (importer 21) refreshes generated programs for consistent shadow reception, spot cookies,
 and box-projected reflections. Existing graph sources need no manual migration; rebuild cooked content to include
 these fixes. Ninja builds through the repository launchers refresh fingerprinted shader headers before compilation,
 including edits to shared HLSL includes; unchanged shader output keeps its timestamp.
@@ -351,6 +371,9 @@ OAuth endpoint and survive restarts through the operating system's protected cre
 email/password fallback retains its separate Auth refresh flow. See [Asset Packages](Docs/AssetPackages.md) and
 [Project Hub](Docs/ProjectHub.md) for the complete workflow and trust model.
 
+When Hub stays running after an Editor launch, closing its final tracked Editor brings Hub back from the tray as a
+visible, restored window. Reopening Hub from the tray uses the same restoration path.
+
 ## Repository Layout
 
 | Path | Purpose |
@@ -379,6 +402,10 @@ service and its documentation generator likewise use `Source/`, never a lowercas
 
 Generated builds, packages, logs, restored tools, dependency caches, and website output are disposable and are not
 documentation authorities.
+
+SDK consumers link `Keire::Core` through CMake. The package carries its private FreeType, HarfBuzz, FriBidi, and
+libunibreak archives and their license files; CMake supplies those text dependencies transitively. Direct compiler
+invocations must include the same archives, as exercised by the package launchers.
 
 Graphics-capable Windows contributors can run the real cooked-runtime and rendered Editor device-loss matrix with
 `./Scripts/Windows/test-render-device-loss.ps1`; fixed Release frame-latency characterization is available through

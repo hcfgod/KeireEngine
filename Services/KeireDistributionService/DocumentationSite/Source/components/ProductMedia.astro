@@ -1,0 +1,14 @@
+---
+interface Props {
+    name: string;
+    alt: string;
+    caption?: string;
+    priority?: boolean;
+}
+const { name, alt, caption, priority = false } = Astro.props;
+---
+<figure class="product-media">
+    <img src={`/assets/outpost/${name}.webp`} alt={alt} width="1920" height="1080"
+        loading={priority ? "eager" : "lazy"} fetchpriority={priority ? "high" : "auto"} decoding="async" />
+    {caption && <figcaption>{caption}</figcaption>}
+</figure>

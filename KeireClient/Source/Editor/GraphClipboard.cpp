@@ -100,41 +100,27 @@ namespace KeireEditor
                                reinterpret_cast<const char*>(source.data() + source.size()));
         }
 
-        [[nodiscard]] std::string UniqueParameterSymbol(const std::string_view requested,
-                                                        const std::set<std::string, std::less<>>& occupied)
+        void AppendFragmentAuthoring(Keire::GraphAuthoringMetadata& target, const Keire::GraphAuthoringMetadata& source,
+                                     const std::set<Keire::AssetId>& selected)
         {
-            if (!occupied.contains(requested))
-                return std::string(requested);
+            for (const auto& annotation : source.NodeAnnotations)
+                if (selected.contains(annotation.Node))
+                    target.NodeAnnotations.push_back(annotation);
 
-            const std::string base = std::string(requested) + "_Copy";
-            if (!occupied.contains(base))
-                return base;
-            for (std::size_t suffix = 2; suffix <= occupied.size() + 2U; ++suffix)
+            auto included = selected;
+            bool changed = true;
+            while (changed)
             {
-                const auto candidate = base + std::to_string(suffix);
-                if (!occupied.contains(candidate))
-                    return candidate;
+                changed = false;
+                for (const auto& comment : source.Comments)
+                    if (!comment.Members.empty() && !included.contains(comment.Id) &&
+                        std::ranges::all_of(comment.Members,
+                                            [&](const Keire::AssetId id) { return included.contains(id); }))
+                        changed = included.insert(comment.Id).second || changed;
             }
-            throw std::invalid_argument("Shader Graph paste could not allocate a unique parameter symbol.");
-        }
-
-        void ResolvePastedParameterSymbols(Keire::ShaderGraphDefinition& definition,
-                                           const std::set<Keire::AssetId>& pasted)
-        {
-            std::set<std::string, std::less<>> occupied;
-            for (const auto& resource : definition.Resources)
-                occupied.insert(resource.Symbol);
-            for (const auto& node : definition.Nodes)
-                if (node.Kind == Keire::ShaderGraphNodeKind::Parameter && !pasted.contains(node.Id))
-                    occupied.insert(node.Symbol);
-
-            for (auto& node : definition.Nodes)
-            {
-                if (node.Kind != Keire::ShaderGraphNodeKind::Parameter || !pasted.contains(node.Id))
-                    continue;
-                node.Symbol = UniqueParameterSymbol(node.Symbol, occupied);
-                occupied.insert(node.Symbol);
-            }
+            for (const auto& comment : source.Comments)
+                if (included.contains(comment.Id))
+                    target.Comments.push_back(comment);
         }
     } // namespace
 
@@ -185,7 +171,8 @@ namespace KeireEditor
         const auto selection = DecodeSelection(document);
         const auto sourceText = document.at("source").dump();
         auto source = Keire::ShaderGraphAsset::DecodeSource(Bytes(sourceText));
-        const auto copied = DuplicateShaderGraphSelection(source, selection, offset);
+        const auto copied =
+            DuplicateShaderGraphSelection(source, selection, offset, GraphParameterDuplication::PreserveSymbols);
         if (copied.empty())
             throw std::invalid_argument("Graph fragment contains no editable Shader Graph nodes.");
         const auto appendedSelection = copied;
@@ -203,13 +190,8 @@ namespace KeireEditor
         for (const auto& connection : sourceConnections)
             if (selected.contains(connection.Output.Node) && selected.contains(connection.Input.Node))
                 transfer.Connections.push_back(connection);
-        for (const auto& annotation : sourceAuthoring.NodeAnnotations)
-            if (selected.contains(annotation.Node))
-                transfer.Authoring.NodeAnnotations.push_back(annotation);
-        for (const auto& comment : sourceAuthoring.Comments)
-            if (std::ranges::all_of(comment.Members, [&](const Keire::AssetId id) { return selected.contains(id); }))
-                transfer.Authoring.Comments.push_back(comment);
-        ResolvePastedParameterSymbols(transfer, selected);
+        AppendFragmentAuthoring(transfer.Authoring, sourceAuthoring, selected);
+        ResolveGraphParameterSymbols(transfer, appendedSelection);
         Keire::ValidateShaderGraph(transfer);
         definition = std::move(transfer);
         return appendedSelection;
@@ -222,7 +204,8 @@ namespace KeireEditor
         const auto selection = DecodeSelection(document);
         const auto sourceText = document.at("source").dump();
         auto source = Keire::MaterialGraphAsset::DecodeSource(Bytes(sourceText));
-        const auto copied = DuplicateMaterialGraphSelection(source, selection, offset);
+        const auto copied =
+            DuplicateMaterialGraphSelection(source, selection, offset, GraphParameterDuplication::PreserveSymbols);
         if (copied.empty())
             throw std::invalid_argument("Graph fragment contains no editable Material Graph nodes.");
 
@@ -244,19 +227,9 @@ namespace KeireEditor
         for (const auto& connection : sourceExpressionConnections)
             if (selected.contains(connection.Output.Node) && selected.contains(connection.Input.Node))
                 transfer.SurfaceGraph.Connections.push_back(connection);
-        for (const auto& annotation : source.Authoring.NodeAnnotations)
-            if (selected.contains(annotation.Node))
-                transfer.Authoring.NodeAnnotations.push_back(annotation);
-        for (const auto& comment : source.Authoring.Comments)
-            if (std::ranges::all_of(comment.Members, [&](const Keire::AssetId id) { return selected.contains(id); }))
-                transfer.Authoring.Comments.push_back(comment);
-        for (const auto& annotation : source.SurfaceGraph.Authoring.NodeAnnotations)
-            if (selected.contains(annotation.Node))
-                transfer.SurfaceGraph.Authoring.NodeAnnotations.push_back(annotation);
-        for (const auto& comment : source.SurfaceGraph.Authoring.Comments)
-            if (std::ranges::all_of(comment.Members, [&](const Keire::AssetId id) { return selected.contains(id); }))
-                transfer.SurfaceGraph.Authoring.Comments.push_back(comment);
-        ResolvePastedParameterSymbols(transfer.SurfaceGraph, selected);
+        AppendFragmentAuthoring(transfer.Authoring, source.Authoring, selected);
+        AppendFragmentAuthoring(transfer.SurfaceGraph.Authoring, source.SurfaceGraph.Authoring, selected);
+        ResolveGraphParameterSymbols(transfer.SurfaceGraph, copied);
         Keire::ValidateMaterialGraph(transfer);
         definition = std::move(transfer);
         return copied;
@@ -297,12 +270,7 @@ namespace KeireEditor
         for (const auto& connection : sourceSystem->Connections)
             if (selected.contains(connection.OutputNode) && selected.contains(connection.InputNode))
                 target->Connections.push_back(connection);
-        for (const auto& annotation : sourceSystem->Authoring.NodeAnnotations)
-            if (selected.contains(annotation.Node))
-                target->Authoring.NodeAnnotations.push_back(annotation);
-        for (const auto& comment : sourceSystem->Authoring.Comments)
-            if (std::ranges::all_of(comment.Members, [&](const Keire::AssetId id) { return selected.contains(id); }))
-                target->Authoring.Comments.push_back(comment);
+        AppendFragmentAuthoring(target->Authoring, sourceSystem->Authoring, selected);
         return copied;
     }
 } // namespace KeireEditor

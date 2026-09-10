@@ -247,7 +247,7 @@ namespace
     {
         std::ifstream stream(path, std::ios::binary);
         if (!stream)
-            throw std::runtime_error("Could not read file: " + path.string());
+            throw std::runtime_error("Could not read file: " + Keire::Detail::PathToUtf8(path));
         const std::vector<char> characters{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
         std::vector<std::byte> result(characters.size());
         std::ranges::transform(characters, result.begin(), [](const char value) { return std::byte(value); });
@@ -684,7 +684,7 @@ namespace
                 if (commandLine.Catalog.empty())
                     throw std::invalid_argument("validate requires --catalog <path>.");
                 Keire::AssetCooker::Validate(commandLine.Catalog);
-                std::cout << "Validated " << commandLine.Catalog.string() << '\n';
+                std::cout << "Validated " << Keire::Detail::PathToUtf8(commandLine.Catalog) << '\n';
                 return 0;
             }
             if (commandLine.Command == "create-asset-package")
@@ -783,7 +783,7 @@ namespace
                 const auto result = Keire::Detail::CreatePlayerSupportPackage(
                     Keire::Detail::LoadPlayerSupportManifest(commandLine.Catalog), commandLine.Input,
                     commandLine.Output, commandLine.Profile.CompressionLevel);
-                std::cout << "Created " << commandLine.Output.string() << " (" << result.ArchiveSize
+                std::cout << "Created " << Keire::Detail::PathToUtf8(commandLine.Output) << " (" << result.ArchiveSize
                           << " bytes, sha256 " << result.ArchiveSha256 << ")\n";
                 return 0;
             }
@@ -1031,7 +1031,7 @@ namespace
                 const auto input = std::filesystem::absolute(commandLine.Input);
                 std::ifstream source(input, std::ios::binary);
                 if (!source)
-                    throw std::runtime_error("Cannot open mesh source: " + input.string());
+                    throw std::runtime_error("Cannot open mesh source: " + Keire::Detail::PathToUtf8(input));
                 const std::vector<char> characters{std::istreambuf_iterator<char>(source),
                                                    std::istreambuf_iterator<char>()};
                 std::vector<std::byte> bytes(characters.size());
@@ -1059,8 +1059,9 @@ namespace
                 if (!destination || (!imported.Bytes.empty() &&
                                      !destination.write(reinterpret_cast<const char*>(imported.Bytes.data()),
                                                         static_cast<std::streamsize>(imported.Bytes.size()))))
-                    throw std::runtime_error("Cannot write converted mesh: " + output.string());
-                std::cout << "Converted " << input.string() << " to " << output.string() << '\n';
+                    throw std::runtime_error("Cannot write converted mesh: " + Keire::Detail::PathToUtf8(output));
+                std::cout << "Converted " << Keire::Detail::PathToUtf8(input) << " to "
+                          << Keire::Detail::PathToUtf8(output) << '\n';
                 return 0;
             }
             if (commandLine.Command == "upgrade-project")
@@ -1103,7 +1104,7 @@ namespace
                 {
                     std::cout << "  " << step.Id << " (" << step.FromSchema << " -> " << step.ToSchema << ")\n";
                     for (const auto& path : step.AffectedPaths)
-                        std::cout << "    " << path.generic_string() << '\n';
+                        std::cout << "    " << Keire::Detail::PathToUtf8(path) << '\n';
                     if (!step.Warning.empty())
                         std::cout << "    warning: " << step.Warning << '\n';
                 }
@@ -1135,9 +1136,9 @@ namespace
                         : item.Disposition == Keire::ShaderGraphMigrationDisposition::AlreadyMigrated ? "current"
                         : item.Disposition == Keire::ShaderGraphMigrationDisposition::Conflict        ? "conflict"
                                                                                                       : "invalid";
-                    std::cout << disposition << ": " << item.MaterialGraph.generic_string();
+                    std::cout << disposition << ": " << Keire::Detail::PathToUtf8(item.MaterialGraph);
                     if (item.Disposition == Keire::ShaderGraphMigrationDisposition::Migrate)
-                        std::cout << " -> " << item.ShaderGraph.generic_string();
+                        std::cout << " -> " << Keire::Detail::PathToUtf8(item.ShaderGraph);
                     if (!item.Diagnostic.empty())
                         std::cout << " (" << item.Diagnostic << ')';
                     std::cout << '\n';
@@ -1152,7 +1153,7 @@ namespace
             modules->ValidateRequired(project->Descriptor().RequiredModules);
             if (commandLine.Command == "validate-project")
             {
-                std::cout << "Validated project " << project->Root().string() << " with Kéire "
+                std::cout << "Validated project " << Keire::Detail::PathToUtf8(project->Root()) << " with Kéire "
                           << Keire::GetBuildInfo().Version << ".\n";
                 return 0;
             }
@@ -1301,7 +1302,7 @@ namespace
             {
                 const auto result = ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
                 std::cout << "Imported " << result.Imported << " assets (" << result.CacheHits
-                          << " cache hits). Catalog: " << result.CatalogPath.string() << '\n';
+                          << " cache hits). Catalog: " << Keire::Detail::PathToUtf8(result.CatalogPath) << '\n';
             }
             else if (commandLine.Command == "cook")
             {
@@ -1355,7 +1356,7 @@ namespace
                 }
                 result.CatalogPath = output / "catalog.json";
                 std::cout << "Cooked " << result.AssetCount << " assets into " << result.PackCount
-                          << " pack(s). Catalog: " << result.CatalogPath.string() << '\n';
+                          << " pack(s). Catalog: " << Keire::Detail::PathToUtf8(result.CatalogPath) << '\n';
             }
             else if (commandLine.Command == "bake-lighting")
             {
@@ -1420,7 +1421,8 @@ namespace
                 Keire::Detail::WriteFileAtomically(scenePath, Keire::SceneAsset::Encode(updated));
                 (void)ImportAssetsWithWorker(project->Root(), executable, commandLine.WorkerTimeout);
                 std::cout << "Baked " << baked.Assets.size() << " lighting assets for "
-                          << sceneRecord->RelativePath.string() << (baked.CacheHit ? " (cache hit).\n" : ".\n");
+                          << Keire::Detail::PathToUtf8(sceneRecord->RelativePath)
+                          << (baked.CacheHit ? " (cache hit).\n" : ".\n");
             }
             else
             {

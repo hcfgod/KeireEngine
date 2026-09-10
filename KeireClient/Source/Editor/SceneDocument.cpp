@@ -13,6 +13,7 @@
 #include <array>
 #include <ranges>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 
 namespace KeireEditor
@@ -926,7 +927,7 @@ namespace KeireEditor
         m_Scene = std::move(scene);
         if (!source.empty())
         {
-            const auto sourceName = source.stem().string();
+            const auto sourceName = Keire::Detail::PathToUtf8(source.stem());
             if (!sourceName.empty() && m_Scene->Name() != sourceName)
             {
                 const bool wasDirty = m_Scene->Dirty();
@@ -979,7 +980,16 @@ namespace KeireEditor
         m_Source = std::move(source);
     }
 
-    void SceneDocument::SetRecoveryPath(std::filesystem::path path) { m_RecoveryPath = std::move(path); }
+    void SceneDocument::SetRecoveryPath(std::filesystem::path path)
+    {
+        if (path == m_RecoveryPath)
+            return;
+        std::error_code error;
+        const bool available = !path.empty() && std::filesystem::is_regular_file(path, error);
+        m_RecoveryPath = std::move(path);
+        m_RecoveryAvailable = available;
+        m_RecoverySeconds = 0.0;
+    }
 
     void SceneDocument::SetStatus(std::string status) { m_Status = std::move(status); }
 

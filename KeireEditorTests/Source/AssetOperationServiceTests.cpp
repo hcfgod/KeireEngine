@@ -19,6 +19,35 @@
 #include <thread>
 #include <vector>
 
+TEST_CASE("scene Save As adoption compares the original snapshot and preserves intervening edits")
+{
+    const auto sourceAsset = Keire::AssetId::Generate();
+    Keire::SceneDefinition source;
+    source.Name = "Original";
+    auto copy = source;
+    copy.Name = "Workshop Caf\xc3\xa9";
+    KeireEditor::AssetOperationContext context{
+        .FollowUp = KeireEditor::AssetOperationFollowUp::AdoptSceneCopy,
+        .SceneSnapshot = copy,
+        .SourceSceneSnapshot = source,
+        .SourceSceneAsset = sourceAsset,
+    };
+    CHECK(context.CanAdoptSceneCopy(sourceAsset, source));
+    CHECK_FALSE(context.CanAdoptSceneCopy(Keire::AssetId::Generate(), source));
+    CHECK_FALSE(context.CanAdoptSceneCopy({}, source));
+    auto edited = source;
+    edited.Name = "Renamed while saving";
+    CHECK_FALSE(context.CanAdoptSceneCopy(sourceAsset, edited));
+    edited = source;
+    edited.Objects.push_back({.Id = Keire::AssetId::Generate(), .Name = "Added while saving"});
+    CHECK_FALSE(context.CanAdoptSceneCopy(sourceAsset, edited));
+    context.SourceSceneSnapshot.reset();
+    CHECK_FALSE(context.CanAdoptSceneCopy(sourceAsset, source));
+    context.SourceSceneSnapshot = source;
+    context.SceneSnapshot.reset();
+    CHECK_FALSE(context.CanAdoptSceneCopy(sourceAsset, source));
+}
+
 namespace
 {
     class AssetWorkerTestRuntime final
@@ -249,8 +278,63 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Scenes/WorkerCreated.keirescene"));
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerRenamed.keirescene"));
 
+        const auto finishMutation = [&operations]
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+            while (operations.Busy() && std::chrono::steady_clock::now() < deadline)
+            {
+                operations.Update();
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            operations.Update();
+            CHECK_FALSE(operations.Busy());
+            return operations.TakeCompletion();
+        };
+        const Keire::Detail::AssetWorkerMutation duplicateMutation{
+            .Kind = Keire::Detail::AssetWorkerMutationKind::DuplicateAsset,
+            .Asset = created->Result.CreatedAsset,
+            .Destination = "Scenes/InspectorCopy.keirescene"};
+        operations.QueueMutation(duplicateMutation, {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal,
+                                                     .UndoName = "Duplicate Asset"});
+        const auto duplicated = finishMutation();
+        REQUIRE(duplicated);
+        INFO(duplicated->Result.Diagnostic);
+        REQUIRE(duplicated->Result.Success);
+        REQUIRE(duplicated->Result.MutatedAssets.size() == 1);
+        REQUIRE(duplicated->Context.MutationUndo);
+        CHECK(duplicated->Context.MutationUndo->Name == "Duplicate Asset");
+        CHECK(duplicated->Context.MutationUndo->RecordCommand);
+        CHECK(duplicated->Context.MutationUndo->RevealResult);
+        CHECK(duplicated->Context.MutationUndo->Forward.Asset == created->Result.CreatedAsset);
+        CHECK(duplicated->Context.MutationUndo->Forward.Destination == duplicateMutation.Destination);
+        CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/InspectorCopy.keirescene"));
+
+        operations.QueueMutation(duplicateMutation, {.UndoName = "Duplicate Asset"});
+        const auto failedDuplicate = finishMutation();
+        REQUIRE(failedDuplicate);
+        CHECK_FALSE(failedDuplicate->Result.Success);
+        REQUIRE(failedDuplicate->Context.MutationUndo);
+        CHECK(failedDuplicate->Context.MutationUndo->RecordCommand);
+        CHECK(failedDuplicate->Context.MutationUndo->Name == "Duplicate Asset");
+        CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerRenamed.keirescene"));
+        CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/InspectorCopy.keirescene"));
+
+        CHECK_THROWS_AS(operations.QueueMutation({.Kind = Keire::Detail::AssetWorkerMutationKind::MoveAsset,
+                                                  .Asset = created->Result.CreatedAsset,
+                                                  .Destination = "Scenes/UntrackedMove.keirescene"},
+                                                 {.UndoName = "Move Asset"}),
+                        std::invalid_argument);
+        CHECK_THROWS_AS(
+            operations.QueueMutation(duplicateMutation, {.UndoName = "Duplicate Asset",
+                                                         .MutationPhase = KeireEditor::AssetMutationPhase::Undo}),
+            std::invalid_argument);
+        CHECK_FALSE(operations.Busy());
+        CHECK_FALSE(operations.TakeCompletion());
+        CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Scenes/UntrackedMove.keirescene"));
+
         operations.QueueMutation(
-            {.Kind = Keire::Detail::AssetWorkerMutationKind::TrashAsset, .Asset = created->Result.CreatedAsset});
+            {.Kind = Keire::Detail::AssetWorkerMutationKind::TrashAsset, .Asset = created->Result.CreatedAsset},
+            {.UndoName = "Trash Asset"});
         const auto trashDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (operations.Busy() && std::chrono::steady_clock::now() < trashDeadline)
         {
@@ -263,10 +347,20 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         INFO(trashed->Result.Diagnostic);
         REQUIRE(trashed->Result.Success);
         REQUIRE(trashed->Result.Trash);
+        REQUIRE(trashed->Context.MutationUndo);
+        CHECK(trashed->Context.MutationUndo->Name == "Trash Asset");
+        CHECK(trashed->Context.MutationUndo->RecordCommand);
+        CHECK_FALSE(trashed->Context.MutationUndo->RevealResult);
+        CHECK(trashed->Context.MutationUndo->Forward.Asset == created->Result.CreatedAsset);
         CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Scenes/WorkerRenamed.keirescene"));
 
-        operations.QueueMutation(
-            {.Kind = Keire::Detail::AssetWorkerMutationKind::RestoreTrash, .Trash = trashed->Result.Trash});
+        auto undoState = trashed->Context.MutationUndo;
+        undoState->Reverse = {.Kind = Keire::Detail::AssetWorkerMutationKind::RestoreTrash,
+                              .Trash = trashed->Result.Trash};
+        undoState->RecordCommand = false;
+        operations.QueueMutation(undoState->Reverse, {.UndoName = "Trash Asset",
+                                                      .MutationUndo = undoState,
+                                                      .MutationPhase = KeireEditor::AssetMutationPhase::Undo});
         const auto restoreDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (operations.Busy() && std::chrono::steady_clock::now() < restoreDeadline)
         {
@@ -278,6 +372,9 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         REQUIRE(restored);
         INFO(restored->Result.Diagnostic);
         CHECK(restored->Result.Success);
+        CHECK(restored->Context.MutationUndo == undoState);
+        CHECK(restored->Context.MutationPhase == KeireEditor::AssetMutationPhase::Undo);
+        CHECK_FALSE(restored->Context.MutationUndo->RecordCommand);
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerRenamed.keirescene"));
     }
     std::filesystem::remove_all(location, cleanupError);

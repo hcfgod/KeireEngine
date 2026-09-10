@@ -8,14 +8,6 @@
 
 namespace KeireEditor
 {
-    namespace
-    {
-        [[nodiscard]] bool IsTextureProperty(const Keire::MaterialPropertyValue& value)
-        {
-            return std::holds_alternative<Keire::AssetId>(value);
-        }
-    } // namespace
-
     void MaterialDocument::Open(const std::span<const std::byte> source, const ShaderResolver& resolveShader)
     {
         Open(source, AdaptShaderResolver(resolveShader));
@@ -39,12 +31,14 @@ namespace KeireEditor
         runtime.ContributeEmissionToGI = authoring.ContributeEmissionToGI;
         runtime.EmissiveGIIntensity = authoring.EmissiveGIIntensity;
         runtime.Properties = authoring.Properties;
-        m_AuthoringDefinition = std::move(authoring);
-        m_Definition = std::move(runtime);
-        m_LastChangedProperty.clear();
-        SetResolvedShader(resolved ? std::optional(std::move(resolved->Definition)) : std::nullopt);
-        if (m_ShaderDefinition)
-            Keire::ValidateMaterialAgainstShader(m_Definition, *m_ShaderDefinition);
+        auto replacement = *this;
+        replacement.m_AuthoringDefinition = std::move(authoring);
+        replacement.m_Definition = std::move(runtime);
+        replacement.m_LastChangedProperty.clear();
+        replacement.SetResolvedShader(resolved ? std::optional(std::move(resolved->Definition)) : std::nullopt);
+        if (replacement.m_ShaderDefinition)
+            Keire::ValidateMaterialAgainstShader(replacement.m_Definition, *replacement.m_ShaderDefinition);
+        *this = std::move(replacement);
     }
 
     void MaterialDocument::OpenAsset(const Keire::AssetId asset, std::filesystem::path sourcePath,
@@ -82,27 +76,33 @@ namespace KeireEditor
         if (shader.Asset && !resolved)
             throw std::invalid_argument("The selected shader source could not be read.");
 
+        auto replacement = *this;
+        auto& runtime = replacement.m_Definition;
+        runtime.Shader = resolved ? resolved->RuntimeAsset : Keire::AssetId{};
+        runtime.Properties.clear();
         if (resolved)
         {
-            std::erase_if(m_AuthoringDefinition.Properties,
-                          [&](const auto& entry)
-                          {
-                              const auto property = std::ranges::find(resolved->Definition.Properties, entry.first,
-                                                                      &Keire::ShaderPropertyDefinition::Name);
-                              if (property == resolved->Definition.Properties.end())
-                                  return true;
-                              return (property->Type == Keire::ShaderPropertyType::Texture2D) !=
-                                     IsTextureProperty(entry.second);
-                          });
+            Keire::ValidateMaterialAgainstShader(runtime, resolved->Definition);
+            for (const auto& [name, value] : m_AuthoringDefinition.Properties)
+            {
+                runtime.Properties.emplace(name, value);
+                try
+                {
+                    Keire::ValidateMaterialAgainstShader(runtime, resolved->Definition);
+                }
+                catch (const std::invalid_argument&)
+                {
+                    // A new shader may change a property's type or range; use its default for incompatible values.
+                    runtime.Properties.erase(name);
+                }
+            }
         }
-        else
-            m_AuthoringDefinition.Properties.clear();
 
-        m_AuthoringDefinition.Shader = std::move(shader);
-        m_Definition.Shader = resolved ? resolved->RuntimeAsset : Keire::AssetId{};
-        m_Definition.Properties = m_AuthoringDefinition.Properties;
-        m_LastChangedProperty = "$shader";
-        SetResolvedShader(resolved ? std::optional(std::move(resolved->Definition)) : std::nullopt);
+        replacement.m_AuthoringDefinition.Shader = std::move(shader);
+        replacement.m_AuthoringDefinition.Properties = runtime.Properties;
+        replacement.m_LastChangedProperty = "$shader";
+        replacement.SetResolvedShader(resolved ? std::optional(std::move(resolved->Definition)) : std::nullopt);
+        *this = std::move(replacement);
         return true;
     }
 

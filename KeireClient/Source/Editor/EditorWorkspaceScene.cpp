@@ -160,7 +160,7 @@ void EditorWorkspaceLayer::CreateScene()
         m_AssetOperations->QueueCreateAsset(
             destination, Keire::SceneAsset::Encode(definition), {},
             {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenScene, .UndoName = "Create Scene"});
-        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        m_AssetStatus = "Creating " + Keire::Detail::PathToUtf8(destination) + " in the isolated asset worker.";
     }
     catch (const std::exception& error)
     {
@@ -179,13 +179,13 @@ bool EditorWorkspaceLayer::CreateSceneAsset(const std::string_view name)
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Scene name must be one non-empty path component.");
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
-        const auto destination = directory / (std::string(name) + ".keirescene");
+        const auto destination = directory / Keire::Detail::PathFromUtf8(std::string(name) + ".keirescene");
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A scene with that name already exists in this folder.");
         m_AssetOperations->QueueCreateAsset(
             destination, Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition(std::string(name))), {},
             {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenScene, .UndoName = "Create Scene"});
-        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        m_AssetStatus = "Creating " + Keire::Detail::PathToUtf8(destination) + " in the isolated asset worker.";
         return true;
     }
     catch (const std::exception& error)
@@ -236,7 +236,7 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
     scene->MarkSaved();
     Keire::Ref<Keire::UndoContext> context;
     if (const auto undo = Owner().Undo())
-        context = undo->CreateContext({.Name = "Scene: " + record->RelativePath.stem().string()});
+        context = undo->CreateContext({.Name = "Scene: " + Keire::Detail::PathToUtf8(record->RelativePath.stem())});
     const auto previousAsset = m_SceneDocument->Asset();
     if (const auto scenes = Owner().Scenes(); scenes && previousAsset)
         (void)scenes->Unload(previousAsset);
@@ -248,8 +248,6 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
     if (const auto project = Owner().GetProject())
         m_SceneDocument->SetRecoveryPath(project->SceneRecoveryDirectory() /
                                          (asset.ToString() + ".keirescene.recovery"));
-    m_SceneDocument->SetRecoveryAvailable(!m_SceneDocument->RecoveryPath().empty() &&
-                                          std::filesystem::is_regular_file(m_SceneDocument->RecoveryPath()));
     m_SelectedAsset = asset;
     m_ActiveUndoContext = m_SceneDocument->UndoContext();
     if (const auto scenes = Owner().Scenes())
@@ -377,8 +375,9 @@ void EditorWorkspaceLayer::CompleteSaveSceneAs()
             throw std::invalid_argument("Scene Save As must remain inside the project's Assets directory.");
         if (std::filesystem::exists(destination))
             throw std::invalid_argument("Scene Save As requires a new path and will not overwrite an existing asset.");
-        auto definition = m_SceneDocument->EditingScene()->Snapshot();
-        definition.Name = destination.stem().string();
+        const auto sourceDefinition = m_SceneDocument->EditingScene()->Snapshot();
+        auto definition = sourceDefinition;
+        definition.Name = Keire::Detail::PathToUtf8(destination.stem());
         const auto bytes = Keire::SceneAsset::Encode(definition);
         const auto relative = relativeParent / destination.filename();
         if (!m_AssetOperations)
@@ -387,6 +386,7 @@ void EditorWorkspaceLayer::CompleteSaveSceneAs()
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::AdoptSceneCopy,
                                              .UndoName = "Save Scene As",
                                              .SceneSnapshot = definition,
+                                             .SourceSceneSnapshot = sourceDefinition,
                                              .SourceSceneAsset = m_SceneDocument->Asset(),
                                              .SceneSource = destination});
         m_SceneDocument->SetStatus("Saving the scene copy in the isolated asset worker.");

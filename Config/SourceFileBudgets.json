@@ -27,7 +27,6 @@
   "testRoots": ["KeireEditorTests", "KeireHubTests", "KeireManaged.Tests", "KeireRenderTests", "KeireTests"],
   "exceptions": {
     "KeireClient/Source/Editor/UiBuilderPanelStyles.cpp": 1520,
-    "KeireCore/Source/Assets/UiToolkitAssets.cpp": 1508,
-    "KeireCore/Source/Rendering/MaterialGraph.cpp": 1513
+    "KeireCore/Source/Assets/UiToolkitAssets.cpp": 1508
   }
 }

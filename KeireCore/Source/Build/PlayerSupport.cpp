@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <map>
 #include <optional>
 #include <ranges>
@@ -343,18 +344,20 @@ namespace Keire::Detail
             return *found;
         }
 
-        [[nodiscard]] std::vector<std::filesystem::path> CandidateManifestPaths(const std::filesystem::path& executable,
-                                                                                const PlayerPlatform platform,
-                                                                                const PlayerArchitecture architecture)
+        [[nodiscard]] std::vector<std::filesystem::path>
+        CandidateManifestPaths(const std::filesystem::path& executable, const PlayerPlatform platform,
+                               const PlayerArchitecture architecture, const std::filesystem::path& installedSupportRoot)
         {
             const auto& build = GetBuildInfo();
             const auto target = std::string(ToString(platform)) + "-" + std::string(ToString(architecture));
-            std::vector<std::filesystem::path> roots{PlayerSupportStorageRoot() / std::string(build.Version),
-                                                     executable.parent_path() / "BuildSupport" /
-                                                         std::string(build.Version)};
+            // A packaged editor's bundled runtime belongs to that build. A same-version user installation may
+            // come from an older development build and must not shadow it.
+            const std::array roots{executable.parent_path() / "BuildSupport" / std::string(build.Version),
+                                   installedSupportRoot / std::string(build.Version)};
             std::vector<std::filesystem::path> result;
             for (const auto& root : roots)
             {
+                const auto first = result.size();
                 std::error_code error;
                 if (!std::filesystem::is_directory(root, error) || error)
                     continue;
@@ -369,8 +372,8 @@ namespace Keire::Detail
                         PathToUtf8(entry.path().filename()).find(target) != std::string::npos)
                         result.push_back(manifest);
                 }
+                std::sort(result.begin() + static_cast<std::ptrdiff_t>(first), result.end());
             }
-            std::ranges::sort(result);
             return result;
         }
 
@@ -586,10 +589,11 @@ namespace Keire::Detail
     ResolvedPlayerSupport ResolvePlayerSupport(const std::filesystem::path& executable, const PlayerPlatform platform,
                                                const PlayerArchitecture architecture,
                                                const PlayerBuildConfiguration configuration,
-                                               const std::string& moduleFingerprint)
+                                               const std::string& moduleFingerprint,
+                                               const std::filesystem::path& installedSupportRoot)
     {
         std::string diagnostic;
-        for (const auto& path : CandidateManifestPaths(executable, platform, architecture))
+        for (const auto& path : CandidateManifestPaths(executable, platform, architecture, installedSupportRoot))
         {
             try
             {
