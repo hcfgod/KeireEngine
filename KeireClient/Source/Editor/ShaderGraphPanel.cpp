@@ -1,9 +1,12 @@
 #include "KeireClient/Editor/ShaderGraphPanel.h"
+#include "KeireClient/Editor/ShaderGraphPanelLayout.h"
+#include "KeireClient/Editor/ShaderGraphPreview.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <optional>
 #include <ranges>
 #include <set>
 #include <stdexcept>
@@ -171,12 +174,34 @@ namespace KeireEditor
         m_Registration = workspace.RegisterPanel({"editor.shader-graph", "Shader Graph", false});
     }
 
+    void ShaderGraphPanel::RequestSave() { m_SaveState.Request(m_Controller.ShaderGraphState()); }
+
+    void ShaderGraphPanel::UpdatePendingSave()
+    {
+        try
+        {
+            m_SaveState.Update(m_Controller.ShaderGraphState(),
+                               [&]
+                               {
+                                   m_Controller.SaveShaderGraphDocument();
+                                   m_Message = "Saved Shader Graph.";
+                               });
+        }
+        catch (const std::exception& error)
+        {
+            Report(error.what());
+        }
+    }
+
     void ShaderGraphPanel::Draw(Keire::UiFrame& ui)
     {
+        UpdatePendingSave();
         if (m_Registration.Visible())
             ui.SetNextWindowSize({1040.0F, 640.0F});
         if (auto panel = ui.BeginPanel(m_Registration); panel)
         {
+            if (ui.WindowFocused())
+                m_Controller.ActivateShaderGraphHistory();
             auto& document = m_Controller.ShaderGraphState();
             if (!document.IsOpen())
             {
@@ -184,13 +209,19 @@ namespace KeireEditor
                                "Open a Shader Graph asset to author its shader.");
                 return;
             }
-            DrawHeader(ui);
+            if (m_ReadOnly)
+                ui.TextWrapped("Read-only shared shader. Use Copy to Project in the asset Inspector to author a copy.");
+            {
+                const auto readOnly = ui.BeginDisabled(m_ReadOnly);
+                DrawHeader(ui);
+            }
             ui.Separator();
             const auto available = ui.ContentAvailable();
             const float authoringHeight = std::max(360.0F, available.Height * 0.72F);
-            const float previewPaneWidth =
-                m_ShowPreview && !document.ReusableGraph() && available.Width >= 620.0F ? 248.0F : 0.0F;
-            const float graphPaneWidth = std::max(320.0F, available.Width - previewPaneWidth - 8.0F);
+            const auto layout =
+                ResolveShaderGraphPaneLayout(available.Width, m_ShowPreview && !document.ReusableGraph());
+            const float previewPaneWidth = layout.PreviewWidth;
+            const float graphPaneWidth = layout.CanvasWidth;
             if (auto graph = ui.BeginChild("ShaderGraphAuthoring", {graphPaneWidth, authoringHeight}, false); graph)
                 DrawCanvas(ui);
             if (previewPaneWidth > 0.0F)
@@ -201,7 +232,16 @@ namespace KeireEditor
                     DrawPreview(ui);
             }
             ui.Separator();
-            DrawInspector(ui);
+            DrawBlackboard(ui);
+            {
+                const auto readOnly = ui.BeginDisabled(m_ReadOnly);
+                DrawInspector(ui);
+            }
+            // Text fields claim routed shortcuts; saving must also work while their draft has focus.
+            if (!m_ReadOnly && ui.WindowFocused() && ui.ControlDown() && !ui.ShiftDown() && !ui.AltDown() &&
+                ui.KeyPressed(Keire::UiKey::S) && (document.Dirty() || m_SaveState.Draft.Dirty))
+                RequestSave();
+            UpdatePendingSave();
             ui.Separator();
             DrawDiagnostics(ui);
         }
@@ -209,11 +249,13 @@ namespace KeireEditor
 
     void ShaderGraphPanel::ResetTransientState() noexcept
     {
+        m_BlackboardSearch.clear();
         m_SelectedNode.reset();
         m_SelectedNodes.clear();
         m_SelectedConnection.reset();
         m_FrameNode.reset();
-        m_InspectorNode.reset();
+        m_FrameAllOnOpen = true;
+        m_SaveState.Reset();
         m_NodeCreationPosition.reset();
         m_GraphContext.reset();
         m_FunctionExtractionSelection.clear();
@@ -227,8 +269,6 @@ namespace KeireEditor
         m_AssetPicker.Clear();
         m_NodeAssetPicker.Clear();
         m_Message.clear();
-        m_InspectorComment.clear();
-        m_InspectorCommentPinned = false;
     }
 
     void ShaderGraphPanel::DrawHeader(Keire::UiFrame& ui)
@@ -237,26 +277,23 @@ namespace KeireEditor
         const auto& theme = m_Controller.ShaderGraphTheme();
         const bool compiling = document.CompilationPending();
         const bool reusable = document.ReusableGraph();
-        ui.TextColored(!compiling && document.Publishable() ? theme.Success : theme.Warning,
-                       compiling                ? "LIVE COMPILING + UPDATING SCENE"
-                       : document.Publishable() ? reusable ? "REUSABLE GRAPH VALID" : "GENERATED SHADER READY"
-                       : reusable               ? "REUSABLE GRAPH HAS ERRORS"
-                                                : "PREVIEW USING LAST GOOD SHADER");
-        ui.SameLine();
-        if (auto disabled = ui.BeginDisabled(!document.Dirty() || !document.Publishable() || compiling); disabled)
+        const bool compact = ui.ContentAvailable().Width < 1000.0F;
+        ui.TextColoredWrapped(!compiling && document.Publishable() ? theme.Success : theme.Warning,
+                              compiling                ? "LIVE COMPILING + UPDATING SCENE"
+                              : document.Publishable() ? reusable ? "REUSABLE GRAPH VALID" : "GENERATED SHADER READY"
+                              : reusable               ? "REUSABLE GRAPH HAS ERRORS"
+                                                       : "PREVIEW USING LAST GOOD SHADER");
+        if (!compact)
+            ui.SameLine();
+        if (auto disabled = ui.BeginDisabled((!document.Dirty() && !m_SaveState.Draft.Dirty) || compiling); disabled)
             if (ui.Button("Save"))
-            {
-                try
-                {
-                    m_Controller.SaveShaderGraphDocument();
-                    m_Message = "Saved " + std::string(GraphPurposeName(document.Definition().Purpose)) + ".";
-                }
-                catch (const std::exception& error)
-                {
-                    Report(error.what());
-                }
-            }
-        ui.SameLine();
+                RequestSave();
+        if (m_SaveState.Draft.Dirty)
+        {
+            ui.TextColoredWrapped(theme.Warning, "Node changes pending Save / Apply");
+        }
+        else
+            ui.SameLine();
         const auto undo = document.UndoContext();
         if (auto disabled = ui.BeginDisabled(!undo || !undo->CanUndo()); disabled)
             if (ui.Button("Undo"))
@@ -268,59 +305,65 @@ namespace KeireEditor
 
         if (reusable)
         {
-            ui.SameLine();
+            if (!compact)
+                ui.SameLine();
             ui.TextColored(theme.MutedText, GraphPurposeName(document.Definition().Purpose));
             const auto& statistics = document.Compilation().Statistics;
-            ui.SameLine();
-            ui.TextColored(theme.MutedText, std::to_string(statistics.NodeCount) + " nodes  |  " +
-                                                std::to_string(statistics.ConnectionCount) + " connections");
+            ui.TextColoredWrapped(theme.MutedText, std::to_string(statistics.NodeCount) + " nodes  |  " +
+                                                       std::to_string(statistics.ConnectionCount) + " connections");
             return;
         }
 
-        ui.SameLine();
+        if (!compact)
+            ui.SameLine();
         if (ui.Button(m_ShowPreview ? "Hide Preview" : "Show Preview"))
             m_ShowPreview = !m_ShowPreview;
 
-        auto preview = document.PreviewSettings();
-        auto previewIndex = static_cast<std::size_t>(preview.Mesh);
-        ui.SameLine();
-        if (auto combo = ui.BeginCombo("Preview Mesh", PreviewNames[previewIndex]); combo)
+        if (!UsesShaderGraphImagePreview(document.Definition().Target.Target))
         {
-            for (std::size_t index = 0; index < PreviewNames.size(); ++index)
+            auto preview = document.PreviewSettings();
+            auto previewIndex = static_cast<std::size_t>(preview.Mesh);
+            if (!compact)
+                ui.SameLine();
+            ui.SetNextItemWidth(std::max(40.0F, std::min(180.0F, ui.ContentAvailable().Width - 95.0F)));
+            if (auto combo = ui.BeginCombo("Preview Mesh", PreviewNames[previewIndex]); combo)
             {
-                if (ui.Selectable(PreviewNames[index], index == previewIndex))
+                for (std::size_t index = 0; index < PreviewNames.size(); ++index)
                 {
-                    preview.Mesh = static_cast<Keire::ShaderGraphPreviewMesh>(index);
-                    if (preview.Mesh == Keire::ShaderGraphPreviewMesh::Custom && !preview.CustomMesh)
-                        preview.CustomMesh = Keire::MeshAsset::CubeId();
-                    document.SetPreviewSettings(preview);
+                    if (ui.Selectable(PreviewNames[index], index == previewIndex))
+                    {
+                        preview.Mesh = static_cast<Keire::ShaderGraphPreviewMesh>(index);
+                        if (preview.Mesh == Keire::ShaderGraphPreviewMesh::Custom && !preview.CustomMesh)
+                            preview.CustomMesh = Keire::MeshAsset::CubeId();
+                        document.SetPreviewSettings(preview);
+                    }
                 }
             }
-        }
-        if (preview.Mesh == Keire::ShaderGraphPreviewMesh::Custom)
-        {
-            auto mesh = preview.CustomMesh;
-            const AssetPickerOptions options{
-                .Label = "Custom Preview Mesh",
-                .ExpectedType = Keire::MeshAsset::StaticType(),
-                .Reveal = [this](const Keire::AssetId selected) { m_Controller.RevealShaderGraphAsset(selected); },
-                .AllowNone = false,
-            };
-            if (m_AssetPicker.Draw(ui, m_Controller.ShaderGraphAssetRecords(), mesh, options))
+            if (preview.Mesh == Keire::ShaderGraphPreviewMesh::Custom)
             {
-                preview.CustomMesh = mesh;
-                document.SetPreviewSettings(preview);
+                auto mesh = preview.CustomMesh;
+                const AssetPickerOptions options{
+                    .Label = "Custom Preview Mesh",
+                    .ExpectedType = Keire::MeshAsset::StaticType(),
+                    .Reveal = [this](const Keire::AssetId selected) { m_Controller.RevealShaderGraphAsset(selected); },
+                    .AllowNone = false,
+                };
+                if (m_AssetPicker.Draw(ui, m_Controller.ShaderGraphAssetRecords(), mesh, options))
+                {
+                    preview.CustomMesh = mesh;
+                    document.SetPreviewSettings(preview);
+                }
+                if (!m_AssetPicker.Diagnostic().empty())
+                    ui.TextColored(theme.Warning, m_AssetPicker.Diagnostic());
             }
-            if (!m_AssetPicker.Diagnostic().empty())
-                ui.TextColored(theme.Warning, m_AssetPicker.Diagnostic());
         }
         const auto& statistics = document.Compilation().Statistics;
-        ui.SameLine();
-        ui.TextColored(theme.MutedText, std::to_string(statistics.ReachableNodeCount) + "/" +
-                                            std::to_string(statistics.NodeCount) + " active nodes  |  " +
-                                            std::to_string(statistics.TextureSampleCount) + " texture samples  |  ~" +
-                                            std::to_string(statistics.EstimatedAluInstructions) + " ALU  |  " +
-                                            std::to_string(statistics.VariantCount) + " variants");
+        ui.TextColoredWrapped(theme.MutedText, std::to_string(statistics.ReachableNodeCount) + "/" +
+                                                   std::to_string(statistics.NodeCount) + " active nodes  |  " +
+                                                   std::to_string(statistics.TextureSampleCount) +
+                                                   " texture samples  |  ~" +
+                                                   std::to_string(statistics.EstimatedAluInstructions) + " ALU  |  " +
+                                                   std::to_string(statistics.VariantCount) + " variants");
 
         const auto target = document.Definition().Target.Target;
         ui.Text("Shader Target: " + std::string(Keire::ShaderGraphTargetName(target)));
@@ -346,112 +389,69 @@ namespace KeireEditor
     void ShaderGraphPanel::DrawInspector(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.ShaderGraphState();
+        if (m_SaveState.Draft.Dirty && m_SelectedNode != m_SaveState.Draft.Node)
+        {
+            ui.TextWrapped(
+                "The previous node has unapplied properties. Save or apply them before editing another node.");
+            if (ui.Button("Apply Previous Node Properties"))
+                (void)ApplyInspectorProperties();
+            ui.SameLine();
+            if (ui.Button("Discard Previous Node Properties"))
+            {
+                m_SaveState.Draft.Dirty = false;
+                m_SaveState.Draft.Node.reset();
+            }
+            return;
+        }
         if (DrawMultiSelectionInspector(ui))
             return;
         const auto* node = m_SelectedNode ? FindNode(document.Definition(), *m_SelectedNode) : nullptr;
         if (!node)
         {
-            m_InspectorNode.reset();
+            m_SaveState.Draft.Node.reset();
             ui.TextColored(m_Controller.ShaderGraphTheme().MutedText,
                            "Select a node to edit its authoring properties.");
             return;
         }
-        if (m_InspectorNode != node->Id)
+        if (m_SaveState.Draft.Node != node->Id || !m_SaveState.Draft.Dirty)
         {
-            m_InspectorNode = node->Id;
-            m_InspectorName = node->Name;
-            m_InspectorSymbol = node->Symbol;
-            m_InspectorInclude = node->Include.generic_string();
-            m_InspectorFunction = node->Function;
-            m_InspectorDescription = node->ParameterMetadata.Description;
-            m_InspectorCategory = node->ParameterMetadata.Category;
-            m_InspectorSortPriority = node->ParameterMetadata.SortPriority;
-            m_InspectorHasMinimum = node->ParameterMetadata.Minimum.has_value();
-            m_InspectorHasMaximum = node->ParameterMetadata.Maximum.has_value();
-            m_InspectorHasStep = node->ParameterMetadata.Step.has_value();
-            m_InspectorMinimum = node->ParameterMetadata.Minimum.value_or(0.0F);
-            m_InspectorMaximum = node->ParameterMetadata.Maximum.value_or(1.0F);
-            m_InspectorStep = node->ParameterMetadata.Step.value_or(0.01F);
-            const auto annotation = std::ranges::find(document.Definition().Authoring.NodeAnnotations, node->Id,
-                                                      &Keire::GraphNodeAnnotation::Node);
-            m_InspectorComment =
-                annotation == document.Definition().Authoring.NodeAnnotations.end() ? std::string{} : annotation->Text;
-            m_InspectorCommentPinned =
-                annotation != document.Definition().Authoring.NodeAnnotations.end() && annotation->Pinned;
+            StageNodeProperties(*node);
+            m_SaveState.Draft.Dirty = false;
         }
 
         ui.TextColored(m_Controller.ShaderGraphTheme().Accent, "NODE INSPECTOR");
         ui.TextColored(m_Controller.ShaderGraphTheme().MutedText, "Stable ID: " + node->Id.ToString());
-        (void)ui.InputText("Display Name", m_InspectorName);
+        m_SaveState.Draft.Dirty |= ui.InputText("Display Name", m_SaveState.Draft.Name);
         if (node->Kind == Keire::ShaderGraphNodeKind::Parameter || node->Kind == Keire::ShaderGraphNodeKind::Keyword)
-            (void)ui.InputText("Shader Symbol", m_InspectorSymbol);
+            m_SaveState.Draft.Dirty |= ui.InputText("Shader Symbol", m_SaveState.Draft.Symbol);
         if (node->Kind == Keire::ShaderGraphNodeKind::Parameter)
         {
-            (void)ui.InputText("Description", m_InspectorDescription);
-            (void)ui.InputText("Parameter Group", m_InspectorCategory);
-            (void)ui.DragScalar("Sort Priority", m_InspectorSortPriority, 1.0, -10'000.0, 10'000.0);
-            (void)ui.Checkbox("Override Minimum", m_InspectorHasMinimum);
-            if (m_InspectorHasMinimum)
-                (void)ui.DragScalar("Minimum", m_InspectorMinimum, 0.01);
-            (void)ui.Checkbox("Override Maximum", m_InspectorHasMaximum);
-            if (m_InspectorHasMaximum)
-                (void)ui.DragScalar("Maximum", m_InspectorMaximum, 0.01);
-            (void)ui.Checkbox("Override Step", m_InspectorHasStep);
-            if (m_InspectorHasStep)
-                (void)ui.DragScalar("Step", m_InspectorStep, 0.001, 0.0001, 1'000.0);
+            m_SaveState.Draft.Dirty |= ui.InputText("Description", m_SaveState.Draft.Description);
+            m_SaveState.Draft.Dirty |= ui.InputText("Parameter Group", m_SaveState.Draft.Category);
+            if (node->ValueType == Keire::ShaderGraphValueType::Color)
+                m_SaveState.Draft.Dirty |= ui.Checkbox("HDR Color", m_SaveState.Draft.HighDynamicRange);
+            m_SaveState.Draft.Dirty |=
+                ui.DragScalar("Sort Priority", m_SaveState.Draft.SortPriority, 1.0, -10'000.0, 10'000.0);
+            m_SaveState.Draft.Dirty |= ui.Checkbox("Override Minimum", m_SaveState.Draft.HasMinimum);
+            if (m_SaveState.Draft.HasMinimum)
+                m_SaveState.Draft.Dirty |= ui.DragScalar("Minimum", m_SaveState.Draft.Minimum, 0.01);
+            m_SaveState.Draft.Dirty |= ui.Checkbox("Override Maximum", m_SaveState.Draft.HasMaximum);
+            if (m_SaveState.Draft.HasMaximum)
+                m_SaveState.Draft.Dirty |= ui.DragScalar("Maximum", m_SaveState.Draft.Maximum, 0.01);
+            m_SaveState.Draft.Dirty |= ui.Checkbox("Override Step", m_SaveState.Draft.HasStep);
+            if (m_SaveState.Draft.HasStep)
+                m_SaveState.Draft.Dirty |= ui.DragScalar("Step", m_SaveState.Draft.Step, 0.001, 0.0001, 1'000.0);
         }
         if (node->Kind == Keire::ShaderGraphNodeKind::Custom)
         {
-            (void)ui.InputText("Safe Include", m_InspectorInclude);
-            (void)ui.InputText("Function", m_InspectorFunction);
+            m_SaveState.Draft.Dirty |= ui.InputText("Safe Include", m_SaveState.Draft.Include);
+            m_SaveState.Draft.Dirty |= ui.InputText("Function", m_SaveState.Draft.Function);
         }
-        (void)ui.InputTextMultiline("Node Comment", m_InspectorComment, 3);
-        (void)ui.Checkbox("Pin Comment Bubble", m_InspectorCommentPinned);
+        m_SaveState.Draft.Dirty |= ui.InputTextMultiline("Node Comment", m_SaveState.Draft.Comment, 3);
+        m_SaveState.Draft.Dirty |= ui.Checkbox("Pin Comment Bubble", m_SaveState.Draft.CommentPinned);
         if (ui.Button("Apply Node Properties"))
         {
-            try
-            {
-                const auto nodeId = node->Id;
-                const auto oldSymbol = node->Symbol;
-                const auto kind = node->Kind;
-                Keire::ShaderGraphParameterMetadata metadata;
-                metadata.Description = m_InspectorDescription;
-                metadata.Category = m_InspectorCategory;
-                metadata.SortPriority = static_cast<std::int32_t>(std::round(m_InspectorSortPriority));
-                if (m_InspectorHasMinimum)
-                    metadata.Minimum = static_cast<float>(m_InspectorMinimum);
-                if (m_InspectorHasMaximum)
-                    metadata.Maximum = static_cast<float>(m_InspectorMaximum);
-                if (m_InspectorHasStep)
-                    metadata.Step = static_cast<float>(m_InspectorStep);
-                (void)document.Edit(
-                    "Edit Shader Graph node properties",
-                    [nodeId, oldSymbol, kind, name = m_InspectorName, symbol = m_InspectorSymbol,
-                     include = m_InspectorInclude, function = m_InspectorFunction, metadata = std::move(metadata),
-                     comment = m_InspectorComment, pinned = m_InspectorCommentPinned](auto& definition)
-                    {
-                        auto candidate = std::ranges::find(definition.Nodes, nodeId, &Keire::ShaderGraphNode::Id);
-                        if (candidate == definition.Nodes.end())
-                            throw std::invalid_argument("Shader Graph node is unavailable.");
-                        candidate->Name = name;
-                        candidate->Symbol = symbol;
-                        candidate->Include = include;
-                        candidate->Function = function;
-                        candidate->ParameterMetadata = metadata;
-                        SetGraphNodeAnnotation(definition.Authoring, nodeId, comment, pinned);
-                        if (kind == Keire::ShaderGraphNodeKind::Keyword)
-                        {
-                            auto keyword =
-                                std::ranges::find(definition.Keywords, oldSymbol, &Keire::ShaderGraphKeyword::Name);
-                            if (keyword != definition.Keywords.end())
-                                keyword->Name = symbol;
-                        }
-                    });
-            }
-            catch (const std::exception& error)
-            {
-                Report(error.what());
-            }
+            (void)ApplyInspectorProperties();
             return;
         }
         if (auto disabled = ui.BeginDisabled(node->Kind == Keire::ShaderGraphNodeKind::Master ||
@@ -488,7 +488,7 @@ namespace KeireEditor
                 {
                     (void)document.RemoveNode(node->Id);
                     m_SelectedNode.reset();
-                    m_InspectorNode.reset();
+                    m_SaveState.Draft.Node.reset();
                 }
                 catch (const std::exception& error)
                 {
@@ -496,78 +496,86 @@ namespace KeireEditor
                 }
                 return;
             }
-        const auto applyValue = [&](Keire::ShaderGraphValue value)
+        if (node->Kind != Keire::ShaderGraphNodeKind::Master)
         {
-            try
+            const auto applyValue = [&](Keire::ShaderGraphValue value)
             {
-                (void)document.EditNode(node->Id, [value](auto& candidate) { candidate.Value = value; });
-            }
-            catch (const std::exception& error)
-            {
-                Report(error.what());
-            }
-        };
-        if (const auto scalar = std::get_if<float>(&node->Value))
-        {
-            double value = *scalar;
-            if (ui.DragScalar("Default Value", value, 0.01))
-                applyValue(static_cast<float>(value));
-        }
-        else if (const auto vector2 = std::get_if<Keire::Vector2>(&node->Value))
-        {
-            auto value = *vector2;
-            if (ui.DragVector2("Default Value", value))
-                applyValue(value);
-        }
-        else if (const auto vector3 = std::get_if<Keire::Vector3>(&node->Value))
-        {
-            auto value = *vector3;
-            if (ui.DragVector3("Default Value", value))
-                applyValue(value);
-        }
-        else if (const auto vector4 = std::get_if<Keire::Vector4>(&node->Value))
-        {
-            auto value = *vector4;
-            if (ui.DragVector4("Default Value", value))
-                applyValue(value);
-        }
-        else if (const auto color = std::get_if<Keire::Color>(&node->Value))
-        {
-            Keire::UiColor value{color->Red, color->Green, color->Blue, color->Alpha};
-            if (ui.ColorEdit("Default Value", value))
-                applyValue(Keire::Color{value.Red, value.Green, value.Blue, value.Alpha});
-        }
-        else if (const auto asset = std::get_if<Keire::AssetId>(&node->Value))
-        {
-            auto value = *asset;
-            const AssetPickerOptions options{
-                .Label = "Default Texture",
-                .ExpectedType = Keire::Texture2DAsset::StaticType(),
-                .Reveal = [this](const Keire::AssetId selected) { m_Controller.RevealShaderGraphAsset(selected); },
-                .AllowNone = true,
+                try
+                {
+                    (void)document.EditNode(node->Id, [value](auto& candidate) { candidate.Value = value; });
+                }
+                catch (const std::exception& error)
+                {
+                    Report(error.what());
+                }
             };
-            if (m_NodeAssetPicker.Draw(ui, m_Controller.ShaderGraphAssetRecords(), value, options))
-                applyValue(value);
-            if (!m_NodeAssetPicker.Diagnostic().empty())
-                ui.TextColored(m_Controller.ShaderGraphTheme().Warning, m_NodeAssetPicker.Diagnostic());
-            auto semanticIndex = static_cast<std::size_t>(node->TextureSemantic);
-            if (auto combo = ui.BeginCombo("Texture Semantic", TextureSemanticNames[semanticIndex]); combo)
-                for (std::size_t index = 0; index < TextureSemanticNames.size(); ++index)
-                    if (ui.Selectable(TextureSemanticNames[index], semanticIndex == index))
-                    {
-                        const auto semantic = static_cast<Keire::ShaderTextureSemantic>(index);
-                        try
+            if (const auto scalar = std::get_if<float>(&node->Value))
+            {
+                double value = *scalar;
+                if (ui.DragScalar("Default Value", value, 0.01))
+                    applyValue(static_cast<float>(value));
+            }
+            else if (const auto vector2 = std::get_if<Keire::Vector2>(&node->Value))
+            {
+                auto value = *vector2;
+                if (ui.DragVector2("Default Value", value))
+                    applyValue(value);
+            }
+            else if (const auto vector3 = std::get_if<Keire::Vector3>(&node->Value))
+            {
+                auto value = *vector3;
+                if (ui.DragVector3("Default Value", value))
+                    applyValue(value);
+            }
+            else if (const auto vector4 = std::get_if<Keire::Vector4>(&node->Value))
+            {
+                auto value = *vector4;
+                if (ui.DragVector4("Default Value", value))
+                    applyValue(value);
+            }
+            else if (const auto color = std::get_if<Keire::Color>(&node->Value))
+            {
+                Keire::UiColor value{color->Red, color->Green, color->Blue, color->Alpha};
+                if (ui.ColorEditHdr("Default Value", value))
+                    applyValue(Keire::Color{value.Red, value.Green, value.Blue, value.Alpha});
+            }
+            else if (const auto asset = std::get_if<Keire::AssetId>(&node->Value))
+            {
+                auto value = *asset;
+                const AssetPickerOptions options{
+                    .Label = "Default Texture",
+                    .ExpectedType = Keire::Texture2DAsset::StaticType(),
+                    .Reveal = [this](const Keire::AssetId selected) { m_Controller.RevealShaderGraphAsset(selected); },
+                    .AllowNone = true,
+                };
+                if (m_NodeAssetPicker.Draw(ui, m_Controller.ShaderGraphAssetRecords(), value, options))
+                    applyValue(value);
+                if (!m_NodeAssetPicker.Diagnostic().empty())
+                    ui.TextColored(m_Controller.ShaderGraphTheme().Warning, m_NodeAssetPicker.Diagnostic());
+                auto semanticIndex = static_cast<std::size_t>(node->TextureSemantic);
+                if (auto combo = ui.BeginCombo("Texture Semantic", TextureSemanticNames[semanticIndex]); combo)
+                    for (std::size_t index = 0; index < TextureSemanticNames.size(); ++index)
+                        if (ui.Selectable(TextureSemanticNames[index], semanticIndex == index))
                         {
-                            (void)document.EditNode(node->Id, [semantic](auto& candidate)
-                                                    { candidate.TextureSemantic = semantic; });
+                            const auto semantic = static_cast<Keire::ShaderTextureSemantic>(index);
+                            try
+                            {
+                                (void)document.EditNode(node->Id, [semantic](auto& candidate)
+                                                        { candidate.TextureSemantic = semantic; });
+                            }
+                            catch (const std::exception& error)
+                            {
+                                Report(error.what());
+                            }
                         }
-                        catch (const std::exception& error)
-                        {
-                            Report(error.what());
-                        }
-                    }
+            }
         }
-        if (auto inputs = ui.BeginTreeNode("Input Defaults"); inputs)
+        std::optional<Keire::UiTreeNodeScope> inputs;
+        if (node->Kind == Keire::ShaderGraphNodeKind::Master)
+            ui.Text("Input Defaults");
+        else
+            inputs.emplace(ui.BeginTreeNode("Input Defaults"));
+        if (!inputs || static_cast<bool>(*inputs))
         {
             const auto applyPinValue = [&](const Keire::AssetId pinId, Keire::ShaderGraphValue value)
             {
@@ -628,7 +636,7 @@ namespace KeireEditor
                 else if (const auto color = std::get_if<Keire::Color>(&pin.DefaultValue))
                 {
                     Keire::UiColor value{color->Red, color->Green, color->Blue, color->Alpha};
-                    if (ui.ColorEdit(label, value))
+                    if (ui.ColorEditHdr(label, value))
                         applyPinValue(pin.Id, Keire::Color{value.Red, value.Green, value.Blue, value.Alpha});
                 }
                 else if (const auto asset = std::get_if<Keire::AssetId>(&pin.DefaultValue))
@@ -649,7 +657,8 @@ namespace KeireEditor
     }
     bool ShaderGraphPanel::DrawNodeCreationMenu(Keire::UiFrame& ui, const std::optional<Keire::Vector2> graphPosition,
                                                 const Keire::ShaderGraphNode* compatibleNode,
-                                                const Keire::ShaderGraphPin* compatiblePin)
+                                                const Keire::ShaderGraphPin* compatiblePin,
+                                                const std::optional<Keire::AssetId> insertion)
     {
         if (m_NodeMenuSelection.ConsumeFocusRequest())
             ui.RequestKeyboardFocus();
@@ -657,8 +666,32 @@ namespace KeireEditor
         ui.Separator();
         const auto search = Lower(m_NodeSearch);
         const auto& entries = NodeEntries();
+        const auto& definition = m_Controller.ShaderGraphState().Definition();
+        std::optional<Keire::ShaderGraphEndpoint> anchor;
+        if (compatiblePin)
+            for (const auto& node : definition.Nodes)
+                if (std::ranges::find(node.Pins, compatiblePin->Id, &Keire::ShaderGraphPin::Id) != node.Pins.end())
+                    anchor = Keire::ShaderGraphEndpoint{node.Id, compatiblePin->Id};
         const auto compatible = [&](const Keire::ShaderGraphNode& candidate)
         {
+            if (insertion)
+            {
+                const auto cable =
+                    std::ranges::find(definition.Connections, *insertion, &Keire::ShaderGraphConnection::Id);
+                if (cable == definition.Connections.end())
+                    return false;
+                const auto* source = FindNode(definition, cable->Output.Node);
+                const auto* target = FindNode(definition, cable->Input.Node);
+                if (!source || !target)
+                    return false;
+                const auto output = std::ranges::find(source->Pins, cable->Output.Pin, &Keire::ShaderGraphPin::Id);
+                const auto input = std::ranges::find(target->Pins, cable->Input.Pin, &Keire::ShaderGraphPin::Id);
+                return output != source->Pins.end() && input != target->Pins.end() &&
+                       std::ranges::any_of(candidate.Pins,
+                                           [&](const auto& pin) { return ShaderGraphPinsCanConnect(*output, pin); }) &&
+                       std::ranges::any_of(candidate.Pins,
+                                           [&](const auto& pin) { return ShaderGraphPinsCanConnect(pin, *input); });
+            }
             if (compatiblePin)
                 return std::ranges::any_of(candidate.Pins, [&](const Keire::ShaderGraphPin& pin)
                                            { return ShaderGraphPinsCanConnect(*compatiblePin, pin); });
@@ -685,7 +718,7 @@ namespace KeireEditor
                                   record.Type == Keire::MaterialLayerBlendAsset::StaticType();
             if (!reusable || record.Id == m_Controller.ShaderGraphState().Asset())
                 continue;
-            if (!compatibleNode && !compatiblePin)
+            if (!compatibleNode && !compatiblePin && !insertion)
             {
                 reusableGraphs.push_back(&record);
                 continue;
@@ -763,7 +796,7 @@ namespace KeireEditor
                                    (activateSelected && m_NodeMenuSelection.IsSelected(paths[index]));
             if (!activated)
                 return false;
-            if (!AddNode(entries[index].Kind, entries[index].Type, graphPosition))
+            if (!AddNode(entries[index].Kind, entries[index].Type, graphPosition, anchor, insertion))
                 return false;
             m_NodeMenuSelection.Remember(paths[index]);
             m_NodeSearch.clear();
@@ -786,7 +819,7 @@ namespace KeireEditor
                 if (Lower(path).find(search) == std::string::npos)
                     continue;
                 visibleFunction = true;
-                if (ui.MenuItem(path) && AddFunctionNode(record->Id, name, graphPosition))
+                if (ui.MenuItem(path) && AddFunctionNode(record->Id, name, graphPosition, anchor, insertion))
                 {
                     m_NodeSearch.clear();
                     ui.CloseCurrentPopup();
@@ -821,7 +854,7 @@ namespace KeireEditor
                     for (const auto* record : reusableGraphs)
                     {
                         const auto name = record->RelativePath.stem().string();
-                        if (ui.MenuItem(name) && AddFunctionNode(record->Id, name, graphPosition))
+                        if (ui.MenuItem(name) && AddFunctionNode(record->Id, name, graphPosition, anchor, insertion))
                         {
                             ui.CloseCurrentPopup();
                             return true;
@@ -835,23 +868,45 @@ namespace KeireEditor
         const bool openFunctionExtractionPopup = std::exchange(m_OpenFunctionExtractionPopup, false);
         auto& document = m_Controller.ShaderGraphState();
         auto model = document.BuildCanvasModel();
-        if (m_FrameNode)
+        const auto framePending = [&]
         {
-            const auto identity =
-                std::ranges::find(model.NodeIdentities, *m_FrameNode, &std::pair<StableNodeId, Keire::AssetId>::second);
-            const auto node = identity == model.NodeIdentities.end()
-                                  ? model.Nodes.end()
-                                  : std::ranges::find(model.Nodes, identity->first, &NodeGraphNode::Id);
-            if (node != model.Nodes.end())
+            // Consume requests only after toolbars have established the canvas's actual viewport.
+            const auto available = ui.ContentAvailable();
+            const Keire::UiSize size{std::max(120.0F, available.Width), std::max(80.0F, available.Height)};
+            if (std::exchange(m_FrameAllOnOpen, false))
+                m_Canvas.Focus(model.Nodes, size);
+            if (m_FrameNode)
             {
-                const std::array framed{*node};
-                m_Canvas.Focus(framed, ui.ContentAvailable());
+                const auto identity = std::ranges::find(model.NodeIdentities, *m_FrameNode,
+                                                        &std::pair<StableNodeId, Keire::AssetId>::second);
+                const auto node = identity == model.NodeIdentities.end()
+                                      ? model.Nodes.end()
+                                      : std::ranges::find(model.Nodes, identity->first, &NodeGraphNode::Id);
+                if (node != model.Nodes.end())
+                {
+                    const std::array framed{*node};
+                    m_Canvas.Focus(framed, size);
+                }
+                m_FrameNode.reset();
             }
-            m_FrameNode.reset();
-        }
+        };
         ApplyNodeGraphAnnotations(document.Definition().Authoring, model.NodeIdentities, model.Nodes);
+        if (m_ReadOnly)
+        {
+            if (ui.Button("Frame All"))
+                m_FrameAllOnOpen = true;
+            framePending();
+            SynchronizeGraphSelection(m_Canvas, model.NodeIdentities, m_SelectedNodes, m_SelectedNode);
+            const auto canvas = m_Canvas.Draw(ui, "ShaderGraphCanvas", model.Nodes, model.Connections,
+                                              {.Editable = false, .InteractiveConnections = false});
+            m_SelectedNodes = ResolveGraphSelection(canvas.SelectedNodes, model.NodeIdentities);
+            m_SelectedNode = m_SelectedNodes.empty() ? std::nullopt : std::optional(m_SelectedNodes.back());
+            return;
+        }
         auto comments = BuildNodeGraphCommentModel(document.Definition().Authoring, model.NodeIdentities);
         bool nodeMenuOpen = false;
+        const bool compact = ui.ContentAvailable().Width < 900.0F;
+        ui.SetNextItemWidth(std::max(40.0F, std::min(240.0F, ui.ContentAvailable().Width - 80.0F)));
         if (auto combo = ui.BeginCombo("Add Node", "Choose..."); combo)
         {
             nodeMenuOpen = true;
@@ -866,18 +921,23 @@ namespace KeireEditor
                 return;
             }
         }
-        ui.SameLine();
+        if (!compact)
+            ui.SameLine();
         if (ui.Button("Frame All"))
-            m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
-        ui.SameLine();
+            m_FrameAllOnOpen = true;
+        if (!compact)
+            ui.SameLine();
+        ui.SetNextItemWidth(std::max(40.0F, std::min(180.0F, ui.ContentAvailable().Width - 80.0F)));
         if (DrawArrangeMenu(ui, model.Nodes, model.Connections, model.NodeIdentities, model.ConnectionIdentities))
             return;
-        ui.SameLine();
+        if (!compact)
+            ui.SameLine();
+        ui.SetNextItemWidth(std::max(40.0F, std::min(180.0F, ui.ContentAvailable().Width - 90.0F)));
         (void)DrawGraphBookmarkMenu(ui, m_Bookmarks, m_Canvas);
-        ui.SameLine();
-        ui.TextColored(
+        ui.TextColoredWrapped(
             m_Controller.ShaderGraphTheme().MutedText,
             "Right-click canvas or items for actions  |  drag pins to connect  |  double-click cable routes");
+        framePending();
         const auto findCanvasConnection = [&](const Keire::AssetId id) -> std::optional<StableNodeId>
         {
             const auto found = std::ranges::find_if(model.ConnectionIdentities,
@@ -1193,6 +1253,9 @@ namespace KeireEditor
                 {
                     ui.TextColored(m_Controller.ShaderGraphTheme().Accent, "SHADER GRAPH CABLE");
                     ui.Separator();
+                    if (auto insert = ui.BeginMenu("Insert Compatible Node"); insert)
+                        if (DrawNodeCreationMenu(ui, m_GraphContext->GraphPosition, nullptr, nullptr, connection->Id))
+                            return;
                     if (ui.MenuItem("Select Source Node"))
                         m_SelectedNode = connection->Output.Node;
                     if (ui.MenuItem("Select Target Node"))
@@ -1230,14 +1293,35 @@ namespace KeireEditor
             if (ui.MenuItem("Create Empty Comment"))
                 CreateComment(ui, document, model, *m_NodeCreationPosition, false);
             if (ui.MenuItem("Frame All Nodes"))
-                m_Canvas.Focus(model.Nodes, ui.ContentAvailable());
+                m_FrameAllOnOpen = true;
         }
         if (!contextMenuOpen)
             m_NodeCreationPosition.reset();
         m_NodeMenuOpen = nodeMenuOpen || contextMenuOpen;
     }
+    void ShaderGraphPanel::StageNodeProperties(const Keire::ShaderGraphNode& node)
+    {
+        m_SaveState.Stage(m_Controller.ShaderGraphState(), node);
+    }
+
+    bool ShaderGraphPanel::ApplyInspectorProperties()
+    {
+        try
+        {
+            m_SaveState.Apply(m_Controller.ShaderGraphState());
+            return true;
+        }
+        catch (const std::exception& error)
+        {
+            Report(error.what());
+            return false;
+        }
+    }
+
     bool ShaderGraphPanel::AddNode(const Keire::ShaderGraphNodeKind kind, const Keire::ShaderGraphValueType type,
-                                   const std::optional<Keire::Vector2> graphPosition)
+                                   const std::optional<Keire::Vector2> graphPosition,
+                                   const std::optional<Keire::ShaderGraphEndpoint> anchor,
+                                   const std::optional<Keire::AssetId> insertion)
     {
         try
         {
@@ -1267,20 +1351,7 @@ namespace KeireEditor
                 const auto size = m_Canvas.Zoom();
                 node.EditorPosition = {-m_Canvas.Pan().X + 280.0F / size, -m_Canvas.Pan().Y + 180.0F / size};
             }
-            const auto id = node.Id;
-            const bool changed =
-                kind == Keire::ShaderGraphNodeKind::Keyword
-                    ? m_Controller.ShaderGraphState().Edit("Add Shader Graph keyword",
-                                                           [node = std::move(node)](auto& definition) mutable
-                                                           {
-                                                               definition.Keywords.push_back(
-                                                                   {.Name = node.Symbol, .DefaultOption = "false"});
-                                                               definition.Nodes.push_back(std::move(node));
-                                                           })
-                    : m_Controller.ShaderGraphState().AddNode(std::move(node));
-            if (changed)
-                m_SelectedNode = id;
-            return changed;
+            return CommitCreatedNode(std::move(node), anchor, insertion);
         }
         catch (const std::exception& error)
         {

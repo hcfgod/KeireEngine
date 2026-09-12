@@ -1,4 +1,5 @@
 #include "KeireInternal/Scripting/ManagedRuntimeBindings.h"
+#include "KeireInternal/Scripting/ManagedRuntimeCompute.h"
 
 namespace Keire::Detail
 {
@@ -16,6 +17,7 @@ namespace Keire::Detail
         RegisterManagedRuntimePhysics(assembly);
         RegisterManagedRuntimeWorld(assembly);
         RegisterManagedRuntimeRendering(assembly);
+        RegisterManagedRuntimeCompute(assembly);
         RegisterManagedRuntimeUi(assembly);
     }
 } // namespace Keire::Detail

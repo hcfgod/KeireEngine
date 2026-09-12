@@ -1600,6 +1600,10 @@ assert_true grep -Fq 'Assert-MetricSummary $report.summary.$metricName' \
   "$ROOT/Scripts/Windows/render-benchmark.ps1"
 assert_true grep -Fq 'Assert-RequiredProperties $timeline $timelineFields' \
   "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'function Get-MaterialShaderFixture' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'Assets/Examples/MaterialLab' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'identitySha256' "$ROOT/Scripts/Windows/render-benchmark.ps1"
+assert_true grep -Fq 'fixture = $fixture' "$ROOT/Scripts/Windows/render-benchmark.ps1"
 assert_true grep -Fq 'Remove-Item -LiteralPath $matrixPath -Force' "$ROOT/Scripts/Windows/render-benchmark.ps1"
 assert_true grep -q 'editor product manifest must be a clean schema-2' \
   "$ROOT/KeireHubPackagePublisher/Source/Main.cpp"

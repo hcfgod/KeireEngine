@@ -1455,34 +1455,3 @@ public static class Cursor
         }
     }
 }
-
-public static class Debug
-{
-    public static void Log(object? message) => NativeRuntime.WriteLog(2, message?.ToString() ?? "null");
-    public static void Warn(object? message) => NativeRuntime.WriteLog(3, message?.ToString() ?? "null");
-    public static void LogWarning(object? message) => Warn(message);
-    public static void Error(object? message) => NativeRuntime.WriteLog(4, message?.ToString() ?? "null");
-    public static void LogError(object? message) => Error(message);
-
-    public static void LogException(Exception exception) =>
-        NativeRuntime.WriteLog(4, (exception ?? throw new ArgumentNullException(nameof(exception))).ToString());
-
-    public static void Assert(bool condition, object? message = null)
-    {
-        if (!condition)
-            NativeRuntime.WriteLog(4, $"Assertion failed: {message ?? "No message provided."}");
-    }
-
-    public static void DrawLine(Vector3 start, Vector3 end, Color color, float duration = 0.0f) =>
-        NativeRuntime.DrawDebugLine(start, end, color, duration);
-}
-
-public static class Log
-{
-    public static void Trace(string message) => NativeRuntime.WriteLog(0, message);
-    public static void Debug(string message) => NativeRuntime.WriteLog(1, message);
-    public static void Info(string message) => NativeRuntime.WriteLog(2, message);
-    public static void Warning(string message) => NativeRuntime.WriteLog(3, message);
-    public static void Error(string message) => NativeRuntime.WriteLog(4, message);
-    public static void Critical(string message) => NativeRuntime.WriteLog(5, message);
-}

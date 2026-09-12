@@ -66,7 +66,11 @@ namespace KeireEditor
             RefreshFolderCache(true);
         }
         void SetUndoContext(Keire::Ref<Keire::UndoContext> context) { Undo = std::move(context); }
-        void RequestCreateMaterial() { RequestNamedCreate(NamedCreateKind::Material, "Material"); }
+        void RequestCreateMaterial()
+        {
+            MaterialGraphCreation.Reset();
+            RequestNamedCreate(NamedCreateKind::Material, "Material");
+        }
         void RequestNamedCreate(const NamedCreateKind kind, const std::string_view defaultName)
         {
             PendingCreateKind = kind;
@@ -130,6 +134,7 @@ namespace KeireEditor
             VisibleSelectionOrder.clear();
             VisibleFolderOrder.clear();
             SelectionAnchor = {};
+            RevealAsset = {};
             FolderSelectionAnchor.clear();
             PendingVariantBase = {};
             Clipboard.clear();
@@ -245,7 +250,7 @@ namespace KeireEditor
             if (const auto record =
                     editor.AssetBrowserDatabase() ? editor.AssetBrowserDatabase()->Find(asset) : std::nullopt)
             {
-                CurrentFolder = record->RelativePath.parent_path();
+                PrepareAssetBrowserReveal(*record, CurrentFolder, Search);
                 if (record->ParentSource)
                     ExpandedParents.insert(record->ParentSource);
                 Select(asset, false, editor);
@@ -441,11 +446,11 @@ namespace KeireEditor
             }
             if (!canCreateFontFamily && ui.LastItemState().Hovered)
                 ui.SetTooltip("Select one imported .ttf, .otf, or .ttc font face first.", {.Delayed = true});
-            if (ui.MenuItem("Material Graph"))
+            if (ui.MenuItem("Material from Shader"))
             {
                 MaterialGraphCreation.Begin(Selection.empty() ? Keire::AssetId{} : Selection.back(),
                                             editor.AssetBrowserRecords());
-                RequestNamedCreate(NamedCreateKind::MaterialGraph, "NewMaterialGraph");
+                RequestNamedCreate(NamedCreateKind::MaterialGraph, "NewMaterial");
             }
             if (const auto graphTemplate = DrawShaderGraphCreationMenu(ui))
             {
@@ -792,6 +797,8 @@ namespace KeireEditor
                 const auto size = Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F),
                                                 Detail::AssetBrowserGridCardHeight(ui, ThumbnailSize)};
                 const bool activated = ui.InvisibleButton("AssetCard", size);
+                if (ConsumeAssetBrowserReveal(RevealAsset, record.Id))
+                    ui.ScrollLastItemIntoView();
                 const auto state = ui.LastItemState();
                 const auto area = ui.LastItemRect();
                 const auto disclosure = Detail::AssetBrowserGridDisclosureArea(area, ThumbnailSize);
@@ -822,6 +829,8 @@ namespace KeireEditor
                 ui.SetCursorPosition(cursor);
                 const auto size = Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), rowHeight};
                 const bool activated = ui.InvisibleButton("AssetRow", size);
+                if (ConsumeAssetBrowserReveal(RevealAsset, record.Id))
+                    ui.ScrollLastItemIntoView();
                 const auto state = ui.LastItemState();
                 const auto area = ui.LastItemRect();
                 const auto disclosure = Detail::AssetBrowserListDisclosureArea(area);
@@ -855,8 +864,6 @@ namespace KeireEditor
             }
             if (open)
                 Open(record, editor);
-            if (RevealAsset == record.Id)
-                RevealAsset = {};
         }
 
         void DrawGridAssetGroup(Keire::UiFrame& ui, const std::span<const AssetBrowserHierarchyEntry> entries,

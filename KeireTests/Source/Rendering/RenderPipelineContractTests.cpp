@@ -1279,6 +1279,13 @@ TEST_CASE("ImGui surface bindings remain empty until their logical epoch publish
     REQUIRE(unresolved);
     CHECK(unresolvedCalled);
     CHECK_FALSE(DrawDataUsesTexture(*unresolved->Data(), capturedTexture));
+    CHECK_FALSE(DrawDataUsesTexture(*unresolved->Data(), ImTextureID_Invalid));
+    for (const auto* list : unresolved->Data()->CmdLists)
+        CHECK(list->CmdBuffer.empty());
+
+    const auto missingResolver = captured->ResolveForRender(cache, 2U, {});
+    for (const auto* list : missingResolver->Data()->CmdLists)
+        CHECK(list->CmdBuffer.empty());
 
     constexpr ImTextureID publishedTexture = static_cast<ImTextureID>(0x5678U);
     const auto published = captured->ResolveForRender(cache, 2U, [](const Keire::RenderBackend::RenderSurfaceToken&)
@@ -1286,6 +1293,39 @@ TEST_CASE("ImGui surface bindings remain empty until their logical epoch publish
     REQUIRE(published);
     CHECK(DrawDataUsesTexture(*published->Data(), publishedTexture));
     CHECK_FALSE(DrawDataUsesTexture(*published->Data(), capturedTexture));
+}
+
+TEST_CASE("ImGui recovery omits unavailable surfaces without shifting surviving texture bindings")
+{
+    ImGuiContextScope contextScope;
+    BeginImGuiPacketFrame(contextScope);
+    std::vector<Keire::RenderBackend::CapturedSurfaceTextureBinding> bindings;
+    for (std::uint64_t id = 1; id <= 4; ++id)
+    {
+        const auto texture = static_cast<ImTextureID>(0x1234U + id);
+        ImGui::GetForegroundDrawList()->AddImage(ImTextureRef(texture), {4.0F, 4.0F}, {28.0F, 28.0F});
+        bindings.push_back(
+            {.Surface = {.Id = id,
+                         .Epoch = 1,
+                         .Lifetime = std::make_shared<Keire::RenderBackend::RenderSurfaceEpochLease>(id, 1)},
+             .TextureIdentity = static_cast<std::uintptr_t>(texture)});
+    }
+    ImGui::Render();
+    const auto captured = Keire::RenderBackend::OwnedImGuiDrawData::Capture(ImGui::GetDrawData(), bindings);
+    REQUIRE(captured);
+    Keire::RenderBackend::ImGuiTextureCache cache;
+    const auto recovered = captured->ResolveForRender(
+        cache, 2U, [](const auto& token) { return token.Id == 2U ? std::uintptr_t{0x5678U} : std::uintptr_t{0}; });
+    CHECK(DrawDataUsesTexture(*recovered->Data(), static_cast<ImTextureID>(0x5678U)));
+    CHECK_FALSE(DrawDataUsesTexture(*recovered->Data(), ImTextureID_Invalid));
+    int commands = 0;
+    for (const auto* list : recovered->Data()->CmdLists)
+        commands += list->CmdBuffer.Size;
+    CHECK(commands == 1);
+    const auto published = captured->ResolveForRender(cache, 2U, [](const auto& token)
+                                                      { return static_cast<std::uintptr_t>(0x6000U + token.Id); });
+    for (std::uint64_t id = 1; id <= 4; ++id)
+        CHECK(DrawDataUsesTexture(*published->Data(), static_cast<ImTextureID>(0x6000U + id)));
 }
 
 TEST_CASE("ImGui frame packets reject raw GPU textures borrowed pixels and arbitrary callbacks")

@@ -84,7 +84,8 @@ namespace KeireEditor
 
     Keire::PrefabInstanceDefinition InstantiatePrefab(Keire::SceneDefinition& scene, const Keire::AssetId prefab,
                                                       const Keire::SceneDefinition& composed,
-                                                      const Keire::AssetId parent)
+                                                      const Keire::AssetId parent,
+                                                      const std::optional<Keire::Vector3> position)
     {
         Keire::SceneAsset::Validate(scene);
         Keire::SceneAsset::Validate(composed);
@@ -94,6 +95,13 @@ namespace KeireEditor
             std::ranges::find(scene.Objects, parent, &Keire::SceneObjectDefinition::Id) == scene.Objects.end())
             throw std::invalid_argument("Prefab instance parent is unavailable.");
 
+        const auto root = std::ranges::find(composed.Objects, Keire::AssetId{}, &Keire::SceneObjectDefinition::Parent);
+        if (root == composed.Objects.end())
+            throw std::invalid_argument("Prefab instantiation requires at least one root object.");
+        const auto offset = position ? Keire::Vector3{position->X - root->Transform.Position.X,
+                                                      position->Y - root->Transform.Position.Y,
+                                                      position->Z - root->Transform.Position.Z}
+                                     : Keire::Vector3{};
         std::unordered_map<Keire::AssetId, Keire::AssetId> remapped;
         for (const auto& object : composed.Objects)
             remapped.emplace(object.Id, Keire::AssetId::Generate());
@@ -106,6 +114,16 @@ namespace KeireEditor
             auto copy = object;
             copy.Id = remapped.at(object.Id);
             copy.Parent = object.Parent ? remapped.at(object.Parent) : parent;
+
+            if (!object.Parent && position)
+            {
+                copy.Transform.Position = {copy.Transform.Position.X + offset.X, copy.Transform.Position.Y + offset.Y,
+                                           copy.Transform.Position.Z + offset.Z};
+                instance.Overrides.push_back({.Kind = Keire::PrefabOverrideKind::SetObjectTransform,
+                                              .Object = object.Id,
+                                              .Transform = copy.Transform});
+            }
+
             replacement.Objects.push_back(std::move(copy));
             instance.Objects.push_back({object.Id, remapped.at(object.Id)});
             if (!object.Parent && !instance.Root)

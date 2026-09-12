@@ -224,10 +224,13 @@ namespace
                 database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             }
             bool progressWarningEmitted = false;
+            Keire::Detail::AssetWorkerProgressThrottle progressThrottle;
             const auto progress = [&](const Keire::AssetOperationProgress& value)
             {
                 if (std::filesystem::exists(commandLine.Cancel))
                     throw Keire::AssetOperationCancelled();
+                if (!progressThrottle.ShouldPublish(value, Keire::Detail::AssetWorkerProgressThrottle::Clock::now()))
+                    return;
                 try
                 {
                     Keire::Detail::WriteAssetWorkerProgress(commandLine.Progress, value);

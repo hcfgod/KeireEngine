@@ -192,6 +192,12 @@ namespace Keire
         return state->Duplicate(m_Id);
     }
 
+    bool Entity::Destroy(const float delaySeconds)
+    {
+        const auto state = m_State.Lock();
+        return state && state->Destroy(m_Id, delaySeconds);
+    }
+
     bool Entity::Destroy()
     {
         const auto state = m_State.Lock();

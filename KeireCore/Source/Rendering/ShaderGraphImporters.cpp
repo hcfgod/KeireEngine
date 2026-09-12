@@ -1,6 +1,8 @@
+#include "Keire/Project/SharedShaderLibrary.h"
 #include "Keire/Rendering/MaterialEcosystem.h"
 #include "Keire/Rendering/ProgramArtifact.h"
 #include "Keire/Rendering/ShaderGraph.h"
+#include "KeireInternal/Assets/AssetInternal.h"
 
 #include "KeireInternal/Rendering/ShaderGraphCompilerInternal.h"
 
@@ -28,7 +30,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ShaderGraph";
-        result.Version = 21;
+        result.Version = 23;
         result.Type = ShaderGraphAsset::StaticType();
         result.Extensions = {".keireshadergraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
@@ -40,9 +42,31 @@ namespace Keire
                     "Shader Graph import requires a complete project context and stable subasset resolver.");
             }
             const auto definition = ShaderGraphAsset::DecodeSource(bytes);
+            if (definition.Target.Target == ShaderGraphTarget::Compute)
+                throw std::invalid_argument("Compute graph import requires a cooked ProgramArtifact; graphics "
+                                            "ShaderAsset import is unsupported.");
             if (definition.GeneratedAssetOwner && !context.ResolveSubAssetIdFor)
                 throw std::invalid_argument("Migrated Shader Graph import requires a cross-asset subasset resolver.");
             AssetImportOutput output;
+            if (IsSharedShaderPath(context.RelativePath))
+            {
+                const auto library = ReadSharedShaderLibrary(context.ProjectRoot);
+                if (std::ranges::none_of(
+                        library.Shaders, [&](const auto& shader)
+                        { return shader.Id == context.Asset && shader.SourcePath == context.RelativePath; }))
+                    throw std::runtime_error("This source is not owned by the pinned shared shader library.");
+                const auto lock = context.ReadProjectFile("ProjectSettings/SharedShaders.lock");
+                output.SourceDependencies.push_back(
+                    {"ProjectSettings/SharedShaders.lock", Detail::DigestToString(Detail::Sha256(lock))});
+                for (const auto& input : library.Inputs)
+                {
+                    const auto contents = context.ReadProjectFile(input.Path);
+                    const auto digest = Detail::DigestToString(Detail::Sha256(contents));
+                    if (digest != input.Sha256)
+                        throw std::runtime_error("A pinned shared shader input changed during import.");
+                    output.SourceDependencies.push_back({input.Path, digest});
+                }
+            }
             output.Bytes = ShaderGraphAsset::Encode(definition);
             for (const auto& node : definition.Nodes)
                 if (node.Kind == ShaderGraphNodeKind::Parameter && node.ValueType == ShaderGraphValueType::Texture2D)
@@ -117,6 +141,8 @@ namespace Keire
             std::vector<std::pair<std::vector<std::string>, AssetId>> shaderVariants;
             shaderVariants.reserve(program.Variants.size());
             std::set<std::filesystem::path> sourceDependencies;
+            for (const auto& dependency : output.SourceDependencies)
+                sourceDependencies.insert(dependency.RelativePath.lexically_normal());
             for (const auto& variant : program.Variants)
             {
                 const auto shaderKey = "shader/" + variant.StableSuffix;

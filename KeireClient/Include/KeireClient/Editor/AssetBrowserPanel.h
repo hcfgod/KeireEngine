@@ -98,6 +98,7 @@ namespace KeireEditor
         void SetUndoContext(Keire::Ref<Keire::UndoContext> context);
         [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const;
         [[nodiscard]] bool Focused() const noexcept;
+        [[nodiscard]] std::span<const Keire::AssetId> SelectedAssets() const noexcept;
         [[nodiscard]] std::filesystem::path CurrentFolder() const;
         [[nodiscard]] std::filesystem::path ResolveExternalDropFolder(Keire::UiPosition position) const;
         [[nodiscard]] static std::vector<Keire::AssetId> DecodeDragPayload(std::span<const std::byte> bytes);

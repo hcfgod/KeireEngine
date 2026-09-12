@@ -1209,6 +1209,10 @@ Assert-True ($windowsRenderBenchmark.Contains('@("vsync", "immediate")') -and
               $windowsRenderBenchmark.Contains('Remove-Item -LiteralPath $matrixPath -Force') -and
               $windowsRenderBenchmark.Contains('KEIRE_WORKSPACE_CACHE_ROOT') -and
               $windowsRenderBenchmark.Contains('Get-KeireWorkspaceIdentity $Root') -and
+              $windowsRenderBenchmark.Contains('function Get-MaterialShaderFixture') -and
+              $windowsRenderBenchmark.Contains('Assets/Examples/MaterialLab') -and
+              $windowsRenderBenchmark.Contains('identitySha256') -and
+              $windowsRenderBenchmark.Contains('fixture = $fixture') -and
               -not $windowsRenderBenchmark.Contains('Join-Path $benchmarkRoot "Temp"') -and
               $windowsRenderBenchmark.Contains('Build\Benchmarks')) `
     "Release render benchmark enforces the fixed VSync matrix and durable result contract"

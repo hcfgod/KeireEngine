@@ -25,6 +25,8 @@ namespace KeireEditor
     {
       public:
         virtual ~IPropertyEditor() = default;
+        virtual void PropertyCategory(std::string_view label) { (void)label; }
+        virtual void PropertyTooltip(std::string_view description) { (void)description; }
 
         [[nodiscard]] virtual bool EditBoolean(std::string_view label, bool& value) = 0;
         [[nodiscard]] virtual bool EditInteger(std::string_view label, std::int64_t& value, double step,
@@ -55,6 +57,10 @@ namespace KeireEditor
         [[nodiscard]] virtual bool EditVector4(std::string_view label, Keire::Vector4& value, double step) = 0;
         [[nodiscard]] virtual bool EditQuaternion(std::string_view label, Keire::Quaternion& value, double step) = 0;
         [[nodiscard]] virtual bool EditColor(std::string_view label, Keire::Color& value) = 0;
+        [[nodiscard]] virtual bool EditHdrColor(std::string_view label, Keire::Color& value)
+        {
+            return EditColor(label, value);
+        }
         [[nodiscard]] virtual bool EditCurve(std::string_view label, Keire::Curve1D& value)
         {
             (void)label;

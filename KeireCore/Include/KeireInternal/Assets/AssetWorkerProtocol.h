@@ -2,6 +2,7 @@
 
 #include "Keire/Assets/AssetPipeline.h"
 
+#include <chrono>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -10,6 +11,24 @@
 
 namespace Keire::Detail
 {
+    class AssetWorkerProgressThrottle final
+    {
+      public:
+        using Clock = std::chrono::steady_clock;
+
+        [[nodiscard]] bool ShouldPublish(const AssetOperationProgress& progress, const Clock::time_point now)
+        {
+            if (m_Last && progress.Phase != AssetOperationPhase::Completed &&
+                now - *m_Last < std::chrono::milliseconds(50))
+                return false;
+            m_Last = now;
+            return true;
+        }
+
+      private:
+        std::optional<Clock::time_point> m_Last;
+    };
+
     enum class AssetWorkerOperationKind : std::uint8_t
     {
         ImportAll,

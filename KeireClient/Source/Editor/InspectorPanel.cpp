@@ -1493,5 +1493,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
         }
         sceneDocument.ClearSelection();
     }
+    if (ui.WindowFocused() && inspectedAsset)
+        m_Controller.ActivateInspectorAssetHistory();
     m_AssetInspector->Draw(ui, inspectedAsset, m_Registration.Locked());
 }

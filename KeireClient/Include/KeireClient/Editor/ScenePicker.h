@@ -33,4 +33,7 @@ namespace KeireEditor
                                    Keire::UiItemRect selection, const Keire::RenderCamera& camera,
                                    const MeshBoundsResolver& resolveMeshBounds = {});
     [[nodiscard]] std::vector<Keire::EntityId> ResolveMaterialDropTargets(const Keire::Entity& target);
+    // Intersects the Y-up ground plane; horizon/upward rays use a plane ten units in front of the camera.
+    [[nodiscard]] Keire::Vector3 ResolveSceneDropPosition(Keire::UiItemRect viewport, Keire::UiPosition pointer,
+                                                          const Keire::RenderCamera& camera);
 } // namespace KeireEditor

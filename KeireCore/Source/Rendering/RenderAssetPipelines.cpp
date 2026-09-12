@@ -60,11 +60,12 @@ namespace Keire::RenderBackend
                                      : nullptr;
         information.format = format;
         information.stage = vertex ? SDL_GPU_SHADERSTAGE_VERTEX : SDL_GPU_SHADERSTAGE_FRAGMENT;
-        information.num_samplers = vertex ? 0
-                                          : textureCount + definition.UserResourceSlots +
-                                                (definition.ReceivesShadows ? 2U : 0U) +
-                                                (definition.UsesImageBasedLighting ? 2U : 0U) +
-                                                (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U);
+        information.num_samplers =
+            vertex ? 0
+                   : textureCount + (definition.VertexLayoutVersion == UiShaderVertexLayoutVersion ? 1U : 0U) +
+                         definition.UserResourceSlots + (definition.ReceivesShadows ? 2U : 0U) +
+                         (definition.UsesImageBasedLighting ? 2U : 0U) +
+                         (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U);
         information.num_storage_buffers = !vertex ? (definition.UsesForwardPlus ? 3U : 0U) +
                                                         (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
                                                         definition.UserReadOnlyBuffers

@@ -81,6 +81,8 @@ namespace Keire
         case ShaderGraphTarget::Compute:
             result = CreateDefaultShaderGraph(ShaderGraphOutput::Unlit);
             result.Target.Stages = ShaderGraphShaderStage::Compute;
+            result.Target.ThreadGroupSizeX = 64;
+            result.Target.ThreadGroupSizeY = 1;
             result.Nodes.front().Name = "Compute Shader Output";
             break;
         }

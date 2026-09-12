@@ -15,6 +15,7 @@
 #include "Keire/Navigation/NavigationSystem.h"
 #include "Keire/Physics/PhysicsSystem.h"
 #include "Keire/Project/Project.h"
+#include "Keire/Rendering/Compute.h"
 #include "Keire/Rendering/RenderSystem.h"
 #include "Keire/Replay/ReplaySystem.h"
 #include "Keire/Scenes/SceneSystem.h"
@@ -108,6 +109,10 @@ namespace Keire
         [[nodiscard]] Ref<WindowSystem> Windows() const noexcept;
         [[nodiscard]] Ref<Window> MainWindow() const noexcept;
         [[nodiscard]] Ref<RenderSystem> Renderer() const noexcept;
+        /// Lazily creates an application-owned compute device matching the live renderer backend.
+        /// Work is completed before frame presentation.
+        /// Requires an active rendered application on its owner thread. Retained references become inert at shutdown.
+        [[nodiscard]] Ref<ComputeDevice> Compute();
         [[nodiscard]] Ref<UndoService> Undo() const noexcept;
         [[nodiscard]] const ApplicationSpecification& Specification() const noexcept;
         [[nodiscard]] bool UiEnabled() const noexcept;

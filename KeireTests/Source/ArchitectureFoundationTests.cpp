@@ -321,6 +321,39 @@ TEST_CASE("Job compute and blocking lanes remain isolated")
     jobs->Close();
 }
 
+TEST_CASE("Job shutdown cancels all occupied worker lanes and remains idempotent")
+{
+    auto jobs =
+        Keire::CreateRef<Keire::JobSystem>(Keire::JobSystemSpecification{.WorkerCount = 4, .BlockingWorkerCount = 2});
+    std::atomic<unsigned> entered = 0;
+    std::atomic<unsigned> stopped = 0;
+    std::vector<Keire::JobHandle> handles;
+    for (unsigned index = 0; index < 6; ++index)
+    {
+        Keire::JobDescription description{.Name = "Shutdown lane"};
+        if (index >= 4)
+            description.Class = Keire::JobClass::Blocking;
+        handles.push_back(jobs->Submit(std::move(description),
+                                       [&](Keire::JobContext& context)
+                                       {
+                                           ++entered;
+                                           while (!context.StopRequested())
+                                               std::this_thread::yield();
+                                           ++stopped;
+                                       }));
+    }
+    const auto deadline = std::chrono::steady_clock::now() + 5s;
+    while (entered < 6 && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    CHECK(entered == 6);
+    jobs->Close();
+    jobs->Close();
+    CHECK(stopped == entered);
+    CHECK_FALSE(jobs->IsOpen());
+    for (const auto& handle : handles)
+        CHECK(handle.Status() == Keire::JobStatus::Cancelled);
+}
+
 TEST_CASE("Worker waits execute local work and allow stealing")
 {
     Keire::JobSystemSpecification specification;

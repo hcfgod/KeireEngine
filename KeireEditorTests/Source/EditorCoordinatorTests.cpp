@@ -32,7 +32,7 @@
 #include <utility>
 #include <vector>
 
-TEST_CASE("material shader changes retain only overrides valid for the replacement shader")
+TEST_CASE("material shader changes activate compatible overrides and archive incompatible values")
 {
     const auto firstShader = Keire::AssetId::Generate();
     const auto nextShader = Keire::AssetId::Generate();
@@ -67,6 +67,8 @@ TEST_CASE("material shader changes retain only overrides valid for the replaceme
 
     CHECK(document.Shader() == nextShader);
     CHECK(document.Definition().Properties.size() == 2);
+    CHECK(document.InactiveProperties().size() == 3);
+    CHECK(std::get<float>(document.InactiveProperties().find("Removed")->second) == 0.9F);
     CHECK(std::get<Keire::Vector3>(document.Property("ChangedType")) == Keire::Vector3{0.1F, 0.2F, 0.3F});
     CHECK(std::get<float>(document.Property("NarrowerRange")) == 0.0F);
     CHECK(std::get<float>(document.Property("Unchanged")) == 0.4F);
@@ -76,6 +78,10 @@ TEST_CASE("material shader changes retain only overrides valid for the replaceme
     CHECK_NOTHROW(restored.Open(document.SaveSource(), resolver));
     CHECK(Keire::MaterialAsset::EncodeSource(restored.Definition()) ==
           Keire::MaterialAsset::EncodeSource(document.Definition()));
+    CHECK(restored.SetShader(firstShader, resolver));
+    CHECK(restored.InactiveProperties().empty());
+    CHECK(std::get<Keire::Vector4>(restored.Property("Packed")) == Keire::Vector4{0.1F, 0.2F, 0.3F, 1.0F});
+    CHECK(std::get<float>(restored.Property("Removed")) == 0.9F);
 }
 
 TEST_CASE("failed material opens and shader changes preserve the active draft")
@@ -98,9 +104,10 @@ TEST_CASE("failed material opens and shader changes preserve the active draft")
     const auto before = document.Definition();
     const auto draft = document.SaveSource();
 
-    SUBCASE("An opened material has a property type mismatch")
+    SUBCASE("An opened material references invalid shader declarations")
     {
-        definition.Properties["Roughness"] = Keire::Vector3{1.0F, 2.0F, 3.0F};
+        shaderDefinition.Properties.front().Minimum = 1.0F;
+        shaderDefinition.Properties.front().Maximum = 0.0F;
         const auto invalid = Keire::MaterialAsset::EncodeSource(definition);
         CHECK_THROWS_AS(
             document.OpenAsset(Keire::AssetId::Generate(), "Assets/Materials/Invalid.keirematerial", invalid, resolver),

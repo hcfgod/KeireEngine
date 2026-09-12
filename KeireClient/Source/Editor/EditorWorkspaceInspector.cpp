@@ -15,6 +15,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/MaterialVariantEditing.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneCameraController.h"
@@ -126,6 +127,14 @@ bool EditorWorkspaceLayer::InspectorPlayModeActive() const noexcept
 
 void EditorWorkspaceLayer::SetInspectorSelectedAsset(const Keire::AssetId asset) noexcept
 {
+    try
+    {
+        FlushMaterialSelectionImports();
+    }
+    catch (...)
+    {
+        // Saved sources and pending refresh identities survive a failed queue allocation.
+    }
     if (asset != m_SelectedAsset)
         StopInspectorAudioPreview();
     m_SelectedAsset = asset;
@@ -167,6 +176,11 @@ void EditorWorkspaceLayer::StopInspectorAudioPreview() noexcept
 }
 
 void EditorWorkspaceLayer::ActivateInspectorHistory() noexcept { m_ActiveUndoContext = m_SceneDocument->History(); }
+
+void EditorWorkspaceLayer::ActivateInspectorAssetHistory() noexcept
+{
+    m_ActiveUndoContext = m_AssetBrowserPanel ? m_AssetBrowserPanel->UndoContext() : Keire::Ref<Keire::UndoContext>{};
+}
 
 void EditorWorkspaceLayer::ActivateInspectorManagedDataHistory() noexcept
 {
@@ -329,11 +343,77 @@ void EditorWorkspaceLayer::PersistInspectorMaterialInstance(const Keire::AssetId
         record->RelativePath.extension() != ".keirematerialinstance")
         throw std::invalid_argument("Only Material Instance sources can be persisted here.");
     const auto& specification = m_AssetDatabase->Specification();
-    KeireEditor::Detail::WriteBytesAtomically(
-        specification.ProjectRoot / specification.SourceDirectory / record->RelativePath, bytes);
-    m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::ExplicitAction,
+    const auto path = specification.ProjectRoot / specification.SourceDirectory / record->RelativePath;
+    const auto before = KeireEditor::Detail::ReadBytes(path);
+    const std::vector<std::byte> after(bytes.begin(), bytes.end());
+    if (before == after)
+        return;
+    const auto definition = Keire::MaterialInstanceAsset::DecodeSource(after);
+    if (definition.Parent != Keire::MaterialInstanceAsset::DecodeSource(before).Parent)
+        KeireEditor::ValidateMaterialVariantParent(
+            asset, definition.Parent,
+            [this, &specification](const Keire::AssetId id) -> std::optional<KeireEditor::MaterialVariantAncestor>
+            {
+                const auto ancestor = m_AssetDatabase->Find(id);
+                if (!ancestor)
+                    return std::nullopt;
+                Keire::AssetId parent;
+                if (ancestor->Type == Keire::MaterialInstanceAsset::StaticType())
+                    parent = Keire::MaterialInstanceAsset::DecodeSource(
+                                 KeireEditor::Detail::ReadBytes(specification.ProjectRoot /
+                                                                specification.SourceDirectory / ancestor->RelativePath))
+                                 .Parent;
+                return KeireEditor::MaterialVariantAncestor{ancestor->Type, parent};
+            });
+    const auto resolvePath = [this, asset]
+    {
+        const auto current = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+        if (!current || current->Type != Keire::MaterialInstanceAsset::StaticType())
+            throw std::runtime_error("The material variant source is unavailable.");
+        const auto& spec = m_AssetDatabase->Specification();
+        return spec.ProjectRoot / spec.SourceDirectory / current->RelativePath;
+    };
+    const auto apply = [this, asset, resolvePath](const std::span<const std::byte> source)
+    {
+        KeireEditor::Detail::WriteBytesAtomically(resolvePath(), source);
+        m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                            {.ReloadAsset = asset});
+    };
+    const auto undo = m_AssetBrowserPanel->UndoContext();
+    auto command = KeireEditor::CreateMaterialVariantEdit(asset, before, after, m_InspectorPanel->EditSerial(), apply,
+                                                          [resolvePath]
+                                                          { return std::filesystem::is_regular_file(resolvePath()); });
+    KeireEditor::Detail::WriteBytesAtomically(path, after);
+    try
+    {
+        if (undo && undo->IsOpen())
+        {
+            undo->RecordApplied(std::move(command));
+            m_ActiveUndoContext = undo;
+        }
+    }
+    catch (...)
+    {
+        const auto failure = std::current_exception();
+        try
+        {
+            KeireEditor::Detail::WriteBytesAtomically(path, before);
+        }
+        catch (...)
+        {
+            SetAssetError("Material variant undo registration and source rollback both failed.");
+        }
+        std::rethrow_exception(failure);
+    }
+    m_AssetOperations->QueueAssetImport(asset, KeireEditor::AssetOperationPriority::MaterialRefresh,
                                         {.ReloadAsset = asset});
-    m_AssetStatus = "Saved Material Instance overrides and queued its runtime material rebuild.";
+    m_AssetStatus = "Saved Material Variant and queued its runtime material rebuild.";
+}
+
+void EditorWorkspaceLayer::FinishInspectorMaterialInstanceEdit()
+{
+    FlushMaterialSelectionImports();
+    m_InspectorPanel->AdvanceEditSerial();
 }
 
 void EditorWorkspaceLayer::PersistInspectorMaterialParameterCollection(const Keire::AssetId asset,

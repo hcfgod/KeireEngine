@@ -55,9 +55,30 @@ namespace KeireEditor
 
     bool InspectorPropertyEditor::EditBoundary() const noexcept { return m_EditBoundary; }
 
+    void InspectorPropertyEditor::PropertyCategory(const std::string_view label)
+    {
+        m_Ui.Separator();
+        m_Ui.TextWrapped(label);
+    }
+
     bool InspectorPropertyEditor::EditBoolean(const std::string_view label, bool& value)
     {
         return Track(m_Ui.Checkbox(label, value));
+    }
+
+    void InspectorPropertyEditor::PropertyTooltip(const std::string_view description)
+    {
+        if (!description.empty() && m_Ui.LastItemState().Hovered)
+            m_Ui.SetTooltip(description);
+    }
+
+    bool InspectorPropertyEditor::EditHdrColor(const std::string_view label, Keire::Color& value)
+    {
+        Keire::UiColor color{value.Red, value.Green, value.Blue, value.Alpha};
+        const bool changed = m_Ui.ColorEditHdr(label, color);
+        if (changed)
+            value = {color.Red, color.Green, color.Blue, color.Alpha};
+        return Track(changed);
     }
 
     bool InspectorPropertyEditor::EditInteger(const std::string_view label, std::int64_t& value, const double step,

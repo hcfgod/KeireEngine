@@ -157,9 +157,29 @@ namespace
                     ui.Text("Ready");
             }
 
+            if (auto fixed =
+                    ui.BeginWindow("Fixed controls", nullptr, {.NoScrollbar = true, .NoScrollWithMouse = true});
+                fixed)
+            {
+                CHECK((ImGui::GetCurrentWindowRead()->Flags & ImGuiWindowFlags_NoScrollbar) != 0);
+                CHECK((ImGui::GetCurrentWindowRead()->Flags & ImGuiWindowFlags_NoScrollWithMouse) != 0);
+                ui.Text("Toolbar");
+                if (auto logs = ui.BeginChild("Scrolling logs"); logs)
+                {
+                    CHECK((ImGui::GetCurrentWindowRead()->Flags & ImGuiWindowFlags_NoScrollbar) == 0);
+                    CHECK((ImGui::GetCurrentWindowRead()->Flags & ImGuiWindowFlags_NoScrollWithMouse) == 0);
+                }
+            }
             ui.SetNextWindowSize({320.0F, 200.0F});
             if (auto window = ui.BeginWindow("Headless UI"); window)
             {
+                Keire::UiColor hdrColor{4.0F, 2.0F, 0.5F, 1.0F};
+                CHECK_FALSE(ui.ColorEditHdr("HDR shader color", hdrColor));
+                CHECK(hdrColor.Red == 4.0F);
+                CHECK_THROWS_AS((void)ui.ColorEdit("Display color", hdrColor), std::invalid_argument);
+                auto invalidColor = hdrColor;
+                invalidColor.Blue = std::numeric_limits<float>::infinity();
+                CHECK_THROWS_AS((void)ui.ColorEditHdr("Invalid HDR", invalidColor), std::invalid_argument);
                 {
                     const auto heading = ui.PushFont(Keire::UiFontRole::Heading);
                     CHECK(heading);

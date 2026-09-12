@@ -324,6 +324,8 @@ namespace Keire
         bool NoMove = false;
         bool NoCollapse = false;
         bool NoSavedSettings = false;
+        bool NoScrollbar = false;
+        bool NoScrollWithMouse = false;
     };
 
     class KEIRE_API UiError final : public std::runtime_error
@@ -651,6 +653,8 @@ namespace Keire
         [[nodiscard]] bool Selectable(std::string_view label, bool selected = false, bool keepPopupOpen = false);
         [[nodiscard]] bool MenuItem(std::string_view label, bool selected = false, bool enabled = true);
         [[nodiscard]] bool ColorEdit(std::string_view label, UiColor& color);
+        /// Shader color components may exceed the display-color range, but must remain finite.
+        [[nodiscard]] bool ColorEditHdr(std::string_view label, UiColor& color);
         [[nodiscard]] Ref<UiImage> CreateImage(std::uint32_t width, std::uint32_t height,
                                                std::span<const std::byte> rgbaPixels);
         void Image(const Ref<UiImage>& image, UiSize size = {});
@@ -691,6 +695,8 @@ namespace Keire
         void SetNextWindowPosition(UiPosition position, bool firstUseOnly = true);
         void SetCursorPosition(UiPosition position);
         void SetCursorScreenPosition(UiPosition position);
+        /// Requests vertical scrolling to the last submitted item, including an offscreen item, next frame.
+        void ScrollLastItemIntoView();
         void SetNextItemWidth(float width);
         void RequestKeyboardFocus();
         void AlignNextItemGroup(float alignment, float width);

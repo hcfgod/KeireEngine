@@ -182,7 +182,18 @@ void EditorWorkspaceLayer::RefreshAssetBrowserRecords()
     }
 }
 
-void EditorWorkspaceLayer::SetAssetBrowserSelected(const Keire::AssetId asset) noexcept { m_SelectedAsset = asset; }
+void EditorWorkspaceLayer::SetAssetBrowserSelected(const Keire::AssetId asset) noexcept
+{
+    try
+    {
+        FlushMaterialSelectionImports();
+    }
+    catch (...)
+    {
+        // Saved sources and pending refresh identities survive a failed queue allocation.
+    }
+    m_SelectedAsset = asset;
+}
 
 void EditorWorkspaceLayer::ClearAssetBrowserSceneSelection() noexcept { m_SceneDocument->ClearSelection(); }
 
@@ -476,9 +487,9 @@ void EditorWorkspaceLayer::OpenAssetBrowserMaterial(const Keire::AssetId asset)
     if (!m_AssetDatabase)
         return;
     const auto record = m_AssetDatabase->Find(asset);
-    if (!record || record->Type != Keire::MaterialAsset::StaticType() ||
-        record->RelativePath.extension().string() != Keire::LegacyMaterialAssetSourceExtension)
-        throw std::invalid_argument("Only legacy material assets can be opened in the compatibility inspector.");
+    if (!record || (record->RelativePath.extension().string() != Keire::LegacyMaterialAssetSourceExtension &&
+                    record->RelativePath.extension().string() != Keire::MaterialAssetSourceExtension))
+        throw std::invalid_argument("Only material source assets can be opened in the Material Inspector.");
     m_SelectedAsset = asset;
     if (m_InspectorPanel)
     {
@@ -553,6 +564,10 @@ void EditorWorkspaceLayer::HandleExternalAssetDrop(const Keire::WindowFileDropEv
     const auto& viewportRect = m_SceneViewportPanel->ViewportRect();
     const bool viewport = position.X >= viewportRect.Minimum.X && position.X <= viewportRect.Maximum.X &&
                           position.Y >= viewportRect.Minimum.Y && position.Y <= viewportRect.Maximum.Y;
+    Keire::Vector3 worldPosition{};
+    if (viewport && ActiveScene())
+        worldPosition =
+            KeireEditor::ResolveSceneDropPosition(viewportRect, position, m_SceneViewportPanel->LastCamera());
     Keire::EntityId target;
     if (viewport && ActiveScene())
     {
@@ -592,7 +607,7 @@ void EditorWorkspaceLayer::HandleExternalAssetDrop(const Keire::WindowFileDropEv
                 {
                     try
                     {
-                        m_ViewportAssetDropRouter->Route(record->Type, record->Id, target, *this);
+                        m_ViewportAssetDropRouter->Route(record->Type, record->Id, target, worldPosition, *this);
                     }
                     catch (const std::invalid_argument& exception)
                     {
@@ -619,7 +634,8 @@ void EditorWorkspaceLayer::HandleExternalAssetDrop(const Keire::WindowFileDropEv
         m_AssetBrowserPanel ? m_AssetBrowserPanel->ResolveExternalDropFolder(position) : std::filesystem::path{};
     if (!m_AssetOperations)
         throw std::logic_error("Asset operation service is unavailable.");
-    m_ExternalAssetImport->Queue(external, destination, viewport, target, m_AssetDatabase, *m_AssetOperations);
+    m_ExternalAssetImport->Queue(external, destination, viewport, target, worldPosition, m_AssetDatabase,
+                                 *m_AssetOperations, ActiveScene());
 }
 
 void EditorWorkspaceLayer::DrawExternalAssetImport(Keire::UiFrame& ui)
@@ -652,11 +668,12 @@ void EditorWorkspaceLayer::DrawExternalAssetImport(Keire::UiFrame& ui)
         {
             m_AssetBrowserPanel->RevealAsset(entry.Id);
         }
-        if (completion->Viewport)
+        if (completion->Viewport && completion->ViewportScene.Lock().Get() == ActiveScene().Get())
         {
             try
             {
-                m_ViewportAssetDropRouter->Route(record->Type, entry.Id, completion->ViewportTarget, *this);
+                m_ViewportAssetDropRouter->Route(record->Type, entry.Id, completion->ViewportTarget,
+                                                 completion->ViewportPosition, *this);
             }
             catch (const std::invalid_argument& error)
             {
@@ -840,7 +857,9 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                 m_SceneDocument->SetStatus("Material source compilation failed; the previous material was kept.");
             }
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ExternalImport)
+            {
                 m_ExternalAssetImport->Complete(std::move(*completion));
+            }
             else
                 SetAssetError(std::string("Asset worker failed: ") + completion->Result.Diagnostic);
             if (generation > 0)
@@ -1117,6 +1136,7 @@ void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult
                                                   const Keire::AssetId reloadAsset)
 {
     RefreshAssetBrowserRecords();
+    Keire::Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(*m_AssetDatabase, result.Statuses);
     if (!result.CatalogPath.empty())
     {
         if (const auto assets = Owner().Assets())

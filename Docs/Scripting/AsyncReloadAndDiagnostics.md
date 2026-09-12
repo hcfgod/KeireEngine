@@ -192,6 +192,9 @@ Debug.Log("Door opened.");
 Debug.Warn("Optional target is missing.");
 Debug.Error("Required asset was not assigned.");
 Debug.Assert(_count >= 0, "Count must remain non-negative.");
+Debug.LogFormat("Player {0}: health {1:F2}", Entity.Name, health);
+Debug.LogWarningFormat("Missing target {0} for {1}", targetName, Entity.Name);
+Debug.LogErrorFormat("Failed to load {0}: {1}", assetName, reason);
 ```
 
 Use `Log` for explicit severity:
@@ -199,7 +202,13 @@ Use `Log` for explicit severity:
 ```csharp
 Log.Info($"Loaded tuning for {Entity.Name}.");
 Log.Warning("Using fallback configuration.");
+Log.Info("Loaded {0} items in {1:F2} ms", itemCount, elapsedMilliseconds);
 ```
+
+Formatted overloads are available at every `Log` severity, from `Trace` through `Critical`. Explicit formatting uses
+invariant composite formatting; escape literal braces as `{{` and `}}`. Invalid format strings throw `FormatException`
+before emitting a record. Single-string `Log` calls remain literal, so JSON and other brace-containing messages need
+no escaping. `Debug.LogException` retains nested exception diagnostics. Passing assertions emit no record.
 
 Good messages answer:
 

@@ -8,6 +8,7 @@
 #include "KeireInternal/Assets/ShaderCompilerJobs.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include "KeireInternal/Rendering/MaterialPropertyReflection.h"
 
 #include <SDL3/SDL_filesystem.h>
 #include <nlohmann/json.hpp>
@@ -41,6 +42,7 @@ namespace Keire
         {
             AssetId Owner;
             std::vector<std::string> Keywords;
+            ShaderAssetDefinition Reflection;
         };
 
         [[nodiscard]] ResolvedShaderGraphVariant ResolveShaderGraphVariant(const AssetImportContext& context,
@@ -58,13 +60,16 @@ namespace Keire
             const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
             const auto graph =
                 ShaderGraphAsset::DecodeSource(context.ReadProjectFile(sourcePrefix / source->RelativePath));
+            if (graph.Target.Target != ShaderGraphTarget::Material)
+                throw std::invalid_argument("A mesh material requires a surface Shader Graph.");
             ShaderGraphInstanceDefinition selection;
             selection.Parent = reference.Asset;
             selection.KeywordOverrides = reference.Keywords;
             const std::array ancestry{selection};
             auto resolved = ResolveShaderGraphInstance(graph, ancestry);
+            auto reflection = Detail::ReflectMaterialProperties(graph, source->RelativePath);
             return {graph.GeneratedAssetOwner ? graph.GeneratedAssetOwner : reference.Asset,
-                    std::move(resolved.Keywords)};
+                    std::move(resolved.Keywords), std::move(reflection)};
         }
 
         template <typename Range> [[nodiscard]] std::vector<std::byte> ToBytes(const Range& values)
@@ -135,7 +140,25 @@ namespace Keire
             runtime.EmissiveGIIntensity = definition.EmissiveGIIntensity;
             runtime.Properties = definition.Properties;
             Detail::ValidateMaterialDefinition(runtime);
-            if (definition.SchemaVersion != 4 || definition.Shader.Kind > MaterialShaderSourceKind::ShaderGraph ||
+            if (definition.InactiveProperties.size() > Detail::MaximumShaderProperties)
+                throw std::invalid_argument("Inactive material properties exceed their bound.");
+            for (const auto& [name, value] : definition.InactiveProperties)
+            {
+                runtime.Properties = {{name, value}};
+                Detail::ValidateMaterialDefinition(runtime);
+            }
+            if (definition.PropertyOverrides.size() > Detail::MaximumShaderProperties ||
+                (!definition.PropertyOverrides.empty() && definition.SchemaVersion != 5))
+                throw std::invalid_argument("Stable material overrides require bounded schema-5 authoring data.");
+            for (const auto& property : definition.PropertyOverrides)
+            {
+                if (!property.Property)
+                    throw std::invalid_argument("Stable material overrides require a property identity.");
+                runtime.Properties = {{property.Name, property.Value}};
+                Detail::ValidateMaterialDefinition(runtime);
+            }
+            if ((definition.SchemaVersion != 4 && definition.SchemaVersion != 5) ||
+                definition.Shader.Kind > MaterialShaderSourceKind::ShaderGraph ||
                 (definition.Shader.Kind != MaterialShaderSourceKind::ShaderAsset && !definition.Shader.Asset) ||
                 definition.Shader.Keywords.size() > 16 ||
                 (definition.Shader.Kind == MaterialShaderSourceKind::ShaderGraph &&
@@ -227,10 +250,11 @@ namespace Keire
                 result.Properties = legacy.Properties;
                 return result;
             }
-            if (schemaVersion != 4)
+            if (schemaVersion != 4 && schemaVersion != 5)
                 throw std::invalid_argument("Material authoring source has an unsupported schema.");
 
             MaterialAuthoringDefinition result;
+            result.SchemaVersion = schemaVersion;
             const auto& shader = source.at("shader");
             if (!shader.is_object())
                 throw std::invalid_argument("Material shader reference must be an object.");
@@ -264,6 +288,19 @@ namespace Keire
                 throw std::invalid_argument("Material authoring properties must be an object.");
             for (const auto& [name, value] : properties.items())
                 result.Properties.emplace(name, DecodeMaterialProperty(value));
+            const auto inactive = source.value("inactiveProperties", Json::array());
+            if (!inactive.is_array() || inactive.size() > Detail::MaximumShaderProperties)
+                throw std::invalid_argument("Inactive material properties must be a bounded array.");
+            for (const auto& property : inactive)
+                result.InactiveProperties.emplace(property.at("name").get<std::string>(),
+                                                  DecodeMaterialProperty(property));
+            const auto overrides = source.value("propertyOverrides", Json::array());
+            if (!overrides.is_array() || overrides.size() > Detail::MaximumShaderProperties)
+                throw std::invalid_argument("Stable material overrides must be a bounded array.");
+            for (const auto& property : overrides)
+                result.PropertyOverrides.push_back({AssetId::Parse(property.at("id").get<std::string>()),
+                                                    property.at("name").get<std::string>(),
+                                                    DecodeMaterialProperty(property)});
             ValidateMaterialAuthoringDefinition(result);
             return result;
         }
@@ -457,21 +494,23 @@ namespace Keire
 
         void ValidateReflection(const Json& vertex, const Json& fragment, const ShaderAssetDefinition& definition)
         {
+            const bool ui = definition.VertexLayoutVersion == UiShaderVertexLayoutVersion;
             const auto noStorageTextures = [](const Json& value) { return value.value("storage_textures", 0U) == 0; };
             const auto textureCount = std::ranges::count(definition.Properties, ShaderPropertyType::Texture2D,
                                                          &ShaderPropertyDefinition::Type);
             const auto fragmentUniformBuffers = fragment.value("uniform_buffers", 0U);
             const bool spatialLighting = definition.SpatialLightingAbiVersion >= 2U;
-            const auto expectedFragmentUniformBuffers = definition.UsesImageBasedLighting ? 4U : 3U;
+            const auto expectedFragmentUniformBuffers = ui ? 2U : definition.UsesImageBasedLighting ? 4U : 3U;
             const bool unlit = !definition.ReceivesShadows && !definition.UsesForwardPlus &&
                                !definition.UsesImageBasedLighting && !spatialLighting;
-            const auto minimumFragmentUniformBuffers = unlit                               ? 1U
+            const auto minimumFragmentUniformBuffers = ui                                  ? 2U
+                                                       : unlit                             ? 1U
                                                        : definition.UsesImageBasedLighting ? 4U
                                                        : definition.ReceivesShadows        ? 3U
                                                                                            : 2U;
-            const auto expectedSamplers = textureCount + definition.UserResourceSlots +
-                                          (definition.ReceivesShadows ? 2U : 0U) +
-                                          (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U);
+            const auto expectedSamplers =
+                textureCount + definition.UserResourceSlots + (definition.ReceivesShadows ? 2U : 0U) +
+                (definition.UsesImageBasedLighting ? 2U : 0U) + (spatialLighting ? 5U : 0U) + (ui ? 1U : 0U);
             const auto expectedFragmentStorageBuffers = (definition.UsesForwardPlus ? 3U : 0U) +
                                                         (definition.SpatialLightingAbiVersion == 3U ? 1U : 0U) +
                                                         definition.UserReadOnlyBuffers;
@@ -501,7 +540,9 @@ namespace Keire
 
             constexpr std::array<std::string_view, 6> vertexTypes{"float3", "float3", "float2",
                                                                   "float4", "float4", "float2"};
-            const auto expectedInputs = definition.VertexLayoutVersion == 3   ? 6U
+            constexpr std::array<std::string_view, 3> uiVertexTypes{"float3", "float4", "float2"};
+            const auto expectedInputs = ui                                    ? 3U
+                                        : definition.VertexLayoutVersion == 3 ? 6U
                                         : definition.VertexLayoutVersion == 2 ? 5U
                                                                               : 4U;
             if (!vertex.at("inputs").is_array() || vertex.at("inputs").empty() ||
@@ -511,7 +552,8 @@ namespace Keire
             for (const auto& input : vertex.at("inputs"))
             {
                 const auto location = input.at("location").get<std::uint32_t>();
-                if (location >= expectedInputs || input.at("type").get<std::string>() != vertexTypes[location])
+                if (location >= expectedInputs ||
+                    input.at("type").get<std::string>() != (ui ? uiVertexTypes[location] : vertexTypes[location]))
                     throw std::invalid_argument("Shader vertex inputs do not match the fixed mesh ABI.");
                 hasPosition |= location == 0U;
             }
@@ -846,6 +888,8 @@ namespace Keire
                 definition.Type = found->second;
                 definition.DisplayName = property.value("displayName", std::string{});
                 definition.Category = property.value("category", std::string{});
+                definition.Description = property.value("description", std::string{});
+                definition.HighDynamicRange = property.value("hdr", false);
                 if (property.contains("minimum"))
                     definition.Minimum = property.at("minimum").get<float>();
                 if (property.contains("maximum"))
@@ -1156,7 +1200,19 @@ namespace Keire
         Json properties = Json::object();
         for (const auto& [name, value] : definition.Properties)
             properties[name] = {{"type", value.index()}, {"value", EncodeMaterialProperty(value)}};
-        const Json source{{"schemaVersion", definition.SchemaVersion},
+        Json inactive = Json::array();
+        for (const auto& [name, value] : definition.InactiveProperties)
+            inactive.push_back({{"name", name}, {"type", value.index()}, {"value", EncodeMaterialProperty(value)}});
+        Json overrides = Json::array();
+        for (const auto& property : definition.PropertyOverrides)
+            overrides.push_back({{"id", property.Property.ToString()},
+                                 {"name", property.Name},
+                                 {"type", property.Value.index()},
+                                 {"value", EncodeMaterialProperty(property.Value)}});
+        const Json source{{"kind", "material"},
+                          {"propertyOverrides", std::move(overrides)},
+                          {"inactiveProperties", std::move(inactive)},
+                          {"schemaVersion", definition.SchemaVersion},
                           {"shader", std::move(shader)},
                           {"surface",
                            {{"alphaMode", static_cast<std::uint8_t>(definition.Surface.AlphaMode)},
@@ -1177,73 +1233,6 @@ namespace Keire
         return CreateRef<MaterialAsset>(std::move(definition));
     }
 
-    void ValidateMaterialAgainstShader(const MaterialAssetDefinition& material, const ShaderAssetDefinition& shader)
-    {
-        Detail::ValidateMaterialDefinition(material);
-        Detail::ValidateShaderDefinition(shader, false, true);
-        for (const auto& [name, value] : material.Properties)
-        {
-            const auto found = std::ranges::find(shader.Properties, name, &ShaderPropertyDefinition::Name);
-            if (found == shader.Properties.end())
-                throw std::invalid_argument("Material property is not declared by its shader: " + name);
-            const bool correctType =
-                (found->Type == ShaderPropertyType::Scalar && std::holds_alternative<float>(value)) ||
-                (found->Type == ShaderPropertyType::Vector2 &&
-                 (std::holds_alternative<Vector2>(value) || std::holds_alternative<Vector4>(value))) ||
-                (found->Type == ShaderPropertyType::Vector3 &&
-                 (std::holds_alternative<Vector3>(value) || std::holds_alternative<Vector4>(value))) ||
-                (found->Type == ShaderPropertyType::Vector4 &&
-                 (std::holds_alternative<Vector4>(value) || std::holds_alternative<Color>(value))) ||
-                (found->Type == ShaderPropertyType::Color &&
-                 (std::holds_alternative<Color>(value) || std::holds_alternative<Vector4>(value))) ||
-                (found->Type == ShaderPropertyType::Texture2D && std::holds_alternative<AssetId>(value));
-            if (!correctType)
-                throw std::invalid_argument("Material property type does not match its shader declaration: " + name);
-            if (found->Type != ShaderPropertyType::Texture2D && (found->Minimum || found->Maximum))
-            {
-                std::array<float, 4> components{};
-                std::size_t count = 0;
-                std::visit(
-                    [&](const auto& typed)
-                    {
-                        using T = std::decay_t<decltype(typed)>;
-                        if constexpr (std::same_as<T, float>)
-                        {
-                            components[0] = typed;
-                            count = 1;
-                        }
-                        else if constexpr (std::same_as<T, Vector2>)
-                        {
-                            components = {typed.X, typed.Y, 0.0F, 0.0F};
-                            count = 2;
-                        }
-                        else if constexpr (std::same_as<T, Vector3>)
-                        {
-                            components = {typed.X, typed.Y, typed.Z, 0.0F};
-                            count = 3;
-                        }
-                        else if constexpr (std::same_as<T, Vector4>)
-                        {
-                            components = {typed.X, typed.Y, typed.Z, typed.W};
-                            count = 4;
-                        }
-                        else if constexpr (std::same_as<T, Color>)
-                        {
-                            components = {typed.Red, typed.Green, typed.Blue, typed.Alpha};
-                            count = 4;
-                        }
-                    },
-                    value);
-                for (std::size_t component = 0; component < count; ++component)
-                {
-                    if ((found->Minimum && components[component] < *found->Minimum) ||
-                        (found->Maximum && components[component] > *found->Maximum))
-                        throw std::invalid_argument("Material property is outside its shader-declared range: " + name);
-                }
-            }
-        }
-    }
-
     AssetImporterRegistration CreateShaderAssetImporter(ShaderImporterSpecification specification)
     {
         if (specification.Timeout.count() <= 0 || specification.MaximumOutputBytes == 0 ||
@@ -1260,7 +1249,7 @@ namespace Keire
             throw std::invalid_argument("Shader importer formats must be unique and include SPIR-V reflection data.");
         AssetImporterRegistration result;
         result.Name = "Keire.Shader";
-        result.Version = 8;
+        result.Version = 9;
         result.Type = ShaderAsset::StaticType();
         result.Extensions = {".keireshader"};
         result.ContextualImport =
@@ -1416,7 +1405,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.LegacyMaterial";
-        result.Version = 5;
+        result.Version = 7;
         result.Type = MaterialAsset::StaticType();
         result.Extensions = {std::string(LegacyMaterialAssetSourceExtension)};
         result.PreviousNames = {"Keire.Material"};
@@ -1434,11 +1423,28 @@ namespace Keire
                     throw std::invalid_argument(
                         "Shader Graph material references require a stable cross-asset subasset resolver.");
                 const auto variant = ResolveShaderGraphVariant(context, source.Shader);
+                if (!source.PropertyOverrides.empty())
+                    definition.Properties = ResolveMaterialProperties(source, variant.Reflection).Properties;
                 definition.Shader = context.ResolveSubAssetIdFor(
                     variant.Owner, MakeShaderGraphVariantSubAssetKey(source.Shader.Target, variant.Keywords));
             }
             else
+            {
                 definition.Shader = source.Shader.Asset;
+                if (!source.PropertyOverrides.empty())
+                {
+                    if (!context.ResolveAssetSource || !context.ReadProjectFile || context.ProjectRoot.empty() ||
+                        context.SourceRoot.empty())
+                        throw std::invalid_argument("Stable material overrides require shader source reflection.");
+                    const auto shaderSource = context.ResolveAssetSource(source.Shader.Asset);
+                    if (!shaderSource || shaderSource->Type != ShaderAsset::StaticType())
+                        throw std::runtime_error("Material shader source is missing or has an incompatible type.");
+                    const auto prefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
+                    const auto shader =
+                        ShaderAsset::DecodeManifest(context.ReadProjectFile(prefix / shaderSource->RelativePath));
+                    definition.Properties = ResolveMaterialProperties(source, shader).Properties;
+                }
+            }
             AssetImportOutput output;
             output.Bytes = MaterialAsset::Encode(definition);
             if (source.Shader.Asset)

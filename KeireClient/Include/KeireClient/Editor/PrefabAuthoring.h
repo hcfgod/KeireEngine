@@ -2,6 +2,7 @@
 
 #include "Keire/Core.h"
 
+#include <optional>
 #include <span>
 #include <string>
 
@@ -18,10 +19,9 @@ namespace KeireEditor
                                                                     std::string name);
     [[nodiscard]] Keire::PrefabDefinition CreatePrefabVariant(Keire::AssetId basePrefab, std::string name,
                                                               std::vector<Keire::PrefabOverrideDefinition> overrides);
-    [[nodiscard]] Keire::PrefabInstanceDefinition InstantiatePrefab(Keire::SceneDefinition& scene,
-                                                                    Keire::AssetId prefab,
-                                                                    const Keire::SceneDefinition& composed,
-                                                                    Keire::AssetId parent = {});
+    [[nodiscard]] Keire::PrefabInstanceDefinition
+    InstantiatePrefab(Keire::SceneDefinition& scene, Keire::AssetId prefab, const Keire::SceneDefinition& composed,
+                      Keire::AssetId parent = {}, std::optional<Keire::Vector3> position = std::nullopt);
     [[nodiscard]] Keire::PrefabInstanceDefinition ConnectPrefabInstance(Keire::SceneDefinition& scene,
                                                                         Keire::AssetId prefab,
                                                                         const Keire::SceneDefinition& source,

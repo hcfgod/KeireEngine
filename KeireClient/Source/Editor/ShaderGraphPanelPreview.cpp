@@ -73,12 +73,25 @@ namespace KeireEditor
             m_PreviewRender = {};
             m_PreviewRenderState.reset();
         }
-        ui.TextColored(theme.Accent, "LIVE SHADER PREVIEW");
+        const auto target = m_Controller.ShaderGraphState().Definition().Target.Target;
+        const bool imagePreview = UsesShaderGraphImagePreview(target);
+        ui.TextColored(theme.Accent, imagePreview ? "2D GRAPH APPROXIMATION" : "GRAPH APPROXIMATION");
+        ui.TextWrapped("CPU preview; compiled GPU shader execution is not shown.");
+        if (target == Keire::ShaderGraphTarget::Vfx)
+            ui.TextWrapped(
+                "The mesh illustrates shading only. Particle simulation and billboard rendering are not shown.");
+        else if (target == Keire::ShaderGraphTarget::CustomGraphics)
+            ui.TextWrapped("The mesh illustrates shading only. Custom pass inputs and scheduling are not shown.");
+        else if (target == Keire::ShaderGraphTarget::Fullscreen)
+            ui.TextWrapped("Scene color, depth, and fullscreen injection are not shown.");
         auto preview = m_Controller.ShaderGraphState().PreviewSettings();
         bool previewChanged = false;
         previewChanged |= ui.SliderFloat("Exposure", preview.Exposure, 0.1F, 4.0F);
-        previewChanged |= ui.SliderFloat("Environment", preview.EnvironmentIntensity, 0.0F, 4.0F);
-        previewChanged |= ui.SliderFloat("Rotation", preview.RotationDegrees, -180.0F, 180.0F);
+        if (!imagePreview)
+        {
+            previewChanged |= ui.SliderFloat("Environment", preview.EnvironmentIntensity, 0.0F, 4.0F);
+            previewChanged |= ui.SliderFloat("Rotation", preview.RotationDegrees, -180.0F, 180.0F);
+        }
         if (previewChanged)
             m_Controller.ShaderGraphState().SetPreviewSettings(preview);
         if (m_PreviewProperties.empty() && !m_Controller.ShaderGraphState().LastGoodCompilation())
@@ -104,7 +117,7 @@ namespace KeireEditor
             {
                 EnsureJobScope();
                 Keire::Ref<const Keire::MeshAsset> customMesh;
-                if (m_PreviewSettings.Mesh == Keire::ShaderGraphPreviewMesh::Custom)
+                if (!imagePreview && m_PreviewSettings.Mesh == Keire::ShaderGraphPreviewMesh::Custom)
                 {
                     customMesh = m_Controller.ResolveShaderGraphPreviewMesh(m_PreviewSettings.CustomMesh);
                     if (!customMesh)

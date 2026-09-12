@@ -104,7 +104,7 @@ namespace KeireEditor
         const float width = std::max(maximum.X - minimum.X, 1.0F);
         const float height = std::max(maximum.Y - minimum.Y, 1.0F);
         m_Zoom =
-            std::clamp(std::min((canvasSize.Width - 48.0F) / width, (canvasSize.Height - 48.0F) / height), 0.35F, 2.5F);
+            std::clamp(std::min((canvasSize.Width - 48.0F) / width, (canvasSize.Height - 48.0F) / height), 0.2F, 2.5F);
         m_Pan = {(canvasSize.Width / m_Zoom - width) * 0.5F - minimum.X,
                  (canvasSize.Height / m_Zoom - height) * 0.5F - minimum.Y};
     }

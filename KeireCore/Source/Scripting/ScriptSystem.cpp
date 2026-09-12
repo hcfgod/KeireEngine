@@ -326,21 +326,39 @@ namespace Keire
                 ideManagedApiProject = designTimeProject;
             }
         }
+        // A net10 editor API DLL cannot be referenced from a net8 design-time facade.
+        const bool includesEditor = std::ranges::any_of(
+            request.Assemblies, [](const auto& assembly)
+            { return assembly.Definition.Classification == ManagedAssemblyClassification::Editor; });
+        if (includesEditor)
+            ideManagedApiProject.clear();
         const bool usesManagedApiDesignTimeProject = !ideManagedApiProject.empty();
         const std::string_view ideTargetFramework = usesManagedApiDesignTimeProject ? "net8.0" : "net10.0";
         const std::string_view ideLanguageVersion = usesManagedApiDesignTimeProject ? "12.0" : "14.0";
+        std::map<AssetId, std::filesystem::path> designTimeProjects;
         for (const auto& assembly : request.Assemblies)
         {
             const auto project = m_Impl->ProjectRoot / (assembly.Definition.Name + ".csproj");
             (void)Detail::WriteTextFileAtomicallyIfChanged(
-                project, GenerateProject(assembly, names, m_Impl->ProjectRoot, m_Impl->ProjectRoot, ideManagedApi,
-                                         ideManagedApiProject, ideManagedEditorApi, ideManagedGenerator,
+                project, GenerateProject(assembly, names, m_Impl->ProjectRoot, m_Impl->ProjectRoot, ideManagedApi, {},
+                                         ideManagedEditorApi, ideManagedGenerator,
                                          assembly.Definition.Classification == ManagedAssemblyClassification::Editor,
-                                         ideTargetFramework, ideLanguageVersion));
-            result.Projects.push_back(project);
+                                         "net10.0", "14.0"));
+            const auto designTimeProject = m_Impl->ProjectRoot / (assembly.Definition.Name + ".VisualStudio.csproj");
+            (void)Detail::WriteTextFileAtomicallyIfChanged(
+                designTimeProject,
+                GenerateUserAssemblyDesignTimeProject(assembly, names, ideManagedApi, ideManagedApiProject,
+                                                      ideManagedEditorApi, ideManagedGenerator, m_Impl->ProjectRoot,
+                                                      m_Impl->ProjectRoot, ideTargetFramework, ideLanguageVersion));
+            designTimeProjects.emplace(assembly.Asset, designTimeProject);
+            result.Projects.push_back(designTimeProject);
         }
         (void)Detail::WriteTextFileAtomicallyIfChanged(
-            result.Solution, GenerateSolution(request, names, m_Impl->ProjectRoot, ideManagedApiProject));
+            result.Solution,
+            GenerateSolution(request, names, m_Impl->ProjectRoot, ideManagedApiProject, designTimeProjects));
+        const auto ideAggregatorPath = m_Impl->ProjectRoot / "Keire.Managed.VisualStudio.Build.csproj";
+        (void)Detail::WriteTextFileAtomicallyIfChanged(ideAggregatorPath,
+                                                       GenerateManagedIdeAggregator(request, ideTargetFramework));
         return result;
     }
 

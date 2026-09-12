@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <stdexcept>
 
 namespace Keire
 {
@@ -41,6 +42,22 @@ namespace Keire
         WriteAssetSourceIndex(path, database.Records());
     }
 
+    void Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(AssetDatabase& database,
+                                                                const std::span<const AssetImportStatus> statuses)
+    {
+        std::scoped_lock lock(database.m_Impl->Mutex);
+        auto updated = database.m_Impl->ImportStatuses;
+        for (const auto& status : statuses)
+        {
+            if (!status.Id || status.State > AssetImportState::Failed ||
+                std::ranges::find(database.m_Impl->Records, status.Id, &AssetSourceRecord::Id) ==
+                    database.m_Impl->Records.end())
+                throw std::invalid_argument("Asset worker import status does not match the current source index.");
+            updated.insert_or_assign(status.Id, status);
+        }
+        database.m_Impl->ImportStatuses.swap(updated);
+    }
+
     std::size_t Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(AssetDatabase& database,
                                                                      const std::filesystem::path& path)
     {
@@ -52,15 +69,17 @@ namespace Keire
         for (auto& record : records)
         {
             record.RelativePath = record.RelativePath.lexically_normal();
-            const auto source = ConfinedPath(database.m_Impl->SourceRoot, record.RelativePath);
-            const auto expectedMetadata = ConfinedMetadataPath(database.m_Impl->SourceRoot, record.RelativePath);
+            const auto metadataRelative = Detail::PathWithSuffix(record.RelativePath, ".keiremeta");
             if (!record.Id || !record.Type || record.RelativePath.empty() || record.RelativePath.is_absolute() ||
                 !identities.insert(record.Id).second ||
                 !relativePaths.insert(record.RelativePath.generic_string()).second ||
-                record.MetadataPath.lexically_normal() != expectedMetadata ||
-                !std::filesystem::is_regular_file(source) || !std::filesystem::is_regular_file(expectedMetadata))
+                record.MetadataPath.lexically_normal() != database.m_Impl->SourceRoot / metadataRelative)
                 throw std::runtime_error("Published asset source index contains an invalid record.");
-            signatures.emplace(record.Id, database.m_Impl->ReadSignature(source, expectedMetadata));
+            // Anchored signatures also reject escaped paths, redirected files, and non-regular files.
+            const auto sourceSignature = database.m_Impl->SourceFiles->Signature(record.RelativePath);
+            const auto metadataSignature = database.m_Impl->SourceFiles->Signature(metadataRelative);
+            signatures.emplace(record.Id, FileSignature{sourceSignature.Modified, sourceSignature.Size,
+                                                        metadataSignature.Modified, metadataSignature.Size});
         }
         std::ranges::sort(records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
 

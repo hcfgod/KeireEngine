@@ -35,7 +35,7 @@ namespace KeireEditor
         case NamedAssetCreationKind::UiFontFamily:
             return "UI font family";
         case NamedAssetCreationKind::MaterialGraph:
-            return "material graph";
+            return "material";
         case NamedAssetCreationKind::ShaderGraph:
             return "shader graph";
         case NamedAssetCreationKind::MaterialFunction:

@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
+#include <iostream>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -145,7 +146,7 @@ namespace
 
 TEST_CASE("Asset operation service runs the isolated worker and publishes a source index")
 {
-    const auto location = std::filesystem::temp_directory_path() / std::filesystem::path(u8"Kéire-资产-Worker-Test");
+    const auto location = std::filesystem::temp_directory_path() / std::filesystem::path(u8"Kéire-èµ„äº§-Worker-Test");
     std::error_code cleanupError;
     std::filesystem::remove_all(location, cleanupError);
     std::filesystem::create_directories(location);
@@ -392,7 +393,17 @@ TEST_CASE("Asset operation service reports malformed worker completion and bound
 
     SetTestWorkerMode("malformed");
     {
-        KeireEditor::AssetOperationService operations(KeireEditorTests::ExecutablePath, project->Root());
+        CHECK_THROWS_AS(KeireEditor::AssetOperationService(KeireEditorTests::ExecutablePath, project->Root(), {}),
+                        std::invalid_argument);
+        std::size_t clockSample = 0;
+        const std::array clockMilliseconds{0, 125, 375};
+        KeireEditor::AssetOperationService operations(KeireEditorTests::ExecutablePath, project->Root(),
+                                                      [&]
+                                                      {
+                                                          return std::chrono::steady_clock::time_point{} +
+                                                                 std::chrono::milliseconds(
+                                                                     clockMilliseconds.at(clockSample++));
+                                                      });
         operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
         operations.Update();
         SetTestWorkerMode(nullptr);
@@ -407,6 +418,11 @@ TEST_CASE("Asset operation service reports malformed worker completion and bound
         REQUIRE(completion);
         CHECK_FALSE(completion->Result.Success);
         CHECK_FALSE(completion->Result.Diagnostic.empty());
+        CHECK_FALSE(completion->OperationId.empty());
+        CHECK(completion->QueueMilliseconds == 125.0);
+        CHECK(completion->ExecutionMilliseconds == 250.0);
+        CHECK(clockSample == 3);
+        CHECK_FALSE(operations.TakeCompletion());
     }
 
     SetTestWorkerMode("hang");
@@ -447,5 +463,108 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
     operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
     CHECK(operations.QueuedCount() == 3);
     operations.Shutdown();
+
+    SetTestWorkerMode("hang");
+    {
+        std::size_t clockSample = 0;
+        const std::array clockMilliseconds{0, 80, 200};
+        KeireEditor::AssetOperationService interrupted(KeireEditorTests::ExecutablePath, project->Root(),
+                                                       [&]
+                                                       {
+                                                           return std::chrono::steady_clock::time_point{} +
+                                                                  std::chrono::milliseconds(
+                                                                      clockMilliseconds.at(clockSample++));
+                                                       });
+        interrupted.QueueAssetImport(first, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                     {.ReloadAsset = first, .Generation = 1});
+        interrupted.QueueAssetImport(second, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                     {.ReloadAsset = second, .Generation = 2});
+        CHECK(interrupted.QueuedCount() == 1);
+        CHECK(clockSample == 1);
+        interrupted.Update();
+        SetTestWorkerMode(nullptr);
+        REQUIRE(interrupted.PreemptBackgroundImports());
+        CHECK_FALSE(interrupted.Busy());
+        const auto completion = interrupted.TakeCompletion();
+        REQUIRE(completion);
+        CHECK(completion->Result.Cancelled);
+        CHECK_FALSE(completion->Result.Success);
+        CHECK(completion->Context.Generation == 2);
+        CHECK_FALSE(completion->Context.ReloadAsset);
+        CHECK_FALSE(completion->OperationId.empty());
+        CHECK(completion->QueueMilliseconds == 80.0);
+        CHECK(completion->ExecutionMilliseconds == 120.0);
+        CHECK(clockSample == 3);
+        CHECK_FALSE(interrupted.TakeCompletion());
+        CHECK_FALSE(interrupted.PreemptBackgroundImports());
+    }
+    SetTestWorkerMode(nullptr);
     std::filesystem::remove_all(location, cleanupError);
+}
+
+TEST_CASE("Asset worker timing benchmark" * doctest::skip())
+{
+    const auto location = std::filesystem::absolute(std::filesystem::path("Temp") /
+                                                    ("AssetTiming-" + Keire::AssetId::Generate().ToString()));
+    struct Cleanup
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{location};
+    std::filesystem::create_directories(location);
+    auto project =
+        Keire::Project::Create({.Location = location, .Name = "Timing", .Template = Keire::ProjectTemplate::Empty});
+    const AssetWorkerTestRuntime worker(
+        KeireEditor::AssetOperationService::ResolveWorkerExecutable(KeireEditorTests::ExecutablePath));
+    for (int i = 0; i < 200; ++i)
+        Keire::Detail::WriteTextFileAtomically(project->Root() / "Assets" / ("Seed" + std::to_string(i) + ".cs"),
+                                               "// asset benchmark source\n" + std::string(2048, ' '));
+    KeireEditor::AssetOperationService operations(worker.Executable(), project->Root());
+    const auto finish = [&]
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(2);
+        while (operations.Busy() && std::chrono::steady_clock::now() < deadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        operations.Update();
+        const auto result = operations.TakeCompletion();
+        REQUIRE(result);
+        INFO(result->Result.Diagnostic);
+        REQUIRE(result->Result.Success);
+    };
+    operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
+    finish();
+    const auto bytes = Keire::SceneAsset::Encode(Keire::SceneAsset::EmptyDefinition("Created"));
+    std::vector<double> creation;
+    std::vector<double> importing;
+    for (int sample = 0; sample < 5; ++sample)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        operations.QueueCreateAsset("Created" + std::to_string(sample) + ".keirescene", bytes, {}, {});
+        finish();
+        creation.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+        std::vector<Keire::ExternalAssetImportItem> items;
+        for (int item = 0; item < 20; ++item)
+        {
+            const auto name = "External" + std::to_string(sample) + "_" + std::to_string(item) + ".cs";
+            const auto source = location / name;
+            Keire::Detail::WriteTextFileAtomically(source, "// imported source\n" + std::string(2048, ' '));
+            items.push_back({.SourcePath = source, .RelativeDestination = name});
+        }
+        const auto importStart = std::chrono::steady_clock::now();
+        operations.QueueExternalImport(std::move(items), {});
+        finish();
+        importing.push_back(
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - importStart).count());
+    }
+    std::ranges::sort(creation);
+    std::ranges::sort(importing);
+    std::cout << "ASSET_TIMING creation_median_ms=" << creation[2] << " import20_median_ms=" << importing[2] << '\n';
+    operations.Shutdown();
 }

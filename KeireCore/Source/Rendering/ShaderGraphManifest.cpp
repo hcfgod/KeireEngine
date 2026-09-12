@@ -55,6 +55,10 @@ namespace Keire::Detail
                 {"name", property.Name}, {"displayName", property.DisplayName}, {"category", property.Category}};
             if (property.Id)
                 result["id"] = property.Id.ToString();
+            if (!property.Description.empty())
+                result["description"] = property.Description;
+            if (property.HighDynamicRange)
+                result["hdr"] = true;
             const auto graphType = static_cast<ShaderGraphValueType>(property.Type);
             result["type"] = PropertyTypeName(graphType);
             if (property.Type == ShaderPropertyType::Texture2D)
@@ -98,6 +102,24 @@ namespace Keire::Detail
                                          const ShaderOcclusionSupport occlusionSupport,
                                          const std::optional<float> maximumWorldPositionDisplacementRadius)
     {
+        if (definition.Target.Target == ShaderGraphTarget::Compute)
+        {
+            return Json{{"schemaVersion", 3},
+                        {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
+                        {"programTarget", "Compute"},
+                        {"programStages", static_cast<std::uint8_t>(ShaderGraphShaderStage::Compute)},
+                        {"source", generatedSource.generic_string()},
+                        {"stages", {{"compute", "CSMain"}}},
+                        {"computeThreadGroupSize", {definition.Target.ThreadGroupSizeX, 1, 1}},
+                        {"resources", Json::array({{{"symbol", "KeireComputeOutput"},
+                                                    {"kind", "StorageBuffer"},
+                                                    {"access", "ReadWrite"},
+                                                    {"space", 1},
+                                                    {"binding", 0},
+                                                    {"strideBytes", 16}}})}}
+                       .dump(2) +
+                   '\n';
+        }
         Json encodedProperties = Json::array();
         for (const auto& property : properties)
             encodedProperties.push_back(ManifestProperty(property));
@@ -111,9 +133,12 @@ namespace Keire::Detail
         const auto resourceContract =
             Json::parse(reinterpret_cast<const char*>(resourceBytes.data()),
                         reinterpret_cast<const char*>(resourceBytes.data()) + resourceBytes.size());
+        const bool ui = definition.Target.Target == ShaderGraphTarget::Ui;
+        const bool vfx = definition.Target.Target == ShaderGraphTarget::Vfx;
         const bool transparent =
-            definition.Output == ShaderGraphOutput::Transparent || definition.Output == ShaderGraphOutput::Decal;
+            ui || definition.Output == ShaderGraphOutput::Transparent || definition.Output == ShaderGraphOutput::Decal;
         const bool fullscreen = definition.Target.Target == ShaderGraphTarget::Fullscreen;
+        const bool screenSpace = ui || fullscreen;
         const bool lit = definition.Output != ShaderGraphOutput::Unlit && !fullscreen;
         Json passes = Json::array();
         const auto addPass = [&](const std::string_view role, const std::string_view define)
@@ -166,12 +191,12 @@ namespace Keire::Detail
              {definition.Target.ThreadGroupSizeX, definition.Target.ThreadGroupSizeY,
               definition.Target.ThreadGroupSizeZ}},
             {"source", generatedSource.generic_string()},
-            {"vertexLayoutVersion", ShaderGraphVertexLayoutVersion},
+            {"vertexLayoutVersion", ui ? UiShaderVertexLayoutVersion : ShaderGraphVertexLayoutVersion},
             {"receivesShadows", lit},
             {"usesForwardPlus", lit},
-            {"usesInstancing", true},
-            {"instanceAddressingAbiVersion", 2},
-            {"occlusionSupport", static_cast<std::uint8_t>(occlusionSupport)},
+            {"usesInstancing", !ui},
+            {"instanceAddressingAbiVersion", ui ? 0 : 2},
+            {"occlusionSupport", static_cast<std::uint8_t>(ui ? ShaderOcclusionSupport::None : occlusionSupport)},
             {"maximumWorldPositionDisplacementRadius",
              maximumWorldPositionDisplacementRadius ? Json(*maximumWorldPositionDisplacementRadius) : Json(nullptr)},
             {"usesImageBasedLighting", lit},
@@ -184,12 +209,12 @@ namespace Keire::Detail
             {"resources", resourceContract.at("resources")},
             {"renderState",
              {{"topology", "TriangleList"},
-              {"culling", fullscreen                                      ? "None"
+              {"culling", screenSpace || vfx                              ? "None"
                           : definition.Output == ShaderGraphOutput::Decal ? "Front"
                           : definition.Output == ShaderGraphOutput::Hair  ? "None"
                                                                           : "Back"},
-              {"depthTest", !fullscreen},
-              {"depthWrite", !transparent && !fullscreen},
+              {"depthTest", !screenSpace},
+              {"depthWrite", !transparent && !screenSpace},
               {"blend", transparent}}},
             {"properties", std::move(encodedProperties)}};
         return manifest.dump(2) + '\n';

@@ -8,6 +8,7 @@
 #include "KeireClient/Editor/GraphLayout.h"
 #include "KeireClient/Editor/GraphNavigation.h"
 #include "KeireClient/Editor/ShaderGraphDocument.h"
+#include "KeireClient/Editor/ShaderGraphSaveState.h"
 
 #include <atomic>
 #include <cstdint>
@@ -31,6 +32,7 @@ namespace KeireEditor
         virtual void SaveShaderGraphDocument() = 0;
         virtual void UndoShaderGraphEdit() = 0;
         virtual void RedoShaderGraphEdit() = 0;
+        virtual void ActivateShaderGraphHistory() noexcept = 0;
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> ShaderGraphAssetRecords() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<const Keire::MeshAsset>
         ResolveShaderGraphPreviewMesh(Keire::AssetId asset) = 0;
@@ -53,6 +55,13 @@ namespace KeireEditor
         void Attach(Keire::UiWorkspace& workspace);
         void SetJobSystem(Keire::Ref<Keire::JobSystem> jobs);
         void Draw(Keire::UiFrame& ui);
+        void RequestSave();
+        void UpdatePendingSave();
+        /// Stages the editable metadata of an existing node; Save applies it as one undoable document edit.
+        void StageNodeProperties(const Keire::ShaderGraphNode& node);
+        [[nodiscard]] bool HasPendingNodeProperties() const noexcept { return m_SaveState.Draft.Dirty; }
+        void SetReadOnly(const bool value) noexcept { m_ReadOnly = value; }
+        [[nodiscard]] bool SavePending() const noexcept { return m_SaveState.RequestedAsset.has_value(); }
         void ResetTransientState() noexcept;
         void UpdatePreview(const Keire::ShaderGraphCompilation& compilation,
                            const ShaderGraphPreviewSettings& settings);
@@ -97,22 +106,34 @@ namespace KeireEditor
                         std::span<const std::pair<StableNodeId, Keire::AssetId>> nodeIdentities,
                         std::span<const std::pair<StableNodeId, Keire::AssetId>> connectionIdentities);
         void DrawInspector(Keire::UiFrame& ui);
+        void DrawBlackboard(Keire::UiFrame& ui);
+        [[nodiscard]] bool ApplyInspectorProperties();
         [[nodiscard]] bool DrawMultiSelectionInspector(Keire::UiFrame& ui);
         void DrawDiagnostics(Keire::UiFrame& ui);
+        void DrawGeneratedSource(Keire::UiFrame& ui);
         void EnsureJobScope();
         [[nodiscard]] bool DrawNodeCreationMenu(Keire::UiFrame& ui, std::optional<Keire::Vector2> graphPosition,
                                                 const Keire::ShaderGraphNode* compatibleNode = nullptr,
-                                                const Keire::ShaderGraphPin* compatiblePin = nullptr);
+                                                const Keire::ShaderGraphPin* compatiblePin = nullptr,
+                                                std::optional<Keire::AssetId> insertion = std::nullopt);
         [[nodiscard]] bool AddNode(Keire::ShaderGraphNodeKind kind,
                                    Keire::ShaderGraphValueType type = Keire::ShaderGraphValueType::Scalar,
-                                   std::optional<Keire::Vector2> graphPosition = std::nullopt);
+                                   std::optional<Keire::Vector2> graphPosition = std::nullopt,
+                                   std::optional<Keire::ShaderGraphEndpoint> anchor = std::nullopt,
+                                   std::optional<Keire::AssetId> insertion = std::nullopt);
         [[nodiscard]] bool AddFunctionNode(Keire::AssetId asset, std::string_view name,
-                                           std::optional<Keire::Vector2> graphPosition);
+                                           std::optional<Keire::Vector2> graphPosition,
+                                           std::optional<Keire::ShaderGraphEndpoint> anchor = std::nullopt,
+                                           std::optional<Keire::AssetId> insertion = std::nullopt);
+        [[nodiscard]] bool CommitCreatedNode(Keire::ShaderGraphNode node,
+                                             std::optional<Keire::ShaderGraphEndpoint> anchor,
+                                             std::optional<Keire::AssetId> insertion);
         [[nodiscard]] bool CanExtractSelection(const Keire::ShaderGraphDefinition& definition) const;
         [[nodiscard]] bool DrawFunctionExtractionPopup(Keire::UiFrame& ui);
         void Report(std::string message) noexcept;
 
         IShaderGraphPanelController& m_Controller;
+        std::string m_BlackboardSearch;
         StableNodeGraphCanvas m_Canvas;
         GraphCommentEditorState m_CommentEditor;
         AssetPicker m_AssetPicker;
@@ -125,22 +146,9 @@ namespace KeireEditor
         std::vector<Keire::AssetId> m_SelectedNodes;
         std::optional<Keire::AssetId> m_SelectedConnection;
         std::optional<Keire::AssetId> m_FrameNode;
-        std::optional<Keire::AssetId> m_InspectorNode;
-        std::string m_InspectorName;
-        std::string m_InspectorSymbol;
-        std::string m_InspectorInclude;
-        std::string m_InspectorFunction;
-        std::string m_InspectorDescription;
-        std::string m_InspectorCategory;
-        std::string m_InspectorComment;
-        double m_InspectorSortPriority = 0.0;
-        double m_InspectorMinimum = 0.0;
-        double m_InspectorMaximum = 1.0;
-        double m_InspectorStep = 0.01;
-        bool m_InspectorHasMinimum = false;
-        bool m_InspectorHasMaximum = false;
-        bool m_InspectorHasStep = false;
-        bool m_InspectorCommentPinned = false;
+        bool m_FrameAllOnOpen = true;
+        ShaderGraphSaveState m_SaveState;
+        bool m_ReadOnly = false;
         std::string m_NodeSearch;
         std::string m_ExtractionName;
         std::vector<Keire::AssetId> m_FunctionExtractionSelection;
@@ -149,6 +157,8 @@ namespace KeireEditor
         std::optional<Keire::Vector2> m_NodeCreationPosition;
         std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_Message;
+        std::size_t m_SourceVariant = 0;
+        int m_SourceLine = 1;
         std::uint32_t m_PreviewWidth = 320;
         std::uint32_t m_PreviewHeight = 220;
         Keire::Ref<Keire::JobSystem> m_JobSystem;

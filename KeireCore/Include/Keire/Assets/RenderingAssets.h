@@ -21,6 +21,8 @@ namespace Keire
 {
     inline constexpr std::uint32_t ShaderAssetSchemaVersion = 3;
     inline constexpr std::size_t ShaderAssetPassRoleHardLimit = 32;
+    /// Retained UI: float3 pixel position, float4 vertex color, float2 UV; viewport uniform b0/space1.
+    inline constexpr std::uint8_t UiShaderVertexLayoutVersion = 4;
 
     enum class ShaderBinaryFormat : std::uint8_t
     {
@@ -99,6 +101,9 @@ namespace Keire
         ShaderTextureSemantic TextureSemantic = ShaderTextureSemantic::Generic;
         /// Stable authoring identity. Names may change without invalidating material bindings when this is populated.
         AssetId Id;
+
+        std::string Description;
+        bool HighDynamicRange = false;
 
         bool operator==(const ShaderPropertyDefinition&) const = default;
     };
@@ -248,6 +253,16 @@ namespace Keire
     /// Editable material source. Import resolves graph targets to an immutable runtime MaterialAssetDefinition.
     inline constexpr std::string_view LegacyMaterialAssetSourceExtension = ".keiremateriallegacy";
 
+    struct MaterialPropertyOverride
+    {
+        AssetId Property;
+        /// Last known symbol, retained for diagnostics only. Identity controls binding.
+        std::string Name;
+        MaterialPropertyValue Value;
+
+        bool operator==(const MaterialPropertyOverride&) const = default;
+    };
+
     struct MaterialAuthoringDefinition
     {
         std::uint32_t SchemaVersion = 4;
@@ -256,9 +271,25 @@ namespace Keire
         bool ContributeEmissionToGI = true;
         float EmissiveGIIntensity = 1.0F;
         std::map<std::string, MaterialPropertyValue, std::less<>> Properties;
+        /// Overrides retained for recovery when the selected shader cannot accept them. Never bound at runtime.
+        std::multimap<std::string, MaterialPropertyValue, std::less<>> InactiveProperties;
+        /// Ordered oldest to newest. Incompatible historical values remain available for recovery.
+        std::vector<MaterialPropertyOverride> PropertyOverrides;
 
         bool operator==(const MaterialAuthoringDefinition&) const = default;
     };
+
+    struct MaterialPropertyResolution
+    {
+        MaterialAuthoringDefinition Authoring;
+        std::map<std::string, MaterialPropertyValue, std::less<>> Properties;
+        std::multimap<std::string, MaterialPropertyValue, std::less<>> InactiveProperties;
+        std::vector<std::size_t> InactiveOverrideIndices;
+    };
+
+    /// Reconciles legacy names and stable overrides without compiling a shader or modifying the input.
+    [[nodiscard]] KEIRE_API MaterialPropertyResolution
+    ResolveMaterialProperties(const MaterialAuthoringDefinition& material, const ShaderAssetDefinition& shader);
 
     class KEIRE_API MaterialAsset final : public Asset
     {

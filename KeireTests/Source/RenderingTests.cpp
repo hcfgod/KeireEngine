@@ -499,7 +499,7 @@ TEST_CASE("shader assets preserve deterministic variants and target cooking")
     CHECK(decodedLegacyManifest.OcclusionSupport == Keire::ShaderOcclusionSupport::None);
 
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 8U);
+    CHECK(importer.Version == 9U);
     REQUIRE(importer.Cook);
     Keire::ShaderImporterSpecification missingReflection;
     missingReflection.Formats = {Keire::ShaderBinaryFormat::Dxil};

@@ -27,9 +27,10 @@ namespace KeireEditor
 
     void ExternalAssetImportController::Queue(const std::span<const std::filesystem::path> paths,
                                               const std::filesystem::path& destinationFolder, const bool viewport,
-                                              const Keire::EntityId viewportTarget,
+                                              const Keire::EntityId viewportTarget, Keire::Vector3 viewportPosition,
                                               const Keire::Ref<Keire::AssetDatabase>& database,
-                                              AssetOperationService& operations)
+                                              AssetOperationService& operations,
+                                              const Keire::Ref<Keire::Scene>& viewportScene)
     {
         if (!database || paths.empty())
             return;
@@ -37,6 +38,8 @@ namespace KeireEditor
             throw std::logic_error("Finish the current external import before starting another.");
         m_Viewport = viewport;
         m_ViewportTarget = viewportTarget;
+        m_ViewportPosition = viewportPosition;
+        m_ViewportScene = viewportScene;
         m_Diagnostic.clear();
         m_Failed = false;
         std::vector<Keire::ExternalAssetImportItem> pendingItems;
@@ -150,7 +153,10 @@ namespace KeireEditor
             return;
         }
         m_Diagnostic = "Importing assets...";
-        operations.QueueExternalImport(std::move(items), {.Viewport = m_Viewport, .ViewportTarget = m_ViewportTarget});
+        operations.QueueExternalImport(std::move(items), {.Viewport = m_Viewport,
+                                                          .ViewportTarget = m_ViewportTarget,
+                                                          .ViewportPosition = m_ViewportPosition,
+                                                          .ViewportScene = m_ViewportScene});
         m_OperationPending = true;
         m_OpenRequested = true;
     }
@@ -288,6 +294,8 @@ namespace KeireEditor
         result.Result.Receipt = completion.Result.Receipt;
         result.Viewport = completion.Context.Viewport;
         result.ViewportTarget = completion.Context.ViewportTarget;
+        result.ViewportPosition = completion.Context.ViewportPosition;
+        result.ViewportScene = completion.Context.ViewportScene;
         m_Completion = std::move(result);
         m_Diagnostic = "Imported " + std::to_string(m_Completion->Result.Entries.size()) + " asset(s).";
     }

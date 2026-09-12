@@ -26,20 +26,25 @@ namespace Keire::Detail
         {
             constexpr std::uintmax_t maximumDocumentBytes = 64ULL * 1024ULL * 1024U;
             std::error_code error;
-            if (std::filesystem::file_size(path, error) > maximumDocumentBytes || error)
+            const auto size = std::filesystem::file_size(path, error);
+            if (size > maximumDocumentBytes || error)
                 throw std::runtime_error("Asset-worker document is missing or exceeds the size limit: " +
                                          PathToUtf8(path));
             std::ifstream stream(path, std::ios::binary);
             if (!stream)
                 throw std::runtime_error("Could not open asset-worker document: " + PathToUtf8(path));
-            Json value;
-            stream >> value;
-            return value;
+            std::string contents(static_cast<std::size_t>(size), '\0');
+            stream.read(contents.data(), static_cast<std::streamsize>(contents.size()));
+            if (!stream || stream.peek() != std::char_traits<char>::eof())
+                throw std::runtime_error("Asset-worker document changed while being read: " + PathToUtf8(path));
+            // Release the file before parsing so polling cannot hold up an atomic progress replacement.
+            stream.close();
+            return Json::parse(contents);
         }
 
         void WriteJson(const std::filesystem::path& path, const Json& value)
         {
-            WriteTextFileAtomically(path, value.dump(2));
+            WriteTextFileAtomically(path, value.dump());
         }
 
         [[nodiscard]] AssetWorkerOperationKind ParseKind(const std::string_view value)

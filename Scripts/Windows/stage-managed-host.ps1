@@ -56,7 +56,7 @@ function Copy-TreeIfChanged {
     )
 
     $sourceRoot = (Resolve-Path -LiteralPath $Source).Path
-    foreach ($sourceFile in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse) {
+    foreach ($sourceFile in Get-ChildItem -LiteralPath $sourceRoot -File -Recurse -ErrorAction Stop) {
         $relativePath = $sourceFile.FullName.Substring($sourceRoot.Length).TrimStart("\", "/")
         Copy-FileIfChanged -Source $sourceFile.FullName -Destination (Join-Path $Destination $relativePath)
     }
@@ -80,9 +80,10 @@ if ($IncludeEditorApi -and -not (Test-Path -LiteralPath $managedGeneratorAssembl
     throw "The Keire.Managed.Generators analyzer is missing."
 }
 
-$hostFxr = Get-ChildItem (Join-Path $dotnetRoot "host\fxr") -Directory |
+$hostFxr = Get-ChildItem (Join-Path $dotnetRoot "host\fxr") -Directory -ErrorAction SilentlyContinue |
     Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-$coreRuntime = Get-ChildItem (Join-Path $dotnetRoot "shared\Microsoft.NETCore.App") -Directory |
+$coreRuntime = Get-ChildItem (Join-Path $dotnetRoot "shared\Microsoft.NETCore.App") -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path $_.FullName } |
     Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (-not $hostFxr -or -not $coreRuntime) {
     throw "The bundled .NET hostfxr or CoreCLR runtime is missing."

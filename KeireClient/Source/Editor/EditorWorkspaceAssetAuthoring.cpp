@@ -1,6 +1,8 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "Keire/Assets/BuiltinAssetRegistry.h"
+#include "Keire/Project/SharedShaderLibrary.h"
+#include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
@@ -20,6 +22,7 @@
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
+#include "KeireClient/Editor/MaterialGraphCreationPicker.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/PrefabAuthoring.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
@@ -30,6 +33,7 @@
 #include "KeireClient/Editor/ScenePicker.h"
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
+#include "KeireClient/Editor/ShaderCodeTemplate.h"
 #include "KeireClient/Editor/ShaderGraphDocument.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/ShaderGraphPublication.h"
@@ -74,6 +78,7 @@ namespace
 
 void EditorWorkspaceLayer::CommitMaterialDraft()
 {
+    FlushMaterialSelectionImports();
     if (!m_MaterialDocument->Dirty() || !m_MaterialDocument->Asset() || m_MaterialDocument->SourcePath().empty())
         return;
     try
@@ -86,10 +91,36 @@ void EditorWorkspaceLayer::CommitMaterialDraft()
                                            m_MaterialDocument->DraftSource().end());
         const auto apply = [this, asset, path](const std::vector<std::byte>& source)
         {
+            const auto definition = KeireEditor::MaterialDocument::ResolveRuntimeRevision(
+                source,
+                [this](const Keire::MaterialShaderReference& shader)
+                    -> std::optional<KeireEditor::MaterialDocument::ResolvedShader>
+                {
+                    const auto runtime = ResolveMaterialGraphShader(shader);
+                    const auto assets = Owner().Assets();
+                    if (!runtime || !assets)
+                        return std::nullopt;
+                    const auto loaded =
+                        assets->Load<Keire::ShaderAsset>(runtime, Keire::AssetPriority::High).TryGetLoaded();
+                    if (!loaded)
+                        return std::nullopt;
+                    return KeireEditor::MaterialDocument::ResolvedShader{runtime, loaded->Definition()};
+                });
             WriteBytesAtomically(path, source);
-            const auto definition = Keire::MaterialAsset::DecodeSource(source);
-            if (const auto assets = Owner().Assets())
-                (void)assets->PublishDevelopmentAsset(asset, Keire::CreateRef<Keire::MaterialAsset>(definition));
+            if (const auto assets = Owner().Assets(); assets && definition)
+            {
+                auto runtime = asset;
+                const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+                if (record && record->Type != Keire::MaterialAsset::StaticType())
+                {
+                    const auto generated =
+                        std::ranges::find_if(record->SubAssets, [&](const Keire::AssetId id)
+                                             { return assets->TryGetType(id) == Keire::MaterialAsset::StaticType(); });
+                    runtime = generated == record->SubAssets.end() ? Keire::AssetId{} : *generated;
+                }
+                if (runtime)
+                    (void)assets->PublishDevelopmentAsset(runtime, Keire::CreateRef<Keire::MaterialAsset>(*definition));
+            }
             if (m_MaterialDocument->Asset() == asset)
                 m_MaterialDocument->AcceptSavedSource(source);
             QueueMaterialCatalogRefresh(asset);
@@ -372,7 +403,6 @@ bool EditorWorkspaceLayer::CreateVfxEffect(const std::string_view name)
 
 bool EditorWorkspaceLayer::CreateMaterialGraph(const std::string_view name, const Keire::AssetId shaderAsset)
 {
-    (void)shaderAsset;
     if (!m_AssetDatabase || !m_AssetOperations)
         return false;
     try
@@ -381,12 +411,32 @@ bool EditorWorkspaceLayer::CreateMaterialGraph(const std::string_view name, cons
             (void)m_AssetOperations->PreemptBackgroundImports();
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Material name must be one non-empty path component.");
-        auto definition = Keire::CreateOpenPbrMaterial();
+        const auto shaderRecord = m_AssetDatabase->Find(shaderAsset);
+        if (!shaderRecord)
+            throw std::invalid_argument("The selected shader no longer exists. Choose another shader.");
+        if (shaderRecord->Type == Keire::ShaderGraphAsset::StaticType())
+        {
+            const auto& specification = m_AssetDatabase->Specification();
+            const auto shaderSource =
+                specification.ProjectRoot / specification.SourceDirectory / shaderRecord->RelativePath;
+            const auto graph = Keire::ShaderGraphAsset::DecodeSource(ReadBytes(shaderSource));
+            if (graph.Target.Target != Keire::ShaderGraphTarget::Material)
+                throw std::invalid_argument("A mesh material requires a surface Shader Graph.");
+        }
+        Keire::MaterialShaderReference shaderReference;
+        shaderReference.Asset = shaderAsset;
+        shaderReference.Kind = shaderRecord->Type == Keire::ShaderGraphAsset::StaticType()
+                                   ? Keire::MaterialShaderSourceKind::ShaderGraph
+                                   : Keire::MaterialShaderSourceKind::ShaderAsset;
+        const auto shaderInterface = ResolveMaterialGraphInterface(shaderReference);
+        if (!shaderInterface)
+            throw std::invalid_argument("The selected shader interface is unavailable. Repair its import first.");
+        const auto definition = KeireEditor::CreateMaterialForShader(*shaderRecord, *shaderInterface);
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         const auto destination = directory / (std::string(name) + std::string(Keire::MaterialAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A Material with that name already exists in this folder.");
-        m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialGraphAsset::EncodeSource(definition), {},
+        m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialAsset::EncodeAuthoringSource(definition), {},
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenMaterialGraph,
                                              .UndoName = "Create Material",
                                              .Reason = "material-creation"});
@@ -912,52 +962,10 @@ bool EditorWorkspaceLayer::CreateUnlitShader(const std::string_view name)
             baseName = "UnlitShader " + std::to_string(copy);
         }
 
-        const std::string shaderSource = R"(struct VertexInput
-{
-    float3 Position : TEXCOORD0;
-    float3 Color : TEXCOORD1;
-};
-
-struct VertexOutput
-{
-    float4 Color : TEXCOORD0;
-    float4 Position : SV_Position;
-};
-
-cbuffer CameraObjectConstants : register(b0, space1)
-{
-    float4x4 ModelViewProjection;
-};
-
-VertexOutput VSMain(VertexInput input)
-{
-    VertexOutput output;
-    output.Color = float4(input.Color, 1.0F);
-    output.Position = mul(ModelViewProjection, float4(input.Position, 1.0F));
-    return output;
-}
-
-float4 PSMain(VertexOutput input) : SV_Target0
-{
-    return input.Color;
-}
-)";
-        const auto projectSource = (std::filesystem::path("Assets") / hlsl).generic_string();
-        const auto includeRoot =
-            (std::filesystem::path("Assets") / (directory.empty() ? std::filesystem::path{} : directory))
-                .generic_string();
-        const std::string manifestSource =
-            "{\n  \"schemaVersion\": 1,\n  \"source\": \"" + projectSource +
-            "\",\n  \"stages\": { \"vertex\": \"VSMain\", \"fragment\": \"PSMain\" },\n"
-            "  \"defines\": {},\n  \"includeRoots\": [\"" +
-            includeRoot +
-            "\"],\n"
-            "  \"renderState\": { \"topology\": \"TriangleList\", \"culling\": \"Back\", "
-            "\"depthTest\": true, \"depthWrite\": true, \"blend\": false },\n"
-            "  \"properties\": [{ \"name\": \"Tint\", \"type\": \"Color\", "
-            "\"default\": [0.25, 0.55, 1.0, 1.0] }]\n}\n";
-        const auto manifestBytes = std::as_bytes(std::span(manifestSource));
-        const auto shaderBytes = std::as_bytes(std::span(shaderSource));
+        const auto shader =
+            KeireEditor::CreateUnlitShaderCodeTemplate(m_AssetDatabase->Specification().SourceDirectory / hlsl);
+        const auto manifestBytes = std::as_bytes(std::span(shader.Manifest));
+        const auto shaderBytes = std::as_bytes(std::span(shader.Hlsl));
         std::vector<KeireEditor::AssetCreationAuxiliarySource> auxiliary;
         auxiliary.push_back({hlsl, std::vector<std::byte>(shaderBytes.begin(), shaderBytes.end())});
         m_AssetOperations->QueueCreateAssetWithAuxiliary(
@@ -987,8 +995,20 @@ bool EditorWorkspaceLayer::CreateMaterial(const std::string_view name)
         const auto destination = directory / (std::string(name) + std::string(Keire::MaterialAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A material with that name already exists in this folder.");
-        m_AssetOperations->QueueCreateAsset(destination,
-                                            Keire::MaterialGraphAsset::EncodeSource(Keire::CreateOpenPbrMaterial()), {},
+        if (m_AssetOperations->Busy())
+            throw std::runtime_error("Wait for the active asset operation before creating a material.");
+        const auto library = Keire::EnsureSharedShaderLibrary(m_AssetDatabase->Specification().ProjectRoot);
+        const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
+        if (lit == library.Shaders.end())
+            throw std::runtime_error("The pinned shared shader library has no Kéire/Lit shader.");
+        (void)m_AssetDatabase->Refresh();
+        Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(
+            *m_AssetDatabase,
+            m_AssetDatabase->Specification().ProjectRoot / "Library/AssetCache/Runtime/source-index.json");
+        Keire::MaterialAuthoringDefinition definition;
+        definition.SchemaVersion = 5;
+        definition.Shader = {Keire::MaterialShaderSourceKind::ShaderGraph, lit->Id};
+        m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialAsset::EncodeAuthoringSource(definition), {},
                                             {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenMaterialGraph,
                                              .UndoName = "Create Material",
                                              .Reason = "material-creation"});

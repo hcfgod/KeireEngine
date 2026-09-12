@@ -177,6 +177,31 @@ namespace KeireEditor
             }
         }
 
+        ShaderGraphPreviewEvaluator evaluator(request);
+        if (request.Definition && UsesShaderGraphImagePreview(request.Definition->Target.Target))
+        {
+            for (std::uint32_t y = 0; y < request.Height; ++y)
+            {
+                Detail::CheckShaderGraphPreviewCancellation(request);
+                for (std::uint32_t x = 0; x < request.Width; ++x)
+                {
+                    const Keire::Vector2 uv{(static_cast<float>(x) + 0.5F) / static_cast<float>(request.Width),
+                                            (static_cast<float>(y) + 0.5F) / static_cast<float>(request.Height)};
+                    const auto material =
+                        evaluator.Resolve(uv, {0.0F, 0.0F, 1.0F}, {uv.X * 2.0F - 1.0F, 1.0F - uv.Y * 2.0F, 0.0F});
+                    const auto background = Detail::PreviewBackground(x, y);
+                    const float alpha = Clamp01(material.BaseColor.W * material.Opacity);
+                    const auto channel = [&](const float color, const float emission, const float checker)
+                    { return Clamp01((color + emission) * request.Exposure) * alpha + checker * (1.0F - alpha); };
+                    Detail::WritePreviewPixel(pixels, request.Width, x, y,
+                                              {channel(material.BaseColor.X, material.Emission.X, background[0]),
+                                               channel(material.BaseColor.Y, material.Emission.Y, background[1]),
+                                               channel(material.BaseColor.Z, material.Emission.Z, background[2]),
+                                               1.0F});
+                }
+            }
+            return pixels;
+        }
         Detail::PreviewGeometry geometry;
         switch (request.Mesh)
         {
@@ -197,7 +222,6 @@ namespace KeireEditor
         default:
             throw std::invalid_argument("Shader Graph preview mesh is invalid.");
         }
-        ShaderGraphPreviewEvaluator evaluator(request);
         Rasterize(geometry, request, evaluator, request.Width, request.Height, request.Exposure,
                   request.EnvironmentIntensity, request.RotationDegrees, pixels);
         return pixels;

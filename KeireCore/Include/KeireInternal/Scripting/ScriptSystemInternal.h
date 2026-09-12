@@ -21,6 +21,7 @@
 #include "KeireInternal/Scripting/ManagedGenerationSequence.h"
 #include "KeireInternal/Scripting/ManagedReflection.h"
 #include "KeireInternal/Scripting/ManagedRuntimeBindings.h"
+#include "KeireInternal/Scripting/ManagedRuntimeCompute.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInterop.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 #if defined(_MSC_VER)
@@ -58,8 +59,10 @@ namespace Keire
     using Detail::ApplyManagedState;
     using Detail::GenerateManagedApiDesignTimeProject;
     using Detail::GenerateManagedBuildAggregator;
+    using Detail::GenerateManagedIdeAggregator;
     using Detail::GenerateProject;
     using Detail::GenerateSolution;
+    using Detail::GenerateUserAssemblyDesignTimeProject;
     using Detail::ManagedApiSourceFingerprint;
     using Detail::ManagedInspectorAttributeTypes, Detail::ResolveManagedInspectorAttributeTypes;
     using Detail::ManagedTypeName;
@@ -126,7 +129,9 @@ namespace Keire
           public:
             explicit RuntimeScope(Impl& runtime) noexcept
                 : m_Previous(CurrentRuntime), m_Bindings(runtime.Specification.RuntimeServices),
-                  m_BuiltinComponents(&Impl::ResolveRuntimeEntity)
+                  m_BuiltinComponents(&Impl::ResolveRuntimeEntity),
+                  m_Compute(&runtime.ComputeResources, runtime.Reload.State != ManagedReloadState::Preparing &&
+                                                           runtime.Reload.State != ManagedReloadState::Prepared)
             {
                 CurrentRuntime = &runtime;
             }
@@ -138,7 +143,9 @@ namespace Keire
             Impl* m_Previous;
             Detail::ManagedRuntimeBindingsScope m_Bindings;
             Detail::ManagedBuiltinComponentResolverScope m_BuiltinComponents;
+            Detail::ManagedRuntimeComputeScope m_Compute;
         };
+        Detail::ManagedComputeStore ComputeResources;
         Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs);
 
         ~Impl();
@@ -480,6 +487,8 @@ namespace Keire
         static void RuntimeCloneEntity(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
                                        std::uint64_t* resultHigh, std::uint64_t* resultLow) noexcept;
 
+        [[nodiscard]] static std::uint8_t RuntimeDestroyEntityDelayed(std::uint64_t world, std::uint64_t high,
+                                                                      std::uint64_t low, float delaySeconds) noexcept;
         static void RuntimeDestroyEntity(const std::uint64_t world, const std::uint64_t high,
                                          const std::uint64_t low) noexcept;
 

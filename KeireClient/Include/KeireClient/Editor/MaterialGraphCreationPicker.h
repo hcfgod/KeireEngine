@@ -1,9 +1,14 @@
 #pragma once
 
+#include "Keire/Rendering/MaterialGraph.h"
 #include "KeireClient/Editor/AssetPicker.h"
 
 namespace KeireEditor
 {
+    [[nodiscard]] Keire::MaterialAuthoringDefinition
+    CreateMaterialForShader(const Keire::AssetSourceRecord& shader,
+                            const Keire::ShaderInterfaceDefinition& shaderInterface);
+
     class MaterialGraphCreationPicker final
     {
       public:

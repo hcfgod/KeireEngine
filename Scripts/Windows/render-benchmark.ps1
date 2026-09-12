@@ -72,6 +72,68 @@ function Assert-MetricSummary {
     }
 }
 
+function Get-MaterialShaderFixture {
+    param([string]$Root)
+
+    $fixtureRoots = @(
+        "Assets/Examples/MaterialLab",
+        "Assets/Scenes/SandboxShowcase.keirescene",
+        "Assets/Scenes/SandboxShowcase.keirescene.keiremeta",
+        "Assets/Textures",
+        "Assets/Vfx",
+        "ProjectSettings/BuildScenes.keiresettings"
+    )
+    $entries = [Collections.Generic.List[object]]::new()
+    foreach ($relativeRoot in $fixtureRoots) {
+        $path = Join-Path $Root $relativeRoot
+        if (-not (Test-Path -LiteralPath $path)) {
+            throw "Material/shader benchmark fixture is missing $relativeRoot."
+        }
+        $files = if ((Get-Item -LiteralPath $path).PSIsContainer) {
+            Get-ChildItem -LiteralPath $path -File -Recurse
+        }
+        else {
+            @(Get-Item -LiteralPath $path)
+        }
+        foreach ($file in $files) {
+            $relativePath = $file.FullName.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
+            $entries.Add([PSCustomObject][ordered]@{
+                path = $relativePath
+                sizeBytes = [Int64]$file.Length
+                sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }) | Out-Null
+        }
+    }
+    $entryComparison = [Comparison[object]]{
+        param($left, $right)
+        return [StringComparer]::Ordinal.Compare([string]$left.path, [string]$right.path)
+    }
+    $entries.Sort($entryComparison)
+    $entries = @($entries)
+    if ($entries.Count -eq 0) {
+        throw "Material/shader benchmark fixture contains no files."
+    }
+    $identityText = ($entries | ForEach-Object {
+        "$($_.path)`n$($_.sizeBytes)`n$($_.sha256)`n"
+    }) -join ""
+    $identityBytes = [Text.Encoding]::UTF8.GetBytes($identityText)
+    $identityAlgorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $identityHash = -join ($identityAlgorithm.ComputeHash($identityBytes) | ForEach-Object {
+            $_.ToString("x2")
+        })
+    }
+    finally {
+        $identityAlgorithm.Dispose()
+    }
+    return [ordered]@{
+        schemaVersion = 1
+        roots = $fixtureRoots
+        identitySha256 = $identityHash
+        files = $entries
+    }
+}
+
 New-Item -ItemType Directory -Force $benchmarkRoot, $temporaryRoot | Out-Null
 Remove-Item -LiteralPath $matrixPath -Force -ErrorAction SilentlyContinue
 $previousTemp = $env:TEMP
@@ -106,6 +168,7 @@ try {
     }
     Copy-Item -LiteralPath $buildScenes -Destination (Join-Path $sampleRoot "ProjectSettings\BuildScenes.keiresettings") `
         -Force
+    $fixture = Get-MaterialShaderFixture -Root $sampleRoot
     $env:KEIRE_SHADER_COMPILER = Join-Path $Root "Build\Tools\ShaderCompiler\KeireShaderCompiler.exe"
     $env:DOTNET_ROOT = Join-Path $Root "Build\Dependencies\dotnet-sdk"
     $env:PATH = "$env:DOTNET_ROOT;$env:PATH"
@@ -116,6 +179,10 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $contentRoot "catalog.json") -PathType Leaf) -or
         -not (Test-Path -LiteralPath (Join-Path $contentRoot "runtime-manifest.json") -PathType Leaf)) {
         throw "Render benchmark cooked workload is incomplete."
+    }
+    $fixtureAfterCook = Get-MaterialShaderFixture -Root $sampleRoot
+    if ($fixtureAfterCook.identitySha256 -cne $fixture.identitySha256) {
+        throw "Material/shader benchmark fixture source changed during cook."
     }
 
     $reports = @()
@@ -218,6 +285,7 @@ try {
         warmupFrames = 300
         measuredFrames = 2000
         buildCommit = $expectedCommit
+        fixture = $fixture
         runs = $reports
     }
     $matrixTemporary = "$matrixPath.tmp-$([guid]::NewGuid().ToString('N'))"

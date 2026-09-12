@@ -16,6 +16,7 @@
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Project/StarterProjectUiInternal.h"
+#include "KeireInternal/ProjectFileTransaction.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #include <nlohmann/json.hpp>
@@ -800,7 +801,12 @@ float4 PSMain(VertexOutput input) : SV_Target0
             throw std::runtime_error("Project upgrade is required before opening this project.");
         if (RequiresNewerEngine(descriptor))
             throw std::runtime_error("Project requires a newer Kéire engine version.");
-        return CreateRef<Project>(std::make_unique<Impl>(root, std::move(descriptor), mode));
+        auto implementation = std::make_unique<Impl>(root, std::move(descriptor), mode);
+        if (mode == ProjectOpenMode::Exclusive)
+            (void)Detail::RecoverMaterialMigrationFiles(root);
+        else if (Detail::HasPendingMaterialMigration(root))
+            throw std::runtime_error("Open this project exclusively to recover its interrupted material upgrade.");
+        return CreateRef<Project>(std::move(implementation));
     }
 
     ProjectInspectionResult Project::InspectMetadata(const std::filesystem::path& path) noexcept
@@ -816,7 +822,8 @@ float4 PSMain(VertexOutput input) : SV_Target0
             }
             const auto root = ResolveRoot(path);
             result.Root = root;
-            if (std::filesystem::is_regular_file(root / "Library" / "ProjectUpgrades" / "Active" / "journal.json"))
+            if (std::filesystem::is_regular_file(root / "Library" / "ProjectUpgrades" / "Active" / "journal.json") ||
+                Detail::HasPendingMaterialMigration(root))
                 result.Status = ProjectStatus::RecoveryRequired;
 
             const auto document = Json::parse(Detail::ReadTextFile(MarkerPath(root), MaximumProjectFileBytes));

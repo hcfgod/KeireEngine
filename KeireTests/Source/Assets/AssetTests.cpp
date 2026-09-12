@@ -2481,3 +2481,20 @@ TEST_CASE("Missing assets become explicit failures while retaining typed default
     CHECK_THROWS_AS((void)missing.Require(), Keire::AssetLoadError);
     assets->Close();
 }
+
+TEST_CASE("indexed source loading rejects missing files without changing the current database")
+{
+    TemporaryAssetProject project;
+    auto importer = Keire::CreateTextAssetImporter();
+    project.Write("Source.cs", "source");
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    const auto index = project.Root / "Library/Assets/Runtime/source-index.json";
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, index);
+    const auto before = database->Records();
+    REQUIRE(before.size() == 1);
+    std::filesystem::remove(project.Root / "Assets/Source.cs");
+    CHECK_THROWS((void)Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*database, index));
+    REQUIRE(database->Records().size() == 1);
+    CHECK(database->Records().front().Id == before.front().Id);
+}

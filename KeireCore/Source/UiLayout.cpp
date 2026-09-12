@@ -233,6 +233,12 @@ namespace Keire
         ImGui::SetCursorScreenPos({position.X, position.Y});
     }
 
+    void UiFrame::ScrollLastItemIntoView()
+    {
+        (void)ContentAvailable();
+        ImGui::SetScrollHereY(0.5F);
+    }
+
     void UiFrame::SetCursorShape(const UiCursorShape shape)
     {
         (void)ContentAvailable();

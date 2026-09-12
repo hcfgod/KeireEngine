@@ -849,6 +849,11 @@ namespace Keire
             job->CancellationRequested.store(true, std::memory_order_release);
             job->StopSource.request_stop();
         }
+        // Request every stop before joining: sequential stop/join otherwise waits one sleep interval per worker.
+        for (auto& worker : state->Workers)
+            worker->Thread.request_stop();
+        for (auto& worker : state->BlockingWorkers)
+            worker.request_stop();
         state->Wake.notify_all();
         const auto currentThread = std::this_thread::get_id();
         const bool workerInitiated = std::ranges::any_of(state->Workers, [&](const auto& worker)
@@ -857,7 +862,6 @@ namespace Keire
                                                          { return worker.get_id() == currentThread; });
         for (auto& worker : state->Workers)
         {
-            worker->Thread.request_stop();
             if (worker->Thread.joinable())
             {
                 if (workerInitiated)
@@ -868,7 +872,6 @@ namespace Keire
         }
         for (auto& worker : state->BlockingWorkers)
         {
-            worker.request_stop();
             if (worker.joinable())
             {
                 if (workerInitiated)

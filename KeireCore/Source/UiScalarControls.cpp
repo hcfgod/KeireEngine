@@ -15,6 +15,24 @@
 
 namespace Keire
 {
+    bool UiFrame::ColorEditHdr(std::string_view label, UiColor& color)
+    {
+        RequireActive("ColorEditHdr");
+        if (!std::isfinite(color.Red) || !std::isfinite(color.Green) || !std::isfinite(color.Blue) ||
+            !std::isfinite(color.Alpha))
+            throw std::invalid_argument("HDR color components must be finite.");
+        const std::string safeLabel(label);
+        float values[]{color.Red, color.Green, color.Blue, color.Alpha};
+        const bool changed =
+            ImGui::ColorEdit4(safeLabel.c_str(), values,
+                              ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+        if (std::ranges::any_of(values, [](float value) { return !std::isfinite(value); }))
+            throw std::invalid_argument("HDR color components must remain finite.");
+        if (changed)
+            color = {values[0], values[1], values[2], values[3]};
+        return changed;
+    }
+
     namespace
     {
         int UpdateCodeEditorState(ImGuiInputTextCallbackData* data)

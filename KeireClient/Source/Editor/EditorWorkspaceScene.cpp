@@ -24,6 +24,7 @@
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
+#include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 #include "KeireClient/Editor/ViewportInputRouting.h"
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
@@ -464,7 +465,9 @@ void EditorWorkspaceLayer::ExecutePendingSceneAction()
 {
     const auto [action, asset] = m_DocumentCoordinator->TakePendingTransition();
     m_Dialog = Dialog::None;
-    if (action == DocumentAction::Exit && m_ShaderGraphDocument && m_ShaderGraphDocument->Dirty())
+    if (action == DocumentAction::Exit && m_ShaderGraphDocument &&
+        (m_ShaderGraphDocument->Dirty() || m_ShaderGraphPanel->HasPendingNodeProperties() ||
+         m_ShaderGraphPanel->SavePending()))
     {
         m_DocumentCoordinator->SetPendingTransition(DocumentAction::Exit);
         OpenDialog(Dialog::DirtyShaderGraph);
@@ -493,7 +496,8 @@ void EditorWorkspaceLayer::RequestEditorExit()
         OpenDialog(Dialog::DirtyScene);
         return;
     }
-    if (m_ShaderGraphDocument && m_ShaderGraphDocument->Dirty())
+    if (m_ShaderGraphDocument && (m_ShaderGraphDocument->Dirty() || m_ShaderGraphPanel->HasPendingNodeProperties() ||
+                                  m_ShaderGraphPanel->SavePending()))
     {
         OpenDialog(Dialog::DirtyShaderGraph);
         return;
@@ -1071,9 +1075,13 @@ void EditorWorkspaceLayer::RevealSceneViewportScenes()
 }
 
 void EditorWorkspaceLayer::RouteSceneViewportAsset(const Keire::AssetTypeId type, const Keire::AssetId asset,
-                                                   const Keire::EntityId target)
+                                                   const Keire::EntityId target, Keire::UiPosition position)
 {
-    m_ViewportAssetDropRouter->Route(type, asset, target, *this);
+    Keire::Vector3 worldPosition{};
+    if (type == Keire::PrefabAsset::StaticType() || type == Keire::MeshAsset::StaticType())
+        worldPosition = KeireEditor::ResolveSceneDropPosition(m_SceneViewportPanel->ViewportRect(), position,
+                                                              m_SceneViewportPanel->LastCamera());
+    m_ViewportAssetDropRouter->Route(type, asset, target, worldPosition, *this);
 }
 
 void EditorWorkspaceLayer::RecordSceneViewportUndo(const std::string_view name) { RecordSceneUndo(name); }
@@ -1103,7 +1111,7 @@ void EditorWorkspaceLayer::OpenDroppedInputActions(const Keire::AssetId asset)
     m_InputActionsPanel->Registration().SetVisible(true);
 }
 
-void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset)
+void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset, Keire::Vector3 position)
 {
     const auto scene = ActiveScene();
     if (!scene || !m_AssetDatabase || !Owner().GetProject())
@@ -1120,7 +1128,8 @@ void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset)
         });
     RecordSceneUndo("Instantiate Prefab");
     auto replacement = scene->Snapshot();
-    const auto instance = KeireEditor::InstantiatePrefab(replacement, asset, composed);
+
+    const auto instance = KeireEditor::InstantiatePrefab(replacement, asset, composed, {}, position);
     auto rebuilt = Keire::CreateRef<Keire::Scene>(scene->Asset(), std::move(replacement), scene->Components());
     rebuilt->MarkDirty();
     m_SceneDocument->ReplaceEditingScene(std::move(rebuilt));
@@ -1128,7 +1137,7 @@ void EditorWorkspaceLayer::InstantiateDroppedPrefab(const Keire::AssetId asset)
     m_SceneDocument->SetStatus("Instantiated prefab in the active scene.");
 }
 
-void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset)
+void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset, Keire::Vector3 position)
 {
     const auto scene = ActiveScene();
     if (!scene)
@@ -1140,6 +1149,8 @@ void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset)
     RecordSceneUndo("Create Mesh Entity");
     const auto entity = m_SceneDocument->CreateEntity(record->RelativePath.stem().string(), {},
                                                       Keire::MeshRendererComponent::StaticType());
+    const KeireEditor::SceneDocument::TransformValues transform{.Position = position};
+    m_SceneDocument->SetTransform(entity, transform);
     m_SceneDocument->SetComponentProperty(entity, Keire::MeshRendererComponent::StaticType(), "mesh", asset);
     m_SceneDocument->Select(entity.Value());
     if (m_SceneDocument->PlaySession())

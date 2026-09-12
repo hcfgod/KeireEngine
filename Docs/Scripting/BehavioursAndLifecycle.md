@@ -248,3 +248,23 @@ entity, managed type, script generation, and managed exception text. Other insta
 
 Catch exceptions only when the script can recover or add useful context. Do not hide invariant failures just to keep an
 instance enabled; the quarantine diagnostic is more useful than silently corrupted gameplay state.
+
+## Delayed entity destruction and logging
+
+```csharp
+Destroy(entity, 5f);
+entity.Destroy(5f);
+Debug.Log("Updated TestData ModName:{0}, Description:{1}, Enabled:{2}",
+          testData.ModName, testData.Description, testData.IsEnabled);
+Debug.Log(firstObject, secondObject, thirdObject);
+```
+
+Delays use scaled scene update seconds, so pausing scaled time pauses the countdown. Destruction remains scheduled
+when the calling Behaviour is disabled or destroyed. Zero uses the existing immediate/deferred destruction behavior;
+negative, NaN, and infinite delays throw `ArgumentOutOfRangeException`. Repeated requests retain the earliest expiry,
+and stopping play clears pending requests. The overload applies to entities.
+
+`Log`, `Warn`/`LogWarning`, and `Error`/`LogError` accept composite format strings and multiple objects. Each call emits
+one record. Values use their `ToString()` representation; numeric composite formatting uses invariant culture.
+Single strings retain literal braces. Pass format values with commas, as above: concatenating a value with `+` does
+not supply an argument for `{0}`. Malformed composite formats report `FormatException`.

@@ -140,6 +140,8 @@ namespace Keire
                     metadata["maximum"] = *node.ParameterMetadata.Maximum;
                 if (node.ParameterMetadata.Step)
                     metadata["step"] = *node.ParameterMetadata.Step;
+                if (node.ParameterMetadata.HighDynamicRange)
+                    metadata["hdr"] = true;
                 nodes.push_back(
                     {{"id", node.Id.ToString()},
                      {"typeId", node.TypeId.empty() ? ShaderGraphNodeTypeId(node.Kind) : node.TypeId},
@@ -293,6 +295,7 @@ namespace Keire
                 {
                     node.ParameterMetadata.Description = metadata->value("description", std::string{});
                     node.ParameterMetadata.Category = metadata->value("category", std::string{});
+                    node.ParameterMetadata.HighDynamicRange = metadata->value("hdr", false);
                     node.ParameterMetadata.SortPriority = metadata->value("sortPriority", 0);
                     if (metadata->contains("minimum"))
                         node.ParameterMetadata.Minimum = metadata->at("minimum").get<float>();

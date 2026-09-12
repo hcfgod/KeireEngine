@@ -1,11 +1,13 @@
 #pragma once
 
 #include "Keire/Assets/RenderingAssets.h"
+#include "Keire/Rendering/ShaderGraph.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
@@ -27,6 +29,16 @@ namespace KeireEditor
         using ShaderReferenceResolver =
             std::function<std::optional<ResolvedShader>(const Keire::MaterialShaderReference&)>;
 
+        [[nodiscard]] static bool IsPropertySource(std::span<const std::byte> source);
+
+        /// Resolves an authored shader reference before publishing a saved or undo revision.
+        /// An unavailable referenced shader leaves the last-good runtime revision active.
+        [[nodiscard]] static std::optional<Keire::MaterialAssetDefinition> ResolveRuntimeRevision(
+            std::span<const std::byte> source,
+            const std::function<Keire::AssetId(const Keire::MaterialShaderReference&)>& resolveShader);
+        [[nodiscard]] static std::optional<Keire::MaterialAssetDefinition>
+        ResolveRuntimeRevision(std::span<const std::byte> source, const ShaderReferenceResolver& resolveShader);
+
         struct CatalogRefresh final
         {
             Keire::AssetId Asset;
@@ -42,11 +54,37 @@ namespace KeireEditor
         [[nodiscard]] bool SetShader(Keire::AssetId shader, const ShaderResolver& resolveShader);
         [[nodiscard]] bool SetShaderReference(Keire::MaterialShaderReference shader,
                                               const ShaderReferenceResolver& resolveShader);
+        [[nodiscard]] bool SetKeyword(const Keire::ShaderGraphKeyword& keyword, std::optional<std::string> value,
+                                      const ShaderReferenceResolver& resolveShader);
+        [[nodiscard]] bool ResetKeywords(const ShaderReferenceResolver& resolveShader);
+        void RequestKeyword(const Keire::ShaderGraphKeyword& keyword, std::optional<std::string> value);
+        void RequestKeywordReset();
+        [[nodiscard]] bool ApplyPendingKeywords(const ShaderReferenceResolver& resolveShader);
+        void CancelPendingKeywords() noexcept { m_PendingKeywords.reset(); }
+        [[nodiscard]] bool HasPendingKeywords() const noexcept { return m_PendingKeywords.has_value(); }
+        [[nodiscard]] const Keire::MaterialShaderReference& RequestedShaderReference() const noexcept
+        {
+            return m_PendingKeywords ? m_PendingKeywords->After : ShaderReference();
+        }
         [[nodiscard]] bool SetTexture(std::string_view property, Keire::AssetId texture);
         [[nodiscard]] bool SetProperty(std::string_view property, Keire::MaterialPropertyValue value);
+        [[nodiscard]] bool ResetProperty(std::string_view property);
+        [[nodiscard]] bool ResetProperties();
+        [[nodiscard]] std::vector<Keire::MaterialPropertyOverride> CopyProperties() const;
+        /// Pastes matching stable identities (or legacy names), skipping incompatible values.
+        [[nodiscard]] std::size_t PasteProperties(std::span<const Keire::MaterialPropertyOverride> properties);
+        /// Explicit cross-shader paste using current code symbols, retaining destination identities.
+        [[nodiscard]] std::size_t PastePropertiesByName(std::span<const Keire::MaterialPropertyOverride> properties);
+        [[nodiscard]] bool RemoveInactiveProperties();
+        [[nodiscard]] const std::multimap<std::string, Keire::MaterialPropertyValue, std::less<>>&
+        InactiveProperties() const noexcept
+        {
+            return m_InactiveProperties;
+        }
         [[nodiscard]] bool SetSurface(Keire::MaterialSurfaceState surface);
 
         [[nodiscard]] Keire::AssetId Shader() const noexcept { return m_AuthoringDefinition.Shader.Asset; }
+        [[nodiscard]] bool HasResolvedShader() const noexcept { return m_ShaderDefinition.has_value(); }
         [[nodiscard]] const Keire::MaterialShaderReference& ShaderReference() const noexcept
         {
             return m_AuthoringDefinition.Shader;
@@ -79,15 +117,24 @@ namespace KeireEditor
         [[nodiscard]] bool Dirty() const noexcept { return m_Dirty; }
 
       private:
+        struct PendingKeywords
+        {
+            Keire::MaterialShaderReference Before;
+            Keire::MaterialShaderReference After;
+        };
         [[nodiscard]] static ShaderReferenceResolver AdaptShaderResolver(const ShaderResolver& resolveShader);
         void OpenDefinition(Keire::MaterialAuthoringDefinition definition,
                             const ShaderReferenceResolver& resolveShader);
         void SetResolvedShader(std::optional<Keire::ShaderAssetDefinition> definition);
+        void ApplyPropertyResolution(Keire::MaterialPropertyResolution resolution);
 
         Keire::MaterialAuthoringDefinition m_AuthoringDefinition;
+        std::optional<PendingKeywords> m_PendingKeywords;
         Keire::MaterialAssetDefinition m_Definition;
         std::optional<Keire::ShaderAssetDefinition> m_ShaderDefinition;
         std::vector<Keire::ShaderPropertyDefinition> m_TextureProperties;
+        std::multimap<std::string, Keire::MaterialPropertyValue, std::less<>> m_InactiveProperties;
+        std::vector<std::size_t> m_InactiveOverrideIndices;
         std::string m_LastChangedProperty;
         Keire::AssetId m_Asset;
         std::filesystem::path m_SourcePath;

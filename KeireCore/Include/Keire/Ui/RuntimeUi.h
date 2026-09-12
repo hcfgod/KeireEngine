@@ -556,6 +556,7 @@ namespace Keire
         std::vector<RuntimeUiPreparedTextLine> PreparedTextLines;
         float PreparedTextWidth = 0.0F;
         float PreparedTextHeight = 0.0F;
+        AssetId Material;
     };
 
     struct RuntimeUiStatistics

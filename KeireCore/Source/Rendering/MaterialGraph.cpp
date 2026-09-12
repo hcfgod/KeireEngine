@@ -2,6 +2,8 @@
 
 #include "Keire/Rendering/ShaderGraph.h"
 #include "KeireInternal/Authoring/GraphAuthoringSerialization.h"
+#include "KeireInternal/Rendering/MaterialAuthoringCompatibility.h"
+#include "KeireInternal/Rendering/MaterialPropertyReflection.h"
 
 #include <nlohmann/json.hpp>
 
@@ -449,6 +451,12 @@ namespace Keire
             Json properties = Json::array();
             for (const auto& [name, value] : definition.Properties)
                 properties.push_back({{"name", name}, {"type", value.index()}, {"value", EncodeValue(value)}});
+            Json overrides = Json::array();
+            for (const auto& property : definition.PropertyOverrides)
+                overrides.push_back({{"id", property.Property.ToString()},
+                                     {"name", property.Name},
+                                     {"type", property.Value.index()},
+                                     {"value", EncodeValue(property.Value)}});
             Json surface = nullptr;
             if (definition.Surface)
                 surface = {{"alphaMode", static_cast<std::uint8_t>(definition.Surface->AlphaMode)},
@@ -462,6 +470,7 @@ namespace Keire
                     {"emissiveGIIntensity",
                      definition.EmissiveGIIntensity ? Json(*definition.EmissiveGIIntensity) : Json(nullptr)},
                     {"properties", std::move(properties)},
+                    {"propertyOverrides", std::move(overrides)},
                     {"keywords", definition.KeywordOverrides}};
         }
 
@@ -471,7 +480,7 @@ namespace Keire
                 throw std::invalid_argument("Material Instance source must be an object.");
             MaterialInstanceDefinition result;
             const auto sourceSchema = source.value("schemaVersion", 0U);
-            if (sourceSchema != 1 && sourceSchema != MaterialInstanceSourceSchemaVersion)
+            if (sourceSchema < 1 || sourceSchema > MaterialInstanceSourceSchemaVersion)
                 throw std::invalid_argument("Material Instance source schema is unsupported.");
             result.SchemaVersion = MaterialInstanceSourceSchemaVersion;
             result.Parent =
@@ -505,6 +514,13 @@ namespace Keire
             }
             if (sourceSchema >= 2)
                 result.KeywordOverrides = source.value("keywords", std::map<std::string, std::string, std::less<>>{});
+            const auto overrides = source.value("propertyOverrides", Json::array());
+            if (!overrides.is_array() || overrides.size() > MaximumMaterialProperties)
+                throw std::invalid_argument("Material Instance stable overrides exceed their bound.");
+            for (const auto& property : overrides)
+                result.PropertyOverrides.push_back(
+                    {AssetId::Parse(property.at("id").get<std::string>()), property.at("name").get<std::string>(),
+                     DecodeValue(property.at("value"), property.at("type").get<std::size_t>())});
             ValidateMaterialInstance(result);
             return result;
         }
@@ -914,7 +930,10 @@ namespace Keire
     {
         if (bytes.size() > MaximumMaterialGraphBytes)
             throw std::invalid_argument("Material Graph source exceeds its byte limit.");
-        return DecodeDefinition(Json::parse(Text(bytes)));
+        const auto source = Json::parse(Text(bytes));
+        if (source.value("kind", std::string{}) == "material")
+            return Detail::MaterialGraphFromAuthoring(MaterialAsset::DecodeAuthoringSource(bytes));
+        return DecodeDefinition(source);
     }
 
     std::vector<std::byte> MaterialGraphAsset::EncodeSource(const MaterialGraphDefinition& definition)
@@ -1120,36 +1139,12 @@ namespace Keire
         return result;
     }
 
-    void ValidateMaterialInstance(const MaterialInstanceDefinition& definition)
-    {
-        if (definition.SchemaVersion != MaterialInstanceSourceSchemaVersion || !definition.Parent ||
-            definition.Properties.size() > MaximumMaterialProperties)
-            throw std::invalid_argument("Material Instance definition is invalid or exceeds a portable bound.");
-        if (definition.Surface && (definition.Surface->AlphaMode > MaterialAlphaMode::AlphaHoldout ||
-                                   !std::isfinite(definition.Surface->AlphaCutoff) ||
-                                   definition.Surface->AlphaCutoff < 0.0F || definition.Surface->AlphaCutoff > 1.0F))
-            throw std::invalid_argument("Material Instance surface override is invalid.");
-        if (definition.EmissiveGIIntensity &&
-            (!std::isfinite(*definition.EmissiveGIIntensity) || *definition.EmissiveGIIntensity < 0.0F ||
-             *definition.EmissiveGIIntensity > 100'000.0F))
-            throw std::invalid_argument("Material Instance emissive intensity override is invalid.");
-        for (const auto& [name, value] : definition.Properties)
-        {
-            if (!ValidIdentifier(name))
-                throw std::invalid_argument("Material Instance property names must be valid shader identifiers.");
-            ValidateFiniteValue(value);
-        }
-        if (definition.KeywordOverrides.size() > 16)
-            throw std::invalid_argument("Material Instance static parameter overrides exceed their portable bound.");
-        for (const auto& [name, value] : definition.KeywordOverrides)
-            if (!ValidIdentifier(name) || (value != "true" && value != "false" && !ValidIdentifier(value)))
-                throw std::invalid_argument("Material Instance static parameter override is invalid.");
-    }
-
     MaterialAssetDefinition BakeMaterialInstance(const MaterialAssetDefinition& parent,
                                                  const MaterialInstanceDefinition& instance)
     {
         ValidateMaterialInstance(instance);
+        if (!instance.PropertyOverrides.empty())
+            throw std::invalid_argument("Stable Material Instance overrides require shader reflection.");
         if (!parent.Shader)
             throw std::invalid_argument("Material Instance parent has no resolved shader.");
         auto result = parent;
@@ -1176,7 +1171,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Material";
-        result.Version = ShaderGraphGeneratedShaderVersion + 1; // Includes material composition fixes.
+        result.Version = ShaderGraphGeneratedShaderVersion + 4; // Property descriptions and HDR editor reflection.
         result.Type = MaterialGraphAsset::StaticType();
         result.Extensions = {std::string(MaterialAssetSourceExtension)};
         result.PreviousNames = {"Keire.MaterialGraph"};
@@ -1184,6 +1179,10 @@ namespace Keire
         {
             if (!context.Asset || !context.ResolveSubAssetId)
                 throw std::invalid_argument("Material Graph import requires a stable asset and subasset resolver.");
+            if (bytes.size() > MaximumMaterialGraphBytes)
+                throw std::invalid_argument("Material source exceeds its byte limit.");
+            if (Json::parse(Text(bytes)).value("kind", std::string{}) == "material")
+                return Detail::ImportPropertyMaterial(context, bytes);
             const auto definition = MaterialGraphAsset::DecodeSource(bytes);
             if (!definition.Shader.Asset)
             {
@@ -1316,7 +1315,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.MaterialInstance";
-        result.Version = 3;
+        result.Version = 5;
         result.Type = MaterialInstanceAsset::StaticType();
         result.Extensions = {std::string(MaterialInstanceAssetSourceExtension)};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)
@@ -1340,6 +1339,7 @@ namespace Keire
             std::string instanceVariantTarget = "default";
             std::map<std::string, std::string, std::less<>> instanceVariantDefaults;
             AssetId parent = definition.Parent;
+            std::optional<ShaderAssetDefinition> propertyReflection;
             for (std::size_t depth = 0; depth < MaximumMaterialInstanceDepth && parent; ++depth)
             {
                 if (!visited.insert(parent).second)
@@ -1358,14 +1358,37 @@ namespace Keire
                     continue;
                 }
 
-                const auto resolveShader = [&](const MaterialShaderReference& shader)
+                const auto resolveShader = [&](MaterialShaderReference shader)
                 {
                     if (shader.Kind != MaterialShaderSourceKind::ShaderGraph)
                         return shader.Asset;
+                    for (auto instance = ancestry.rbegin(); instance != ancestry.rend(); ++instance)
+                        for (const auto& [name, value] : instance->KeywordOverrides)
+                            shader.Keywords.insert_or_assign(name, value);
                     const auto variant = ResolveShaderGraphVariant(context, shader);
                     return context.ResolveSubAssetIdFor(
                         variant.Owner, MakeShaderGraphVariantSubAssetKey(shader.Target, variant.Keywords));
                 };
+                if (source->Type == MaterialAsset::StaticType() ||
+                    (source->Type == MaterialGraphAsset::StaticType() &&
+                     Json::parse(Text(parentBytes)).value("kind", std::string{}) == "material"))
+                {
+                    auto authoring = MaterialAsset::DecodeAuthoringSource(parentBytes);
+                    if (authoring.Shader.Kind == MaterialShaderSourceKind::ShaderGraph)
+                        for (auto instance = ancestry.rbegin(); instance != ancestry.rend(); ++instance)
+                            for (const auto& [name, value] : instance->KeywordOverrides)
+                                authoring.Shader.Keywords.insert_or_assign(name, value);
+                    const auto imported = CreateMaterialAssetImporter().ContextualImport(
+                        context, MaterialAsset::EncodeAuthoringSource(authoring));
+                    material = MaterialAsset::Decode(imported.Bytes)->Definition();
+                    if (const auto shaderSource = context.ResolveAssetSource(authoring.Shader.Asset);
+                        shaderSource && (shaderSource->Type == ShaderAsset::StaticType() ||
+                                         shaderSource->Type == ShaderGraphAsset::StaticType()))
+                        propertyReflection = Detail::ReadMaterialPropertyReflection(context, authoring.Shader);
+                    output.AssetDependencies.insert(output.AssetDependencies.end(), imported.AssetDependencies.begin(),
+                                                    imported.AssetDependencies.end());
+                    break;
+                }
                 if (source->Type == MaterialGraphAsset::StaticType())
                 {
                     const auto graph = MaterialGraphAsset::DecodeSource(parentBytes);
@@ -1415,18 +1438,6 @@ namespace Keire
                         output.AssetDependencies.push_back(graph.Shader.Asset);
                     break;
                 }
-                if (source->Type == MaterialAsset::StaticType())
-                {
-                    const auto authoring = MaterialAsset::DecodeAuthoringSource(parentBytes);
-                    material.Shader = resolveShader(authoring.Shader);
-                    material.Surface = authoring.Surface;
-                    material.ContributeEmissionToGI = authoring.ContributeEmissionToGI;
-                    material.EmissiveGIIntensity = authoring.EmissiveGIIntensity;
-                    material.Properties = authoring.Properties;
-                    if (authoring.Shader.Asset)
-                        output.AssetDependencies.push_back(authoring.Shader.Asset);
-                    break;
-                }
                 throw std::invalid_argument(
                     "Material Instance parent must be a Material, Material Graph, or another Material Instance.");
             }
@@ -1436,7 +1447,8 @@ namespace Keire
 
             std::ranges::reverse(ancestry);
             for (const auto& instance : ancestry)
-                material = BakeMaterialInstance(material, instance);
+                material = propertyReflection ? Detail::ResolveMaterialVariant(material, instance, *propertyReflection)
+                                              : BakeMaterialInstance(material, instance);
             if (instanceVariantGraph)
             {
                 ShaderGraphInstanceDefinition selection;

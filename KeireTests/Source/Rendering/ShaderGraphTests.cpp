@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 21);
+    CHECK(importer.Version == 23);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -174,7 +174,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 11);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 12);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -192,7 +192,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 11, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 12, source schema 6") != std::string::npos);
     REQUIRE(manifest.at("passes").size() == 3U);
     CHECK(manifest.at("passes")[0].at("role") == "depthVelocity");
     CHECK(manifest.at("passes")[1].at("role") == "deferredGBufferStandard");
@@ -458,10 +458,44 @@ TEST_CASE("Shader Graph creation templates map to deliberate output domains")
     CHECK(compute.Target.Target == Keire::ShaderGraphTarget::Compute);
     CHECK(compute.Target.Stages == Keire::ShaderGraphShaderStage::Compute);
     const auto computeCompilation = Keire::CompileShaderGraph(compute);
-    CHECK_FALSE(computeCompilation.Succeeded());
-    REQUIRE_FALSE(computeCompilation.Diagnostics.empty());
-    CHECK(computeCompilation.Diagnostics.front().Message ==
-          "Compute Shader Graph code generation requires the compute-program artifact ABI.");
+    REQUIRE(computeCompilation.Succeeded());
+    CHECK(computeCompilation.Variants.front().Hlsl.find("void CSMain") != std::string::npos);
+}
+
+TEST_CASE("compute graph arithmetic lowers through typed connected nodes")
+{
+    auto graph = Keire::CreateTargetShaderGraph(Keire::ShaderGraphTarget::Compute);
+    auto constant = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant);
+    constant.Value = 0.25F;
+    auto add = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Add);
+    Pin(add, "B").DefaultValue = 0.5F;
+    Connect(graph, constant, "Value", add, "A");
+    Connect(graph, add, "Result", graph.Nodes.front(), "Color");
+    graph.Nodes.push_back(constant);
+    graph.Nodes.push_back(add);
+    const auto compilation = Keire::CompileShaderGraph(graph);
+    REQUIRE(compilation.Succeeded());
+    const auto& hlsl = compilation.Variants.front().Hlsl;
+    CHECK(hlsl.find("0.25") != std::string::npos);
+    CHECK(hlsl.find("0.5") != std::string::npos);
+    CHECK(hlsl.find(" + ") != std::string::npos);
+    CHECK(hlsl.find("KeireComputeOutput[dispatchThreadId.x]") != std::string::npos);
+    CHECK(Keire::ShaderGraphAsset::DecodeSource(Keire::ShaderGraphAsset::EncodeSource(graph)) == graph);
+}
+
+TEST_CASE("compute graph import rejects the graphics asset publication path")
+{
+    const auto graph = Keire::CreateTargetShaderGraph(Keire::ShaderGraphTarget::Compute);
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.ProjectRoot = std::filesystem::current_path();
+    context.SourceRoot = context.ProjectRoot / "Assets";
+    context.ReadProjectFile = [](const std::filesystem::path&) { return std::vector<std::byte>{}; };
+    context.ResolveSubAssetId = [](std::string_view) { return Keire::AssetId::Generate(); };
+    CHECK_THROWS_WITH_AS(
+        Keire::CreateShaderGraphAssetImporter().ContextualImport(context, Keire::ShaderGraphAsset::EncodeSource(graph)),
+        "Compute graph import requires a cooked ProgramArtifact; graphics ShaderAsset import is unsupported.",
+        std::invalid_argument);
 }
 
 TEST_CASE("Shader Graph generated HLSL compiles through the production shader importer")
@@ -524,7 +558,7 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     context.ReadProjectFile = [root = directory.Path](const std::filesystem::path& relative)
     { return ReadBytes(root / relative); };
     const auto importer = Keire::CreateShaderAssetImporter();
-    CHECK(importer.Version == 8);
+    CHECK(importer.Version == 9);
     REQUIRE(importer.ContextualImport);
     const auto imported = importer.ContextualImport(context, ReadBytes(manifest));
     const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);

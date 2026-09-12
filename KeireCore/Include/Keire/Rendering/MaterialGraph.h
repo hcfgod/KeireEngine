@@ -17,7 +17,7 @@
 namespace Keire
 {
     inline constexpr std::uint32_t MaterialGraphSourceSchemaVersion = 7;
-    inline constexpr std::uint32_t MaterialInstanceSourceSchemaVersion = 2;
+    inline constexpr std::uint32_t MaterialInstanceSourceSchemaVersion = 3;
     inline constexpr std::string_view MaterialAssetSourceExtension = ".keirematerial";
     inline constexpr std::string_view MaterialInstanceAssetSourceExtension = ".keirematerialinstance";
 
@@ -142,6 +142,7 @@ namespace Keire
         std::optional<MaterialSurfaceState> Surface;
         std::optional<bool> ContributeEmissionToGI;
         std::optional<float> EmissiveGIIntensity;
+        std::vector<MaterialPropertyOverride> PropertyOverrides;
 
         bool operator==(const MaterialInstanceDefinition&) const = default;
     };

@@ -661,6 +661,8 @@ namespace Keire
                 if (!ValidIdentifier(node.Symbol) || !properties.insert(node.Symbol).second)
                     throw std::invalid_argument("Shader Graph parameter symbols must be unique identifiers.");
                 const auto& metadata = node.ParameterMetadata;
+                if (metadata.HighDynamicRange && node.ValueType != ShaderGraphValueType::Color)
+                    throw std::invalid_argument("HDR parameter metadata requires a color property.");
                 const auto validOptional = [](const std::optional<float>& value)
                 { return !value || std::isfinite(*value); };
                 if (metadata.Description.size() > MaximumGraphText * 4U ||

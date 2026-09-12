@@ -149,3 +149,26 @@ TEST_CASE("Direct nested prefab source editing rejects ownership flattening")
     source.Template.PrefabInstances.push_back({nested, root, {{root, root}}, {}});
     CHECK_THROWS_AS((void)KeireEditor::UpdatePrefabFromEditingScene(source, source.Template), std::invalid_argument);
 }
+
+TEST_CASE("prefab placement includes origin persists as an override and preserves root spacing")
+{
+    const auto root = Keire::AssetId::Generate();
+    const auto other = Keire::AssetId::Generate();
+    const auto child = Keire::AssetId::Generate();
+    auto composed = Keire::SceneAsset::EmptyDefinition("Prefab");
+    composed.Objects = {Object(root, "Root"), Object(other, "Other"), Object(child, "Child", root)};
+    composed.Objects[0].Transform.Position = {12.0F, 4.0F, 8.0F};
+    composed.Objects[1].Transform.Position = {15.0F, 4.0F, 8.0F};
+    composed.Objects[2].Transform.Position = {1.0F, 2.0F, 3.0F};
+    auto scene = Keire::SceneAsset::EmptyDefinition("Scene");
+    const auto instance =
+        KeireEditor::InstantiatePrefab(scene, Keire::AssetId::Generate(), composed, {}, Keire::Vector3{});
+    CHECK(scene.Objects[0].Transform.Position == Keire::Vector3{});
+    CHECK(scene.Objects[1].Transform.Position == Keire::Vector3{3.0F, 0.0F, 0.0F});
+    CHECK(scene.Objects[2].Transform.Position == Keire::Vector3{1.0F, 2.0F, 3.0F});
+    REQUIRE(instance.Overrides.size() == 2);
+    CHECK(instance.Overrides.front().Kind == Keire::PrefabOverrideKind::SetObjectTransform);
+    CHECK(instance.Overrides.front().Transform.Position == Keire::Vector3{});
+    const auto decoded = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(scene));
+    CHECK(decoded->Definition().PrefabInstances.front().Overrides.size() == 2);
+}

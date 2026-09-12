@@ -92,6 +92,21 @@ namespace Keire
             result.ThreadGroupSizeZ = definition.Target.ThreadGroupSizeZ;
             AddEntryPoints(result, stages);
 
+            if (definition.Target.Target == ShaderGraphTarget::Compute)
+            {
+                result.Resources.push_back({{},
+                                            "Compute Output",
+                                            "KeireComputeOutput",
+                                            ProgramResourceKind::StorageBuffer,
+                                            ProgramResourceAccess::ReadWrite,
+                                            ProgramStage::Compute,
+                                            1,
+                                            0,
+                                            1,
+                                            16});
+                return result;
+            }
+
             std::uint32_t binding = 0;
             for (const auto& property : result.Properties)
             {
@@ -413,6 +428,32 @@ namespace Keire
             (compute && (HasProgramStage(artifact.Stages, ProgramStage::Vertex) ||
                          HasProgramStage(artifact.Stages, ProgramStage::Fragment))))
             throw std::invalid_argument("Program artifact target and stage contract are incompatible.");
+        if (compute)
+        {
+            const auto& reflection = artifact.Reflection;
+            if (artifact.Stages != ProgramStage::Compute || reflection.EntryPoints.size() != 1 ||
+                reflection.EntryPoints.front().Stage != ProgramStage::Compute ||
+                reflection.EntryPoints.front().Name.empty() || reflection.ThreadGroupSizeX == 0 ||
+                reflection.ThreadGroupSizeX > 1024 || reflection.ThreadGroupSizeY == 0 ||
+                reflection.ThreadGroupSizeY > 1024 || reflection.ThreadGroupSizeZ == 0 ||
+                reflection.ThreadGroupSizeZ > 64 ||
+                static_cast<std::uint64_t>(reflection.ThreadGroupSizeX) * reflection.ThreadGroupSizeY *
+                        reflection.ThreadGroupSizeZ >
+                    1024)
+                throw std::invalid_argument("Compute reflection requires one kernel and a valid thread group.");
+            for (const auto& resource : reflection.Resources)
+            {
+                const bool storage = resource.Kind == ProgramResourceKind::StorageBuffer ||
+                                     resource.Kind == ProgramResourceKind::StorageTexture;
+                if (resource.Stages != ProgramStage::Compute || resource.Kind > ProgramResourceKind::StorageBuffer ||
+                    resource.Access > ProgramResourceAccess::ReadWrite ||
+                    (!storage && resource.Access != ProgramResourceAccess::ReadOnly) ||
+                    ((resource.Kind == ProgramResourceKind::StructuredBuffer ||
+                      resource.Kind == ProgramResourceKind::StorageBuffer) &&
+                     (resource.StrideBytes == 0 || resource.StrideBytes % 4 != 0)))
+                    throw std::invalid_argument("Compute reflection contains an incompatible resource contract.");
+            }
+        }
 
         std::set<std::string, std::less<>> suffixes;
         for (const auto& variant : artifact.Variants)
@@ -425,6 +466,8 @@ namespace Keire
             for (const auto& binary : variant.Binaries)
             {
                 ValidateStageBinary(binary);
+                if (compute && binary.Reflection != artifact.Reflection)
+                    throw std::invalid_argument("Compute binary reflection does not match the program contract.");
                 if (!HasProgramStage(artifact.Stages, binary.Stage) ||
                     !binaries.emplace(binary.PassRole, binary.Backend, binary.Stage).second)
                 {

@@ -22,6 +22,7 @@ namespace KeireEditor
     }
     Keire::Ref<Keire::UndoContext> AssetBrowserPanel::UndoContext() const { return m_Impl->Undo; }
     bool AssetBrowserPanel::Focused() const noexcept { return m_Impl->Focused; }
+    std::span<const Keire::AssetId> AssetBrowserPanel::SelectedAssets() const noexcept { return m_Impl->Selection; }
     std::filesystem::path AssetBrowserPanel::CurrentFolder() const { return m_Impl->CurrentFolder; }
     std::filesystem::path AssetBrowserPanel::ResolveExternalDropFolder(const Keire::UiPosition position) const
     {

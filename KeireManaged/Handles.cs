@@ -52,6 +52,12 @@ public abstract class EngineObject
         }
     }
 
+    public static void Destroy(Entity entity, float delaySeconds)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        entity.Destroy(delaySeconds);
+    }
+
     public static bool DontDestroyOnLoad(Entity entity)
     {
         ArgumentNullException.ThrowIfNull(entity);
@@ -373,6 +379,15 @@ public sealed class Entity : EngineObject, IEquatable<Entity>
 
     public Entity Instantiate() => NativeRuntime.CloneEntity(this);
     public void Destroy() => NativeRuntime.DestroyEntity(this);
+    public void Destroy(float delaySeconds)
+    {
+        if (!float.IsFinite(delaySeconds) || delaySeconds < 0)
+            throw new ArgumentOutOfRangeException(nameof(delaySeconds));
+        if (delaySeconds == 0)
+            Destroy();
+        else
+            NativeRuntime.DestroyEntity(this, delaySeconds);
+    }
 
     internal Component? GetConcreteComponent(Type type)
     {

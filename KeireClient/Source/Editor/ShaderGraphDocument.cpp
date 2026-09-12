@@ -2,6 +2,8 @@
 
 #include "Keire/Rendering/MaterialEcosystem.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <bit>
 #include <chrono>
@@ -91,6 +93,10 @@ namespace KeireEditor
                                                        const Keire::ShaderGraphDefinition& definition,
                                                        const Keire::ShaderGraphCompilation& compilation)
         {
+            // Generated HLSL contains include paths, not their bytes. Until dependency snapshots are carried with
+            // executable variants, source equality cannot establish that an include-dependent program is current.
+            if (!previous.Dependencies.empty() || !compilation.Dependencies.empty())
+                return false;
             if (previousDefinition.Target != definition.Target || previousDefinition.Output != definition.Output ||
                 previousDefinition.MaximumWorldPositionDisplacementRadius !=
                     definition.MaximumWorldPositionDisplacementRadius ||
@@ -104,6 +110,14 @@ namespace KeireEditor
                 const auto& left = previous.Variants[index];
                 const auto& right = compilation.Variants[index];
                 if (left.Keywords != right.Keywords || left.Hlsl != right.Hlsl)
+                    return false;
+                auto leftManifest = nlohmann::json::parse(left.Manifest);
+                auto rightManifest = nlohmann::json::parse(right.Manifest);
+                // Property defaults and presentation metadata do not change executable programs. Their binding
+                // identities, types, and texture semantics are checked separately below.
+                leftManifest.erase("properties");
+                rightManifest.erase("properties");
+                if (leftManifest != rightManifest)
                     return false;
             }
             for (std::size_t index = 0; index < compilation.Properties.size(); ++index)
@@ -209,7 +223,8 @@ namespace KeireEditor
 
         [[nodiscard]] std::vector<Keire::Ref<Keire::ShaderAsset>>
         CompileDevelopmentShaders(const Keire::ShaderGraphCompilation& compilation,
-                                  const Keire::ShaderGraphCompileOptions& options)
+                                  const Keire::ShaderGraphCompileOptions& options,
+                                  Keire::JobContext* jobContext = nullptr)
         {
             Keire::ShaderImporterSpecification importerSpecification;
 #if defined(_WIN32)
@@ -227,6 +242,8 @@ namespace KeireEditor
             result.reserve(compilation.Variants.size());
             for (const auto& variant : compilation.Variants)
             {
+                if (jobContext && jobContext->StopRequested())
+                    return {};
                 Keire::AssetImportContext context;
                 context.Asset = Keire::AssetId::Generate();
                 context.ProjectRoot = std::filesystem::current_path();
@@ -810,6 +827,8 @@ namespace KeireEditor
             m_CompileDebounceSeconds = LiveCompilationIntervalSeconds;
         if (++m_RequestedGeneration == 0)
             ++m_RequestedGeneration;
+        if (m_BackgroundCompilation)
+            m_BackgroundCompilation.Cancel();
     }
 
     void ShaderGraphDocument::StartPendingCompilation()
@@ -822,6 +841,7 @@ namespace KeireEditor
         auto options = m_Specification.CompileOptions;
         auto previousCompilation = m_LastGoodCompilation;
         auto previousDefinition = m_LastGoodDefinition;
+        const auto previousShaderCount = m_LastGoodDevelopmentShaders.size();
         m_InFlightGeneration = m_RequestedGeneration;
         const auto generation = m_InFlightGeneration;
         m_BackgroundCompilationState = std::make_shared<BackgroundCompilationState>();
@@ -833,19 +853,22 @@ namespace KeireEditor
              .Domain = Keire::JobDomain::Tooling},
             [generation, definition = std::move(definition), options = std::move(options),
              previousCompilation = std::move(previousCompilation), previousDefinition = std::move(previousDefinition),
-             state](Keire::JobContext& context) mutable
+             previousShaderCount, state](Keire::JobContext& context) mutable
             {
                 if (context.StopRequested())
                     return;
                 auto compilation = Keire::CompileShaderGraph(definition, options);
+                if (context.StopRequested())
+                    return;
                 std::vector<Keire::Ref<Keire::ShaderAsset>> developmentShaders;
                 if (compilation.Succeeded() &&
-                    (!previousCompilation || !previousDefinition ||
+                    (previousShaderCount != compilation.Variants.size() || !previousCompilation ||
+                     !previousDefinition ||
                      !HasEquivalentRuntimeShaders(*previousDefinition, *previousCompilation, definition, compilation)))
                 {
                     try
                     {
-                        developmentShaders = CompileDevelopmentShaders(compilation, options);
+                        developmentShaders = CompileDevelopmentShaders(compilation, options, &context);
                     }
                     catch (const std::exception& error)
                     {
@@ -970,8 +993,15 @@ namespace KeireEditor
         m_ReusableValid = false;
         auto compilation = Keire::CompileShaderGraph(definition, m_Specification.CompileOptions);
         std::vector<Keire::Ref<Keire::ShaderAsset>> developmentShaders;
-        if (compileDevelopmentShaders && compilation.Succeeded() &&
+        if (!compileDevelopmentShaders && compilation.Succeeded() &&
             (!m_LastGoodCompilation || !m_LastGoodDefinition ||
+             !HasEquivalentRuntimeShaders(*m_LastGoodDefinition, *m_LastGoodCompilation, definition, compilation)))
+        {
+            m_LastGoodDevelopmentShaders.clear();
+        }
+        if (compileDevelopmentShaders && compilation.Succeeded() &&
+            (m_LastGoodDevelopmentShaders.size() != compilation.Variants.size() || !m_LastGoodCompilation ||
+             !m_LastGoodDefinition ||
              !HasEquivalentRuntimeShaders(*m_LastGoodDefinition, *m_LastGoodCompilation, definition, compilation)))
         {
             try

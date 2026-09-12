@@ -250,6 +250,7 @@ namespace Keire::RenderBackend
         LightProbeVolumeCache.clear();
         MaterialCache.clear();
         ShaderCache.clear();
+        ReleaseRuntimeUiMaterialPipelines(true);
         SamplerCache.clear();
         VfxVolumeCache.clear();
         GpuVfxWorlds.clear();

@@ -922,6 +922,15 @@ void EditorWorkspaceLayer::OnAttach()
                                       m_Theme.Warning, Keire::LogLevel::Warn);
                     return Keire::EventFlow::Continue;
                 });
+            Listen<Keire::QuitEvent>(
+                [this](const auto&)
+                {
+                    if (m_DocumentCoordinator->PendingTransition() ==
+                            KeireEditor::EditorDocumentTransitionAction::None &&
+                        (!m_SceneTransitions || !m_SceneTransitions->Pending()))
+                        RequestEditorExit();
+                    return Keire::EventFlow::Handled;
+                });
             Listen<Keire::WindowCloseRequestedEvent>(
                 [this](const auto& event)
                 {
@@ -1197,12 +1206,13 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
                 ReportError("Material Graph", error.what());
             }
         }
-        else if (m_ShaderGraphDocument->Dirty() && m_ShaderGraphPanel->Registration().Visible() &&
+        else if ((m_ShaderGraphDocument->Dirty() || m_ShaderGraphPanel->HasPendingNodeProperties()) &&
+                 m_ShaderGraphPanel->Registration().Visible() &&
                  m_ActiveUndoContext == m_ShaderGraphDocument->UndoContext())
         {
             try
             {
-                SaveShaderGraph();
+                m_ShaderGraphPanel->RequestSave();
             }
             catch (const std::exception& error)
             {

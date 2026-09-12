@@ -8,10 +8,12 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 namespace
@@ -737,4 +739,68 @@ TEST_CASE("Unregistered scene components survive load edit and save without losi
     CHECK(canonicalPayload.find("\"name\":\"kept\"") != std::string::npos);
     const auto decodedAgain = Keire::SceneAsset::Decode(Keire::SceneAsset::Encode(decoded->Definition()));
     CHECK(decodedAgain->Definition().Objects.front().Components.back().Data == canonicalPayload);
+}
+
+TEST_CASE("delayed entity destruction follows scaled updates and preserves earliest deadlines")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto entity = scene->CreateEntity("Delayed");
+    auto child = scene->CreateEntity("Child", entity);
+    scene->BeginPlay();
+    REQUIRE(entity.Destroy(5.0F));
+    REQUIRE(entity.Destroy(10.0F));
+    scene->Update(0.0F);
+    scene->FixedUpdate(10.0F);
+    CHECK(static_cast<bool>(entity));
+    scene->Update(4.0F);
+    CHECK(static_cast<bool>(entity));
+    scene->Update(1.0F);
+    CHECK_FALSE(static_cast<bool>(entity));
+    CHECK_FALSE(static_cast<bool>(child));
+    CHECK_FALSE(entity.Destroy(1.0F));
+    scene->EndPlay();
+    scene->Close();
+}
+
+TEST_CASE("delayed destruction rejects invalid and worker requests and clears stopped scenes")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto entity = scene->CreateEntity("Survivor");
+    scene->BeginPlay();
+    CHECK_THROWS_AS((void)entity.Destroy(-1.0F), std::invalid_argument);
+    CHECK_THROWS_AS((void)entity.Destroy(std::numeric_limits<float>::quiet_NaN()), std::invalid_argument);
+    CHECK_THROWS_AS((void)entity.Destroy(std::numeric_limits<float>::infinity()), std::invalid_argument);
+    bool rejected = false;
+    std::thread worker(
+        [&]
+        {
+            try
+            {
+                (void)entity.Destroy(1.0F);
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
+        });
+    worker.join();
+    CHECK(rejected);
+    scene->Update(2.0F);
+    CHECK(static_cast<bool>(entity));
+    REQUIRE(entity.Destroy(1.0F));
+    scene->EndPlay();
+    scene->BeginPlay();
+    scene->Update(2.0F);
+    CHECK(static_cast<bool>(entity));
+    REQUIRE(entity.Destroy(3.0F));
+    REQUIRE(entity.Destroy(1.0F));
+    scene->Update(1.0F);
+    CHECK_FALSE(static_cast<bool>(entity));
+    auto immediate = scene->CreateEntity("Immediate");
+    REQUIRE(immediate.Destroy(2.0F));
+    REQUIRE(immediate.Destroy(0.0F));
+    scene->Update(3.0F);
+    CHECK_FALSE(static_cast<bool>(immediate));
+    scene->EndPlay();
+    scene->Close();
 }

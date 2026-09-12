@@ -48,9 +48,12 @@ namespace KeireEditor
     }
 
     AssetOperationService::AssetOperationService(const std::filesystem::path& workerExecutable,
-                                                 const std::filesystem::path& projectRoot)
-        : m_WorkerExecutable(AbsoluteNormalized(workerExecutable)), m_ProjectRoot(AbsoluteNormalized(projectRoot))
+                                                 const std::filesystem::path& projectRoot, Clock clock)
+        : m_WorkerExecutable(AbsoluteNormalized(workerExecutable)), m_ProjectRoot(AbsoluteNormalized(projectRoot)),
+          m_Clock(std::move(clock))
     {
+        if (!m_Clock)
+            throw std::invalid_argument("Asset operation timing requires a monotonic clock.");
         if (!std::filesystem::is_regular_file(m_WorkerExecutable))
             throw std::runtime_error("Kéire asset worker was not found: " +
                                      Keire::Detail::PathToUtf8(m_WorkerExecutable));
@@ -269,6 +272,7 @@ namespace KeireEditor
         operation.Request.ProjectRoot = m_ProjectRoot;
         operation.Request.OperationId = Keire::AssetId::Generate().ToString();
         operation.Sequence = m_NextSequence++;
+        operation.QueuedAt = m_Clock();
         KEIRE_CLIENT_INFO("[Asset Operations] Queued {} operation {} (reason='{}', targets={}).",
                           Keire::Detail::AssetWorkerOperationName(operation.Request.Kind),
                           operation.Request.OperationId, operation.Request.Reason,
@@ -336,6 +340,7 @@ namespace KeireEditor
     {
         if (m_Queue.empty())
             return;
+        const auto startedAt = m_Clock();
         auto pending = std::move(m_Queue.front());
         m_Queue.pop_front();
         const auto directory = m_ProjectRoot / "Library" / "AssetOperations" / pending.Request.OperationId;
@@ -385,13 +390,14 @@ namespace KeireEditor
             "--request", Keire::Detail::PathToUtf8(requestPath), "--progress", Keire::Detail::PathToUtf8(progressPath),
             "--result",  Keire::Detail::PathToUtf8(resultPath),  "--cancel",   Keire::Detail::PathToUtf8(cancelPath)};
         auto process = Keire::Detail::ChildProcess::Start(m_WorkerExecutable, arguments, m_ProjectRoot);
-        m_Running.emplace(
-            RunningOperation{std::move(pending), directory, progressPath, resultPath, cancelPath, std::move(process)});
+        m_Running.emplace(RunningOperation{std::move(pending), directory, progressPath, resultPath, cancelPath,
+                                           std::move(process), startedAt});
         m_Progress = Keire::AssetOperationProgress{.Phase = Keire::AssetOperationPhase::Scanning};
     }
 
     void AssetOperationService::FinishCurrent()
     {
+        const auto completedAt = m_Clock();
         auto running = std::move(*m_Running);
         m_Running.reset();
         AssetOperationCompletion completion;
@@ -399,6 +405,11 @@ namespace KeireEditor
         completion.Context = running.Pending.Context;
         completion.SourceIndexPath = running.Pending.Request.SourceIndexPath;
         completion.WorkerOutput = running.Process.TakeOutput();
+        completion.OperationId = running.Pending.Request.OperationId;
+        completion.QueueMilliseconds =
+            std::chrono::duration<double, std::milli>(running.StartedAt - running.Pending.QueuedAt).count();
+        completion.ExecutionMilliseconds =
+            std::chrono::duration<double, std::milli>(completedAt - running.StartedAt).count();
         const auto exitCode = running.Process.ExitCode().value_or(127);
         try
         {
@@ -465,9 +476,16 @@ namespace KeireEditor
     {
         if (m_Completions.empty())
             return std::nullopt;
-        auto result = std::move(m_Completions.front());
+        const auto& result = m_Completions.front();
+        KEIRE_CLIENT_INFO("[Asset Timing] {} operation {}: queue_ms={:.3f}, execution_ms={:.3f}, status={}",
+                          Keire::Detail::AssetWorkerOperationName(result.Kind), result.OperationId,
+                          result.QueueMilliseconds, result.ExecutionMilliseconds,
+                          result.Result.Cancelled ? "cancelled"
+                          : result.Result.Success ? "succeeded"
+                                                  : "failed");
+        auto completion = std::move(m_Completions.front());
         m_Completions.pop_front();
-        return result;
+        return completion;
     }
 
     std::optional<Keire::AssetOperationProgress> AssetOperationService::Progress() const noexcept { return m_Progress; }

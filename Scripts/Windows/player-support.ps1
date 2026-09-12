@@ -76,7 +76,7 @@ function Copy-TreeIfChanged {
     param([string]$Source, [string]$Destination)
 
     $sourceRoot = (Assert-PlayerSupportDirectory -Path $Source).FullName
-    foreach ($sourceEntry in Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse) {
+    foreach ($sourceEntry in Get-ChildItem -LiteralPath $sourceRoot -Force -Recurse -ErrorAction Stop) {
         if (($sourceEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw "Player Support runtime closure contains a symbolic link: $($sourceEntry.FullName)"
         }
@@ -177,9 +177,9 @@ function Copy-PlayerRuntimeClosure {
     foreach ($relative in $required) {
         Copy-FileIfChanged -Source (Join-Path $sourceRoot $relative) -Destination (Join-Path $Destination $relative)
     }
-    $hostFxr = Get-ChildItem (Join-Path $sourceRoot 'Managed\Dotnet\host\fxr') -Force -Directory |
+    $hostFxr = Get-ChildItem (Join-Path $sourceRoot 'Managed\Dotnet\host\fxr') -Force -Directory -ErrorAction SilentlyContinue |
         Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-    $coreRuntime = Get-ChildItem (Join-Path $sourceRoot 'Managed\Dotnet\shared\Microsoft.NETCore.App') -Force -Directory |
+    $coreRuntime = Get-ChildItem (Join-Path $sourceRoot 'Managed\Dotnet\shared\Microsoft.NETCore.App') -Force -Directory -ErrorAction SilentlyContinue |
         Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
     if (-not $hostFxr -or -not $coreRuntime) {
         throw 'The player runtime closure has no bundled hostfxr or CoreCLR generation.'

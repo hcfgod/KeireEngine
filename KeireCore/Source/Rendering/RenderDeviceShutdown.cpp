@@ -239,6 +239,7 @@ namespace Keire::RenderBackend
                     SDL_ReleaseGPUGraphicsPipeline(Device, pipeline.Handle);
             }
             ShaderCache.clear();
+            ReleaseRuntimeUiMaterialPipelines(false);
             ReleaseTextureResources(CheckerboardTexture);
             ReleaseTextureResources(DefaultSkyTexture);
             ReleaseTextureResources(BrdfIntegrationLut);

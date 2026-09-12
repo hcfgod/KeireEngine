@@ -26,9 +26,18 @@ public abstract class ScriptableObject : Asset
     protected virtual void OnDisable() { }
     protected virtual void OnValidate() { }
 
-    public static T CreateInstance<T>() where T : ScriptableObject, new()
+    public static T CreateInstance<T>() where T : ScriptableObject
     {
-        var value = new T();
+        T value;
+        try
+        {
+            value = (T)Activator.CreateInstance(typeof(T), nonPublic: true)!;
+        }
+        catch (System.Reflection.TargetInvocationException exception) when (exception.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(exception.InnerException).Throw();
+            throw;
+        }
         bool enabled = false;
         try
         {

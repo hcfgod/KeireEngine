@@ -10,6 +10,11 @@
 
 namespace KeireEditor
 {
+    [[nodiscard]] constexpr bool UsesShaderGraphImagePreview(const Keire::ShaderGraphTarget target) noexcept
+    {
+        return target == Keire::ShaderGraphTarget::Ui || target == Keire::ShaderGraphTarget::Fullscreen;
+    }
+
     struct ShaderGraphPreviewTexture
     {
         Keire::AssetId Asset;

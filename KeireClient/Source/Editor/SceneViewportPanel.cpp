@@ -325,14 +325,14 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                     if (record->Type == Keire::SceneAsset::StaticType() ||
                         record->Type == Keire::InputActionAsset::StaticType())
                     {
-                        m_Controller.RouteSceneViewportAsset(record->Type, asset, {});
+                        m_Controller.RouteSceneViewportAsset(record->Type, asset, {}, ui.PointerState().Position);
                         continue;
                     }
                     if (!activeScene || !activeScene->IsOpen())
                         throw std::runtime_error("Create or open a scene before dropping meshes or materials.");
                     const auto hit = KeireEditor::PickSceneEntity(activeScene, imageRect, ui.PointerState().Position,
                                                                   camera, resolveMeshBounds);
-                    m_Controller.RouteSceneViewportAsset(record->Type, asset, hit);
+                    m_Controller.RouteSceneViewportAsset(record->Type, asset, hit, ui.PointerState().Position);
                 }
             }
             catch (const std::exception& error)

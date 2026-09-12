@@ -5,7 +5,8 @@
 namespace KeireEditor
 {
     void ViewportAssetDropRouter::Route(const Keire::AssetTypeId type, const Keire::AssetId asset,
-                                        const Keire::EntityId target, IViewportAssetDropCommands& commands) const
+                                        const Keire::EntityId target, Keire::Vector3 position,
+                                        IViewportAssetDropCommands& commands) const
     {
         if (!asset)
             throw std::invalid_argument("A viewport asset drop requires a valid asset ID.");
@@ -14,9 +15,9 @@ namespace KeireEditor
         else if (type == Keire::InputActionAsset::StaticType())
             commands.OpenDroppedInputActions(asset);
         else if (type == Keire::PrefabAsset::StaticType())
-            commands.InstantiateDroppedPrefab(asset);
+            commands.InstantiateDroppedPrefab(asset, position);
         else if (type == Keire::MeshAsset::StaticType())
-            commands.CreateDroppedMeshEntity(asset);
+            commands.CreateDroppedMeshEntity(asset, position);
         else if (type == Keire::MaterialAsset::StaticType() || type == Keire::MaterialGraphAsset::StaticType() ||
                  type == Keire::MaterialInstanceAsset::StaticType() ||
                  type == Keire::ShaderGraphInstanceAsset::StaticType())

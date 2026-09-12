@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/NamedAssetCreation.h"
+#include "KeireClient/Editor/ShaderGraphPanelLayout.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <doctest/doctest.h>
@@ -11,6 +12,31 @@
 #include <ranges>
 #include <span>
 #include <string>
+
+TEST_CASE("Shader Graph panes fit narrow docks and reserve preview space only when it fits")
+{
+    for (const float width : {1.0F, 120.0F, 228.0F, 319.0F, 619.0F, 620.0F, 1040.0F})
+    {
+        const auto layout = KeireEditor::ResolveShaderGraphPaneLayout(width, true);
+        CHECK(layout.CanvasWidth > 0.0F);
+        CHECK(layout.CanvasWidth + layout.PreviewWidth <= width);
+        if (width < 620.0F)
+        {
+            CHECK(layout.CanvasWidth == width);
+            CHECK(layout.PreviewWidth == 0.0F);
+        }
+        else
+        {
+            CHECK(layout.CanvasWidth >= 320.0F);
+            CHECK(layout.PreviewWidth == 248.0F);
+            CHECK(layout.CanvasWidth + layout.PreviewWidth + 8.0F == width);
+        }
+        const auto hidden = KeireEditor::ResolveShaderGraphPaneLayout(width, false);
+        CHECK(hidden.CanvasWidth == width);
+        CHECK(hidden.PreviewWidth == 0.0F);
+    }
+    CHECK(KeireEditor::ResolveShaderGraphPaneLayout(0.0F, true).CanvasWidth == 1.0F);
+}
 
 TEST_CASE("asset browser displays and searches Unicode filenames as UTF-8")
 {
@@ -26,6 +52,49 @@ TEST_CASE("asset browser displays and searches Unicode filenames as UTF-8")
     CHECK(cache.Records().front() == &records[0]);
     CHECK(cache.Refresh(records, 1, "Scenes", "Missing"));
     CHECK(cache.Records().empty());
+}
+
+TEST_CASE("asset browser reveal makes newly created assets visible through an existing search")
+{
+    std::array<Keire::AssetSourceRecord, 3> records;
+    records[0].RelativePath = "Shaders/FullscreenAcceptance.keireshadergraph";
+    records[1].RelativePath = "Shaders/VfxAcceptance.keireshadergraph";
+    records[2].RelativePath = Keire::Detail::PathFromUtf8("Caf\xc3\xa9/Custom.keireshadergraph");
+    std::filesystem::path folder = "Shaders";
+    std::string search = "Fullscreen";
+    KeireEditor::AssetBrowserRecordViewCache cache;
+    REQUIRE(cache.Refresh(records, 1, folder, search));
+    REQUIRE(cache.Records().size() == 1);
+    REQUIRE(cache.Records().front() == &records[0]);
+
+    KeireEditor::PrepareAssetBrowserReveal(records[1], folder, search);
+    REQUIRE(cache.Refresh(records, 1, folder, search));
+    CHECK(std::ranges::find(cache.Records(), &records[1]) != cache.Records().end());
+    CHECK(folder == "Shaders");
+    CHECK(search.empty());
+
+    search = "Missing";
+    KeireEditor::PrepareAssetBrowserReveal(records[2], folder, search);
+    REQUIRE(cache.Refresh(records, 1, folder, search));
+    REQUIRE(cache.Records().size() == 1);
+    CHECK(cache.Records().front() == &records[2]);
+    KeireEditor::PrepareAssetBrowserReveal(records[2], folder, search);
+    CHECK_FALSE(cache.Refresh(records, 1, folder, search));
+}
+
+TEST_CASE("asset browser reveal waits for its widget and requests scrolling only once")
+{
+    const auto target = Keire::AssetId::Generate();
+    auto pending = target;
+    for (int index = 0; index < 100; ++index)
+        CHECK_FALSE(KeireEditor::ConsumeAssetBrowserReveal(pending, Keire::AssetId::Generate()));
+    CHECK(pending == target);
+    CHECK(KeireEditor::ConsumeAssetBrowserReveal(pending, target));
+    CHECK_FALSE(pending);
+    CHECK_FALSE(KeireEditor::ConsumeAssetBrowserReveal(pending, target));
+    CHECK_FALSE(KeireEditor::ConsumeAssetBrowserReveal(pending, {}));
+    pending = target;
+    CHECK(KeireEditor::ConsumeAssetBrowserReveal(pending, target));
 }
 
 TEST_CASE("New Material Graph documents focus the canvas on their OpenPBR surface")
@@ -81,7 +150,7 @@ TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows 
     using KeireEditor::NamedAssetCreationKind;
 
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::ShaderGraph) == "shader graph");
-    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialGraph) == "material graph");
+    CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialGraph) == "material");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialInstance) == "material instance");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialFunction) == "material function");
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::MaterialLayer) == "material layer");

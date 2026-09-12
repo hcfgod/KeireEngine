@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "Keire/Project/SharedShaderLibrary.h"
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
@@ -12,6 +13,7 @@
 #include "KeireClient/Editor/ManagedDataTypeCache.h"
 #include "KeireClient/Editor/ManagedRuntimeDiagnostics.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
+#include "KeireClient/Editor/MaterialMigrationReview.h"
 #include "KeireClient/Editor/RiggingStudioPanel.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/UiBuilderPanel.h"
@@ -201,7 +203,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SetSceneViewportSelectedAsset(Keire::AssetId asset) noexcept override;
     void RequestSceneViewportNewScene() override;
     void RevealSceneViewportScenes() override;
-    void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target) override;
+    void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target,
+                                 Keire::UiPosition position) override;
     void RecordSceneViewportUndo(std::string_view name) override;
     void OpenSceneViewportUiDocument(Keire::AssetId asset) override;
     void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) override;
@@ -334,6 +337,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept override;
     [[nodiscard]] Keire::AssetId InspectorDefaultAudioMixer() const noexcept override;
     [[nodiscard]] Keire::AssetId InspectorSelectedAsset() const noexcept override;
+    [[nodiscard]] std::span<const Keire::AssetId> InspectorSelectedAssets() const noexcept override;
     [[nodiscard]] std::string_view InspectorAssetStatus() const noexcept override;
     [[nodiscard]] std::vector<Keire::ManagedAssetTypeDescriptor> InspectorManagedAssetTypes() const override;
     [[nodiscard]] std::optional<Keire::ManagedTypeId>
@@ -344,6 +348,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void PreviewInspectorAudio(Keire::AssetId asset) override;
     void StopInspectorAudioPreview() noexcept override;
     void ActivateInspectorHistory() noexcept override;
+    void ActivateInspectorAssetHistory() noexcept override;
     void ActivateInspectorManagedDataHistory() noexcept override;
     void RecordInspectorUndo(std::string_view name, std::string mergeKey = {}) override;
     void ApplyInspectorTransformEdit(KeireEditor::InspectorTransformEdit edit) override;
@@ -351,10 +356,14 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void NotifyInspectorUiToolkitAssetAssigned(Keire::AssetId asset) noexcept override;
     void AddScriptToEntity(Keire::EntityId entity, Keire::AssetId script) override;
     void CommitInspectorMaterial() override;
+    void CommitInspectorMaterialSelection(std::span<const KeireEditor::MaterialDocument> before,
+                                          std::span<const KeireEditor::MaterialDocument> after) override;
+    void FlushMaterialSelectionImports();
     void OpenInspectorInputActions(Keire::AssetId asset) override;
     void OpenInspectorMaterialGraph(Keire::AssetId asset) override;
     void OpenInspectorUiDocument(Keire::AssetId asset) override;
     void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) override;
+    void FinishInspectorMaterialInstanceEdit() override;
     void PersistInspectorMaterialParameterCollection(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void PersistInspectorProceduralMotionProfile(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void ApplyInspectorImportSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) override;
@@ -409,8 +418,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void QueueLightingBake(bool force) override;
     void OpenDroppedScene(Keire::AssetId asset) override;
     void OpenDroppedInputActions(Keire::AssetId asset) override;
-    void InstantiateDroppedPrefab(Keire::AssetId asset) override;
-    void CreateDroppedMeshEntity(Keire::AssetId asset) override;
+    void InstantiateDroppedPrefab(Keire::AssetId asset, Keire::Vector3 position) override;
+    void CreateDroppedMeshEntity(Keire::AssetId asset, Keire::Vector3 position) override;
     void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) override;
     void ConfigureAssetImporters(Keire::AssetDatabaseSpecification& specification) const;
     void
@@ -494,6 +503,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] const Keire::UiThemeDefinition& ShaderGraphTheme() const noexcept override;
     void SaveShaderGraphDocument() override;
     void UndoShaderGraphEdit() override;
+    void ActivateShaderGraphHistory() noexcept override;
     void RedoShaderGraphEdit() override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> ShaderGraphAssetRecords() const noexcept override;
     [[nodiscard]] Keire::Ref<const Keire::MeshAsset> ResolveShaderGraphPreviewMesh(Keire::AssetId asset) override;
@@ -771,6 +781,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ApplyActiveUndo(bool redo);
     void OpenDialog(Dialog dialog);
     void OpenPendingDialog(Keire::UiFrame& ui);
+    void DrawMaterialUpgradeDialogs(Keire::UiFrame& ui);
+    [[nodiscard]] bool MaterialUpgradeAvailable() const;
     void RequestTheme(Keire::UiWorkspace& workspace, Keire::UiThemeId id);
     void LoadTheme(Keire::UiWorkspace& workspace, Keire::UiThemeId id);
     void OpenDiagnosticBundle();
@@ -816,6 +828,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     KeireEditor::MaterialGraphDocument* m_MaterialGraphDocument = nullptr;
     KeireEditor::ProjectSettingsDocument* m_ProjectSettingsDocument = nullptr;
     KeireEditor::MaterialDocument* m_MaterialDocument = nullptr;
+    std::vector<Keire::AssetId> m_PendingMaterialSelectionImports;
     std::unique_ptr<KeireEditor::UiBuilderDocument> m_UiBuilderDocument;
     std::unique_ptr<KeireEditor::UiBuilderStyleSheetDocument> m_UiBuilderStyleSheetDocument;
     std::unique_ptr<KeireEditor::UiBuilderLiveDraftSession> m_UiBuilderLiveDraft;
@@ -857,6 +870,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_Error;
     std::string m_Notice;
     std::string m_AssetStatus;
+    KeireEditor::MaterialMigrationReview m_MaterialMigrationReview;
+    std::optional<Keire::SharedShaderUpgradeReview> m_SharedShaderReview;
+    bool m_OpenMaterialMigrationReview = false;
+    bool m_OpenSharedShaderReview = false;
+    std::string m_MaterialUpgradeStatus;
     std::string m_RenderGraphStatus;
     std::string m_AudioMixerPreviewDiagnostic;
     std::string m_VfxEffectPreviewDiagnostic;

@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
@@ -335,6 +336,11 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
             }
             if (ui.MenuItem("Cook Dist Build", false, static_cast<bool>(m_AssetDatabase)))
                 CookAssets();
+            ui.Separator();
+            if (ui.MenuItem("Review Legacy Material Conversion...", false, MaterialUpgradeAvailable()))
+                m_OpenMaterialMigrationReview = true;
+            if (ui.MenuItem("Review Shared Shader Inputs...", false, MaterialUpgradeAvailable()))
+                m_OpenSharedShaderReview = true;
         }
         if (auto window = ui.BeginMenu("Window"); window)
         {
@@ -560,6 +566,7 @@ void EditorWorkspaceLayer::OpenPendingDialog(Keire::UiFrame& ui)
 
 void EditorWorkspaceLayer::DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& workspace)
 {
+    DrawMaterialUpgradeDialogs(ui);
     DrawNameDialog(ui, workspace, "Save Layout As", Dialog::SaveLayout);
     DrawNameDialog(ui, workspace, "Rename Layout", Dialog::RenameLayout);
     DrawNameDialog(ui, workspace, "Save Theme As", Dialog::SaveTheme);
@@ -781,17 +788,19 @@ void EditorWorkspaceLayer::DrawDirtyShaderGraphDialog(Keire::UiFrame& ui)
 {
     if (auto popup = ui.BeginPopupModal("Unsaved Shader Graph Changes"); popup)
     {
+        if (!m_ShaderGraphDocument->Dirty() && !m_ShaderGraphPanel->HasPendingNodeProperties() &&
+            !m_ShaderGraphPanel->SavePending())
+        {
+            ui.CloseCurrentPopup();
+            ExecutePendingSceneAction();
+            return;
+        }
         ui.Text("Save the open Shader Graph before closing the editor?");
         if (ui.Button("Save"))
         {
             try
             {
-                SaveShaderGraph();
-                if (!m_ShaderGraphDocument->Dirty())
-                {
-                    ui.CloseCurrentPopup();
-                    ExecutePendingSceneAction();
-                }
+                m_ShaderGraphPanel->RequestSave();
             }
             catch (const std::exception& error)
             {
@@ -802,6 +811,7 @@ void EditorWorkspaceLayer::DrawDirtyShaderGraphDialog(Keire::UiFrame& ui)
         if (ui.Button("Discard"))
         {
             m_ShaderGraphDocument->Discard();
+            m_ShaderGraphPanel->ResetTransientState();
             ui.CloseCurrentPopup();
             ExecutePendingSceneAction();
         }
@@ -812,8 +822,7 @@ void EditorWorkspaceLayer::DrawDirtyShaderGraphDialog(Keire::UiFrame& ui)
             m_Dialog = Dialog::None;
             ui.CloseCurrentPopup();
         }
-        ui.TextColored(m_Theme.MutedText,
-                       "Save publishes the graph source and its generated runtime shader variants atomically.");
+        ui.TextColored(m_Theme.MutedText, "Save applies node properties and waits for validation before writing.");
     }
 }
 

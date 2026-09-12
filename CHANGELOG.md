@@ -5,6 +5,100 @@ versions.
 
 ## Unreleased
 
+- Shader Graph Frame All uses the canvas's supported 20% minimum zoom, fitting tall Lit outputs in short panels.
+- Shader Code creation now references the actual authored HLSL filename. Reviewed material migration validates a
+  full staged import before publishing its catalog.
+- Compute binary compilation validates SPIR-V buffer bindings, symbols and strides against its declared contract;
+  the managed compute bridge keeps pointer operations private to native interop.
+- Asset reveal clears the Project search, including after creation. Shader Graph canvases fit narrow docks, wrap
+  authoring controls, and frame nodes when opened.
+- Focusing Shader Graph activates its own undo history, preventing keyboard undo from reaching asset creation history.
+  Output Inspectors expand named input defaults and hide the unused generic output-node value.
+
+- Ordinary materials expose graph shader keyword choices and resets. Pending variants load without losing the first
+  click or replacing the last-good preview; applied choices preserve properties and participate in material undo.
+  Their shader picker hides generated code duplicates while the owning graph exists, retaining legacy references.
+
+- UI and fullscreen Shader Graph authoring previews cover a flat image and hide mesh-only controls; opacity is
+  composited over a checker background without introducing surface lighting.
+
+- Editor asset operations report monotonic queue and execution timings with operation identities and final status,
+  including failed and cancelled work, to support asset-creation and loading acceptance measurements.
+- Material variants share compatible property copy/paste with ordinary materials. Copy includes inherited values;
+  paste preserves incompatible history and unrelated settings and participates in source snapshot undo.
+  Both Inspectors offer an explicit cross-shader paste by code name while retaining destination identities.
+- Shader Graph Ctrl+S now requests its staged save while the node Inspector has focus, including text fields.
+
+- Graph and code shader properties retain descriptions and HDR color metadata through generated manifests and cooked
+  reflection. Material tooltips expose descriptions, and HDR colors remain editable above one. The public UI facade
+  adds `ColorEditHdr`; ordinary display-color validation is unchanged. Importer versions invalidate older reflection.
+
+- Ordinary material properties are grouped by category and offer individual reset and compatible value copy/paste.
+  Editing or resetting a property preserves incompatible type/range history until explicit inactive cleanup.
+
+- Material variants expose individual property override controls and a separate surface inheritance reset.
+  Individual resets preserve incompatible history; explicit inactive-override cleanup is undoable. Inspector help
+  wraps within narrow panels, and Reimport remains accessible when the variant has no property overrides.
+  Focusing an asset Inspector restores asset undo routing after scene focus or stopping Play.
+
+- Editor UI packets omit unavailable render-surface draws during device recovery, preventing a null texture binding
+  crash in D3D12 while preserving surviving draws and the captured packet for later retries.
+
+- Material variants support parent repair in the Inspector, validate complete inheritance chains before saving,
+  and record source edits in asset undo/redo. Continuous property edits coalesce; undo resolves renamed sources by ID.
+  Material shader and variant parent magnifiers navigate to the referenced Inspector.
+- Material Inspector controls use stable property identities, so matching display names remain independently editable
+  and display-name changes retain widget identity. Custom vector and texture fields hide widget ID suffixes.
+  The mesh-material graph picker filters incompatible targets, including compute, before assignment.
+
+- New materials use shared Kéire/Lit. First use installs a versioned graphics shader library with deterministic
+  source/property identities and a project hash lock. Existing pinned content is never regenerated on open or create.
+  Shared sources are read-only in the editor and asset mutation APIs; Copy to Project creates an editable asset ID.
+
+- Materials and nested variants persist stable shader property identities, preserve values through symbol renames,
+  retain incompatible history, and allow variants to override shader defaults absent from parent overrides. Undo
+  resolves identities against current shader reflection. Inspector property edits preserve reflection storage while
+  controls are being rendered.
+- Material migration adds reviewed-input fingerprints, deterministic extracted shader identities, collision checks,
+  and a persistent source/metadata recovery journal with verified backups. Exclusive project open rolls back
+  interrupted publication; recovery refuses to overwrite external edits or restore corrupt backups.
+- Shader Graph Save and Ctrl+S apply pending node-property drafts before waiting for compilation and saving. Invalid
+  drafts remain editable, queued saves cannot publish another document, and editor exit detects pending drafts.
+  Native quit events, including Windows Alt+F4, now use the same unsaved-document checks as the editor Exit command.
+  Material and shader Inspectors collapse technical metadata under Asset Details to leave room for authoring controls.
+
+- Material shader switching and reopening preserve removed, mistyped, and out-of-range overrides as inactive source
+  data. The Inspector lists them with explicit undoable cleanup; they are excluded from runtime bindings and imports.
+  Compatible values recover when their shader declaration returns, including multiple historical types under one name.
+  Compatible Color/Vector4 shader switches normalize values in both directions for Inspector editing.
+  Editing a material with an unresolved shader preserves its last-good live preview.
+- **Material** and **Material from Shader** use shader selection to create property-only `.keirematerial` sources and open
+  them in the Inspector. Value edits
+  reuse existing shader programs while retaining source identity and the generated runtime material ID; shader defaults
+  remain inherited until overridden. Nested material instances apply graph keyword overrides from parent to child.
+  Shader Graph surface templates no longer carry legacy labels, and unsupported Compute creation is visibly disabled.
+- The Material Inspector uses one shader selector for graph and code sources and shows surface controls even when the
+  shader exposes no properties. Audio import failures display their diagnostics, and stopping preview updates its status.
+- Worker import statuses are copied into the editor database so the Inspector can display failure diagnostics and
+  clear them after a successful reimport.
+
+- Material creation from a selected shader preserves that shader and its exposed defaults; non-surface Shader Graphs
+  are rejected. Property-material undo resolves current authored shader references before publishing, preserving the
+  last-good runtime material when a graph shader is unavailable.
+- The property-based Material Inspector keeps missing shader references editable and can reset shader properties to
+  their defaults. C# adds `Debug.LogFormat`, `LogWarningFormat`, `LogErrorFormat`, and formatted `Log` severity overloads.
+- C# supports delayed entity destruction using scaled scene time and multi-value formatted Debug logging.
+- ScriptableObjects with non-public parameterless constructors remain discoverable and creatable; constructor and
+  hydration failures preserve their original diagnostics at the managed runtime boundary.
+- Console controls remain fixed above the scrolling log. Prefab and mesh drops use the mouse position; prefab root
+  placement persists as an override, including the origin, and queued imports retain their original scene.
+- Asset workers avoid redundant path resolution, refresh externally imported records directly, and coalesce progress
+  writes while retaining cancellation checks. Job shutdown requests all worker stops before joining, removing a
+  per-thread teardown delay from each asset operation. An opt-in benchmark measures creation and batch import latency.
+- Generated IDE projects retain package and assembly references, isolate intermediate output, and select compatible
+  API frameworks. Windows staging reports copy failures and rejects redirected runtime roots; workspace lock recovery
+  uses the lease instead of trusting another host's process ID.
+
 - Hub returns from the tray as a restored window after its final tracked Editor closes, instead of remaining minimized.
 - Scene Save As clears recovery warnings inherited from the original document and resets the new recovery timer,
   while preserving the original recovery file. Asset Inspector rename, duplicate, and trash controls fit narrow panels.

@@ -321,6 +321,22 @@ namespace Keire::RenderBackend
         }
     };
 
+    struct GpuRuntimeUiShaderEntry final
+    {
+        struct Pipeline final
+        {
+            bool WorldSurface = false;
+            bool DepthTest = false;
+            SDL_GPUSampleCount Samples = SDL_GPU_SAMPLECOUNT_1;
+            SDL_GPUTextureFormat Format = SDL_GPU_TEXTUREFORMAT_INVALID;
+            SDL_GPUGraphicsPipeline* Handle = nullptr;
+        };
+        AssetHandle<ShaderAsset> Asset;
+        Ref<const ShaderAsset> LastGood;
+        std::uint64_t LastAttemptedRevision = 0;
+        std::vector<Pipeline> Pipelines;
+    };
+
     struct GpuMaterialBindingEntry final
     {
         ResolvedAssetMaterial Binding;
@@ -1198,7 +1214,13 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline*
         CreateRuntimeUiPipeline(bool worldSurface = false, bool depthTest = false,
                                 SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1,
-                                SDL_GPUTextureFormat targetFormat = SDL_GPU_TEXTUREFORMAT_INVALID);
+                                SDL_GPUTextureFormat targetFormat = SDL_GPU_TEXTUREFORMAT_INVALID,
+                                const ShaderAssetDefinition* shader = nullptr);
+        [[nodiscard]] bool BindRuntimeUiMaterial(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
+                                                 AssetId material, SDL_GPUGraphicsPipeline* fallback,
+                                                 SDL_GPUTextureSamplerBinding source, bool worldSurface, bool depthTest,
+                                                 SDL_GPUSampleCount samples, SDL_GPUTextureFormat format);
+        void ReleaseRuntimeUiMaterialPipelines(bool abandon) noexcept;
         void RecordRuntimeUiCameraPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void RecordRuntimeUiWorldPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void EndFrame(ImDrawData* drawData);
@@ -1388,6 +1410,7 @@ namespace Keire::RenderBackend
         std::uint64_t MaterialBindingBuilds = 0;
         std::uint64_t MaterialDependencyChecks = 0;
         std::unordered_map<AssetId, GpuShaderEntry> ShaderCache;
+        std::unordered_map<AssetId, GpuRuntimeUiShaderEntry> RuntimeUiShaderCache;
         std::vector<std::pair<SamplerDescription, SDL_GPUSampler*>> SamplerCache;
         std::vector<RenderPipelineSet> Pipelines;
         std::vector<RenderSurfaceRegistryEntry> Surfaces;

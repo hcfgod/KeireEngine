@@ -209,7 +209,7 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
 
     CHECK(workspace.Solution == root / "My_Game.sln");
     REQUIRE(workspace.Projects.size() == 1);
-    CHECK(workspace.Projects.front() == root / "Gameplay.csproj");
+    CHECK(workspace.Projects.front() == root / "Gameplay.VisualStudio.csproj");
     CHECK(std::filesystem::is_regular_file(workspace.Solution));
     CHECK(std::filesystem::is_regular_file(workspace.Projects.front()));
     const auto project = ReadBytes(workspace.Projects.front());
@@ -657,10 +657,11 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "[CreateAssetMenu(\"Gameplay/Player Tuning\", \"PlayerTuning\")] "
                "[StableAssetTypeId(\"73616e64-626f-4078-8000-000000000190\")] "
                "public sealed class PlayerTuning : ScriptableObject { "
+               "private PlayerTuning() { Speed = 7.5f; Debug.Log(\"Tuning constructor {0}\", Speed); } "
                "[StableFieldId(\"73616e64-626f-4078-8000-000000000191\"), Range(0.0, 100.0), "
                "InspectorStep(0.25), InspectorName(\"Movement Speed\"), Header(\"Movement\"), "
                "Tooltip(\"Base movement speed.\")] "
-               "public float Speed = 7.5f; "
+               "public float Speed; "
                "[StableFieldId(\"73616e64-626f-4078-8000-000000000192\"), ReadOnlyInInspector] "
                "public PlayerTuning? Parent; "
                "[StableFieldId(\"73616e64-626f-4078-8000-000000000194\"), Multiline(5), "

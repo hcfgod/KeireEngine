@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
+#include "Keire/Project/SharedShaderLibrary.h"
 #include "KeireClient/Editor/AssetInspectorFileActions.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
@@ -8,6 +9,8 @@
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClient/Editor/MaterialSelectionDocument.h"
+#include "KeireClient/Editor/MaterialVariantEditing.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/ThumbnailService.h"
 
@@ -114,6 +117,8 @@ void KeireEditor::AssetInspectorPanel::ClearState() noexcept
     m_PreviewImage.Reset();
     m_PreviewDigest.clear();
     m_AssetName.clear();
+    m_VariantParentDiagnostic.clear();
+    m_SurfaceShaderCompatibility.clear();
     m_MaterialParameterCollection.reset();
     m_ProceduralMotionProfile.reset();
     m_MaterialParameterCollectionDirty = false;
@@ -149,6 +154,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     const auto importer = database->FindImporterForPath(record->RelativePath);
     if (m_EditingAsset != record->Id)
     {
+        m_Controller.FinishInspectorMaterialInstanceEdit();
+        m_VariantParentDiagnostic.clear();
         m_EditingAsset = record->Id;
         m_AssetName = Keire::Detail::PathToUtf8(record->RelativePath.filename());
         m_OriginalImportSettings = importer && importer->Name == record->Importer
@@ -223,13 +230,25 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     ui.TextColored(theme.Accent, "PREVIEW");
     const float previewSize = std::clamp(ui.ContentAvailable().Width, 96.0F, 220.0F);
     ui.Image(m_PreviewImage, {previewSize, previewSize});
-    ui.Text(Keire::Detail::PathToUtf8(record->RelativePath));
-    ui.TextColored(theme.MutedText, "Asset ID");
-    ui.Text(record->Id.ToString());
-    ui.TextColored(theme.MutedText, "Importer");
-    ui.Text(record->Importer + " v" + std::to_string(record->ImporterVersion));
-    ui.TextColored(theme.MutedText, "Content SHA-256");
-    ui.Text(record->SourceDigest);
+    ui.TextWrapped(Keire::Detail::PathToUtf8(record->RelativePath));
+    const auto drawMetadata = [&]
+    {
+        ui.TextColored(theme.MutedText, "Asset ID");
+        ui.TextWrapped(record->Id.ToString());
+        ui.TextColored(theme.MutedText, "Importer");
+        ui.TextWrapped(record->Importer + " v" + std::to_string(record->ImporterVersion));
+        ui.TextColored(theme.MutedText, "Content SHA-256");
+        ui.TextWrapped(record->SourceDigest);
+    };
+    if (record->Type == Keire::MaterialGraphAsset::StaticType() || record->Type == Keire::MaterialAsset::StaticType() ||
+        record->Type == Keire::MaterialInstanceAsset::StaticType() ||
+        record->Type == Keire::ShaderGraphAsset::StaticType() || record->Type == Keire::ShaderAsset::StaticType())
+    {
+        if (auto details = ui.BeginTreeNode("Asset Details", false); details)
+            drawMetadata();
+    }
+    else
+        drawMetadata();
     if (importer && importer->Name == record->Importer && !importer->ImportOptions.empty())
     {
         ui.Separator();
@@ -291,6 +310,14 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "AUDIO CLIP");
+        const auto importStatus = database->ImportStatus(record->Id);
+        const bool importFailed = importStatus.State == Keire::AssetImportState::Failed;
+        if (importFailed)
+        {
+            ui.TextColored(theme.Error, "Audio import failed. Correct the source file and reimport.");
+            for (std::size_t index = 0; index < std::min(importStatus.Diagnostics.size(), std::size_t{64}); ++index)
+                ui.TextColored(theme.Error, FormatAssetDiagnostic(importStatus.Diagnostics[index]));
+        }
         if (assets)
         {
             const auto handle = assets->Load<Keire::AudioClipAsset>(record->Id, Keire::AssetPriority::High);
@@ -306,7 +333,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             }
             else
             {
-                ui.TextColored(theme.MutedText, "Loading decoded audio metadata...");
+                ui.TextColored(theme.MutedText, importFailed ? "No playable imported revision is available."
+                                                             : "Loading decoded audio metadata...");
             }
         }
         if (ui.Button("Preview"))
@@ -314,7 +342,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             try
             {
                 m_Controller.PreviewInspectorAudio(record->Id);
-                m_Controller.SetInspectorAssetStatus("Playing audio preview through the EditorPreview bus.");
+                m_Controller.SetInspectorAssetStatus("Started audio preview through the EditorPreview bus.");
             }
             catch (const std::exception& error)
             {
@@ -323,7 +351,10 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         }
         ui.SameLine();
         if (ui.Button("Stop Preview"))
+        {
             m_Controller.StopInspectorAudioPreview();
+            m_Controller.SetInspectorAssetStatus("Audio preview stopped.");
+        }
         ui.SameLine();
         if (ui.Button("Reimport Audio"))
             m_Controller.ImportInspectorAssets();
@@ -520,12 +551,44 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "MATERIAL INSTANCE");
-        ui.Text("Lightweight overrides inherited from a Material, Material Graph, or Material Instance.");
+        ui.TextWrapped("Lightweight overrides inherited from a Material, Material Graph, or Material Instance.");
         try
         {
             const auto sourceRoot = database->Specification().ProjectRoot / database->Specification().SourceDirectory;
             const auto sourcePath = sourceRoot / record->RelativePath;
             auto instance = Keire::MaterialInstanceAsset::DecodeSource(ReadBytes(sourcePath));
+            auto selectedParent = instance.Parent;
+            const AssetPickerOptions parentOptions{
+                .Label = "Parent",
+                .Filter =
+                    [asset = record->Id](const Keire::AssetSourceRecord& candidate)
+                {
+                    return candidate.Id != asset && (candidate.Type == Keire::MaterialAsset::StaticType() ||
+                                                     candidate.Type == Keire::MaterialGraphAsset::StaticType() ||
+                                                     candidate.Type == Keire::MaterialInstanceAsset::StaticType());
+                },
+                .Reveal = [this](Keire::AssetId id) { m_Controller.SetInspectorSelectedAsset(id); },
+                .AllowNone = false};
+            if (m_AssetPicker->Draw(ui, records, selectedParent, parentOptions))
+            {
+                m_Controller.FinishInspectorMaterialInstanceEdit();
+                auto replacement = instance;
+                replacement.Parent = selectedParent;
+                try
+                {
+                    m_Controller.PersistInspectorMaterialInstance(
+                        record->Id, Keire::MaterialInstanceAsset::EncodeSource(replacement));
+                    instance = std::move(replacement);
+                    m_VariantParentDiagnostic.clear();
+                }
+                catch (const std::exception& error)
+                {
+                    m_VariantParentDiagnostic = error.what();
+                }
+                m_Controller.FinishInspectorMaterialInstanceEdit();
+            }
+            if (!m_VariantParentDiagnostic.empty())
+                ui.TextColored(theme.Error, m_VariantParentDiagnostic);
             const auto parentRecord = database->Find(instance.Parent);
             if (!parentRecord || !assets)
                 throw std::runtime_error("The Material Instance parent is unavailable.");
@@ -553,8 +616,6 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             if (!shader)
                 throw std::runtime_error("The inherited shader interface is still loading.");
 
-            ui.TextColored(theme.MutedText, "Parent");
-            ui.Text(Keire::Detail::PathToUtf8(parentRecord->RelativePath));
             Keire::MaterialAuthoringDefinition authoring;
             authoring.Shader.Asset = parent->Definition().Shader;
             authoring.Surface = instance.Surface.value_or(parent->Definition().Surface);
@@ -565,6 +626,9 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             authoring.Properties = parent->Definition().Properties;
             for (const auto& [name, value] : instance.Properties)
                 authoring.Properties.insert_or_assign(name, value);
+            authoring.PropertyOverrides = instance.PropertyOverrides;
+            if (!authoring.PropertyOverrides.empty())
+                authoring.SchemaVersion = 5;
             KeireEditor::MaterialDocument editorDocument;
             editorDocument.Open(Keire::MaterialAsset::EncodeAuthoringSource(authoring),
                                 [&](const Keire::AssetId candidate) -> std::optional<Keire::ShaderAssetDefinition>
@@ -580,9 +644,96 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 if (changed == "$surface")
                     instance.Surface = editorDocument.Surface();
                 else if (!changed.empty())
-                    instance.Properties.insert_or_assign(std::string(changed), editorDocument.Property(changed));
+                {
+                    const auto property = std::ranges::find(shader->Definition().Properties, changed,
+                                                            &Keire::ShaderPropertyDefinition::Name);
+                    const auto value = editorDocument.Property(changed);
+                    if (property != shader->Definition().Properties.end())
+                        (void)KeireEditor::SetMaterialVariantProperty(instance, *property, value);
+                }
                 m_Controller.PersistInspectorMaterialInstance(record->Id,
                                                               Keire::MaterialInstanceAsset::EncodeSource(instance));
+            }
+
+            if (propertyEditor.EditBoundary())
+                m_Controller.FinishInspectorMaterialInstanceEdit();
+
+            if (ui.Button("Copy Property Values"))
+                m_MaterialPropertyClipboard = editorDocument.CopyProperties();
+            if (!m_MaterialPropertyClipboard.empty() && ui.Button("Paste Compatible Property Values") &&
+                KeireEditor::PasteMaterialVariantProperties(instance, shader->Definition(),
+                                                            m_MaterialPropertyClipboard))
+            {
+                m_Controller.FinishInspectorMaterialInstanceEdit();
+                m_Controller.PersistInspectorMaterialInstance(record->Id,
+                                                              Keire::MaterialInstanceAsset::EncodeSource(instance));
+                m_Controller.FinishInspectorMaterialInstanceEdit();
+            }
+
+            if (!m_MaterialPropertyClipboard.empty())
+                if (auto crossShader = ui.BeginTreeNode("Paste Across Shaders", false); crossShader)
+                {
+                    ui.TextWrapped(
+                        "Match shader property code names instead of IDs. Only compatible values are pasted.");
+                    if (ui.Button("Paste Matching Property Names") &&
+                        KeireEditor::PasteMaterialVariantPropertiesByName(instance, shader->Definition(),
+                                                                          m_MaterialPropertyClipboard))
+                    {
+                        m_Controller.FinishInspectorMaterialInstanceEdit();
+                        m_Controller.PersistInspectorMaterialInstance(
+                            record->Id, Keire::MaterialInstanceAsset::EncodeSource(instance));
+                        m_Controller.FinishInspectorMaterialInstanceEdit();
+                    }
+                }
+
+            if (auto overrides = ui.BeginTreeNode("Property Inheritance", false); overrides)
+            {
+                ui.TextWrapped("Checked properties override the parent. Clear to inherit again.");
+                bool inheritanceChanged = false;
+                for (const auto& property : shader->Definition().Properties)
+                {
+                    bool overridden = KeireEditor::HasMaterialVariantProperty(instance, property);
+                    const auto label = (property.DisplayName.empty() ? property.Name : property.DisplayName) +
+                                       "###variant-override-" + (property.Id ? property.Id.ToString() : property.Name);
+                    if (ui.Checkbox(label, overridden))
+                        inheritanceChanged |= KeireEditor::SetMaterialVariantProperty(
+                            instance, property,
+                            overridden ? std::optional(editorDocument.Property(property.Name)) : std::nullopt);
+                }
+                if (instance.Surface && ui.Button("Inherit Surface Settings"))
+                {
+                    instance.Surface.reset();
+                    inheritanceChanged = true;
+                }
+                if (inheritanceChanged)
+                {
+                    m_Controller.FinishInspectorMaterialInstanceEdit();
+                    m_Controller.PersistInspectorMaterialInstance(record->Id,
+                                                                  Keire::MaterialInstanceAsset::EncodeSource(instance));
+                    m_Controller.FinishInspectorMaterialInstanceEdit();
+                }
+            }
+
+            const auto variantResolution = KeireEditor::ResolveMaterialVariantOverrides(instance, shader->Definition());
+            if (!variantResolution.InactiveProperties.empty())
+            {
+                if (auto inactive = ui.BeginTreeNode("Inactive Property Overrides", false); inactive)
+                {
+                    ui.TextWrapped("These saved values are unavailable, incompatible, or superseded. "
+                                   "They remain saved until explicitly removed.");
+                    constexpr std::array<std::string_view, 6> valueTypes{"Scalar",  "Vector2", "Vector3",
+                                                                         "Vector4", "Color",   "Texture"};
+                    for (const auto& [name, value] : variantResolution.InactiveProperties)
+                        ui.TextWrapped(name + " (" + std::string(valueTypes.at(value.index())) + ")");
+                    if (ui.Button("Remove Inactive Property Overrides"))
+                    {
+                        (void)KeireEditor::RemoveInactiveMaterialVariantProperties(instance, shader->Definition());
+                        m_Controller.FinishInspectorMaterialInstanceEdit();
+                        m_Controller.PersistInspectorMaterialInstance(
+                            record->Id, Keire::MaterialInstanceAsset::EncodeSource(instance));
+                        m_Controller.FinishInspectorMaterialInstanceEdit();
+                    }
+                }
             }
 
             std::optional<Keire::MaterialGraphDefinition> rootGraph;
@@ -680,22 +831,27 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                             staticChanged = true;
                         }
                         if (staticChanged)
+                        {
+                            m_Controller.FinishInspectorMaterialInstanceEdit();
                             m_Controller.PersistInspectorMaterialInstance(
                                 record->Id, Keire::MaterialInstanceAsset::EncodeSource(instance));
+                            m_Controller.FinishInspectorMaterialInstanceEdit();
+                        }
                     }
                 }
             }
-            ui.TextColored(theme.MutedText, std::to_string(instance.Properties.size()) +
-                                                " explicit property override(s), " +
-                                                std::to_string(instance.KeywordOverrides.size()) +
-                                                " static override(s). Shader code is never duplicated.");
-            if (!instance.Properties.empty() && ui.Button("Reset All Property Overrides"))
+            ui.TextWrapped(std::to_string(instance.Properties.size() + instance.PropertyOverrides.size()) +
+                           " saved property override(s), " + std::to_string(instance.KeywordOverrides.size()) +
+                           " static override(s).");
+            if (!variantResolution.Properties.empty() && ui.Button("Reset All Property Overrides"))
             {
-                instance.Properties.clear();
+                for (const auto& property : shader->Definition().Properties)
+                    (void)KeireEditor::SetMaterialVariantProperty(instance, property, std::nullopt);
+                m_Controller.FinishInspectorMaterialInstanceEdit();
                 m_Controller.PersistInspectorMaterialInstance(record->Id,
                                                               Keire::MaterialInstanceAsset::EncodeSource(instance));
+                m_Controller.FinishInspectorMaterialInstanceEdit();
             }
-            ui.SameLine();
             if (ui.Button("Reimport Material Instance"))
                 m_Controller.ImportInspectorAssets();
         }
@@ -813,7 +969,10 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                            std::string("Material Parameter Collection editor unavailable: ") + error.what());
         }
     }
-    else if (record->RelativePath.extension().string() == Keire::MaterialAssetSourceExtension)
+    else if (record->RelativePath.extension().string() == Keire::MaterialAssetSourceExtension &&
+             !KeireEditor::MaterialDocument::IsPropertySource(
+                 ReadBytes(database->Specification().ProjectRoot / database->Specification().SourceDirectory /
+                           record->RelativePath)))
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "MATERIAL");
@@ -835,14 +994,24 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             m_Controller.ImportInspectorAssets();
         ui.TextColored(theme.MutedText, "Double-clicking this asset opens its Material document.");
     }
-    else if (record->RelativePath.extension().string() == Keire::LegacyMaterialAssetSourceExtension)
+    else if (record->RelativePath.extension().string() == Keire::LegacyMaterialAssetSourceExtension ||
+             record->RelativePath.extension().string() == Keire::MaterialAssetSourceExtension)
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "MATERIAL");
-        ui.Text("Inspector-based material authoring with shader-driven properties.");
+        ui.TextWrapped("Choose a shader and edit its exposed properties.");
         try
         {
             const auto sourceRoot = database->Specification().ProjectRoot / database->Specification().SourceDirectory;
+            std::optional<std::pair<Keire::AssetId, Keire::ShaderGraphDefinition>> frameGraphSource;
+            const auto readGraph =
+                [&](const Keire::AssetSourceRecord& shaderRecord) -> const Keire::ShaderGraphDefinition&
+            {
+                if (!frameGraphSource || frameGraphSource->first != shaderRecord.Id)
+                    frameGraphSource = std::pair(shaderRecord.Id, Keire::ShaderGraphAsset::DecodeSource(ReadBytes(
+                                                                      sourceRoot / shaderRecord.RelativePath)));
+                return frameGraphSource->second;
+            };
             const KeireEditor::MaterialDocument::ShaderReferenceResolver resolveShader =
                 [&](const Keire::MaterialShaderReference& shader)
                 -> std::optional<KeireEditor::MaterialDocument::ResolvedShader>
@@ -854,17 +1023,20 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 {
                     if (shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph)
                     {
-                        if (shaderRecord->Type != Keire::ShaderAsset::StaticType())
+                        if (shaderRecord->Type != Keire::ShaderAsset::StaticType() || !assets)
                             return std::nullopt;
-                        return KeireEditor::MaterialDocument::ResolvedShader{
-                            shader.Asset,
-                            Keire::ShaderAsset::DecodeManifest(ReadBytes(sourceRoot / shaderRecord->RelativePath))};
+                        const auto loaded = assets->Load<Keire::ShaderAsset>(shader.Asset, Keire::AssetPriority::High);
+                        const auto definition = loaded.TryGetLoaded();
+                        if (!definition)
+                            return std::nullopt;
+                        return KeireEditor::MaterialDocument::ResolvedShader{shader.Asset, definition->Definition()};
                     }
                     if (shader.Target != "default" || shaderRecord->Type != Keire::ShaderGraphAsset::StaticType() ||
                         !assets)
                         return std::nullopt;
-                    const auto graph =
-                        Keire::ShaderGraphAsset::DecodeSource(ReadBytes(sourceRoot / shaderRecord->RelativePath));
+                    const auto& graph = readGraph(*shaderRecord);
+                    if (graph.Target.Target != Keire::ShaderGraphTarget::Material)
+                        return std::nullopt;
                     Keire::ShaderGraphInstanceDefinition selection;
                     selection.Parent = shader.Asset;
                     selection.KeywordOverrides = shader.Keywords;
@@ -891,6 +1063,59 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             };
 
             const auto sourcePath = sourceRoot / record->RelativePath;
+            const auto selectedMaterials = m_Controller.InspectorSelectedAssets();
+            if (!pinned && selectedMaterials.size() > 1)
+            {
+                if (materialDocument.Dirty())
+                    m_Controller.CommitInspectorMaterial();
+                std::vector<MaterialDocument> documents;
+                for (const auto id : selectedMaterials)
+                {
+                    const auto selected = database->Find(id);
+                    if (!selected || (selected->RelativePath.extension() != Keire::MaterialAssetSourceExtension &&
+                                      selected->RelativePath.extension() != Keire::LegacyMaterialAssetSourceExtension))
+                        throw std::invalid_argument("Select only property materials to edit shared values together.");
+                    const auto path = sourceRoot / selected->RelativePath;
+                    const auto source = ReadBytes(path);
+                    if (!MaterialDocument::IsPropertySource(source))
+                        throw std::invalid_argument(
+                            "Convert legacy material graphs before editing them as a selection.");
+                    MaterialDocument selectedDocument;
+                    selectedDocument.OpenAsset(id, path, source, resolveShader);
+                    if (!selectedDocument.HasResolvedShader())
+                        throw std::invalid_argument("Wait for every selected material shader to load before editing.");
+                    documents.push_back(std::move(selectedDocument));
+                }
+                MaterialSelectionDocument selection(std::move(documents), [this](const auto before, const auto after)
+                                                    { m_Controller.CommitInspectorMaterialSelection(before, after); });
+                ui.Text(std::to_string(selectedMaterials.size()) + " materials selected");
+                ui.TextWrapped("Common properties match by stable identity. Mixed marks differing values; editing "
+                               "replaces that value in every selected material.");
+                InspectorPropertyEditor selectionEditor(ui, records, assets, scene, *m_AssetPicker);
+                (void)MaterialInspectorPanel{}.Draw(selectionEditor, selection);
+                if (selectionEditor.EditBoundary())
+                    m_Controller.FinishInspectorMaterialInstanceEdit();
+                if (auto overrides = ui.BeginTreeNode("Reset Shared Properties", false); overrides)
+                {
+                    // Commands may replace the selection storage, so retain independent declarations for this draw.
+                    const auto declared = selection.Documents().front().Properties();
+                    const std::vector<Keire::ShaderPropertyDefinition> properties(declared.begin(), declared.end());
+                    for (const auto& property : properties)
+                    {
+                        if (!selection.Property(property))
+                            continue;
+                        const auto label = property.DisplayName.empty() ? property.Name : property.DisplayName;
+                        if (ui.Button("Reset " + label + "###reset-selection-" +
+                                      (property.Id ? property.Id.ToString() : property.Name)))
+                        {
+                            m_Controller.FinishInspectorMaterialInstanceEdit();
+                            (void)selection.ResetProperty(property);
+                            m_Controller.FinishInspectorMaterialInstanceEdit();
+                        }
+                    }
+                }
+                return;
+            }
             if (!materialDocument.IsOpen(record->Id))
             {
                 m_Controller.CommitInspectorMaterial();
@@ -902,62 +1127,214 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             auto& document = materialDocument;
             InspectorPropertyEditor editor(ui, records, assets, scene, *m_AssetPicker);
             bool changed = false;
+            if (document.Shader() && !document.HasResolvedShader())
+                ui.TextColored(
+                    theme.Warning,
+                    "Shader unavailable or still importing. Choose a replacement below; saved values are preserved.");
             const auto currentShader = document.ShaderReference();
-            auto shaderGraph = currentShader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph ? currentShader.Asset
-                                                                                                  : Keire::AssetId{};
-            if (editor.EditAsset("Shader Graph", shaderGraph, Keire::ShaderGraphAsset::StaticType()))
+            auto selectedShader = currentShader.Asset;
+            const KeireEditor::AssetPickerOptions shaderOptions{
+                .Label = "Shader",
+                .Filter =
+                    [this, &database, &records](const Keire::AssetSourceRecord& candidate)
+                {
+                    if (candidate.Type == Keire::ShaderAsset::StaticType())
+                        return !MaterialInspectorPanel::IsGeneratedShaderSource(candidate, records);
+                    if (candidate.Type != Keire::ShaderGraphAsset::StaticType())
+                        return false;
+                    const auto cached = m_SurfaceShaderCompatibility.find(candidate.Id);
+                    if (cached != m_SurfaceShaderCompatibility.end() && cached->second.first == candidate.SourceDigest)
+                        return cached->second.second;
+                    bool compatible = false;
+                    try
+                    {
+                        const auto& specification = database->Specification();
+                        compatible = MaterialInspectorPanel::AcceptsSurfaceShaderGraph(ReadBytes(
+                            specification.ProjectRoot / specification.SourceDirectory / candidate.RelativePath));
+                    }
+                    catch (const std::exception&)
+                    {
+                        // Unreadable candidates cannot establish target compatibility; existing references remain
+                        // editable.
+                    }
+                    m_SurfaceShaderCompatibility.insert_or_assign(candidate.Id,
+                                                                  std::pair(candidate.SourceDigest, compatible));
+                    return compatible;
+                },
+                .Reveal = [this](Keire::AssetId id) { m_Controller.SetInspectorSelectedAsset(id); },
+            };
+            const bool shaderChanged = m_AssetPicker->Draw(ui, records, selectedShader, shaderOptions);
+            if (shaderChanged)
             {
                 Keire::MaterialShaderReference replacement;
-                replacement.Kind = shaderGraph ? Keire::MaterialShaderSourceKind::ShaderGraph
-                                               : Keire::MaterialShaderSourceKind::ShaderAsset;
-                replacement.Asset = shaderGraph;
-                changed = document.SetShaderReference(std::move(replacement), resolveShader) || changed;
-            }
-            auto rawShader = currentShader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph ? Keire::AssetId{}
-                                                                                                : currentShader.Asset;
-            if (editor.EditAsset("Raw Shader", rawShader, Keire::ShaderAsset::StaticType()))
-            {
-                Keire::MaterialShaderReference replacement;
-                replacement.Asset = rawShader;
+                const auto selectedRecord = database->Find(selectedShader);
+                if (selectedRecord && selectedRecord->Type == Keire::ShaderGraphAsset::StaticType())
+                    replacement.Kind = Keire::MaterialShaderSourceKind::ShaderGraph;
+                replacement.Asset = selectedShader;
                 changed = document.SetShaderReference(std::move(replacement), resolveShader) || changed;
             }
 
+            bool keywordChanged = false;
+            if (document.ShaderReference().Kind == Keire::MaterialShaderSourceKind::ShaderGraph)
+            {
+                const auto shaderRecord = database->Find(document.Shader());
+                if (shaderRecord)
+                {
+                    const auto& graph = readGraph(*shaderRecord);
+                    if (!graph.Keywords.empty() || !document.ShaderReference().Keywords.empty())
+                    {
+                        ui.Separator();
+                        ui.TextColored(theme.Accent, "SHADER KEYWORDS");
+                        ui.TextWrapped("Select an imported shader variant. Property values are preserved.");
+                        for (const auto& keyword : graph.Keywords)
+                        {
+                            if (!keyword.Exposed)
+                                continue;
+                            const auto& selections = document.RequestedShaderReference().Keywords;
+                            const auto selected = selections.find(keyword.Name);
+                            const auto defaultValue = keyword.DefaultOption.empty() ? "false" : keyword.DefaultOption;
+                            const std::string inherited = "Shader Default (" + defaultValue + ")";
+                            const auto label = selected == selections.end() ? inherited : selected->second;
+                            if (auto combo = ui.BeginCombo(keyword.Name + "###material-keyword-" + keyword.Name, label);
+                                combo)
+                            {
+                                if (ui.Selectable(inherited, selected == selections.end()))
+                                    document.RequestKeyword(keyword, std::nullopt);
+                                const auto options = keyword.Options.empty() ? std::vector<std::string>{"false", "true"}
+                                                                             : keyword.Options;
+                                for (const auto& option : options)
+                                    if (ui.Selectable(option, label == option))
+                                        document.RequestKeyword(keyword, option);
+                            }
+                        }
+                        if (!document.RequestedShaderReference().Keywords.empty() && ui.Button("Reset Shader Keywords"))
+                            document.RequestKeywordReset();
+                    }
+                }
+            }
+            if (document.HasPendingKeywords())
+            {
+                ui.TextWrapped("Waiting for the selected shader variant. Repair import errors or cancel to keep the "
+                               "current variant.");
+                if (ui.Button("Cancel Keyword Selection"))
+                    document.CancelPendingKeywords();
+                keywordChanged = document.ApplyPendingKeywords(resolveShader);
+            }
+            changed = keywordChanged || changed;
             if (document.Properties().empty())
                 ui.TextColored(theme.MutedText, "The selected shader declares no material properties.");
             else
             {
                 ui.Separator();
                 ui.TextColored(theme.MutedText, "SHADER PROPERTIES");
-                changed = KeireEditor::MaterialInspectorPanel{}.Draw(editor, document) || changed;
+            }
+            changed = KeireEditor::MaterialInspectorPanel{}.Draw(editor, document) || changed;
+            bool propertyAction = false;
+            if (document.HasResolvedShader())
+            {
+                if (ui.Button("Copy Property Values"))
+                    m_MaterialPropertyClipboard = document.CopyProperties();
+                if (!m_MaterialPropertyClipboard.empty() && ui.Button("Paste Compatible Property Values"))
+                {
+                    const auto pasted = document.PasteProperties(m_MaterialPropertyClipboard);
+                    propertyAction = pasted != 0;
+                    m_Controller.SetInspectorAssetStatus(std::to_string(pasted) +
+                                                         " compatible property value(s) changed.");
+                }
+                if (!m_MaterialPropertyClipboard.empty())
+                    if (auto crossShader = ui.BeginTreeNode("Paste Across Shaders", false); crossShader)
+                    {
+                        ui.TextWrapped(
+                            "Match shader property code names instead of IDs. Only compatible values are pasted.");
+                        if (ui.Button("Paste Matching Property Names"))
+                        {
+                            const auto pasted = document.PastePropertiesByName(m_MaterialPropertyClipboard);
+                            propertyAction = pasted != 0;
+                            m_Controller.SetInspectorAssetStatus(std::to_string(pasted) +
+                                                                 " compatible named property value(s) changed.");
+                        }
+                    }
+                if (auto overrides = ui.BeginTreeNode("Property Overrides", false); overrides)
+                {
+                    ui.TextWrapped("Reset an individual override to its shader default.");
+                    for (const auto& property : document.Properties())
+                    {
+                        const bool overridden = document.Definition().Properties.contains(property.Name);
+                        const auto label = (property.DisplayName.empty() ? property.Name : property.DisplayName);
+                        ui.TextWrapped(label + (overridden ? " (overridden)" : " (shader default)"));
+                        if (overridden && ui.Button("Reset###reset-material-" +
+                                                    (property.Id ? property.Id.ToString() : property.Name)))
+                            propertyAction = document.ResetProperty(property.Name) || propertyAction;
+                    }
+                }
+            }
+            changed = propertyAction || changed;
+            const bool resetProperties = document.HasResolvedShader() && ui.Button("Reset Shader Properties");
+            if (resetProperties)
+                changed = document.ResetProperties() || changed;
+            bool cleanedInactive = false;
+            if (!document.InactiveProperties().empty())
+            {
+                ui.Separator();
+                ui.Text("INACTIVE OVERRIDES");
+                ui.TextWrapped(
+                    "These saved values cannot be used by the selected shader. They are retained for recovery.");
+                for (const auto& [name, value] : document.InactiveProperties())
+                {
+                    (void)value;
+                    ui.Text(name);
+                }
+                if (ui.Button("Remove Inactive Overrides"))
+                    cleanedInactive = document.RemoveInactiveProperties();
+                changed = cleanedInactive || changed;
             }
             if (changed)
             {
                 document.CaptureDraft();
                 if (assets)
-                    (void)assets->PublishDevelopmentAsset(
-                        record->Id, Keire::CreateRef<Keire::MaterialAsset>(document.Definition()));
+                {
+                    auto runtime = record->Id;
+                    if (record->Type != Keire::MaterialAsset::StaticType())
+                    {
+                        const auto generated = std::ranges::find_if(
+                            record->SubAssets, [&](const Keire::AssetId id)
+                            { return assets->TryGetType(id) == Keire::MaterialAsset::StaticType(); });
+                        runtime = generated == record->SubAssets.end() ? Keire::AssetId{} : *generated;
+                    }
+                    if (runtime && document.HasResolvedShader())
+                        (void)assets->PublishDevelopmentAsset(
+                            runtime, Keire::CreateRef<Keire::MaterialAsset>(document.Definition()));
+                }
                 m_Controller.SetInspectorAssetStatus("Previewing material changes live.");
             }
-            if (editor.EditBoundary())
+            if (editor.EditBoundary() || resetProperties || shaderChanged || keywordChanged || cleanedInactive ||
+                propertyAction)
                 m_Controller.CommitInspectorMaterial();
-            ui.TextColored(theme.MutedText,
-                           "Names, ranges, categories, texture semantics, and defaults come from the shader.");
+            ui.TextWrapped("Names, ranges, categories, texture semantics, and defaults come from the shader.");
         }
         catch (const std::exception& error)
         {
             ui.TextColored(theme.Error, std::string("Material editor unavailable: ") + error.what());
         }
-        ui.TextColored(theme.MutedText, "Invalid shaders resolve to the error material at runtime.");
         if (ui.Button("Reimport Material"))
         {
             m_Controller.CommitInspectorMaterial();
             m_Controller.ImportInspectorAssets();
         }
         if (!assetStatus.empty())
-            ui.TextColored(theme.MutedText, assetStatus);
+            ui.TextWrapped(assetStatus);
     }
     ui.Separator();
-    const auto fileAction = DrawAssetInspectorFileActions(ui, m_AssetName);
+    const bool sharedShader = Keire::IsSharedShaderPath(record->RelativePath);
+    auto fileAction = AssetInspectorFileAction::None;
+    if (sharedShader)
+    {
+        ui.TextWrapped("Shared shader sources are read-only and pinned to this project's library version.");
+        if (ui.Button("Copy to Project"))
+            fileAction = AssetInspectorFileAction::Duplicate;
+    }
+    else
+        fileAction = DrawAssetInspectorFileActions(ui, m_AssetName);
     if (fileAction == AssetInspectorFileAction::Rename)
     {
         try
@@ -978,12 +1355,13 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             const auto extension = record->RelativePath.extension().string();
             auto copyName = stem;
             copyName.append(" Copy").append(extension);
-            auto destination = record->RelativePath.parent_path() / Keire::Detail::PathFromUtf8(copyName);
+            const auto copyFolder = sharedShader ? std::filesystem::path{} : record->RelativePath.parent_path();
+            auto destination = copyFolder / Keire::Detail::PathFromUtf8(copyName);
             for (std::size_t copy = 2; database->Find(destination); ++copy)
             {
                 copyName = stem;
                 copyName.append(" Copy ").append(std::to_string(copy)).append(extension);
-                destination = record->RelativePath.parent_path() / Keire::Detail::PathFromUtf8(copyName);
+                destination = copyFolder / Keire::Detail::PathFromUtf8(copyName);
             }
             m_Controller.DuplicateInspectorAsset(record->Id, destination);
             m_Controller.SetInspectorAssetStatus("Duplicating asset in the isolated asset worker.");

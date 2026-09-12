@@ -87,6 +87,7 @@ namespace Keire
         Ref<WindowSystem> Windowing;
         Ref<Window> PrimaryWindow;
         Ref<RenderSystem> Renderer;
+        Ref<ComputeDevice> ComputeService;
         EventSubscription LayerListener;
         std::unique_ptr<LayerStack> LayerSystem;
         std::unique_ptr<UiSystem> UserInterface;
@@ -522,6 +523,8 @@ namespace Keire
                         }
                         {
                             ProfileScope present(m_Impl->ProfilerService, ProfileCategory::Rendering, "Present");
+                            if (m_Impl->ComputeService)
+                                m_Impl->ComputeService->WaitIdle();
                             m_Impl->UserInterface->EndFrame();
                             uiFrame = false;
                         }
@@ -533,6 +536,8 @@ namespace Keire
                     if (renderFrame)
                     {
                         ProfileScope present(m_Impl->ProfilerService, ProfileCategory::Rendering, "Present");
+                        if (m_Impl->ComputeService)
+                            m_Impl->ComputeService->WaitIdle();
                         RenderSystemInternalAccess::EndFrame(*m_Impl->Renderer, nullptr);
                         renderFrame = false;
                     }
@@ -1024,6 +1029,26 @@ namespace Keire
 
     Ref<RenderSystem> Application::Renderer() const noexcept { return m_Impl->Renderer; }
 
+    Ref<ComputeDevice> Application::Compute()
+    {
+        RequireOwnerThread("Compute");
+        if (m_Impl->RuntimeState != Impl::State::Running || !m_Impl->Renderer ||
+            m_Impl->Renderer->Mode() != RenderMode::Rendered || !m_Impl->Renderer->IsOpen() ||
+            m_Impl->Renderer->DeviceState() != RenderDeviceState::Running)
+            throw std::logic_error("Application compute requires an active rendered device.");
+        if (!m_Impl->ComputeService)
+        {
+            const auto backend = m_Impl->Renderer->DeviceIdentity().Backend;
+            const auto target = backend == "direct3d12" ? ProgramBackend::D3D12
+                                : backend == "vulkan"   ? ProgramBackend::Vulkan
+                                : backend == "metal"
+                                    ? ProgramBackend::Metal
+                                    : throw std::runtime_error("Unsupported application compute backend.");
+            m_Impl->ComputeService = CreateRef<ComputeDevice>(target, m_Impl->Specification.Render.EnableGpuValidation);
+        }
+        return m_Impl->ComputeService;
+    }
+
     Ref<UndoService> Application::Undo() const noexcept { return m_Impl->UndoHistory; }
 
     const ApplicationSpecification& Application::Specification() const noexcept { return m_Impl->Specification; }
@@ -1144,6 +1169,18 @@ namespace Keire
         {
             m_Impl->ReplayService->Close();
             m_Impl->ReplayService.Reset();
+        }
+
+        if (m_Impl->ComputeService)
+        {
+            try
+            {
+                m_Impl->ComputeService->Shutdown();
+            }
+            catch (...)
+            {
+            }
+            m_Impl->ComputeService.Reset();
         }
 
         if (m_Impl->Renderer)

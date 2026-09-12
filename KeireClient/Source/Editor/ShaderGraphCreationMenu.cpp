@@ -14,20 +14,19 @@ namespace KeireEditor
                 return Keire::ShaderGraphTemplate::Vfx;
             if (ui.MenuItem("Custom Graphics"))
                 return Keire::ShaderGraphTemplate::CustomGraphics;
-            if (ui.MenuItem("Compute"))
-                return Keire::ShaderGraphTemplate::Compute;
+            (void)ui.MenuItem("Compute (not supported)", false, false);
             ui.Separator();
-            if (ui.MenuItem("Legacy Surface / Lit"))
+            if (ui.MenuItem("Surface / Lit"))
                 return Keire::ShaderGraphTemplate::Lit;
-            if (ui.MenuItem("Legacy Surface / Unlit"))
+            if (ui.MenuItem("Surface / Unlit"))
                 return Keire::ShaderGraphTemplate::Unlit;
-            if (ui.MenuItem("Legacy Surface / Transparent"))
+            if (ui.MenuItem("Surface / Transparent"))
                 return Keire::ShaderGraphTemplate::Transparent;
-            if (ui.MenuItem("Legacy Surface / Decal"))
+            if (ui.MenuItem("Surface / Decal"))
                 return Keire::ShaderGraphTemplate::Decal;
-            if (ui.MenuItem("Legacy Surface / Hair"))
+            if (ui.MenuItem("Surface / Hair"))
                 return Keire::ShaderGraphTemplate::Hair;
-            if (ui.MenuItem("Legacy Surface / Eye"))
+            if (ui.MenuItem("Surface / Eye"))
                 return Keire::ShaderGraphTemplate::Eye;
         }
         return std::nullopt;

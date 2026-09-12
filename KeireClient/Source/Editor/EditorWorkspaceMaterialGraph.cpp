@@ -1,5 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
+#include "KeireClient/Editor/MaterialDocument.h"
+
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetOperationService.h"
@@ -189,9 +191,9 @@ Keire::AssetId EditorWorkspaceLayer::ResolveMaterialGraphShader(const Keire::Mat
 {
     if (!m_AssetDatabase || !shader.Asset)
         return {};
-    if (shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph)
-        return shader.Asset;
     const auto record = m_AssetDatabase->Find(shader.Asset);
+    if (shader.Kind != Keire::MaterialShaderSourceKind::ShaderGraph)
+        return record && record->Type == Keire::ShaderAsset::StaticType() ? shader.Asset : Keire::AssetId{};
     if (!record || record->Type != Keire::ShaderGraphAsset::StaticType())
         return {};
     try
@@ -279,6 +281,14 @@ void EditorWorkspaceLayer::OpenMaterialGraph(const Keire::AssetId asset)
     if (!record || record->Type != Keire::MaterialGraphAsset::StaticType() ||
         !KeireEditor::IsMaterialGraphSourcePath(record->RelativePath))
         throw std::invalid_argument("Only Material assets can be opened in the Material editor.");
+    const auto& materialSpecification = m_AssetDatabase->Specification();
+    const auto materialSource =
+        materialSpecification.ProjectRoot / materialSpecification.SourceDirectory / record->RelativePath;
+    if (KeireEditor::MaterialDocument::IsPropertySource(ReadBytes(materialSource)))
+    {
+        OpenAssetBrowserMaterial(asset);
+        return;
+    }
     if (m_MaterialGraphDocument->Dirty() && m_MaterialGraphDocument->Asset() != asset)
         throw std::runtime_error("Save or discard the current Material Graph before opening another one.");
     m_SelectedAsset = asset;

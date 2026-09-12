@@ -49,6 +49,7 @@ namespace Keire::Detail
         [[nodiscard]] Entity InstantiatePrefab(AssetId prefab, SceneDefinition definition, EntityId parent,
                                                Vector3 position, Quaternion rotation, bool active);
         [[nodiscard]] bool Destroy(EntityId id);
+        [[nodiscard]] bool Destroy(EntityId id, float delaySeconds);
         [[nodiscard]] std::vector<Entity> Query(ComponentTypeId type) const;
         [[nodiscard]] std::vector<Entity> QueryName(std::string_view name) const;
         [[nodiscard]] std::vector<Entity> QueryTag(std::string_view tag) const;

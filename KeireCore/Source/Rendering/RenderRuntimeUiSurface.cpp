@@ -93,7 +93,9 @@ namespace Keire::RenderBackend
                 continue;
             SDL_SetGPUScissor(pass, &scissor);
             const auto texture = RuntimeUiTextureBinding(batch.Asset);
-            SDL_BindGPUFragmentSamplers(pass, 0, &texture, 1);
+            if (!BindRuntimeUiMaterial(commands, pass, batch.Material, RuntimeUiCameraOverlayPipeline, texture, false,
+                                       false, SDL_GPU_SAMPLECOUNT_1, ColorFormat))
+                continue;
             SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
             ++Statistics.DrawCalls;
             Statistics.Triangles += batch.VertexCount / 3U;

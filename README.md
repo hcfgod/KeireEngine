@@ -5,6 +5,35 @@
 
 **Build worlds. Keep control.**
 
+UI and fullscreen Shader Graphs display a flat image preview with transparency, rather than a lit mesh.
+See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current scope.
+Shader Graph focus selects the graph's undo history. Edit output values through the expanded **Input Defaults**.
+Newly opened graphs frame their nodes, and narrow docks wrap authoring controls. Creating or revealing an asset clears
+the Project search so the selected asset remains visible.
+
+Property-only materials retain incompatible shader overrides in the Inspector's **Inactive Overrides** section.
+Restore the matching shader to recover them, or use **Remove Inactive Overrides** for explicit, undoable cleanup.
+Material variants expose a searchable Parent field even when their existing parent is missing. Parent changes reject
+inheritance cycles before saving; property, parent, keyword, and reset edits participate in asset undo/redo.
+Expand **Property Inheritance** to keep individual variant values or clear them back to the parent. **Inherit Surface
+Settings** resets the surface override separately. **Inactive Property Overrides** lists retained incompatible or
+superseded values and provides explicit, undoable cleanup.
+To undo an asset edit after stopping Play, focus its Inspector; asset history remains separate from scene history.
+Ordinary material properties are grouped by shader category. **Property Overrides** offers individual resets, and
+**Shader Keywords** selects exposed graph variants, with per-keyword shader defaults and **Reset Shader Keywords**.
+Selections wait for imported variants to load while retaining the current preview; **Cancel Keyword Selection**
+discards a pending choice. Applied selections participate in material undo/redo.
+**Copy Property Values** / **Paste Compatible Property Values** transfer values by stable identity (or legacy name),
+skipping missing or incompatible declarations. Reset preserves incompatible history for explicit cleanup.
+Variants share this clipboard: copy includes inherited values, and paste creates explicit compatible overrides in
+one undo action without changing the parent, keywords, or surface settings.
+For different shader interfaces, expand **Paste Across Shaders** and use **Paste Matching Property Names** to match
+code symbols explicitly. It retains destination property IDs and skips incompatible or missing declarations.
+Shader descriptions appear as property tooltips, and graph/code color properties can opt into HDR controls.
+See [Shaders and materials](Docs/ShadersAndMaterials.md) for current authoring behavior and remaining revamp work.
+The editor Console's `Asset Timing` entries separate queue wait from execution for asset creation, import, and other
+worker operations; see [timing scope](Docs/AssetPipeline.md#editor-operation-timings) when comparing loading times.
+
 Kéire is an open-source, cross-platform C++20 game engine built around explicit ownership, deterministic behavior, and
 a project-first authoring workflow. The Kéire Hub manages projects and installed editor versions; the editor provides
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
@@ -24,6 +53,27 @@ activation; macOS downloads remain gated pending platform, signing, and notariza
 [Changelog](https://keireengine.duckdns.org/changelog/) ·
 [Roadmap](https://keireengine.duckdns.org/roadmap/) ·
 [Report an issue](https://github.com/hcfgod/KeireEngine/issues/new/choose)
+
+Editor Console controls stay fixed while log entries scroll. Drag prefabs or meshes into the Scene viewport to place
+them beneath the pointer; prefab placement is retained when the source is reloaded. C# scripts can schedule
+`Destroy(entity, 5f)` and log multiple values with `Debug.Log("Values: {0}, {1}", first, second)`.
+See [scripting lifecycle](Docs/Scripting/BehavioursAndLifecycle.md) and
+[ScriptableObject authoring](Docs/Scripting/AssetsAndScriptableObjects.md) for the contracts.
+
+Explicit formatted logging is available through `Debug.LogFormat`, `Debug.LogWarningFormat`,
+`Debug.LogErrorFormat`, and every `Log` severity. See [logging](Docs/Scripting/AsyncReloadAndDiagnostics.md#logging).
+The [material and shader replacement audit](Docs/MaterialShaderReplacement.md) tracks the requested Inspector-based
+workflow and migration requirements; the full replacement is not yet implemented.
+Use **Create > Material** to create a property-only material using **Kéire/Lit**.
+The first creation installs shared graphics shaders and pins their source hashes and version in
+`ProjectSettings/SharedShaders.lock`; opening a project does not install or upgrade them. **Material from Shader**
+uses a selected surface Shader Graph or code shader. Both open the Inspector, inherit defaults, and store only
+overrides and surface settings. Shared sources are read-only; **Copy to Project** creates an editable shader with a
+new asset ID. Double-click reopens the Inspector. Properties retain their values across symbol renames; incompatible
+values remain inactive until restored or explicitly removed. Nested material variants can override shader defaults.
+The migration API provides a dry-run report and reviewed apply, retaining recovery backups under
+`Library/MaterialShaderUpgrade`. Interrupted publication is recovered on exclusive project open; the full editor
+upgrade workflow and catalog publication gate remain pending.
 
 ## Product Model
 
@@ -325,6 +375,17 @@ Start with [C# Scripting](Docs/Scripting/README.md), then use the
 [Managed API Index](Docs/Scripting/ApiIndex.md) as the compact API map and the
 [Managed API Capability Matrix](Docs/Scripting/ManagedApiMatrix.md) for production status and planned parity work.
 The managed API is intentionally distinct from the internal native-hosting layer.
+
+## Compute integration status
+
+The in-progress compute API exposes device-owned buffers, compiled pipelines, direct/indirect dispatch, completion
+tokens, and synchronous readback through `Keire::ComputeDevice`. `Application::Compute()` supplies an application-owned
+device while rendering is active. Calls and resource disposal belong to the device's creation thread. C# wrappers
+implement `IDisposable`; hosts register compiled programs through `ScriptSystem.RegisterComputeProgram`.
+
+This implementation uses an independent GPU device and does not share scene-rendering resources. Texture bindings,
+asynchronous readback, full render dependency scheduling, and cross-platform acceptance remain incomplete. See
+[material/shader progress](Docs/MaterialShaderReplacement.md) for the current implementation and evidence.
 
 ## Packaging and Releases
 

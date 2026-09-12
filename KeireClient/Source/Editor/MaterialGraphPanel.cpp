@@ -1037,7 +1037,7 @@ namespace KeireEditor
         if (auto* color = std::get_if<Keire::Color>(&value))
         {
             Keire::UiColor edited{color->Red, color->Green, color->Blue, color->Alpha};
-            if (!ui.ColorEdit(label, edited))
+            if (!ui.ColorEditHdr(label, edited))
                 return false;
             *color = {edited.Red, edited.Green, edited.Blue, edited.Alpha};
             return true;
@@ -1074,7 +1074,7 @@ namespace KeireEditor
         if (auto* color = std::get_if<Keire::Color>(&value))
         {
             Keire::UiColor edited{color->Red, color->Green, color->Blue, color->Alpha};
-            if (!ui.ColorEdit(label, edited))
+            if (!ui.ColorEditHdr(label, edited))
                 return false;
             *color = {edited.Red, edited.Green, edited.Blue, edited.Alpha};
             return true;
@@ -1174,6 +1174,7 @@ namespace KeireEditor
                         const auto oldSymbol = expression.Symbol;
                         const auto kind = expression.Kind;
                         Keire::ShaderGraphParameterMetadata metadata;
+                        metadata.HighDynamicRange = expression.ParameterMetadata.HighDynamicRange;
                         metadata.Description = m_InspectorDescription;
                         metadata.Category = m_InspectorCategory;
                         metadata.SortPriority = static_cast<std::int32_t>(std::round(m_InspectorSortPriority));

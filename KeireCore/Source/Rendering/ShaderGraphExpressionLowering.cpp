@@ -34,6 +34,8 @@ namespace Keire::Detail
         property.Name = node.Symbol;
         property.DisplayName = node.Name.empty() ? node.Symbol : node.Name;
         property.Category = node.ParameterMetadata.Category.empty() ? "Shader Graph" : node.ParameterMetadata.Category;
+        property.Description = node.ParameterMetadata.Description;
+        property.HighDynamicRange = node.ParameterMetadata.HighDynamicRange;
         property.Minimum = node.ParameterMetadata.Minimum;
         property.Maximum = node.ParameterMetadata.Maximum;
         property.Step = node.ParameterMetadata.Step;

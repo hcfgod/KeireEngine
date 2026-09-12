@@ -16,6 +16,7 @@ namespace Keire::RenderBackend
         RuntimeUiRect ClipRect;
         std::uint32_t FirstVertex = 0;
         std::uint32_t VertexCount = 0;
+        AssetId Material;
     };
 
     struct RuntimeUiGeometry final

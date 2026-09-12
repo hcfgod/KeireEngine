@@ -7,6 +7,7 @@
 #include "KeireInternal/UiLayoutInternal.h"
 #include "KeireInternal/UiRenderBackendInternal.h"
 #include "KeireInternal/UiThemeInternal.h"
+#include "KeireInternal/UiWindowFlags.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include "Keire/Log.h"
@@ -70,23 +71,6 @@ namespace Keire
             const auto valid = [](const float component)
             { return std::isfinite(component) && component >= 0.0F && component <= 1.0F; };
             return valid(color.Red) && valid(color.Green) && valid(color.Blue) && valid(color.Alpha);
-        }
-        [[nodiscard]] ImGuiWindowFlags ToImGuiWindowFlags(const UiWindowOptions options) noexcept
-        {
-            ImGuiWindowFlags flags = ImGuiWindowFlags_None;
-            if (options.MenuBar)
-                flags |= ImGuiWindowFlags_MenuBar;
-            if (options.NoTitleBar)
-                flags |= ImGuiWindowFlags_NoTitleBar;
-            if (options.NoResize)
-                flags |= ImGuiWindowFlags_NoResize;
-            if (options.NoMove)
-                flags |= ImGuiWindowFlags_NoMove;
-            if (options.NoCollapse)
-                flags |= ImGuiWindowFlags_NoCollapse;
-            if (options.NoSavedSettings)
-                flags |= ImGuiWindowFlags_NoSavedSettings;
-            return flags;
         }
     } // namespace
 
@@ -213,7 +197,7 @@ namespace Keire
     {
         m_Impl->RequireActive("BeginWindow");
         const std::string safeTitle(title);
-        const bool visible = ImGui::Begin(safeTitle.c_str(), open, ToImGuiWindowFlags(options));
+        const bool visible = ImGui::Begin(safeTitle.c_str(), open, Detail::ToImGuiWindowFlags(options));
         m_Impl->OpenScope(UiScope::Kind::Window);
         return UiWindowScope(*this, visible);
     }
@@ -344,7 +328,7 @@ namespace Keire
     {
         m_Impl->RequireActive("BeginPopupModal");
         const std::string safeId(id);
-        auto flags = ToImGuiWindowFlags(options);
+        auto flags = Detail::ToImGuiWindowFlags(options);
         if (autoResize)
             flags |= ImGuiWindowFlags_AlwaysAutoResize;
         const bool visible = ImGui::BeginPopupModal(safeId.c_str(), open, flags);
@@ -502,7 +486,7 @@ namespace Keire
         bool* visible = panel.VisibilityAddress();
         const bool previous = *visible;
         const bool submitted = ImGui::Begin(panel.SubmittedName().c_str(), visible,
-                                            ToImGuiWindowFlags(effectiveOptions) |
+                                            Detail::ToImGuiWindowFlags(effectiveOptions) |
                                                 (maximized ? ImGuiWindowFlags_NoDocking : ImGuiWindowFlags_None));
         panel.NotifyWindowSubmitted();
         panel.NotifyVisibilityChanged(previous);
@@ -823,7 +807,8 @@ namespace Keire
         const float available = std::max(ImGui::GetContentRegionAvail().x, 1.0F);
         const bool compact = available < 300.0F;
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(safeLabel.c_str());
+        const auto visibleLabel = label.substr(0, label.find("##"));
+        ImGui::TextUnformatted(visibleLabel.data(), visibleLabel.data() + visibleLabel.size());
         if (!compact)
         {
             ImGui::SameLine();

@@ -15,6 +15,9 @@ namespace KeireEditor
 {
     class IAssetBrowserController;
 
+    /// Consume only after the requested asset's widget has been submitted, even if it is offscreen.
+    [[nodiscard]] bool ConsumeAssetBrowserReveal(Keire::AssetId& pending, Keire::AssetId submitted) noexcept;
+
     enum class AssetBrowserClipboardMode : std::uint8_t
     {
         Empty,
@@ -102,6 +105,9 @@ namespace KeireEditor
     };
 
     [[nodiscard]] std::string DisplayName(const std::filesystem::path& path);
+    /// Explicit reveal navigates to the asset and removes filters that could hide it.
+    void PrepareAssetBrowserReveal(const Keire::AssetSourceRecord& record, std::filesystem::path& folder,
+                                   std::string& search);
     [[nodiscard]] std::string ElideAssetDisplayName(std::string_view name, float maximumWidth,
                                                     const std::function<float(std::string_view)>& measureText);
     [[nodiscard]] bool SameOrChild(const std::filesystem::path& parent, const std::filesystem::path& candidate);

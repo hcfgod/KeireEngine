@@ -1,3 +1,4 @@
+#include "Keire/Project/SharedShaderLibrary.h"
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
 namespace Keire
@@ -181,6 +182,9 @@ namespace Keire
                     item.Settings = item.Importer->SuggestImportSettings(item.Source, item.Settings);
                 item.Settings = m_Impl->NormalizeSettings(*item.Importer, item.Settings);
                 auto destination = item.Destination.lexically_normal();
+                if (IsSharedShaderPath(destination))
+                    throw std::invalid_argument(
+                        "External imports cannot overwrite or extend the shared shader library.");
                 auto existing = Find(destination);
                 if (existing && item.Conflict == ExternalAssetConflictPolicy::Skip)
                     continue;
@@ -327,16 +331,19 @@ namespace Keire
                 ReportOperationProgress(progress, AssetOperationPhase::Publishing, index + 1, planned.size(),
                                         item.Destination);
             }
-            (void)RefreshUnlocked();
             std::vector<AssetId> importedAssets;
             importedAssets.reserve(planned.size());
             for (auto& item : planned)
             {
-                if (const auto record = Find(item.Id))
-                {
-                    m_Impl->StoreValidatedImport(*record, std::move(item.Validated));
-                    importedAssets.push_back(item.Id);
-                }
+                auto record = ReadMetadata(*m_Impl->SourceFiles, item.Destination,
+                                           m_Impl->Specification.MaximumSourceBytes, true, item.Importer);
+                if (record.Id != item.Id)
+                    throw std::logic_error("Published external import changed its stable asset identity.");
+                const auto source = m_Impl->SourceRoot / item.Destination;
+                const auto metadata = Detail::PathWithSuffix(source, ".keiremeta");
+                m_Impl->PublishRecord(record, m_Impl->ReadSignature(source, metadata));
+                m_Impl->StoreValidatedImport(record, std::move(item.Validated));
+                importedAssets.push_back(item.Id);
             }
             if (importedAssets.size() != planned.size())
                 throw std::logic_error("Published external imports must remain present in the source database.");

@@ -263,11 +263,11 @@ namespace KeireEditor
                 }
             }
             ui.SameLine();
-            const bool reveal = ui.IconButton("Reveal", Keire::UiIcon::Search, false, {24.0F, 0.0F});
-            if (value && reveal && options.Reveal)
-                options.Reveal(value);
+            if (auto disabled = ui.BeginDisabled(!value || !options.Reveal); disabled)
+                if (ui.IconButton("Reveal", Keire::UiIcon::Search, false, {24.0F, 0.0F}) && value && options.Reveal)
+                    options.Reveal(value);
             ui.SameLine();
-            ui.Text(options.Label);
+            ui.Text(options.Label.substr(0, options.Label.find("##")));
         }
         return changed;
     }

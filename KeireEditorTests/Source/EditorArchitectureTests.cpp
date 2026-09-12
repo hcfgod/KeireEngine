@@ -1939,8 +1939,8 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
       public:
         void OpenDroppedScene(const Keire::AssetId asset) override { Scene = asset; }
         void OpenDroppedInputActions(const Keire::AssetId asset) override { Input = asset; }
-        void InstantiateDroppedPrefab(const Keire::AssetId asset) override { Prefab = asset; }
-        void CreateDroppedMeshEntity(const Keire::AssetId asset) override { Mesh = asset; }
+        void InstantiateDroppedPrefab(const Keire::AssetId asset, Keire::Vector3) override { Prefab = asset; }
+        void CreateDroppedMeshEntity(const Keire::AssetId asset, Keire::Vector3) override { Mesh = asset; }
         void AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset) override
         {
             Target = entity;
@@ -1957,37 +1957,38 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
     const auto asset = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000040");
     const auto target = Keire::EntityId::Parse("ed170000-0000-4000-8000-000000000041");
     KeireEditor::ViewportAssetDropRouter router;
-    router.Route(Keire::SceneAsset::StaticType(), asset, {}, commands);
+    router.Route(Keire::SceneAsset::StaticType(), asset, {}, {}, commands);
     CHECK(commands.Scene == asset);
-    router.Route(Keire::InputActionAsset::StaticType(), asset, {}, commands);
+    router.Route(Keire::InputActionAsset::StaticType(), asset, {}, {}, commands);
     CHECK(commands.Input == asset);
-    router.Route(Keire::PrefabAsset::StaticType(), asset, {}, commands);
+    router.Route(Keire::PrefabAsset::StaticType(), asset, {}, {}, commands);
     CHECK(commands.Prefab == asset);
-    router.Route(Keire::MeshAsset::StaticType(), asset, {}, commands);
+    router.Route(Keire::MeshAsset::StaticType(), asset, {}, {}, commands);
     CHECK(commands.Mesh == asset);
-    router.Route(Keire::MaterialAsset::StaticType(), asset, target, commands);
+    router.Route(Keire::MaterialAsset::StaticType(), asset, target, {}, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
     commands.Material = {};
-    router.Route(Keire::MaterialGraphAsset::StaticType(), asset, target, commands);
+    router.Route(Keire::MaterialGraphAsset::StaticType(), asset, target, {}, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
     commands.Material = {};
-    router.Route(Keire::MaterialInstanceAsset::StaticType(), asset, target, commands);
+    router.Route(Keire::MaterialInstanceAsset::StaticType(), asset, target, {}, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
     commands.Material = {};
-    router.Route(Keire::ShaderGraphInstanceAsset::StaticType(), asset, target, commands);
+    router.Route(Keire::ShaderGraphInstanceAsset::StaticType(), asset, target, {}, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);
-    CHECK_THROWS_AS(router.Route(Keire::MaterialAsset::StaticType(), asset, {}, commands), std::invalid_argument);
-    CHECK_THROWS_AS(router.Route(Keire::MaterialGraphAsset::StaticType(), asset, {}, commands), std::invalid_argument);
-    CHECK_THROWS_AS(router.Route(Keire::MaterialInstanceAsset::StaticType(), asset, {}, commands),
+    CHECK_THROWS_AS(router.Route(Keire::MaterialAsset::StaticType(), asset, {}, {}, commands), std::invalid_argument);
+    CHECK_THROWS_AS(router.Route(Keire::MaterialGraphAsset::StaticType(), asset, {}, {}, commands),
                     std::invalid_argument);
-    CHECK_THROWS_AS(router.Route(Keire::ShaderGraphAsset::StaticType(), asset, target, commands),
+    CHECK_THROWS_AS(router.Route(Keire::MaterialInstanceAsset::StaticType(), asset, {}, {}, commands),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(router.Route(Keire::ShaderGraphAsset::StaticType(), asset, target, {}, commands),
                     std::invalid_argument);
     CHECK_THROWS_AS(
-        router.Route(Keire::AssetTypeId::Parse("ed170000-0000-4000-8000-000000000042"), asset, {}, commands),
+        router.Route(Keire::AssetTypeId::Parse("ed170000-0000-4000-8000-000000000042"), asset, {}, {}, commands),
         std::invalid_argument);
 }
 

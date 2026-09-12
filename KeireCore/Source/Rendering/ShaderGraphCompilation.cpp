@@ -21,9 +21,6 @@ namespace Keire
             ValidateShaderGraph(definition);
             if (definition.Purpose != ShaderGraphPurpose::Shader)
                 throw std::invalid_argument("Reusable graph bodies must be called from a Shader or Material Graph.");
-            if (definition.Target.Target == ShaderGraphTarget::Compute)
-                throw std::invalid_argument(
-                    "Compute Shader Graph code generation requires the compute-program artifact ABI.");
             const auto expanded = ShaderGraphReferencedAssets(definition).empty()
                                       ? definition
                                       : ExpandShaderGraphFunctions(definition, options.ResolveFunction);

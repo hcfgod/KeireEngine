@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -15,6 +16,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -45,6 +47,153 @@ namespace
     }
 
 } // namespace
+
+TEST_CASE("Shader Graph first save compiles executable variants before reusing unchanged source")
+{
+    std::vector<std::size_t> publications;
+    KeireEditor::ShaderGraphDocument document(
+        {.LiveApply = [&publications](Keire::AssetId, const Keire::ShaderGraphDefinition&,
+                                      const Keire::ShaderGraphCompilation&,
+                                      const std::span<const Keire::Ref<Keire::ShaderAsset>> shaders)
+         { publications.push_back(shaders.size()); },
+         .Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    document.Create(Keire::AssetId::Generate());
+    REQUIRE(publications == std::vector<std::size_t>{0});
+    document.Save();
+    REQUIRE(publications == std::vector<std::size_t>{0, 1});
+    document.Save();
+    CHECK(publications == std::vector<std::size_t>{0, 1, 0});
+    document.ApplyLiveRevision();
+    CHECK(publications.back() == 1);
+}
+
+TEST_CASE("Shader Graph CPU regeneration invalidates executable variants when the manifest changes")
+{
+    std::vector<std::size_t> publications;
+    KeireEditor::ShaderGraphDocument document(
+        {.LiveApply = [&](Keire::AssetId, const Keire::ShaderGraphDefinition&, const Keire::ShaderGraphCompilation&,
+                          const std::span<const Keire::Ref<Keire::ShaderAsset>> shaders)
+         { publications.push_back(shaders.size()); },
+         .Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    document.Create(Keire::AssetId::Generate());
+    document.Save();
+    REQUIRE(publications.back() == 1);
+    const auto hlsl = document.LastGoodCompilation()->Variants.front().Hlsl;
+    const auto manifest = document.LastGoodCompilation()->Variants.front().Manifest;
+    document.SetCompileOptions({.GeneratedSource = "Assets/Generated/Relocated.hlsl"});
+    CHECK(document.LastGoodCompilation()->Variants.front().Hlsl == hlsl);
+    CHECK(document.LastGoodCompilation()->Variants.front().Manifest != manifest);
+    document.ApplyLiveRevision();
+    CHECK(publications.back() == 0);
+    document.Save();
+    CHECK(publications.back() == 1);
+    document.Save();
+    CHECK(publications.back() == 0);
+}
+
+TEST_CASE("Shader Graph superseding edits cancel backend work after graph generation")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto custom = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Custom, Keire::ShaderGraphValueType::Color);
+    custom.Include = "Assets/Shaders/Nodes/Cancelled.hlsli";
+    graph.Nodes.push_back(custom);
+    const std::string include = "float4 EvaluateCustomMaterialNode(float4 value) { return value; }\n";
+    std::size_t generationReads = 0;
+    REQUIRE(Keire::CompileShaderGraph(graph, {.ReadInclude =
+                                                  [&](const std::filesystem::path&)
+                                              {
+                                                  ++generationReads;
+                                                  return std::optional(include);
+                                              }})
+                .Succeeded());
+    REQUIRE(generationReads > 0);
+
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool entered = false;
+    bool released = false;
+    std::size_t reads = 0;
+    std::size_t publications = 0;
+    KeireEditor::ShaderGraphDocument document(
+        {.CompileOptions = {.ReadInclude =
+                                [&](const std::filesystem::path&)
+                            {
+                                std::unique_lock lock(mutex);
+                                ++reads;
+                                entered = true;
+                                changed.notify_all();
+                                changed.wait_for(lock, std::chrono::seconds(5), [&] { return released; });
+                                return std::optional(include);
+                            }},
+         .LiveApply = [&](Keire::AssetId, const Keire::ShaderGraphDefinition&, const Keire::ShaderGraphCompilation&,
+                          std::span<const Keire::Ref<Keire::ShaderAsset>>) { ++publications; },
+         .Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    document.Create(Keire::AssetId::Generate());
+    REQUIRE(document.AddNode(custom));
+    document.AdvanceCompilation(0.075);
+    bool workerEntered = false;
+    {
+        std::unique_lock lock(mutex);
+        workerEntered = changed.wait_for(lock, std::chrono::seconds(5), [&] { return entered; });
+    }
+    const bool removed = document.RemoveNode(custom.Id);
+    {
+        std::scoped_lock lock(mutex);
+        released = true;
+    }
+    changed.notify_all();
+    REQUIRE(workerEntered);
+    REQUIRE(removed);
+    DrainCompilation(document);
+    CHECK(document.Publishable());
+    CHECK(publications == 2);
+    CHECK(reads == generationReads);
+    CHECK(document.LastGoodDefinition()->Nodes.size() == 1);
+}
+
+TEST_CASE("Shader Graph save validates changed include bytes while preserving last-good executable variants")
+{
+    std::string include = "float4 EvaluateCustomMaterialNode(float4 value) { return value; }\n";
+    std::size_t persisted = 0;
+    std::vector<std::size_t> publications;
+    KeireEditor::ShaderGraphDocument document(
+        {.CompileOptions = {.ReadInclude = [&](const std::filesystem::path& path) -> std::optional<std::string>
+                            {
+                                if (path.lexically_normal() == "Assets/Shaders/Nodes/Mutable.hlsli")
+                                    return include;
+                                return std::nullopt;
+                            }},
+         .LiveApply = [&](Keire::AssetId, const Keire::ShaderGraphDefinition&, const Keire::ShaderGraphCompilation&,
+                          const std::span<const Keire::Ref<Keire::ShaderAsset>> shaders)
+         { publications.push_back(shaders.size()); },
+         .Persist = [&](Keire::AssetId, std::span<const std::byte>) { ++persisted; }});
+    auto graph = Keire::CreateDefaultShaderGraph();
+    auto custom = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Custom, Keire::ShaderGraphValueType::Color);
+    custom.Include = "Assets/Shaders/Nodes/Mutable.hlsli";
+    graph.Nodes.push_back(custom);
+    document.Create(Keire::AssetId::Generate(), graph);
+    INFO(document.Diagnostic());
+    REQUIRE_NOTHROW(document.Save());
+    REQUIRE(document.Publishable());
+    REQUIRE(publications.back() == 1);
+    const auto successfulPublications = publications.size();
+    const auto lastGoodHlsl = document.LastGoodCompilation()->Variants.front().Hlsl;
+
+    include = "#error Stale_dependency_content\n";
+    CHECK_THROWS_AS(document.Save(), std::logic_error);
+    CHECK_FALSE(document.Publishable());
+    CHECK(persisted == 1);
+    CHECK(publications.size() == successfulPublications);
+    CHECK(document.LastGoodCompilation()->Variants.front().Hlsl == lastGoodHlsl);
+    document.ApplyLiveRevision();
+    CHECK(publications.back() == 1);
+
+    include = "float4 EvaluateCustomMaterialNode(float4 value) { return value * 0.5; }\n";
+    document.Save();
+    CHECK(document.Publishable());
+    CHECK(persisted == 2);
+    CHECK(publications.back() == 1);
+}
 
 TEST_CASE("Shader Graph document preserves reusable function metadata without standalone shader publication")
 {
@@ -429,6 +578,48 @@ TEST_CASE("Shader Graph live apply republishes culling bounds and stable propert
     document.Close();
 }
 
+TEST_CASE("Shader Graph output inputs drive compiled values and context undo stays in the edited document")
+{
+    auto graph = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Fullscreen);
+    const auto baseline = Keire::CompileShaderGraph(graph);
+    REQUIRE(baseline.Succeeded());
+    REQUIRE_FALSE(baseline.Variants.empty());
+    graph.Nodes.front().Value = Keire::Color{1.0F, 0.0F, 0.0F, 1.0F};
+    const auto unusedValue = Keire::CompileShaderGraph(graph);
+    REQUIRE(unusedValue.Succeeded());
+    CHECK(unusedValue.Variants.front().Hlsl == baseline.Variants.front().Hlsl);
+
+    auto service = Keire::CreateRef<Keire::UndoService>();
+    KeireEditor::ShaderGraphDocument other({.Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    other.Create(Keire::AssetId::Generate(), graph, service->CreateContext({.Name = "Other graph"}));
+    REQUIRE(other.Edit("Rename other output", [](auto& definition) { definition.Nodes.front().Name = "Other"; }));
+    const auto otherRevision = other.Definition();
+    KeireEditor::ShaderGraphDocument edited({.Persist = [](Keire::AssetId, std::span<const std::byte>) {}});
+    edited.Create(Keire::AssetId::Generate(), graph, service->CreateContext({.Name = "Focused graph"}));
+    const auto original = edited.Definition();
+    REQUIRE(edited.Edit("Edit output opacity",
+                        [](auto& definition)
+                        {
+                            for (auto& pin : definition.Nodes.front().Pins)
+                                if (pin.Name == "Opacity")
+                                    pin.DefaultValue = 0.5F;
+                        }));
+    const auto changed = edited.Definition();
+    DrainCompilation(edited);
+    REQUIRE(edited.Compilation().Succeeded());
+    CHECK(edited.Compilation().Variants.front().Hlsl != baseline.Variants.front().Hlsl);
+    REQUIRE(edited.UndoContext()->Undo());
+    CHECK(edited.Definition() == original);
+    CHECK(other.Definition() == otherRevision);
+    CHECK(other.UndoContext()->CanUndo());
+    REQUIRE(edited.UndoContext()->Redo());
+    CHECK(edited.Definition() == changed);
+    CHECK(other.Definition() == otherRevision);
+    edited.Close();
+    other.Close();
+    service->Close();
+}
+
 TEST_CASE("Shader Graph live preview renders every built-in shape and custom meshes")
 {
     const std::array properties{
@@ -476,6 +667,39 @@ TEST_CASE("Shader Graph live preview renders every built-in shape and custom mes
     request.Exposure = 1.0F;
     request.CancellationRequested = [] { return true; };
     CHECK_THROWS_AS((void)KeireEditor::RenderShaderGraphPreview(request), std::runtime_error);
+}
+
+TEST_CASE("Shader Graph UI and fullscreen previews cover the image without mesh lighting")
+{
+    for (const auto graphTemplate : {Keire::ShaderGraphTemplate::Ui, Keire::ShaderGraphTemplate::Fullscreen})
+    {
+        auto graph = Keire::CreateShaderGraphTemplate(graphTemplate);
+        for (auto& pin : graph.Nodes.front().Pins)
+            if (pin.Name == "Color")
+                pin.DefaultValue = Keire::Color{1.0F, 0.0F, 0.0F, 1.0F};
+        KeireEditor::ShaderGraphPreviewRequest request{
+            .Output = graph.Output, .Definition = &graph, .Width = 48, .Height = 32};
+        const auto pixels = KeireEditor::RenderShaderGraphPreview(request);
+        REQUIRE(pixels.size() == 48U * 32U * 4U);
+        for (std::size_t offset = 0; offset < pixels.size(); offset += 4)
+        {
+            REQUIRE(pixels[offset] == std::byte{255});
+            REQUIRE(pixels[offset + 1] == std::byte{0});
+            REQUIRE(pixels[offset + 2] == std::byte{0});
+            REQUIRE(pixels[offset + 3] == std::byte{255});
+        }
+        request.Mesh = Keire::ShaderGraphPreviewMesh::Custom;
+        request.RotationDegrees = 170.0F;
+        request.EnvironmentIntensity = 0.0F;
+        CHECK(KeireEditor::RenderShaderGraphPreview(request) == pixels);
+        for (auto& pin : graph.Nodes.front().Pins)
+            if (pin.Name == "Opacity")
+                pin.DefaultValue = 0.0F;
+        CHECK(KeireEditor::RenderShaderGraphPreview(request) != pixels);
+        std::size_t cancellationChecks = 0;
+        request.CancellationRequested = [&] { return ++cancellationChecks > request.Height; };
+        CHECK_THROWS_AS((void)KeireEditor::RenderShaderGraphPreview(request), std::runtime_error);
+    }
 }
 
 TEST_CASE("Shader Graph live preview evaluates procedural nodes instead of property-name approximations")

@@ -24,6 +24,8 @@ namespace KeireEditor
             }
             (void)ui.InputText("Name", CreateNameBuffer, true);
             const bool submitCreate = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+            if (PendingCreateKind == NamedCreateKind::Material)
+                ui.Text("Shader: Kéire/Lit (shared project default)");
             if (PendingCreateKind == NamedCreateKind::MaterialGraph)
                 MaterialGraphCreation.Draw(ui, editor.AssetBrowserRecords(), editor.AssetBrowserTheme());
             const auto records = editor.AssetBrowserRecords();

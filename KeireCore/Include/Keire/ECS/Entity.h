@@ -50,6 +50,8 @@ namespace Keire
         void MoveComponentBefore(const Ref<Component>& component, const Ref<Component>& before = {});
         [[nodiscard]] Entity Clone();
         [[nodiscard]] bool Destroy();
+        // Uses scaled scene update time; repeated requests keep the earliest deadline.
+        [[nodiscard]] bool Destroy(float delaySeconds);
 
         template <std::derived_from<Component> T> [[nodiscard]] Ref<T> AddComponent()
         {

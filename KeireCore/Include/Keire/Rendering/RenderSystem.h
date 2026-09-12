@@ -451,6 +451,8 @@ namespace Keire
         AssetId RenderTexture;
         std::int32_t SortingOrder = 0;
         bool DepthTest = true;
+        /// Optional material whose shader uses the runtime UI vertex ABI. Applies to this submitted subtree.
+        AssetId Material;
     };
 
     struct SceneRenderContribution

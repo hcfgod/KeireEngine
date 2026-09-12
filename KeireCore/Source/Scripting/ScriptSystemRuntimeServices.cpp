@@ -85,6 +85,25 @@ namespace Keire
         }
     }
 
+    std::uint8_t ScriptSystem::Impl::RuntimeDestroyEntityDelayed(const std::uint64_t world, const std::uint64_t high,
+                                                                 const std::uint64_t low,
+                                                                 const float delaySeconds) noexcept
+    {
+        try
+        {
+            if (!CurrentRuntime)
+                return 0;
+            CurrentRuntime->RequireOwner();
+            if (auto entity = ResolveRuntimeEntity(world, high, low))
+                (void)entity.Destroy(delaySeconds);
+            return 1;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
     void ScriptSystem::Impl::RuntimeDestroyEntity(const std::uint64_t world, const std::uint64_t high,
                                                   const std::uint64_t low) noexcept
     {

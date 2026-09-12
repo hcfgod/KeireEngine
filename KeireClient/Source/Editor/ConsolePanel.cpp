@@ -156,7 +156,7 @@ namespace KeireEditor
 
     void ConsolePanel::Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
     {
-        if (auto console = ui.BeginPanel(m_Registration); console)
+        if (auto console = ui.BeginPanel(m_Registration, {.NoScrollbar = true, .NoScrollWithMouse = true}); console)
         {
             const auto countInfo = std::ranges::count_if(m_Messages, [](const Message& message)
                                                          { return message.Level < Keire::LogLevel::Warn; });
@@ -192,7 +192,10 @@ namespace KeireEditor
                 m_PausedSnapshot.clear();
                 m_Selection.Clear();
             }
-            if (m_Messages.empty())
+            auto logRegion = ui.BeginChild("ConsoleLogs");
+            if (!logRegion)
+                return;
+            if (m_Paused ? m_PausedSnapshot.empty() : m_Messages.empty())
             {
                 ui.TextColored(theme.Success, "Ready");
                 return;

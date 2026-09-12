@@ -1,5 +1,14 @@
 # Asset Database And Cook Pipeline
 
+## Editor operation timings
+
+The editor logs each consumed worker completion under `Asset Timing`, identified by operation kind and operation ID.
+`queue_ms` measures time waiting for dispatch. `execution_ms` includes request/payload staging, worker process startup,
+execution, and delay until the editor observes process exit. Success, failure, and cancellation are distinguished;
+cancelled background work is not counted as a successful import. Coalesced requests retain the original queue time.
+These timings stop before editor catalog adoption and thumbnail presentation, and are not GPU timings or complete
+click-to-preview measurements. They are available on `AssetOperationCompletion` for acceptance tooling.
+
 ## Static mesh version 5
 
 `.keiremesh` version 5 records every submesh as TriangleList, LineList, or PointList. Version 4 added a separate UV1
@@ -252,3 +261,27 @@ and the conversion is backend-independent across D3D12, Vulkan, and Metal.
 Before a catalog is published or cooked, material overrides are checked against the referenced shader declarations.
 Unknown names, incompatible value types, out-of-range values, missing/wrong asset types, and incompatible texture
 semantics or color spaces fail without replacing the last-good catalog.
+
+## Measuring editor asset operations
+
+Build `KeireEditorTests` through the project launcher, then opt into its worker benchmark:
+
+```powershell
+./Scripts/project.ps1 build -Generator ninja -Configuration Debug -Toolset msc -Target KeireEditorTests
+./Build/Bin/Debug-windows-x86_64/KeireEditorTests/KeireEditorTests.exe --no-skip --test-case="Asset worker timing benchmark"
+```
+
+The benchmark starts with 200 source assets, warms the catalog, and measures five scene-asset creations plus five
+batches of 20 external source imports through the real isolated worker. It prints median wall-clock milliseconds and
+validates every completion. Compare the same configuration on an idle machine. It is skipped by default; results
+depend on file type, storage, project size, and importer work.
+
+On the same Windows x64 MSVC Debug fixture on September 10, 2026, the before/after medians were:
+
+| Operation | Before | After | Time reduction |
+| --- | ---: | ---: | ---: |
+| Scene asset creation | 1,307 ms | 428 ms | 67% |
+| Import 20 source files | 6,239 ms | 1,387 ms | 78% |
+
+These measurements include worker startup and shutdown after warming the project catalog. They are fixture results,
+not a guarantee for every asset format or cold project scan.

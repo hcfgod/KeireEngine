@@ -130,6 +130,7 @@ namespace Keire::RenderBackend
         RuntimeUiRect ClipRect;
         std::size_t FirstCommand = 0;
         std::size_t CommandCount = 0;
+        AssetId Material;
     };
 
     [[nodiscard]] inline bool IsRuntimeUiDrawable(const RuntimeUiDrawCommand& command) noexcept
@@ -158,12 +159,13 @@ namespace Keire::RenderBackend
             if (!IsRuntimeUiDrawable(command))
                 continue;
             const auto asset = RuntimeUiTextureAsset(command);
-            if (!result.empty() && result.back().Asset == asset && result.back().ClipRect == command.ClipRect)
+            if (!result.empty() && result.back().Asset == asset && result.back().ClipRect == command.ClipRect &&
+                result.back().Material == command.Material)
             {
                 result.back().CommandCount = index + 1U - result.back().FirstCommand;
                 continue;
             }
-            result.push_back({asset, command.ClipRect, index, 1U});
+            result.push_back({asset, command.ClipRect, index, 1U, command.Material});
         }
         return result;
     }

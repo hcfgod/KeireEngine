@@ -5,9 +5,11 @@
 #include "KeireInternal/Assets/AssetWorkerProtocol.h"
 #include "KeireInternal/Process.h"
 
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -77,6 +79,8 @@ namespace KeireEditor
         std::uint64_t Generation = 0;
         bool Viewport = false;
         Keire::EntityId ViewportTarget;
+        Keire::Vector3 ViewportPosition;
+        Keire::WeakRef<Keire::Scene> ViewportScene;
         AssetOperationFollowUp FollowUp = AssetOperationFollowUp::None;
         std::string UndoName;
         std::optional<Keire::SceneDefinition> SceneSnapshot;
@@ -102,6 +106,10 @@ namespace KeireEditor
         AssetOperationContext Context;
         std::filesystem::path SourceIndexPath;
         std::string WorkerOutput;
+        std::string OperationId;
+        double QueueMilliseconds = 0.0;
+        /// Includes request staging, process startup, worker execution, and delay until exit is polled.
+        double ExecutionMilliseconds = 0.0;
     };
 
     struct AssetCreationAuxiliarySource
@@ -113,7 +121,9 @@ namespace KeireEditor
     class AssetOperationService final
     {
       public:
-        AssetOperationService(const std::filesystem::path& workerExecutable, const std::filesystem::path& projectRoot);
+        using Clock = std::function<std::chrono::steady_clock::time_point()>;
+        AssetOperationService(const std::filesystem::path& workerExecutable, const std::filesystem::path& projectRoot,
+                              Clock clock = std::chrono::steady_clock::now);
         ~AssetOperationService();
 
         AssetOperationService(const AssetOperationService&) = delete;
@@ -161,6 +171,7 @@ namespace KeireEditor
             std::vector<std::byte> Payload;
             std::vector<AssetCreationAuxiliarySource> AuxiliaryPayloads;
             std::uint64_t Sequence = 0;
+            std::chrono::steady_clock::time_point QueuedAt;
         };
 
         struct RunningOperation
@@ -171,6 +182,7 @@ namespace KeireEditor
             std::filesystem::path ResultPath;
             std::filesystem::path CancelPath;
             Keire::Detail::ChildProcess Process;
+            std::chrono::steady_clock::time_point StartedAt;
         };
 
         void Queue(PendingOperation operation);
@@ -179,6 +191,7 @@ namespace KeireEditor
 
         std::filesystem::path m_WorkerExecutable;
         std::filesystem::path m_ProjectRoot;
+        Clock m_Clock;
         std::deque<PendingOperation> m_Queue;
         std::optional<RunningOperation> m_Running;
         std::deque<AssetOperationCompletion> m_Completions;

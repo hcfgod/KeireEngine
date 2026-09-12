@@ -287,7 +287,10 @@ namespace Keire::RenderBackend
                             continue;
                         SDL_SetGPUScissor(pass, &scissor);
                         const auto texture = RuntimeUiTextureBinding(batch.Asset);
-                        SDL_BindGPUFragmentSamplers(pass, 0, &texture, 1);
+                        if (!BindRuntimeUiMaterial(commands, pass, batch.Material, RuntimeUiPipeline, texture, false,
+                                                   false, SDL_GPU_SAMPLECOUNT_1,
+                                                   SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow)))
+                            continue;
                         SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
                         ++Statistics.DrawCalls;
                         Statistics.Triangles += batch.VertexCount / 3U;
@@ -411,7 +414,9 @@ namespace Keire::RenderBackend
                     continue;
                 SDL_SetGPUScissor(pass, &scissor);
                 const auto texture = RuntimeUiTextureBinding(batch.Asset);
-                SDL_BindGPUFragmentSamplers(pass, 0, &texture, 1);
+                if (!BindRuntimeUiMaterial(commands, pass, batch.Material, pipeline, texture, true, panel.DepthTest,
+                                           pipelines.Samples, SceneColorFormat))
+                    continue;
                 SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
                 ++Statistics.DrawCalls;
                 Statistics.Triangles += batch.VertexCount / 3U;
@@ -505,7 +510,9 @@ namespace Keire::RenderBackend
                         continue;
                     SDL_SetGPUScissor(pass, &scissor);
                     const auto texture = RuntimeUiTextureBinding(batch.Asset);
-                    SDL_BindGPUFragmentSamplers(pass, 0, &texture, 1);
+                    if (!BindRuntimeUiMaterial(renderCommands, pass, batch.Material, RuntimeUiRenderTexturePipeline,
+                                               texture, false, false, SDL_GPU_SAMPLECOUNT_1, SceneColorFormat))
+                        continue;
                     SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
                     ++Statistics.DrawCalls;
                     Statistics.Triangles += batch.VertexCount / 3U;
@@ -1139,14 +1146,15 @@ namespace Keire::RenderBackend
 
     SDL_GPUGraphicsPipeline* RenderSharedState::CreateRuntimeUiPipeline(const bool worldSurface, const bool depthTest,
                                                                         const SDL_GPUSampleCount samples,
-                                                                        const SDL_GPUTextureFormat targetFormat)
+                                                                        const SDL_GPUTextureFormat targetFormat,
+                                                                        const ShaderAssetDefinition* shader)
     {
         SDL_GPUShader* vertex = nullptr;
         SDL_GPUShader* fragment = nullptr;
         try
         {
-            vertex = CreateRuntimeUiShader(true);
-            fragment = CreateRuntimeUiShader(false);
+            vertex = shader ? CreateAssetShader(*shader, true) : CreateRuntimeUiShader(true);
+            fragment = shader ? CreateAssetShader(*shader, false) : CreateRuntimeUiShader(false);
 
             const SDL_GPUVertexBufferDescription buffer{0, sizeof(RuntimeUiVertex), SDL_GPU_VERTEXINPUTRATE_VERTEX, 0};
             const std::array attributes{

@@ -15,6 +15,7 @@
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 #include "KeireInternal/Rendering/RenderSystemFacadeInternal.h"
+#include "KeireInternal/Rendering/RuntimeUiMaterialInternal.h"
 
 #include "Keire/BuiltinUnlitShaders.h"
 
@@ -271,6 +272,20 @@ namespace Keire
             throw std::invalid_argument("Runtime UI submission root does not exist in the submitted tree.");
         if (state.PendingRuntimeUiSubmissions.size() >= 256U)
             throw std::length_error("Runtime UI submissions exceed the per-frame panel bound of 256.");
+        if (submission.Material)
+        {
+            if (!state.Assets)
+                throw std::invalid_argument("Runtime UI materials require an asset system.");
+            const auto material =
+                state.Assets->Load<MaterialAsset>(submission.Material, AssetPriority::High).TryGetLoaded();
+            if (material)
+            {
+                const auto shader =
+                    state.Assets->Load<ShaderAsset>(material->Definition().Shader, AssetPriority::High).TryGetLoaded();
+                if (shader)
+                    (void)Detail::BuildRuntimeUiMaterialValues(shader->Definition(), material->Definition());
+            }
+        }
 
         RenderBackend::RenderSurfaceToken surface;
         switch (submission.Target)

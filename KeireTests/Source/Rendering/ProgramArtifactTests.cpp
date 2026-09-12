@@ -8,6 +8,77 @@
 #include <stdexcept>
 #include <vector>
 
+TEST_CASE("compute graph output lowers to a bounded reflected storage kernel")
+{
+    auto graph = Keire::CreateTargetShaderGraph(Keire::ShaderGraphTarget::Compute);
+    const auto color = std::ranges::find(graph.Nodes.front().Pins, "Color", &Keire::ShaderGraphPin::Name);
+    REQUIRE(color != graph.Nodes.front().Pins.end());
+    color->DefaultValue = Keire::Color{0.25F, 0.5F, 0.75F, 1.0F};
+    const auto artifact = Keire::CompileShaderGraphProgram(graph);
+    REQUIRE(artifact.Succeeded());
+    CHECK_NOTHROW(Keire::ValidateProgramArtifact(artifact));
+    CHECK_THROWS_AS(Keire::ValidateCookedProgramArtifact(artifact), std::invalid_argument);
+    REQUIRE(artifact.Reflection.Resources.size() == 1);
+    CHECK(artifact.Reflection.Resources.front().Kind == Keire::ProgramResourceKind::StorageBuffer);
+    CHECK(artifact.Reflection.Resources.front().Access == Keire::ProgramResourceAccess::ReadWrite);
+    CHECK(artifact.Reflection.Resources.front().Space == 1);
+    CHECK(artifact.Reflection.Resources.front().Binding == 0);
+    CHECK(artifact.Reflection.Resources.front().StrideBytes == 16);
+    const auto& hlsl = artifact.Variants.front().Hlsl;
+    CHECK(hlsl.find("register(u0, space1)") != std::string::npos);
+    CHECK(hlsl.find("[numthreads(64, 1, 1)]") != std::string::npos);
+    CHECK(hlsl.find("dispatchThreadId.x >= elementCount") != std::string::npos);
+    CHECK(hlsl.find("dispatchThreadId.y != 0 || dispatchThreadId.z != 0") != std::string::npos);
+    CHECK(hlsl.find("VSMain") == std::string::npos);
+    CHECK(hlsl.find("PSMain") == std::string::npos);
+    CHECK(artifact.Variants.front().Manifest.find("\"compute\": \"CSMain\"") != std::string::npos);
+
+    auto malformed = artifact;
+    malformed.Reflection.ThreadGroupSizeX = 0;
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(malformed), std::invalid_argument);
+    malformed = artifact;
+    malformed.Reflection.ThreadGroupSizeX = 1024;
+    malformed.Reflection.ThreadGroupSizeY = 1024;
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(malformed), std::invalid_argument);
+    malformed = artifact;
+    malformed.Reflection.Resources.front().StrideBytes = 3;
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(malformed), std::invalid_argument);
+    malformed = artifact;
+    malformed.Reflection.Resources.front().Stages = Keire::ProgramStage::Fragment;
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(malformed), std::invalid_argument);
+    malformed = artifact;
+    malformed.Reflection.EntryPoints.clear();
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(malformed), std::invalid_argument);
+}
+
+TEST_CASE("compute graph rejects unsupported dimensions and graphics inputs")
+{
+    auto graph = Keire::CreateTargetShaderGraph(Keire::ShaderGraphTarget::Compute);
+    graph.Target.ThreadGroupSizeY = 2;
+    CHECK_FALSE(Keire::CompileShaderGraphProgram(graph).Succeeded());
+    graph.Target.ThreadGroupSizeY = 1;
+    graph.Nodes.push_back(Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::WorldPosition));
+    CHECK_FALSE(Keire::CompileShaderGraphProgram(graph).Succeeded());
+}
+
+TEST_CASE("compute binary validation rejects mismatched kernel reflection")
+{
+    auto artifact = Keire::CompileShaderGraphProgram(Keire::CreateTargetShaderGraph(Keire::ShaderGraphTarget::Compute));
+    REQUIRE(artifact.Succeeded());
+    // A digest-valid payload tests the container contract; it is never submitted as executable shader code.
+    artifact.Variants.front().Binaries.push_back({"primary",
+                                                  Keire::ProgramBackend::D3D12,
+                                                  Keire::ProgramBinaryFormat::Dxil,
+                                                  Keire::ProgramStage::Compute,
+                                                  "CSMain",
+                                                  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                                                  {std::byte{0x61}, std::byte{0x62}, std::byte{0x63}},
+                                                  artifact.Reflection});
+    CHECK_NOTHROW(Keire::ValidateCookedProgramArtifact(artifact));
+    artifact.Variants.front().Binaries.front().Reflection.ThreadGroupSizeX = 32;
+    CHECK_THROWS_AS(Keire::ValidateCookedProgramArtifact(artifact), std::invalid_argument);
+}
+
 TEST_CASE("standalone OpenPBR materials round trip and compile to reflected multi-pass programs")
 {
     const auto material = Keire::CreateOpenPbrMaterial();

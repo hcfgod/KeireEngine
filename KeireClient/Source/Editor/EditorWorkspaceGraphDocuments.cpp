@@ -1,6 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "Keire/Assets/BuiltinAssetRegistry.h"
+#include "Keire/Project/SharedShaderLibrary.h"
 
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
@@ -79,6 +80,11 @@ void EditorWorkspaceLayer::SaveShaderGraphDocument() { SaveShaderGraph(); }
 void EditorWorkspaceLayer::UndoShaderGraphEdit() { (void)m_ShaderGraphDocument->Undo(); }
 
 void EditorWorkspaceLayer::RedoShaderGraphEdit() { (void)m_ShaderGraphDocument->Redo(); }
+
+void EditorWorkspaceLayer::ActivateShaderGraphHistory() noexcept
+{
+    m_ActiveUndoContext = m_ShaderGraphDocument->UndoContext();
+}
 
 std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::ShaderGraphAssetRecords() const noexcept
 {
@@ -182,6 +188,8 @@ void EditorWorkspaceLayer::PersistShaderGraph(const Keire::AssetId asset, const 
     const auto record = m_AssetDatabase->Find(asset);
     if (!record)
         throw std::runtime_error("The edited graph source is unavailable.");
+    if (Keire::IsSharedShaderPath(record->RelativePath))
+        throw std::runtime_error("Shared shaders are read-only. Copy to Project before editing the shader.");
     if (record->Type != Keire::ShaderGraphAsset::StaticType())
     {
         const bool reusable = record->Type == Keire::ShaderSubgraphAsset::StaticType() ||
@@ -220,6 +228,16 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
                                      record->Type == Keire::MaterialLayerBlendAsset::StaticType());
     if (!record || (record->Type != Keire::ShaderGraphAsset::StaticType() && !reusable))
         throw std::invalid_argument("Only Shader Graph, function, and material-layer assets can be opened here.");
+
+    if (m_ShaderGraphPanel->HasPendingNodeProperties() || m_ShaderGraphPanel->SavePending())
+    {
+        m_ShaderGraphPanel->Registration().SetVisible(true);
+        m_ShaderGraphPanel->Registration().RequestFocus();
+        if (m_ShaderGraphDocument->Asset() == asset)
+            return;
+        throw std::runtime_error(
+            "Save or discard the pending Shader Graph node properties before opening another graph.");
+    }
 
     m_SelectedAsset = asset;
     const auto& specification = m_AssetDatabase->Specification();
@@ -286,6 +304,7 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
     }
     m_ActiveUndoContext = m_ShaderGraphDocument->UndoContext();
     m_ShaderGraphPanel->ResetTransientState();
+    m_ShaderGraphPanel->SetReadOnly(Keire::IsSharedShaderPath(record->RelativePath));
     m_ShaderGraphPanel->SetMessage("Loaded " + record->RelativePath.generic_string() + ".");
     m_ShaderGraphPanel->Registration().SetVisible(true);
     m_ShaderGraphPanel->Registration().RequestFocus();

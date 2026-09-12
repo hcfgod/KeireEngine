@@ -1,10 +1,14 @@
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 
+#include <algorithm>
+#include <limits>
+
 namespace KeireEditor
 {
     void ShaderGraphPanel::DrawDiagnostics(Keire::UiFrame& ui)
     {
+        DrawGeneratedSource(ui);
         const auto& document = m_Controller.ShaderGraphState();
         const auto& theme = m_Controller.ShaderGraphTheme();
         if (!m_Message.empty())
@@ -18,8 +22,10 @@ namespace KeireEditor
         ui.TextColored(theme.Warning, std::string(document.ReusableGraph() ? "Reusable graph diagnostics ("
                                                                            : "Generated shader diagnostics (") +
                                           std::to_string(document.Compilation().Diagnostics.size()) + ")");
+        std::size_t diagnosticIndex = 0;
         for (const auto& diagnostic : document.Compilation().Diagnostics)
         {
+            auto diagnosticId = ui.PushId(std::to_string(diagnosticIndex++));
             const auto color = diagnostic.Severity == Keire::ShaderGraphDiagnosticSeverity::Error     ? theme.Error
                                : diagnostic.Severity == Keire::ShaderGraphDiagnosticSeverity::Warning ? theme.Warning
                                                                                                       : theme.MutedText;
@@ -28,14 +34,19 @@ namespace KeireEditor
                 text += "  [" + diagnostic.Node.ToString() + "]";
             if (diagnostic.GeneratedLine != 0)
                 text += "  line " + std::to_string(diagnostic.GeneratedLine);
-            if (diagnostic.Node)
+            if (diagnostic.Node || diagnostic.GeneratedLine != 0)
             {
-                auto id = ui.PushId(diagnostic.Node.ToString() + diagnostic.Code);
                 if (ui.Selectable(text))
                 {
-                    m_SelectedNode = diagnostic.Node;
-                    m_SelectedNodes = {diagnostic.Node};
-                    m_FrameNode = diagnostic.Node;
+                    if (diagnostic.Node)
+                    {
+                        m_SelectedNode = diagnostic.Node;
+                        m_SelectedNodes = {diagnostic.Node};
+                        m_FrameNode = diagnostic.Node;
+                    }
+                    if (diagnostic.GeneratedLine != 0)
+                        m_SourceLine = static_cast<int>(
+                            std::min(diagnostic.GeneratedLine, std::size_t{std::numeric_limits<int>::max()}));
                 }
             }
             else

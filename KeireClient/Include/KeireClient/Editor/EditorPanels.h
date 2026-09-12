@@ -74,7 +74,8 @@ namespace KeireEditor
         virtual void SetSceneViewportSelectedAsset(Keire::AssetId asset) noexcept = 0;
         virtual void RequestSceneViewportNewScene() = 0;
         virtual void RevealSceneViewportScenes() = 0;
-        virtual void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target) = 0;
+        virtual void RouteSceneViewportAsset(Keire::AssetTypeId type, Keire::AssetId asset, Keire::EntityId target,
+                                             Keire::UiPosition position) = 0;
         virtual void RecordSceneViewportUndo(std::string_view name) = 0;
         virtual void OpenSceneViewportUiDocument(Keire::AssetId asset) = 0;
         virtual void SelectSceneViewportEntity(Keire::AssetId entity, bool additive) = 0;
@@ -120,6 +121,7 @@ namespace KeireEditor
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> InspectorAssetRecords() const noexcept = 0;
         [[nodiscard]] virtual Keire::AssetId InspectorDefaultAudioMixer() const noexcept = 0;
         [[nodiscard]] virtual Keire::AssetId InspectorSelectedAsset() const noexcept = 0;
+        [[nodiscard]] virtual std::span<const Keire::AssetId> InspectorSelectedAssets() const noexcept { return {}; }
         [[nodiscard]] virtual std::string_view InspectorAssetStatus() const noexcept = 0;
         [[nodiscard]] virtual std::vector<Keire::ManagedAssetTypeDescriptor> InspectorManagedAssetTypes() const = 0;
         [[nodiscard]] virtual std::optional<Keire::ManagedTypeId>
@@ -130,6 +132,7 @@ namespace KeireEditor
         virtual void PreviewInspectorAudio(Keire::AssetId asset) = 0;
         virtual void StopInspectorAudioPreview() noexcept = 0;
         virtual void ActivateInspectorHistory() noexcept = 0;
+        virtual void ActivateInspectorAssetHistory() noexcept {}
         virtual void ActivateInspectorManagedDataHistory() noexcept = 0;
         virtual void RecordInspectorUndo(std::string_view name = "Edit Scene", std::string mergeKey = {}) = 0;
         virtual void ApplyInspectorTransformEdit(InspectorTransformEdit edit) = 0;
@@ -140,10 +143,16 @@ namespace KeireEditor
             throw std::logic_error("This inspector does not support managed script attachment.");
         }
         virtual void CommitInspectorMaterial() = 0;
+        virtual void CommitInspectorMaterialSelection(std::span<const MaterialDocument>,
+                                                      std::span<const MaterialDocument>)
+        {
+            throw std::logic_error("Material selection persistence is unavailable.");
+        }
         virtual void OpenInspectorInputActions(Keire::AssetId asset) = 0;
         virtual void OpenInspectorMaterialGraph(Keire::AssetId asset) = 0;
         virtual void OpenInspectorUiDocument(Keire::AssetId asset) = 0;
         virtual void PersistInspectorMaterialInstance(Keire::AssetId asset, std::span<const std::byte> bytes) = 0;
+        virtual void FinishInspectorMaterialInstanceEdit() {}
         virtual void PersistInspectorMaterialParameterCollection(Keire::AssetId asset,
                                                                  std::span<const std::byte> bytes) = 0;
         virtual void PersistInspectorProceduralMotionProfile(Keire::AssetId asset,
@@ -281,6 +290,9 @@ namespace KeireEditor
         std::string m_PreviewDigest;
         std::filesystem::path m_PreviewProjectRoot;
         std::string m_AssetName;
+        std::string m_VariantParentDiagnostic;
+        std::vector<Keire::MaterialPropertyOverride> m_MaterialPropertyClipboard;
+        std::unordered_map<Keire::AssetId, std::pair<std::string, bool>> m_SurfaceShaderCompatibility;
         std::optional<Keire::MaterialParameterCollectionDefinition> m_MaterialParameterCollection;
         std::optional<Keire::ProceduralMotionProfile> m_ProceduralMotionProfile;
         bool m_MaterialParameterCollectionDirty = false;

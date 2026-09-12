@@ -11,6 +11,9 @@
 namespace Keire::Detail
 {
     [[nodiscard]] std::string_view ShaderGraphSpatialLightingHlsl() noexcept;
+    void ValidateUiShaderGraph(const ShaderGraphDefinition& definition);
+    [[nodiscard]] std::string_view ShaderGraphUiVertexInputHlsl() noexcept;
+    [[nodiscard]] std::string_view ShaderGraphUiVertexMainHlsl() noexcept;
 
     [[nodiscard]] std::string ShaderGraphCompiler::BuildHlsl()
     {
@@ -19,6 +22,63 @@ namespace Keire::Detail
         if (master == m_Definition.Nodes.end())
             throw std::invalid_argument("Shader Graph has no Shader Output node.");
 
+        if (m_Definition.Target.Target == ShaderGraphTarget::Compute)
+        {
+            if (m_Definition.Target.ThreadGroupSizeY != 1 || m_Definition.Target.ThreadGroupSizeZ != 1 ||
+                !m_Definition.Resources.empty() || !m_Properties.empty())
+                throw std::invalid_argument(
+                    "Compute graphs currently require a one-dimensional group and no external input resources.");
+            for (const auto& node : m_Definition.Nodes)
+            {
+                switch (node.Kind)
+                {
+                case ShaderGraphNodeKind::Master:
+                case ShaderGraphNodeKind::Constant:
+                case ShaderGraphNodeKind::Add:
+                case ShaderGraphNodeKind::Subtract:
+                case ShaderGraphNodeKind::Multiply:
+                case ShaderGraphNodeKind::Divide:
+                case ShaderGraphNodeKind::Minimum:
+                case ShaderGraphNodeKind::Maximum:
+                case ShaderGraphNodeKind::Clamp:
+                case ShaderGraphNodeKind::Lerp:
+                case ShaderGraphNodeKind::OneMinus:
+                case ShaderGraphNodeKind::Absolute:
+                case ShaderGraphNodeKind::Floor:
+                case ShaderGraphNodeKind::Ceiling:
+                case ShaderGraphNodeKind::Fraction:
+                case ShaderGraphNodeKind::Sine:
+                case ShaderGraphNodeKind::Cosine:
+                case ShaderGraphNodeKind::Reroute:
+                    break;
+                default:
+                    throw std::invalid_argument("Node '" + node.Name + "' is not supported by compute graph lowering.");
+                }
+            }
+            // A single writer per element is preserved even when callers dispatch multiple Y/Z groups.
+            m_CurrentStage = ShaderGraphShaderStage::Compute;
+            const auto* color = FindShaderGraphPin(*master, "Color", ShaderGraphPinDirection::Input);
+            if (!color)
+                throw std::invalid_argument("Compute Shader Output requires a Color input.");
+            for (const auto& pin : master->Pins)
+                if (pin.Name != "Color" && m_Incoming.contains({master->Id, pin.Id}))
+                    throw std::invalid_argument("Compute Shader Output only consumes its Color input.");
+            const auto value = CoerceShaderGraphExpression(Input(*master, *color), ShaderGraphValueType::Vector4).Code;
+            std::ostringstream compute;
+            compute << "RWStructuredBuffer<float4> KeireComputeOutput : register(u0, space1);\n"
+                    << "[numthreads(" << m_Definition.Target.ThreadGroupSizeX << ", 1, 1)]\n"
+                    << "void CSMain(uint3 dispatchThreadId : SV_DispatchThreadID)\n{\n"
+                    << "    uint elementCount, stride;\n"
+                    << "    KeireComputeOutput.GetDimensions(elementCount, stride);\n"
+                    << "    if (dispatchThreadId.y != 0 || dispatchThreadId.z != 0 || "
+                       "dispatchThreadId.x >= elementCount) return;\n"
+                    << "    KeireComputeOutput[dispatchThreadId.x] = " << value << ";\n}\n";
+            return compute.str();
+        }
+
+        const bool ui = m_Definition.Target.Target == ShaderGraphTarget::Ui;
+        if (ui)
+            ValidateUiShaderGraph(m_Definition);
         std::optional<std::string> worldPositionOffset;
         if (const auto* offsetPin = FindShaderGraphPin(*master, "WorldPositionOffset", ShaderGraphPinDirection::Input))
             if (const auto incoming = m_Incoming.find({master->Id, offsetPin->Id}); incoming != m_Incoming.end())
@@ -155,6 +215,8 @@ namespace Keire::Detail
                                    ? attribute("Thickness")
                                    : optionalInput("Thickness", ShaderGraphValueType::Scalar, "1.0F");
         const bool hasPixelDepthOffset = inputConnected("PixelDepthOffset");
+        if (ui && (worldPositionOffset || hasPixelDepthOffset))
+            throw std::invalid_argument("UI Shader Graph does not support world-position or pixel-depth displacement.");
         const auto pixelDepthOffset =
             hasPixelDepthOffset ? input("PixelDepthOffset", ShaderGraphValueType::Scalar) : std::string("0.0F");
         m_MaximumWorldPositionDisplacementRadius =
@@ -182,7 +244,10 @@ namespace Keire::Detail
                << ShaderGraphGeneratedShaderVersion << ", source schema " << m_Definition.SchemaVersion << ".\n";
         for (const auto& include : m_CustomIncludes)
             source << "#include \"" << include.generic_string() << "\"\n";
-        source << R"HLSL(
+        if (ui)
+            source << ShaderGraphUiVertexInputHlsl();
+        else
+            source << R"HLSL(
 struct VertexInput
 {
     float3 Position : TEXCOORD0;
@@ -195,7 +260,8 @@ struct VertexInput
     float3 PreviousPosition : TEXCOORD6;
 #endif
 };
-
+)HLSL";
+        source << R"HLSL(
 struct VertexOutput
 {
     float3 Normal : TEXCOORD0;
@@ -214,7 +280,9 @@ struct VertexOutput
 #endif
     float4 Position : SV_Position;
 };
-
+)HLSL";
+        if (!ui)
+            source << R"HLSL(
 cbuffer ObjectData : register(b0, space1)
 {
     float4x4 Model;
@@ -237,7 +305,8 @@ cbuffer InstanceAddressingData : register(b2, space1)
                     source << "    float4 " << ShaderGraphVertexPropertySymbol(property.Name) << ";\n";
             source << "};\n\n";
         }
-        source << R"HLSL(
+        if (!ui)
+            source << R"HLSL(
 struct InstanceData
 {
     float4x4 Model;
@@ -246,7 +315,8 @@ struct InstanceData
 };
 
 StructuredBuffer<InstanceData> Instances : register(t0, space0);
-
+)HLSL";
+        source << R"HLSL(
 struct ShaderGraphLocalLight
 {
     float4 PositionRange;
@@ -299,6 +369,11 @@ cbuffer MaterialData : register(b1, space3)
             GenerateShaderGraphResourceDeclarations(m_Definition.Resources, textureIndex, textureIndex);
         source << resourceDeclarations.Hlsl;
         textureIndex = std::max(resourceDeclarations.NextTextureRegister, resourceDeclarations.NextSamplerRegister);
+        if (ui)
+        {
+            source << "Texture2D KeireUiSourceTexture : register(t" << textureIndex << ", space2);\n";
+            source << "SamplerState KeireUiSourceSampler : register(s" << textureIndex << ", space2);\n";
+        }
         if (!unlit)
         {
             source << "Texture2DArray<float> DirectionalShadowTexture : register(t" << textureIndex << ", space2);\n";
@@ -1067,7 +1142,11 @@ return 0.0F.xxx;
     return (surface + directSpecular + coatSpecular + sheen) * radiance * noL;
 }
 )HLSL";
-        source << R"HLSL(
+        if (ui)
+            source << ShaderGraphUiVertexMainHlsl();
+        else
+        {
+            source << R"HLSL(
 
 VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
 {
@@ -1075,15 +1154,15 @@ VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
     const InstanceData instance = Instances[InstanceParameters.x + instanceId];
     float4 world = mul(instance.Model, float4(input.Position, 1.0F));
 )HLSL";
-        if (worldPositionOffset)
-            source << "    world.xyz += " << *worldPositionOffset << ";\n";
-        source << R"HLSL(
+            if (worldPositionOffset)
+                source << "    world.xyz += " << *worldPositionOffset << ";\n";
+            source << R"HLSL(
 #if defined(KEIRE_PASS_DEPTH_VELOCITY)
     float4 previousWorld = mul(Model, float4(input.PreviousPosition, 1.0F));
 )HLSL";
-        if (previousWorldPositionOffset)
-            source << "    previousWorld.xyz += " << *previousWorldPositionOffset << ";\n";
-        source << R"HLSL(
+            if (previousWorldPositionOffset)
+                source << "    previousWorld.xyz += " << *previousWorldPositionOffset << ";\n";
+            source << R"HLSL(
 #endif
     const float4 viewPosition = mul(View, world);
     output.Position = mul(Projection, viewPosition);
@@ -1109,6 +1188,7 @@ VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
     return output;
 }
 )HLSL";
+        }
         source << R"HLSL(
 
 #if defined(KEIRE_PASS_DEFERRED_GBUFFER_STANDARD)
@@ -1306,7 +1386,14 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
     }
 )HLSL";
         }
-        source << "    const float alpha = saturate(graphBaseColor.a * graphOpacity);\n";
+        if (ui)
+        {
+            source << "    const float4 uiCoverage = input.Color * "
+                      "KeireUiSourceTexture.Sample(KeireUiSourceSampler, input.UV0);\n";
+            source << "    graphColor *= uiCoverage.rgb;\n";
+        }
+        source << "    const float alpha = saturate(graphBaseColor.a * graphOpacity" << (ui ? " * uiCoverage.a" : "")
+               << ");\n";
         source << "    if (SurfaceParameters.y > 0.5F && SurfaceParameters.y < 1.5F)\n";
         source << "        clip(alpha - SurfaceParameters.x);\n";
         source << "    const float graphAbiRetention =\n";

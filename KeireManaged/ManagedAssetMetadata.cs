@@ -327,8 +327,8 @@ internal static class ManagedAssetMetadata
             throw Invalid(type, "concrete ScriptableObject types require StableAssetTypeId");
         if (type.ContainsGenericParameters)
             throw Invalid(type, "open generic ScriptableObject types are not supported");
-        if (type.GetConstructor(BindingFlags.Instance | BindingFlags.Public, null, Type.EmptyTypes, null) is null)
-            throw Invalid(type, "a public parameterless constructor is required");
+        if (type.GetConstructor(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, Type.EmptyTypes, null) is null)
+            throw Invalid(type, "a parameterless constructor is required (public or non-public)");
 
         CreateAssetMenuAttribute? menu = type.GetCustomAttribute<CreateAssetMenuAttribute>(false);
         Type? baseType = type.BaseType;

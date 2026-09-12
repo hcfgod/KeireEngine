@@ -1,3 +1,4 @@
+#include "Keire/Project/SharedShaderLibrary.h"
 #include "Keire/Rendering/MaterialGraph.h"
 #include "KeireInternal/Assets/AssetDatabaseImplementation.h"
 
@@ -9,6 +10,18 @@ namespace Keire
 {
     namespace
     {
+        void RequireEditableSource(const std::filesystem::path& path)
+        {
+            if (IsSharedShaderPath(path))
+                throw std::invalid_argument("Shared shader sources are read-only. Copy to Project before editing.");
+        }
+
+        void RequireEditableFolder(const std::filesystem::path& path)
+        {
+            RequireEditableSource(path / "SharedShaders");
+            RequireEditableSource(path);
+        }
+
         [[nodiscard]] ShaderPropertyDefinition ExtractedMaterialProperty(const std::string& name,
                                                                          const MaterialPropertyValue& value)
         {
@@ -106,6 +119,7 @@ namespace Keire
 
     void AssetDatabase::CreateFolder(const std::filesystem::path& relativePath)
     {
+        RequireEditableSource(relativePath);
         std::scoped_lock operation(*m_Impl->OperationMutex);
         (void)ConfinedPath(m_Impl->SourceRoot, relativePath);
         m_Impl->SourceFiles->CreateDirectories(relativePath);
@@ -125,6 +139,7 @@ namespace Keire
                                                const std::span<const std::byte> sourceBytes,
                                                const AssetImportSettings& requestedSettings, const AssetId parentSource)
     {
+        RequireEditableSource(relativePath);
         const auto registered = m_Impl->Importers.find(importer.Name);
         if (registered == m_Impl->Importers.end() || registered->second.Version != importer.Version ||
             registered->second.Type != importer.Type)
@@ -228,6 +243,7 @@ namespace Keire
         const auto existing = Find(id);
         if (!existing)
             throw std::invalid_argument("Asset source replacement requires a live source asset.");
+        RequireEditableSource(existing->RelativePath);
         if (sourceBytes.size() > m_Impl->Specification.MaximumSourceBytes)
             throw std::invalid_argument("Asset replacement source exceeds the configured maximum size.");
         const auto importer = m_Impl->Importers.find(existing->Importer);
@@ -468,6 +484,8 @@ namespace Keire
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot move an unknown asset ID.");
+        RequireEditableSource(record->RelativePath);
+        RequireEditableSource(relativeDestination);
         const auto source = ConfinedPath(m_Impl->SourceRoot, record->RelativePath);
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
         if (source == destination)
@@ -506,6 +524,7 @@ namespace Keire
 
     AssetId AssetDatabase::Duplicate(const AssetId id, const std::filesystem::path& destination)
     {
+        RequireEditableSource(destination);
         std::scoped_lock operation(*m_Impl->OperationMutex);
         const auto record = Find(id);
         if (!record)
@@ -543,6 +562,8 @@ namespace Keire
     void AssetDatabase::MoveFolder(const std::filesystem::path& relativeSource,
                                    const std::filesystem::path& relativeDestination)
     {
+        RequireEditableFolder(relativeSource);
+        RequireEditableFolder(relativeDestination);
         std::scoped_lock operation(*m_Impl->OperationMutex);
         const auto source = ConfinedPath(m_Impl->SourceRoot, relativeSource);
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
@@ -612,6 +633,7 @@ namespace Keire
     std::vector<AssetId> AssetDatabase::DuplicateFolder(const std::filesystem::path& relativeSource,
                                                         const std::filesystem::path& relativeDestination)
     {
+        RequireEditableFolder(relativeDestination);
         std::scoped_lock operation(*m_Impl->OperationMutex);
         const auto source = ConfinedPath(m_Impl->SourceRoot, relativeSource);
         const auto destination = ConfinedPath(m_Impl->SourceRoot, relativeDestination);
@@ -668,6 +690,7 @@ namespace Keire
         const auto record = Find(id);
         if (!record)
             throw std::invalid_argument("Cannot trash an unknown asset ID.");
+        RequireEditableSource(record->RelativePath);
         const auto source = ConfinedPath(m_Impl->SourceRoot, record->RelativePath);
         const auto sourceMetadata = ConfinedMetadataPath(m_Impl->SourceRoot, record->RelativePath);
         const auto transaction = AssetId::Generate();
@@ -715,6 +738,7 @@ namespace Keire
 
     AssetTrashRecord AssetDatabase::TrashFolder(const std::filesystem::path& relativePath)
     {
+        RequireEditableFolder(relativePath);
         std::scoped_lock operation(*m_Impl->OperationMutex);
         const auto source = ConfinedPath(m_Impl->SourceRoot, relativePath);
         if (!std::filesystem::is_directory(source) || std::filesystem::is_symlink(source))

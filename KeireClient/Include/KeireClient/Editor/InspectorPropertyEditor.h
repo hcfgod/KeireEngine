@@ -29,6 +29,9 @@ namespace KeireEditor
             std::unordered_map<std::string, std::uint32_t>* managedGraphFocus = nullptr);
 
         [[nodiscard]] bool EditBoundary() const noexcept;
+        void PropertyCategory(std::string_view label) override;
+        void PropertyTooltip(std::string_view description) override;
+        bool EditHdrColor(std::string_view label, Keire::Color& value) override;
         bool EditBoolean(std::string_view label, bool& value) override;
         bool EditInteger(std::string_view label, std::int64_t& value, double step, std::optional<double> minimum,
                          std::optional<double> maximum) override;

@@ -302,6 +302,8 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetWorldRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "CloneEntityIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeCloneEntity));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "DestroyEntityDelayedIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeDestroyEntityDelayed));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "DestroyEntityIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeDestroyEntity));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "RaycastIcall",
@@ -905,6 +907,7 @@ namespace Keire
         m_Impl->ShutdownManagedExtensionGeneration(previousRuntimeServices, previousEditorExtensions,
                                                    previousGeneration);
         m_Impl->ResetManagedAssetGeneration(previousNativeRuntime, previousGeneration);
+        m_Impl->ComputeResources.ClearResources();
         m_Impl->Unload(previous);
         {
             std::scoped_lock lock(m_Impl->Mutex);

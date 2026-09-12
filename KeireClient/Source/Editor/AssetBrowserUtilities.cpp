@@ -17,6 +17,22 @@
 
 namespace KeireEditor
 {
+    bool ConsumeAssetBrowserReveal(Keire::AssetId& pending, const Keire::AssetId submitted) noexcept
+    {
+        if (!pending || pending != submitted)
+            return false;
+        pending = {};
+        return true;
+    }
+
+    void PrepareAssetBrowserReveal(const Keire::AssetSourceRecord& record, std::filesystem::path& folder,
+                                   std::string& search)
+    {
+        auto destination = record.RelativePath.parent_path();
+        folder = std::move(destination);
+        search.clear();
+    }
+
     bool AssetBrowserRecordViewCache::Refresh(const std::span<const Keire::AssetSourceRecord> records,
                                               const std::uint64_t revision, const std::filesystem::path& folder,
                                               const std::string_view search)

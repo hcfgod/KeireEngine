@@ -26,6 +26,7 @@
 namespace Keire
 {
     class JobSystem;
+    struct ProgramArtifact;
     struct VfxParameterOverride;
     enum class RuntimeUiEventType : std::uint8_t;
 
@@ -1015,6 +1016,11 @@ namespace Keire
         explicit ScriptSystem(ScriptSystemSpecification specification = {}, Ref<JobSystem> jobs = {});
         ~ScriptSystem() override;
         [[nodiscard]] bool IsOpen() const noexcept;
+        /// Registers an immutable cooked compute program for managed CreatePipeline. Owner-thread only.
+        /// Keys survive reload; device resources expire at committed reload. All keys expire on shutdown.
+        [[nodiscard]] std::uint64_t RegisterComputeProgram(const ProgramArtifact& artifact);
+        /// Prevents future pipeline creation from this key; existing pipelines retain native ownership.
+        void UnregisterComputeProgram(std::uint64_t program);
         [[nodiscard]] ManagedBuildOperationId StartBuild(ManagedBuildRequest request);
         [[nodiscard]] ManagedIdeWorkspace GenerateIdeWorkspace(const ManagedBuildRequest& request,
                                                                std::string_view solutionName);

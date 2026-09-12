@@ -30,7 +30,7 @@ namespace Keire::Detail
                                                                         ShaderOcclusionSupport::DepthOnlyGeometryMatch);
         const auto occlusionSupport = static_cast<std::uint8_t>(definition.OcclusionSupport);
         if (definition.SchemaVersion != ShaderAssetSchemaVersion ||
-            (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > 3) ||
+            (definition.VertexLayoutVersion < 1 || definition.VertexLayoutVersion > UiShaderVertexLayoutVersion) ||
             definition.Topology > ShaderPrimitiveTopology::PointList || definition.Culling > ShaderCullMode::Back ||
             (definition.SpatialLightingAbiVersion != 0U && definition.SpatialLightingAbiVersion != 2U &&
              definition.SpatialLightingAbiVersion != 3U) ||
@@ -45,6 +45,13 @@ namespace Keire::Detail
             definition.Source.lexically_normal().generic_string().starts_with("..") ||
             !ValidShaderIdentifier(definition.VertexEntry) || !ValidShaderIdentifier(definition.FragmentEntry))
             throw std::invalid_argument("Shader definition contains an unsupported schema, path, or entry point.");
+        const bool ui = definition.VertexLayoutVersion == UiShaderVertexLayoutVersion;
+        if (ui && (definition.ReceivesShadows || definition.UsesForwardPlus || definition.UsesImageBasedLighting ||
+                   definition.UsesInstancing || definition.InstanceAddressingAbiVersion != 0U ||
+                   definition.SpatialLightingAbiVersion != 0U || definition.UserResourceSlots != 0U ||
+                   definition.UserReadOnlyBuffers != 0U || definition.OcclusionSupport != ShaderOcclusionSupport::None))
+            throw std::invalid_argument(
+                "UI shaders do not support lighting, instancing, storage, or custom resources.");
         if (definition.MaximumWorldPositionDisplacementRadius &&
             (!std::isfinite(*definition.MaximumWorldPositionDisplacementRadius) ||
              *definition.MaximumWorldPositionDisplacementRadius < 0.0F))
@@ -98,15 +105,18 @@ namespace Keire::Detail
                     (property.Minimum && property.Maximum && *property.Minimum > *property.Maximum))
                     throw std::invalid_argument("Shader numeric property range is invalid.");
             }
-            if (property.DisplayName.size() > 128 || property.Category.size() > 128)
+            if (property.DisplayName.size() > 128 || property.Category.size() > 128 ||
+                property.Description.size() > 512)
                 throw std::invalid_argument("Shader property editor metadata exceeds its limit.");
+            if (property.HighDynamicRange && property.Type != ShaderPropertyType::Color)
+                throw std::invalid_argument("HDR editor metadata requires a color property.");
         }
         if (numericProperties > MaximumShaderNumericProperties || textureProperties > MaximumShaderTextureProperties)
             throw std::invalid_argument("Shader exceeds the 64 numeric slot or 16 texture slot ABI limit.");
         constexpr std::size_t portableFragmentSamplerLimit = 16;
         const auto reservedSamplers = (definition.ReceivesShadows ? 2U : 0U) +
                                       (definition.UsesImageBasedLighting ? 2U : 0U) +
-                                      (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U);
+                                      (definition.SpatialLightingAbiVersion >= 2U ? 5U : 0U) + (ui ? 1U : 0U);
         if (textureProperties + definition.UserResourceSlots + reservedSamplers > portableFragmentSamplerLimit)
             throw std::invalid_argument(
                 "Shader material textures and fixed lighting resources exceed the portable 16-sampler limit.");

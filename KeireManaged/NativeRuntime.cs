@@ -419,6 +419,7 @@ internal static unsafe class NativeRuntime
         SetBuiltinComponentTextIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong*, ulong*, void> CloneEntityIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, void> DestroyEntityIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, float, byte> DestroyEntityDelayedIcall;
     internal static delegate* unmanaged<ulong, Vector3, Vector3, float, uint, ulong, ulong, NativeRaycastHit*, byte>
         RaycastIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, Quaternion, float, float, Vector3, uint, byte,
@@ -931,6 +932,13 @@ internal static unsafe class NativeRuntime
         ulong low = 0;
         CloneEntityIcall(entity.World, entity.Id.High, entity.Id.Low, &high, &low);
         return new Entity(entity.World, new EntityId(high, low));
+    }
+
+    internal static void DestroyEntity(Entity entity, float delaySeconds)
+    {
+        if (DestroyEntityDelayedIcall == null ||
+            DestroyEntityDelayedIcall(entity.World, entity.Id.High, entity.Id.Low, delaySeconds) == 0)
+            throw new InvalidOperationException("Delayed destruction requires the active scene owner thread.");
     }
 
     internal static void DestroyEntity(Entity entity) =>

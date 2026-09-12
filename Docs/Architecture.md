@@ -1,5 +1,133 @@
 # Architecture
 
+## Material and shader replacement direction
+
+Compute compilation validates the generated SPIR-V buffer ABI against `ProgramArtifact` reflection before publishing
+backend binaries. The current `ComputeDevice` owns an independent GPU device and opaque device-scoped identities;
+copies of identities do not extend resource lifetime. Operations and destruction require the construction thread.
+`Application::Compute()` lazily owns a device matching the renderer backend, waits for its work before presentation,
+and closes it during teardown. This coarse synchronization is interim integration: renderer resource sharing and
+explicit render-feature dependencies are still required. Managed wrappers enforce the same owner-thread/disposal
+contract and keep pointer-bearing interop signatures private.
+
+Reviewed migration performs a full import of its isolated staged project before catalog validation and publication.
+This ensures validation covers the converted project rather than relying on a partial incremental catalog.
+
+Explicit asset reveal prepares folder and search state together before selection, so the cached record view refreshes
+even when the source revision is unchanged. Shader Graph pane sizing reserves preview space only when the canvas fits;
+opening a document schedules one initial frame operation without changing serialized node positions.
+
+Shader Graph activates its document undo context when its panel or child controls have focus, matching the editor's
+other document panels. Keyboard commands then use the existing context router rather than whichever asset operation
+was previously active. Output-node value controls expose connected/unconnected input defaults, not the unused master
+node value carried by the generic node representation.
+
+Material documents own pending keyword selections separately from serialized source. The selection records its
+original shader reference, coalesces newer choices, and applies only after the resolver supplies a loaded variant.
+Changing the shader reference or opening another material invalidates pending work. Applying copies the current
+document so intervening property edits survive; the existing source commit path records the completed selection.
+
+UI/fullscreen graph authoring previews evaluate pixel-center UVs directly into a bounded image using the existing
+preview job and cancellation generation. They do not acquire preview meshes or apply surface lighting. The editor
+hides mesh-only controls for these targets; this CPU evaluation remains distinct from runtime UI/pass execution.
+
+Asset operation timing is owned by each editor service and uses a monotonic clock. Pending operations retain their
+original enqueue timestamp through coalescing; dispatched operations retain a start timestamp through completion.
+Completion records separate queue wait from execution up to observed worker exit. Tests can inject the clock without
+changing process waiting/cancellation deadlines. Timing logs are emitted on consumption after preemption has finalized
+the result status, and do not claim to include catalog adoption or preview presentation.
+
+Shader property descriptions and HDR flags are optional graph/code metadata shared by generated manifests and
+canonical shader reflection. They do not add GPU property slots or change material property identities. The
+material-property reflection adapter carries the same metadata without compiling a program. HDR UI controls reject
+non-finite components before mutation and preserve the existing display-color API's bounded contract.
+
+Material clipboard values carry stable property identities and diagnostic names. Paste matches identities, falling
+back to names only for legacy clipboard entries, validates against the current shader, and publishes a completed
+document replacement. Missing/type/range-incompatible values are skipped without adding inactive data or invoking
+shader resolution. Category grouping affects display order without changing property identities or serialization.
+Variant clipboard paste applies validated overrides to a replacement source definition and publishes it as one
+source snapshot edit. Copy uses the resolved parent/default values; paste does not change inheritance ancestry.
+Explicit cross-shader name paste discards clipboard identities only in a temporary copy, then uses the same
+validation and transaction path to bind current code symbols to destination identities. Ordinary paste never enables
+this fallback for an identified property.
+
+Variant property override actions operate on source snapshots through the existing asset undo context. Individual
+resets match stable identities and shader-compatible values, removing compatible older entries so they cannot
+reactivate while preserving incompatible history. Explicit cleanup uses the common material property resolver's
+inactive indices after legacy-name reconciliation, preserving the effective values and unrelated variant settings.
+Focused asset Inspectors reactivate the asset browser history; focused entity Inspectors activate scene history.
+Stopping Play closes runtime scene history without discarding source asset history.
+
+Captured editor UI packets resolve surface textures against the current device generation. If a surface has not
+published an output after recovery, its draw command is removed from that resolved view. The captured packet remains
+intact for later resolution, and unrelated draws retain their vertex/index offsets and texture bindings.
+
+Variant parent selection validates source ancestry independently of runtime asset availability. Ordinary property
+edits do not require missing parents to resolve. Source snapshots belong to the asset browser undo context and resolve
+paths by source identity when applied, preserving undo after rename. Contiguous edits merge only for the same asset
+and Inspector edit serial; property completion, selection changes, parent changes, keywords, and reset actions end
+the merge group. Historical undo snapshots can restore missing references for subsequent repair.
+
+Shared shader sources are ordinary indexed Shader Graph assets in a protected project namespace. Explicit first-time
+material creation installs their source and metadata together with `ProjectSettings/SharedShaders.lock` using the
+material-upgrade recovery journal. The lock pins version, source identities, and source hashes. Existing libraries
+are read and verified without calling the current template generator. Creation publishes the refreshed source index
+before handing the new material to the isolated asset worker. Shader import records the lock as a source dependency
+and rejects changed pinned content, allowing normal last-good import recovery to apply. Asset mutations reject writes,
+moves, and trash operations against shared sources; duplication into ordinary project content generates a new source
+identity. The graph panel permits selection and preview while disabling authoring on the protected source.
+
+[Material and shader replacement](MaterialShaderReplacement.md) records the requested transition from material-owned
+graphs to shader-owned programs and property-only materials, including identity-preserving migration and release gates.
+The replacement is incremental. Shader-selected material creation now writes schema-4 property sources tagged
+`kind: material`, sharing the existing authoring codec with legacy property materials. The canonical importer retains
+the historical source asset type and `material/default` subasset identity for consumer compatibility. An internal
+adapter represents properties as non-executable bindings for existing instance consumers; only the shader owns code.
+Inspector preview and undo publish to the generated runtime material, never over the source asset. Code-shader value
+imports do not need compiler context; graph references resolve an already-defined shader variant without compiling.
+The property-based Inspector preserves unavailable shader references and saved overrides; reset inherits shader defaults.
+Schema-4 property sources also retain an `inactiveProperties` archive. The document reconciles it against resolved
+reflection transactionally, while runtime material encoding and import dependencies use only active properties.
+Explicit archive cleanup uses ordinary document snapshots for undo; unavailable shaders never replace the live preview.
+Schema-5 property sources add ordered `propertyOverrides` records keyed by shader property identity. Names are
+diagnostic labels; resolution never falls back from an unmatched identity to a reused symbol. Legacy name-based
+values upgrade when reflection supplies an identity. Editor reconciliation and import use the same resolver, which
+keeps incompatible historical values while publishing only the newest compatible override. Schema-3 material
+instances use the same identities and resolve against the root shader, including defaults absent from parent overrides.
+Undo resolves snapshot identities against current reflection before publishing a runtime revision.
+
+Material migration stages sources and metadata with original/replacement hashes and retained backups. A prepared
+journal is durable before any source is replaced; committed journals remain available for diagnosis. Recovery checks
+every destination and backup before rollback, refusing to overwrite external edits. Exclusive project open recovers
+prepared transactions before assets load; read-only open refuses pending recovery. The reviewed apply overload rejects
+changed source, metadata, or extracted program inputs. Shared default shaders, migration editor integration, catalog
+publication, and the remaining replacement acceptance gates are pending.
+
+`ShaderGraphSaveState` owns staged node metadata and a save request bound to one document identity. The panel and
+keyboard shortcut share this state. Applying metadata is one document edit; saving waits for compilation and clears
+the request on failure without discarding the draft or changing the persisted baseline. Switching documents cancels
+the queued save. The state is independent of UI drawing so these transitions have focused tests.
+
+## Scene destruction and editor placement
+
+Delayed entity destruction belongs to `SceneState`, keyed by stable entity identity. Deadlines advance once per
+scaled scene `Update`, independently of the requesting Behaviour and fixed-update count. Due entities are collected
+before invoking destruction callbacks; callback-triggered structural changes use the existing scene boundary.
+Repeated requests keep the earliest deadline. Immediate destruction removes outstanding timers, and ending play or
+closing a scene clears them. Invalid delays and off-thread requests reject before mutating scene state.
+
+Viewport drops resolve screen coordinates against the captured camera into the Y-up ground plane, with a plane ten
+units in front of the camera for horizon/upward rays. Imported assets retain that world point and a weak reference to
+the original scene. Completion may instantiate only into that same scene. Prefab placement offsets all roots together
+and records transform overrides; child local transforms remain intact.
+
+Worker source-index loading validates source and metadata through anchored file signatures, retaining rejection of
+missing, redirected, and non-regular files without repeated canonical-path walks. External publication updates its
+known records directly; transaction rollback retains its full reconciliation path. Progress file writes are limited
+to 20 Hz plus completion, while cancellation is checked at every progress callback. Job shutdown requests every
+compute and blocking worker stop before waking and joining them, avoiding a separate idle wait for each thread.
+
 ## Shared architecture foundations
 
 `Application` owns the scheduler, memory tracker, string interner, diagnostic catalog/sink, source-module registry,

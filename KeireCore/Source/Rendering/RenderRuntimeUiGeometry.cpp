@@ -564,13 +564,14 @@ namespace Keire::RenderBackend
     {
         RuntimeUiGeometry result;
         result.Vertices.reserve(std::min<std::size_t>(commands.size() * 12U, MaximumRuntimeUiVertices));
-        const auto appendBatch = [&result](const AssetId asset, const RuntimeUiRect clip, const std::size_t first)
+        const auto appendBatch =
+            [&result](const AssetId asset, const RuntimeUiRect clip, const std::size_t first, const AssetId material)
         {
             const auto count = result.Vertices.size() - first;
             if (count == 0U)
                 return;
             if (!result.Batches.empty() && result.Batches.back().Asset == asset &&
-                result.Batches.back().ClipRect == clip &&
+                result.Batches.back().ClipRect == clip && result.Batches.back().Material == material &&
                 static_cast<std::size_t>(result.Batches.back().FirstVertex) + result.Batches.back().VertexCount ==
                     first)
             {
@@ -578,7 +579,7 @@ namespace Keire::RenderBackend
                 return;
             }
             result.Batches.push_back(
-                {asset, clip, static_cast<std::uint32_t>(first), static_cast<std::uint32_t>(count)});
+                {asset, clip, static_cast<std::uint32_t>(first), static_cast<std::uint32_t>(count), material});
         };
         for (const auto& command : commands)
         {
@@ -608,7 +609,7 @@ namespace Keire::RenderBackend
                     AppendRuntimeUiText(result.Vertices, command, binding, runBegin, runEnd - runBegin);
                     TransformRuntimeUiVertices(
                         std::span(result.Vertices).subspan(first, result.Vertices.size() - first), command);
-                    appendBatch(binding, command.ClipRect, first);
+                    appendBatch(binding, command.ClipRect, first, command.Material);
                     runBegin = runEnd;
                 }
                 continue;
@@ -636,9 +637,12 @@ namespace Keire::RenderBackend
             case RuntimeUiDrawType::PopClip:
                 break;
             }
+            if (command.Material && command.Type == RuntimeUiDrawType::Quad)
+                for (auto& vertex : std::span(result.Vertices).subspan(first))
+                    vertex.UV = NormalizedPosition(command.Rect, {vertex.Position.X, vertex.Position.Y});
             TransformRuntimeUiVertices(std::span(result.Vertices).subspan(first, result.Vertices.size() - first),
                                        command);
-            appendBatch(RuntimeUiTextureAsset(command), command.ClipRect, first);
+            appendBatch(RuntimeUiTextureAsset(command), command.ClipRect, first, command.Material);
         }
         return result;
     }
@@ -705,7 +709,7 @@ namespace Keire::RenderBackend
                 }
                 result.Batches.push_back({batch.Asset, projected ? projectedClip : RuntimeUiRect{},
                                           static_cast<std::uint32_t>(firstVertex),
-                                          static_cast<std::uint32_t>(vertexCount)});
+                                          static_cast<std::uint32_t>(vertexCount), batch.Material});
             }
         }
         return result;

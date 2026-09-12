@@ -11,6 +11,7 @@ namespace Keire::Detail
                                                                       const std::filesystem::path& path,
                                                                       bool startChangeMonitor = false);
         static void PublishSourceIndex(const AssetDatabase& database, const std::filesystem::path& path);
+        static void ApplyImportStatuses(AssetDatabase& database, std::span<const AssetImportStatus> statuses);
         [[nodiscard]] static std::size_t ReloadSourceIndex(AssetDatabase& database, const std::filesystem::path& path);
         [[nodiscard]] static AssetImportResult
         ImportAssetsFromSourceIndex(AssetDatabase& database, std::span<const AssetId> assets, AssetImportPolicy policy,

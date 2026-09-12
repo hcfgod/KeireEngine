@@ -1,5 +1,76 @@
 # Shaders And Materials
 
+**Create > Material** uses the shared **Kéire/Lit** surface shader. On first use, the project installs version 1.0.0
+sources for Lit, Unlit, UI, Fullscreen, VFX, and Custom Graphics under `Assets/Keire/SharedShaders/1.0.0` and records
+their identities and source hashes in `ProjectSettings/SharedShaders.lock`. Existing sources are verified rather
+than regenerated from the current editor's templates. Opening an older project does not opt it into the library.
+The library does not include compute programs. Target-specific consumer integrations remain separate acceptance gates.
+
+UI and fullscreen Shader Graphs use a bounded 2D authoring preview: graph UVs cover the image, and opacity is shown
+over a checker background. Mesh selection, mesh rotation, and environment lighting are hidden for these targets.
+Exposure remains available. This CPU preview evaluates graph color and emission; it does not execute a UI document,
+sample the scene framebuffer, or prove backend/player parity. Surface graphs retain their mesh previews.
+Focus the Shader Graph panel to route keyboard undo/redo to that graph's history. Output nodes expose their named
+input defaults directly; their unused generic node value is hidden to avoid edits that cannot affect shader output.
+
+Shared sources can be inspected in Shader Graph. Use **Copy to Project** in the Inspector to create an editable copy
+with a new shader asset ID. Asset operations reject changes to the shared source namespace. Missing or modified
+pinned sources require restoring the recorded library content; automatic repair must not change a project's visuals.
+
+The requested property-only material replacement is tracked in [Material and shader replacement](MaterialShaderReplacement.md).
+The graph-based architecture below describes the existing implementation, not completion of that replacement.
+In the property-based compatibility Inspector, missing shaders remain replaceable without losing saved values;
+**Reset Shader Properties** restores shader defaults and participates in material save/undo.
+Overrides rejected by a resolved shader are retained in the source's `inactiveProperties` array and listed under
+**Inactive Overrides**. They do not become GPU bindings or import dependencies. Restoring a compatible declaration
+reactivates its saved value. Multiple historical values may share a name; the most recently archived compatible value
+wins. Resetting an active property removes compatible older overrides so they cannot reactivate; incompatible
+type/range history remains saved. **Remove Inactive Overrides** deletes the archive through the same save/undo path.
+When the shader declares stable property IDs, schema-5 sources store ordered identity/value records in
+`propertyOverrides`. Renaming a symbol retains its value; a different property reusing that symbol does not inherit
+it. Incompatible identity records remain inactive. Schema-3 material variants apply these identities through nested
+parents and may override values inherited directly from shader defaults.
+**Create > Material from Shader** writes a property-only `.keirematerial` source and opens the Material Inspector.
+For graph shaders, **Shader Keywords** exposes boolean and named options. **Shader Default** clears an individual
+selection, and **Reset Shader Keywords** clears all selections. Keyword edits select imported variants and preserve
+property values; they use the material source save/undo workflow. Loading is asynchronous: a pending choice keeps the
+last-good preview until its shader asset is ready. Cancel discards it, and selecting another shader or material prevents
+the old request from applying. Missing/broken variants remain pending with repair/cancel guidance. This does not add
+keyword reflection or equivalent authoring controls to handwritten shader assets.
+The surface material shader picker hides generated code duplicates when their owning Shader Graph exists; it keeps
+orphaned legacy shader sources selectable. Existing references to generated code are still loadable.
+The material references the selected surface Shader Graph or code shader and inherits defaults until overridden.
+Double-clicking these sources reopens the Inspector. Surface controls, compatible-value preservation when switching
+shaders, reset, save, and undo use the property-material document. Preview and undo publish to the stable generated
+runtime material ID. Value imports resolve shader references without compiling shader code. Nested material instances
+apply keyword overrides from oldest parent to nearest child before selecting a graph shader variant.
+The standard **Material** command starts with shared Kéire/Lit; **Material from Shader** preselects the current shader.
+Historical assets still use the graph implementation described below. The reviewed migration editor workflow is
+pending. `InspectShaderGraphMigration` reports direct binding conversion or
+executable graph extraction; pass that report to `ApplyShaderGraphMigration` to reject changed review inputs.
+The transaction retains verified backups and automatically rolls back interrupted publication on exclusive project
+open. Unsupported graphs and collisions prevent publication. Catalog and packaged-player acceptance remain open.
+Unsupported Compute Shader Graph creation is disabled.
+
+Material properties are grouped by their shader category. **Property Overrides** identifies explicit values and
+offers individual reset. **Copy Property Values** and **Paste Compatible Property Values** use stable identities,
+or names for legacy entries; paste skips unavailable or incompatible declarations and is one undo action.
+Variants share these controls: copy includes resolved inherited values and paste makes compatible values explicit
+overrides while preserving the parent, keywords, surface settings, and incompatible saved history.
+For different shader interfaces, expand **Paste Across Shaders** and choose **Paste Matching Property Names**.
+This explicitly matches code symbols rather than clipboard identities, retains the destination shader's property IDs,
+and skips incompatible values. Ordinary paste continues to follow stable IDs across property renames.
+Shader parameter descriptions appear as material-property tooltips. Color parameters can enable **HDR Color** in
+the Shader Graph node Inspector; Save applies this metadata. Code shader property declarations accept optional
+`description` text (up to 512 bytes) and `hdr: true` for Color properties. These fields survive generated manifests
+and cooked reflection. HDR color controls accept finite values above one; ordinary UI display-color controls retain
+their existing 0–1 validation. Legacy material colors outside that range also use the HDR control to remain editable.
+
+Shader Graph node metadata is a draft until applied or saved. **Save** and **Ctrl+S** apply the draft, wait for
+compilation, and then write the source; invalid drafts remain editable with diagnostics. Switching selection preserves
+an unapplied draft until Save, Apply, or explicit Discard. Closing the editor also detects unapplied node properties.
+Material and shader **Asset Details** can be expanded to inspect source IDs, importer versions, and content hashes.
+
 Kéire separates surface-material authoring from target-program authoring. A Material owns the editable OpenPBR
 surface program, parameters, domain, shading model, authoring mode, closure budget, and render state. A Shader Graph
 owns a Material, UI, Fullscreen, VFX, Custom Graphics, or Compute program target, including legal stages, resources,

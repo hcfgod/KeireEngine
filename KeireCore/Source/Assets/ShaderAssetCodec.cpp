@@ -57,6 +57,10 @@ namespace Keire::Detail
                     encoded["displayName"] = property.DisplayName;
                 if (!property.Category.empty())
                     encoded["category"] = property.Category;
+                if (!property.Description.empty())
+                    encoded["description"] = property.Description;
+                if (property.HighDynamicRange)
+                    encoded["hdr"] = true;
                 if (property.Minimum)
                     encoded["minimum"] = *property.Minimum;
                 if (property.Maximum)
@@ -164,6 +168,8 @@ namespace Keire::Detail
                 decoded.Type = static_cast<ShaderPropertyType>(property.at("type").get<std::uint8_t>());
                 decoded.DisplayName = property.value("displayName", std::string{});
                 decoded.Category = property.value("category", std::string{});
+                decoded.Description = property.value("description", std::string{});
+                decoded.HighDynamicRange = property.value("hdr", false);
                 if (property.contains("minimum"))
                     decoded.Minimum = property.at("minimum").get<float>();
                 if (property.contains("maximum"))

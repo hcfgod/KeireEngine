@@ -1,5 +1,8 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("Compute rejects invalid ownership and keeps disposed resources inert", ComputeTests.Run),
+    ("Gameplay logging preserves all severities formatting assertions and nested exceptions", GameplayLoggingTests.Run),
+    ("Constructor defaults formatted logs and delayed destroy preserve managed contracts", CreationLoggingTests.Run),
     ("Prefab assets expose typed stable identity", PrefabAssetMarkerContract),
     ("Unity-shaped object API replaces public handles and marker components", UnityShapedObjectApiContract),
     ("Managed state v4 tags direct entity component and asset references", DirectReferenceStateContract),

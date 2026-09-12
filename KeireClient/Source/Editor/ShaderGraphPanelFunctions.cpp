@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 
+#include "KeireClient/Editor/ShaderGraphBlackboard.h"
+
 #include <algorithm>
 #include <stdexcept>
 
@@ -20,7 +22,9 @@ namespace KeireEditor
     }
 
     bool ShaderGraphPanel::AddFunctionNode(const Keire::AssetId asset, const std::string_view name,
-                                           const std::optional<Keire::Vector2> graphPosition)
+                                           const std::optional<Keire::Vector2> graphPosition,
+                                           const std::optional<Keire::ShaderGraphEndpoint> anchor,
+                                           const std::optional<Keire::AssetId> insertion)
     {
         try
         {
@@ -31,17 +35,44 @@ namespace KeireEditor
             node.Name = std::string(name);
             node.EditorPosition = graphPosition.value_or(Keire::Vector2{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
                                                                         -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()});
-            const auto id = node.Id;
-            if (!m_Controller.ShaderGraphState().AddNode(std::move(node)))
-                return false;
-            m_SelectedNode = id;
-            return true;
+            return CommitCreatedNode(std::move(node), anchor, insertion);
         }
         catch (const std::exception& error)
         {
             Report(error.what());
             return false;
         }
+    }
+
+    bool ShaderGraphPanel::CommitCreatedNode(Keire::ShaderGraphNode node,
+                                             const std::optional<Keire::ShaderGraphEndpoint> anchor,
+                                             const std::optional<Keire::AssetId> insertion)
+    {
+        const auto id = node.Id;
+        auto& document = m_Controller.ShaderGraphState();
+        bool changed = false;
+        if (insertion)
+            changed = document.InsertNode(std::move(node), *insertion);
+        else if (anchor)
+            changed = document.AddConnectedNode(std::move(node), *anchor);
+        else if (node.Kind == Keire::ShaderGraphNodeKind::Keyword)
+            changed =
+                document.Edit("Add Shader Graph keyword",
+                              [node = std::move(node)](auto& definition) mutable
+                              {
+                                  if (!ShaderGraphHasKeywordToken(definition, node.Symbol))
+                                      definition.Keywords.push_back({.Name = node.Symbol, .DefaultOption = "false"});
+                                  definition.Nodes.push_back(std::move(node));
+                              });
+        else
+            changed = document.AddNode(std::move(node));
+        if (changed)
+        {
+            m_SelectedNode = id;
+            m_SelectedNodes = {id};
+            m_SelectedConnection.reset();
+        }
+        return changed;
     }
 
     bool ShaderGraphPanel::DrawFunctionExtractionPopup(Keire::UiFrame& ui)

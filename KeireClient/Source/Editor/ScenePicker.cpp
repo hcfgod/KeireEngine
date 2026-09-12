@@ -10,8 +10,18 @@ namespace KeireEditor
 {
     namespace
     {
-        [[nodiscard]] Keire::Vector3 Unproject(const Keire::Matrix4& inverseViewProjection, const float x,
-                                               const float y, const float z)
+        [[nodiscard]] Keire::Vector3 NormalizedDirection(const Keire::Vector3 from, const Keire::Vector3 to)
+        {
+            const Keire::Vector3 difference{to.X - from.X, to.Y - from.Y, to.Z - from.Z};
+            const float length =
+                std::sqrt(difference.X * difference.X + difference.Y * difference.Y + difference.Z * difference.Z);
+            if (length <= 0.000001F)
+                throw std::runtime_error("Scene picking produced a zero-length ray.");
+            return {difference.X / length, difference.Y / length, difference.Z / length};
+        }
+
+        Keire::Vector3 Unproject(const Keire::Matrix4& inverseViewProjection, const float x, const float y,
+                                 const float z)
         {
             const auto& value = inverseViewProjection.Elements;
             const float resultX = value[0] * x + value[4] * y + value[8] * z + value[12];
@@ -21,16 +31,6 @@ namespace KeireEditor
             if (std::abs(resultW) <= 0.000001F)
                 throw std::runtime_error("Scene picking produced an invalid homogeneous position.");
             return {resultX / resultW, resultY / resultW, resultZ / resultW};
-        }
-
-        [[nodiscard]] Keire::Vector3 NormalizedDirection(const Keire::Vector3 from, const Keire::Vector3 to)
-        {
-            const Keire::Vector3 difference{to.X - from.X, to.Y - from.Y, to.Z - from.Z};
-            const float length =
-                std::sqrt(difference.X * difference.X + difference.Y * difference.Y + difference.Z * difference.Z);
-            if (length <= 0.000001F)
-                throw std::runtime_error("Scene picking produced a zero-length ray.");
-            return {difference.X / length, difference.Y / length, difference.Z / length};
         }
 
         [[nodiscard]] std::optional<float> IntersectBounds(const Keire::Matrix4& world, const Keire::MeshBounds& bounds,
@@ -129,6 +129,34 @@ namespace KeireEditor
                 IncludeEntity(bounds, child, resolveMeshBounds);
         }
     } // namespace
+
+    Keire::Vector3 ResolveSceneDropPosition(const Keire::UiItemRect viewport, const Keire::UiPosition pointer,
+                                            const Keire::RenderCamera& camera)
+    {
+        const auto size = viewport.Size();
+        if (!std::isfinite(size.Width) || !std::isfinite(size.Height) || size.Width <= 1.0F || size.Height <= 1.0F ||
+            !std::isfinite(pointer.X) || !std::isfinite(pointer.Y) || !viewport.Contains(pointer))
+            throw std::invalid_argument("Asset placement requires a point inside a valid scene viewport.");
+        const float x = (pointer.X - viewport.Minimum.X) / size.Width * 2.0F - 1.0F;
+        const float y = 1.0F - (pointer.Y - viewport.Minimum.Y) / size.Height * 2.0F;
+        const auto inverse = Keire::Math::Inverse(Keire::Math::Multiply(camera.Projection, camera.View));
+        const auto origin = Unproject(inverse, x, y, 0.0F);
+        const auto direction = NormalizedDirection(origin, Unproject(inverse, x, y, 1.0F));
+        float distance = -1.0F;
+        if (std::abs(direction.Y) > 0.000001F)
+            distance = -origin.Y / direction.Y;
+        if (!std::isfinite(distance) || distance < 0.0F)
+        {
+            const auto viewOrigin = Keire::Math::TransformPoint(camera.View, origin);
+            const auto viewDirection = Keire::Math::TransformDirection(camera.View, direction);
+            distance = (10.0F - viewOrigin.Z) / viewDirection.Z;
+        }
+        const Keire::Vector3 result{origin.X + direction.X * distance, origin.Y + direction.Y * distance,
+                                    origin.Z + direction.Z * distance};
+        if (distance < 0.0F || !std::isfinite(result.X) || !std::isfinite(result.Y) || !std::isfinite(result.Z))
+            throw std::invalid_argument("Scene camera cannot resolve asset placement.");
+        return result;
+    }
 
     Keire::Vector3 SceneEntityBounds::Center() const noexcept
     {

@@ -104,3 +104,30 @@ extraction reads the same tagged records, so scene-to-managed-data-to-native-ass
 
 The legacy reader accepts persisted 0.3.x `AssetReference<T>` records. Saving the owning scene, prefab, or data asset
 normalizes them to v2; old C# source must still be migrated to direct asset fields.
+
+## Constructors
+
+ScriptableObjects may declare a public or non-public parameterless constructor to initialize default data.
+`ScriptableObject.CreateInstance<T>()` invokes it before lifecycle callbacks. Type discovery inspects constructors
+without executing user code, so a private `TestData()` does not remove the class from the Create menu.
+Persistent hydration invokes the constructor first, then restores fields present in the asset; absent fields retain
+constructor defaults. Constructors that throw produce their original diagnostic. Constructors with required
+arguments still need a parameterless counterpart; the editor cannot infer application arguments.
+
+```csharp
+[StableAssetTypeId("dd300000-0000-4000-8000-000000000001")]
+[CreateAssetMenu("Data/Test Data", "TestData")]
+public sealed class TestData : ScriptableObject
+{
+    public string ModName;
+    public string Description;
+    public bool IsEnabled;
+
+    private TestData()
+    {
+        ModName = "Example";
+        Description = "Default data";
+        IsEnabled = true;
+    }
+}
+```

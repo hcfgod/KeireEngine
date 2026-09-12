@@ -4,6 +4,22 @@
 
 namespace Keire
 {
+    std::uint64_t ScriptSystem::RegisterComputeProgram(const ProgramArtifact& artifact)
+    {
+        m_Impl->RequireOwner();
+        if (!IsOpen())
+            throw std::logic_error("ScriptSystem is closed.");
+        return m_Impl->ComputeResources.RegisterProgram(artifact);
+    }
+
+    void ScriptSystem::UnregisterComputeProgram(const std::uint64_t program)
+    {
+        m_Impl->RequireOwner();
+        if (!IsOpen())
+            throw std::logic_error("ScriptSystem is closed.");
+        m_Impl->ComputeResources.UnregisterProgram(program);
+    }
+
     ScriptSystem::Impl::Impl(ScriptSystemSpecification value, Ref<JobSystem> jobs)
         : Specification(std::move(value)), Owner(std::this_thread::get_id()), Lifetime(std::make_shared<Impl*>(this)),
           Scheduler(std::move(jobs))
@@ -142,16 +158,20 @@ namespace Keire
             throw std::runtime_error("Managed data type '" + source.Definition().ManagedTypeName +
                                      "' is unavailable in the target script generation.");
         }
+        const RuntimeScope scope(*this);
+        ClearRuntimeException();
         auto object = const_cast<Coral::Type*>(found->second)->CreateInstance();
+        ThrowRuntimeException();
         if (!object.IsValid())
             throw std::runtime_error("Managed data type '" + source.Definition().ManagedTypeName +
                                      "' could not be constructed.");
         const auto encoded = ManagedDataAsset::Encode(source.Definition());
         const std::string document(reinterpret_cast<const char*>(encoded.data()), encoded.size());
-        const RuntimeScope scope(*this);
         const Coral::ScopedString scopedDocument(Coral::String::New(document));
         auto managedDocument = static_cast<Coral::String>(scopedDocument);
+        ClearRuntimeException();
         object.InvokeMethod("RuntimeHydrateManagedData", managedDocument);
+        ThrowRuntimeException();
         return object;
     }
 
@@ -319,6 +339,7 @@ namespace Keire
                                            Reload.Generation);
         ResetManagedAssetGeneration(CandidateNativeRuntimeType, Reload.Generation + 1);
         ResetManagedAssetGeneration(ActiveNativeRuntimeType, Reload.Generation);
+        ComputeResources.Clear();
         {
             std::scoped_lock lock(ManagedAssetMutex);
             PendingManagedAssetLoads.clear();

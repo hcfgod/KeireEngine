@@ -6,11 +6,13 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 namespace Keire::RenderBackend
 {
@@ -567,11 +569,23 @@ namespace Keire::RenderBackend
             }
             throw std::logic_error("Captured Dear ImGui texture snapshot is missing from the render view.");
         }
+        std::vector<std::pair<std::size_t, std::size_t>> unavailableSurfaces;
         for (const auto& binding : m_Impl->SurfaceBindings)
         {
             auto& command = resolved->DrawLists[binding.DrawList]->CmdBuffer[static_cast<int>(binding.Command)];
             const auto textureIdentity = resolveTexture ? resolveTexture(binding.Surface) : 0U;
-            command.TexRef = textureIdentity ? ImTextureRef(static_cast<ImTextureID>(textureIdentity)) : ImTextureRef{};
+            if (textureIdentity)
+                command.TexRef = ImTextureRef(static_cast<ImTextureID>(textureIdentity));
+            else
+                unavailableSurfaces.emplace_back(binding.DrawList, binding.Command);
+        }
+        // A recovered surface may not have published its first frame yet. SDL binds the texture even for a
+        // zero-element draw, so omit the command rather than passing a null texture to the backend.
+        std::ranges::sort(unavailableSurfaces, std::greater<>{});
+        for (const auto& [drawList, command] : unavailableSurfaces)
+        {
+            auto& commands = resolved->DrawLists[drawList]->CmdBuffer;
+            commands.erase(commands.Data + command);
         }
         return std::shared_ptr<ResolvedImGuiDrawData>(new ResolvedImGuiDrawData(std::move(resolved)));
     }

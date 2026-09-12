@@ -48,7 +48,10 @@ namespace Keire::RenderBackend
             for (const auto& command : commands)
             {
                 if (RuntimeUiCommandWithin(*submission.Tree, submission.Root, command.Element))
+                {
                     result.push_back(command);
+                    result.back().Material = submission.Material;
+                }
             }
             return result;
         }
