@@ -17,7 +17,17 @@ internal static unsafe class ComputeTests
             using var other = new ComputeDevice(ComputeBackend.D3D12);
             using var buffer = device.CreateBuffer(32);
             using var pipeline = device.CreatePipeline(1);
+            pipeline.Reload(2, 3);
+            using var snapshot = buffer.RequestReadback(4, 16);
+            if (snapshot.GetReadback().Length != 16)
+                throw new Exception("Readback snapshot size was lost.");
+            snapshot.Wait();
             int before = _calls;
+            Throws<ArgumentOutOfRangeException>(() => pipeline.Reload(0));
+            Throws<ArgumentOutOfRangeException>(() => buffer.RequestReadback(1, 4));
+            Throws<ArgumentOutOfRangeException>(() => buffer.RequestReadback(32));
+            Task.Run(() => Throws<InvalidOperationException>(() => pipeline.Reload(2)))
+                .GetAwaiter().GetResult();
             Throws<ArgumentOutOfRangeException>(() => device.CreateBuffer(0));
             Throws<ArgumentOutOfRangeException>(() => buffer.Upload(new byte[33]));
             Throws<ArgumentException>(() => other.Dispatch(pipeline, [], 1));
@@ -27,6 +37,8 @@ internal static unsafe class ComputeTests
                 throw new Exception("Rejected compute operations reached the native bridge.");
 
             buffer.Dispose();
+            if (snapshot.GetReadback().Length != 16)
+                throw new Exception("Readback did not survive source disposal.");
             before = _calls;
             buffer.Dispose();
             Throws<ObjectDisposedException>(() => buffer.Upload(new byte[1]));
@@ -35,6 +47,9 @@ internal static unsafe class ComputeTests
             device.Dispose();
             before = _calls;
             pipeline.Dispose();
+            snapshot.Dispose();
+            Throws<ObjectDisposedException>(() => snapshot.GetReadback());
+            Throws<ObjectDisposedException>(() => pipeline.Reload(2));
             device.Dispose();
             Throws<ObjectDisposedException>(() => device.CreateBuffer(16));
             if (_calls != before)

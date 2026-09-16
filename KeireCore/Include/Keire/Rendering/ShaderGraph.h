@@ -22,7 +22,7 @@ namespace Keire
     /// Latest canonical source schema emitted by ShaderGraphAsset::EncodeSource.
     inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 6;
     /// Version of the deterministic HLSL generator contract embedded in every generated shader manifest.
-    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 12;
+    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 13;
     /// Renderer-facing vertex input and interpolator contract required by generated Shader Graph shaders.
     inline constexpr std::uint32_t ShaderGraphVertexLayoutVersion = 3;
 
@@ -289,6 +289,8 @@ namespace Keire
         std::optional<float> Step;
 
         bool HighDynamicRange = false;
+        /// Optional Vector4 parameter identity: xy tiling and zw offset applied by texture sampling nodes.
+        AssetId TextureTransformProperty;
 
         bool operator==(const ShaderGraphParameterMetadata&) const = default;
     };

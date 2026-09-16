@@ -6,6 +6,7 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 #include "KeireClient/Editor/EditorAssetFileService.h"
+#include "KeireClient/Editor/MaterialGraphCreationPicker.h"
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/MaterialGraphPanel.h"
 
@@ -74,52 +75,17 @@ EditorWorkspaceLayer::ResolveMaterialGraphInterface(const Keire::MaterialShaderR
     {
         const auto& specification = m_AssetDatabase->Specification();
         const auto source = specification.ProjectRoot / specification.SourceDirectory / record->RelativePath;
-        Keire::ShaderInterfaceDefinition result;
         if (shader.Kind == Keire::MaterialShaderSourceKind::ShaderGraph)
         {
             if (record->Type != Keire::ShaderGraphAsset::StaticType())
                 return std::nullopt;
             const auto graph = Keire::ShaderGraphAsset::DecodeSource(ReadBytes(source));
-            result.Domain = graph.Output == Keire::ShaderGraphOutput::Fullscreen
-                                ? Keire::ShaderInterfaceDomain::Fullscreen
-                                : Keire::ShaderInterfaceDomain::Surface;
-            for (const auto& node : graph.Nodes)
-            {
-                if (node.Kind != Keire::ShaderGraphNodeKind::Parameter)
-                    continue;
-                Keire::ShaderPropertyDefinition property;
-                property.Id = node.Id;
-                property.Name = node.Symbol;
-                property.DisplayName = node.Name;
-                property.Category = node.ParameterMetadata.Category;
-                property.Type = static_cast<Keire::ShaderPropertyType>(node.ValueType);
-                property.Minimum = node.ParameterMetadata.Minimum;
-                property.Maximum = node.ParameterMetadata.Maximum;
-                property.Step = node.ParameterMetadata.Step;
-                property.TextureSemantic = node.TextureSemantic;
-                if (const auto* scalar = std::get_if<float>(&node.Value))
-                    property.DefaultValue.X = *scalar;
-                else if (const auto* vector2 = std::get_if<Keire::Vector2>(&node.Value))
-                    property.DefaultValue = {vector2->X, vector2->Y, 0.0F, 0.0F};
-                else if (const auto* vector3 = std::get_if<Keire::Vector3>(&node.Value))
-                    property.DefaultValue = {vector3->X, vector3->Y, vector3->Z, 0.0F};
-                else if (const auto* vector4 = std::get_if<Keire::Vector4>(&node.Value))
-                    property.DefaultValue = *vector4;
-                else if (const auto* color = std::get_if<Keire::Color>(&node.Value))
-                    property.DefaultValue = {color->Red, color->Green, color->Blue, color->Alpha};
-                else if (const auto* texture = std::get_if<Keire::AssetId>(&node.Value))
-                    property.DefaultTexture = *texture;
-                result.Properties.push_back(std::move(property));
-            }
-            for (const auto& keyword : graph.Keywords)
-                result.Keywords.push_back(keyword.Name);
-            return result;
+            return KeireEditor::MaterialShaderInterface(graph);
         }
         if (shader.Kind != Keire::MaterialShaderSourceKind::ShaderAsset ||
             record->Type != Keire::ShaderAsset::StaticType())
             return std::nullopt;
-        result.Properties = Keire::ShaderAsset::DecodeManifest(ReadBytes(source)).Properties;
-        return result;
+        return KeireEditor::MaterialShaderInterface(Keire::ShaderAsset::DecodeManifest(ReadBytes(source)));
     }
     catch (...)
     {

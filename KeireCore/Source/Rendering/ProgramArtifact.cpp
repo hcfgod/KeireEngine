@@ -424,10 +424,21 @@ namespace Keire
             artifact.Reflection.AbiVersion != ProgramReflectionAbiVersion)
             throw std::invalid_argument("Program artifact schema, target, stages, or variant bounds are invalid.");
         const bool compute = artifact.Target == ProgramTarget::Compute;
-        if (compute != HasProgramStage(artifact.Stages, ProgramStage::Compute) ||
+        if ((static_cast<std::uint8_t>(artifact.Stages) & ~7U) != 0U ||
+            compute != HasProgramStage(artifact.Stages, ProgramStage::Compute) ||
             (compute && (HasProgramStage(artifact.Stages, ProgramStage::Vertex) ||
                          HasProgramStage(artifact.Stages, ProgramStage::Fragment))))
             throw std::invalid_argument("Program artifact target and stage contract are incompatible.");
+        ProgramStage reflectedStages = ProgramStage::None;
+        for (const auto& entry : artifact.Reflection.EntryPoints)
+        {
+            if (!IsSingleProgramStage(entry.Stage) || !HasProgramStage(artifact.Stages, entry.Stage) ||
+                HasProgramStage(reflectedStages, entry.Stage) || !IsPassRole(entry.Name))
+                throw std::invalid_argument("Program reflection contains an invalid or duplicate entry point.");
+            reflectedStages = reflectedStages | entry.Stage;
+        }
+        if (reflectedStages != artifact.Stages)
+            throw std::invalid_argument("Program reflection is missing a declared stage entry point.");
         if (compute)
         {
             const auto& reflection = artifact.Reflection;
@@ -480,7 +491,13 @@ namespace Keire
         if (artifact.Reflection.Resources.size() > ProgramResourceHardLimit)
             throw std::invalid_argument("Program reflection exceeds the portable resource limit.");
         for (const auto& resource : artifact.Reflection.Resources)
-            if (resource.Symbol.empty() || !symbols.insert(resource.Symbol).second || resource.ArrayCount == 0 ||
+            if (!IsPassRole(resource.Symbol) || !symbols.insert(resource.Symbol).second || resource.ArrayCount == 0 ||
+                resource.Kind > ProgramResourceKind::StorageBuffer ||
+                resource.Access > ProgramResourceAccess::ReadWrite || resource.Stages == ProgramStage::None ||
+                (static_cast<std::uint8_t>(resource.Stages) & ~static_cast<std::uint8_t>(artifact.Stages)) != 0U ||
+                ((resource.Kind != ProgramResourceKind::StorageBuffer &&
+                  resource.Kind != ProgramResourceKind::StorageTexture) &&
+                 resource.Access != ProgramResourceAccess::ReadOnly) ||
                 !bindings.emplace(resource.Space, resource.Binding).second)
                 throw std::invalid_argument("Program reflection contains a duplicate or invalid resource binding.");
     }
@@ -543,6 +560,11 @@ namespace Keire
             {
                 if (!declaredPasses.contains(binary.PassRole))
                     throw std::invalid_argument("Cooked material program contains an undeclared pass binary.");
+                const auto pass = std::ranges::find_if(artifact.Passes, [&binary](const MaterialPassContract& contract)
+                                                       { return MaterialPassName(contract.Pass) == binary.PassRole; });
+                const auto& entry = binary.Stage == ProgramStage::Vertex ? pass->VertexEntry : pass->FragmentEntry;
+                if (binary.EntryPoint != entry)
+                    throw std::invalid_argument("Cooked material binary entry point differs from its pass contract.");
                 backends.insert(binary.Backend);
             }
             for (const auto backend : backends)

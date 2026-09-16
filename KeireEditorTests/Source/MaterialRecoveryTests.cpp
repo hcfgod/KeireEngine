@@ -10,7 +10,49 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
+
+TEST_CASE("material shader interfaces preserve graph metadata and reject incompatible targets")
+{
+    Keire::ShaderGraphDefinition graph;
+    Keire::ShaderGraphNode parameter;
+    parameter.Id = Keire::AssetId::Generate();
+    parameter.Kind = Keire::ShaderGraphNodeKind::Parameter;
+    parameter.Symbol = "Glow";
+    parameter.Name = "Glow Color";
+    parameter.ValueType = Keire::ShaderGraphValueType::Color;
+    parameter.Value = Keire::Color{2.0F, 0.5F, 0.25F, 1.0F};
+    parameter.ParameterMetadata.Category = "Surface";
+    parameter.ParameterMetadata.Description = "Emitted light color";
+    parameter.ParameterMetadata.HighDynamicRange = true;
+    graph.Nodes.push_back(parameter);
+    const auto reflected = KeireEditor::MaterialShaderInterface(graph);
+    REQUIRE(reflected);
+    REQUIRE(reflected->Properties.size() == 1);
+    const auto& property = reflected->Properties.front();
+    CHECK(property.Id == parameter.Id);
+    CHECK(property.Name == "Glow");
+    CHECK(property.DisplayName == "Glow Color");
+    CHECK(property.Category == "Surface");
+    CHECK(property.Description == "Emitted light color");
+    CHECK(property.HighDynamicRange);
+    CHECK(property.DefaultValue.X == 2.0F);
+    for (const auto [target, domain] : std::array{
+             std::pair{Keire::ShaderGraphTarget::Material, Keire::ShaderInterfaceDomain::Surface},
+             std::pair{Keire::ShaderGraphTarget::Vfx, Keire::ShaderInterfaceDomain::Vfx},
+             std::pair{Keire::ShaderGraphTarget::Fullscreen, Keire::ShaderInterfaceDomain::Fullscreen},
+             std::pair{Keire::ShaderGraphTarget::CustomGraphics, Keire::ShaderInterfaceDomain::CustomGraphicsPass}})
+    {
+        graph.Target.Target = target;
+        REQUIRE(KeireEditor::MaterialShaderInterface(graph));
+        CHECK(KeireEditor::MaterialShaderInterface(graph)->Domain == domain);
+    }
+    graph.Target.Target = Keire::ShaderGraphTarget::Compute;
+    CHECK_FALSE(KeireEditor::MaterialShaderInterface(graph));
+    graph.Target.Target = Keire::ShaderGraphTarget::Ui;
+    CHECK_FALSE(KeireEditor::MaterialShaderInterface(graph));
+}
 
 TEST_CASE("material creation keeps the selected shader and inherits its exposed defaults")
 {

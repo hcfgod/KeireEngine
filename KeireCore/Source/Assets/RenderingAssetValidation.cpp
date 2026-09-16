@@ -78,6 +78,17 @@ namespace Keire::Detail
             (!allowMissingVariants && definition.Variants.empty()))
             throw std::invalid_argument("Shader definition exceeds a bounded collection or lacks variants.");
 
+        if (definition.ProgramTarget != "Material" && definition.ProgramTarget != "UI" &&
+            definition.ProgramTarget != "Fullscreen" && definition.ProgramTarget != "VFX" &&
+            definition.ProgramTarget != "Custom Graphics")
+            throw std::invalid_argument("Shader graphics program target is unsupported.");
+        std::set<std::string, std::less<>> keywords;
+        if (definition.Keywords.size() > 64U)
+            throw std::invalid_argument("Shader keyword collection exceeds its limit.");
+        for (const auto& keyword : definition.Keywords)
+            if (!ValidShaderIdentifier(keyword) || !keywords.insert(keyword).second)
+                throw std::invalid_argument("Shader keywords require unique identifiers.");
+
         std::set<std::string, std::less<>> propertyNames;
         std::set<AssetId> propertyIds;
         std::size_t numericProperties = 0;
@@ -108,6 +119,14 @@ namespace Keire::Detail
             if (property.DisplayName.size() > 128 || property.Category.size() > 128 ||
                 property.Description.size() > 512)
                 throw std::invalid_argument("Shader property editor metadata exceeds its limit.");
+            if (property.TextureTransformProperty)
+            {
+                const auto transform = std::ranges::find(definition.Properties, property.TextureTransformProperty,
+                                                        &ShaderPropertyDefinition::Id);
+                if (property.Type != ShaderPropertyType::Texture2D || transform == definition.Properties.end() ||
+                    transform->Type != ShaderPropertyType::Vector4)
+                    throw std::invalid_argument("Texture transform must reference an existing Vector4 property.");
+            }
             if (property.HighDynamicRange && property.Type != ShaderPropertyType::Color)
                 throw std::invalid_argument("HDR editor metadata requires a color property.");
         }

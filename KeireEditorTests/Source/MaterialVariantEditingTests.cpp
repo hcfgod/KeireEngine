@@ -146,6 +146,43 @@ TEST_CASE("material variant individual reset supports legacy packed vectors and 
     CHECK_FALSE(KeireEditor::HasMaterialVariantProperty(instance, property));
 }
 
+TEST_CASE("material variant color and packed vector compatibility matches runtime resolution")
+{
+    Keire::MaterialInstanceDefinition instance;
+    instance.Parent = Keire::AssetId::Generate();
+    Keire::ShaderAssetDefinition shader;
+    shader.Source = "PackedColors.hlsl";
+    Keire::ShaderPropertyDefinition property;
+    property.Id = Keire::AssetId::Generate();
+    property.Name = "Tint";
+    property.Type = Keire::ShaderPropertyType::Color;
+    property.Minimum = 0.0F;
+    property.Maximum = 1.0F;
+    shader.Properties.push_back(property);
+    instance.PropertyOverrides = {{property.Id, "OldTint", Keire::Vector4{0.2F, 0.3F, 0.4F, 1.0F}},
+                                  {property.Id, "OldTint", Keire::Vector4{2.0F, 0.3F, 0.4F, 1.0F}}};
+    CHECK(KeireEditor::HasMaterialVariantProperty(instance, property));
+    CHECK(KeireEditor::SetMaterialVariantProperty(instance, property, std::nullopt));
+    CHECK_FALSE(KeireEditor::HasMaterialVariantProperty(instance, property));
+    CHECK(KeireEditor::ResolveMaterialVariantOverrides(instance, shader).Properties.empty());
+    REQUIRE(instance.PropertyOverrides.size() == 1);
+    CHECK(std::get<Keire::Vector4>(instance.PropertyOverrides.front().Value).X == 2.0F);
+    const std::vector<Keire::MaterialPropertyOverride> clipboard{
+        {property.Id, "OldTint", Keire::Vector4{0.5F, 0.6F, 0.7F, 1.0F}}};
+    CHECK(KeireEditor::PasteMaterialVariantProperties(instance, shader, clipboard) == 1);
+    CHECK(std::get<Keire::Color>(KeireEditor::ResolveMaterialVariantOverrides(instance, shader).Properties.at("Tint")) ==
+          Keire::Color{0.5F, 0.6F, 0.7F, 1.0F});
+    property.Type = Keire::ShaderPropertyType::Vector4;
+    shader.Properties.front() = property;
+    instance.PropertyOverrides = {{property.Id, "Tint", Keire::Color{0.2F, 0.3F, 0.4F, 1.0F}}};
+    CHECK(KeireEditor::HasMaterialVariantProperty(instance, property));
+    CHECK(KeireEditor::SetMaterialVariantProperty(instance, property, std::nullopt));
+    CHECK(KeireEditor::ResolveMaterialVariantOverrides(instance, shader).Properties.empty());
+    CHECK(KeireEditor::SetMaterialVariantProperty(instance, property, Keire::Color{0.4F, 0.3F, 0.2F, 1.0F}));
+    CHECK(std::get<Keire::Vector4>(KeireEditor::ResolveMaterialVariantOverrides(instance, shader).Properties.at("Tint")) ==
+          Keire::Vector4{0.4F, 0.3F, 0.2F, 1.0F});
+}
+
 TEST_CASE("material variant inactive cleanup preserves effective overrides and can be undone")
 {
     Keire::MaterialInstanceDefinition instance;

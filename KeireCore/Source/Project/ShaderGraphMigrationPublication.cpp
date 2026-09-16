@@ -62,6 +62,15 @@ namespace Keire
         struct Preparation
         {
             std::filesystem::path Root;
+            Preparation()
+                : Root(Detail::CanonicalExistingPath(std::filesystem::temp_directory_path()) /
+                       ("KeireUpgrade-" + AssetId::Generate().ToString()))
+            {
+                // Validation needs no same-volume rename. Keep its scratch tree out of the already-deep project
+                // path; the durable backups and publication journal remain inside the actual project.
+                if (!std::filesystem::create_directory(Root))
+                    throw std::runtime_error("Material migration preparation directory already exists.");
+            }
             ~Preparation()
             {
                 try
@@ -73,6 +82,8 @@ namespace Keire
                     std::ranges::sort(entries, std::greater<>{});
                     for (const auto& entry : entries)
                         fs.Remove(entry);
+                    const Detail::AnchoredFileSystem parent(Root.parent_path());
+                    parent.Remove(Root.filename());
                 }
                 catch (...)
                 {
@@ -119,10 +130,7 @@ namespace Keire
         if (current.PendingCount() == 0)
             return current;
 
-        const auto relative =
-            std::filesystem::path("Library/MaterialShaderUpgradePreparation") / AssetId::Generate().ToString();
-        original.CreateDirectories(relative);
-        const Preparation preparation{original.Root() / relative};
+        const Preparation preparation;
         const Detail::AnchoredFileSystem staged(preparation.Root, Detail::AnchoredRootPolicy::RejectLink);
         staged.CreateDirectories("Assets");
         Snapshot snapshot;

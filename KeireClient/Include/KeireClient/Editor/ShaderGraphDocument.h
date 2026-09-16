@@ -18,6 +18,13 @@
 
 namespace KeireEditor
 {
+    /// Conservatively checks catalog stages against every downstream output. Function bodies and keyword
+    /// specialization remain compiler-validated. An absent destination checks the graph's enabled stages.
+    [[nodiscard]] bool
+    ShaderGraphNodeSupportsDestination(const Keire::ShaderGraphDefinition& definition,
+                                       const Keire::ShaderGraphNode& node,
+                                       std::optional<Keire::ShaderGraphEndpoint> destination = std::nullopt);
+
     struct ShaderGraphPreviewSettings
     {
         Keire::ShaderGraphPreviewMesh Mesh = Keire::ShaderGraphPreviewMesh::Sphere;

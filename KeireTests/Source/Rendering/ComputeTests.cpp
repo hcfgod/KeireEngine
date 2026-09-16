@@ -21,6 +21,9 @@ TEST_CASE("compute devices reject invalid input before initializing native servi
     CHECK_THROWS_AS(device.Wait({}), std::invalid_argument);
     CHECK_THROWS_AS(device.ReleaseSubmission({}), std::invalid_argument);
     CHECK_THROWS_AS(device.Readback({}), std::invalid_argument);
+    CHECK_THROWS_AS(device.RequestReadback({}), std::invalid_argument);
+    CHECK_THROWS_AS(device.GetReadback({}), std::invalid_argument);
+    CHECK_THROWS_AS(device.ReloadPipeline({}, {}), std::invalid_argument);
     const std::array<std::byte, 4> bytes{};
     CHECK_THROWS_AS(device.Upload({}, bytes), std::invalid_argument);
     CHECK_THROWS_AS(device.Dispatch({}, {}, {0, 1, 1}), std::invalid_argument);
@@ -44,6 +47,9 @@ TEST_CASE("compute shutdown is idempotent and all subsequent mutations reject")
     CHECK_THROWS_AS(device.DestroyPipeline({}), std::logic_error);
     CHECK_THROWS_AS(device.Dispatch({}, {}, {}), std::logic_error);
     CHECK_THROWS_AS(device.Readback({}), std::logic_error);
+    CHECK_THROWS_AS(device.RequestReadback({}), std::logic_error);
+    CHECK_THROWS_AS(device.GetReadback({}), std::logic_error);
+    CHECK_THROWS_AS(device.ReloadPipeline({}, {}), std::logic_error);
     CHECK_THROWS_AS(device.WaitIdle(), std::logic_error);
     CHECK_THROWS_AS(device.IsComplete({}), std::logic_error);
 }
@@ -69,10 +75,13 @@ TEST_CASE("compute owner thread rejection leaves the device open")
             reject([&] { device.Shutdown(); });
             reject([&] { (void)device.CreateBuffer(16); });
             reject([&] { device.WaitIdle(); });
+            reject([&] { (void)device.RequestReadback({}); });
+            reject([&] { (void)device.GetReadback({}); });
+            reject([&] { device.ReloadPipeline({}, {}); });
             reject([&] { (void)device.Dispatch({}, {}, {}); });
         });
     worker.join();
-    CHECK(rejected == 4);
+    CHECK(rejected == 7);
     CHECK(device.IsOpen());
     CHECK_NOTHROW(device.WaitIdle());
     CHECK_NOTHROW(device.Shutdown());

@@ -115,6 +115,20 @@ TEST_CASE("validated material migration publishes source index and verified runt
     Fixture fixture;
     const Keire::Detail::AnchoredFileSystem fs(fixture.Root);
     auto specification = fixture.Specification();
+    std::filesystem::path preparationRoot;
+    const auto importMaterial = specification.Importers.front().ContextualImport;
+    specification.Importers.front().ContextualImport =
+        [&](const Keire::AssetImportContext& context, const std::span<const std::byte> source)
+    {
+        if (context.ProjectRoot != fixture.Root)
+        {
+            preparationRoot = context.ProjectRoot;
+            CHECK(preparationRoot.parent_path() ==
+                  Keire::Detail::CanonicalExistingPath(std::filesystem::temp_directory_path()));
+            CHECK(std::filesystem::is_directory(preparationRoot));
+        }
+        return importMaterial(context, source);
+    };
     Keire::AssetId runtime;
     {
         const auto database = Keire::CreateRef<Keire::AssetDatabase>(specification);
@@ -129,6 +143,8 @@ TEST_CASE("validated material migration publishes source index and verified runt
     REQUIRE(reviewed.CanApply());
     const auto applied = Keire::ApplyShaderGraphMigration(fixture.Root, reviewed, specification);
     REQUIRE(applied.PendingCount() == 1);
+    REQUIRE_FALSE(preparationRoot.empty());
+    CHECK_FALSE(std::filesystem::exists(preparationRoot));
     CHECK_NOTHROW(Keire::AssetCooker::Validate(fixture.Root / "Library/AssetCache/Runtime/catalog.json"));
     const auto catalog = Keire::Detail::LoadCatalog(fixture.Root / "Library/AssetCache/Runtime/catalog.json");
     CHECK(std::ranges::find(catalog.Entries, runtime, &Keire::Detail::CatalogEntry::Id) != catalog.Entries.end());
@@ -142,6 +158,9 @@ TEST_CASE("validated material migration publishes source index and verified runt
     CHECK(Keire::MaterialAsset::DecodeAuthoringSource(fs.Read("Assets/Paint.keirematerial", 1000000)).Shader.Asset ==
           reviewed.Items.front().GeneratedShaderAsset);
     CHECK_FALSE(Keire::Detail::HasPendingMaterialMigration(fixture.Root));
+    const auto repeated = Keire::InspectShaderGraphMigration(fixture.Root);
+    CHECK(repeated.PendingCount() == 0);
+    CHECK(Keire::ApplyShaderGraphMigration(fixture.Root, repeated, specification).PendingCount() == 0);
 }
 
 TEST_CASE("validated material migration preserves all authoring bytes when dependency validation fails")
@@ -151,11 +170,18 @@ TEST_CASE("validated material migration preserves all authoring bytes when depen
     const auto before = fs.Read("Assets/Paint.keirematerial", 1000000);
     const auto metadata = fs.Read("Assets/Paint.keirematerial.keiremeta", 1000000);
     auto specification = fixture.Specification();
-    specification.Importers.at(1).ContextualImport = [](const Keire::AssetImportContext&,
-                                                        std::span<const std::byte>) -> Keire::AssetImportOutput
-    { throw std::runtime_error("Fixture shader dependency failed validation."); };
+    std::filesystem::path preparationRoot;
+    specification.Importers.at(1).ContextualImport = [&](const Keire::AssetImportContext& context,
+                                                         std::span<const std::byte>) -> Keire::AssetImportOutput
+    {
+        preparationRoot = context.ProjectRoot;
+        throw std::runtime_error("Fixture shader dependency failed validation.");
+    };
     const auto reviewed = Keire::InspectShaderGraphMigration(fixture.Root);
     CHECK_THROWS_AS((void)Keire::ApplyShaderGraphMigration(fixture.Root, reviewed, specification), std::runtime_error);
+    REQUIRE_FALSE(preparationRoot.empty());
+    CHECK(preparationRoot != fixture.Root);
+    CHECK_FALSE(std::filesystem::exists(preparationRoot));
     CHECK(fs.Read("Assets/Paint.keirematerial", 1000000) == before);
     CHECK(fs.Read("Assets/Paint.keirematerial.keiremeta", 1000000) == metadata);
     CHECK_FALSE(fs.Exists("Assets/Paint_Shader.keireshadergraph"));

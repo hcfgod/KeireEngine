@@ -162,3 +162,69 @@ TEST_CASE("Shader Graph connected named keyword reuses its declared option witho
     REQUIRE(fixture.Document.Undo());
     CHECK(fixture.Document.Definition() == graph);
 }
+
+TEST_CASE("Shader Graph stage eligibility distinguishes vertex and fragment output pins")
+{
+    const auto graph = Keire::CreateDefaultShaderGraph();
+    const auto derivative = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::DerivativeX);
+    const auto constant = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant);
+    CHECK(KeireEditor::ShaderGraphNodeSupportsDestination(graph, derivative, Pin(graph.Nodes.front(), "Roughness")));
+    CHECK_FALSE(KeireEditor::ShaderGraphNodeSupportsDestination(graph, derivative,
+                                                                Pin(graph.Nodes.front(), "WorldPositionOffset")));
+    CHECK(KeireEditor::ShaderGraphNodeSupportsDestination(graph, constant,
+                                                          Pin(graph.Nodes.front(), "WorldPositionOffset")));
+    CHECK(KeireEditor::ShaderGraphNodeSupportsDestination(graph, derivative));
+    CHECK_FALSE(KeireEditor::ShaderGraphNodeSupportsDestination(
+        graph, derivative, Keire::ShaderGraphEndpoint{Keire::AssetId::Generate(), Keire::AssetId::Generate()}));
+}
+
+TEST_CASE("Shader Graph stage eligibility follows reroutes and all downstream fanout")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    const auto reroute = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Reroute);
+    const auto input =
+        std::ranges::find(reroute.Pins, Keire::ShaderGraphPinDirection::Input, &Keire::ShaderGraphPin::Direction);
+    const auto output =
+        std::ranges::find(reroute.Pins, Keire::ShaderGraphPinDirection::Output, &Keire::ShaderGraphPin::Direction);
+    REQUIRE(input != reroute.Pins.end());
+    REQUIRE(output != reroute.Pins.end());
+    const Keire::ShaderGraphEndpoint destination{reroute.Id, input->Id};
+    const Keire::ShaderGraphEndpoint source{reroute.Id, output->Id};
+    graph.Nodes.push_back(reroute);
+    graph.Connections.push_back({Keire::AssetId::Generate(), source, Pin(graph.Nodes.front(), "Roughness")});
+    const auto derivative = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::DerivativeX);
+    CHECK(KeireEditor::ShaderGraphNodeSupportsDestination(graph, derivative, destination));
+    graph.Connections.push_back({Keire::AssetId::Generate(), source, Pin(graph.Nodes.front(), "WorldPositionOffset")});
+    CHECK_FALSE(KeireEditor::ShaderGraphNodeSupportsDestination(graph, derivative, destination));
+    // Even a malformed cyclic draft terminates without recursion.
+    graph.Connections.push_back({Keire::AssetId::Generate(), source, destination});
+    CHECK_FALSE(KeireEditor::ShaderGraphNodeSupportsDestination(graph, derivative, destination));
+}
+
+TEST_CASE("Shader Graph stage rejection preserves document content and undo history")
+{
+    AuthoringFixture fixture;
+    auto graph = fixture.Graph;
+    graph.Connections.front().Input = Pin(graph.Nodes.front(), "WorldPositionOffset");
+    fixture.Document.Open(Keire::AssetId::Generate(), graph, 1, fixture.Undo);
+    const auto derivative = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::DerivativeX);
+    CHECK_THROWS_AS(fixture.Document.AddConnectedNode(derivative, graph.Connections.front().Input),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(fixture.Document.InsertNode(derivative, graph.Connections.front().Id), std::invalid_argument);
+    CHECK(fixture.Document.Definition() == graph);
+    CHECK_FALSE(fixture.Document.Dirty());
+    CHECK_FALSE(fixture.Document.Undo());
+    // A new branch off an existing source has no destination stage yet.
+    CHECK(fixture.Document.AddConnectedNode(derivative, graph.Connections.front().Output));
+}
+
+TEST_CASE("Shader Graph unconnected stage eligibility respects the compute target")
+{
+    auto graph = Keire::CreateDefaultShaderGraph();
+    graph.Target.Target = Keire::ShaderGraphTarget::Compute;
+    graph.Target.Stages = Keire::ShaderGraphShaderStage::Compute;
+    CHECK_FALSE(KeireEditor::ShaderGraphNodeSupportsDestination(
+        graph, Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::DerivativeX)));
+    CHECK(KeireEditor::ShaderGraphNodeSupportsDestination(
+        graph, Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Constant)));
+}

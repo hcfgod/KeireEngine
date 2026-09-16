@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 23);
+    CHECK(importer.Version == 24);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -174,7 +174,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 12);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 13);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -192,7 +192,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 12, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 13, source schema 6") != std::string::npos);
     REQUIRE(manifest.at("passes").size() == 3U);
     CHECK(manifest.at("passes")[0].at("role") == "depthVelocity");
     CHECK(manifest.at("passes")[1].at("role") == "deferredGBufferStandard");
@@ -1265,4 +1265,60 @@ TEST_CASE("Shader Graph instance import publishes an assignable runtime material
     CHECK(material->Definition().Shader == shaderAsset);
     CHECK(std::get<float>(material->Definition().Properties.at("Roughness")) == doctest::Approx(0.18F));
     CHECK(std::get<Keire::Color>(material->Definition().Properties.at("Tint")) == Keire::Color{0.2F, 0.4F, 0.8F, 1.0F});
+}
+
+TEST_CASE("Shader Graph texture transforms preserve identity and change sampled coordinates")
+{
+    for (const auto kind : {Keire::ShaderGraphNodeKind::TextureSample, Keire::ShaderGraphNodeKind::TextureSampleLevel,
+                            Keire::ShaderGraphNodeKind::TriplanarSample})
+    {
+        auto graph = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Unlit);
+        auto transform =
+            Parameter("TextureST", Keire::ShaderGraphValueType::Vector4, Keire::Vector4{2.0F, 3.0F, 0.25F, -0.5F});
+        auto texture = Parameter("Albedo", Keire::ShaderGraphValueType::Texture2D, Keire::AssetId{});
+        texture.ParameterMetadata.TextureTransformProperty = transform.Id;
+        auto sample = Keire::CreateShaderGraphNode(kind);
+        Connect(graph, texture, "Value", sample, "Texture");
+        Connect(graph, sample, "RGBA", graph.Nodes.front(), "Color");
+        graph.Nodes.push_back(transform);
+        graph.Nodes.push_back(texture);
+        graph.Nodes.push_back(sample);
+        const auto compilation = Keire::CompileShaderGraph(graph);
+        REQUIRE(compilation.Succeeded());
+        const auto& source = compilation.Variants.front().Hlsl;
+        CHECK(source.find("TextureST.xy") != std::string::npos);
+        CHECK(source.find("TextureST.zw") != std::string::npos);
+        const auto reflected =
+            std::ranges::find(compilation.Properties, texture.Id, &Keire::ShaderPropertyDefinition::Id);
+        REQUIRE(reflected != compilation.Properties.end());
+        CHECK(reflected->TextureTransformProperty == transform.Id);
+        CHECK(Keire::ShaderGraphAsset::DecodeSource(Keire::ShaderGraphAsset::EncodeSource(graph)) == graph);
+
+        graph.Nodes[1].Name = "Renamed transform";
+        CHECK(Keire::CompileShaderGraph(graph).Succeeded());
+        graph.Nodes[1].Value = Keire::Vector4{4.0F, 5.0F, 0.0F, 0.0F};
+        const auto valuesChanged = Keire::CompileShaderGraph(graph);
+        REQUIRE(valuesChanged.Succeeded());
+        CHECK(valuesChanged.Variants.front().Hlsl == source);
+        graph.Nodes[1].Symbol = "RenamedST";
+        const auto renamed = Keire::CompileShaderGraph(graph);
+        REQUIRE(renamed.Succeeded());
+        CHECK(renamed.Variants.front().Hlsl.find("RenamedST.xy") != std::string::npos);
+    }
+}
+
+TEST_CASE("Shader Graph texture transforms reject missing and incompatible parameter identities")
+{
+    auto graph = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Unlit);
+    auto texture = Parameter("Albedo", Keire::ShaderGraphValueType::Texture2D, Keire::AssetId{});
+    texture.ParameterMetadata.TextureTransformProperty = Keire::AssetId::Generate();
+    graph.Nodes.push_back(texture);
+    CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
+    auto scalar = Parameter("WrongType", Keire::ShaderGraphValueType::Scalar, 1.0F);
+    graph.Nodes.back().ParameterMetadata.TextureTransformProperty = scalar.Id;
+    graph.Nodes.push_back(scalar);
+    CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
+    graph.Nodes[1].ParameterMetadata.TextureTransformProperty = {};
+    graph.Nodes.back().ParameterMetadata.TextureTransformProperty = texture.Id;
+    CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
 }

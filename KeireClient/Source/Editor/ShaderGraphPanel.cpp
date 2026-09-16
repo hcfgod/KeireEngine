@@ -680,6 +680,8 @@ namespace KeireEditor
                     std::ranges::find(definition.Connections, *insertion, &Keire::ShaderGraphConnection::Id);
                 if (cable == definition.Connections.end())
                     return false;
+                if (!ShaderGraphNodeSupportsDestination(definition, candidate, cable->Input))
+                    return false;
                 const auto* source = FindNode(definition, cable->Output.Node);
                 const auto* target = FindNode(definition, cable->Input.Node);
                 if (!source || !target)
@@ -692,6 +694,11 @@ namespace KeireEditor
                        std::ranges::any_of(candidate.Pins,
                                            [&](const auto& pin) { return ShaderGraphPinsCanConnect(pin, *input); });
             }
+            if (!ShaderGraphNodeSupportsDestination(
+                    definition, candidate,
+                    compatiblePin && compatiblePin->Direction == Keire::ShaderGraphPinDirection::Input ? anchor
+                                                                                                       : std::nullopt))
+                return false;
             if (compatiblePin)
                 return std::ranges::any_of(candidate.Pins, [&](const Keire::ShaderGraphPin& pin)
                                            { return ShaderGraphPinsCanConnect(*compatiblePin, pin); });

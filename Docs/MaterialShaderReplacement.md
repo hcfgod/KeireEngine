@@ -11,8 +11,12 @@ The lane evidence documents distinguish implementation from tests actually run. 
 build passed. The seed build passed 47 cases / 13,225 assertions and its Windows checks found
 offscreen asset reveal and short-panel Frame All defects.
 The first integrated regression run passed 143/148 native cases and 118/125 editor cases. After repairs, the focused
-editor suite passed 129 cases / 14,156 assertions. Native failure retests passed 6/7 cases; migration publication still
-fails on a deeply nested Windows cache path. This remains an open gate; full staged import did not resolve it.
+editor suite passed 129 cases / 14,156 assertions. Native failure retests initially passed 6/7 cases. The remaining
+Windows migration failure was repaired by moving validation into a unique system temporary directory, avoiding
+additional project-path nesting. On September 15, a fresh Debug/MSVC build and all 17 migration/publication cases
+passed with 118 assertions, including temporary cleanup on failure and repeat application. Durable journals and
+backups remain in the project. The same migration suite passed DebugASan, and the broader Debug material/shader/
+compute filter passed 164 cases / 3,231 assertions. Broader acceptance remains open.
 Windows control retests passed asset reveal, narrow five-pin framing, save/reopen, and tall Lit framing after lowering
 the Frame All minimum zoom to the canvas's supported 20%. See `RevampProductionAcceptance.md` for provenance/timings.
 

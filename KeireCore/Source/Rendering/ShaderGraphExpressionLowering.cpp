@@ -40,6 +40,7 @@ namespace Keire::Detail
         property.Maximum = node.ParameterMetadata.Maximum;
         property.Step = node.ParameterMetadata.Step;
         property.Type = static_cast<ShaderPropertyType>(node.ValueType);
+        property.TextureTransformProperty = node.ParameterMetadata.TextureTransformProperty;
         if (node.ValueType == ShaderGraphValueType::Texture2D)
         {
             property.DefaultTexture = std::get<AssetId>(node.Value);
@@ -61,6 +62,29 @@ namespace Keire::Detail
         }
         if (std::ranges::find(m_Properties, property.Name, &ShaderPropertyDefinition::Name) == m_Properties.end())
             m_Properties.push_back(std::move(property));
+    }
+
+    std::string ShaderGraphCompiler::TransformTextureCoordinates(const std::string_view texture,
+                                                                 std::string coordinates)
+    {
+        const auto parameter =
+            std::ranges::find_if(m_Definition.Nodes,
+                                 [&](const ShaderGraphNode& node)
+                                 {
+                                     return node.Kind == ShaderGraphNodeKind::Parameter &&
+                                            node.ValueType == ShaderGraphValueType::Texture2D &&
+                                            (ShaderGraphPropertySymbol(node.Symbol) == texture ||
+                                             ShaderGraphVertexPropertySymbol(node.Symbol) == texture);
+                                 });
+        if (parameter == m_Definition.Nodes.end() || !parameter->ParameterMetadata.TextureTransformProperty)
+            return coordinates;
+        const auto& transform =
+            RequireShaderGraphNode(m_Definition, parameter->ParameterMetadata.TextureTransformProperty);
+        const bool vertex = m_CurrentStage == ShaderGraphShaderStage::Vertex;
+        m_UsesVertexMaterialParameters |= vertex;
+        const auto symbol =
+            vertex ? ShaderGraphVertexPropertySymbol(transform.Symbol) : ShaderGraphPropertySymbol(transform.Symbol);
+        return "((" + coordinates + ") * " + symbol + ".xy + " + symbol + ".zw)";
     }
 
     [[nodiscard]] ShaderGraphExpression ShaderGraphCompiler::Input(const ShaderGraphNode& node,
@@ -176,7 +200,8 @@ namespace Keire::Detail
             const auto uv = CoerceShaderGraphExpression(namedInput("UV"), ShaderGraphValueType::Vector2);
             if (texture.Type != ShaderGraphValueType::Texture2D || !IsValidShaderGraphIdentifier(texture.Code))
                 throw std::invalid_argument("Texture Sample requires a Texture2D Parameter connection.");
-            const auto sample = texture.Code + ".Sample(" + texture.Code + "Sampler, " + uv.Code + ")";
+            const auto sample = texture.Code + ".Sample(" + texture.Code + "Sampler, " +
+                                TransformTextureCoordinates(texture.Code, uv.Code) + ")";
             const auto swizzle = outputPin.Name == "RGB" ? ".rgb"
                                  : outputPin.Name == "R" ? ".r"
                                  : outputPin.Name == "G" ? ".g"
@@ -695,10 +720,12 @@ namespace Keire::Detail
                                  sharpness.Code + "), 1.0F)) / max(dot(pow(abs(SafeNormalize(" + normal.Code +
                                  ", input.Normal)), max(abs(" + sharpness.Code + "), 1.0F)), 1.0F.xxx), 1.0e-5F))";
             const auto scaled = "((" + position.Code + ") * (" + scale.Code + "))";
-            const auto sample = "(" + texture.Code + ".Sample(" + texture.Code + "Sampler, " + scaled + ".zy) * " +
-                                weights + ".x + " + texture.Code + ".Sample(" + texture.Code + "Sampler, " + scaled +
-                                ".xz) * " + weights + ".y + " + texture.Code + ".Sample(" + texture.Code + "Sampler, " +
-                                scaled + ".xy) * " + weights + ".z)";
+            const auto sample = "(" + texture.Code + ".Sample(" + texture.Code + "Sampler, " +
+                                TransformTextureCoordinates(texture.Code, scaled + ".zy") + ") * " + weights + ".x + " +
+                                texture.Code + ".Sample(" + texture.Code + "Sampler, " +
+                                TransformTextureCoordinates(texture.Code, scaled + ".xz") + ") * " + weights + ".y + " +
+                                texture.Code + ".Sample(" + texture.Code + "Sampler, " +
+                                TransformTextureCoordinates(texture.Code, scaled + ".xy") + ") * " + weights + ".z)";
             const auto swizzle = outputPin.Name == "RGB" ? ".rgb"
                                  : outputPin.Name == "R" ? ".r"
                                  : outputPin.Name == "G" ? ".g"
@@ -715,8 +742,8 @@ namespace Keire::Detail
             const auto level = CoerceShaderGraphExpression(namedInput("Mip Level"), ShaderGraphValueType::Scalar);
             if (texture.Type != ShaderGraphValueType::Texture2D || !IsValidShaderGraphIdentifier(texture.Code))
                 throw std::invalid_argument("Texture Sample Level requires a Texture2D Parameter connection.");
-            const auto sample = texture.Code + ".SampleLevel(" + texture.Code + "Sampler, " + uv.Code + ", max(" +
-                                level.Code + ", 0.0F))";
+            const auto sample = texture.Code + ".SampleLevel(" + texture.Code + "Sampler, " +
+                                TransformTextureCoordinates(texture.Code, uv.Code) + ", max(" + level.Code + ", 0.0F))";
             const auto swizzle = outputPin.Name == "RGB" ? ".rgb"
                                  : outputPin.Name == "R" ? ".r"
                                  : outputPin.Name == "G" ? ".g"

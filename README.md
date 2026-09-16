@@ -72,8 +72,9 @@ overrides and surface settings. Shared sources are read-only; **Copy to Project*
 new asset ID. Double-click reopens the Inspector. Properties retain their values across symbol renames; incompatible
 values remain inactive until restored or explicitly removed. Nested material variants can override shader defaults.
 The migration API provides a dry-run report and reviewed apply, retaining recovery backups under
-`Library/MaterialShaderUpgrade`. Interrupted publication is recovered on exclusive project open; the full editor
-upgrade workflow and catalog publication gate remain pending.
+`Library/MaterialShaderUpgrade`. Validation uses an isolated system temporary directory and removes it on success
+or failure. Interrupted publication is recovered on exclusive project open. The editor offers reviewed conversion;
+complete interactive and cross-platform acceptance remains pending.
 
 ## Product Model
 

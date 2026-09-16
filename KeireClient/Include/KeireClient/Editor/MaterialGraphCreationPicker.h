@@ -3,8 +3,15 @@
 #include "Keire/Rendering/MaterialGraph.h"
 #include "KeireClient/Editor/AssetPicker.h"
 
+#include <optional>
+
 namespace KeireEditor
 {
+    [[nodiscard]] std::optional<Keire::ShaderInterfaceDefinition>
+    MaterialShaderInterface(const Keire::ShaderGraphDefinition& graph);
+    [[nodiscard]] std::optional<Keire::ShaderInterfaceDefinition>
+    MaterialShaderInterface(const Keire::ShaderAssetDefinition& shader);
+
     [[nodiscard]] Keire::MaterialAuthoringDefinition
     CreateMaterialForShader(const Keire::AssetSourceRecord& shader,
                             const Keire::ShaderInterfaceDefinition& shaderInterface);

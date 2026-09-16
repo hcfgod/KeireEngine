@@ -57,6 +57,8 @@ namespace Keire::Detail
                 result["id"] = property.Id.ToString();
             if (!property.Description.empty())
                 result["description"] = property.Description;
+            if (property.TextureTransformProperty)
+                result["textureTransformProperty"] = property.TextureTransformProperty.ToString();
             if (property.HighDynamicRange)
                 result["hdr"] = true;
             const auto graphType = static_cast<ShaderGraphValueType>(property.Type);
@@ -123,6 +125,9 @@ namespace Keire::Detail
         Json encodedProperties = Json::array();
         for (const auto& property : properties)
             encodedProperties.push_back(ManifestProperty(property));
+        Json declaredKeywords = Json::array();
+        for (const auto& keyword : definition.Keywords)
+            declaredKeywords.push_back(keyword.Name);
         Json defines = Json::object();
         for (const auto& keyword : keywords)
             defines[KeywordDefine(keyword)] = "1";
@@ -185,6 +190,7 @@ namespace Keire::Detail
             {"materialGraphSourceSchemaVersion", definition.SchemaVersion},
             {"materialGraphGeneratedShaderVersion", ShaderGraphGeneratedShaderVersion},
             {"programTarget", ShaderGraphTargetName(definition.Target.Target)},
+            {"keywords", std::move(declaredKeywords)},
             {"programStages", static_cast<std::uint8_t>(definition.Target.Stages)},
             {"fullscreenInjectionPoint", FullscreenInjectionPointName(definition.Target.FullscreenInjectionPoint)},
             {"computeThreadGroupSize",

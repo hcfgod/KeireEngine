@@ -73,6 +73,12 @@ namespace Keire
             std::uint32_t UniformBytes = 0;
         };
 
+        struct ReadbackRequest
+        {
+            SDL_GPUTransferBuffer* Transfer = nullptr;
+            std::uint32_t Size = 0;
+        };
+
         explicit Impl(const ProgramBackend backend, const bool debug) : Backend(backend), Debug(debug)
         {
             if (backend != ProgramBackend::D3D12 && backend != ProgramBackend::Vulkan &&
@@ -159,6 +165,9 @@ namespace Keire
                 if (fence)
                     SDL_ReleaseGPUFence(Device, fence);
             Submissions.clear();
+            for (const auto& [id, request] : Readbacks)
+                SDL_ReleaseGPUTransferBuffer(Device, request.Transfer);
+            Readbacks.clear();
             for (const auto& [id, pipeline] : Pipelines)
                 SDL_ReleaseGPUComputePipeline(Device, pipeline.Native);
             Pipelines.clear();
@@ -179,6 +188,7 @@ namespace Keire
         std::map<std::uint64_t, Buffer> Buffers;
         std::map<std::uint64_t, Pipeline> Pipelines;
         std::map<std::uint64_t, SDL_GPUFence*> Submissions;
+        std::map<std::uint64_t, ReadbackRequest> Readbacks;
     };
 
     ComputeDevice::ComputeDevice(const ProgramBackend backend, const bool debug)
@@ -299,6 +309,16 @@ namespace Keire
             state.Fail("Create compute pipeline");
         }
         return id;
+    }
+
+    void ComputeDevice::ReloadPipeline(const ComputePipelineId pipeline, const ProgramArtifact& artifact,
+                                       const std::size_t variant)
+    {
+        auto& current = m_Impl->Get(pipeline);
+        const auto replacement = CreatePipeline(artifact, variant);
+        auto& next = m_Impl->Get(replacement);
+        std::swap(current, next);
+        DestroyPipeline(replacement);
     }
 
     void ComputeDevice::DestroyPipeline(const ComputePipelineId pipeline)
@@ -467,6 +487,11 @@ namespace Keire
     void ComputeDevice::ReleaseSubmission(const ComputeSubmissionId submission)
     {
         Wait(submission);
+        if (const auto request = m_Impl->Readbacks.find(submission.Value); request != m_Impl->Readbacks.end())
+        {
+            SDL_ReleaseGPUTransferBuffer(m_Impl->Device, request->second.Transfer);
+            m_Impl->Readbacks.erase(request);
+        }
         m_Impl->Submissions.erase(submission.Value);
     }
 
@@ -505,6 +530,75 @@ namespace Keire
             state.Fail("Map compute download");
         std::memcpy(result.data(), mapped, size);
         SDL_UnmapGPUTransferBuffer(state.Device, transfer.Value);
+        return result;
+    }
+
+    ComputeSubmissionId ComputeDevice::RequestReadback(const ComputeBufferId buffer, const std::uint32_t offset,
+                                                       std::uint32_t size)
+    {
+        auto& state = *m_Impl;
+        const auto& sourceBuffer = state.Get(buffer);
+        if (size == 0 && offset <= sourceBuffer.Size)
+            size = sourceBuffer.Size - offset;
+        ValidateRange(sourceBuffer.Size, offset, size);
+        if (state.Submissions.size() >= 4096)
+            throw std::length_error("Release compute submissions before submitting more work.");
+        std::uint64_t pendingBytes = size;
+        for (const auto& [key, pending] : state.Readbacks)
+            pendingBytes += pending.Size;
+        if (pendingBytes > 256ULL * 1024ULL * 1024ULL)
+            throw std::length_error("Release compute readbacks before exceeding 256 MiB of pending snapshots.");
+        ComputeSubmissionId id;
+        id.Value = state.NextId++;
+        id.m_Owner = state.Identity;
+        auto [record, inserted] = state.Submissions.emplace(id.Value, nullptr);
+        try
+        {
+            auto [request, added] = state.Readbacks.emplace(id.Value, Impl::ReadbackRequest{nullptr, size});
+            SDL_GPUTransferBufferCreateInfo info{};
+            info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
+            info.size = size;
+            TransferGuard transfer{state.Device, SDL_CreateGPUTransferBuffer(state.Device, &info)};
+            if (!transfer.Value)
+                state.Fail("Create asynchronous compute download transfer");
+            CommandGuard commands{SDL_AcquireGPUCommandBuffer(state.Device)};
+            if (!commands.Value)
+                state.Fail("Acquire asynchronous compute download commands");
+            auto* copy = SDL_BeginGPUCopyPass(commands.Value);
+            if (!copy)
+                state.Fail("Begin asynchronous compute download");
+            const SDL_GPUBufferRegion source{sourceBuffer.Native, offset, size};
+            const SDL_GPUTransferBufferLocation destination{transfer.Value, 0};
+            SDL_DownloadFromGPUBuffer(copy, &source, &destination);
+            SDL_EndGPUCopyPass(copy);
+            record->second = SDL_SubmitGPUCommandBufferAndAcquireFence(std::exchange(commands.Value, nullptr));
+            if (!record->second)
+                state.Fail("Submit asynchronous compute download");
+            request->second.Transfer = std::exchange(transfer.Value, nullptr);
+        }
+        catch (...)
+        {
+            state.Readbacks.erase(id.Value);
+            state.Submissions.erase(record);
+            throw;
+        }
+        return id;
+    }
+
+    std::vector<std::byte> ComputeDevice::GetReadback(const ComputeSubmissionId submission)
+    {
+        auto& state = *m_Impl;
+        (void)state.Get(submission);
+        const auto request = state.Readbacks.find(submission.Value);
+        if (request == state.Readbacks.end())
+            throw std::invalid_argument("Compute submission is not a readback request.");
+        std::vector<std::byte> result(request->second.Size);
+        Wait(submission);
+        const void* mapped = SDL_MapGPUTransferBuffer(state.Device, request->second.Transfer, false);
+        if (!mapped)
+            state.Fail("Map asynchronous compute download");
+        std::memcpy(result.data(), mapped, result.size());
+        SDL_UnmapGPUTransferBuffer(state.Device, request->second.Transfer);
         return result;
     }
 

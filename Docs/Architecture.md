@@ -12,6 +12,9 @@ contract and keep pointer-bearing interop signatures private.
 
 Reviewed migration performs a full import of its isolated staged project before catalog validation and publication.
 This ensures validation covers the converted project rather than relying on a partial incremental catalog.
+The validation copy uses a unique system temporary directory to avoid adding staging depth to Windows project paths.
+Its scoped owner removes it after success or failure. Durable publication journals and recovery backups remain in
+the project; validation does not require a same-volume rename.
 
 Explicit asset reveal prepares folder and search state together before selection, so the cached record view refreshes
 even when the source revision is unchanged. Shader Graph pane sizing reserves preview space only when the canvas fits;

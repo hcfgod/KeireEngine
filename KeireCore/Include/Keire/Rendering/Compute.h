@@ -74,6 +74,9 @@ namespace Keire
         [[nodiscard]] ComputeBufferId CreateBuffer(std::uint32_t size, bool indirect = false);
         void DestroyBuffer(ComputeBufferId buffer);
         [[nodiscard]] ComputePipelineId CreatePipeline(const ProgramArtifact& artifact, std::size_t variant = 0);
+        /// Keeps the identity stable; validation failure leaves the previous pipeline usable.
+        /// Pending submissions retain their original native pipeline. Native failure closes the device.
+        void ReloadPipeline(ComputePipelineId pipeline, const ProgramArtifact& artifact, std::size_t variant = 0);
         void DestroyPipeline(ComputePipelineId pipeline);
         void Upload(ComputeBufferId buffer, std::span<const std::byte> bytes, std::uint32_t offset = 0);
         [[nodiscard]] ComputeSubmissionId Dispatch(ComputePipelineId pipeline,
@@ -89,6 +92,11 @@ namespace Keire
         void ReleaseSubmission(ComputeSubmissionId submission);
         [[nodiscard]] std::vector<std::byte> Readback(ComputeBufferId buffer, std::uint32_t offset = 0,
                                                       std::uint32_t size = 0);
+        /// Enqueues a snapshot after preceding device work without waiting for GPU completion.
+        /// The result remains available until ReleaseSubmission, including after source-buffer destruction.
+        [[nodiscard]] ComputeSubmissionId RequestReadback(ComputeBufferId buffer, std::uint32_t offset = 0,
+                                                          std::uint32_t size = 0);
+        [[nodiscard]] std::vector<std::byte> GetReadback(ComputeSubmissionId submission);
         void WaitIdle();
         void Shutdown();
         [[nodiscard]] bool IsOpen() const noexcept;

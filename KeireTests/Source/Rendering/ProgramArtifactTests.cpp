@@ -217,3 +217,79 @@ TEST_CASE("cooked material programs require digest-verified complete pass stage 
     incomplete.Program.Variants.front().Binaries.pop_back();
     CHECK_THROWS_AS(Keire::ValidateCookedMaterialProgramArtifact(incomplete), std::invalid_argument);
 }
+
+TEST_CASE("graphics program reflection rejects invalid stages entries and resources")
+{
+    const auto valid = Keire::CompileShaderGraphProgram(Keire::CreateTargetShaderGraph(Keire::ShaderGraphTarget::Ui));
+    REQUIRE(valid.Succeeded());
+    CHECK_NOTHROW(Keire::ValidateProgramArtifact(valid));
+    auto invalid = valid;
+    invalid.Stages = static_cast<Keire::ProgramStage>(0x83);
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+    invalid = valid;
+    invalid.Reflection.EntryPoints.pop_back();
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+    invalid = valid;
+    invalid.Reflection.EntryPoints.push_back(invalid.Reflection.EntryPoints.front());
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+    invalid = valid;
+    invalid.Reflection.EntryPoints.front().Name = "invalid entry";
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+    auto withResource = valid;
+    withResource.Reflection.Resources.push_back(
+        {{}, "Texture", "Texture", Keire::ProgramResourceKind::SampledTexture2D});
+    CHECK_NOTHROW(Keire::ValidateProgramArtifact(withResource));
+    invalid = withResource;
+    invalid.Reflection.Resources.back().Stages = Keire::ProgramStage::Compute;
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+    invalid = withResource;
+    invalid.Reflection.Resources.back().Access = Keire::ProgramResourceAccess::WriteOnly;
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+    invalid = withResource;
+    invalid.Reflection.Resources.back().Kind = static_cast<Keire::ProgramResourceKind>(255);
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+    invalid = withResource;
+    invalid.Reflection.Resources.back().Stages = Keire::ProgramStage::None;
+    CHECK_THROWS_AS(Keire::ValidateProgramArtifact(invalid), std::invalid_argument);
+}
+
+TEST_CASE("shader reflection preserves targets keywords and stable texture transform bindings")
+{
+    auto graph = Keire::CreateTargetShaderGraph(Keire::ShaderGraphTarget::Vfx);
+    auto transform = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Vector4);
+    transform.Symbol = "AlbedoTransform";
+    transform.Value = Keire::Vector4{1.0F, 1.0F, 0.0F, 0.0F};
+    auto texture = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Texture2D);
+    texture.Symbol = "Albedo";
+    texture.TextureSemantic = Keire::ShaderTextureSemantic::BaseColor;
+    texture.ParameterMetadata.TextureTransformProperty = transform.Id;
+    graph.Nodes.push_back(transform);
+    graph.Nodes.push_back(texture);
+    graph.Keywords.push_back({"DETAIL", {}, "false", true});
+    const auto compiled = Keire::CompileShaderGraphProgram(graph);
+    REQUIRE(compiled.Succeeded());
+    const auto& manifest = compiled.Variants.front().Manifest;
+    auto definition = Keire::ShaderAsset::DecodeManifest(std::as_bytes(std::span(manifest)));
+    CHECK(definition.ProgramTarget == "VFX");
+    CHECK(definition.Keywords == std::vector<std::string>{"DETAIL"});
+    const auto reflected = std::ranges::find(definition.Properties, texture.Id, &Keire::ShaderPropertyDefinition::Id);
+    REQUIRE(reflected != definition.Properties.end());
+    CHECK(reflected->TextureTransformProperty == transform.Id);
+    CHECK(reflected->TextureSemantic == Keire::ShaderTextureSemantic::BaseColor);
+    for (const auto format : {Keire::ShaderBinaryFormat::Dxil, Keire::ShaderBinaryFormat::SpirV, Keire::ShaderBinaryFormat::Msl})
+        definition.Variants.push_back({format, {std::byte{1}}, {std::byte{2}}});
+    const auto encoded = Keire::ShaderAsset::Encode(definition);
+    const auto roundTrip = Keire::ShaderAsset::Decode(encoded);
+    CHECK(roundTrip->Definition().Properties == definition.Properties);
+    CHECK(roundTrip->Definition().ProgramTarget == definition.ProgramTarget);
+    CHECK(roundTrip->Definition().Keywords == definition.Keywords);
+    auto invalid = definition;
+    invalid.Properties[static_cast<std::size_t>(reflected - definition.Properties.begin())].TextureTransformProperty = Keire::AssetId::Generate();
+    CHECK_THROWS_AS(Keire::ShaderAsset::Encode(invalid), std::invalid_argument);
+    invalid = definition;
+    invalid.Keywords.push_back("DETAIL");
+    CHECK_THROWS_AS(Keire::ShaderAsset::Encode(invalid), std::invalid_argument);
+    invalid = definition;
+    invalid.ProgramTarget = "Compute";
+    CHECK_THROWS_AS(Keire::ShaderAsset::Encode(invalid), std::invalid_argument);
+}

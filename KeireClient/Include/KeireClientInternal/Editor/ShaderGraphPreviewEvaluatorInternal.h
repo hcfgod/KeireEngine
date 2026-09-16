@@ -41,6 +41,7 @@ namespace KeireEditor::ShaderGraphPreviewInternal
         Keire::ShaderGraphValueType Type = Keire::ShaderGraphValueType::Scalar;
         Keire::AssetId Texture;
         Keire::ShaderTextureSemantic TextureSemantic = Keire::ShaderTextureSemantic::Generic;
+        Keire::Vector4 TextureTransform{1.0F, 1.0F, 0.0F, 0.0F};
         std::optional<PreviewMaterialSurface> Surface;
     };
 

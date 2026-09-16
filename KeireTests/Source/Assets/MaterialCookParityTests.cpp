@@ -107,9 +107,27 @@ TEST_CASE("property-only materials cook and load in the runtime without shader r
     (void)database->ImportAll();
     shaderImports->store(0);
 
-    source.PropertyOverrides.front().Value = 0.8F;
-    database->ReplaceAssetSource(material, Keire::MaterialAsset::EncodeAuthoringSource(source));
     const std::array changedAssets{material};
+    for (const float value : {0.1F, 0.9F, 0.25F, 0.8F})
+    {
+        source.PropertyOverrides.front().Value = value;
+        database->ReplaceAssetSource(material, Keire::MaterialAsset::EncodeAuthoringSource(source));
+        (void)database->ImportAssets(changedAssets, Keire::AssetImportPolicy::FailFast);
+        CHECK(shaderImports->load() == 0);
+    }
+    float expectedRoughness = 0.8F;
+    SUBCASE("edited override survives cooking") {}
+    SUBCASE("reset inherits the shader default without reimport")
+    {
+        source.PropertyOverrides.clear();
+        expectedRoughness = 0.5F;
+    }
+    SUBCASE("an inactive identity cannot replace an active property with the same name")
+    {
+        source.PropertyOverrides.push_back(
+            {Keire::AssetId::Parse("8c300000-0000-4000-8000-000000000002"), "Roughness", 0.1F});
+    }
+    database->ReplaceAssetSource(material, Keire::MaterialAsset::EncodeAuthoringSource(source));
     (void)database->ImportAssets(changedAssets, Keire::AssetImportPolicy::FailFast);
     CHECK(shaderImports->load() == 0);
     const auto sourceRecord = database->Find(material);
@@ -154,7 +172,13 @@ TEST_CASE("property-only materials cook and load in the runtime without shader r
     REQUIRE(loaded.Get());
     CHECK_FALSE(loaded.UsingFallback());
     CHECK(loaded.Require()->Definition().Shader == shader);
-    REQUIRE(loaded.Require()->Definition().Properties.contains("Roughness"));
-    CHECK(std::get<float>(loaded.Require()->Definition().Properties.at("Roughness")) == doctest::Approx(0.8F));
+    const bool hasActiveOverride =
+        std::ranges::any_of(source.PropertyOverrides, [propertyId](const Keire::MaterialPropertyOverride& property)
+                            { return property.Property == propertyId; });
+    CHECK(loaded.Require()->Definition().Properties.contains("Roughness") == hasActiveOverride);
+    const auto resolvedRoughness = hasActiveOverride
+                                       ? std::get<float>(loaded.Require()->Definition().Properties.at("Roughness"))
+                                       : shaderDefinition.Properties.front().DefaultValue.X;
+    CHECK(resolvedRoughness == doctest::Approx(expectedRoughness));
     runtime->Close();
 }

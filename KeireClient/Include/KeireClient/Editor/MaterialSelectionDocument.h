@@ -26,6 +26,10 @@ namespace KeireEditor
         [[nodiscard]] bool SetProperty(const Keire::ShaderPropertyDefinition& property,
                                        const Keire::MaterialPropertyValue& value);
         [[nodiscard]] bool ResetProperty(const Keire::ShaderPropertyDefinition& property);
+        /// Edits the transform's xy tiling or zw offset while retaining each material's untouched pair.
+        [[nodiscard]] bool SetTextureTransform(const Keire::ShaderPropertyDefinition& property,
+                                               std::optional<Keire::Vector2> tiling,
+                                               std::optional<Keire::Vector2> offset);
         [[nodiscard]] bool SetSurface(std::optional<Keire::MaterialAlphaMode> alphaMode,
                                       std::optional<float> alphaCutoff, std::optional<bool> doubleSided);
         [[nodiscard]] bool CanUndo() const noexcept { return !m_Undo.empty(); }

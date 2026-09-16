@@ -25,6 +25,25 @@ namespace Keire
         constexpr std::string_view LockPath = "ProjectSettings/SharedShaders.lock";
         constexpr std::size_t MaximumBytes = 4U * 1024U * 1024U;
 
+        bool ValidVersion(const std::string& version)
+        {
+            unsigned int components = 1;
+            bool digit = false;
+            for (const auto value : version)
+            {
+                if (value == '.' && digit)
+                {
+                    ++components;
+                    digit = false;
+                }
+                else if (value >= '0' && value <= '9')
+                    digit = true;
+                else
+                    return false;
+            }
+            return digit && components == 3 && version.size() <= 32;
+        }
+
         std::vector<std::byte> Bytes(const std::string_view value)
         {
             const auto bytes = std::as_bytes(std::span(value.data(), value.size()));
@@ -97,7 +116,8 @@ namespace Keire
         const auto bytes = fs.Read(LockPath, MaximumBytes);
         const auto lock = Json::parse(bytes);
         if ((lock.at("schemaVersion") != 1 && lock.at("schemaVersion") != 2) ||
-            lock.at("version").get<std::string>() != Version || !lock.at("shaders").is_array() ||
+            (lock.at("schemaVersion") == 1 && lock.at("version").get<std::string>() != Version) ||
+            !ValidVersion(lock.at("version").get<std::string>()) || !lock.at("shaders").is_array() ||
             lock.at("shaders").size() != 6)
             throw std::runtime_error("Shared shaders require an explicit supported library upgrade.");
         SharedShaderLibrary result{lock.at("version").get<std::string>(), {}};

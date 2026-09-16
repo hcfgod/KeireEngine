@@ -15,6 +15,64 @@
 
 namespace KeireEditor
 {
+    namespace
+    {
+        const Keire::ShaderPropertyDefinition* TextureTransform(const MaterialDocument& document,
+                                                                const Keire::ShaderPropertyDefinition& texture)
+        {
+            if (texture.Type != Keire::ShaderPropertyType::Texture2D || !texture.TextureTransformProperty)
+                return nullptr;
+            const auto properties = document.Properties();
+            const auto found = std::ranges::find(properties, texture.TextureTransformProperty,
+                                                  &Keire::ShaderPropertyDefinition::Id);
+            return found != properties.end() && found->Type == Keire::ShaderPropertyType::Vector4 ? &*found : nullptr;
+        }
+
+        bool DrawTextureTransform(IPropertyEditor& editor, MaterialDocument& document,
+                                   MaterialSelectionDocument* selection, const Keire::ShaderPropertyDefinition& texture)
+        {
+            const auto* transform = TextureTransform(document, texture);
+            if (!transform)
+                return false;
+            auto value = std::get<Keire::Vector4>(document.Property(transform->Name));
+            Keire::Vector2 tiling{value.X, value.Y};
+            Keire::Vector2 offset{value.Z, value.W};
+            bool mixedTiling = false;
+            bool mixedOffset = false;
+            if (selection)
+                for (const auto& selected : selection->Documents())
+                {
+                    const auto properties = selected.Properties();
+                    const auto selectedTexture = std::ranges::find_if(properties, [&](const auto& candidate)
+                    {
+                        return texture.Id ? candidate.Id == texture.Id : candidate.Name == texture.Name;
+                    });
+                    if (selectedTexture == properties.end() ||
+                        selectedTexture->TextureTransformProperty != transform->Id)
+                        return false;
+                    const auto* selectedTransform = TextureTransform(selected, *selectedTexture);
+                    if (!selectedTransform)
+                        return false;
+                    const auto current = std::get<Keire::Vector4>(selected.Property(selectedTransform->Name));
+                    mixedTiling |= current.X != tiling.X || current.Y != tiling.Y;
+                    mixedOffset |= current.Z != offset.X || current.W != offset.Y;
+                }
+            const auto identity = texture.Id ? texture.Id.ToString() : texture.Name;
+            const bool tilingChanged = editor.EditVector2(
+                std::string("Tiling") + (mixedTiling ? " (Mixed)" : "") + "###material-tiling-" + identity,
+                tiling, transform->Step.value_or(0.01F));
+            const bool offsetChanged = editor.EditVector2(
+                std::string("Offset") + (mixedOffset ? " (Mixed)" : "") + "###material-offset-" + identity,
+                offset, transform->Step.value_or(0.01F));
+            if (!tilingChanged && !offsetChanged)
+                return false;
+            if (selection)
+                return selection->SetTextureTransform(*transform, tilingChanged ? std::optional{tiling} : std::nullopt,
+                                                       offsetChanged ? std::optional{offset} : std::nullopt);
+            return document.SetProperty(transform->Name, Keire::Vector4{tiling.X, tiling.Y, offset.X, offset.Y});
+        }
+    } // namespace
+
     bool MaterialInspectorPanel::IsGeneratedShaderSource(const Keire::AssetSourceRecord& source,
                                                          const std::span<const Keire::AssetSourceRecord> records)
     {
@@ -123,7 +181,9 @@ namespace KeireEditor
 
         std::vector<const Keire::ShaderPropertyDefinition*> properties;
         for (const auto& property : document.Properties())
-            properties.push_back(&property);
+            if (!std::ranges::any_of(document.Properties(), [&](const auto& texture)
+                                    { return TextureTransform(document, texture) == &property; }))
+                properties.push_back(&property);
         std::stable_sort(properties.begin(), properties.end(),
                          [](const auto* left, const auto* right) { return left->Category < right->Category; });
         std::optional<std::string> category;
@@ -186,6 +246,7 @@ namespace KeireEditor
                 changed = (selection ? selection->SetProperty(property, value)
                                      : document.SetProperty(property.Name, value)) ||
                           changed;
+            changed = DrawTextureTransform(editor, document, selection, property) || changed;
         }
         return changed;
     }

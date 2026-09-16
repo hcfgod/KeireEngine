@@ -87,6 +87,35 @@ namespace KeireEditor
         return Commit(std::move(replacement));
     }
 
+    bool MaterialSelectionDocument::SetTextureTransform(const Keire::ShaderPropertyDefinition& property,
+                                                         std::optional<Keire::Vector2> tiling,
+                                                         std::optional<Keire::Vector2> offset)
+    {
+        if (property.Type != Keire::ShaderPropertyType::Vector4)
+            throw std::invalid_argument("Texture transforms require a Vector4 property.");
+        auto replacement = m_Documents;
+        for (auto& document : replacement)
+        {
+            const auto* declared = Match(document, property);
+            if (!declared)
+                throw std::invalid_argument("The transform is not common to every selected material.");
+            auto value = std::get<Keire::Vector4>(document.Property(declared->Name));
+            if (tiling)
+            {
+                value.X = tiling->X;
+                value.Y = tiling->Y;
+            }
+            if (offset)
+            {
+                value.Z = offset->X;
+                value.W = offset->Y;
+            }
+            if (tiling || offset)
+                (void)document.SetProperty(declared->Name, value);
+        }
+        return Commit(std::move(replacement));
+    }
+
     bool MaterialSelectionDocument::SetSurface(std::optional<Keire::MaterialAlphaMode> alphaMode,
                                                std::optional<float> alphaCutoff, std::optional<bool> doubleSided)
     {

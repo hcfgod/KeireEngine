@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <stdexcept>
@@ -273,6 +274,42 @@ namespace Keire::Detail
             entry.Native->ReleaseSubmission(entry.Submissions.at(a));
             entry.Submissions.erase(a);
             return 0;
+        case 11:
+        {
+            if (bytes.size() != sizeof(std::uint32_t))
+                throw std::invalid_argument("Compute reload requires a variant index.");
+            std::uint32_t variant = 0;
+            std::memcpy(&variant, bytes.data(), sizeof(variant));
+            entry.Native->ReloadPipeline(entry.Pipelines.at(a), m_Impl->Programs.at(b), variant);
+            return 0;
+        }
+        case 12:
+        {
+            if (bytes.size() != sizeof(std::uint32_t) || b > std::numeric_limits<std::uint32_t>::max())
+                throw std::invalid_argument("Compute readback requires a size and valid offset.");
+            std::uint32_t size = 0;
+            std::memcpy(&size, bytes.data(), sizeof(size));
+            const auto id = m_Impl->Allocate();
+            auto [slot, inserted] = entry.Submissions.emplace(id, ComputeSubmissionId{});
+            try
+            {
+                slot->second = entry.Native->RequestReadback(entry.Buffers.at(a), static_cast<std::uint32_t>(b), size);
+            }
+            catch (...)
+            {
+                entry.Submissions.erase(slot);
+                throw;
+            }
+            return id;
+        }
+        case 13:
+        {
+            const auto data = entry.Native->GetReadback(entry.Submissions.at(a));
+            if (data.size() != bytes.size())
+                throw std::invalid_argument("Compute readback destination has an incorrect size.");
+            std::ranges::copy(data, bytes.begin());
+            return 0;
+        }
         default:
             throw std::invalid_argument("Unknown managed compute command.");
         }

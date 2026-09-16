@@ -86,3 +86,30 @@ final retirement; reconstruction requires a new device.
 
 Changelog: Added an opaque native buffer-compute API with cooked backend pipelines, validated direct/indirect dispatch,
 fence completion, readback, owner-thread enforcement, and explicit resource/shutdown lifetimes.
+
+## September 15 continuation: reload and asynchronous readback
+
+`ComputeDevice::ReloadPipeline` replaces the native pipeline behind an existing identity only after the new cooked
+artifact has passed validation and backend creation. Pending work retains the old native pipeline through SDL deferred
+release. Invalid artifacts leave the previous pipeline usable. Native creation failure still makes the device inert;
+this is not automatic device-loss recovery.
+
+`RequestReadback` submits a buffer snapshot and returns an ordinary completion identity without waiting on a GPU fence.
+`GetReadback` waits and copies the snapshot; repeated retrieval remains valid until `ReleaseSubmission`. The transfer
+buffer belongs to the request, so destroying or updating the source after submission does not invalidate the snapshot.
+Shutdown releases pending transfers after the device idle barrier. Requests share the 4096-submission bound and retain
+at most 256 MiB of snapshot storage per device. There is no cancellation claim for already submitted GPU work.
+
+Managed `ComputePipeline.Reload`, `ComputeBuffer.RequestReadback`, and `ComputeSubmission.GetReadback` preserve these
+contracts. Managed resource wrappers enforce owner-thread/disposal checks, and readback wrappers can outlive the source
+buffer. New-work operations remain forbidden in a preparing managed reload candidate. Existing synchronous buffer
+upload and direct dispatch now reject alignment, allocation-bound, and dispatch-bound violations before native calls.
+
+Focused no-device tests cover new operation identity/shutdown/thread checks and malformed managed command payloads.
+The opt-in backend test now checks failed-reload last-good behavior, replacement while a submission remains live, and
+readback persistence across upload and source destruction. Execution evidence will be added after the coordinated build.
+
+Still open: storage textures/samplers and their verified compiler reflection, shared graphics resources/frame-graph
+scheduling, automatic device recreation, and actual Vulkan/Metal host runs. Texture support requires public opaque
+texture identities, format/mip/access validation, SDL texture transfer ownership, managed commands, and SPIR-V image
+reflection; adding only dispatch bindings would not close this contract.

@@ -872,6 +872,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_AssetStatus;
     KeireEditor::MaterialMigrationReview m_MaterialMigrationReview;
     std::optional<Keire::SharedShaderUpgradeReview> m_SharedShaderReview;
+    std::string m_SharedShaderPackagePath;
+    std::optional<Keire::SharedShaderPackageReview> m_SharedShaderPackageReview;
     bool m_OpenMaterialMigrationReview = false;
     bool m_OpenSharedShaderReview = false;
     std::string m_MaterialUpgradeStatus;

@@ -817,6 +817,8 @@ namespace Keire
             result.DepthTest = state.value("depthTest", true);
             result.DepthWrite = state.value("depthWrite", true);
             result.Blend = state.value("blend", false);
+            result.ProgramTarget = manifest.value("programTarget", std::string("Material"));
+            result.Keywords = manifest.value("keywords", std::vector<std::string>{});
             result.ReceivesShadows = manifest.value("receivesShadows", false);
             result.UsesForwardPlus = manifest.value("usesForwardPlus", false);
             result.UsesInstancing = manifest.value("usesInstancing", false);
@@ -890,6 +892,8 @@ namespace Keire
                 definition.Category = property.value("category", std::string{});
                 definition.Description = property.value("description", std::string{});
                 definition.HighDynamicRange = property.value("hdr", false);
+                if (property.contains("textureTransformProperty"))
+                    definition.TextureTransformProperty = AssetId::Parse(property.at("textureTransformProperty").get<std::string>());
                 if (property.contains("minimum"))
                     definition.Minimum = property.at("minimum").get<float>();
                 if (property.contains("maximum"))

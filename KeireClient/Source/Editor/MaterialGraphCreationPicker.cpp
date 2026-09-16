@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/MaterialGraphCreationPicker.h"
+#include "KeireInternal/Rendering/MaterialPropertyReflection.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -6,6 +7,29 @@
 
 namespace KeireEditor
 {
+    std::optional<Keire::ShaderInterfaceDefinition> MaterialShaderInterface(const Keire::ShaderGraphDefinition& graph)
+    {
+        return MaterialShaderInterface(Keire::Detail::ReflectMaterialProperties(graph, {}));
+    }
+
+    std::optional<Keire::ShaderInterfaceDefinition> MaterialShaderInterface(const Keire::ShaderAssetDefinition& shader)
+    {
+        Keire::ShaderInterfaceDefinition result;
+        if (shader.ProgramTarget == "Material")
+            result.Domain = Keire::ShaderInterfaceDomain::Surface;
+        else if (shader.ProgramTarget == "VFX")
+            result.Domain = Keire::ShaderInterfaceDomain::Vfx;
+        else if (shader.ProgramTarget == "Fullscreen")
+            result.Domain = Keire::ShaderInterfaceDomain::Fullscreen;
+        else if (shader.ProgramTarget == "Custom Graphics")
+            result.Domain = Keire::ShaderInterfaceDomain::CustomGraphicsPass;
+        else
+            return std::nullopt;
+        result.Properties = shader.Properties;
+        result.Keywords = shader.Keywords;
+        return result;
+    }
+
     namespace
     {
         [[nodiscard]] bool IsMaterialShader(const Keire::AssetSourceRecord& record) noexcept

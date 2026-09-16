@@ -138,6 +138,51 @@ void EditorWorkspaceLayer::DrawMaterialUpgradeDialogs(Keire::UiFrame& ui)
     }
     if (auto popup = ui.BeginPopupModal("Review Shared Shader Inputs"); popup)
     {
+        ui.TextWrapped("Upgrade from a prepared shader package folder. Review validates the six shaders and pinned "
+                       "dependencies. Applying preserves asset identities and retains recovery backups.");
+        if (ui.InputText("Package folder", m_SharedShaderPackagePath))
+            m_SharedShaderPackageReview.reset();
+        {
+            auto disabled = ui.BeginDisabled(!MaterialUpgradeAvailable() || m_SharedShaderPackagePath.empty());
+            if (ui.Button("Review Package Version"))
+            {
+                m_SharedShaderPackageReview.reset();
+                try
+                {
+                    m_SharedShaderPackageReview =
+                        Keire::ReviewSharedShaderPackage(m_AssetDatabase->Specification().ProjectRoot,
+                                                         std::filesystem::u8path(m_SharedShaderPackagePath));
+                    m_MaterialUpgradeStatus.clear();
+                }
+                catch (const std::exception& error)
+                {
+                    m_MaterialUpgradeStatus = error.what();
+                }
+            }
+        }
+        if (m_SharedShaderPackageReview)
+            ui.TextWrapped("Version " + m_SharedShaderPackageReview->PreviousVersion + " -> " +
+                           m_SharedShaderPackageReview->Version);
+        {
+            auto disabled = ui.BeginDisabled(!MaterialUpgradeAvailable() || !m_SharedShaderPackageReview);
+            if (ui.Button("Apply Reviewed Package Version"))
+            {
+                auto review = std::move(*m_SharedShaderPackageReview);
+                m_SharedShaderPackageReview.reset();
+                m_SharedShaderReview.reset();
+                try
+                {
+                    (void)Keire::ApplySharedShaderPackage(m_AssetDatabase->Specification().ProjectRoot, review);
+                    m_MaterialUpgradeStatus = "Shader package published. Reimporting assets...";
+                    ImportAssets();
+                }
+                catch (const std::exception& error)
+                {
+                    m_MaterialUpgradeStatus = std::string("Review the shader package again: ") + error.what();
+                }
+            }
+        }
+        ui.Separator();
         ui.TextWrapped("Adopt reviewed compiler, include, package-lock and visual-fixture inputs for the installed "
                        "shared shaders. This preserves shader sources, version and identities. It does not certify "
                        "visual acceptance or install a new shader package version.");
@@ -178,6 +223,7 @@ void EditorWorkspaceLayer::DrawMaterialUpgradeDialogs(Keire::UiFrame& ui)
         if (ui.Button("Close Input Review"))
         {
             m_SharedShaderReview.reset();
+            m_SharedShaderPackageReview.reset();
             ui.CloseCurrentPopup();
         }
     }

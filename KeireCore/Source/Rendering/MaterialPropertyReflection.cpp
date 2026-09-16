@@ -11,6 +11,9 @@ namespace Keire::Detail
     {
         ShaderAssetDefinition result;
         result.Source = source;
+        result.ProgramTarget = ShaderGraphTargetName(graph.Target.Target);
+        for (const auto& keyword : graph.Keywords)
+            result.Keywords.push_back(keyword.Name);
         for (const auto& node : graph.Nodes)
         {
             if (node.Kind != ShaderGraphNodeKind::Parameter)
@@ -22,6 +25,8 @@ namespace Keire::Detail
             property.Category = node.ParameterMetadata.Category;
             property.Description = node.ParameterMetadata.Description;
             property.HighDynamicRange = node.ParameterMetadata.HighDynamicRange;
+            property.TextureSemantic = node.TextureSemantic;
+            property.TextureTransformProperty = node.ParameterMetadata.TextureTransformProperty;
             property.Type = static_cast<ShaderPropertyType>(node.ValueType);
             property.Minimum = node.ParameterMetadata.Minimum;
             property.Maximum = node.ParameterMetadata.Maximum;

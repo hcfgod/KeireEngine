@@ -123,6 +123,19 @@ namespace KeireEditor
             }
         }
 
+        void RemapTextureTransforms(Keire::ShaderGraphDefinition& definition, const IdentityMap& identities,
+                                    const std::vector<Keire::AssetId>& duplicated)
+        {
+            for (auto& node : definition.Nodes)
+            {
+                if (std::ranges::find(duplicated, node.Id) == duplicated.end())
+                    continue;
+                auto& transform = node.ParameterMetadata.TextureTransformProperty;
+                if (const auto mapped = identities.find(transform); mapped != identities.end())
+                    transform = mapped->second;
+            }
+        }
+
         [[nodiscard]] const Keire::ShaderGraphNode& RequireShaderNode(const Keire::ShaderGraphDefinition& definition,
                                                                       const Keire::AssetId id)
         {
@@ -375,6 +388,7 @@ namespace KeireEditor
             result.push_back(node.Id);
             definition.Nodes.push_back(std::move(node));
         }
+        RemapTextureTransforms(definition, identities, result);
         if (parameters == GraphParameterDuplication::UniqueSymbols)
             ResolveGraphParameterSymbols(definition, result);
         DuplicateShaderConnections(definition, identities, offset);
@@ -416,6 +430,7 @@ namespace KeireEditor
             definition.SurfaceGraph.Nodes.push_back(std::move(node));
         }
 
+        RemapTextureTransforms(definition.SurfaceGraph, identities, result);
         const auto sourceConnections = definition.Connections;
         for (const auto& connection : sourceConnections)
         {

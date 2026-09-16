@@ -215,6 +215,8 @@ TEST_CASE("material selection Inspector displays mixed values and edits the firs
     {
       public:
         bool Apply = false;
+        bool ApplyTiling = false;
+        bool ApplyOffset = false;
         std::vector<std::string> Labels;
         bool EditScalar(std::string_view label, double& value, double, std::optional<double>,
                         std::optional<double>) override
@@ -243,9 +245,23 @@ TEST_CASE("material selection Inspector displays mixed values and edits the firs
             return false;
         }
         bool EditText(std::string_view, std::string&) override { return false; }
-        bool EditVector2(std::string_view, Keire::Vector2&, double) override { return false; }
+        bool EditVector2(std::string_view label, Keire::Vector2& value, double) override
+        {
+            Labels.emplace_back(label);
+            if (ApplyTiling && label.starts_with("Tiling"))
+                value = {2.0F, 3.0F};
+            else if (ApplyOffset && label.starts_with("Offset"))
+                value = {0.1F, 0.2F};
+            else
+                return false;
+            return true;
+        }
         bool EditVector3(std::string_view, Keire::Vector3&, double) override { return false; }
-        bool EditVector4(std::string_view, Keire::Vector4&, double) override { return false; }
+        bool EditVector4(std::string_view label, Keire::Vector4&, double) override
+        {
+            Labels.emplace_back(label);
+            return false;
+        }
         bool EditQuaternion(std::string_view, Keire::Quaternion&, double) override { return false; }
         bool EditColor(std::string_view, Keire::Color&) override { return false; }
         bool EditAsset(std::string_view, Keire::AssetId&, std::optional<Keire::AssetTypeId>, std::string_view) override
@@ -278,4 +294,78 @@ TEST_CASE("material selection Inspector displays mixed values and edits the firs
     CHECK_FALSE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, selection));
     CHECK(std::ranges::find(editor.Labels, "Amount###material-property-" + fixture.Property.Id.ToString()) !=
           editor.Labels.end());
+
+    SUBCASE("texture transform controls preserve independently mixed tiling and offset")
+    {
+        Keire::ShaderAssetDefinition shader;
+        shader.Source = "TextureTransforms.hlsl";
+        Keire::ShaderPropertyDefinition transform;
+        transform.Name = "TextureST";
+        transform.Type = Keire::ShaderPropertyType::Vector4;
+        transform.Id = Keire::AssetId::Generate();
+        transform.DefaultValue = {1.0F, 1.0F, 0.0F, 0.0F};
+        Keire::ShaderPropertyDefinition texture;
+        texture.Name = "Albedo";
+        texture.Type = Keire::ShaderPropertyType::Texture2D;
+        texture.Id = Keire::AssetId::Generate();
+        texture.TextureTransformProperty = transform.Id;
+        shader.Properties = {texture, transform};
+        const auto create = [&](Keire::Vector4 value)
+        {
+            Keire::MaterialAuthoringDefinition source;
+            source.SchemaVersion = 5;
+            source.Shader.Asset = fixture.Shader;
+            source.PropertyOverrides = {{transform.Id, transform.Name, value}};
+            KeireEditor::MaterialDocument document;
+            document.OpenAsset(Keire::AssetId::Generate(), "Texture.keirematerial",
+                               Keire::MaterialAsset::EncodeAuthoringSource(source),
+                               [&](Keire::AssetId) { return std::optional(shader); });
+            return document;
+        };
+        SUBCASE("invalid transform edits are rejected before publishing any selected material")
+        {
+            int publications = 0;
+            auto bounded = shader;
+            bounded.Properties.back().Maximum = 1.0F;
+            auto firstTexture = create({1.0F, 1.0F, 0.3F, 0.4F});
+            auto secondTexture = create({1.0F, 1.0F, 0.6F, 0.7F});
+            secondTexture.Open(secondTexture.SaveSource(), [&](Keire::AssetId) { return std::optional(bounded); });
+            const auto original = firstTexture.SaveSource();
+            KeireEditor::MaterialSelectionDocument boundedSelection({firstTexture, secondTexture},
+                [&](const auto, const auto) { ++publications; });
+            CHECK_THROWS_AS((void)boundedSelection.SetTextureTransform(transform, Keire::Vector2{2.0F, 3.0F},
+                                                                       std::nullopt), std::invalid_argument);
+            CHECK(publications == 0);
+            CHECK(boundedSelection.Documents().front().SaveSource() == original);
+            CHECK_FALSE(boundedSelection.CanUndo());
+            CHECK_FALSE(boundedSelection.SetTextureTransform(transform, std::nullopt, std::nullopt));
+        }
+        KeireEditor::MaterialSelectionDocument textures(
+            {create({1.0F, 1.0F, 0.3F, 0.4F}), create({4.0F, 5.0F, 0.6F, 0.7F})});
+        editor.Labels.clear();
+        CHECK_FALSE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, textures));
+        CHECK(std::ranges::find(editor.Labels, "Tiling (Mixed)###material-tiling-" + texture.Id.ToString()) !=
+              editor.Labels.end());
+        CHECK(std::ranges::find(editor.Labels, "Offset (Mixed)###material-offset-" + texture.Id.ToString()) !=
+              editor.Labels.end());
+        CHECK_FALSE(std::ranges::any_of(editor.Labels, [](const auto& label) { return label.starts_with("TextureST"); }));
+        editor.ApplyTiling = true;
+        REQUIRE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, textures));
+        CHECK(std::get<Keire::Vector4>(textures.Documents()[0].Property(transform.Name)) ==
+              Keire::Vector4{2.0F, 3.0F, 0.3F, 0.4F});
+        CHECK(std::get<Keire::Vector4>(textures.Documents()[1].Property(transform.Name)) ==
+              Keire::Vector4{2.0F, 3.0F, 0.6F, 0.7F});
+        REQUIRE(textures.Undo());
+        CHECK(std::get<Keire::Vector4>(textures.Documents()[1].Property(transform.Name)).X == 4.0F);
+        REQUIRE(textures.Redo());
+        editor.ApplyTiling = false;
+        editor.ApplyOffset = true;
+        REQUIRE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, textures));
+        CHECK_FALSE(textures.Property(transform)->Mixed);
+        auto single = create({4.0F, 5.0F, 0.6F, 0.7F});
+        REQUIRE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, single));
+        CHECK(std::get<Keire::Vector4>(single.Property(transform.Name)) == Keire::Vector4{4.0F, 5.0F, 0.1F, 0.2F});
+        REQUIRE(single.ResetProperty(transform.Name));
+        CHECK(std::get<Keire::Vector4>(single.Property(transform.Name)) == transform.DefaultValue);
+    }
 }

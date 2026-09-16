@@ -16,6 +16,9 @@ TEST_CASE("managed compute bridge isolates owners and rejects invalid work befor
     CHECK_THROWS_AS(first.Command(other, 2, 0, 0, {}), std::out_of_range);
     CHECK_THROWS_AS(first.Command(device, 2, 0, 0, {}), std::invalid_argument);
     CHECK_THROWS_AS(first.Command(device, 4, 0, 0, {}), std::out_of_range);
+    CHECK_THROWS_AS(first.Command(device, 11, 0, 0, {}), std::invalid_argument);
+    CHECK_THROWS_AS(first.Command(device, 12, 0, 0, {}), std::invalid_argument);
+    CHECK_THROWS_AS(first.Command(device, 13, 0, 0, {}), std::out_of_range);
     CHECK_THROWS_AS(first.RegisterProgram({}), std::invalid_argument);
     CHECK_THROWS_AS(first.Command(0, 0, 255, 0, {}), std::invalid_argument);
     CHECK_NOTHROW(first.Command(device, 1, 0, 0, {}));
@@ -61,6 +64,8 @@ TEST_CASE("managed compute scopes fail closed while reload is preparing and rest
             std::uint64_t result = 0;
             CHECK(InvokeManagedComputeCommand(0, 0, 0, 0, nullptr, 0, &result) == 0);
             CHECK(InvokeManagedComputeCommand(device, 2, 16, 0, nullptr, 0, &result) == 0);
+            CHECK(InvokeManagedComputeCommand(device, 11, 0, 0, nullptr, 0, &result) == 0);
+            CHECK(InvokeManagedComputeCommand(device, 12, 0, 0, nullptr, 0, &result) == 0);
         }
         // Rejected candidate work cannot destroy the active resource.
         CHECK_THROWS_AS(store.Command(device, 2, 0, 0, {}), std::invalid_argument);

@@ -59,6 +59,8 @@ namespace Keire::Detail
                     encoded["category"] = property.Category;
                 if (!property.Description.empty())
                     encoded["description"] = property.Description;
+                if (property.TextureTransformProperty)
+                    encoded["textureTransformProperty"] = property.TextureTransformProperty.ToString();
                 if (property.HighDynamicRange)
                     encoded["hdr"] = true;
                 if (property.Minimum)
@@ -91,6 +93,8 @@ namespace Keire::Detail
             }
             return {{"schemaVersion", definition.SchemaVersion},
                     {"source", definition.Source.generic_string()},
+                    {"programTarget", definition.ProgramTarget},
+                    {"keywords", definition.Keywords},
                     {"vertexEntry", definition.VertexEntry},
                     {"fragmentEntry", definition.FragmentEntry},
                     {"vertexLayoutVersion", definition.VertexLayoutVersion},
@@ -128,6 +132,8 @@ namespace Keire::Detail
                 throw std::invalid_argument("Canonical shader data has an unsupported schema.");
             result.SchemaVersion = ShaderAssetSchemaVersion;
             result.Source = source.at("source").get<std::string>();
+            result.ProgramTarget = source.value("programTarget", std::string("Material"));
+            result.Keywords = source.value("keywords", std::vector<std::string>{});
             result.VertexEntry = source.at("vertexEntry").get<std::string>();
             result.FragmentEntry = source.at("fragmentEntry").get<std::string>();
             result.VertexLayoutVersion = source.value("vertexLayoutVersion", static_cast<std::uint8_t>(1));
@@ -170,6 +176,8 @@ namespace Keire::Detail
                 decoded.Category = property.value("category", std::string{});
                 decoded.Description = property.value("description", std::string{});
                 decoded.HighDynamicRange = property.value("hdr", false);
+                if (property.contains("textureTransformProperty"))
+                    decoded.TextureTransformProperty = AssetId::Parse(property.at("textureTransformProperty").get<std::string>());
                 if (property.contains("minimum"))
                     decoded.Minimum = property.at("minimum").get<float>();
                 if (property.contains("maximum"))

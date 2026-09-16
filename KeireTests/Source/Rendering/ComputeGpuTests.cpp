@@ -41,6 +41,7 @@ namespace
         device.Upload(output, zeros);
         const std::array bindings{Keire::ComputeBufferBinding{0, output, true}};
         const auto submission = device.Dispatch(pipeline, bindings, {5, 1, 1});
+        CHECK_THROWS_AS(device.GetReadback(submission), std::invalid_argument);
         device.Wait(submission);
         CHECK(device.IsComplete(submission));
         device.ReleaseSubmission(submission);
@@ -109,8 +110,27 @@ namespace
         CHECK_THROWS_AS(other.Readback(output), std::invalid_argument);
         other.Shutdown();
 
-        device.DestroyBuffer(arguments);
+        CHECK_THROWS_AS(device.ReloadPipeline(pipeline, {}), std::invalid_argument);
+        CHECK(device.IsOpen());
+        const auto retained = device.Dispatch(pipeline, bindings, {5, 1, 1});
+        device.ReloadPipeline(pipeline, compiled);
+        device.ReleaseSubmission(retained);
+        verify();
+        const auto snapshot = device.RequestReadback(output, 16, 16);
+        device.Upload(output, zeros);
         device.DestroyBuffer(output);
+        device.Wait(snapshot);
+        CHECK(device.IsComplete(snapshot));
+        const auto snapshotBytes = device.GetReadback(snapshot);
+        CHECK(snapshotBytes == device.GetReadback(snapshot));
+        REQUIRE(snapshotBytes.size() == 16);
+        std::array<float, 4> snapshotValues{};
+        std::memcpy(snapshotValues.data(), snapshotBytes.data(), snapshotBytes.size());
+        CHECK(snapshotValues[0] == doctest::Approx(0.25F));
+        CHECK(snapshotValues[3] == doctest::Approx(1.0F));
+        device.ReleaseSubmission(snapshot);
+        CHECK_THROWS_AS(device.GetReadback(snapshot), std::invalid_argument);
+        device.DestroyBuffer(arguments);
         CHECK_THROWS_AS(device.Readback(output), std::invalid_argument);
         device.DestroyPipeline(pipeline);
         CHECK_THROWS_AS(device.Dispatch(pipeline, bindings, {1, 1, 1}), std::invalid_argument);

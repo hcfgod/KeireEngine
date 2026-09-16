@@ -104,6 +104,8 @@ namespace Keire
 
         std::string Description;
         bool HighDynamicRange = false;
+        /// Optional Vector4 property identity: xy tiling and zw offset for this texture.
+        AssetId TextureTransformProperty;
 
         bool operator==(const ShaderPropertyDefinition&) const = default;
     };
@@ -183,6 +185,9 @@ namespace Keire
         ShaderOcclusionSupport OcclusionSupport = ShaderOcclusionSupport::None;
         /// Maximum authored vertex displacement in world units. Missing legacy metadata is never occlusion-safe.
         std::optional<float> MaximumWorldPositionDisplacementRadius = 0.0F;
+        /// Authored target retained across import; legacy code shaders default to Material.
+        std::string ProgramTarget = "Material";
+        std::vector<std::string> Keywords;
     };
 
     class KEIRE_API ShaderAsset final : public Asset

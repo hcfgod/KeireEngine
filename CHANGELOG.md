@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+- Material migration validates in an isolated system temporary directory, avoiding the extra project-path nesting
+  that prevented Windows cache publication; temporary validation files are cleaned up on success and failure.
 - Shader Graph Frame All uses the canvas's supported 20% minimum zoom, fitting tall Lit outputs in short panels.
 - Shader Code creation now references the actual authored HLSL filename. Reviewed material migration validates a
   full staged import before publishing its catalog.

@@ -79,6 +79,7 @@ namespace Keire::Detail
 
       private:
         void RegisterProperty(const ShaderGraphNode& node);
+        [[nodiscard]] std::string TransformTextureCoordinates(std::string_view texture, std::string coordinates);
         [[nodiscard]] ShaderGraphExpression Input(const ShaderGraphNode& node, const ShaderGraphPin& pin);
         [[nodiscard]] ShaderGraphExpression EvaluatePrepared(ShaderGraphEndpoint endpoint);
         [[nodiscard]] ShaderGraphExpression Evaluate(ShaderGraphEndpoint endpoint);

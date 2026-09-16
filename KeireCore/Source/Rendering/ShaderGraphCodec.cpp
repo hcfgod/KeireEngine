@@ -140,6 +140,8 @@ namespace Keire
                     metadata["maximum"] = *node.ParameterMetadata.Maximum;
                 if (node.ParameterMetadata.Step)
                     metadata["step"] = *node.ParameterMetadata.Step;
+                if (node.ParameterMetadata.TextureTransformProperty)
+                    metadata["textureTransformProperty"] = node.ParameterMetadata.TextureTransformProperty.ToString();
                 if (node.ParameterMetadata.HighDynamicRange)
                     metadata["hdr"] = true;
                 nodes.push_back(
@@ -296,6 +298,9 @@ namespace Keire
                     node.ParameterMetadata.Description = metadata->value("description", std::string{});
                     node.ParameterMetadata.Category = metadata->value("category", std::string{});
                     node.ParameterMetadata.HighDynamicRange = metadata->value("hdr", false);
+                    if (metadata->contains("textureTransformProperty"))
+                        node.ParameterMetadata.TextureTransformProperty =
+                            AssetId::Parse(metadata->at("textureTransformProperty").get<std::string>());
                     node.ParameterMetadata.SortPriority = metadata->value("sortPriority", 0);
                     if (metadata->contains("minimum"))
                         node.ParameterMetadata.Minimum = metadata->at("minimum").get<float>();

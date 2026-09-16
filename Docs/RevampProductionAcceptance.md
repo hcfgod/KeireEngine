@@ -1,5 +1,27 @@
 # Material/shader production acceptance
 
+## Migration follow-up validation — September 15, 2026
+
+Continued in the canonical checkout with one agent. The existing staged migration fix and regression changes were
+preserved. Validation now uses a unique system temporary directory, avoiding additional project-path nesting;
+durable recovery journals and backups remain in the project. Added failure-path scratch cleanup coverage.
+
+- `./Scripts/project.ps1 build -Generator ninja -Configuration Debug -Toolset msc -Target KeireTests` passed.
+- The equivalent build with `-Configuration DebugASan` passed. Both configurations rebuilt 482 build steps.
+- With `SDL_VIDEODRIVER=dummy`, `KeireTests.exe --test-case="*material migration*,*material publication*"` passed
+  17 cases / 118 assertions in both Debug and DebugASan. The latter used the MSVC ASan runtime directory from
+  `Scripts/Windows/common.ps1`. Logs: `Temp/continue-migration-debug.log` and `Temp/continue-migration-asan.log`.
+- Debug `KeireTests.exe --test-case="*material*,*shader*,*compute*" --success --no-colors` passed 164 cases /
+  3,231 assertions. Log: `Temp/continue-rendering-debug-diagnostic.log`. An earlier quiet run was interrupted to
+  enable diagnostic output during the concurrent sanitizer build; it is not counted as passing evidence.
+- `clang-format --dry-run --Werror` passed for both changed C++ files. `python Scripts/Tests/check-source-budgets.py`
+  passed for 1,506 files. Working-tree and staged `git diff --check` passed; final status contained only the two
+  existing C++ changes and intended documentation edits. No staging or commits were performed.
+
+This closes the previously failing Windows migration regression. It does not establish general Windows long-path
+support. Release, editor interaction, opt-in GPU execution, SDK packaging, Linux/Vulkan, and macOS/Metal were not
+rerun in this follow-up and remain subject to the broader acceptance gates below.
+
 ## Single-agent integrated validation — September 12, 2026
 
 All four additional tasks and their twelve subagents are stopped. These results use the canonical checkout and the

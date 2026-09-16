@@ -661,6 +661,15 @@ namespace Keire
                 if (!ValidIdentifier(node.Symbol) || !properties.insert(node.Symbol).second)
                     throw std::invalid_argument("Shader Graph parameter symbols must be unique identifiers.");
                 const auto& metadata = node.ParameterMetadata;
+                if (metadata.TextureTransformProperty)
+                {
+                    const auto transform =
+                        std::ranges::find(definition.Nodes, metadata.TextureTransformProperty, &ShaderGraphNode::Id);
+                    if (node.ValueType != ShaderGraphValueType::Texture2D || transform == definition.Nodes.end() ||
+                        transform->Kind != ShaderGraphNodeKind::Parameter ||
+                        transform->ValueType != ShaderGraphValueType::Vector4)
+                        throw std::invalid_argument("Texture transforms require a Texture2D and a Vector4 parameter.");
+                }
                 if (metadata.HighDynamicRange && node.ValueType != ShaderGraphValueType::Color)
                     throw std::invalid_argument("HDR parameter metadata requires a color property.");
                 const auto validOptional = [](const std::optional<float>& value)

@@ -3,8 +3,13 @@
 #include "KeireClient/Editor/ShaderGraphBlackboard.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <optional>
+#include <set>
 #include <stdexcept>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -31,9 +36,56 @@ namespace KeireEditor
         }
     } // namespace
 
+    bool ShaderGraphNodeSupportsDestination(const Keire::ShaderGraphDefinition& definition,
+                                            const Keire::ShaderGraphNode& node,
+                                            const std::optional<Keire::ShaderGraphEndpoint> destination)
+    {
+        const auto* descriptor = Keire::FindShaderGraphNodeDescriptor(
+            node.TypeId.empty() ? Keire::ShaderGraphNodeTypeId(node.Kind) : std::string_view(node.TypeId));
+        if (!descriptor)
+            return false;
+        std::uint8_t required = 0;
+        std::vector<Keire::ShaderGraphEndpoint> pending;
+        if (destination)
+            pending.push_back(*destination);
+        std::set<Keire::AssetId> visited;
+        while (!pending.empty())
+        {
+            const auto endpoint = pending.back();
+            pending.pop_back();
+            const auto target = std::ranges::find(definition.Nodes, endpoint.Node, &Keire::ShaderGraphNode::Id);
+            if (target == definition.Nodes.end())
+                return false;
+            const auto pin = std::ranges::find(target->Pins, endpoint.Pin, &Keire::ShaderGraphPin::Id);
+            if (pin == target->Pins.end() || pin->Direction != Keire::ShaderGraphPinDirection::Input)
+                return false;
+            if (target->Kind == Keire::ShaderGraphNodeKind::Master)
+            {
+                const auto stage = definition.Target.Target == Keire::ShaderGraphTarget::Compute
+                                       ? Keire::ShaderGraphShaderStage::Compute
+                                   : pin->Name == "WorldPositionOffset" ? Keire::ShaderGraphShaderStage::Vertex
+                                                                        : Keire::ShaderGraphShaderStage::Fragment;
+                required |= static_cast<std::uint8_t>(stage);
+                continue;
+            }
+            if (!visited.insert(target->Id).second)
+                continue;
+            for (const auto& connection : definition.Connections)
+                if (connection.Output.Node == target->Id)
+                    pending.push_back(connection.Input);
+        }
+        const auto available = static_cast<std::uint8_t>(descriptor->Stages);
+        return required != 0 ? (available & required) == required
+                             : (available & static_cast<std::uint8_t>(definition.Target.Stages)) != 0;
+    }
+
     bool ShaderGraphDocument::AddConnectedNode(Keire::ShaderGraphNode node, const Keire::ShaderGraphEndpoint anchor)
     {
         const auto& anchorPin = RequireAnchor(Definition(), anchor);
+        if (!ShaderGraphNodeSupportsDestination(
+                Definition(), node,
+                anchorPin.Direction == Keire::ShaderGraphPinDirection::Input ? std::optional(anchor) : std::nullopt))
+            throw std::invalid_argument("This node is unavailable in the destination shader stage.");
         for (const auto& pin : node.Pins)
         {
             if (!ShaderGraphPinsCanConnect(anchorPin, pin))
@@ -64,6 +116,8 @@ namespace KeireEditor
         const auto cable = std::ranges::find(Definition().Connections, connection, &Keire::ShaderGraphConnection::Id);
         if (cable == Definition().Connections.end())
             throw std::invalid_argument("The graph cable is no longer available.");
+        if (!ShaderGraphNodeSupportsDestination(Definition(), node, cable->Input))
+            throw std::invalid_argument("This node is unavailable in the destination shader stage.");
         const auto& source = RequireAnchor(Definition(), cable->Output);
         const auto& target = RequireAnchor(Definition(), cable->Input);
         for (const auto& input : node.Pins)

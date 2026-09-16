@@ -45,7 +45,6 @@ namespace KeireEditor::ShaderGraphPreviewInternal
             if (master != definition.Nodes.end())
                 m_Master = std::addressof(*master);
         }
-
         void SetContext(const Keire::Vector2 uv, const Keire::Vector3 normal, const Keire::Vector3 position)
         {
             m_Uv = uv;
@@ -54,7 +53,6 @@ namespace KeireEditor::ShaderGraphPreviewInternal
             std::ranges::fill(m_Cache, std::nullopt);
             std::ranges::fill(m_Visiting, std::uint8_t{0});
         }
-
         [[nodiscard]] std::optional<Keire::Vector4> MasterInput(const std::string_view name,
                                                                 const Keire::ShaderGraphValueType type)
         {
@@ -65,7 +63,6 @@ namespace KeireEditor::ShaderGraphPreviewInternal
                 return std::nullopt;
             return Coerce(Input(*m_Master, *pin), type).Data;
         }
-
         [[nodiscard]] std::optional<PreviewMaterialSurface> MasterAttributes()
         {
             if (!m_Master)
@@ -149,9 +146,10 @@ namespace KeireEditor::ShaderGraphPreviewInternal
             return result;
         }
 
-        [[nodiscard]] PreviewGraphValue TextureSample(const PreviewGraphValue texture,
-                                                      const Keire::Vector2 uv) const noexcept
+        [[nodiscard]] PreviewGraphValue TextureSample(const PreviewGraphValue texture, Keire::Vector2 uv) const noexcept
         {
+            uv = {uv.X * texture.TextureTransform.X + texture.TextureTransform.Z,
+                  uv.Y * texture.TextureTransform.Y + texture.TextureTransform.W};
             if (texture.Texture)
                 if (const auto sample = Detail::SampleShaderGraphPreviewTexture(m_Textures, texture.Texture, uv))
                     return {.Data = *sample, .Type = Keire::ShaderGraphValueType::Color};
@@ -333,6 +331,15 @@ namespace KeireEditor::ShaderGraphPreviewInternal
                     result = GraphValue(node.Value, node.ValueType, node.TextureSemantic);
                     if (property != m_Properties.end())
                         result.Texture = property->DefaultTexture;
+                    const auto transform = m_Nodes.find(node.ParameterMetadata.TextureTransformProperty);
+                    if (transform != m_Nodes.end())
+                    {
+                        const auto& parameter = m_Definition.Nodes[transform->second];
+                        const auto value =
+                            std::ranges::find(m_Properties, parameter.Symbol, &Keire::ShaderPropertyDefinition::Name);
+                        result.TextureTransform =
+                            value == m_Properties.end() ? ValueVector(parameter.Value) : value->DefaultValue;
+                    }
                 }
                 else if (property != m_Properties.end())
                 {
