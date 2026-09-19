@@ -5,6 +5,17 @@ versions.
 
 ## Unreleased
 
+- Shader imports now compile independent vertex/fragment stages and their reflection passes concurrently, reducing
+  material and Shader Graph creation latency without changing deterministic asset output or target coverage.
+- Fixed the fresh-project material and shader authoring pass: first-run editor windows now maximize, Project is the
+  active bottom tab in the default layout, material node creation uses real category submenus, material status no
+  longer asks for an impossible save, and asset creation reports the active operation while its worker runs. Shader
+  Graph search now matches words in natural order (for example, `Texture Sample`) and lists the texture sampler among
+  common nodes. Enter and arrow-key navigation also work while the search field has focus in Shader Graph and VFX
+  node palettes.
+- Graph editors offset default node insertion from occupied bounds and diagnostic activation now frames the owning
+  node while highlighting the reported pin. Dynamic function calls participate in Shader Graph recents. The Project
+  panel confines wheel scrolling to its folder or content pane instead of competing with an outer scroll region.
 - Material migration validates in an isolated system temporary directory, avoiding the extra project-path nesting
   that prevented Windows cache publication; temporary validation files are cleaned up on success and failure.
 - Shader Graph Frame All uses the canvas's supported 20% minimum zoom, fitting tall Lit outputs in short panels.

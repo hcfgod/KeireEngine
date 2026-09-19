@@ -103,6 +103,39 @@ namespace KeireEditor
             return result;
         }
 
+        [[nodiscard]] constexpr bool IsSearchWhitespace(const char character) noexcept
+        {
+            return character == ' ' || character == '\t' || character == '\r' || character == '\n';
+        }
+
+        [[nodiscard]] constexpr bool SearchMatches(const std::string_view candidate,
+                                                   const std::string_view search) noexcept
+        {
+            if (candidate.find(search) != std::string_view::npos)
+                return true;
+
+            std::size_t tokenStart = 0;
+            while (tokenStart < search.size())
+            {
+                while (tokenStart < search.size() && IsSearchWhitespace(search[tokenStart]))
+                    ++tokenStart;
+                if (tokenStart == search.size())
+                    break;
+
+                auto tokenEnd = search.find_first_of(" \t\r\n", tokenStart);
+                if (tokenEnd == std::string_view::npos)
+                    tokenEnd = search.size();
+                if (candidate.find(search.substr(tokenStart, tokenEnd - tokenStart)) == std::string_view::npos)
+                    return false;
+                tokenStart = tokenEnd;
+            }
+            return true;
+        }
+
+        static_assert(SearchMatches("textures / sample texture 2d", "texture sample"));
+        static_assert(SearchMatches("textures / sample texture 2d", "sample texture"));
+        static_assert(!SearchMatches("textures / sample texture 2d", "texture cube"));
+
         [[nodiscard]] std::string UniqueSymbol(const Keire::ShaderGraphDefinition& definition,
                                                const std::string_view base)
         {
@@ -254,6 +287,7 @@ namespace KeireEditor
         m_SelectedNodes.clear();
         m_SelectedConnection.reset();
         m_FrameNode.reset();
+        m_FramePin.reset();
         m_FrameAllOnOpen = true;
         m_SaveState.Reset();
         m_NodeCreationPosition.reset();
@@ -748,7 +782,7 @@ namespace KeireEditor
         if (!search.empty())
         {
             for (std::size_t index = 0; index < entries.size(); ++index)
-                if (entryCompatible(entries[index]) && Lower(paths[index]).find(search) != std::string::npos)
+                if (entryCompatible(entries[index]) && SearchMatches(Lower(paths[index]), search))
                     visible.push_back(index);
         }
         else
@@ -773,7 +807,7 @@ namespace KeireEditor
                                         std::string_view("Texture2D Parameter"),
                                         std::string_view("Add"),
                                         std::string_view("Multiply"),
-                                        std::string_view("Texture Sample")};
+                                        std::string_view("Sample Texture 2D")};
             for (const auto name : common)
             {
                 const auto found = std::ranges::find(entries, name, &NodeEntry::Name);
@@ -791,11 +825,11 @@ namespace KeireEditor
         for (const auto index : visible)
             visibleIds.push_back(paths[index]);
         m_NodeMenuSelection.Synchronize(visibleIds);
-        if (ui.Shortcut({.Key = Keire::UiKey::Up, .Global = true}))
+        if (ui.KeyPressed(Keire::UiKey::Up))
             m_NodeMenuSelection.MovePrevious(visibleIds);
-        if (ui.Shortcut({.Key = Keire::UiKey::Down, .Global = true}))
+        if (ui.KeyPressed(Keire::UiKey::Down))
             m_NodeMenuSelection.MoveNext(visibleIds);
-        const bool activateSelected = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+        const bool activateSelected = ui.KeyPressed(Keire::UiKey::Enter);
 
         const auto addEntry = [&](const std::size_t index, const std::string_view label)
         {
@@ -810,9 +844,27 @@ namespace KeireEditor
             ui.CloseCurrentPopup();
             return true;
         };
+        const auto addFunction = [&](const Keire::AssetSourceRecord& record, const std::string_view label)
+        {
+            const auto name = record.RelativePath.stem().string();
+            const auto path = "Functions & Layers / " + name;
+            if (!ui.MenuItem(label) || !AddFunctionNode(record.Id, name, graphPosition, anchor, insertion))
+                return false;
+            m_NodeMenuSelection.Remember(path);
+            m_NodeSearch.clear();
+            ui.CloseCurrentPopup();
+            return true;
+        };
 
         if (search.empty())
+        {
             ui.TextColored(m_Controller.ShaderGraphTheme().MutedText, "RECENT & COMMON");
+            for (const auto& recent : m_NodeMenuSelection.Recent())
+                for (const auto* record : reusableGraphs)
+                    if (recent == "Functions & Layers / " + record->RelativePath.stem().string() &&
+                        addFunction(*record, recent))
+                        return true;
+        }
         for (const auto index : visible)
             if (addEntry(index, paths[index]))
                 return true;
@@ -823,15 +875,11 @@ namespace KeireEditor
             {
                 const auto name = record->RelativePath.stem().string();
                 const auto path = "Functions & Layers / " + name;
-                if (Lower(path).find(search) == std::string::npos)
+                if (!SearchMatches(Lower(path), search))
                     continue;
                 visibleFunction = true;
-                if (ui.MenuItem(path) && AddFunctionNode(record->Id, name, graphPosition, anchor, insertion))
-                {
-                    m_NodeSearch.clear();
-                    ui.CloseCurrentPopup();
+                if (addFunction(*record, path))
                     return true;
-                }
             }
         }
         const bool hasCompatibleEntry = std::ranges::any_of(entries, entryCompatible);
@@ -861,11 +909,8 @@ namespace KeireEditor
                     for (const auto* record : reusableGraphs)
                     {
                         const auto name = record->RelativePath.stem().string();
-                        if (ui.MenuItem(name) && AddFunctionNode(record->Id, name, graphPosition, anchor, insertion))
-                        {
-                            ui.CloseCurrentPopup();
+                        if (addFunction(*record, name))
                             return true;
-                        }
                     }
         }
         return false;
@@ -893,8 +938,17 @@ namespace KeireEditor
                 {
                     const std::array framed{*node};
                     m_Canvas.Focus(framed, size);
+                    if (m_FramePin)
+                    {
+                        const auto pinIdentity = std::ranges::find(model.PinIdentities, *m_FramePin,
+                                                                   &std::pair<StableNodeId, Keire::AssetId>::second);
+                        if (pinIdentity != model.PinIdentities.end() &&
+                            std::ranges::find(node->Pins, pinIdentity->first, &NodeGraphPin::Id) != node->Pins.end())
+                            m_Canvas.SelectPin(NodeGraphPinAddress{node->Id, pinIdentity->first});
+                    }
                 }
                 m_FrameNode.reset();
+                m_FramePin.reset();
             }
         };
         ApplyNodeGraphAnnotations(document.Definition().Authoring, model.NodeIdentities, model.Nodes);
@@ -917,6 +971,12 @@ namespace KeireEditor
         if (auto combo = ui.BeginCombo("Add Node", "Choose..."); combo)
         {
             nodeMenuOpen = true;
+            if (ui.KeyPressed(Keire::UiKey::Escape))
+            {
+                ui.CloseCurrentPopup();
+                m_NodeMenuOpen = false;
+                return;
+            }
             if (!m_NodeMenuOpen)
             {
                 m_NodeSearch.clear();
@@ -1288,6 +1348,13 @@ namespace KeireEditor
         if (auto popup = ui.BeginPopup("ShaderGraphNodePalette"); popup)
         {
             contextMenuOpen = true;
+            if (ui.KeyPressed(Keire::UiKey::Escape))
+            {
+                ui.CloseCurrentPopup();
+                m_NodeCreationPosition.reset();
+                m_NodeMenuOpen = false;
+                return;
+            }
             if (DrawNodeCreationMenu(ui, m_NodeCreationPosition))
             {
                 m_NodeCreationPosition.reset();
@@ -1356,7 +1423,11 @@ namespace KeireEditor
             else
             {
                 const auto size = m_Canvas.Zoom();
-                node.EditorPosition = {-m_Canvas.Pan().X + 280.0F / size, -m_Canvas.Pan().Y + 180.0F / size};
+                const Keire::Vector2 preferred{-m_Canvas.Pan().X + 280.0F / size, -m_Canvas.Pan().Y + 180.0F / size};
+                const Keire::Vector2 nodeSize{220.0F,
+                                              std::max(72.0F, 42.0F + static_cast<float>(node.Pins.size()) * 20.0F)};
+                node.EditorPosition = ResolveGraphNodePlacement(
+                    m_Controller.ShaderGraphState().BuildCanvasModel().Nodes, preferred, nodeSize);
             }
             return CommitCreatedNode(std::move(node), anchor, insertion);
         }

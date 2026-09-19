@@ -45,7 +45,12 @@ must not be inferred for those tools.
 
 Press `F` to frame the selection and `Shift+F` to frame the complete graph. The toolbar's **Frame All** action has the
 same complete-graph behavior. A diagnostic carrying a node identity can frame that node directly, keeping navigation
-stable even when display labels are duplicated.
+stable even when display labels are duplicated. Pin diagnostics resolve their owning authored node and retain a
+highlight on the exact pin after framing.
+
+Node creation requested without an explicit canvas position starts near the visible authoring area, then moves along
+the nearest clear axis when that rectangle is occupied. Repeated toolbar, blackboard, function, and compatibility-node
+insertion therefore preserves existing node bounds instead of stacking new nodes at one coordinate.
 
 Each open panel can retain up to nine named viewport bookmarks. A bookmark stores pan and zoom for the current panel
 session; choosing it restores the view without editing or dirtying the asset. Bookmark names are bounded to 64

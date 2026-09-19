@@ -53,4 +53,55 @@ namespace KeireEditor
         }
         return false;
     }
+
+    std::optional<Keire::AssetId>
+    ResolveShaderGraphDiagnosticNode(const Keire::ShaderGraphDefinition& definition,
+                                     const Keire::ShaderGraphDiagnostic& diagnostic) noexcept
+    {
+        if (diagnostic.Node &&
+            std::ranges::find(definition.Nodes, diagnostic.Node, &Keire::ShaderGraphNode::Id) != definition.Nodes.end())
+            return diagnostic.Node;
+        if (!diagnostic.Pin)
+            return std::nullopt;
+        const auto node =
+            std::ranges::find_if(definition.Nodes,
+                                 [&](const auto& candidate)
+                                 {
+                                     return std::ranges::find(candidate.Pins, diagnostic.Pin,
+                                                              &Keire::ShaderGraphPin::Id) != candidate.Pins.end();
+                                 });
+        return node == definition.Nodes.end() ? std::nullopt : std::optional(node->Id);
+    }
+
+    std::optional<Keire::AssetId>
+    ResolveMaterialGraphDiagnosticNode(const Keire::MaterialGraphDefinition& definition,
+                                       const Keire::MaterialGraphDiagnostic& diagnostic) noexcept
+    {
+        if (diagnostic.Node)
+        {
+            if (diagnostic.Node == definition.OutputNode ||
+                std::ranges::find(definition.Nodes, diagnostic.Node, &Keire::MaterialGraphValueNode::Id) !=
+                    definition.Nodes.end() ||
+                std::ranges::find(definition.SurfaceGraph.Nodes, diagnostic.Node, &Keire::ShaderGraphNode::Id) !=
+                    definition.SurfaceGraph.Nodes.end())
+                return diagnostic.Node;
+        }
+        if (!diagnostic.Pin)
+            return std::nullopt;
+        if (std::ranges::find(definition.Properties, diagnostic.Pin, &Keire::MaterialGraphPropertyBinding::Pin) !=
+            definition.Properties.end())
+            return definition.OutputNode;
+        if (const auto value =
+                std::ranges::find(definition.Nodes, diagnostic.Pin, &Keire::MaterialGraphValueNode::OutputPin);
+            value != definition.Nodes.end())
+            return value->Id;
+        const auto expression =
+            std::ranges::find_if(definition.SurfaceGraph.Nodes,
+                                 [&](const auto& candidate)
+                                 {
+                                     return std::ranges::find(candidate.Pins, diagnostic.Pin,
+                                                              &Keire::ShaderGraphPin::Id) != candidate.Pins.end();
+                                 });
+        return expression == definition.SurfaceGraph.Nodes.end() ? std::nullopt : std::optional(expression->Id);
+    }
 } // namespace KeireEditor

@@ -69,6 +69,7 @@ namespace KeireEditor
     void MaterialGraphCreationPicker::Draw(Keire::UiFrame& ui, const std::span<const Keire::AssetSourceRecord> records,
                                            const Keire::UiThemeDefinition& theme)
     {
+        const bool hasShader = std::ranges::any_of(records, IsMaterialShader);
         const AssetPickerOptions options{
             .Label = "Shader",
             .EmptyLabel = "Choose Shader Graph or raw Shader",
@@ -77,6 +78,9 @@ namespace KeireEditor
         };
         (void)m_Picker.Draw(ui, records, m_Shader, options);
         ui.TextColored(theme.MutedText, "The shader defines the properties shown in the Material Inspector.");
+        if (!hasShader)
+            ui.TextColored(theme.Warning,
+                           "Create a Surface / Lit or Surface / Unlit Shader Graph before creating a material.");
         if (!m_Picker.Diagnostic().empty())
             ui.TextColored(theme.Warning, m_Picker.Diagnostic());
     }

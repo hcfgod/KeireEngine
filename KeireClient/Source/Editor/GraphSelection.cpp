@@ -111,17 +111,21 @@ namespace KeireEditor
 
     void StableNodeGraphCanvas::Select(const std::optional<StableNodeId> node)
     {
+        const auto pin = m_PinSelection;
         ClearSelection();
         if (node && *node != 0)
         {
             m_Selection = node;
             m_Selections.push_back(*node);
+            if (pin && pin->Node == *node)
+                m_PinSelection = pin;
         }
     }
 
     void StableNodeGraphCanvas::Select(const std::span<const StableNodeId> nodes,
                                        const std::optional<StableNodeId> primary)
     {
+        const auto pin = m_PinSelection;
         ClearSelection();
         for (const auto node : nodes)
             if (node != 0 && !IsSelected(node))
@@ -130,6 +134,8 @@ namespace KeireEditor
             MakePrimary(*primary);
         else if (!m_Selections.empty())
             m_Selection = m_Selections.back();
+        if (pin && IsSelected(pin->Node))
+            m_PinSelection = pin;
     }
 
     void StableNodeGraphCanvas::ToggleSelection(const StableNodeId node)
@@ -140,6 +146,8 @@ namespace KeireEditor
         if (found != m_Selections.end())
         {
             m_Selections.erase(found);
+            if (m_PinSelection && m_PinSelection->Node == node)
+                m_PinSelection.reset();
             m_Selection = m_Selections.empty() ? std::nullopt : std::optional(m_Selections.back());
             return;
         }
@@ -149,11 +157,21 @@ namespace KeireEditor
 
     void StableNodeGraphCanvas::SelectAll(const std::span<const NodeGraphNode> nodes)
     {
+        const auto pin = m_PinSelection;
         ClearSelection();
         m_Selections.reserve(nodes.size());
         std::ranges::transform(nodes, std::back_inserter(m_Selections), &NodeGraphNode::Id);
         if (!m_Selections.empty())
             m_Selection = m_Selections.back();
+        if (pin && IsSelected(pin->Node))
+            m_PinSelection = pin;
+    }
+
+    void StableNodeGraphCanvas::SelectPin(const std::optional<NodeGraphPinAddress> pin)
+    {
+        m_PinSelection = pin;
+        if (pin)
+            Select(pin->Node);
     }
 
     bool StableNodeGraphCanvas::IsSelected(const StableNodeId node) const noexcept
@@ -178,6 +196,7 @@ namespace KeireEditor
     {
         m_Selection.reset();
         m_Selections.clear();
+        m_PinSelection.reset();
     }
 
     void SynchronizeGraphSelection(StableNodeGraphCanvas& canvas,

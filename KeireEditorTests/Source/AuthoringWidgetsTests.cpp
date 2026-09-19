@@ -377,6 +377,23 @@ TEST_CASE("Stable node graph canvas tracks node and cable selections independent
     CHECK_FALSE(canvas.ConnectionDragActive());
 }
 
+TEST_CASE("Stable node graph pin focus survives selection synchronization")
+{
+    KeireEditor::StableNodeGraphCanvas canvas;
+    const KeireEditor::NodeGraphPinAddress pin{41, 7, 0};
+
+    canvas.SelectPin(pin);
+    CHECK(canvas.Selection() == 41);
+    CHECK(canvas.PinSelection() == pin);
+
+    const std::array<KeireEditor::StableNodeId, 1> selection{41};
+    canvas.Select(selection, 41);
+    CHECK(canvas.PinSelection() == pin);
+
+    canvas.Select(42);
+    CHECK_FALSE(canvas.PinSelection());
+}
+
 TEST_CASE("Stable node graph cable routing points are ordered, bounded, and finite")
 {
     KeireEditor::NodeGraphNode producer{1, "Producer", {0.0F, 0.0F}};

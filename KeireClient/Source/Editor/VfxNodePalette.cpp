@@ -422,11 +422,11 @@ namespace KeireEditor
         for (const auto index : keyboardEntries)
             keyboardIds.push_back(catalog.Entries()[index].Id);
         m_NodeMenuSelection.Synchronize(keyboardIds);
-        if (ui.Shortcut({.Key = Keire::UiKey::Up, .Global = true}))
+        if (ui.KeyPressed(Keire::UiKey::Up))
             m_NodeMenuSelection.MovePrevious(keyboardIds);
-        if (ui.Shortcut({.Key = Keire::UiKey::Down, .Global = true}))
+        if (ui.KeyPressed(Keire::UiKey::Down))
             m_NodeMenuSelection.MoveNext(keyboardIds);
-        activateSelected = ui.Shortcut({.Key = Keire::UiKey::Enter, .Global = true});
+        activateSelected = ui.KeyPressed(Keire::UiKey::Enter);
 
         if (filter.empty())
         {

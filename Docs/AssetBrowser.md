@@ -127,7 +127,8 @@ List and Grid labels omit source extensions. A delayed hover card supplies the c
 project-relative path, size, stable ID, importer, and latest import result so visually identical stems remain
 distinguishable without cluttering the content view.
 
-The folder tree and content area use a resizable split when enough width is available. At compact widths, the tree
+The folder tree and content area use a resizable split when enough width is available. Each pane owns its scrolling;
+the containing Project panel does not compete for the pointer wheel. At compact widths, the tree
 collapses and the breadcrumb/content view remains usable instead of forcing both panes below their minimum sizes. Grid
 columns are equal-width, non-persistent presentation columns recalculated from the current content width; they are not
 user-resizable data columns and never restore stale stretch weights after a window-size change.

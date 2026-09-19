@@ -167,6 +167,7 @@ namespace KeireEditor
         m_SelectedNodes.clear();
         m_SelectedConnection.reset();
         m_FrameNode.reset();
+        m_FramePin.reset();
         m_InspectorNode.reset();
         m_InspectorCommentNode.reset();
         m_NodeCreationPosition.reset();
@@ -210,11 +211,11 @@ namespace KeireEditor
                                            std::ranges::any_of(document.Definition().SurfaceGraph.Connections,
                                                                [&](const Keire::ShaderGraphConnection& connection)
                                                                { return connection.Input.Node == materialOutput->Id; });
-        ui.TextColored(document.Diagnostics().empty() ? theme.Success : theme.Warning,
-                       document.Diagnostics().empty() ? hasSurfaceExpressions
-                                                            ? "MATERIAL SURFACE READY  |  SAVE TO COMPILE"
-                                                            : "MATERIAL GRAPH READY"
-                                                      : "MATERIAL GRAPH HAS DIAGNOSTICS");
+        const auto status = !document.Diagnostics().empty() ? "MATERIAL GRAPH HAS DIAGNOSTICS"
+                            : document.Dirty()              ? "MATERIAL GRAPH MODIFIED"
+                            : hasSurfaceExpressions         ? "MATERIAL SURFACE READY"
+                                                            : "MATERIAL GRAPH READY";
+        ui.TextColored(document.Diagnostics().empty() && !document.Dirty() ? theme.Success : theme.Warning, status);
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!document.Dirty()); disabled)
             if (ui.Button("Save"))
@@ -481,26 +482,37 @@ namespace KeireEditor
                                            { return ShaderGraphPinsCanConnect(*compatiblePin, pin); });
             return !compatibleNode || ShaderGraphNodesCanConnect(*compatibleNode, candidate);
         };
-        for (const auto& descriptor : Keire::ShaderGraphNodeCatalog())
+        const auto canCreate = [&](const Keire::ShaderGraphNodeDescriptor& descriptor)
         {
             if (!descriptor.UserCreatable || descriptor.Kind == Keire::ShaderGraphNodeKind::Master ||
                 descriptor.Kind == Keire::ShaderGraphNodeKind::Keyword ||
                 descriptor.Kind == Keire::ShaderGraphNodeKind::Custom)
-                continue;
+                return false;
             auto node = Keire::CreateShaderGraphNode(descriptor.TypeId, descriptor.DefaultValueType);
-            if (!compatible(node))
-                continue;
-            const auto label = std::string(descriptor.Category) + " / " + std::string(descriptor.DisplayName);
-            if (!ui.MenuItem(label))
-                continue;
+            return compatible(node);
+        };
+        const auto addNode = [&](const Keire::ShaderGraphNodeDescriptor& descriptor)
+        {
+            if (!ui.MenuItem(descriptor.DisplayName))
+                return false;
+            auto node = Keire::CreateShaderGraphNode(descriptor.TypeId, descriptor.DefaultValueType);
             if (descriptor.Kind == Keire::ShaderGraphNodeKind::Parameter)
             {
                 node.Symbol = UniqueExpressionSymbol(m_Controller.MaterialGraphState().Definition(),
                                                      DefaultParameterSymbol(descriptor.DefaultValueType));
                 node.Name = node.Symbol;
             }
-            node.EditorPosition = position.value_or(Keire::Vector2{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
-                                                                   -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()});
+            if (position)
+                node.EditorPosition = *position;
+            else
+            {
+                const Keire::Vector2 preferred{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
+                                               -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()};
+                const Keire::Vector2 nodeSize{220.0F,
+                                              std::max(88.0F, 48.0F + static_cast<float>(node.Pins.size()) * 22.0F)};
+                node.EditorPosition = ResolveGraphNodePlacement(
+                    m_Controller.MaterialGraphState().BuildCanvasModel(true).Nodes, preferred, nodeSize);
+            }
             const auto nodeId = node.Id;
             try
             {
@@ -514,7 +526,19 @@ namespace KeireEditor
             }
             ui.CloseCurrentPopup();
             return true;
-        }
+        };
+
+        std::vector<std::string_view> categories;
+        for (const auto& descriptor : Keire::ShaderGraphNodeCatalog())
+            if (canCreate(descriptor) && std::ranges::find(categories, descriptor.Category) == categories.end())
+                categories.push_back(descriptor.Category);
+        for (const auto category : categories)
+            if (auto menu = ui.BeginMenu(category); menu)
+                for (const auto& descriptor : Keire::ShaderGraphNodeCatalog())
+                    if (descriptor.Category == category && canCreate(descriptor) && addNode(descriptor))
+                        return true;
+
+        bool hasSubgraphs = false;
         for (const auto& record : m_Controller.MaterialGraphAssetRecords())
         {
             const bool reusable = record.Type == Keire::ShaderSubgraphAsset::StaticType() ||
@@ -522,28 +546,39 @@ namespace KeireEditor
                                   record.Type == Keire::ShaderFunctionAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerAsset::StaticType() ||
                                   record.Type == Keire::MaterialLayerBlendAsset::StaticType();
-            if (!reusable || record.Id == m_Controller.MaterialGraphState().Asset())
-                continue;
-            try
+            if (reusable && record.Id != m_Controller.MaterialGraphState().Asset())
+                hasSubgraphs = true;
+        }
+        if (auto subgraphs = ui.BeginMenu("Functions & Layers", hasSubgraphs); subgraphs)
+            for (const auto& record : m_Controller.MaterialGraphAssetRecords())
             {
-                const auto function = m_Controller.ResolveMaterialGraphFunction(record.Id);
-                if (!function)
+                const bool reusable = record.Type == Keire::ShaderSubgraphAsset::StaticType() ||
+                                      record.Type == Keire::MaterialFunctionAsset::StaticType() ||
+                                      record.Type == Keire::ShaderFunctionAsset::StaticType() ||
+                                      record.Type == Keire::MaterialLayerAsset::StaticType() ||
+                                      record.Type == Keire::MaterialLayerBlendAsset::StaticType();
+                if (!reusable || record.Id == m_Controller.MaterialGraphState().Asset())
                     continue;
-                const auto candidate = Keire::CreateShaderGraphFunctionCallNode(record.Id, *function);
-                if (!compatible(candidate))
-                    continue;
-                const auto label = "Subgraphs / " + record.RelativePath.stem().string();
-                if (ui.MenuItem(label) && AddFunctionNode(record.Id, record.RelativePath.stem().string(), position))
+                try
                 {
-                    ui.CloseCurrentPopup();
-                    return true;
+                    const auto function = m_Controller.ResolveMaterialGraphFunction(record.Id);
+                    if (!function)
+                        continue;
+                    const auto candidate = Keire::CreateShaderGraphFunctionCallNode(record.Id, *function);
+                    if (!compatible(candidate))
+                        continue;
+                    const auto label = record.RelativePath.stem().string();
+                    if (ui.MenuItem(label) && AddFunctionNode(record.Id, label, position))
+                    {
+                        ui.CloseCurrentPopup();
+                        return true;
+                    }
+                }
+                catch (const std::exception&)
+                {
+                    // A stale or invalid subgraph is omitted from the compatible palette until its import recovers.
                 }
             }
-            catch (const std::exception&)
-            {
-                // A stale or invalid subgraph is omitted from the compatible palette until its import recovers.
-            }
-        }
         return false;
     }
 
@@ -563,14 +598,30 @@ namespace KeireEditor
             {
                 const std::array framed{*node};
                 m_Canvas.Focus(framed, ui.ContentAvailable());
+                if (m_FramePin)
+                {
+                    const auto pinIdentity = std::ranges::find(model.PinIdentities, *m_FramePin,
+                                                               &std::pair<StableNodeId, Keire::AssetId>::second);
+                    if (pinIdentity != model.PinIdentities.end() &&
+                        std::ranges::find(node->Pins, pinIdentity->first, &NodeGraphPin::Id) != node->Pins.end())
+                        m_Canvas.SelectPin(NodeGraphPinAddress{node->Id, pinIdentity->first});
+                }
             }
             m_FrameNode.reset();
+            m_FramePin.reset();
         }
         ApplyNodeGraphAnnotations(document.Definition().Authoring, model.NodeIdentities, model.Nodes);
         auto comments = BuildNodeGraphCommentModel(document.Definition().Authoring, model.NodeIdentities);
         if (auto combo = ui.BeginCombo("Add Node", "Choose material node..."); combo)
+        {
+            if (ui.KeyPressed(Keire::UiKey::Escape))
+            {
+                ui.CloseCurrentPopup();
+                return;
+            }
             if (DrawExpressionCreationMenu(ui, std::nullopt))
                 return;
+        }
         if (!document.Definition().Properties.empty())
         {
             ui.SameLine();
@@ -1000,6 +1051,12 @@ namespace KeireEditor
         if (auto popup = ui.BeginPopup("MaterialGraphExpressionPalette"); popup)
         {
             paletteOpen = true;
+            if (ui.KeyPressed(Keire::UiKey::Escape))
+            {
+                ui.CloseCurrentPopup();
+                m_NodeCreationPosition.reset();
+                return;
+            }
             if (DrawExpressionCreationMenu(ui, m_NodeCreationPosition))
             {
                 m_NodeCreationPosition.reset();
@@ -1415,8 +1472,12 @@ namespace KeireEditor
     {
         try
         {
-            auto node = Keire::CreateMaterialGraphValueNode(property.Type, property.Value,
-                                                            position.value_or(Keire::Vector2{120.0F, 120.0F}));
+            const Keire::Vector2 preferred = position.value_or(Keire::Vector2{120.0F, 120.0F});
+            const auto placement =
+                position ? preferred
+                         : ResolveGraphNodePlacement(m_Controller.MaterialGraphState().BuildCanvasModel(true).Nodes,
+                                                     preferred, {180.0F, 72.0F});
+            auto node = Keire::CreateMaterialGraphValueNode(property.Type, property.Value, placement);
             node.Name = property.Name;
             const auto id = node.Id;
             if (m_Controller.MaterialGraphState().AddNode(std::move(node)))

@@ -79,18 +79,6 @@ namespace
         return HeaderHeight(node) + PinAreaHeight(node.Pins);
     }
 
-    [[nodiscard]] Keire::UiSize EffectiveNodeSize(const KeireEditor::NodeGraphNode& node) noexcept
-    {
-        float contentHeight = BlockAreaOffset(node);
-        if (!node.Blocks.empty())
-        {
-            contentHeight += BlockSpacing;
-            for (const auto& block : node.Blocks)
-                contentHeight += BlockHeight(block) + BlockSpacing;
-        }
-        return {node.Size.X, std::max(node.Size.Y, contentHeight)};
-    }
-
     struct DrawnNode
     {
         KeireEditor::StableNodeId Id = 0;
@@ -238,6 +226,18 @@ namespace
 
 namespace KeireEditor
 {
+    Keire::UiSize EffectiveNodeGraphSize(const NodeGraphNode& node) noexcept
+    {
+        float contentHeight = BlockAreaOffset(node);
+        if (!node.Blocks.empty())
+        {
+            contentHeight += BlockSpacing;
+            for (const auto& block : node.Blocks)
+                contentHeight += BlockHeight(block) + BlockSpacing;
+        }
+        return {node.Size.X, std::max(node.Size.Y, contentHeight)};
+    }
+
     NodeGraphCanvasResult StableNodeGraphCanvas::Draw(Keire::UiFrame& ui, const std::string_view id,
                                                       const std::span<NodeGraphNode> nodes,
                                                       const std::span<const NodeGraphConnection> connections,
@@ -516,7 +516,7 @@ namespace KeireEditor
             if (collapsedOwners.contains(node.Id))
                 continue;
             const auto minimum = ToScreen(node.Position, canvas);
-            const auto effectiveSize = EffectiveNodeSize(node);
+            const auto effectiveSize = EffectiveNodeGraphSize(node);
             const Keire::UiSize scaledSize{effectiveSize.Width * m_Zoom, effectiveSize.Height * m_Zoom};
             drawnNodes.push_back({node.Id, {minimum, Add(minimum, {scaledSize.Width, scaledSize.Height})}});
 
@@ -634,8 +634,8 @@ namespace KeireEditor
             }
             else
             {
-                const auto sourceSize = EffectiveNodeSize(*sourceNode->second);
-                const auto targetSize = EffectiveNodeSize(*targetNode->second);
+                const auto sourceSize = EffectiveNodeGraphSize(*sourceNode->second);
+                const auto targetSize = EffectiveNodeGraphSize(*targetNode->second);
                 sourcePosition = sourceOwner != collapsedOwners.end()
                                      ? collapsedEndpoint(*sourceOwner->second, false)
                                      : ToScreen({sourceNode->second->Position.X + sourceSize.Width,
@@ -1402,8 +1402,11 @@ namespace KeireEditor
         {
             const bool hovered = hoveredPin && *hoveredPin == pin.Address;
             const bool linkOrigin = m_DraggingPin && *m_DraggingPin == pin.Address;
+            const bool selected = m_PinSelection && *m_PinSelection == pin.Address;
             Keire::UiColor ring{0.72F, 0.78F, 0.88F, 1.0F};
-            if (linkOrigin)
+            if (selected)
+                ring = {0.3F, 0.78F, 1.0F, 1.0F};
+            else if (linkOrigin)
                 ring = {0.92F, 0.96F, 1.0F, 1.0F};
             else if (hovered && previewValidation)
             {
@@ -1426,10 +1429,11 @@ namespace KeireEditor
             }
 
             const float radius = std::clamp(5.0F * m_Zoom, 2.5F, 6.0F);
-            if (hovered || linkOrigin)
+            if (hovered || linkOrigin || selected)
                 ui.DrawFilledCircle(pin.Position, radius + 3.0F, {ring.Red, ring.Green, ring.Blue, 0.18F});
-            ui.DrawFilledCircle(pin.Position, radius, ScaleColor(pin.Pin->Color, hovered ? 1.2F : 0.88F, 1.0F));
-            ui.DrawCircle(pin.Position, radius, ring, hovered || linkOrigin ? 2.0F : 1.0F);
+            ui.DrawFilledCircle(pin.Position, radius,
+                                ScaleColor(pin.Pin->Color, hovered || selected ? 1.2F : 0.88F, 1.0F));
+            ui.DrawCircle(pin.Position, radius, ring, hovered || linkOrigin || selected ? 2.0F : 1.0F);
 
             if (detail.PinLabels)
             {

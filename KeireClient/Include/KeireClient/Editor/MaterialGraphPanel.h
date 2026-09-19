@@ -124,6 +124,7 @@ namespace KeireEditor
         std::vector<Keire::AssetId> m_SelectedNodes;
         std::optional<Keire::AssetId> m_SelectedConnection;
         std::optional<Keire::AssetId> m_FrameNode;
+        std::optional<Keire::AssetId> m_FramePin;
         std::optional<Keire::AssetId> m_InspectorNode;
         std::optional<Keire::AssetId> m_InspectorCommentNode;
         std::optional<Keire::Vector2> m_NodeCreationPosition;

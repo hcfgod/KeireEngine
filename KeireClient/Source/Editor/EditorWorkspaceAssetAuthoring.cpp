@@ -970,7 +970,8 @@ bool EditorWorkspaceLayer::CreateUnlitShader(const std::string_view name)
         auxiliary.push_back({hlsl, std::vector<std::byte>(shaderBytes.begin(), shaderBytes.end())});
         m_AssetOperations->QueueCreateAssetWithAuxiliary(
             manifest, std::vector<std::byte>(manifestBytes.begin(), manifestBytes.end()), {},
-            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal}, std::move(auxiliary));
+            {.FollowUp = KeireEditor::AssetOperationFollowUp::Reveal, .UndoName = "Create Shader"},
+            std::move(auxiliary));
         m_AssetStatus = "Creating and compiling " + manifest.generic_string() + " in the isolated asset worker.";
         return true;
     }

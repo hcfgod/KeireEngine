@@ -19,7 +19,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
+#include <future>
 #include <mutex>
 #include <optional>
 #include <regex>
@@ -893,7 +895,8 @@ namespace Keire
                 definition.Description = property.value("description", std::string{});
                 definition.HighDynamicRange = property.value("hdr", false);
                 if (property.contains("textureTransformProperty"))
-                    definition.TextureTransformProperty = AssetId::Parse(property.at("textureTransformProperty").get<std::string>());
+                    definition.TextureTransformProperty =
+                        AssetId::Parse(property.at("textureTransformProperty").get<std::string>());
                 if (property.contains("minimum"))
                     definition.Minimum = property.at("minimum").get<float>();
                 if (property.contains("maximum"))
@@ -1321,13 +1324,28 @@ namespace Keire
                     const auto stem = passLane.Role + '-' + std::string(name);
                     const auto vertexPath = temporary.Path() / ("vertex-" + stem + extension);
                     const auto fragmentPath = temporary.Path() / ("fragment-" + stem + extension);
-                    definition.Variants.push_back(
-                        {format,
-                         Compile(compiler, source, name, "vertex", definition.VertexEntry, vertexPath,
-                                 stagedIncludeRoots, laneDefines, specification, temporary.Path()),
-                         Compile(compiler, source, name, "fragment", definition.FragmentEntry, fragmentPath,
-                                 stagedIncludeRoots, laneDefines, specification, temporary.Path()),
-                         passLane.Role});
+                    auto vertex = std::async(std::launch::async,
+                                             [&]
+                                             {
+                                                 return Compile(compiler, source, name, "vertex",
+                                                                definition.VertexEntry, vertexPath, stagedIncludeRoots,
+                                                                laneDefines, specification, temporary.Path());
+                                             });
+                    std::vector<std::byte> fragment;
+                    std::exception_ptr fragmentFailure;
+                    try
+                    {
+                        fragment = Compile(compiler, source, name, "fragment", definition.FragmentEntry, fragmentPath,
+                                           stagedIncludeRoots, laneDefines, specification, temporary.Path());
+                    }
+                    catch (...)
+                    {
+                        fragmentFailure = std::current_exception();
+                    }
+                    auto vertexBytes = vertex.get();
+                    if (fragmentFailure)
+                        std::rethrow_exception(fragmentFailure);
+                    definition.Variants.push_back({format, std::move(vertexBytes), std::move(fragment), passLane.Role});
                 }
             }
 
@@ -1365,14 +1383,29 @@ namespace Keire
                        static_cast<std::streamsize>(spirv->Fragment.size()));
             const auto vertexReflection = temporary.Path() / "vertex.json";
             const auto fragmentReflection = temporary.Path() / "fragment.json";
-            RunCompiler(
-                compiler,
-                {Utf8Path(vertexSpirv), "-s", "SPIRV", "-d", "JSON", "-t", "vertex", "-o", Utf8Path(vertexReflection)},
-                temporary.Path(), specification.Timeout);
-            RunCompiler(compiler,
-                        {Utf8Path(fragmentSpirv), "-s", "SPIRV", "-d", "JSON", "-t", "fragment", "-o",
-                         Utf8Path(fragmentReflection)},
-                        temporary.Path(), specification.Timeout);
+            auto vertexReflectionTask = std::async(std::launch::async,
+                                                   [&]
+                                                   {
+                                                       RunCompiler(compiler,
+                                                                   {Utf8Path(vertexSpirv), "-s", "SPIRV", "-d", "JSON",
+                                                                    "-t", "vertex", "-o", Utf8Path(vertexReflection)},
+                                                                   temporary.Path(), specification.Timeout);
+                                                   });
+            std::exception_ptr fragmentReflectionFailure;
+            try
+            {
+                RunCompiler(compiler,
+                            {Utf8Path(fragmentSpirv), "-s", "SPIRV", "-d", "JSON", "-t", "fragment", "-o",
+                             Utf8Path(fragmentReflection)},
+                            temporary.Path(), specification.Timeout);
+            }
+            catch (...)
+            {
+                fragmentReflectionFailure = std::current_exception();
+            }
+            vertexReflectionTask.get();
+            if (fragmentReflectionFailure)
+                std::rethrow_exception(fragmentReflectionFailure);
             ValidateReflection(Json::parse(Text(ReadFile(vertexReflection, specification.MaximumOutputBytes))),
                                Json::parse(Text(ReadFile(fragmentReflection, specification.MaximumOutputBytes))),
                                definition);

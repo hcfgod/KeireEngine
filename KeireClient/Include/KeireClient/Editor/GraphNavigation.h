@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Keire/Rendering/MaterialGraph.h"
+#include "Keire/Rendering/ShaderGraph.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 
 #include <optional>
@@ -34,4 +36,10 @@ namespace KeireEditor
 
     [[nodiscard]] bool DrawGraphBookmarkMenu(Keire::UiFrame& ui, GraphBookmarkSet& bookmarks,
                                              StableNodeGraphCanvas& canvas);
+    [[nodiscard]] std::optional<Keire::AssetId>
+    ResolveShaderGraphDiagnosticNode(const Keire::ShaderGraphDefinition& definition,
+                                     const Keire::ShaderGraphDiagnostic& diagnostic) noexcept;
+    [[nodiscard]] std::optional<Keire::AssetId>
+    ResolveMaterialGraphDiagnosticNode(const Keire::MaterialGraphDefinition& definition,
+                                       const Keire::MaterialGraphDiagnostic& diagnostic) noexcept;
 } // namespace KeireEditor

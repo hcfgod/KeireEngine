@@ -142,6 +142,8 @@ namespace KeireEditor
         bool operator==(const NodeGraphNode&) const = default;
     };
 
+    [[nodiscard]] Keire::UiSize EffectiveNodeGraphSize(const NodeGraphNode& node) noexcept;
+
     struct NodeGraphConnection
     {
         StableNodeId Id = 0;
@@ -322,6 +324,7 @@ namespace KeireEditor
         void Select(std::span<const StableNodeId> nodes, std::optional<StableNodeId> primary = {});
         void ToggleSelection(StableNodeId node);
         void SelectAll(std::span<const NodeGraphNode> nodes);
+        void SelectPin(std::optional<NodeGraphPinAddress> pin);
         void SelectBlock(std::optional<NodeGraphBlockAddress> block) noexcept { m_BlockSelection = block; }
         void SelectConnection(std::optional<StableNodeId> connection) noexcept
         {
@@ -345,6 +348,7 @@ namespace KeireEditor
         [[nodiscard]] std::optional<StableNodeId> Selection() const noexcept { return m_Selection; }
         [[nodiscard]] std::span<const StableNodeId> Selections() const noexcept { return m_Selections; }
         [[nodiscard]] std::optional<NodeGraphBlockAddress> BlockSelection() const noexcept { return m_BlockSelection; }
+        [[nodiscard]] std::optional<NodeGraphPinAddress> PinSelection() const noexcept { return m_PinSelection; }
         [[nodiscard]] std::optional<StableNodeId> ConnectionSelection() const noexcept { return m_ConnectionSelection; }
         [[nodiscard]] std::optional<StableNodeId> CommentSelection() const noexcept { return m_CommentSelection; }
         [[nodiscard]] bool ConnectionDragActive() const noexcept { return m_DraggingPin.has_value(); }
@@ -365,6 +369,7 @@ namespace KeireEditor
         std::optional<StableNodeId> m_Selection;
         std::vector<StableNodeId> m_Selections;
         std::optional<NodeGraphBlockAddress> m_BlockSelection;
+        std::optional<NodeGraphPinAddress> m_PinSelection;
         std::optional<StableNodeId> m_ConnectionSelection;
         std::optional<StableNodeId> m_Dragging;
         std::optional<NodeGraphBlockAddress> m_DraggingBlock;

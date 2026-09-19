@@ -138,4 +138,44 @@ namespace KeireEditor
                 result.push_back(connection.Id);
         return result;
     }
+
+    Keire::Vector2 ResolveGraphNodePlacement(const std::span<const NodeGraphNode> nodes,
+                                             const Keire::Vector2 preferredPosition,
+                                             const Keire::Vector2 nodeSize) noexcept
+    {
+        constexpr float spacing = 24.0F;
+        const auto overlaps = [&](const Keire::Vector2 position, const NodeGraphNode& node)
+        {
+            const auto size = EffectiveNodeGraphSize(node);
+            return position.X < node.Position.X + size.Width + spacing &&
+                   position.X + nodeSize.X + spacing > node.Position.X &&
+                   position.Y < node.Position.Y + size.Height + spacing &&
+                   position.Y + nodeSize.Y + spacing > node.Position.Y;
+        };
+        const auto resolve = [&](const bool horizontal)
+        {
+            auto candidate = preferredPosition;
+            for (;;)
+            {
+                const auto blocking =
+                    std::ranges::find_if(nodes, [&](const auto& node) { return overlaps(candidate, node); });
+                if (blocking == nodes.end())
+                    return candidate;
+                const auto size = EffectiveNodeGraphSize(*blocking);
+                if (horizontal)
+                    candidate.X = blocking->Position.X + size.Width + spacing;
+                else
+                    candidate.Y = blocking->Position.Y + size.Height + spacing;
+            }
+        };
+        const auto horizontal = resolve(true);
+        const auto vertical = resolve(false);
+        const auto distanceSquared = [&](const Keire::Vector2 position)
+        {
+            const float x = position.X - preferredPosition.X;
+            const float y = position.Y - preferredPosition.Y;
+            return x * x + y * y;
+        };
+        return distanceSquared(horizontal) <= distanceSquared(vertical) ? horizontal : vertical;
+    }
 } // namespace KeireEditor

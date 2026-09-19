@@ -25,3 +25,21 @@ TEST_CASE("Graph bookmarks reject invalid state and enforce their workspace boun
         bookmarks.Save("Bookmark " + std::to_string(index + 1U), {});
     CHECK_THROWS_WITH_AS(bookmarks.Save("Overflow", {}), "Graph bookmark limit is 9.", std::invalid_argument);
 }
+
+TEST_CASE("Graph diagnostics resolve pin-only locations to their authored node")
+{
+    const auto shader = Keire::CreateDefaultShaderGraph();
+    const auto& shaderNode = shader.Nodes.front();
+    const auto shaderPin = shaderNode.Pins.front().Id;
+    CHECK(KeireEditor::ResolveShaderGraphDiagnosticNode(
+              shader, {.Code = "SGTEST", .Message = "Pin failure", .Pin = shaderPin}) == shaderNode.Id);
+
+    const auto material = Keire::CreateOpenPbrMaterial();
+    const auto& materialNode = material.SurfaceGraph.Nodes.front();
+    const auto materialPin = materialNode.Pins.front().Id;
+    CHECK(KeireEditor::ResolveMaterialGraphDiagnosticNode(
+              material, {.Code = "MATTEST", .Message = "Pin failure", .Pin = materialPin}) == materialNode.Id);
+
+    CHECK_FALSE(KeireEditor::ResolveShaderGraphDiagnosticNode(
+        shader, {.Code = "SGTEST", .Message = "Missing pin", .Pin = Keire::AssetId::Generate()}));
+}

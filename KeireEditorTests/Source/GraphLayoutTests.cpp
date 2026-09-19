@@ -47,3 +47,20 @@ TEST_CASE("Straighten selection finds only fully internal cables")
 
     CHECK(KeireEditor::InternalGraphConnections(connections, selection) == std::vector<KeireEditor::StableNodeId>{10});
 }
+
+TEST_CASE("Default graph placement chooses the nearest clear axis")
+{
+    const std::array nodes{
+        KeireEditor::NodeGraphNode{.Id = 1,
+                                   .Position = {100.0F, 100.0F},
+                                   .Size = {220.0F, 120.0F},
+                                   .Subtitle = "Output",
+                                   .Pins = {{.Id = 1}, {.Id = 2}, {.Id = 3}, {.Id = 4}}},
+        KeireEditor::NodeGraphNode{.Id = 2, .Position = {344.0F, 100.0F}, .Size = {220.0F, 120.0F}},
+    };
+
+    CHECK(KeireEditor::ResolveGraphNodePlacement({}, {100.0F, 100.0F}, {220.0F, 72.0F}) ==
+          Keire::Vector2{100.0F, 100.0F});
+    CHECK(KeireEditor::ResolveGraphNodePlacement(nodes, {100.0F, 100.0F}, {220.0F, 72.0F}) ==
+          Keire::Vector2{100.0F, 268.0F});
+}

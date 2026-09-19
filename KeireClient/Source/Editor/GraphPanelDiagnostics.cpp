@@ -32,17 +32,21 @@ namespace KeireEditor
             std::string text = diagnostic.Code + "  " + diagnostic.Message;
             if (diagnostic.Node)
                 text += "  [" + diagnostic.Node.ToString() + "]";
+            if (diagnostic.Pin)
+                text += "  [pin " + diagnostic.Pin.ToString() + "]";
             if (diagnostic.GeneratedLine != 0)
                 text += "  line " + std::to_string(diagnostic.GeneratedLine);
-            if (diagnostic.Node || diagnostic.GeneratedLine != 0)
+            const auto focusedNode = ResolveShaderGraphDiagnosticNode(document.Definition(), diagnostic);
+            if (focusedNode || diagnostic.GeneratedLine != 0)
             {
                 if (ui.Selectable(text))
                 {
-                    if (diagnostic.Node)
+                    if (focusedNode)
                     {
-                        m_SelectedNode = diagnostic.Node;
-                        m_SelectedNodes = {diagnostic.Node};
-                        m_FrameNode = diagnostic.Node;
+                        m_SelectedNode = focusedNode;
+                        m_SelectedNodes = {*focusedNode};
+                        m_FrameNode = focusedNode;
+                        m_FramePin = diagnostic.Pin ? std::optional(diagnostic.Pin) : std::nullopt;
                     }
                     if (diagnostic.GeneratedLine != 0)
                         m_SourceLine = static_cast<int>(
@@ -77,15 +81,20 @@ namespace KeireEditor
                                : diagnostic.Severity == Keire::MaterialGraphDiagnosticSeverity::Warning
                                    ? theme.Warning
                                    : theme.MutedText;
-            const auto text = diagnostic.Code + "  " + diagnostic.Message;
-            if (diagnostic.Node)
+            auto text = diagnostic.Code + "  " + diagnostic.Message;
+            if (diagnostic.Pin)
+                text += "  [pin " + diagnostic.Pin.ToString() + "]";
+            const auto focusedNode =
+                ResolveMaterialGraphDiagnosticNode(m_Controller.MaterialGraphState().Definition(), diagnostic);
+            if (focusedNode)
             {
-                auto id = ui.PushId(diagnostic.Node.ToString() + diagnostic.Code);
+                auto id = ui.PushId(focusedNode->ToString() + diagnostic.Code);
                 if (ui.Selectable(text))
                 {
-                    m_SelectedNode = diagnostic.Node;
-                    m_SelectedNodes = {diagnostic.Node};
-                    m_FrameNode = diagnostic.Node;
+                    m_SelectedNode = focusedNode;
+                    m_SelectedNodes = {*focusedNode};
+                    m_FrameNode = focusedNode;
+                    m_FramePin = diagnostic.Pin ? std::optional(diagnostic.Pin) : std::nullopt;
                 }
             }
             else

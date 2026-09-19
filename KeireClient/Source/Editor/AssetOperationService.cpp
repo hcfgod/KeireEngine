@@ -490,6 +490,12 @@ namespace KeireEditor
 
     std::optional<Keire::AssetOperationProgress> AssetOperationService::Progress() const noexcept { return m_Progress; }
 
+    std::string AssetOperationService::ActivityLabel() const
+    {
+        const auto* pending = m_Running ? &m_Running->Pending : m_Queue.empty() ? nullptr : &m_Queue.front();
+        return pending && !pending->Context.UndoName.empty() ? pending->Context.UndoName : "Process assets";
+    }
+
     bool AssetOperationService::Busy() const noexcept { return m_Running.has_value() || !m_Queue.empty(); }
 
     bool AssetOperationService::Publishing() const noexcept

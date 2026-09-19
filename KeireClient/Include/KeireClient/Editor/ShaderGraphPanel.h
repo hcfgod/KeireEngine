@@ -146,6 +146,7 @@ namespace KeireEditor
         std::vector<Keire::AssetId> m_SelectedNodes;
         std::optional<Keire::AssetId> m_SelectedConnection;
         std::optional<Keire::AssetId> m_FrameNode;
+        std::optional<Keire::AssetId> m_FramePin;
         bool m_FrameAllOnOpen = true;
         ShaderGraphSaveState m_SaveState;
         bool m_ReadOnly = false;

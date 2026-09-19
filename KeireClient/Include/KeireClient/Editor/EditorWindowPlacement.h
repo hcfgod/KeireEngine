@@ -13,7 +13,7 @@ namespace KeireEditor
         Keire::WindowPosition Position{80, 80};
         Keire::LogicalExtent WindowedSize{1280, 720};
         Keire::WindowMode Mode = Keire::WindowMode::Windowed;
-        bool Maximized = false;
+        bool Maximized = true;
     };
 
     [[nodiscard]] std::optional<EditorWindowPlacement>

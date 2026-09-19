@@ -227,10 +227,10 @@ namespace
         layout.Dock("editor.inspector", right.Near);
         layout.Dock("editor.theme", right.Near);
         layout.Dock("editor.input-actions", bottom.Far);
-        layout.Dock("editor.project", bottom.Near);
         layout.Dock("editor.console", bottom.Near);
         layout.Dock("editor.diagnostics", bottom.Near);
         layout.Dock("editor.package-manager", bottom.Near);
+        layout.Dock("editor.project", bottom.Near);
         layout.Dock("editor.scene", bottom.Far);
         layout.Dock("editor.game", bottom.Far);
     }
@@ -286,7 +286,10 @@ namespace
             else
             {
                 m_Placement = KeireEditor::EditorWindowPlacement{};
-                CaptureWindowedBounds();
+                if (m_Placement->Maximized)
+                    window->Maximize();
+                else
+                    CaptureWindowedBounds();
             }
             m_Placement->Mode = window->Mode();
             m_Placement->Maximized = window->Maximized();

@@ -31,4 +31,7 @@ namespace KeireEditor
                          GraphDistribution distribution);
     [[nodiscard]] std::vector<StableNodeId> InternalGraphConnections(std::span<const NodeGraphConnection> connections,
                                                                      std::span<const StableNodeId> selection);
+    [[nodiscard]] Keire::Vector2 ResolveGraphNodePlacement(std::span<const NodeGraphNode> nodes,
+                                                           Keire::Vector2 preferredPosition,
+                                                           Keire::Vector2 nodeSize) noexcept;
 } // namespace KeireEditor

@@ -33,8 +33,17 @@ namespace KeireEditor
                 throw std::runtime_error("The reusable graph source is unavailable.");
             auto node = Keire::CreateShaderGraphFunctionCallNode(asset, *function);
             node.Name = std::string(name);
-            node.EditorPosition = graphPosition.value_or(Keire::Vector2{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
-                                                                        -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()});
+            if (graphPosition)
+                node.EditorPosition = *graphPosition;
+            else
+            {
+                const Keire::Vector2 preferred{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
+                                               -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()};
+                const Keire::Vector2 nodeSize{220.0F,
+                                              std::max(72.0F, 42.0F + static_cast<float>(node.Pins.size()) * 20.0F)};
+                node.EditorPosition = ResolveGraphNodePlacement(
+                    m_Controller.ShaderGraphState().BuildCanvasModel().Nodes, preferred, nodeSize);
+            }
             return CommitCreatedNode(std::move(node), anchor, insertion);
         }
         catch (const std::exception& error)

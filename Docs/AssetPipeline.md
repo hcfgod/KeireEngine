@@ -276,6 +276,10 @@ batches of 20 external source imports through the real isolated worker. It print
 validates every completion. Compare the same configuration on an idle machine. It is skipped by default; results
 depend on file type, storage, project size, and importer work.
 
+Shader-backed materials and Shader Graphs also run the production shader compiler. Vertex and fragment stages, then
+their reflection passes, execute as bounded pairs because each pair reads the same staged source but writes separate
+outputs. This keeps the compiler work responsive without spawning an unbounded task per pass, variant, or platform.
+
 On the same Windows x64 MSVC Debug fixture on September 10, 2026, the before/after medians were:
 
 | Operation | Before | After | Time reduction |

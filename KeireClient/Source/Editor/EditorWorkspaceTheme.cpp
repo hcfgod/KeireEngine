@@ -440,7 +440,7 @@ void EditorWorkspaceLayer::DrawMainToolbar(Keire::UiFrame& ui)
         ui.AlignNextItemGroup(1.0F, 106.0F);
         if (m_AssetOperations && m_AssetOperations->Busy())
         {
-            ui.TextColored(m_Theme.AccentHovered, "Assets...");
+            ui.TextColored(m_Theme.AccentHovered, m_AssetOperations->ActivityLabel() + "...");
             ui.SameLine();
         }
         if (ui.IconButton("ToolbarTheme", Keire::UiIcon::Settings, m_ThemeEditor.Visible(), {28.0F, 24.0F}))
@@ -471,10 +471,11 @@ void EditorWorkspaceLayer::DrawMainStatusBar(Keire::UiFrame& ui)
         {
             ui.SameLine();
             const auto progress = m_AssetOperations->Progress();
-            const std::string progressText =
-                progress && progress->Total > 0
-                    ? "Assets " + std::to_string(progress->Completed) + "/" + std::to_string(progress->Total)
-                    : "Assets working";
+            const std::string progressText = progress && progress->Total > 0
+                                                 ? m_AssetOperations->ActivityLabel() + " " +
+                                                       std::to_string(progress->Completed) + "/" +
+                                                       std::to_string(progress->Total)
+                                                 : m_AssetOperations->ActivityLabel() + "...";
             ui.TextColored(m_Theme.AccentHovered, progressText);
         }
         ui.SameLine();

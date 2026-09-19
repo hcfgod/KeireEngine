@@ -6,7 +6,7 @@ namespace KeireEditor
     {
         Focused = false;
         ExternalDropTargets.clear();
-        if (auto project = ui.BeginPanel(Registration); project)
+        if (auto project = ui.BeginPanel(Registration, {.NoScrollbar = true, .NoScrollWithMouse = true}); project)
         {
             Focused = ui.WindowFocused();
             ui.TextColored(editor.AssetBrowserTheme().Accent, "ASSET BROWSER");

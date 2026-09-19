@@ -196,8 +196,10 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         definition.Lighting.SamplesPerTexel = 1;
         bakeScene->Close();
         operations.QueueCreateAssetWithAuxiliary(
-            "Scenes/WorkerCreated.keirescene", Keire::SceneAsset::Encode(definition), {}, {},
+            "Scenes/WorkerCreated.keirescene", Keire::SceneAsset::Encode(definition), {},
+            {.UndoName = "Create Test Asset"},
             {{"Shaders/WorkerAuxiliary.hlsl", std::vector<std::byte>(auxiliaryBytes.begin(), auxiliaryBytes.end())}});
+        CHECK(operations.ActivityLabel() == "Create Test Asset");
         const auto createDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
         while (operations.Busy() && std::chrono::steady_clock::now() < createDeadline)
         {

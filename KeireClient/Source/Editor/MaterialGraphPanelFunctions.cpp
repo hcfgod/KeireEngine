@@ -15,7 +15,16 @@ namespace KeireEditor
                 throw std::runtime_error("The reusable material graph source is unavailable.");
             auto node = Keire::CreateShaderGraphFunctionCallNode(asset, *function);
             node.Name = std::string(name);
-            node.EditorPosition = position.value_or(Keire::Vector2{120.0F, 120.0F});
+            if (position)
+                node.EditorPosition = *position;
+            else
+            {
+                const Keire::Vector2 preferred{120.0F, 120.0F};
+                const Keire::Vector2 nodeSize{220.0F,
+                                              std::max(88.0F, 48.0F + static_cast<float>(node.Pins.size()) * 22.0F)};
+                node.EditorPosition = ResolveGraphNodePlacement(
+                    m_Controller.MaterialGraphState().BuildCanvasModel(true).Nodes, preferred, nodeSize);
+            }
             const auto id = node.Id;
             if (!m_Controller.MaterialGraphState().AddExpressionNode(std::move(node)))
                 return false;

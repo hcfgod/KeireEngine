@@ -2095,9 +2095,11 @@ TEST_CASE("editor window placement persists windowed bounds and display state")
     std::filesystem::remove_all(root, error);
 
     KeireEditor::EditorWindowPlacement placement;
+    CHECK(placement.Maximized);
     placement.Position = {-1440, 90};
     placement.WindowedSize = {1560, 940};
     placement.Mode = Keire::WindowMode::BorderlessFullscreen;
+    placement.Maximized = false;
     REQUIRE(KeireEditor::SaveEditorWindowPlacement(path, placement));
     const auto restored = KeireEditor::LoadEditorWindowPlacement(path);
     REQUIRE(restored);

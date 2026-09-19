@@ -70,8 +70,12 @@ namespace KeireEditor
                             auto node = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Keyword);
                             node.Symbol = entry.Symbol;
                             node.Name = entry.Name;
-                            node.EditorPosition = {-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
-                                                   -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()};
+                            const Keire::Vector2 preferred{-m_Canvas.Pan().X + 280.0F / m_Canvas.Zoom(),
+                                                           -m_Canvas.Pan().Y + 180.0F / m_Canvas.Zoom()};
+                            const Keire::Vector2 nodeSize{
+                                220.0F, std::max(72.0F, 42.0F + static_cast<float>(node.Pins.size()) * 20.0F)};
+                            node.EditorPosition =
+                                ResolveGraphNodePlacement(document.BuildCanvasModel().Nodes, preferred, nodeSize);
                             (void)CommitCreatedNode(std::move(node), std::nullopt, std::nullopt);
                         }
                         catch (const std::exception& error)
