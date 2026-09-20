@@ -22,6 +22,7 @@ foreach ($contract in @("package-editor.ps1", "Assert-WindowsEditorPackageStage"
 $templatePath = Join-Path $Root "Installer\Windows\KeireEditor.nsi"
 $template = Get-Content -LiteralPath $templatePath -Raw
 foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_PAGE_COMPONENTS',
+        'SetCompressor lzma', 'SetCompressorDictSize 8',
         'MUI_PAGE_DIRECTORY', 'Desktop shortcut', 'Start Menu shortcuts', 'WriteUninstaller',
         'INSTALL_MARKER_CONTENT', 'INSTALL_OWNERSHIP_IDENTIFIER',
         '!error "KeireInstallWorker is the required Editor install and uninstall authority."',
@@ -34,6 +35,9 @@ foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_P
     if (-not $template.Contains($contract)) {
         throw "The worker-authority Editor NSIS template is missing '$contract'."
     }
+}
+if ($template.Contains('SetCompressor /SOLID')) {
+    throw "The Editor installer must avoid solid compression so large release payloads remain buildable."
 }
 
 foreach ($forbidden in @('!else', 'EDITOR_TRANSACTION_MARKER', 'ValidateEditorInstallDestination',

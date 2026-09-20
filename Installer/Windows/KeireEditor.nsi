@@ -65,8 +65,8 @@ OutFile "${OUTPUT_PATH}"
 InstallDir "$LOCALAPPDATA\Programs\${INSTALL_FOLDER_NAME}"
 InstallDirRegKey HKCU "${PRODUCT_REGISTRY_KEY}" "InstallDirectory"
 RequestExecutionLevel user
-SetCompressor /SOLID lzma
-SetCompressorDictSize 64
+SetCompressor lzma
+SetCompressorDictSize 8
 ManifestDPIAware true
 Icon "${SETUP_ICON_PATH}"
 UninstallIcon "${SETUP_ICON_PATH}"

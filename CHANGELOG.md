@@ -7,6 +7,8 @@ versions.
 
 - Windows release packaging now runs the rendered sample-project smoke against an isolated tracked copy, preventing
   importer metadata upgrades from dirtying the release worktree or changing the embedded build identity mid-package.
+- Windows Editor and Hub installers now use non-solid LZMA compression so expanded release payloads remain buildable
+  within NSIS's address-space limits.
 
 - Marketplace product handoffs now carry a unique request marker that the Editor acknowledges independently of the Hub
   cache, so Package Manager opens once per website request instead of reopening on every Editor launch. Existing stale
