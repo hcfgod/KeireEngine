@@ -25,14 +25,14 @@ pointers or stage Git changes.
 
 | Platform | Current evidence | Public preview |
 | --- | --- | --- |
-| Windows x86-64 | Clean 0.4.2 Release and Dist Editor/Hub suites, SDK consumers, D3D12/Vulkan render suites, packaged smokes, and exact installer/archive validation passed | Signed 0.4.2 sequence-17 catalog; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
-| Linux x86-64 (glibc) | Clean 0.4.2 Rocky Linux 9 Editor/package gate plus native Rocky RPM and Ubuntu 22.04 DEB build, metadata, payload, and checksum validation passed | Signed 0.4.2 sequence-17 catalog; the RPM is catalog/hash verified but not GPG-signed |
+| Windows x86-64 | Clean 0.4.4 Debug and Dist Editor/Hub suites, SDK consumers, D3D12/Vulkan render suites, packaged rendered smoke, installer workflows, and exact artifact validation passed | Signed 0.4.4 sequence-18 catalog; the native Hub EXE is catalog/hash verified but not Authenticode-signed |
+| Linux x86-64 (glibc) | Clean 0.4.2 Rocky Linux 9 Editor/package gate plus native Rocky RPM and Ubuntu 22.04 DEB build, metadata, payload, and checksum validation passed | Signed sequence-18 catalog retains the 0.4.2 packages; the RPM is catalog/hash verified but not GPG-signed |
 | Linux ARM64 or Alpine/musl | Build contracts retained but not validated in this audit | Not published |
 | macOS x86-64 | Clean Debug source build on Tahoe with 733 Core tests and 51,809 assertions; Hub and render-test products link at the macOS 12 deployment target; VMware has no Metal device for rendered execution | Not published; native signing, notarization, Apple silicon, and Metal-hardware acceptance remain open |
 
-Version 0.4.4 is the current source and Windows publication target. Version 0.4.2 remains active through immutable
-signed snapshot `release-0.4.2-sequence-17-e3eb5ac`; its Windows and Linux evidence and retained 0.4.1 records are
-historical package facts, and building current source does not relabel them or advance the catalog.
+Version 0.4.4 is the current source and active Windows release through immutable signed snapshot
+`release-0.4.4-sequence-18-611b191e`. Its Windows catalog retains the 0.4.1 and 0.4.2 records, and its Linux catalog
+retains the independently validated 0.4.1 and 0.4.2 packages without relabeling them as 0.4.4.
 
 The [Downloads page](https://keireengine.duckdns.org/downloads/) shows the current Hub release. The
 [release archive](https://keireengine.duckdns.org/downloads/archive/) preserves historical metadata without crowding

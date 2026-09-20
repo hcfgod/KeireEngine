@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+- Published immutable stable catalog sequence 18 with the Windows 0.4.4 Editor and Hub packages while retaining the
+  previous Windows records and independently validated Linux packages.
 - Windows release packaging now runs the rendered sample-project smoke against an isolated tracked copy, preventing
   importer metadata upgrades from dirtying the release worktree or changing the embedded build identity mid-package.
 - Windows Editor and Hub installers now use non-solid LZMA compression so expanded release payloads remain buildable

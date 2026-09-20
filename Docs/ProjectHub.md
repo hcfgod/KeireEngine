@@ -371,16 +371,12 @@ separately. After the replacement Hub has been distributed and the transition po
 public key is a separate release decision. Packaging overrides may supply an operating-system path-separated
 `KEIRE_DISTRIBUTION_TRUSTED_KEYS` list during an overlap; the legacy singular key variable remains supported.
 
-The active stable snapshot published on 2026-08-25 is `release-0.4.2-sequence-17-e3eb5ac`. Its Windows x86-64 catalog
-contains the 0.4.1 and 0.4.2 Editor and Hub records; its Linux x86-64 catalog contains both Editor versions plus
-distinct DEB and RPM Hub records for each version. The 0.4.2 Windows EXE and RPM are catalog/hash verified but do not
-carry Authenticode or RPM GPG signatures. Sequence 17 passed publisher validation plus live readiness, catalog, and
-package-identity checks. Hub selects only the signed catalog above, so source labels alone never advance the catalog;
-ordinary future publication remains additive unless another documented retirement is approved.
-
-Kéire 0.4.4 is the current source and Windows publication target. Until a newer immutable snapshot is validated and
-activated, Hub continues to consume the signed 0.4.2 catalogs above; the target version alone never changes an
-installed or downloadable package identity.
+The active stable snapshot published on 2026-09-20 is `release-0.4.4-sequence-18-611b191e`. Its Windows x86-64 catalog
+contains the 0.4.1, 0.4.2, and 0.4.4 Editor and Hub records; its Linux x86-64 catalog retains both earlier Editor
+versions plus distinct DEB and RPM Hub records for each version. The native Windows EXE and Linux RPM are catalog/hash
+verified but do not carry Authenticode or RPM GPG signatures. Sequence 18 passed publisher validation plus live
+readiness, catalog, and package-identity checks. Hub selects only the signed catalog above, so source labels alone never
+advance the catalog; ordinary future publication remains additive unless another documented retirement is approved.
 
 ## Launch and activation
 

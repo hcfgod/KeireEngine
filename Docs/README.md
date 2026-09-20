@@ -5,9 +5,9 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-Kéire is currently version 0.4.4 and pre-1.0. Immutable signed catalog sequence 17 continues to publish the active
-Windows and Linux x86-64 0.4.2 Editor and Hub packages while the 0.4.4 Windows refresh completes validation. Guides describe the checked-in
-implementation and identify unfinished work honestly. Roadmap
+Kéire is currently version 0.4.4 and pre-1.0. Immutable signed catalog sequence 18 publishes the active Windows
+x86-64 0.4.4 Editor and Hub packages while retaining the independently validated Linux x86-64 0.4.2 packages. Guides
+describe the checked-in implementation and identify unfinished work honestly. Roadmap
 material is labeled as roadmap material and does not redefine the supported API or activate a release.
 
 ## Choose a Starting Point

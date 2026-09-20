@@ -42,9 +42,9 @@ systems and cooked content selected by a project.
 Kéire is currently **version 0.4.4 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.4 is the current source and Windows publication target. Signed 0.4.2 Windows and Linux x86-64 packages
-remain active through immutable catalog sequence 17 while the new Windows packages complete validation and catalog
-activation; macOS downloads remain gated pending platform, signing, and notarization validation.
+Version 0.4.4 is the current source and active Windows release in immutable catalog sequence 18. The same signed
+snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
+macOS downloads remain gated pending platform, signing, and notarization validation.
 
 [Website](https://keireengine.duckdns.org/) ·
 [Documentation](https://keireengine.duckdns.org/docs/) ·
