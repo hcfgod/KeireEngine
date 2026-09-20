@@ -525,6 +525,21 @@ namespace KeireInstallWorker
             return ExpectedHubCommand(registration.Root);
         }
 
+        [[nodiscard]] bool IsStaleHubCommand(const std::wstring_view command)
+        {
+            constexpr std::wstring_view suffix = L"\" \"%1\"";
+            if (command.size() <= suffix.size() + 1U || command.front() != L'\"' || !command.ends_with(suffix))
+                return false;
+            const std::filesystem::path executable(command.substr(1U, command.size() - suffix.size() - 1U));
+            if (!executable.is_absolute() ||
+                _wcsicmp(executable.filename().c_str(), L"" KEIRE_INSTALL_HUB_TARGET L".exe") != 0)
+            {
+                return false;
+            }
+            std::error_code error;
+            return !std::filesystem::exists(executable, error) && !error;
+        }
+
         [[nodiscard]] std::wstring LegacyMarkerGuid(const InstallProduct product)
         {
             return product == InstallProduct::Editor ? L"{1D37B84D-13B7-4C73-96BD-6D23AD40757A}"
@@ -767,6 +782,8 @@ namespace KeireInstallWorker
             {
                 return HubStatus::Success();
             }
+            if (IsStaleHubCommand(*command.Value()))
+                return HubStatus::Success();
             return HubStatus::Failure({.Code = HubErrorCode::DestinationConflict,
                                        .Message = "An existing Hub protocol registration belongs to another command.",
                                        .AffectedItem = "HKCU\\Software\\Classes\\keirehub\\shell\\open\\command"});

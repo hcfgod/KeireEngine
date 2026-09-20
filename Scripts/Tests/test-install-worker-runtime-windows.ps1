@@ -825,6 +825,61 @@ function Test-HubProtocolSkeletonSafety {
     }
 }
 
+function Test-HubStaleProtocolMigration {
+    $info = Get-ProductInfo -Name "hub"
+    foreach ($scenario in @("stale", "live")) {
+        $context = New-TestContext -CaseName "hub-protocol-$scenario-command"
+        Enter-TestContext -Context $context
+        $caseSucceeded = $false
+        try {
+            $stage = New-PackageFixture -Context $context -Info $info -Version "1.0.0"
+            $legacyExecutable = Join-Path $context.CaseRoot "legacy\bin\KeireHub.exe"
+            if ($scenario -eq "live") {
+                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $legacyExecutable) | Out-Null
+                [IO.File]::WriteAllText($legacyExecutable, "external-live-handler")
+            }
+            $protocolRoot = Join-Path $context.RegistryPath "Classes\keirehub"
+            $protocolIcon = Join-Path $protocolRoot "DefaultIcon"
+            $protocolCommand = Join-Path $protocolRoot "shell\open\command"
+            New-Item -ItemType Directory -Force -Path $protocolIcon, $protocolCommand | Out-Null
+            New-ItemProperty -LiteralPath $protocolRoot -Name "(default)" -Value "URL:Kéire Hub Protocol" `
+                -PropertyType String -Force | Out-Null
+            New-ItemProperty -LiteralPath $protocolRoot -Name "URL Protocol" -Value "" `
+                -PropertyType String -Force | Out-Null
+            New-ItemProperty -LiteralPath $protocolIcon -Name "(default)" -Value ('"' + $legacyExecutable + '",0') `
+                -PropertyType String -Force | Out-Null
+            $legacyCommand = '"' + $legacyExecutable + '" "%1"'
+            New-ItemProperty -LiteralPath $protocolCommand -Name "(default)" -Value $legacyCommand `
+                -PropertyType String -Force | Out-Null
+
+            $expected = if ($scenario -eq "stale") { @(0) } else { @(1) }
+            [void](Invoke-Worker -Arguments @("install-deferred", "--product", "hub", "--source", $stage,
+                    "--root", $context.InstallRoot) -ExpectedExitCodes $expected)
+            $actualCommand = Get-ItemPropertyValue -LiteralPath $protocolCommand -Name "(default)"
+            if ($scenario -eq "stale") {
+                $installedCommand = '"' + (Join-Path $context.InstallRoot "bin\KeireHub.exe") + '" "%1"'
+                if ($actualCommand -ne $installedCommand) {
+                    throw "Hub install did not reclaim the stale Kéire protocol registration."
+                }
+                [void](Invoke-Worker -Arguments @("recover", "--product", "hub", "--root", $context.InstallRoot) `
+                    -ExpectedExitCodes @(0))
+            }
+            elseif ($actualCommand -ne $legacyCommand -or
+                (Test-Path -LiteralPath (Join-Path $context.InstallRoot "bin\KeireHub.exe"))) {
+                throw "Hub install changed a live protocol handler after rejecting it."
+            }
+            $caseSucceeded = $true
+        }
+        catch {
+            Write-TestCaseFailure -Context $context -ErrorRecord $_
+            throw
+        }
+        finally {
+            Remove-TestContext -Context $context -Succeeded $caseSucceeded
+        }
+    }
+}
+
 $products = if ($Product -eq "all") { @("editor", "hub") } else { @($Product) }
 foreach ($productName in $products) {
     $info = Get-ProductInfo -Name $productName
@@ -844,6 +899,7 @@ foreach ($productName in $products) {
 }
 if ($CaseFilter -eq "all" -and $Product -in @("all", "hub")) {
     Test-HubProtocolSkeletonSafety
+    Test-HubStaleProtocolMigration
 }
 
 Write-Host "Windows install-worker runtime checks passed."

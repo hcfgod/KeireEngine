@@ -5,6 +5,8 @@ versions.
 
 ## Unreleased
 
+- Windows Hub installation now reclaims an orphaned `keirehub` protocol handler when its Kéire Hub executable no
+  longer exists, while preserving live or malformed external handlers.
 - Published immutable stable catalog sequence 18 with the Windows 0.4.4 Editor and Hub packages while retaining the
   previous Windows records and independently validated Linux packages.
 - Windows release packaging now runs the rendered sample-project smoke against an isolated tracked copy, preventing
