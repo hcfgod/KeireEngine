@@ -8,7 +8,7 @@ not replace Hub's installation and compatibility view.
 
 1. Open Hub and choose **Create Project**.
 2. Choose an installed Editor version and one of its available templates.
-3. Enter the project name and destination. The final project directory must not already contain unrelated files.
+3. Enter the project name and destination. The final project directory must not already exist, even if it is empty.
 4. Create the project and allow Hub to register it before opening the Editor.
 
 A project has one `ProjectSettings/Project.keireproject` descriptor. Keep these boundaries intact:

@@ -46,6 +46,8 @@ namespace Keire::Detail
         const Coral::Type* Header = nullptr;
         const Coral::Type* Tooltip = nullptr;
         const Coral::Type* Group = nullptr;
+        const Coral::Type* StableFieldId = nullptr;
+        const Coral::Type* FormerlySerializedAs = nullptr;
         const Coral::Type* StableComponentId = nullptr;
         const Coral::Type* StableAssetTypeId = nullptr;
         const Coral::Type* StableSerializedTypeId = nullptr;

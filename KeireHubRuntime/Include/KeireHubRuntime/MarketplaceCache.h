@@ -54,6 +54,17 @@ namespace KeireHub
         [[nodiscard]] bool operator==(const MarketplaceCacheSnapshot&) const = default;
     };
 
+    struct MarketplaceRequestedProduct final
+    {
+        static constexpr std::uint32_t CurrentSchemaVersion = 1;
+
+        std::string AccountId;
+        std::string ProductId;
+        std::string RequestId;
+
+        [[nodiscard]] bool operator==(const MarketplaceRequestedProduct&) const = default;
+    };
+
     class MarketplaceCacheStore final
     {
       public:
@@ -61,6 +72,10 @@ namespace KeireHub
 
         [[nodiscard]] HubResult<MarketplaceCacheSnapshot> Load() const;
         [[nodiscard]] HubStatus Save(const MarketplaceCacheSnapshot& snapshot) const;
+        [[nodiscard]] HubResult<MarketplaceRequestedProduct> LoadRequestedProduct() const;
+        [[nodiscard]] HubStatus PublishRequestedProduct(const MarketplaceRequestedProduct& request) const;
+        [[nodiscard]] HubResult<bool> IsRequestedProductAcknowledged(const MarketplaceRequestedProduct& request) const;
+        [[nodiscard]] HubResult<bool> AcknowledgeRequestedProduct(const MarketplaceRequestedProduct& request) const;
         [[nodiscard]] std::filesystem::path ArchivePath(const MarketplaceCacheItem& item) const;
         [[nodiscard]] const std::filesystem::path& Root() const noexcept { return m_Root; }
         [[nodiscard]] std::filesystem::path IndexPath() const;
@@ -68,6 +83,8 @@ namespace KeireHub
       private:
         [[nodiscard]] std::filesystem::path VersionedIndexPath() const;
         [[nodiscard]] std::filesystem::path PreviousVersionedIndexPath() const;
+        [[nodiscard]] std::filesystem::path RequestedProductPath() const;
+        [[nodiscard]] std::filesystem::path RequestedProductAcknowledgementPath() const;
 
         std::filesystem::path m_Root;
     };

@@ -8,7 +8,7 @@ export const docGroups = [
         "ProjectSystem.md",
         "ProjectSettings.md",
     ]),
-    group("Kéire 0.4.0 user manual", "open-book", [
+    group("Kéire user manual", "open-book", [
         "Manual/README.md",
         "Manual/ProjectsAndEditor.md",
         "Manual/VisualWorkflowMaps.md",
@@ -96,6 +96,21 @@ export const docGroups = [
         "ProductionReadinessReview.md",
         "Maintainability.md",
     ]),
+    group("Material and shader progress records", "open-book", [
+        "MaterialShaderReplacement.md",
+        "RevampProductionAcceptance.md",
+        "RevampContractIntegrationReview.md",
+        "RevampShaderGraphAuthoringDetails.md",
+        "RevampShaderCompilationDetails.md",
+        "RevampShaderGraphicsDetails.md",
+        "RevampComputeCompilerLane.md",
+        "RevampComputeNativeLane.md",
+        "RevampMigrationTransactionsLane.md",
+        "RevampSharedShaderPackagesLane.md",
+        "RevampTestCookSdkEvidence.md",
+        "RevampLaneAAcceptance.md",
+        "RevampBenchmarkFixtureEvidence.md",
+    ]),
     group("Diagnostics", "information", [
         "Diagnostics/README.md",
         "Diagnostics/KEIRE-AUDIO-0001.md",
@@ -135,6 +150,19 @@ export const allDocSources = docGroups.flatMap(({ files }) => files);
 // Each published guide is tied to at least one repository authority. Source validation checks this inventory so a
 // renamed or removed implementation boundary cannot silently leave an apparently current guide behind.
 export const docAuthorities = {
+    "MaterialShaderReplacement.md": ["KeireClient/Source/Editor/MaterialDocument.cpp", "KeireCore/Source/Project/ShaderGraphMigrationPublication.cpp"],
+    "RevampProductionAcceptance.md": ["KeireEditorTests/Source/ShaderGraphDocumentTests.cpp", "KeireTests/Source/Project/MaterialMigrationPublicationTests.cpp"],
+    "RevampContractIntegrationReview.md": ["KeireEditorTests/premake5.lua", "KeireClient/Source/Editor/MaterialSelectionDocument.cpp"],
+    "RevampShaderGraphAuthoringDetails.md": ["KeireClient/Source/Editor/ShaderGraphDocumentAuthoring.cpp", "KeireEditorTests/Source/ShaderGraphConnectionAuthoringTests.cpp"],
+    "RevampShaderCompilationDetails.md": ["KeireClient/Source/Editor/ShaderGraphDocument.cpp", "KeireEditorTests/Source/ShaderGraphDocumentTests.cpp"],
+    "RevampShaderGraphicsDetails.md": ["KeireCore/Source/Rendering/ShaderGraphManifest.cpp", "KeireTests/Source/Rendering/ShaderGraphGraphicsTargetTests.cpp"],
+    "RevampComputeCompilerLane.md": ["KeireCore/Source/Rendering/ShaderGraphHlsl.cpp", "KeireTests/Source/Rendering/ProgramArtifactTests.cpp"],
+    "RevampComputeNativeLane.md": ["KeireCore/Include/Keire/Rendering/Compute.h", "KeireTests/Source/Rendering/ComputeTests.cpp"],
+    "RevampMigrationTransactionsLane.md": ["KeireCore/Source/Project/ShaderGraphMigrationPublication.cpp", "KeireTests/Source/Project/MaterialMigrationPublicationTests.cpp"],
+    "RevampSharedShaderPackagesLane.md": ["KeireCore/Source/Project/SharedShaderLibrary.cpp", "KeireTests/Source/Project/SharedShaderLibraryTests.cpp"],
+    "RevampTestCookSdkEvidence.md": ["KeireTests/Source/Assets/MaterialCookParityTests.cpp", "Scripts/Windows/package.ps1"],
+    "RevampLaneAAcceptance.md": ["KeireTests/Source/Assets/MaterialCookParityTests.cpp", "Scripts/Windows/render-benchmark.ps1"],
+    "RevampBenchmarkFixtureEvidence.md": ["Scripts/Windows/render-benchmark.ps1", "Scripts/Performance/test-render-benchmark-fixture.ps1"],
     "README.md": ["AGENTS.md", "Config/Project.conf"],
     "GettingStarted.md": ["Scripts/project.ps1", "Scripts/project.sh", "Config/Dependencies.lock"],
     "ProjectHub.md": ["KeireHub/Source/HubProductUi.cpp", "KeireHubRuntime/Include/KeireHubRuntime"],

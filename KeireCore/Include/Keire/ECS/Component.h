@@ -146,6 +146,9 @@ namespace Keire
         std::uint32_t TextLines = 1;
         ManagedReferenceKind ReferenceKind = ManagedReferenceKind::None;
         std::string DeclaredManagedType;
+        std::string SerializedRootStableFieldId;
+        std::string SerializedRootType;
+        std::vector<std::string> SerializedRootFormerNames;
         std::vector<ComponentTypeId> CompatibleComponentTypes;
         std::vector<std::string> CompatibleBehaviourTypes;
         std::shared_ptr<const ManagedReferenceGraphDescriptor> ReferenceGraph;

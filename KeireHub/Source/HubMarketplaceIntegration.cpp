@@ -1,5 +1,6 @@
 #include "KeireHub/HubMarketplaceIntegration.h"
 
+#include "Keire/Assets/Asset.h"
 #include "Keire/Assets/AssetPackage.h"
 
 #include "KeireHubRuntime/CatalogClient.h"
@@ -151,6 +152,14 @@ namespace KeireHub
                 ++snapshot.Revision;
                 if (const auto saved = cache.Save(snapshot); !saved)
                     return saved;
+                if (const auto published =
+                        cache.PublishRequestedProduct({.AccountId = request.AccountId,
+                                                       .ProductId = request.ProductId,
+                                                       .RequestId = Keire::AssetId::Generate().ToString()});
+                    !published)
+                {
+                    return published;
+                }
 
                 auto native = NativeHttpTransport::Create(
                     {.CustomProxyUrl = request.CustomProxyUrl,

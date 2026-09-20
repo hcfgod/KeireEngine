@@ -27,7 +27,7 @@ material is labeled as roadmap material and does not redefine the supported API 
 
 ## Complete Guide Library
 
-All 86 published guides are listed below in the same groups used by the documentation website.
+All 99 published guides and progress records are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -143,6 +143,26 @@ All 86 published guides are listed below in the same groups used by the document
 | [Marketplace Launch Runbook](MarketplaceLaunch.md) | Staging state, feature flags, ordered public-launch gates, and required go/no-go evidence. |
 | [Production Readiness Review](ProductionReadinessReview.md) | Evidence-based subsystem grades, known gaps, release blockers, and closure criteria. |
 | [Maintainability Boundaries](Maintainability.md) | First-party source budgets, exclusions, decomposition seams, and enforcement. |
+
+### Material and Shader Progress Records
+
+These dated implementation and acceptance records distinguish delivered behavior from remaining work. Historical
+findings and test counts are evidence for their stated checkout and date, not proof of current production readiness.
+Start with the replacement overview and verify older observations against its later integration evidence.
+
+- [Material and shader replacement](MaterialShaderReplacement.md): direction, integration progress, and remaining gates.
+- [Production acceptance](RevampProductionAcceptance.md): interactive scenarios, provenance, and recorded validation.
+- [Contract and integration review](RevampContractIntegrationReview.md): dated findings and follow-up requirements.
+- [Shader Graph authoring](RevampShaderGraphAuthoringDetails.md): connected creation, blackboard, and framing.
+- [Shader compilation](RevampShaderCompilationDetails.md): cancellation, executable reuse, and include invalidation.
+- [Shader graphics targets](RevampShaderGraphicsDetails.md): raster contracts and missing target execution paths.
+- [Compute compiler](RevampComputeCompilerLane.md): bounded graph lowering and artifact validation.
+- [Compute native implementation](RevampComputeNativeLane.md): resource ownership, dispatch, reload, and readback.
+- [Migration publication](RevampMigrationTransactionsLane.md): staged import, publication, rollback, and recovery.
+- [Shared shader inputs](RevampSharedShaderPackagesLane.md): reviewed dependency pins and remaining package integration.
+- [Material cook and SDK evidence](RevampTestCookSdkEvidence.md): deterministic fixture coverage and package gates.
+- [Lane A acceptance](RevampLaneAAcceptance.md): later cook-parity preparation and validation limits.
+- [Benchmark and visual fixtures](RevampBenchmarkFixtureEvidence.md): workload identity and required measurements.
 
 ### Structured Diagnostics
 

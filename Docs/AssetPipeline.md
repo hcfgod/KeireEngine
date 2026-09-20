@@ -156,6 +156,10 @@ New assets are validated and immediately published through a targeted import in 
 do not wait for a second source-watcher operation before appearing in the Asset Browser. External file and folder
 imports use the same targeted publication for the staged identities and their dependency closure; unrelated runtime
 packs remain mounted and are not recooked.
+Incremental publication also includes referenced sources and generated subassets that are absent from the previous
+catalog, following their dependencies transitively. This allows the first material using a newly installed shared
+shader to publish without a separate full-project import. A dependency import failure leaves the previous catalog
+intact.
 
 Lighting bake publication uses the same narrow transaction. The worker writes the scene's generated LightingSet
 reference, then imports the scene and every baked artifact with fail-fast semantics. Publication failure restores the

@@ -86,9 +86,9 @@ the first graph diagnostic before changing unrelated nodes.
 flowchart TD
     Need{"What are you authoring?"}
     Need -->|"Reusable shader stages and reflected contract"| Shader["Shader Graph"]
-    Need -->|"Assignable surface expressions"| Material["Material Graph"]
+    Need -->|"Edit an existing graph-owned surface"| Material["Material Graph compatibility editor"]
     Need -->|"Particles and ordered simulation"| Vfx["VFX Graph"]
-    Shader --> Surface["Direct Material or Material Graph"]
+    Shader --> Surface["Property-only Material"]
     Material --> Renderer["Mesh Renderer material slot"]
     Surface --> Renderer
     Vfx --> Emitter["VFX Emitter component or Vfx.Play"]

@@ -852,6 +852,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::unique_ptr<KeireEditor::ProjectSettingsPanel> m_ProjectSettingsPanel;
     std::unique_ptr<KeireEditor::LightingPanel> m_LightingPanel;
     std::unique_ptr<KeireEditor::PackageManagerPanel> m_PackageManagerPanel;
+    std::uint8_t m_RestoreProjectFocusFramesRemaining = 0;
     std::unique_ptr<KeireEditor::EditorPackageCoordinator> m_PackageCoordinator;
     std::unique_ptr<KeireEditor::PropertyDrawerRegistry> m_PropertyDrawers;
     std::unique_ptr<KeireEditor::ViewportAssetDropRouter> m_ViewportAssetDropRouter;

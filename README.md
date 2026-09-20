@@ -476,7 +476,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 86 maintained guides grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 99 guides and progress records grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.4 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),

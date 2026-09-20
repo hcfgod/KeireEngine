@@ -45,8 +45,13 @@ try {
     if (!result?.meta?.title || !String(result.url).startsWith("/docs/reference/manual/")) {
         throw new Error("Pagefind returned a malformed native documentation result.");
     }
+    const progressResponse = await search.search("KeireComputeOutput");
+    const progressResults = await Promise.all((progressResponse?.results ?? []).map(entry => entry.data()));
+    if (!progressResults.some(entry => String(entry.url) === "/docs/reference/revamp-compute-compiler-lane/")) {
+        throw new Error("Pagefind omitted the compute compiler progress record.");
+    }
     await search.destroy();
-    console.log(`Pagefind search validation passed with ${response.results.length} result(s); first result: ${result.meta.title}.`);
+    console.log(`Pagefind search validation passed with ${response.results.length} result(s); first result: ${result.meta.title}. Progress record search passed.`);
 } finally {
     globalThis.fetch = nativeFetch;
 }

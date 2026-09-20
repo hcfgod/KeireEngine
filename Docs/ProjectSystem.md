@@ -23,7 +23,7 @@ MyGame/
 The current descriptor uses schema version 4. It stores a stable project UUID, display name, creation timestamp,
 creating/last-saved/minimum engine versions, optional template provenance, startup scene and default input asset IDs,
 and a sorted source-module requirement catalog. Asset and scene references use stable IDs, so files may move inside
-`Assets/` without breaking project settings. Schemas 1 and 2 remain inspectable as upgrade candidates; the Hub or
+`Assets/` without breaking project settings. Schemas 1, 2, and 3 remain inspectable as upgrade candidates; the Hub or
 `KeireAssetTool upgrade-project` must complete the transactional upgrade before the editor opens them for mutation.
 `Project::Save` preserves the immutable project ID and schema, advances the last-saved engine version, and replaces the
 descriptor atomically.

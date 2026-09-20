@@ -232,7 +232,7 @@ try {
                 Remove-KeireGeneratedDirectory -RepositoryRoot $BuildContainerRoot -AllowedRoot $BuildRoot `
                     -Path $TemporaryCheckout -Description "temporary Coral build cache"
             }
-            & git clone --quiet --no-hardlinks --no-checkout $Source $TemporaryCheckout
+            & git clone --quiet --no-hardlinks --no-checkout --revision $Lock.CORAL_COMMIT $Source $TemporaryCheckout
             if ($LASTEXITCODE -ne 0) { throw "Could not clone the Coral build checkout." }
             & git -C $TemporaryCheckout config core.autocrlf false
             if ($LASTEXITCODE -ne 0) { throw "Could not configure deterministic Coral build line endings." }

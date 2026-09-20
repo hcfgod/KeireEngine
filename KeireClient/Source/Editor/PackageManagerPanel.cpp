@@ -128,6 +128,17 @@ namespace KeireEditor
             }
             return std::move(publication).Value();
         }
+
+        [[nodiscard]] KeireHub::HubResult<bool>
+        AcknowledgeLegacyRequestedProduct(KeireHub::MarketplaceCacheStore& cache,
+                                          const KeireHub::MarketplaceCacheSnapshot& snapshot)
+        {
+            if (snapshot.AccountId.empty() || snapshot.RequestedProductId.empty())
+                return KeireHub::HubResult<bool>::Success(false);
+            return cache.AcknowledgeRequestedProduct({.AccountId = snapshot.AccountId,
+                                                      .ProductId = snapshot.RequestedProductId,
+                                                      .RequestId = snapshot.RequestedProductId});
+        }
     } // namespace
 
     PackageManagerPanel::~PackageManagerPanel() = default;
@@ -137,7 +148,7 @@ namespace KeireEditor
         m_Registration = workspace.RegisterPanel({"editor.package-manager", "Package Manager", false});
     }
 
-    void PackageManagerPanel::Initialize(const std::filesystem::path& projectRoot,
+    bool PackageManagerPanel::Initialize(const std::filesystem::path& projectRoot,
                                          const std::filesystem::path& executable)
     {
         Shutdown();
@@ -195,11 +206,32 @@ namespace KeireEditor
                 m_Error = importRecovery.Diagnostics.front();
             Refresh();
             RefreshMarketplaceCache(true);
+            if (!m_MarketplaceSessionAuthorized && m_MarketplaceCache)
+            {
+                const auto request = m_MarketplaceCache->LoadRequestedProduct();
+                if (request && request.Value().RequestId.empty())
+                {
+                    const auto cached = m_MarketplaceCache->Load();
+                    if (cached)
+                    {
+                        const auto acknowledged =
+                            AcknowledgeLegacyRequestedProduct(*m_MarketplaceCache, cached.Value());
+                        m_RestoreProjectFocusOnStartup = acknowledged && acknowledged.Value();
+                    }
+                }
+                else if (request)
+                {
+                    const auto acknowledged = m_MarketplaceCache->IsRequestedProductAcknowledged(request.Value());
+                    m_RestoreProjectFocusOnStartup = acknowledged && acknowledged.Value();
+                }
+            }
+            return m_RestoreProjectFocusOnStartup;
         }
         catch (const std::exception& error)
         {
             m_Error = error.what();
             m_Manager.reset();
+            return false;
         }
     }
 
@@ -226,6 +258,8 @@ namespace KeireEditor
         m_AllowExecutableCode = false;
         m_KeepLocalConflicts = true;
         m_MarketplaceSessionAuthorized = false;
+        m_RestoreProjectFocusOnStartup = false;
+        m_FocusRequestedProduct = false;
         m_NextMarketplaceRefresh = {};
     }
 
@@ -313,15 +347,45 @@ namespace KeireEditor
             m_SelectedMarketplaceProduct.clear();
             return;
         }
-        const auto previousRequest = m_MarketplaceSnapshot.RequestedProductId;
         m_MarketplaceSnapshot = std::move(loaded).Value();
         m_MarketplaceSessionAuthorized = true;
         m_MarketplaceSessionMessage.clear();
-        if (focusRequestedProduct && !m_MarketplaceSnapshot.RequestedProductId.empty() &&
-            (m_MarketplaceSnapshot.RequestedProductId != previousRequest || m_SelectedMarketplaceProduct.empty()))
+        if (focusRequestedProduct)
         {
-            m_SelectedMarketplaceProduct = m_MarketplaceSnapshot.RequestedProductId;
-            m_Registration.SetVisible(true);
+            auto request = m_MarketplaceCache->LoadRequestedProduct();
+            if (!request)
+            {
+                m_Error = request.Error().Message;
+            }
+            else if (request.Value().RequestId.empty())
+            {
+                const auto acknowledged = AcknowledgeLegacyRequestedProduct(*m_MarketplaceCache, m_MarketplaceSnapshot);
+                if (!acknowledged)
+                    m_Error = acknowledged.Error().Message;
+                else
+                    m_RestoreProjectFocusOnStartup = acknowledged.Value();
+            }
+            else if (!request.Value().RequestId.empty() &&
+                     request.Value().AccountId == m_MarketplaceSnapshot.AccountId &&
+                     request.Value().ProductId == m_MarketplaceSnapshot.RequestedProductId)
+            {
+                auto acknowledged = m_MarketplaceCache->AcknowledgeRequestedProduct(request.Value());
+                if (!acknowledged)
+                {
+                    m_Error = acknowledged.Error().Message;
+                }
+                else if (acknowledged.Value())
+                {
+                    m_RestoreProjectFocusOnStartup = false;
+                    m_FocusRequestedProduct = true;
+                    m_SelectedMarketplaceProduct = request.Value().ProductId;
+                    m_Registration.SetVisible(true);
+                }
+                else
+                {
+                    m_RestoreProjectFocusOnStartup = true;
+                }
+            }
         }
         if (m_SelectedMarketplaceProduct.empty())
         {
@@ -924,6 +988,8 @@ namespace KeireEditor
     {
         if (std::chrono::steady_clock::now() >= m_NextMarketplaceRefresh)
             RefreshMarketplaceCache(true);
+        if (std::exchange(m_FocusRequestedProduct, false))
+            m_Registration.RequestFocus();
         auto panel = ui.BeginPanel(m_Registration);
         if (!panel)
             return;

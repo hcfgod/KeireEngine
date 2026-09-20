@@ -52,6 +52,9 @@ assert(publicationStatus.state === "active"
 for (const sourcePath of allDocSources) {
     await access(path.join(outputRoot, "docs", ...sourcePathToSlug(sourcePath).split("/"), "index.html"));
 }
+const documentationLanding = await readFile(path.join(outputRoot, "docs", "index.html"), "utf8");
+assert(documentationLanding.includes(`${allDocSources.length} guides and progress records`),
+    "Built documentation landing count does not match the canonical inventory.");
 
 const files = await collectFiles(outputRoot);
 const outputFiles = new Set(files.map((file) => path.resolve(file)));

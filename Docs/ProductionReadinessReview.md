@@ -19,6 +19,37 @@ validated workflow, and a validated preview is not equivalent to a production-pr
 Version 0.4.4 is the current source and Windows publication target. Its validation is tracked separately from this
 review's immutable 0.4.2 sequence-17 evidence; no 0.4.2 Windows or Linux artifact is relabeled as the new release.
 
+As of September 19, 2026, the publication inventory contains 99 guides and progress records, including 13 material/shader
+records previously absent from the site inventory. This documentation repair does not change the historical readiness
+scores or establish the remaining implementation and validation gates as complete.
+
+### September 20 Windows workflow validation handoff
+
+The current source candidate received a focused Windows review of the documented lighting workflow in
+`Rendering.md`, `SceneAuthoring.md`, `ShadersAndMaterials.md`, and the renderer sections of `Architecture.md`. The review
+covered Forward+, Deferred Hybrid, and Automatic selection; Disabled, Baked Indirect, Realtime Environment, Irradyn,
+and Hybrid GI; every Irradyn quality; directional, point, and spot lights; disabled, hard, and soft shadows; capability
+fallbacks; and project/scene persistence. No lighting implementation defect was found in this pass.
+
+A disposable Hub/Editor project then exercised the actual bake path. Two static lightmap receivers and directional,
+point, and spot lights in Mixed mode produced a schema-6 scene linked to a real `LightingSet`, lightmap and directionality
+textures, and a mixed-light shadow mask. A repeat bake retained the deterministic set identity, and Force Rebuild
+regenerated all four outputs. Forward+ with Baked Indirect and Deferred Hybrid with Hybrid (Baked + Irradyn) rendered
+the baked scene correctly, including stable soft shadows. Saving, closing, and inspecting the scene confirmed the
+lighting reference, receiver flags, and Mixed modes; the disposable project was then removed.
+
+Focused Direct3D 12 validation passed 5 lighting cases with 1,432 assertions, 6 shadow cases with 122 assertions, the
+baked-lighting case with 20 assertions, and the 462-assertion anti-aliasing/render-path/GI matrix. The complete D3D12
+render suite passed all 85 cases and 6,497 assertions. `git diff --check` reported no whitespace errors; its output was
+limited to line-ending notices for existing working-tree changes.
+
+The next workflow-validation session should begin with the final combined first-run pass described by the acceptance
+goal: create a clean project through Hub, author/import representative texture, shader, Material Graph, and material
+assets, use them in a scene with all three light types and shadows, save, close, reopen, edit again, and verify every
+reference and visual result. The individual lighting pass above is complete, but it is not a substitute for that final
+cross-system restart sequence. Native Linux/macOS interaction and the intentional future-work items already identified
+in this review remain outside this Windows source-candidate pass.
+
 ## 0.4.2 Release Update
 
 Version 0.4.2 adds same-frame camera-local GPU occlusion culling, compacted indirect draws, deterministic direct

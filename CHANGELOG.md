@@ -5,6 +5,18 @@ versions.
 
 ## Unreleased
 
+- Marketplace product handoffs now carry a unique request marker that the Editor acknowledges independently of the Hub
+  cache, so Package Manager opens once per website request instead of reopening on every Editor launch. Existing stale
+  cache requests are acknowledged once during migration without overriding the user's later workspace selection.
+- Managed Behaviour fields first edited after attachment now persist their stable field ID, declared type, and former
+  names immediately, so edit-scene saves retain rename-safe metadata before Play Mode materializes an instance.
+- Fixed first-use material publication to include newly referenced shader sources and generated assets in the
+  development catalog. Dependency failures preserve the previous catalog, and unrelated assets are not recooked.
+- Restored documentation publication for all 99 guides and progress records, including the material/shader acceptance
+  records omitted from navigation, search, and the fallback index. Progress records remain labeled as dated evidence.
+- Windows development staging now passes FFmpeg's private zlib include and library flags as shell-safe arguments,
+  including when the repository path contains accented characters. Coral build checkouts clone only the pinned
+  revision, so locally cached partial clones no longer fail while traversing unrelated history.
 - Shader imports now compile independent vertex/fragment stages and their reflection passes concurrently, reducing
   material and Shader Graph creation latency without changing deterministic asset output or target coverage.
 - Fixed the fresh-project material and shader authoring pass: first-run editor windows now maximize, Project is the

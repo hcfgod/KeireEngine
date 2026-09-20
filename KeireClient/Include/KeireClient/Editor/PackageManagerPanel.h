@@ -26,7 +26,8 @@ namespace KeireEditor
         PackageManagerPanel& operator=(const PackageManagerPanel&) = delete;
 
         void Attach(Keire::UiWorkspace& workspace);
-        void Initialize(const std::filesystem::path& projectRoot, const std::filesystem::path& executable);
+        [[nodiscard]] bool Initialize(const std::filesystem::path& projectRoot,
+                                      const std::filesystem::path& executable);
         void Shutdown() noexcept;
         void Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
@@ -75,6 +76,8 @@ namespace KeireEditor
         bool m_AllowExecutableCode = false;
         bool m_KeepLocalConflicts = true;
         bool m_MarketplaceSessionAuthorized = false;
+        bool m_RestoreProjectFocusOnStartup = false;
+        bool m_FocusRequestedProduct = false;
         std::chrono::steady_clock::time_point m_NextMarketplaceRefresh;
     };
 } // namespace KeireEditor

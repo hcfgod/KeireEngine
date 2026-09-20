@@ -548,6 +548,7 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "[RequireComponent(typeof(PlayerDependency))] "
                "[ExecutionOrder(-50)] public sealed class Player : ReloadBehaviourBase { "
                "[SerializeField, StableFieldId(\"73616e64-626f-4078-8000-000000000098\"), "
+               "FormerlySerializedAs(\"Velocity\"), "
                "Range(0.0, 20.0), InspectorName(\"Move Speed\"), Header(\"Movement\"), "
                "Tooltip(\"Maximum movement speed in metres per second.\")] "
                "public float Speed = 7.5f; "
@@ -831,6 +832,41 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(speedProperty->Slider);
     CHECK(speedProperty->Minimum == 0.0);
     CHECK(speedProperty->Maximum == 20.0);
+    CHECK(speedProperty->SerializedRootStableFieldId == "73616e64-626f-4078-8000-000000000098");
+    CHECK(speedProperty->SerializedRootType == "System.Single");
+    CHECK(speedProperty->SerializedRootFormerNames == std::vector<std::string>{"Velocity"});
+
+    const auto authoredComponent = registration->Factory();
+    REQUIRE(authoredComponent);
+    registration->Deserialize(*authoredComponent, {{"managedState", std::string(R"({"Version":1,"Fields":[]})")}},
+                              registration->SchemaVersion);
+    const auto authoredScalarValues = registration->Serialize(*authoredComponent);
+    REQUIRE(authoredScalarValues.contains("managedState"));
+    registration->Deserialize(*authoredComponent,
+                              {{"managedState", authoredScalarValues.at("managedState")}, {"Speed", 9.5}},
+                              registration->SchemaVersion);
+    const auto authoredScalarState =
+        std::get<std::string>(registration->Serialize(*authoredComponent).at("managedState"));
+    const auto authoredScalarDocument = nlohmann::json::parse(authoredScalarState);
+    REQUIRE(authoredScalarDocument.at("Fields").size() == 1);
+    const auto& authoredSpeed = authoredScalarDocument.at("Fields").front();
+    CHECK(authoredSpeed.at("StableId") == "73616e64-626f-4078-8000-000000000098");
+    CHECK(authoredSpeed.at("Name") == "Speed");
+    CHECK(authoredSpeed.at("Type") == "System.Single");
+    CHECK(authoredSpeed.at("Aliases") == nlohmann::json::array({"Velocity"}));
+    CHECK(authoredSpeed.at("Value") == doctest::Approx(9.5));
+
+    const std::string renamedStableState =
+        R"({"Version":1,"Fields":[{"StableId":"73616e64-626f-4078-8000-000000000098",)"
+        R"("Name":"OldSpeed","Type":"System.Single","Aliases":[],"Value":4.25}]})";
+    registration->Deserialize(*authoredComponent, {{"managedState", renamedStableState}}, registration->SchemaVersion);
+    CHECK(std::get<double>(registration->Serialize(*authoredComponent).at("Speed")) == doctest::Approx(4.25));
+
+    const std::string legacyAliasState =
+        R"({"Version":1,"Fields":[{"StableId":"","Name":"Velocity","Type":"System.Single",)"
+        R"("Aliases":[],"Value":6.5}]})";
+    registration->Deserialize(*authoredComponent, {{"managedState", legacyAliasState}}, registration->SchemaVersion);
+    CHECK(std::get<double>(registration->Serialize(*authoredComponent).at("Speed")) == doctest::Approx(6.5));
     const auto ikProperty =
         std::ranges::find(registration->Properties, std::string("AnimatorIkWeight"), &Keire::ComponentProperty::Key);
     REQUIRE(ikProperty != registration->Properties.end());

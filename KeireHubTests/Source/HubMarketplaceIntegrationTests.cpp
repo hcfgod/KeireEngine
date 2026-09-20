@@ -89,4 +89,9 @@ TEST_CASE("Marketplace synchronization registers the Hub session before reading 
     const auto cached = cache.Load();
     REQUIRE(cached);
     CHECK(cached.Value().AccountId == "40112233-4455-6677-8899-aabbccddeeff");
+    const auto requestedProduct = cache.LoadRequestedProduct();
+    REQUIRE(requestedProduct);
+    CHECK(requestedProduct.Value().AccountId == "40112233-4455-6677-8899-aabbccddeeff");
+    CHECK(requestedProduct.Value().ProductId == "00112233-4455-6677-8899-aabbccddeeff");
+    CHECK_FALSE(requestedProduct.Value().RequestId.empty());
 }

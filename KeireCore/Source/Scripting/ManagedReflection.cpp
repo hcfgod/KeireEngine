@@ -83,6 +83,8 @@ namespace Keire::Detail
                 .Header = required("Keire.HeaderAttribute"),
                 .Tooltip = required("Keire.TooltipAttribute"),
                 .Group = required("Keire.InspectorGroupAttribute"),
+                .StableFieldId = required("Keire.StableFieldIdAttribute"),
+                .FormerlySerializedAs = required("Keire.FormerlySerializedAsAttribute"),
                 .StableComponentId = required("Keire.StableComponentIdAttribute"),
                 .StableAssetTypeId = required("Keire.StableAssetTypeIdAttribute"),
                 .StableSerializedTypeId = required("Keire.StableSerializedTypeIdAttribute")};
@@ -212,7 +214,10 @@ namespace Keire::Detail
     void ReflectManagedFieldSet(Coral::Type& ownerType, const ManagedInspectorAttributeTypes& attributeTypes,
                                 const std::string_view prefix, const std::string_view inheritedGroup,
                                 const std::size_t depth, std::vector<std::int32_t>& typeStack,
-                                std::vector<ComponentProperty>& result)
+                                std::vector<ComponentProperty>& result,
+                                const std::string_view inheritedRootStableFieldId = {},
+                                const std::string_view inheritedRootType = {},
+                                const std::vector<std::string>& inheritedRootFormerNames = {})
     {
         for (auto field : ownerType.GetFields())
         {
@@ -231,6 +236,8 @@ namespace Keire::Detail
             std::string header;
             std::string tooltip;
             std::string group(inheritedGroup);
+            std::string stableFieldId;
+            std::vector<std::string> formerNames;
             for (auto attribute : field.GetAttributes())
             {
                 if (attributeTypes.SerializeField && attribute.GetType() == *attributeTypes.SerializeField)
@@ -272,6 +279,17 @@ namespace Keire::Detail
                     tooltip = ManagedAttributeText(attribute, "Text");
                 else if (attributeTypes.Group && attribute.GetType() == *attributeTypes.Group)
                     group = ManagedAttributeText(attribute, "Name");
+                else if (attributeTypes.StableFieldId && attribute.GetType() == *attributeTypes.StableFieldId)
+                {
+                    stableFieldId = AssetId(attribute.GetFieldValue<std::uint64_t>("High"),
+                                            attribute.GetFieldValue<std::uint64_t>("Low"))
+                                        .ToString();
+                }
+                else if (attributeTypes.FormerlySerializedAs &&
+                         attribute.GetType() == *attributeTypes.FormerlySerializedAs)
+                {
+                    formerNames.push_back(ManagedAttributeText(attribute, "SerializedName"));
+                }
             }
             if (!serialized || hidden)
                 continue;
@@ -280,6 +298,10 @@ namespace Keire::Detail
             const auto name = static_cast<std::string>(scopedName);
             const auto key = prefix.empty() ? name : std::string(prefix) + "." + name;
             auto& fieldType = field.GetType();
+            const auto fieldTypeName = ManagedTypeName(fieldType);
+            const auto rootStableFieldId = prefix.empty() ? stableFieldId : std::string(inheritedRootStableFieldId);
+            const auto rootType = prefix.empty() ? fieldTypeName : std::string(inheritedRootType);
+            const auto& rootFormerNames = prefix.empty() ? formerNames : inheritedRootFormerNames;
             if (serializeReference)
                 continue;
             if (const auto kind = ManagedFieldKind(fieldType))
@@ -303,7 +325,10 @@ namespace Keire::Detail
                 property.DisplayName = displayName.empty() ? ManagedFieldDisplayName(name) : std::move(displayName);
                 property.Group = std::move(group);
                 property.Kind = *kind;
-                property.DeclaredManagedType = ManagedTypeName(fieldType);
+                property.DeclaredManagedType = fieldTypeName;
+                property.SerializedRootStableFieldId = rootStableFieldId;
+                property.SerializedRootType = rootType;
+                property.SerializedRootFormerNames = rootFormerNames;
                 if (*kind == ComponentPropertyKind::Entity)
                 {
                     if (property.DeclaredManagedType == "Keire.Entity")
@@ -355,7 +380,6 @@ namespace Keire::Detail
             const bool serializable =
                 (attributeTypes.Serializable && fieldType.HasAttribute(*attributeTypes.Serializable)) ||
                 ManagedTypeHasAttribute(fieldType, "System.SerializableAttribute");
-            const auto fieldTypeName = ManagedTypeName(fieldType);
             if (fieldType.IsSZArray() || fieldTypeName.starts_with("System.Collections.Generic.List`") ||
                 fieldTypeName.starts_with("System.Collections.Generic.Dictionary`"))
             {
@@ -375,7 +399,8 @@ namespace Keire::Detail
                 nestedGroup += " / ";
                 nestedGroup += nestedDisplayName;
             }
-            ReflectManagedFieldSet(fieldType, attributeTypes, key, nestedGroup, depth + 1, typeStack, result);
+            ReflectManagedFieldSet(fieldType, attributeTypes, key, nestedGroup, depth + 1, typeStack, result,
+                                   rootStableFieldId, rootType, rootFormerNames);
             typeStack.pop_back();
         }
     }
@@ -728,48 +753,60 @@ namespace Keire::Detail
         throw std::logic_error("Unsupported managed Inspector property kind.");
     }
 
-    [[nodiscard]] nlohmann::json* ManagedStateField(nlohmann::json& document, const std::string_view name)
+    template <typename Document>
+    using ManagedStateFieldType = std::conditional_t<std::is_const_v<Document>, const nlohmann::json, nlohmann::json>;
+
+    template <typename Document>
+    [[nodiscard]] ManagedStateFieldType<Document>* ManagedStateField(Document& document, const std::string_view name,
+                                                                     const std::string_view stableFieldId,
+                                                                     const std::vector<std::string>& formerNames)
     {
         auto* fields = document.contains("Fields")   ? std::addressof(document["Fields"])
                        : document.contains("fields") ? std::addressof(document["fields"])
                                                      : nullptr;
         if (!fields || !fields->is_array())
-            return nullptr;
-        nlohmann::json* legacyField = nullptr;
+            return static_cast<ManagedStateFieldType<Document>*>(nullptr);
+        using Field = ManagedStateFieldType<Document>;
+        Field* legacyField = nullptr;
         for (auto& field : *fields)
         {
             const auto* fieldName = JsonMember(field, "Name", "name");
-            if (!fieldName || !fieldName->is_string() || fieldName->get<std::string>() != name)
-                continue;
             const auto* stableId = JsonMember(field, "StableId", "stableId");
-            if (stableId && stableId->is_string() && !stableId->get_ref<const std::string&>().empty())
+            const auto serializedStableId =
+                stableId && stableId->is_string() ? stableId->get_ref<const std::string&>() : std::string{};
+            if (!stableFieldId.empty() && !serializedStableId.empty() &&
+                std::ranges::equal(stableFieldId, serializedStableId,
+                                   [](const char left, const char right)
+                                   {
+                                       return std::tolower(static_cast<unsigned char>(left)) ==
+                                              std::tolower(static_cast<unsigned char>(right));
+                                   }))
+            {
                 return std::addressof(field);
-            if (!legacyField)
+            }
+            if (!fieldName || !fieldName->is_string())
+                continue;
+            const auto& serializedName = fieldName->get_ref<const std::string&>();
+            const bool matchesName =
+                serializedName == name || std::ranges::find(formerNames, serializedName) != formerNames.end();
+            if (!matchesName)
+                continue;
+            if (stableFieldId.empty() && !serializedStableId.empty())
+                return std::addressof(field);
+            if (serializedStableId.empty() && !legacyField)
                 legacyField = std::addressof(field);
         }
         return legacyField;
     }
 
+    [[nodiscard]] nlohmann::json* ManagedStateField(nlohmann::json& document, const std::string_view name)
+    {
+        return ManagedStateField(document, name, {}, {});
+    }
+
     [[nodiscard]] const nlohmann::json* ManagedStateField(const nlohmann::json& document, const std::string_view name)
     {
-        const auto* fields = document.contains("Fields")   ? std::addressof(document["Fields"])
-                             : document.contains("fields") ? std::addressof(document["fields"])
-                                                           : nullptr;
-        if (!fields || !fields->is_array())
-            return nullptr;
-        const nlohmann::json* legacyField = nullptr;
-        for (const auto& field : *fields)
-        {
-            const auto* fieldName = JsonMember(field, "Name", "name");
-            if (!fieldName || !fieldName->is_string() || fieldName->get<std::string>() != name)
-                continue;
-            const auto* stableId = JsonMember(field, "StableId", "stableId");
-            if (stableId && stableId->is_string() && !stableId->get_ref<const std::string&>().empty())
-                return std::addressof(field);
-            if (!legacyField)
-                legacyField = std::addressof(field);
-        }
-        return legacyField;
+        return ManagedStateField(document, name, {}, {});
     }
 
     [[nodiscard]] std::vector<std::string_view> ManagedPropertyPath(const std::string_view path)
@@ -788,12 +825,14 @@ namespace Keire::Detail
         return result;
     }
 
-    [[nodiscard]] const nlohmann::json* ManagedStateValue(const nlohmann::json& document, const std::string_view path)
+    [[nodiscard]] const nlohmann::json* ManagedStateValue(const nlohmann::json& document,
+                                                          const ComponentProperty& property)
     {
-        const auto segments = ManagedPropertyPath(path);
+        const auto segments = ManagedPropertyPath(property.Key);
         if (segments.empty())
             return nullptr;
-        const auto* field = ManagedStateField(document, segments.front());
+        const auto* field = ManagedStateField(document, segments.front(), property.SerializedRootStableFieldId,
+                                              property.SerializedRootFormerNames);
         const nlohmann::json* value = field ? JsonMember(*field, "Value", "value") : nullptr;
         for (std::size_t index = 1; value && index < segments.size(); ++index)
         {
@@ -806,12 +845,13 @@ namespace Keire::Detail
     }
 
     [[nodiscard]] nlohmann::json& EnsureManagedStateValue(nlohmann::json& document, nlohmann::json& fields,
-                                                          const std::string_view path)
+                                                          const ComponentProperty& property)
     {
-        const auto segments = ManagedPropertyPath(path);
+        const auto segments = ManagedPropertyPath(property.Key);
         if (segments.empty())
             throw std::invalid_argument("Managed Inspector property path is empty.");
-        auto* field = ManagedStateField(document, segments.front());
+        auto* field = ManagedStateField(document, segments.front(), property.SerializedRootStableFieldId,
+                                        property.SerializedRootFormerNames);
         if (!field)
         {
             fields.push_back({{"StableId", ""},
@@ -821,6 +861,12 @@ namespace Keire::Detail
                               {"Value", nullptr}});
             field = std::addressof(fields.back());
         }
+        if (!property.SerializedRootStableFieldId.empty())
+            (*field)["StableId"] = property.SerializedRootStableFieldId;
+        (*field)["Name"] = std::string(segments.front());
+        if (!property.SerializedRootType.empty())
+            (*field)["Type"] = property.SerializedRootType;
+        (*field)["Aliases"] = property.SerializedRootFormerNames;
         auto* value = std::addressof((*field)["Value"]);
         for (std::size_t index = 1; index < segments.size(); ++index)
         {
@@ -880,7 +926,7 @@ namespace Keire::Detail
         auto document = nlohmann::json::parse(state);
         for (const auto& property : properties)
         {
-            const auto* value = ManagedStateValue(document, property.Key);
+            const auto* value = ManagedStateValue(document, property);
             auto projected = DefaultManagedPropertyValue(property.Kind, property.ReferenceKind);
             if (property.Kind == ComponentPropertyKind::ManagedReferenceGraph)
             {
@@ -889,7 +935,10 @@ namespace Keire::Detail
                     throw std::logic_error("Managed graph property metadata is missing its graph descriptor.");
                 }
                 const auto segments = ManagedPropertyPath(property.Key);
-                const auto* field = segments.empty() ? nullptr : ManagedStateField(document, segments.front());
+                const auto* field = segments.empty() ? nullptr
+                                                     : ManagedStateField(document, segments.front(),
+                                                                         property.SerializedRootStableFieldId,
+                                                                         property.SerializedRootFormerNames);
                 const auto* marker = field ? JsonMember(*field, "ReferenceGraph", "referenceGraph") : nullptr;
                 if (property.ReferenceGraph->Root.ReferenceGraph)
                 {
@@ -988,8 +1037,9 @@ namespace Keire::Detail
                     const auto segments = ManagedPropertyPath(property.Key);
                     if (segments.empty())
                         throw std::logic_error("Managed graph property path is empty.");
-                    (void)EnsureManagedStateValue(document, fields, property.Key);
-                    auto* field = ManagedStateField(document, segments.front());
+                    (void)EnsureManagedStateValue(document, fields, property);
+                    auto* field = ManagedStateField(document, segments.front(), property.SerializedRootStableFieldId,
+                                                    property.SerializedRootFormerNames);
                     if (!field)
                         throw std::logic_error("Managed graph state field could not be materialized.");
                     const auto rootKey = ManagedStateGraphRootKey(*field, property.Key);
@@ -1018,11 +1068,12 @@ namespace Keire::Detail
                             "' declared as '" + property.DeclaredManagedType + "' is invalid: " + error.what());
                     }
                 }
-                EnsureManagedStateValue(document, fields, property.Key) = nlohmann::json::parse(canonical);
+                EnsureManagedStateValue(document, fields, property) = nlohmann::json::parse(canonical);
                 const auto segments = ManagedPropertyPath(property.Key);
                 if (segments.empty())
                     throw std::logic_error("Managed graph property path is empty.");
-                auto* field = ManagedStateField(document, segments.front());
+                auto* field = ManagedStateField(document, segments.front(), property.SerializedRootStableFieldId,
+                                                property.SerializedRootFormerNames);
                 if (!field)
                     throw std::logic_error("Managed graph state field could not be materialized.");
                 if (property.ReferenceGraph->Root.ReferenceGraph)
@@ -1037,7 +1088,7 @@ namespace Keire::Detail
             }
             else
             {
-                EnsureManagedStateValue(document, fields, property.Key) =
+                EnsureManagedStateValue(document, fields, property) =
                     WriteManagedPropertyValue(value->second, property);
             }
         }

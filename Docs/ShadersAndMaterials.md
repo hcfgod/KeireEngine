@@ -18,7 +18,7 @@ with a new shader asset ID. Asset operations reject changes to the shared source
 pinned sources require restoring the recorded library content; automatic repair must not change a project's visuals.
 
 The requested property-only material replacement is tracked in [Material and shader replacement](MaterialShaderReplacement.md).
-The graph-based architecture below describes the existing implementation, not completion of that replacement.
+The graph-owned material sections below describe compatibility assets, not the default Material creation workflow.
 In the property-based compatibility Inspector, missing shaders remain replaceable without losing saved values;
 **Reset Shader Properties** restores shader defaults and participates in material save/undo.
 Overrides rejected by a resolved shader are retained in the source's `inactiveProperties` array and listed under
@@ -71,16 +71,16 @@ compilation, and then write the source; invalid drafts remain editable with diag
 an unapplied draft until Save, Apply, or explicit Discard. Closing the editor also detects unapplied node properties.
 Material and shader **Asset Details** can be expanded to inspect source IDs, importer versions, and content hashes.
 
-Kéire separates surface-material authoring from target-program authoring. A Material owns the editable OpenPBR
-surface program, parameters, domain, shading model, authoring mode, closure budget, and render state. A Shader Graph
+Kéire separates material-value authoring from shader logic. A new Material owns its shader selection, property overrides,
+and surface settings. Existing graph-owned Materials retain editable OpenPBR surface programs. A Shader Graph
 owns a Material, UI, Fullscreen, VFX, Custom Graphics, or Compute program target, including legal stages, resources,
 output contract, and render integration. Both authoring paths share typed graph validation, deterministic lowering,
 HLSL generation, reflected program artifacts, explicit material-pass contracts, and last-good publication.
 
 ```text
-Raw HLSL + .keireshader ---------------------------> Legacy Material -----\
-Material OpenPBR surface program ----------------------------------------+--> MaterialAsset --> RenderSystem
-                                                        Material Instance/
+Raw HLSL + .keireshader or Surface Shader Graph --> Property Material ----\
+Existing Material OpenPBR surface program ------------------------------+--> MaterialAsset --> RenderSystem
+                                                      Material Instance/
 
 Shader Graph target program --> ShaderAsset --> UI / Fullscreen / VFX / Custom Graphics
 ```
@@ -89,7 +89,8 @@ The renderer never needs to understand either authoring graph format. It consume
 and public authoring contracts do not expose native GPU handles or backend compiler types.
 
 Double-clicking a `.keireshadergraph` opens its target program in the Shader Graph panel. Double-clicking a
-`.keirematerial` opens its surface graph, parameter blackboard, and material preview. Material Instances open in the
+property-only `.keirematerial` opens the Inspector; an existing graph-owned source opens its surface graph,
+parameter blackboard, and material preview. Material Instances open in the
 Inspector. Shader Graphs are not assignable to Mesh Renderers: users assign a Material, Material Instance, or explicit
 `.keiremateriallegacy` compatibility asset.
 
@@ -98,8 +99,8 @@ Inspector. Shader Graphs are not assignable to Mesh Renderers: users assign a Ma
 | Asset | Extension | Responsibility |
 | --- | --- | --- |
 | Raw shader | `.hlsl` + `.keireshader` | Expert-authored HLSL, entries, defines, render state, and exposed properties. |
-| Shader Graph | `.keireshadergraph` | Target-based UI, Fullscreen, VFX, Custom Graphics, or Compute program plus resources, variants, generated shaders, and live preview. |
-| Material | `.keirematerial` | Schema-7 OpenPBR surface program with stable parameters, domains, shading models, closures/layers, textures, and render state. |
+| Shader Graph | `.keireshadergraph` | Surface, UI, Fullscreen, VFX, or Custom Graphics shader logic, resources, variants, and preview. Compute creation is disabled. |
+| Material | `.keirematerial` | New schema-5 property-only material, or an existing schema-7 graph-owned OpenPBR surface program. |
 | Material Instance | `.keirematerialinstance` | Lightweight property and surface overrides inherited from a Material or Material Instance. |
 | Legacy Material | `.keiremateriallegacy` | Compatibility values against a raw shader or historical surface Shader Graph. |
 | Shader Subgraph | `.keiresubgraph` | Reusable typed material/shader function, Material Attributes layer, or layer-blend body selected by its purpose. |
@@ -112,8 +113,8 @@ the renderer.
 
 ## Shader Graph Authoring
 
-Create **Shader Graph** in the Project panel, then choose UI, Fullscreen Effect, VFX, Custom Graphics, or Compute. The
-creation menu also exposes Legacy Surface templates for existing projects during migration. The
+Create **Shader Graph** in the Project panel, then choose a **Surface / ...** template, UI, Fullscreen Effect, VFX, or
+Custom Graphics. **Compute (not supported)** is disabled. The
 isolated worker restores the published source index instead of rescanning unrelated assets, validates the new source,
 and opens the resulting `NewShaderGraph.keireshadergraph` directly in the dockable editor. Nodes,
 pins, connections, and parameter properties use stable opaque identities. Validated cable replacement, bounded
@@ -158,8 +159,8 @@ published runtime assets.
 Shader Graph schema 6 stores its explicit target definition and retains the finite, non-negative maximum
 world-position-displacement radius introduced by schema 5. Schemas 1–5 migrate in memory; old Fullscreen outputs infer
 the Fullscreen target and other old graphs infer Material. Generated shader contract 8 publishes target/stage metadata,
-the validated displacement bound, and exact pass roles in a schema-3 shader manifest. Compute target graphs serialize
-and validate today but compilation fails explicitly until the compute-program artifact ABI is available.
+the validated displacement bound, and exact pass roles in a schema-3 shader manifest. Compute compiler/runtime progress
+has separate [acceptance evidence](RevampComputeCompilerLane.md); it does not enable Compute creation in the editor menu.
 
 Compilation reports active and total nodes, unused work, texture samples, estimated ALU instructions, and variant
 count. The editor previews the last-good result on a sphere, plane, cube, or selected mesh and provides exposure and
@@ -184,10 +185,10 @@ coexisting roles such as `primary` and `deferredGBufferStandard` without ambiguo
 shader importer compiles each bounded role/format lane with its optional pass define, rejects duplicate roles or defines
 and collisions with global defines, and keeps reflection selection independent of manifest order.
 
-## Materials Using Custom Shader Graphs
+## Existing Graph-Owned Materials (Compatibility)
 
-Creating a Material produces a standalone OpenPBR surface and opens it as soon as its validated creation transaction
-completes. The Material owns its executable surface expressions and publishes them through the shared typed compiler.
+Existing graph-owned Materials retain their OpenPBR surface and publish executable expressions through the shared typed
+compiler. **Create > Material** and **Material from Shader** instead use the property-only workflow described above.
 Historical sources may retain a tagged shader reference while they transition from reusable surface templates:
 
 - `asset` selects a raw `ShaderAsset`.
@@ -270,8 +271,8 @@ and submit back-to-front.
 
 ## Safe Legacy Migration
 
-Schema-7 readers preserve historical Material Graph and Shader Graph identities without rewriting source on open.
-Explicitly saving a Material writes its executable surface program under the canonical `surfaceGraph` field; old
+Schema-7 readers preserve historical Material Graph identities without rewriting source on open.
+Explicitly saving a graph-owned Material writes its executable surface program under the canonical `surfaceGraph` field; old
 Fullscreen Shader Graphs infer the Fullscreen target and other old Shader Graphs infer the Material target.
 
 The complete identity-preserving conversion of Legacy Surface `.keireshadergraph` assets into material assets is not

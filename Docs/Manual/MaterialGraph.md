@@ -1,26 +1,37 @@
 # Material Graph
 
-A Material is an assignable artist-authored OpenPBR surface program. Schema 7 stores its authoritative `surfaceGraph`,
-stable parameters, domain, shading model, authoring mode, closure budget, and render state, then publishes immutable
-program and material artifacts for Mesh Renderers. A new Material has no hidden Shader Graph dependency.
+New Materials store a shader selection, property overrides, and surface settings. **Create > Material** selects the
+project's pinned shared **Kéire/Lit** shader and writes a schema-5 property-only `.keirematerial`. Double-click it to
+edit its reflected properties in the Inspector. Shader logic belongs to the selected Shader Graph or code shader.
+
+Older graph-owned Materials remain readable and editable. Their schema-7 `surfaceGraph` stores executable OpenPBR
+expressions. The graph instructions below apply to those existing assets, not the ordinary Material creation command.
 
 ## Choose The Right Asset
 
 | Asset | Use it for |
 | --- | --- |
-| Shader Graph | UI, Fullscreen, VFX, Custom Graphics, or Compute target program. |
-| Material | Simple OpenPBR inputs, a full closure graph, or a layer stack in one assignable asset. |
-| Legacy Material | Compatibility values against a raw shader or historical surface Shader Graph. |
+| Shader Graph | Surface shader logic or UI, Fullscreen, VFX, and Custom Graphics programs. Compute creation is disabled. |
+| Material | Assignable shader selection, property overrides, and surface settings. |
+| Existing graph-owned Material | Compatibility editing of an executable surface graph or layer stack. |
 | Material Instance | Lightweight inherited overrides from a Material or another instance. |
 
-## Create A Material Graph
+## Create And Edit A Material
 
 1. In Project, choose **Create > Material**.
-2. Open the new `.keirematerial` asset.
-3. Choose the surface domain, shading model, and authoring mode.
-4. Create parameters and expression nodes from **Add Node** or the canvas context menu.
-5. Connect final values to the protected Material Output.
-6. Save and assign the Material asset to a Mesh Renderer material slot.
+2. Enter a name and choose **Create**. Wait for the asset worker to finish importing its shader dependencies.
+3. Open the new `.keirematerial` in the Inspector and edit the shader's exposed properties and surface settings.
+4. Save and assign the Material asset to a Mesh Renderer material slot.
+
+For custom logic, create a **Shader Graph > Surface / Lit** or **Surface / Unlit** graph, expose properties, and save
+it. Select that shader and choose **Material from Shader** to create its assignable material. New materials inherit
+shader defaults until overridden; editing their values does not compile another copy of the shader.
+
+## Edit An Existing Material Graph
+
+Open an existing graph-owned `.keirematerial`. Choose its surface domain, shading model, and authoring mode, add
+parameters and expression nodes, and connect the final values to its protected Material Output. Save and validate
+the material on scene geometry. Opening an existing graph does not automatically convert it to a property-only source.
 
 The surface catalog includes OpenPBR Surface, Mix Slabs, Add Slabs, Coat, Fuzz, typed Material Attributes, and the
 existing BSDF modifiers. Mix clamps its factor and Add normalizes non-negative weights so the preview and generated

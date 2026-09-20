@@ -39,10 +39,10 @@ The supported acceptance command always rebuilds Release targets and cooks a fre
 build is active, and hold the shared native-build lock for the entire command:
 
 ```powershell
-$lockPath = "C:\Users\keith\Desktop\KéireEngine\Temp\revamp-parallel-native-build.lock"
+$lockPath = "D:\Projects\C++\KéireEngine\Temp\revamp-parallel-native-build.lock"
 $lock = [IO.File]::Open($lockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
 try {
-    Set-Location "C:\Users\keith\Desktop\KéireEngine"
+    Set-Location "D:\Projects\C++\KéireEngine"
     .\Scripts\Windows\render-benchmark.ps1 -Generator ninja -Toolset msc
 }
 finally {

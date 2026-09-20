@@ -4,8 +4,8 @@ These examples describe supported graph shapes without depending on a screen pos
 search-first palette and choose the compatible texture, coordinate, math, color, or procedural node shown by the open
 template. Pin-started search is the quickest way to see only valid choices for a destination.
 
-For ordinary scene surfaces, create a Material and author its OpenPBR graph directly; no separate Shader Graph is
-required. The surface examples below describe the compatible legacy Material shader target. Specialized Shader Graph
+For ordinary scene surfaces, create a Material to edit values against the shared Kéire/Lit shader. To change shader
+logic, use the Surface Shader Graph examples below and create a Material from the resulting shader. Specialized Shader Graph
 targets such as UI expose their own output pins and display their target in the graph header.
 
 ## Example 1: Tint A Tiled Surface
@@ -24,11 +24,11 @@ flowchart LR
     Roughness["Float property<br/>Roughness"] --> RoughOut["Shader Output<br/>Roughness"]
 ```
 
-1. Create a Lit/PBR Shader Graph.
+1. Create a **Shader Graph > Surface / Lit** asset.
 2. Add exposed Base Texture, Tint, Tiling, Metallic, and Roughness properties with durable stable IDs.
 3. Scale UV by Tiling, sample Base Texture, multiply its color by Tint, and connect the result to Base Color.
 4. Connect the two scalar controls to the compatible surface pins exposed by the template.
-5. Save, create a Material Graph or Direct Material using the shader, and assign that material to scene geometry.
+5. Save, select the shader, choose **Material from Shader**, and assign that material to scene geometry.
 
 If a pin is named differently for the selected renderer/template, the open Shader Output and compatible picker are
 authoritative. Do not force a conversion simply to reproduce the diagram.

@@ -53,7 +53,7 @@ double-click a knot to remove it. Knots do not change evaluation.
 | --- | --- |
 | Shader Graph expressions | Material Function |
 | Shader Graph surface composition | Material Layer |
-| Material Graph | Parameter overrides exposed by its selected Shader Graph; it does not create executable shader expressions |
+| Existing Material Graph | Material Functions and Layers for executable surface expressions; new property-only Materials use the Inspector instead |
 | VFX typed value, Block, or system | VFX Subgraph with Operator, Block, or System purpose |
 
 Kéire 0.4.0 does not provide a universal **Collapse Selection To Subgraph** command. A collapsed comment is not a

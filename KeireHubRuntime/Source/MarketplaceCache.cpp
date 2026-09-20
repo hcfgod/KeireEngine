@@ -18,6 +18,7 @@ namespace KeireHub
     {
         constexpr std::size_t MaximumCacheBytes = std::size_t{4U} * 1024U * 1024U;
         constexpr std::size_t MaximumCacheItems = 2048U;
+        constexpr std::size_t MaximumRequestedProductBytes = 4096U;
         constexpr std::size_t MaximumSessionLeaseBytes = 4096U;
 
         [[nodiscard]] HubError CacheError(std::string message, std::string details = {})
@@ -33,6 +34,14 @@ namespace KeireHub
             return {.Code = HubErrorCode::CatalogCacheInvalid,
                     .Message = std::move(message),
                     .AffectedItem = "marketplace-session",
+                    .TechnicalDetails = std::move(details)};
+        }
+
+        [[nodiscard]] HubError RequestedProductError(std::string message, std::string details = {})
+        {
+            return {.Code = HubErrorCode::CatalogCacheInvalid,
+                    .Message = std::move(message),
+                    .AffectedItem = "marketplace-request",
                     .TechnicalDetails = std::move(details)};
         }
 
@@ -90,6 +99,35 @@ namespace KeireHub
         [[nodiscard]] bool IsInstallKind(const std::string_view value) noexcept
         {
             return value.empty() || value == "registry" || value == "asset_import" || value == "complete_project";
+        }
+
+        void ValidateRequestedProduct(const MarketplaceRequestedProduct& request)
+        {
+            if (!IsUuid(request.AccountId) || !IsUuid(request.ProductId) || !IsUuid(request.RequestId))
+                throw std::invalid_argument("Marketplace requested-product identity is invalid.");
+        }
+
+        [[nodiscard]] Detail::Json SerializeRequestedProduct(const MarketplaceRequestedProduct& request)
+        {
+            ValidateRequestedProduct(request);
+            return {{"schemaVersion", MarketplaceRequestedProduct::CurrentSchemaVersion},
+                    {"accountId", request.AccountId},
+                    {"productId", request.ProductId},
+                    {"requestId", request.RequestId}};
+        }
+
+        [[nodiscard]] MarketplaceRequestedProduct ParseRequestedProduct(const Detail::Json& value)
+        {
+            if (!value.is_object() || value.size() != 4U ||
+                value.at("schemaVersion").get<std::uint32_t>() != MarketplaceRequestedProduct::CurrentSchemaVersion)
+            {
+                throw std::invalid_argument("Marketplace requested-product schema is invalid.");
+            }
+            MarketplaceRequestedProduct result{.AccountId = value.at("accountId").get<std::string>(),
+                                               .ProductId = value.at("productId").get<std::string>(),
+                                               .RequestId = value.at("requestId").get<std::string>()};
+            ValidateRequestedProduct(result);
+            return result;
         }
 
         void ValidateItem(const MarketplaceCacheItem& item, const bool requirePublication = true)
@@ -293,6 +331,104 @@ namespace KeireHub
         }
     }
 
+    HubResult<MarketplaceRequestedProduct> MarketplaceCacheStore::LoadRequestedProduct() const
+    {
+        std::error_code error;
+        const auto path = RequestedProductPath();
+        if (!std::filesystem::exists(path, error))
+        {
+            if (error)
+            {
+                return HubResult<MarketplaceRequestedProduct>::Failure(
+                    RequestedProductError("The marketplace request marker is unreadable.", error.message()));
+            }
+            return HubResult<MarketplaceRequestedProduct>::Success({});
+        }
+        auto document = Detail::ReadJsonFile(path, MaximumRequestedProductBytes);
+        if (!document)
+            return HubResult<MarketplaceRequestedProduct>::Failure(document.Error());
+        try
+        {
+            return HubResult<MarketplaceRequestedProduct>::Success(ParseRequestedProduct(document.Value()));
+        }
+        catch (const std::exception& exception)
+        {
+            return HubResult<MarketplaceRequestedProduct>::Failure(
+                RequestedProductError("The marketplace request marker is invalid.", exception.what()));
+        }
+    }
+
+    HubStatus MarketplaceCacheStore::PublishRequestedProduct(const MarketplaceRequestedProduct& request) const
+    {
+        try
+        {
+            return Detail::WriteJsonFileAtomically(RequestedProductPath(), SerializeRequestedProduct(request));
+        }
+        catch (const std::exception& exception)
+        {
+            return HubStatus::Failure(
+                RequestedProductError("The marketplace request marker could not be saved.", exception.what()));
+        }
+    }
+
+    HubResult<bool>
+    MarketplaceCacheStore::IsRequestedProductAcknowledged(const MarketplaceRequestedProduct& request) const
+    {
+        try
+        {
+            ValidateRequestedProduct(request);
+            const auto acknowledgementPath = RequestedProductAcknowledgementPath();
+            std::error_code error;
+            if (!std::filesystem::exists(acknowledgementPath, error))
+            {
+                if (error)
+                {
+                    return HubResult<bool>::Failure(RequestedProductError(
+                        "The marketplace request acknowledgement is unreadable.", error.message()));
+                }
+                return HubResult<bool>::Success(false);
+            }
+            auto document = Detail::ReadJsonFile(acknowledgementPath, MaximumRequestedProductBytes);
+            if (!document)
+                return HubResult<bool>::Success(false);
+            try
+            {
+                return HubResult<bool>::Success(ParseRequestedProduct(document.Value()) == request);
+            }
+            catch (const std::exception&)
+            {
+                return HubResult<bool>::Success(false);
+            }
+        }
+        catch (const std::exception& exception)
+        {
+            return HubResult<bool>::Failure(
+                RequestedProductError("The marketplace request acknowledgement could not be read.", exception.what()));
+        }
+    }
+
+    HubResult<bool> MarketplaceCacheStore::AcknowledgeRequestedProduct(const MarketplaceRequestedProduct& request) const
+    {
+        try
+        {
+            const auto acknowledged = IsRequestedProductAcknowledged(request);
+            if (!acknowledged)
+                return HubResult<bool>::Failure(acknowledged.Error());
+            if (acknowledged.Value())
+                return HubResult<bool>::Success(false);
+            auto saved = Detail::WriteJsonFileAtomically(RequestedProductAcknowledgementPath(),
+                                                         SerializeRequestedProduct(request));
+            if (!saved)
+                return HubResult<bool>::Failure(saved.Error());
+            return HubResult<bool>::Success(true);
+        }
+        catch (const std::exception& exception)
+        {
+            return HubResult<bool>::Failure(
+                RequestedProductError("The marketplace request could not be acknowledged.", exception.what()));
+        }
+    }
+
     std::filesystem::path MarketplaceCacheStore::ArchivePath(const MarketplaceCacheItem& item) const
     {
         ValidateItem(item);
@@ -316,6 +452,16 @@ namespace KeireHub
     std::filesystem::path MarketplaceCacheStore::PreviousVersionedIndexPath() const
     {
         return m_Root / "marketplace-cache-v2.json";
+    }
+
+    std::filesystem::path MarketplaceCacheStore::RequestedProductPath() const
+    {
+        return m_Root / "marketplace-request-v1.json";
+    }
+
+    std::filesystem::path MarketplaceCacheStore::RequestedProductAcknowledgementPath() const
+    {
+        return m_Root / "marketplace-request-ack-v1.json";
     }
 
     MarketplaceSessionLeaseStore::MarketplaceSessionLeaseStore(std::filesystem::path root) : m_Root(std::move(root))

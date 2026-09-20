@@ -795,7 +795,10 @@ void EditorWorkspaceLayer::OnAttach()
     }
     m_SceneViewportPanel->Initialize(Owner().GetProject() ? Owner().GetProject()->Root() : std::filesystem::path{});
     if (const auto project = Owner().GetProject())
-        m_PackageManagerPanel->Initialize(project->Root(), m_ExecutablePath);
+    {
+        m_RestoreProjectFocusFramesRemaining =
+            m_PackageManagerPanel->Initialize(project->Root(), m_ExecutablePath) ? 2U : 0U;
+    }
     LoadTheme(workspace, workspace.ActiveTheme());
     m_ConsolePanel->CaptureEngineLogs(Owner().GetTime().FrameCount(), m_Theme);
     if (!m_Smoke || m_InitializeProject)
@@ -1115,6 +1118,12 @@ void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 
 void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
 {
+    if (m_RestoreProjectFocusFramesRemaining > 0U)
+    {
+        --m_RestoreProjectFocusFramesRemaining;
+        m_AssetBrowserPanel->Registration().SetVisible(true);
+        m_AssetBrowserPanel->Registration().RequestFocus();
+    }
     if (m_SceneDocument)
         m_SceneDocument->SynchronizeSelection();
     if (!m_ActiveUndoContext || !m_ActiveUndoContext->IsOpen())

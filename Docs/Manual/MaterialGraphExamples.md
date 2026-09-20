@@ -1,7 +1,8 @@
 # Material Graph Examples
 
-A new Material owns its OpenPBR surface graph and publishes an assignable surface without a separate Shader Graph.
-These examples use the surface inputs shown by Material Output; the pin-filtered palette is authoritative.
+For new assets, author these expressions in a **Shader Graph > Surface / Lit** graph, then create a property-only
+Material using that shader. Existing graph-owned Materials can use the equivalent Material Output inputs. The
+pin-filtered palette is authoritative for the open graph.
 
 ## Example 1: Base Texture With Damage Flash
 
@@ -12,13 +13,14 @@ flowchart LR
     Sample --> Blend["Lerp"]
     DamageColor["Damage Color property"] --> Blend
     Damage["Damage float property<br/>0..1"] --> Blend
-    Blend --> Output["Material Output<br/>Base Color"]
+    Blend --> Output["Surface Shader Output<br/>Base Color"]
 ```
 
-1. Create a Material and open its OpenPBR surface graph.
+1. Create a Surface / Lit Shader Graph and open it.
 2. Add Base Texture, Damage Color, and Damage properties.
 3. Sample Base Texture and interpolate toward Damage Color using Damage.
-4. Connect the result to Base Color, save, and assign the Material Graph to a Mesh Renderer.
+4. Connect the result to Base Color and save. Select the shader, choose **Material from Shader**, and assign that
+   Material to a Mesh Renderer.
 5. In Play Mode, drive the reflected `Damage` value on one renderer without mutating the shared asset:
 
 ```csharp
@@ -43,8 +45,8 @@ flowchart LR
     BaseRough["Base Roughness"] --> Smooth["Lerp toward low roughness"]
     WetRough["Wet Roughness"] --> Smooth
     Wetness --> Smooth
-    Darken --> ColorOut["Material Output<br/>Base Color"]
-    Smooth --> RoughOut["Material Output<br/>Roughness"]
+    Darken --> ColorOut["Surface Shader Output<br/>Base Color"]
+    Smooth --> RoughOut["Surface Shader Output<br/>Roughness"]
 ```
 
 Package the wet surface contribution as a Material Layer when several materials need it. Keep Wetness as the shared
@@ -55,7 +57,7 @@ and no surface contribution boundary is needed.
 
 ```mermaid
 flowchart TD
-    Graph["Material Graph<br/>shared surface logic"] --> Parent["Published material asset"]
+    Graph["Surface Shader Graph<br/>shared surface logic"] --> Parent["Property-only Material"]
     Parent --> Red["Material Instance<br/>red paint overrides"]
     Parent --> Blue["Material Instance<br/>blue paint overrides"]
     Parent --> Metal["Material Instance<br/>metallic overrides"]
@@ -77,8 +79,8 @@ blocks every frame.
 
 ## Validation Checklist
 
-- The Material Graph selects the intended Shader Graph rather than redirecting into it.
-- Every required Material Output branch is connected with a compatible type.
+- The Material selects the intended surface Shader Graph.
+- Every required Shader Output branch is connected with a compatible type.
 - Exposed property stable IDs survive display-name changes.
 - Transparent and lighting behavior is tested on scene geometry, not only the preview mesh.
 - The target player cooks the needed shader permutation and referenced textures.

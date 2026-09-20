@@ -156,6 +156,69 @@ TEST_CASE("Marketplace cache rejects duplicate identities and incomplete ready e
     CHECK_FALSE(store.Save({.Revision = 1U, .AccountId = std::string(AccountId), .Items = {incomplete}}));
 }
 
+TEST_CASE("Marketplace requested products are acknowledged without rewriting the Hub cache")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
+    MarketplaceCacheSnapshot snapshot{.Revision = 11U,
+                                      .AccountId = std::string(AccountId),
+                                      .RequestedProductId = "00112233-4455-6677-8899-aabbccddeeff",
+                                      .Items = {ReadyItem()}};
+    REQUIRE(store.Save(snapshot));
+
+    const MarketplaceRequestedProduct firstRequest{.AccountId = std::string(AccountId),
+                                                   .ProductId = snapshot.RequestedProductId,
+                                                   .RequestId = "30112233-4455-4677-8899-aabbccddeeff"};
+    REQUIRE(store.PublishRequestedProduct(firstRequest));
+    const auto loadedRequest = store.LoadRequestedProduct();
+    REQUIRE(loadedRequest);
+    CHECK(loadedRequest.Value() == firstRequest);
+    const auto initiallyAcknowledged = store.IsRequestedProductAcknowledged(firstRequest);
+    REQUIRE(initiallyAcknowledged);
+    CHECK_FALSE(initiallyAcknowledged.Value());
+
+    const auto firstAcknowledgement = store.AcknowledgeRequestedProduct(firstRequest);
+    REQUIRE(firstAcknowledgement);
+    CHECK(firstAcknowledgement.Value());
+    const auto acknowledged = store.IsRequestedProductAcknowledged(firstRequest);
+    REQUIRE(acknowledged);
+    CHECK(acknowledged.Value());
+    const auto repeatedAcknowledgement = store.AcknowledgeRequestedProduct(firstRequest);
+    REQUIRE(repeatedAcknowledgement);
+    CHECK_FALSE(repeatedAcknowledgement.Value());
+
+    snapshot.Revision = 12U;
+    snapshot.Items.front().DisplayName = "Updated while the Editor is running";
+    REQUIRE(store.Save(snapshot));
+    const auto cacheAfterAcknowledgement = store.Load();
+    REQUIRE(cacheAfterAcknowledgement);
+    CHECK(cacheAfterAcknowledgement.Value() == snapshot);
+
+    auto repeatedProductRequest = firstRequest;
+    repeatedProductRequest.RequestId = "40112233-4455-4677-8899-aabbccddeeff";
+    REQUIRE(store.PublishRequestedProduct(repeatedProductRequest));
+    const auto repeatedProductAcknowledged = store.IsRequestedProductAcknowledged(repeatedProductRequest);
+    REQUIRE(repeatedProductAcknowledged);
+    CHECK_FALSE(repeatedProductAcknowledged.Value());
+    const auto newAcknowledgement = store.AcknowledgeRequestedProduct(repeatedProductRequest);
+    REQUIRE(newAcknowledgement);
+    CHECK(newAcknowledgement.Value());
+}
+
+TEST_CASE("Marketplace cache without a request marker has no pending Editor handoff")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    MarketplaceCacheStore store(temporary.Path() / "MarketplacePackages");
+    REQUIRE(store.Save({.Revision = 7U,
+                        .AccountId = std::string(AccountId),
+                        .RequestedProductId = "00112233-4455-6677-8899-aabbccddeeff",
+                        .Items = {ReadyItem()}}));
+
+    const auto request = store.LoadRequestedProduct();
+    REQUIRE(request);
+    CHECK(request.Value() == MarketplaceRequestedProduct{});
+}
+
 TEST_CASE("Marketplace session leases authorize only the live matching account")
 {
     KeireHubTests::TemporaryDirectory temporary;

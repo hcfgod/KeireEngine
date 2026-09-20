@@ -349,13 +349,16 @@ namespace Keire
         auto records = allRecords;
         std::vector<AssetId> sourceAssets;
         std::vector<AssetId> replacedAssets;
+        std::unordered_set<AssetId> selected;
+        std::unordered_set<AssetId> availableAssets;
         if (!assets.empty())
         {
             const auto previousCatalog = m_Impl->CacheRoot / "Runtime" / "catalog.json";
             if (!std::filesystem::is_regular_file(previousCatalog))
                 return ImportAssetsUnlocked({}, policy, cancellation, std::move(progress), refreshSources);
 
-            std::unordered_set<AssetId> selected;
+            for (const auto& entry : Detail::LoadCatalog(previousCatalog).Entries)
+                availableAssets.insert(entry.Id);
             std::unordered_set<std::string> affectedSources;
             const auto sourcePrefix = std::filesystem::relative(m_Impl->SourceRoot, m_Impl->Specification.ProjectRoot);
             const auto addAffectedSource = [&affectedSources, &sourcePrefix](const AssetSourceRecord& record)
@@ -415,8 +418,9 @@ namespace Keire
         std::vector<AssetId> successfulSourceAssets;
         std::vector<AssetId> successfulReplacedAssets;
         successfulSourceAssets.reserve(records.size());
-        for (auto record : records)
+        for (std::size_t next = 0; next < records.size(); ++next)
         {
+            auto record = records[next];
             ThrowIfOperationCancelled(cancellation);
             AssetImportStatus status;
             status.Id = record.Id;
@@ -477,6 +481,36 @@ namespace Keire
                 }
                 if (!restoredFromCache)
                     m_Impl->StoreCachedImport(record, imported);
+                if (!assets.empty())
+                {
+                    // Import missing dependencies too, so their source metadata and generated identities are published.
+                    const auto includeDependencies = [&](const std::span<const AssetId> dependencies)
+                    {
+                        for (const auto dependency : dependencies)
+                        {
+                            if (availableAssets.contains(dependency))
+                                continue;
+                            const auto owner = std::ranges::find_if(
+                                allRecords,
+                                [dependency](const AssetSourceRecord& source)
+                                {
+                                    return source.Id == dependency ||
+                                           std::ranges::find(source.SubAssets, dependency) != source.SubAssets.end();
+                                });
+                            if (owner == allRecords.end() || !selected.insert(owner->Id).second)
+                                continue;
+                            records.push_back(*owner);
+                            sourceAssets.push_back(owner->Id);
+                            replacedAssets.push_back(owner->Id);
+                            replacedAssets.insert(replacedAssets.end(), owner->SubAssets.begin(),
+                                                  owner->SubAssets.end());
+                        }
+                    };
+                    includeDependencies(record.Dependencies);
+                    includeDependencies(imported.AssetDependencies);
+                    for (const auto& subAsset : imported.SubAssets)
+                        includeDependencies(subAsset.AssetDependencies);
+                }
                 m_Impl->StoreCookInput(record, std::move(imported));
                 successfulSourceAssets.push_back(record.Id);
                 successfulReplacedAssets.push_back(record.Id);

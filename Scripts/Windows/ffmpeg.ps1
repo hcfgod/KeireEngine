@@ -306,8 +306,9 @@ $Configure = @(
     "--enable-decoder=exr",
     "--enable-encoder=flac",
     "--enable-muxer=flac",
-    "--extra-cflags=`"-MD -I$ZlibIncludeDirectoryBash`"",
-    "--extra-ldflags=`"-libpath:$ZlibLinkDirectoryBash`""
+    "--extra-cflags=-MD",
+    "--extra-cflags=-I$ZlibIncludeDirectoryBash",
+    "--extra-ldflags=-libpath:$ZlibLinkDirectoryBash"
 ) -join " "
 
 Write-Host "==> Building private LGPL FFmpeg $Configuration libraries"

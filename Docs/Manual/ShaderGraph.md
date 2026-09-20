@@ -2,13 +2,14 @@
 
 A Shader Graph is a target-based renderer program. It defines legal stages, resources, reflected properties, keywords,
 variant policy, output contract, and generated shaders for UI, Fullscreen, VFX, Custom Graphics, or Compute work. It is
-not directly assignable to a Mesh Renderer. Legacy Surface templates remain available only while surface graphs migrate
-into materials.
+not directly assignable to a Mesh Renderer. Surface templates provide shader logic for assignable property-only
+materials; existing graph-owned materials remain supported for compatibility.
 
 ## Create And Open
 
 1. In Project, choose **Create > Shader Graph**.
-2. Select UI, Fullscreen Effect, VFX, Custom Graphics, or Compute. Use a Legacy Surface template only for compatibility.
+2. Select a **Surface / ...** template for mesh materials, or UI, Fullscreen Effect, VFX, or Custom Graphics for those
+   targets. **Compute (not supported)** is disabled in the creation menu.
 3. Name the `.keireshadergraph` asset and double-click it.
 4. Use the Blackboard for exposed values and the search-first palette for nodes.
 5. Connect required results to the protected Shader Output.
@@ -31,8 +32,8 @@ Blackboard properties -> texture/coordinate/math nodes -> target stage logic -> 
 
 Supported catalogs include texture sampling, UV/coordinate work, scalar/vector math, color operations, noise and
 procedural helpers, and target-specific output pins. The actual palette and its compatibility filtering are
-authoritative for the open graph and target. Compute graphs serialize and validate their thread-group contract but do
-not compile until the compute-program artifact ABI ships.
+authoritative for the open graph and target. Compute compiler/runtime work has separate acceptance records; it does
+not make Compute creation available through this editor menu.
 
 ## Preview, Compile, And Save
 
@@ -40,8 +41,10 @@ Graph edits update the live preview through a validated candidate. Invalid topol
 last valid result. Shader and Material Graph documents autosave after 500 ms of inactivity; **Save** immediately flushes
 a still-dirty document. Source changes trigger targeted compilation and hot reload.
 
-Use the preview to check the selected prototype mesh and obvious parameter behavior, then assign a material using the
-graph to real scene geometry. Preview success does not replace target cooking or scene validation.
+For surface graphs, check a preview mesh and then assign a material using the graph to real scene geometry. UI and
+Fullscreen use a flat CPU preview with opacity over a checker background; mesh and environment controls are hidden.
+That preview does not execute a UI document or sample the scene framebuffer. Preview success does not replace target
+cooking or consumer validation.
 
 ## Reuse
 

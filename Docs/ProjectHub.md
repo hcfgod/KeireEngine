@@ -287,8 +287,12 @@ already open, its Package Manager observes the atomic token-free cache update. H
 account lease beside that cache; the Editor displays My Assets only when the lease is current and belongs to the same
 account. Signing out clears the lease immediately, while a crashed or closed Hub expires within 15 seconds. Otherwise
 Hub remains on Projects so the user can choose the target project; the next Editor reads the same requested-product
-marker and focuses the Package Manager after the matching Hub session is available. Registry and Asset Import packages
-are project-scoped Editor operations. Complete Project packages remain Hub creation operations.
+marker and focuses the Package Manager after the matching Hub session is available. The Editor records that request's
+unique identity in a separate atomic acknowledgement file. Later cache progress writes cannot erase the acknowledgement,
+and a new request for the same product still receives a new identity and focuses exactly once. A legacy cache-only
+request is acknowledged once during migration, which clears its stale tab selection without overriding later workspace
+choices. Registry and Asset Import packages are project-scoped Editor operations. Complete Project packages remain Hub
+creation operations.
 
 Minimizing or manually closing the Hub to its tray suspends rendering and fixed simulation but keeps its low-rate
 background layer update active. Account refresh and the short-lived Marketplace lease therefore continue while the Hub

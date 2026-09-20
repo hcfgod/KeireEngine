@@ -1013,7 +1013,8 @@ Assert-True ($coralScript.Contains('Assert-KeireLockedGitSource') -and
              $coralScript.Contains('Get-WindowsToolchainIdentity') -and
              $coralScript.Contains('Get-KeireCoralBuildVariantKey') -and
              $coralScript.Contains('$WorkspaceIdentity = Get-KeireWorkspaceIdentity $Root') -and
-             $coralScript.Contains('git clone --quiet --no-hardlinks --no-checkout $Source') -and
+              $coralScript.Contains(
+                  'git clone --quiet --no-hardlinks --no-checkout --revision $Lock.CORAL_COMMIT $Source') -and
              $coralScript.Contains('$CacheKey = "$($Lock.CORAL_COMMIT.Substring(0, 12))-$BuildVariant"') -and
              -not $coralScript.Contains('Patches\Coral') -and -not $coralScript.Contains('git apply')) `
     "Windows Coral source and variant-isolated build caches are validated without local patching"
@@ -1141,10 +1142,12 @@ Assert-True ($windowsFfmpegBuild.Contains('$candidateLicenseRoot') -and
              $unixFfmpegBuild.Contains('install/share/licenses/ffmpeg/SOURCE.txt')) `
     "FFmpeg cache validation requires package-distribution license inputs"
 Assert-True ($windowsFfmpegBuild.Contains('$Toolset -eq "gcc"') -and
-             $windowsFfmpegBuild.Contains('do not support the gcc toolset') -and
-             $windowsFfmpegBuild.Contains('Enter-WindowsToolEnvironment "vs2022" "msc" $Architecture') -and
-             $windowsFfmpegBuild.Contains('--toolchain=msvc') -and
-             $windowsFfmpegBuild.Contains('--extra-cflags=`"-MD')) `
+              $windowsFfmpegBuild.Contains('do not support the gcc toolset') -and
+              $windowsFfmpegBuild.Contains('Enter-WindowsToolEnvironment "vs2022" "msc" $Architecture') -and
+              $windowsFfmpegBuild.Contains('--toolchain=msvc') -and
+              $windowsFfmpegBuild.Contains('"--extra-cflags=-MD"') -and
+              $windowsFfmpegBuild.Contains('"--extra-cflags=-I$ZlibIncludeDirectoryBash"') -and
+              $windowsFfmpegBuild.Contains('"--extra-ldflags=-libpath:$ZlibLinkDirectoryBash"')) `
     "Windows FFmpeg uses an explicit MSVC producer and rejects unsupported GNU import-library consumers"
 Assert-True ($windowsFfmpegBuild.Contains('if (Test-FfmpegOutput $AlternateOutput $AlternateExpected)')) `
     "Windows FFmpeg alternate-configuration reuse applies the complete cache validator"

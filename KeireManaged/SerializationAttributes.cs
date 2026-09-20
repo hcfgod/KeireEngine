@@ -134,12 +134,23 @@ public sealed class ReadOnlyInInspectorAttribute : Attribute;
 public sealed class FormerlySerializedAsAttribute(string name) : Attribute
 {
     public string Name { get; } = name ?? throw new ArgumentNullException(nameof(name));
+    public readonly string SerializedName = name ?? throw new ArgumentNullException(nameof(name));
 }
 
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property)]
-public sealed class StableFieldIdAttribute(string id) : Attribute
+public sealed class StableFieldIdAttribute : Attribute
 {
-    public Guid Id { get; } = Guid.Parse(id);
+    public StableFieldIdAttribute(string id)
+    {
+        Id = Guid.Parse(id);
+        string compact = id.Replace("-", string.Empty, StringComparison.Ordinal);
+        High = Convert.ToUInt64(compact[..16], 16);
+        Low = Convert.ToUInt64(compact[16..], 16);
+    }
+
+    public Guid Id { get; }
+    public readonly ulong High;
+    public readonly ulong Low;
 }
 
 [AttributeUsage(AttributeTargets.Class, AllowMultiple = true, Inherited = true)]

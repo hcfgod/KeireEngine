@@ -817,6 +817,12 @@ verification before a project transaction. The durable snapshot remains the prod
 lease proves only that the matching local Hub session is live. Entitlement authorizes download access, while the
 independently Ed25519-signed publication and its bound archive digest establish integrity independently of the online
 grant service.
+
+Requested-product activation uses a separate atomically replaced request marker with a unique request ID. After the
+matching live account and cache snapshot are accepted, the Editor records that identity in a separate acknowledgement
+file before focusing the Package Manager. Hub never rewrites the acknowledgement and the Editor never rewrites the
+catalog cache, so concurrent progress publication cannot resurrect or lose a consumed request. Re-requesting the same
+product produces a new request ID and therefore focuses once again.
 Projects without package files remain valid, while the first successful package transaction raises
 `minimumEngineVersion` to 0.3.1 atomically.
 
