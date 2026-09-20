@@ -1364,7 +1364,10 @@ foreach ($directPackageScript in $directPackageScripts) {
                  $directPackageSource.Contains('Exit-KeireWorkspaceLock -Lock $WorkspaceLock')) `
         "Direct Windows package entrypoint '$directPackageScript' shares the repository workspace lock"
 }
-Assert-True ($windowsPackage.Contains('-SmokePlay -SmokeOutput $editorPlayValidationOutput') -and
+Assert-True ($windowsPackage.Contains('-SmokePlay -ProjectPath $editorPlayValidationProject') -and
+             $windowsPackage.Contains('"Build\Validation\editor-play-" + [guid]::NewGuid().ToString("N")') -and
+             $windowsPackage.Contains('Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" $editorPlayValidationProject') -and
+             $windowsPackage.Contains('-Path $editorPlayValidationRoot -Description "Editor Play validation snapshot"') -and
              $windowsPackage.Contains('twoPresentationTrees') -and
              $windowsPackage.Contains('topmostInputHandled') -and
              $windowsPackage.Contains('nativeWindowInputQueued')) `

@@ -982,8 +982,6 @@ namespace Keire
         return ParseShaderManifest(Json::parse(Text(bytes)));
     }
 
-    Ref<ShaderAsset> ShaderAsset::Error() { return CreateRef<ShaderAsset>(); }
-
     void MaterialAssetDefinition::SetTexture(std::string name, const AssetId texture)
     {
         if (!Detail::ValidShaderIdentifier(name))
@@ -1231,13 +1229,6 @@ namespace Keire
                           {"properties", std::move(properties)}};
         const auto text = source.dump(2) + '\n';
         return ToBytes(text);
-    }
-
-    Ref<MaterialAsset> MaterialAsset::Error()
-    {
-        MaterialAssetDefinition definition;
-        definition.Properties.emplace("ErrorColor", Color{1.0F, 0.0F, 1.0F, 1.0F});
-        return CreateRef<MaterialAsset>(std::move(definition));
     }
 
     AssetImporterRegistration CreateShaderAssetImporter(ShaderImporterSpecification specification)
@@ -1503,15 +1494,4 @@ namespace Keire
         return result;
     }
 
-    AssetDecoderRegistration CreateShaderAssetDecoder()
-    {
-        return {ShaderAsset::StaticType(), ShaderAsset::Error(),
-                [](const std::span<const std::byte> bytes) -> Ref<Asset> { return ShaderAsset::Decode(bytes); }};
-    }
-
-    AssetDecoderRegistration CreateMaterialAssetDecoder()
-    {
-        return {MaterialAsset::StaticType(), MaterialAsset::Error(),
-                [](const std::span<const std::byte> bytes) -> Ref<Asset> { return MaterialAsset::Decode(bytes); }};
-    }
 } // namespace Keire

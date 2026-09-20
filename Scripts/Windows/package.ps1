@@ -42,15 +42,20 @@ if ($DevelopmentStage) {
 else {
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "test.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -Update:$Update -Generate:$Generate } "Package test suite"
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokeWindow } "Package editor smoke test"
-$editorPlayValidationDirectory = Join-Path $Root "Build\Validation"
-$editorPlayValidationOutput = Join-Path $editorPlayValidationDirectory "editor-additive-play-$Configuration-$outputArchitecture.json"
-New-Item -ItemType Directory -Force $editorPlayValidationDirectory | Out-Null
-Remove-Item -LiteralPath $editorPlayValidationOutput -Force -ErrorAction SilentlyContinue
+$editorPlayValidationRoot = Join-Path $Root `
+    ("Build\Validation\editor-play-" + [guid]::NewGuid().ToString("N"))
+$editorPlayValidationProject = Join-Path $editorPlayValidationRoot "KeireSandbox"
+$editorPlayValidationOutput = Join-Path $editorPlayValidationRoot "result.json"
+try {
+Initialize-KeireOrdinaryChildDirectory -Root $Root -Path $editorPlayValidationRoot `
+    -Description "Editor Play validation snapshot"
+Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" $editorPlayValidationProject `
+    -AdditionalRelativeFiles (Get-WindowsKeireSandboxUiPackageFiles)
 $editorPlayValidationStartedAt = [DateTime]::UtcNow
 Invoke-CheckedWindowsCommand {
     & (Join-Path $PSScriptRoot "run.ps1") -Generator $Generator -Configuration $Configuration `
-        -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokePlay -SmokeOutput $editorPlayValidationOutput `
-        -SmokeTimeoutSeconds 300
+        -Architecture $Architecture -Toolset $Toolset -CI:$CI -SmokePlay -ProjectPath $editorPlayValidationProject `
+        -SmokeOutput $editorPlayValidationOutput -SmokeTimeoutSeconds 300
 } "Rendered additive Editor Play smoke test"
 if (-not (Test-Path -LiteralPath $editorPlayValidationOutput -PathType Leaf)) {
     throw "Rendered additive Editor Play smoke did not publish its result."
@@ -102,6 +107,11 @@ if ($editorPlayValidation.schemaVersion -ne 1 -or
     $editorPlayValidation.gpuOcclusion.vfxVisibility.maskedDraws -lt 1 -or
     -not $editorPlayValidation.gpuOcclusion.vfxVisibility.maskConsumed) {
     throw "Rendered additive Editor Play smoke published an incomplete result."
+}
+}
+finally {
+    Remove-KeireGeneratedDirectory -RepositoryRoot $Root -AllowedRoot (Join-Path $Root "Build\Validation") `
+        -Path $editorPlayValidationRoot -Description "Editor Play validation snapshot"
 }
 }
 Invoke-CheckedWindowsCommand { & (Join-Path $PSScriptRoot "build.ps1") -Generator $Generator -Configuration $Configuration -Architecture $Architecture -Toolset $Toolset -Target $assetToolName -CI:$CI } "AssetTool build"

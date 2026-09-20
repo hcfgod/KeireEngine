@@ -5,6 +5,9 @@ versions.
 
 ## Unreleased
 
+- Windows release packaging now runs the rendered sample-project smoke against an isolated tracked copy, preventing
+  importer metadata upgrades from dirtying the release worktree or changing the embedded build identity mid-package.
+
 - Marketplace product handoffs now carry a unique request marker that the Editor acknowledges independently of the Hub
   cache, so Package Manager opens once per website request instead of reopening on every Editor launch. Existing stale
   cache requests are acknowledged once during migration without overriding the user's later workspace selection.
