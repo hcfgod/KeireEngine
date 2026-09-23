@@ -2,6 +2,8 @@
 
 #include "Keire/Rendering/MaterialGraph.h"
 
+#include <filesystem>
+
 namespace Keire::Detail
 {
     [[nodiscard]] ShaderAssetDefinition ReflectMaterialProperties(const ShaderGraphDefinition& graph,

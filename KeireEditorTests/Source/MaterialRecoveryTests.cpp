@@ -267,7 +267,7 @@ TEST_CASE("property-only material imports preserve generated identity without sh
     }
 }
 
-TEST_CASE("property-only graph shader bindings resolve an existing shader without compiling it")
+TEST_CASE("property-only graph shader bindings resolve existing graphics shaders without compiling them")
 {
     const auto graphId = Keire::AssetId::Generate();
     const auto shaderId = Keire::AssetId::Generate();
@@ -308,7 +308,21 @@ TEST_CASE("property-only graph shader bindings resolve an existing shader withou
     CHECK(imported.SubAssets.front().Id == runtimeId);
     CHECK(Keire::MaterialAsset::Decode(imported.SubAssets.front().Bytes)->Definition().Shader == shaderId);
     CHECK(imported.SourceDependencies.empty());
-    graph = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Ui);
+    graph = Keire::CreateShaderGraphTemplate(Keire::ShaderGraphTemplate::Compute);
+    context.ResolveAssetSource = [&](const Keire::AssetId asset) -> std::optional<Keire::AssetImportSource>
+    {
+        CHECK(asset == graphId);
+        Keire::AssetImportSource record;
+        record.Id = graphId;
+        record.Type = Keire::ShaderGraphAsset::StaticType();
+        record.RelativePath = "Compute.keireshadergraph";
+        return record;
+    };
+    context.ReadProjectFile = [&](const std::filesystem::path& path)
+    {
+        CHECK(path == std::filesystem::path("Assets/Compute.keireshadergraph"));
+        return Keire::ShaderGraphAsset::EncodeSource(graph);
+    };
     CHECK_THROWS_AS(Keire::CreateMaterialGraphAssetImporter().ContextualImport(
                         context, Keire::MaterialAsset::EncodeAuthoringSource(material)),
                     std::invalid_argument);
