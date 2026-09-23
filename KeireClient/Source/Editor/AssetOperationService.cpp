@@ -343,56 +343,75 @@ namespace KeireEditor
         const auto startedAt = m_Clock();
         auto pending = std::move(m_Queue.front());
         m_Queue.pop_front();
-        const auto directory = m_ProjectRoot / "Library" / "AssetOperations" / pending.Request.OperationId;
-        std::filesystem::create_directories(directory);
-        const auto requestPath = directory / "request.json";
-        const auto progressPath = directory / "progress.json";
-        const auto resultPath = directory / "result.json";
-        const auto cancelPath = directory / "cancel";
-        if (pending.Request.Kind == Keire::Detail::AssetWorkerOperationKind::CreateAsset)
+        try
         {
-            const auto extension = pending.Request.CreateRelativePath.extension();
-            auto payloadPath = std::filesystem::path("source");
-            payloadPath += extension.native();
-            pending.Request.CreatePayloadPath = directory / payloadPath;
-            std::string payload;
-            if (!pending.Payload.empty())
-                payload.assign(reinterpret_cast<const char*>(pending.Payload.data()), pending.Payload.size());
-            Keire::Detail::WriteTextFileAtomically(pending.Request.CreatePayloadPath, payload);
-            pending.Payload.clear();
-            pending.Payload.shrink_to_fit();
-            for (std::size_t index = 0; index < pending.AuxiliaryPayloads.size(); ++index)
+            const auto directory = m_ProjectRoot / "Library" / "AssetOperations" / pending.Request.OperationId;
+            std::filesystem::create_directories(directory);
+            const auto requestPath = directory / "request.json";
+            const auto progressPath = directory / "progress.json";
+            const auto resultPath = directory / "result.json";
+            const auto cancelPath = directory / "cancel";
+            if (pending.Request.Kind == Keire::Detail::AssetWorkerOperationKind::CreateAsset)
             {
-                auto auxiliaryPayloadPath = std::filesystem::path("auxiliary-" + std::to_string(index));
-                auxiliaryPayloadPath += pending.AuxiliaryPayloads[index].RelativePath.extension().native();
-                auxiliaryPayloadPath = directory / auxiliaryPayloadPath;
-                std::string auxiliaryPayload;
-                if (!pending.AuxiliaryPayloads[index].Source.empty())
+                const auto extension = pending.Request.CreateRelativePath.extension();
+                auto payloadPath = std::filesystem::path("source");
+                payloadPath += extension.native();
+                pending.Request.CreatePayloadPath = directory / payloadPath;
+                std::string payload;
+                if (!pending.Payload.empty())
+                    payload.assign(reinterpret_cast<const char*>(pending.Payload.data()), pending.Payload.size());
+                Keire::Detail::WriteTextFileAtomically(pending.Request.CreatePayloadPath, payload);
+                pending.Payload.clear();
+                pending.Payload.shrink_to_fit();
+                for (std::size_t index = 0; index < pending.AuxiliaryPayloads.size(); ++index)
                 {
-                    auxiliaryPayload.assign(
-                        reinterpret_cast<const char*>(pending.AuxiliaryPayloads[index].Source.data()),
-                        pending.AuxiliaryPayloads[index].Source.size());
+                    auto auxiliaryPayloadPath = std::filesystem::path("auxiliary-" + std::to_string(index));
+                    auxiliaryPayloadPath += pending.AuxiliaryPayloads[index].RelativePath.extension().native();
+                    auxiliaryPayloadPath = directory / auxiliaryPayloadPath;
+                    std::string auxiliaryPayload;
+                    if (!pending.AuxiliaryPayloads[index].Source.empty())
+                    {
+                        auxiliaryPayload.assign(
+                            reinterpret_cast<const char*>(pending.AuxiliaryPayloads[index].Source.data()),
+                            pending.AuxiliaryPayloads[index].Source.size());
+                    }
+                    Keire::Detail::WriteTextFileAtomically(auxiliaryPayloadPath, auxiliaryPayload);
+                    pending.Request.CreateAuxiliarySources.push_back(
+                        {pending.AuxiliaryPayloads[index].RelativePath, std::move(auxiliaryPayloadPath)});
                 }
-                Keire::Detail::WriteTextFileAtomically(auxiliaryPayloadPath, auxiliaryPayload);
-                pending.Request.CreateAuxiliarySources.push_back(
-                    {pending.AuxiliaryPayloads[index].RelativePath, std::move(auxiliaryPayloadPath)});
+                pending.AuxiliaryPayloads.clear();
+                pending.AuxiliaryPayloads.shrink_to_fit();
             }
-            pending.AuxiliaryPayloads.clear();
-            pending.AuxiliaryPayloads.shrink_to_fit();
+            pending.Request.SourceIndexPath = m_ProjectRoot / "Library/AssetCache/Runtime/source-index.json";
+            Keire::Detail::WriteAssetWorkerRequest(requestPath, pending.Request);
+            KEIRE_CLIENT_INFO("[Asset Operations] Starting {} operation {} with worker '{}' (reason='{}', targets={}).",
+                              Keire::Detail::AssetWorkerOperationName(pending.Request.Kind),
+                              pending.Request.OperationId, Keire::Detail::PathToUtf8(m_WorkerExecutable),
+                              pending.Request.Reason, pending.Request.ImportAssets.size());
+            std::vector<std::string> arguments{"--request",  Keire::Detail::PathToUtf8(requestPath),
+                                               "--progress", Keire::Detail::PathToUtf8(progressPath),
+                                               "--result",   Keire::Detail::PathToUtf8(resultPath),
+                                               "--cancel",   Keire::Detail::PathToUtf8(cancelPath)};
+            auto process = Keire::Detail::ChildProcess::Start(m_WorkerExecutable, arguments, m_ProjectRoot);
+            m_Running.emplace(RunningOperation{std::move(pending), directory, progressPath, resultPath, cancelPath,
+                                               std::move(process), startedAt});
+            m_Progress = Keire::AssetOperationProgress{.Phase = Keire::AssetOperationPhase::Scanning};
         }
-        pending.Request.SourceIndexPath = m_ProjectRoot / "Library/AssetCache/Runtime/source-index.json";
-        Keire::Detail::WriteAssetWorkerRequest(requestPath, pending.Request);
-        KEIRE_CLIENT_INFO("[Asset Operations] Starting {} operation {} with worker '{}' (reason='{}', targets={}).",
-                          Keire::Detail::AssetWorkerOperationName(pending.Request.Kind), pending.Request.OperationId,
-                          Keire::Detail::PathToUtf8(m_WorkerExecutable), pending.Request.Reason,
-                          pending.Request.ImportAssets.size());
-        std::vector<std::string> arguments{
-            "--request", Keire::Detail::PathToUtf8(requestPath), "--progress", Keire::Detail::PathToUtf8(progressPath),
-            "--result",  Keire::Detail::PathToUtf8(resultPath),  "--cancel",   Keire::Detail::PathToUtf8(cancelPath)};
-        auto process = Keire::Detail::ChildProcess::Start(m_WorkerExecutable, arguments, m_ProjectRoot);
-        m_Running.emplace(RunningOperation{std::move(pending), directory, progressPath, resultPath, cancelPath,
-                                           std::move(process), startedAt});
-        m_Progress = Keire::AssetOperationProgress{.Phase = Keire::AssetOperationPhase::Scanning};
+        catch (const std::exception& error)
+        {
+            AssetOperationCompletion completion;
+            completion.Kind = pending.Request.Kind;
+            completion.Context = pending.Context;
+            completion.OperationId = pending.Request.OperationId;
+            completion.SourceIndexPath = pending.Request.SourceIndexPath;
+            completion.Result.Success = false;
+            completion.Result.Diagnostic = std::string("Asset worker could not start: ") + error.what();
+            completion.QueueMilliseconds =
+                std::chrono::duration<double, std::milli>(startedAt - pending.QueuedAt).count();
+            completion.ExecutionMilliseconds = std::chrono::duration<double, std::milli>(m_Clock() - startedAt).count();
+            m_Completions.push_back(std::move(completion));
+            m_Progress.reset();
+        }
     }
 
     void AssetOperationService::FinishCurrent()

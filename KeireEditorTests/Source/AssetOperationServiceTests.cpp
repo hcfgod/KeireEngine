@@ -49,6 +49,45 @@ TEST_CASE("scene Save As adoption compares the original snapshot and preserves i
     CHECK_FALSE(context.CanAdoptSceneCopy(sourceAsset, source));
 }
 
+TEST_CASE("Asset worker startup failures become completions and leave the queue usable")
+{
+    struct Directory final
+    {
+        std::filesystem::path Path =
+            std::filesystem::temp_directory_path() / ("Keire-Worker-Startup-" + Keire::AssetId::Generate().ToString());
+        ~Directory()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Path, ignored);
+        }
+    } directory;
+    std::filesystem::create_directories(directory.Path / "Assets");
+    const auto worker = directory.Path / "worker.exe";
+    Keire::Detail::WriteTextFileAtomically(worker, "test placeholder");
+    KeireEditor::AssetOperationService operations(worker, directory.Path);
+    SUBCASE("worker disappears after startup") { std::filesystem::remove(worker); }
+    SUBCASE("operation staging is blocked")
+    {
+        Keire::Detail::WriteTextFileAtomically(directory.Path / "Library", "not a directory");
+    }
+    const auto asset = Keire::AssetId::Generate();
+    for (std::uint64_t generation = 1; generation <= 2; ++generation)
+    {
+        operations.QueueAssetImport(asset, KeireEditor::AssetOperationPriority::MaterialRefresh,
+                                    {.ReloadAsset = asset, .Generation = generation});
+        CHECK_NOTHROW(operations.Update());
+        CHECK_FALSE(operations.Busy());
+        const auto completion = operations.TakeCompletion();
+        REQUIRE(completion);
+        CHECK_FALSE(completion->Result.Success);
+        CHECK(completion->Result.Diagnostic.starts_with("Asset worker could not start:"));
+        CHECK(completion->Context.ReloadAsset == asset);
+        CHECK(completion->Context.Generation == generation);
+        CHECK_FALSE(completion->OperationId.empty());
+        CHECK_FALSE(operations.TakeCompletion());
+    }
+}
+
 namespace
 {
     class AssetWorkerTestRuntime final

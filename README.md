@@ -554,3 +554,6 @@ preview to evaluate the actual effect. See [Shaders and Materials](Docs/ShadersA
 
 UI-target materials can be assigned in a scene UI Document's **UI Material** field. See the
 [UI Toolkit workflow](Docs/Scripting/UiAndEvents.md) for editor and C# usage.
+
+Live material edits remain authoritative while a background asset reload finishes; an older reload cannot replace
+the newer preview value. Material source persistence and undo continue through the normal Inspector workflow.

@@ -2420,45 +2420,6 @@ TEST_CASE("Catalog replacement recovers a thumbnail load that failed before impo
     assets->Close();
 }
 
-TEST_CASE("Development asset publication advances live handles without rebuilding a catalog")
-{
-    TemporaryAssetProject project;
-    project.Write("Greeting.txt", "catalog value");
-    auto database =
-        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
-    const auto record = database->Records().front();
-    const auto imported = database->ImportAll();
-
-    auto events = Keire::CreateRef<Keire::EventBus>();
-    std::vector<Keire::AssetLoadedEvent> loaded;
-    auto listener = events->Subscribe<Keire::AssetLoadedEvent>(
-        [&loaded](const Keire::AssetLoadedEvent& event)
-        {
-            loaded.push_back(event);
-            return Keire::EventFlow::Continue;
-        });
-    Keire::AssetSystemSpecification specification;
-    specification.Mode = Keire::AssetMode::Development;
-    specification.DevelopmentCatalog = imported.CatalogPath;
-    auto assets = Keire::CreateRef<Keire::AssetSystem>(specification, events);
-    const auto handle = assets->Load<Keire::TextAsset>(record.Id);
-    WaitFor(*assets, [&handle] { return handle.State() == Keire::AssetState::Ready; });
-    REQUIRE(handle.Get());
-    CHECK(handle.Get()->Text() == "catalog value");
-    const auto revision = handle.Revision();
-
-    REQUIRE(assets->PublishDevelopmentAsset(record.Id, Keire::CreateRef<Keire::TextAsset>("live preview")));
-    REQUIRE(handle.Get());
-    CHECK(handle.Get()->Text() == "live preview");
-    CHECK(handle.Revision() == revision + 1);
-    REQUIRE_FALSE(loaded.empty());
-    CHECK(loaded.back().Id == record.Id);
-    CHECK(loaded.back().Reload);
-
-    assets->Close();
-    events->Close();
-}
-
 TEST_CASE("Missing assets become explicit failures while retaining typed defaults")
 {
     TemporaryAssetProject project;

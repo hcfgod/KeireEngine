@@ -1443,7 +1443,10 @@ function Remove-IncompatibleBuildBinaries {
     }
     $preserveOutputs = $false
     if (Test-Path -LiteralPath $IdentityStamp -PathType Leaf) {
-        $preserveOutputs = (Get-Content -LiteralPath $IdentityStamp -Raw).Trim() -eq $ExpectedIdentity
+        $priorParts = (Get-Content -LiteralPath $IdentityStamp -Raw).Trim() -split '\|'
+        # Source inventory changes regenerate the build graph; they do not change compiler provenance.
+        $preserveOutputs = $priorParts.Count -eq 7 -and -not [string]::IsNullOrWhiteSpace($priorParts[6]) -and
+            ($priorParts[0..5] -join '|') -eq ($expectedParts[0..5] -join '|')
     }
     if ($preserveOutputs) { return }
 

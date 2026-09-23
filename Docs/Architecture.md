@@ -1,5 +1,10 @@
 # Architecture
 
+Development asset publication may replace a reloading asset. Each queued load retains its starting revision;
+completion pumping discards results superseded by a newer live publication, including stale failures. Worker
+loading-state transitions and owner-thread publication share the asset-system lock so an old job cannot leave a
+newly published asset stuck reloading. The normal owner-thread callback and lifetime contracts remain unchanged.
+
 ## Material and shader replacement direction
 
 Compute compilation validates the generated SPIR-V buffer ABI against `ProgramArtifact` reflection before publishing

@@ -5,6 +5,12 @@ versions.
 
 ## Unreleased
 
+- Windows build regeneration preserves compatible compiler outputs when only the source inventory changes, rather
+  than deleting running editor dependencies and all configuration caches.
+- Missing asset workers and request-staging failures now report failed operations without closing the editor;
+  subsequent asset requests remain available for retry.
+- Live development asset edits now supersede in-flight catalog reloads, preventing stale reload completions from
+  replacing newer material previews or rejecting edits during reload.
 - Scene and prefab cooking now retain camera fullscreen and UI Document material dependencies; importer revisions
   invalidate previously incomplete dependency caches. Incompatible UI materials fall back to standard UI rendering.
 - Scene UI Documents now expose an optional UI shader material in the Inspector and C# API, propagated to all UI

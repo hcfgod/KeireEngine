@@ -17,6 +17,7 @@
 #include <functional>
 #include <limits>
 #include <mutex>
+#include <optional>
 #include <ranges>
 #include <stdexcept>
 #include <string>
@@ -187,6 +188,7 @@ namespace Keire
             bool Reload = false;
             bool CountedInQueue = true;
             std::function<Ref<Asset>(Ref<Asset>, Ref<Asset>)> ApplyReload;
+            std::optional<std::uint64_t> ExpectedRevision;
         };
 
         struct StreamJob
@@ -266,22 +268,28 @@ namespace Keire
 
         void QueueLoad(Job job, const AssetPriority priority)
         {
+            const auto expectedRevision = job.State->Revision();
             JobDescription description;
             description.Name = "Asset load";
             description.Priority = ToJobPriority(priority);
             description.Class = JobClass::Blocking;
             description.Domain = JobDomain::Streaming;
             (void)WorkScope->Submit(std::move(description),
-                                    [this, job = std::move(job)](JobContext& context) mutable
+                                    [this, job = std::move(job), expectedRevision](JobContext& context) mutable
                                     {
                                         if (context.StopRequested())
                                         {
                                             job.State->Cancel();
                                             return;
                                         }
-                                        job.State->SetLoading(job.Reload);
+                                        {
+                                            std::scoped_lock lock(Mutex);
+                                            if (job.State->Revision() == expectedRevision)
+                                                job.State->SetLoading(job.Reload);
+                                        }
                                         Completion completion{job.State, {}, {}, job.Reload, true};
                                         completion.ApplyReload = job.Decoder.ApplyReload;
+                                        completion.ExpectedRevision = expectedRevision;
                                         try
                                         {
                                             completion.Value = LoadValue(job);
@@ -787,7 +795,7 @@ namespace Keire
                 if (state->Type() != asset->Type())
                     throw std::invalid_argument("The published development asset type does not match its handle.");
                 const auto current = state->State();
-                if (current != AssetState::Ready && current != AssetState::Failed)
+                if (current != AssetState::Ready && current != AssetState::Failed && current != AssetState::Reloading)
                     return false;
                 reload = true;
                 applyReload = decoder->second.ApplyReload;
@@ -800,9 +808,9 @@ namespace Keire
             if (!asset || asset->Type() != state->Type())
                 throw std::runtime_error("Asset reload transaction returned an empty or mismatched asset.");
         }
-        state->Commit(std::move(asset));
         {
             std::scoped_lock lock(m_Impl->Mutex);
+            state->Commit(std::move(asset));
             ++m_Impl->CompletedLoads;
             if (reload)
                 ++m_Impl->Reloads;
@@ -904,6 +912,9 @@ namespace Keire
         }
         for (auto& completion : completions)
         {
+            // A live authoring publication owns the newer revision, including when the old reload failed.
+            if (completion.ExpectedRevision && completion.State->Revision() != *completion.ExpectedRevision)
+                continue;
             if (completion.Value && completion.Reload && completion.ApplyReload && !completion.State->UsingFallback())
             {
                 try

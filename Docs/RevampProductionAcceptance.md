@@ -1,5 +1,29 @@
 # Material/shader production acceptance
 
+## Live edit overlap and render checks — September 23, 2026
+
+A deterministic regression reproduced rejected development publications while a catalog reload was in flight.
+Development publication now accepts reloading assets and makes old completion results obsolete by revision.
+The final ASan asset suite passed 63 cases / 823 assertions; the earlier optimized selection passed 63 / 819.
+The added assertions confirm a later deliberate reload still applies. This fixes the confirmed publication race; continuous
+drag-time black flicker still needs the native scenario to establish whether it has the same cause.
+
+Actual GPU readback checks passed on Windows D3D12 and Vulkan independently: 7 cases / 1,867 assertions each for
+baked-light brightness parity, lightmap binding reset, shadow reception, and anti-aliasing across render paths and
+requested GI modes. Requested GI modes include Irradyn and validate documented fallback where unsupported.
+These bounded pixel tests do not establish exhaustive visual correctness for every lighting scene.
+
+The remaining D3D12 render suite passed 78 cases / 4,655 assertions, bringing the two selections to all 85 cases.
+The remaining Vulkan suite passed 78 cases / 4,719 assertions, also completing all 85 cases on that backend.
+Editor asset-operation tests passed 5 cases / 151 assertions; the startup-failure test additionally passed ASan
+with 1 case / 36 assertions. The rebuilt Debug editor reopened the saved camera-effect/UI project successfully.
+Worker launch failure during a native color edit exposed an uncaught startup exception after build regeneration
+removed the worker executable. Startup/staging failures now become failed asset-operation completions with their
+original context. Windows generation now distinguishes source inventory changes from compiler provenance changes.
+The Windows Fast harness passed its output-provenance fixtures, then stopped at a pre-existing empty lowercase
+`src` directory. That unrelated directory was preserved. The Unix harness could not start because WSL reports
+`HCS_E_HYPERV_NOT_INSTALLED`; no Unix pass is claimed.
+
 ## Camera effects and UI shaders — September 23, 2026
 
 Fullscreen camera stages and UI Document material assignment now execute in the editor and cooked player.

@@ -223,6 +223,15 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $intermediateOutput "sentinel") -PathType Leaf) `
         "Same-toolchain Windows intermediate preservation"
     Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII `
+        -Value "ninja|x86_64|msc|off|False|$toolchainIdentity|older-source-inventory"
+    Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
+        -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedBinaryIdentity `
+        -IdentityStamp $binaryIdentityStamp
+    Assert-True (Test-Path -LiteralPath (Join-Path $binaryOutputJunction "sentinel") -PathType Leaf) `
+        "Source inventory changes preserve same-toolchain Windows binaries"
+    Assert-True (Test-Path -LiteralPath (Join-Path $intermediateOutput "sentinel") -PathType Leaf) `
+        "Source inventory changes preserve same-toolchain Windows intermediates"
+    Set-Content -LiteralPath $binaryIdentityStamp -Encoding ASCII `
         -Value "ninja|x86_64|msc|off|False|msc-vs18.0-vc14.51.0-sdk10.0.28000.0|fingerprint"
     Remove-IncompatibleBuildBinaries -Root $binaryOutputFixture -Architecture x86_64 -Toolset msc `
         -ToolchainIdentity $toolchainIdentity -ExpectedIdentity $expectedBinaryIdentity `

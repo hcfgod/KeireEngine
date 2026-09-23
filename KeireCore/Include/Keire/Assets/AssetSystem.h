@@ -166,6 +166,7 @@ namespace Keire
 
         void Mount(const AssetMountSpecification& specification);
         [[nodiscard]] bool Unmount(const std::filesystem::path& catalogPath);
+        /// Publishes a live development revision, superseding any in-flight reload of the prior revision.
         [[nodiscard]] bool PublishDevelopmentAsset(AssetId id, Ref<Asset> asset);
         [[nodiscard]] bool Reload(AssetId id, AssetPriority priority = AssetPriority::High);
         [[nodiscard]] Ref<AssetStreamOperation> ReadRangeAsync(AssetId id, std::uint64_t offset, std::size_t bytes,
