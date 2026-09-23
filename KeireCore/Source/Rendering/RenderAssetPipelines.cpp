@@ -89,6 +89,8 @@ namespace Keire::RenderBackend
                                                                     const MaterialSurfaceState surface,
                                                                     const std::string_view passRole)
     {
+        if (definition.VertexLayoutVersion == UiShaderVertexLayoutVersion)
+            throw std::invalid_argument("Screen-space materials require a camera effect or UI consumer, not a mesh.");
         SDL_GPUShader* vertex = CreateAssetShader(definition, true, passRole);
         SDL_GPUShader* fragment = nullptr;
         try

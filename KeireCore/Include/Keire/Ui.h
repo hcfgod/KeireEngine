@@ -326,6 +326,8 @@ namespace Keire
         bool NoSavedSettings = false;
         bool NoScrollbar = false;
         bool NoScrollWithMouse = false;
+        // Reserve width for responsive content even when it currently fits vertically.
+        bool AlwaysVerticalScrollbar = false;
     };
 
     class KEIRE_API UiError final : public std::runtime_error

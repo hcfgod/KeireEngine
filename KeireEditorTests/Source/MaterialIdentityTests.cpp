@@ -419,3 +419,36 @@ TEST_CASE("material shader picker rejects compute and non-surface graph targets 
     }
     CHECK_FALSE(KeireEditor::MaterialInspectorPanel::AcceptsSurfaceShaderGraph({}));
 }
+
+TEST_CASE("material code shader picker rejects non-surface targets without losing saved overrides")
+{
+    Keire::ShaderAssetDefinition shader;
+    shader.Source = "Assets/Surface.hlsl";
+    shader.Properties = {{"Roughness", Keire::ShaderPropertyType::Scalar, {0.5F, 0.0F, 0.0F, 0.0F}}};
+    CHECK(KeireEditor::MaterialInspectorPanel::AcceptsSurfaceShader(shader));
+    Keire::MaterialAuthoringDefinition source;
+    source.Shader.Asset = Keire::AssetId::Generate();
+    source.Properties.emplace("Roughness", 0.25F);
+    const auto bytes = Keire::MaterialAsset::EncodeAuthoringSource(source);
+    KeireEditor::MaterialDocument document;
+    const KeireEditor::MaterialDocument::ShaderResolver resolve =
+        [&](Keire::AssetId) -> std::optional<Keire::ShaderAssetDefinition>
+    {
+        return KeireEditor::MaterialInspectorPanel::AcceptsSurfaceShader(shader) ? std::optional(shader) : std::nullopt;
+    };
+    document.Open(bytes, resolve);
+    REQUIRE(document.HasResolvedShader());
+    const auto saved = document.SaveSource();
+    for (const auto target : {"UI", "Fullscreen", "VFX", "Custom Graphics", "Compute", "Unknown", ""})
+    {
+        shader.ProgramTarget = target;
+        CHECK_FALSE(KeireEditor::MaterialInspectorPanel::AcceptsSurfaceShader(shader));
+        document.Open(saved, resolve);
+        CHECK_FALSE(document.HasResolvedShader());
+        CHECK(document.SaveSource() == saved);
+    }
+    shader.ProgramTarget = "Material";
+    document.Open(saved, resolve);
+    REQUIRE(document.HasResolvedShader());
+    CHECK(std::get<float>(document.Property("Roughness")) == doctest::Approx(0.25F));
+}

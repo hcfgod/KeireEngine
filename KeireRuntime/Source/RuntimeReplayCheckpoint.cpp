@@ -25,7 +25,8 @@ namespace KeireRuntime
                                    {"state", layer.StateId},
                                    {"time", layer.Time},
                                    {"weight", layer.Weight},
-                                   {"normalizedTime", layer.NormalizedTime}};
+                                   {"normalizedTime", layer.NormalizedTime},
+                                   {"exitTimeProgress", layer.ExitTimeProgress}};
             if (layer.Transition)
             {
                 const auto& transition = *layer.Transition;
@@ -82,6 +83,7 @@ namespace KeireRuntime
             Keire::AnimatorCheckpointLayer decoded{
                 layer.at("id").get<std::string>(), layer.at("state").get<std::string>(), layer.at("time").get<float>(),
                 layer.at("weight").get<float>(), layer.at("normalizedTime").get<float>()};
+            decoded.ExitTimeProgress = layer.value("exitTimeProgress", static_cast<double>(decoded.NormalizedTime));
             if (layer.contains("transition"))
             {
                 const auto& transition = layer.at("transition");

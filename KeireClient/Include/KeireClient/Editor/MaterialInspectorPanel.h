@@ -12,6 +12,7 @@ namespace KeireEditor
     class MaterialInspectorPanel final
     {
       public:
+        [[nodiscard]] static bool AcceptsSurfaceShader(const Keire::ShaderAssetDefinition& shader) noexcept;
         [[nodiscard]] static bool AcceptsSurfaceShaderGraph(std::span<const std::byte> source);
         [[nodiscard]] static bool IsGeneratedShaderSource(const Keire::AssetSourceRecord& source,
                                                           std::span<const Keire::AssetSourceRecord> records);

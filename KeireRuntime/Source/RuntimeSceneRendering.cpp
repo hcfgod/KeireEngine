@@ -28,7 +28,11 @@ namespace KeireRuntime
                     session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
             {
                 for (auto submission : presentation->UiRenderSubmissions(view))
+                {
+                    if (submission.Target == Keire::RuntimeUiRenderTarget::ScreenOverlay)
+                        submission.Target = Keire::RuntimeUiRenderTarget::CameraOverlay;
                     renderer->SubmitRuntimeUiTarget(std::move(submission));
+                }
             }
         }
         const auto fallback = Keire::Internal::SelectRuntimeRenderSession(world);

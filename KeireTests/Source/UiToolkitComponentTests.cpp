@@ -54,6 +54,8 @@ TEST_CASE("UI Document component stores one visual tree and panel contract")
     const auto source = Keire::CreateRef<Keire::UiDocumentComponent>();
     source->SetVisualTree(visualTree);
     source->SetPanelSettings(panelSettings);
+    const auto material = Keire::AssetId::Generate();
+    source->SetMaterial(material);
     source->SetSortingOrder(17);
     source->SetReceivesInput(false);
 
@@ -69,6 +71,8 @@ TEST_CASE("UI Document component stores one visual tree and panel contract")
     REQUIRE(document);
     CHECK(document->VisualTree() == visualTree);
     CHECK(document->PanelSettings() == panelSettings);
+    CHECK(document->Material() == material);
+    CHECK(std::get<Keire::AssetId>(values.at("material")) == material);
     CHECK(document->SortingOrder() == 17);
     CHECK_FALSE(document->ReceivesInput());
 
@@ -76,6 +80,10 @@ TEST_CASE("UI Document component stores one visual tree and panel contract")
     invalid.insert_or_assign("sortingOrder", static_cast<std::int64_t>(std::numeric_limits<std::int32_t>::max()) + 1);
     CHECK_THROWS_AS(registration->Deserialize(*restored, invalid, registration->SchemaVersion), std::invalid_argument);
     CHECK(document->SortingOrder() == 17);
+    auto legacy = values;
+    legacy.erase("material");
+    registration->Deserialize(*restored, legacy, 1);
+    CHECK_FALSE(document->Material());
 }
 
 TEST_CASE("UI Document is the only registered scene UI component and retired IDs remain reserved")

@@ -30,6 +30,8 @@ namespace Keire::RenderBackend
     void AccumulateRuntimeUiGeometryStatistics(RuntimeUiRendererStatistics& statistics,
                                                const RuntimeUiGeometry& geometry) noexcept;
     [[nodiscard]] RuntimeUiGeometry BuildRuntimeUiGeometry(std::span<const RuntimeUiDrawCommand> commands);
+    [[nodiscard]] RuntimeUiGeometry BuildRuntimeUiCameraGeometry(const CapturedRuntimeUiCameraPanel& panel,
+                                                                 std::uint32_t width, std::uint32_t height);
     [[nodiscard]] RuntimeUiGeometry BuildRuntimeUiWorldGeometry(const CapturedRuntimeUiWorldPanel& panel,
                                                                 std::uint32_t width, std::uint32_t height);
 } // namespace Keire::RenderBackend

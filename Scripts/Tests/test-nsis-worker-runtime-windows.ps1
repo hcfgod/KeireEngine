@@ -131,10 +131,12 @@ function Invoke-Installer {
     $safeName = $Operation -replace '[^A-Za-z0-9_.-]', '-'
     $record = Join-Path $caseRoot "$safeName.process.txt"
     Write-Host "==> [$Product NSIS] $Operation"
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     $exitCode = Invoke-Process -Path $Path -Arguments $Arguments
+    $timer.Stop()
     [IO.File]::WriteAllText($record,
-        "executable=$Path`r`narguments=$($Arguments -join ' ')`r`nexitCode=$exitCode`r`n")
-    Write-Host "    exit=$exitCode"
+        "executable=$Path`r`narguments=$($Arguments -join ' ')`r`nexitCode=$exitCode`r`nelapsedMilliseconds=$($timer.ElapsedMilliseconds)`r`n")
+    Write-Host "    exit=$exitCode elapsed=$($timer.ElapsedMilliseconds)ms"
     return $exitCode
 }
 
@@ -152,6 +154,10 @@ function New-Payload {
     [IO.File]::WriteAllText((Join-Path $Path "README.md"), "payload-$Version")
     foreach ($directory in @("Config", "Docs", "Samples")) {
         [IO.File]::WriteAllText((Join-Path $Path "$directory\owned.txt"), "$Product-$Version-$directory")
+    }
+    # Exercise sibling pruning: a retry delay per remaining sibling scales catastrophically in real packages.
+    foreach ($index in 1..32) {
+        [IO.File]::WriteAllText((Join-Path $Path "Config\nested\owned-$index.txt"), "$Product-$Version-$index")
     }
     & $python.Executable @pythonPrefix $manifestWriter --stage $Path --artifact $Product --version $Version
     if ($LASTEXITCODE -ne 0) {

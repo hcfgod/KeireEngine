@@ -83,7 +83,8 @@ namespace KeireEditor
         else if (target == Keire::ShaderGraphTarget::CustomGraphics)
             ui.TextWrapped("The mesh illustrates shading only. Custom pass inputs and scheduling are not shown.");
         else if (target == Keire::ShaderGraphTarget::Fullscreen)
-            ui.TextWrapped("Scene color, depth, and fullscreen injection are not shown.");
+            ui.TextWrapped("Assign a material using this graph to a Camera Fullscreen Effects slot to view the GPU "
+                           "result. Scene Color is available there; this thumbnail is an approximation.");
         auto preview = m_Controller.ShaderGraphState().PreviewSettings();
         bool previewChanged = false;
         previewChanged |= ui.SliderFloat("Exposure", preview.Exposure, 0.1F, 4.0F);

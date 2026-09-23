@@ -84,6 +84,10 @@ namespace KeireEditor
         [[nodiscard]] bool SetSurface(Keire::MaterialSurfaceState surface);
 
         [[nodiscard]] Keire::AssetId Shader() const noexcept { return m_AuthoringDefinition.Shader.Asset; }
+        [[nodiscard]] std::string_view ShaderTarget() const noexcept
+        {
+            return m_ShaderDefinition ? std::string_view(m_ShaderDefinition->ProgramTarget) : std::string_view{};
+        }
         [[nodiscard]] bool HasResolvedShader() const noexcept { return m_ShaderDefinition.has_value(); }
         [[nodiscard]] const Keire::MaterialShaderReference& ShaderReference() const noexcept
         {

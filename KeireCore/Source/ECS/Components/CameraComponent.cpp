@@ -31,6 +31,12 @@ namespace Keire
 
     CameraComponent::CameraComponent() : Component(StaticType()) {}
 
+    void CameraComponent::SetFullscreenEffect(const CameraEffectStage stage, const AssetId material)
+    {
+        m_FullscreenEffects.at(static_cast<std::size_t>(stage)) = material;
+        NotifyChanged();
+    }
+
     void CameraComponent::SetProjection(const CameraProjection projection)
     {
         m_Projection = projection;
@@ -102,6 +108,7 @@ namespace Keire
 
     void CameraComponent::Reset()
     {
+        m_FullscreenEffects = {};
         m_Projection = CameraProjection::Perspective;
         m_ClearMode = CameraClearMode::Skybox;
         m_Primary = true;
@@ -131,11 +138,19 @@ namespace Keire
             {"nearPlane", "Near", "Clipping", ComponentPropertyKind::Scalar, false, 0.0001, 10'000'000.0, 0.01},
             {"farPlane", "Far", "Clipping", ComponentPropertyKind::Scalar, false, 0.001, 10'000'000.0, 1.0},
             {"clearColor", "Clear Color", "Environment", ComponentPropertyKind::Color}};
+        result.Properties.push_back(
+            {"effectBeforeTonemapping", "Before Tonemapping", "Fullscreen Effects", ComponentPropertyKind::Asset});
+        result.Properties.push_back(
+            {"effectAfterTonemapping", "After Tonemapping", "Fullscreen Effects", ComponentPropertyKind::Asset});
+        result.Properties.push_back({"effectAfterUi", "After UI", "Fullscreen Effects", ComponentPropertyKind::Asset});
         result.Factory = [] { return Ref<Component>(CreateRef<CameraComponent>()); };
         result.Serialize = [](const Component& component)
         {
             const auto& camera = dynamic_cast<const CameraComponent&>(component);
-            return ComponentPropertyBag{{"projection", static_cast<std::int64_t>(camera.m_Projection)},
+            return ComponentPropertyBag{{"effectBeforeTonemapping", camera.m_FullscreenEffects[0]},
+                                        {"effectAfterTonemapping", camera.m_FullscreenEffects[1]},
+                                        {"effectAfterUi", camera.m_FullscreenEffects[2]},
+                                        {"projection", static_cast<std::int64_t>(camera.m_Projection)},
                                         {"clearMode", static_cast<std::int64_t>(camera.m_ClearMode)},
                                         {"primary", camera.m_Primary},
                                         {"priority", static_cast<std::int64_t>(camera.m_Priority)},
@@ -153,6 +168,12 @@ namespace Keire
             const auto projection = ReadCameraProperty(values, "projection", std::int64_t{0});
             if (projection < 0 || projection > 1)
                 throw std::invalid_argument("Camera projection is invalid.");
+            camera.SetFullscreenEffect(CameraEffectStage::BeforeTonemapping,
+                                       ReadCameraProperty(values, "effectBeforeTonemapping", AssetId{}));
+            camera.SetFullscreenEffect(CameraEffectStage::AfterTonemapping,
+                                       ReadCameraProperty(values, "effectAfterTonemapping", AssetId{}));
+            camera.SetFullscreenEffect(CameraEffectStage::AfterUi,
+                                       ReadCameraProperty(values, "effectAfterUi", AssetId{}));
             camera.SetProjection(static_cast<CameraProjection>(projection));
             const auto clearMode = ReadCameraProperty(values, "clearMode", std::int64_t{0});
             if (clearMode < 0 || clearMode > 1)

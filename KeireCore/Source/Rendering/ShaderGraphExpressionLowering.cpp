@@ -529,6 +529,15 @@ namespace Keire::Detail
         case ShaderGraphNodeKind::ScreenPosition:
             result = {"input.Position.xy", ShaderGraphValueType::Vector2};
             break;
+        case ShaderGraphNodeKind::SceneColor:
+        {
+            if (m_Definition.Target.Target != ShaderGraphTarget::Fullscreen)
+                throw std::invalid_argument("Scene Color requires a Fullscreen shader target.");
+            const auto uv = CoerceShaderGraphExpression(namedInput("UV"), ShaderGraphValueType::Vector2);
+            result = {"KeireUiSourceTexture.Sample(KeireUiSourceSampler, " + uv.Code + ")",
+                      ShaderGraphValueType::Color};
+            break;
+        }
         case ShaderGraphNodeKind::DepthFade:
         {
             const auto distance = CoerceShaderGraphExpression(namedInput("Distance"), ShaderGraphValueType::Scalar);

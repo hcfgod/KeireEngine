@@ -170,6 +170,17 @@ namespace
                     CHECK((ImGui::GetCurrentWindowRead()->Flags & ImGuiWindowFlags_NoScrollWithMouse) == 0);
                 }
             }
+            ui.SetNextWindowSize({230.0F, 250.0F}, false);
+            if (auto stable = ui.BeginWindow("Responsive preview", nullptr, {.AlwaysVerticalScrollbar = true}); stable)
+            {
+                const auto width = ui.ContentAvailable().Width;
+                if (m_UiFrames > 0)
+                    CHECK(width == m_PreviewWidth);
+                m_PreviewWidth = width;
+                CHECK(ImGui::GetCurrentWindowRead()->ScrollbarY);
+                // Alternate fitting and overflowing content, as inspector selections do.
+                ImGui::Dummy({width, m_UiFrames % 2 == 0 ? width : width + 300.0F});
+            }
             ui.SetNextWindowSize({320.0F, 200.0F});
             if (auto window = ui.BeginWindow("Headless UI"); window)
             {
@@ -549,6 +560,7 @@ namespace
                                        std::string(16U, '\n');
         Keire::UiCodeEditorState m_CodeEditorState;
         float m_CodeEditorExpectedScrollY = 0.0F;
+        float m_PreviewWidth = 0.0F;
         int m_UiFrames = 0;
     };
 

@@ -67,7 +67,10 @@ internal enum NativeRenderingColorProperty : byte
 internal enum NativeRenderingAssetProperty : byte
 {
     Mesh,
-    Cookie
+    Cookie,
+    EffectBeforeTonemapping,
+    EffectAfterTonemapping,
+    EffectAfterUi
 }
 
 internal static unsafe class NativeRuntimeRendering

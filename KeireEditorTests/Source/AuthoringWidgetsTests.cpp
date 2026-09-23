@@ -444,6 +444,22 @@ TEST_CASE("Stable node graph focus fits tall shader outputs in a short viewport"
     CHECK(canvas.Zoom() < 0.35F);
 }
 
+TEST_CASE("Stable node graph focus reveals a newly created offscreen node without moving authored content")
+{
+    const std::array nodes{
+        KeireEditor::NodeGraphNode{.Id = 42, .Position = {1800.0F, 1400.0F}, .Size = {220.0F, 180.0F}}};
+    KeireEditor::StableNodeGraphCanvas canvas;
+    canvas.RestoreViewport({{-400.0F, -300.0F}, 0.5F});
+    canvas.Focus(nodes, {360.0F, 200.0F});
+    const auto top = (nodes.front().Position.Y + canvas.Pan().Y) * canvas.Zoom();
+    const auto left = (nodes.front().Position.X + canvas.Pan().X) * canvas.Zoom();
+    CHECK(top >= 23.9F);
+    CHECK(left >= 23.9F);
+    CHECK(top + nodes.front().Size.Y * canvas.Zoom() <= 176.1F);
+    CHECK(left + nodes.front().Size.X * canvas.Zoom() <= 336.1F);
+    CHECK(nodes.front().Position == Keire::Vector2{1800.0F, 1400.0F});
+}
+
 TEST_CASE("Stable node graph zoom detail prevents labels from overlapping scaled rows")
 {
     const auto overview = KeireEditor::StableNodeGraphCanvas::DetailForZoom(0.5F);

@@ -2,6 +2,19 @@
 
 Reviewed September 12, 2026 against `Docs/MaterialShaderReplacement.md` and the restored working tree. This is a review-lane handoff, not a production-readiness claim. It intentionally does not amend the shared progress document, README, or changelog.
 
+## September 22 reconciliation
+
+The findings below describe the September 12 snapshot, not an instruction to recreate existing systems. Current
+source includes the missing EditorTests translation units, reviewed editor migration with staged source/index/catalog
+publication, mixed material selection and texture-transform controls, shared-shader input/package review, and a
+bounded compute compiler/device API. `MaterialCookParityTests` now loads and inspects the cooked shader dependency.
+The September 22 Dist material/shader/compute tests passed 168 core cases and 133 editor cases.
+
+Remaining work includes production compiler-work-key integration, measured real compiler invocation counts,
+in-progress compiler cancellation, full compute/target-preview acceptance, representative cooked-player/SDK visual
+parity, performance baselines, and native platform evidence. See [current remaining work](MaterialShaderReplacement.md#current-remaining-work)
+and [production acceptance](RevampProductionAcceptance.md) rather than treating all historical P0 findings as open.
+
 ## Integrated follow-up — canonical review, September 12, 2026
 
 This section is a later review of the canonical checkout after peer changes began landing. It supersedes a

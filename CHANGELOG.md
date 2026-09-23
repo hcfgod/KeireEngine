@@ -5,6 +5,26 @@ versions.
 
 ## Unreleased
 
+- Scene and prefab cooking now retain camera fullscreen and UI Document material dependencies; importer revisions
+  invalidate previously incomplete dependency caches. Incompatible UI materials fall back to standard UI rendering.
+- Scene UI Documents now expose an optional UI shader material in the Inspector and C# API, propagated to all UI
+  render targets without recreating the retained document.
+- Added three camera fullscreen material slots, Scene Color graph sampling, screen-space shader ABI import invalidation,
+  and scene/editor/runtime propagation. Material creation now supports UI, fullscreen, VFX, and custom graphics targets.
+- Shader Graph creation now frames newly added nodes instead of leaving them outside the visible canvas; compilation
+  status no longer implies that every target is executing in the scene.
+- Added production shader-import coverage for all ten graphics templates and their declared backend passes.
+- Surface material shader selection now excludes non-surface code shaders as well as non-surface Shader Graphs;
+  incompatible existing references retain their saved overrides for recovery.
+- Fixed Windows uninstall and failed-install rollback delays caused by retrying parent-directory deletion while
+  sibling files still existed. Empty-directory pruning retains anchored verification and preserves user content.
+- Added visible installer phase messages and elapsed timings to the Hub and Editor NSIS regression fixtures.
+- Fixed Inspector preview flicker at narrow panel sizes by reserving vertical scrollbar space, preventing
+  width-dependent previews from repeatedly making the panel overflow and shrink.
+- Updated animation scripting examples to use the public Animator component API and handle missing components safely.
+- Fixed looping Animator states never reaching exit times of one or more cycles. Transition progress now survives
+  loop wrapping and replay checkpoints while sampled normalized time remains within the current clip cycle.
+
 - Windows Hub installation now reclaims an orphaned `keirehub` protocol handler when its Kéire Hub executable no
   longer exists, while preserving live or malformed external handlers.
 - Published immutable stable catalog sequence 18 with the Windows 0.4.4 Editor and Hub packages while retaining the

@@ -29,6 +29,7 @@ namespace Keire::Detail
         AssetId RenderTexture;
         bool DepthTest = false;
         bool ReceivesInput = true;
+        AssetId Material;
     };
 
     struct UiDocumentPanelProjection final
@@ -37,6 +38,7 @@ namespace Keire::Detail
         RuntimeUiElementId Root;
         UiPanelSettingsDefinition Settings;
         bool ReceivesInput = true;
+        AssetId Material;
     };
 
     [[nodiscard]] std::optional<Vector2> MapCanvasLayoutToViewport(const ProjectedCanvasState& canvas,

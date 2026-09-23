@@ -56,6 +56,7 @@ namespace Keire::Detail
         {
             AssetId VisualTree;
             AssetId PanelSettings;
+            AssetId Material;
             AssetHandle<UiVisualTreeAsset> VisualTreeHandle;
             AssetHandle<UiPanelSettingsAsset> PanelSettingsHandle;
             std::map<AssetId, AssetHandle<UiStyleSheetAsset>> StyleSheetHandles;
@@ -110,7 +111,8 @@ namespace Keire::Detail
                 projection.Assign(node, state.Instance->Root());
             }
             if (entity.ActiveInHierarchy())
-                projections.push_back({entity.Id(), state.Instance->Root(), state.Panel, state.ReceivesInput});
+                projections.push_back(
+                    {entity.Id(), state.Instance->Root(), state.Panel, state.ReceivesInput, state.Material});
         }
 
         [[nodiscard]] std::uint64_t AllocateGeneration() noexcept
@@ -188,6 +190,7 @@ namespace Keire::Detail
         auto& state = m_Impl->Documents[entity.Id()];
         state.ComponentSortingOrder = component->SortingOrder();
         state.ReceivesInput = component->ReceivesInput();
+        state.Material = component->Material();
         if (!component->VisualTree())
         {
             m_Impl->RemoveInstance(entity.Id(), state, uiNodes, nodeEntities);

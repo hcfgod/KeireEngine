@@ -2,6 +2,11 @@
 
 ## Implemented foundation
 
+The contract below records the graph-overhaul foundation. The current creation workflow is property-first:
+new schema-5 Materials select a shared or project shader and edit values in the Inspector, while existing schema-7
+graph-owned Materials retain surface graph editing. See [Shaders and Materials](ShadersAndMaterials.md) for current
+user workflows and [remaining work](MaterialShaderReplacement.md#current-remaining-work) for reconciled gaps.
+
 Surface materials and target programs are separate authoring products that share the same typed graph model and shader
 publication boundary:
 
@@ -22,7 +27,8 @@ publication boundary:
 
 The `.keirematerial` extension is the canonical schema-7 surface-authoring container. Historical flat material
 sources use the explicit `.keiremateriallegacy` compatibility extension; `.keirematerialgraph` is no longer
-registered for new assets. Material Instance schema 3 and redirector cleanup remain later migration steps.
+registered for new assets. Material Instance schema 3 stores stable property-ID overrides; redirector cleanup remains
+a separate migration step.
 
 ## Target architecture
 
@@ -46,11 +52,11 @@ public asset exposes SDL, native GPU handles, backend compiler objects, or third
 | Schema-6 target contracts and compatibility readers | Complete | Deterministic encoding, validation, manifests, templates, and tests. |
 | OpenPBR/slab graph foundation | Partial | Core surface, bounded mix/add, coat, fuzz, HLSL lowering, and editor preview ship; complex deferred closure payloads remain. |
 | Shared typed compiler | Complete | Both authoring paths emit the same versioned ProgramArtifact, reflection, diagnostics, dependencies, and variants. |
-| Target integrations | Partial | Graphics variants publish; bounded UI/fullscreen/VFX runtime request APIs and compute dispatch remain. |
+| Target integrations | Partial | Graphics variants and bounded compute dispatch exist; complete target-specific previews, shared scheduling, and platform acceptance remain. |
 | Deferred renderer | Complete | Single-sample Deferred Hybrid, exact backend probing, standard/extended GBuffer lanes, decals, forward escape, and spatial-lighting parity are live. |
 | Irradyn GI | Partial | Requested/effective modes, quality intent, and the live Deferred Hybrid spatial-lighting path ship; a dedicated multi-bounce scene cache remains future work. |
-| Material promotion | Complete | `.keirematerial` schema 7 is authoritative; old flat sources are explicit compatibility assets. |
-| Material Instance schema 3 | Planned | Instance schema 2 remains authoritative pending static-parameter and redirector migration. |
+| Material promotion | Complete | `.keirematerial` supports schema-5 property sources and schema-7 surface graphs; legacy custom-shader assets retain compatibility readers. |
+| Material Instance schema 3 | Complete | Stable property-ID overrides, static keyword selection, compatibility readers, importer, and Inspector are implemented. |
 | Certified interchange adapters | Planned | Assimp remains the current legacy FBX/OBJ/glTF adapter; USD, Alembic, MaterialX, and process plug-ins are not certified. |
 | IK Rig, Retargeter, and Control Rig assets | Planned | Existing arbitrary skeletons, Rig Definition, retargeting, and IK solvers remain supported. |
 
@@ -77,5 +83,6 @@ legacy payloads and redirectors never enter final cooked packages.
 - OpenPBR additive composition cannot create an unbounded closure weight.
 - Target/stage/resource mismatches fail with actionable diagnostics before publication.
 - Material value edits do not invoke shader compilation.
-- Schema-1–6 projects open without source mutation and save as canonical schema 7.
+- Historical sources open without source mutation; property-only sources retain schema 5 and graph-owned surface
+  sources save as schema 7. Explicit reviewed migration preserves source and generated runtime identities.
 - The Starter 3D schema-2 raw shader retains vertex layout 3, instance ABI 2, and occlusion metadata through import.

@@ -1,5 +1,6 @@
 #include "Keire/ECS/Components/UiDocumentComponent.h"
 
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Ui/UiToolkit.h"
 
 #include <limits>
@@ -23,6 +24,12 @@ namespace Keire
     } // namespace
 
     UiDocumentComponent::UiDocumentComponent() : Component(StaticType()) {}
+
+    void UiDocumentComponent::SetMaterial(const AssetId value)
+    {
+        m_Material = value;
+        NotifyChanged();
+    }
 
     void UiDocumentComponent::SetVisualTree(const AssetId value)
     {
@@ -61,12 +68,16 @@ namespace Keire
             {"panelSettings", "Panel Settings", "Document", ComponentPropertyKind::Asset, false, std::nullopt,
              std::nullopt, 0.1, UiPanelSettingsAsset::StaticType()},
             {"sortingOrder", "Sorting Order", "Presentation", ComponentPropertyKind::Integer},
+            {"material", "UI Material", "Presentation", ComponentPropertyKind::Asset, false, std::nullopt, std::nullopt,
+             0.1, MaterialAsset::StaticType()},
             {"receivesInput", "Receives Input", "Input", ComponentPropertyKind::Boolean},
         };
         result.Properties[0].Tooltip = "Visual tree instantiated by this scene document.";
         result.Properties[1].Tooltip =
             "Panel target, scaling, render-texture, camera, and world-surface presentation settings.";
         result.Properties[2].Tooltip = "Added to the shared Panel Settings sorting order for deterministic stacking.";
+        result.Properties[3].Tooltip =
+            "Optional UI-target shader material applied to this document. None uses standard UI rendering.";
         result.Factory = [] { return Ref<Component>(CreateRef<UiDocumentComponent>()); };
         result.Serialize = [](const Component& component)
         {
@@ -74,7 +85,8 @@ namespace Keire
             return ComponentPropertyBag{{"visualTree", document.m_VisualTree},
                                         {"panelSettings", document.m_PanelSettings},
                                         {"sortingOrder", static_cast<std::int64_t>(document.m_SortingOrder)},
-                                        {"receivesInput", document.m_ReceivesInput}};
+                                        {"receivesInput", document.m_ReceivesInput},
+                                        {"material", document.m_Material}};
         };
         result.Deserialize = [](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)
         {
@@ -91,6 +103,7 @@ namespace Keire
             }
             document.SetSortingOrder(static_cast<std::int32_t>(sortingOrder));
             document.SetReceivesInput(Read(values, "receivesInput", true));
+            document.SetMaterial(Read(values, "material", AssetId{}));
         };
         return result;
     }

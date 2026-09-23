@@ -111,6 +111,38 @@ Materials and Material Instances are the primary assignment workflows. Legacy Ma
 projects readable without exposing generated code; every path cooks to the same immutable `MaterialAsset` consumed by
 the renderer.
 
+## Camera fullscreen effects
+
+Create a **Fullscreen Effect** Shader Graph, then create a Material using that shader. In a Camera Inspector, assign
+that material under **Fullscreen Effects** to **Before Tonemapping**, **After Tonemapping**, or **After UI**. Each slot
+accepts one material and can be cleared independently. The camera slots determine execution order; the graph's
+injection-point metadata does not override an explicit camera assignment. Camera assignments participate in scene
+save/load, duplication, reset, and Inspector undo. The editor Scene view follows the selected game camera's effects;
+Game view, camera preview, and the runtime player use the same renderer path.
+
+For a tint effect, connect **UV0 → Scene Color.UV**, multiply **Scene Color.Color** by an exposed Color parameter,
+and connect the result to **Fullscreen Shader Output.Color**. A graph can also generate a replacement color or
+procedural pattern without sampling Scene Color. Time and Delta Time use the scene material clock. Edit the material
+parameter to update the image without recompiling the graph. Scene Color is a separate copy of the current image,
+so sampling never reads the attachment being written. Before Tonemapping operates on linear HDR color; subsequent
+slots operate on the tone-mapped image, with After UI including camera overlay panels. Temporal history is recorded
+before the two post-tonemapping slots.
+
+The graph thumbnail remains a CPU approximation and has no camera scene input. Verify effects in the Scene/Game
+views or camera preview. Scene Color is fragment-only and only legal in Fullscreen graphs. Scene depth sampling and
+arbitrary user-scheduled render passes are not provided by this path. Invalid or unavailable effect assets leave the
+current image intact; invalid shader reloads retain the last executable shader. UI/fullscreen materials cannot be
+executed as mesh shaders.
+
+Material creation now accepts Surface, UI, Fullscreen, VFX, and Custom Graphics shaders. Replacement shader choices
+stay within the resolved material's target. Retained UI uses UI materials; VFX and Custom Graphics materials use
+existing mesh consumers. Authored shader execution on VFX billboards/ribbons is still a separate integration task.
+
+C++ uses `CameraComponent::SetFullscreenEffect(CameraEffectStage::AfterTonemapping, materialId)`.
+C# exposes nullable Material properties `Camera.EffectBeforeTonemapping`, `Camera.EffectAfterTonemapping`, and
+`Camera.EffectAfterUi`; assigning null clears that stage. These are asset references, so edits persist when the scene
+is saved outside Play Mode.
+
 ## Shader Graph Authoring
 
 Create **Shader Graph** in the Project panel, then choose a **Surface / ...** template, UI, Fullscreen Effect, VFX, or
@@ -119,12 +151,13 @@ isolated worker restores the published source index instead of rescanning unrela
 and opens the resulting `NewShaderGraph.keireshadergraph` directly in the dockable editor. Nodes,
 pins, connections, and parameter properties use stable opaque identities. Validated cable replacement, bounded
 undo/redo, deterministic schema upgrades, and last-good compilation make incomplete edits recoverable.
+Creating a node brings that node into view, including nodes added from the blackboard or reusable-function picker.
 The header deliberately uses **Shader Target**, **Shader Output**, and **Live Shader Preview** terminology so shader
 program authoring remains visibly distinct from material-value authoring.
 
 The shared search-first node palette is available from the toolbar and the canvas context menu. Typing filters names
 and categories; Up/Down wraps through results; Enter creates at the requested canvas position. The current catalog has
-125 stable operations organized under Parameters, Constants, Inputs, Coordinates, Texture, Surface,
+126 stable operations organized under Parameters, Constants, Inputs, Coordinates, Texture, Surface,
 Attributes, BSDF, Color, Vector, Math, Procedural, Scene, Utility, Logic & Variants, and Advanced.
 Right-clicking a node opens target-specific actions for inspection, cable removal, deletion, and adding a categorized
 type-compatible node. Pin context menus provide the same compatible picker plus pin-level unlinking; cable context
@@ -371,3 +404,6 @@ tests cover separate Shader and Material Graph documents, reflected pins, connec
 Shader Graph references, the full twelve-example compiler progression, scene bindings, scripts, VFX staging, and
 canonical/template parity. Render tests keep generated output on the production graphics path rather than validating
 screenshots alone.
+
+UI shader materials can be assigned to the **UI Material** field of a scene UI Document. The optional reference
+is saved with the scene and exposed as `UIDocument.Material` in C#. Clearing it restores standard UI shading.

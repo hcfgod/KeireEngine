@@ -784,6 +784,16 @@ namespace Keire::Detail
     {
         try
         {
+            if (component == ManagedRenderingComponent::Camera)
+            {
+                const auto camera = Find<CameraComponent>(scene, entity);
+                if (!camera || property < ManagedRenderingAssetProperty::EffectBeforeTonemapping ||
+                    property > ManagedRenderingAssetProperty::EffectAfterUi)
+                    return std::nullopt;
+                const auto stage = static_cast<std::size_t>(property) -
+                                   static_cast<std::size_t>(ManagedRenderingAssetProperty::EffectBeforeTonemapping);
+                return camera->FullscreenEffects()[stage];
+            }
             if (component == ManagedRenderingComponent::MeshRenderer)
             {
                 const auto renderer = Find<MeshRendererComponent>(scene, entity);
@@ -818,6 +828,17 @@ namespace Keire::Detail
     {
         try
         {
+            if (component == ManagedRenderingComponent::Camera)
+            {
+                const auto camera = Find<CameraComponent>(scene, entity);
+                if (!camera || property < ManagedRenderingAssetProperty::EffectBeforeTonemapping ||
+                    property > ManagedRenderingAssetProperty::EffectAfterUi)
+                    return false;
+                const auto stage = static_cast<std::uint8_t>(property) -
+                                   static_cast<std::uint8_t>(ManagedRenderingAssetProperty::EffectBeforeTonemapping);
+                camera->SetFullscreenEffect(static_cast<CameraEffectStage>(stage), value);
+                return true;
+            }
             if (component == ManagedRenderingComponent::MeshRenderer)
             {
                 const auto renderer = Find<MeshRendererComponent>(scene, entity);

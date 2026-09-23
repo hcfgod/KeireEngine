@@ -7,9 +7,13 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace KeireEditor
 {
+    [[nodiscard]] std::string JoinEntityTags(std::span<const std::string> tags);
+    [[nodiscard]] std::optional<std::vector<std::string>> ParseEntityTags(std::string_view text);
+
     struct ComponentOrderPayload final
     {
         Keire::EntityId Entity;

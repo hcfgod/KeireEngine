@@ -1,7 +1,7 @@
 #include "KeireHubRuntime/InstallTransaction.h"
 
-#include <KeireHubRuntimeInternal/InstallMutationFileSystem.h>
 #include <KeireHubRuntimeInternal/InstallLegacyMigrationInternal.h>
+#include <KeireHubRuntimeInternal/InstallMutationFileSystem.h>
 #include <KeireHubRuntimeInternal/InstallTransactionInternal.h>
 #include <KeireHubRuntimeInternal/InstallTransactionLocatorInternal.h>
 #include <KeireHubRuntimeInternal/Persistence.h>
@@ -257,8 +257,7 @@ namespace KeireHub
                                                    const Detail::InstallTransactionLocator& locator);
 
         [[nodiscard]] HubStatus UpdatePhase(const Detail::InstallTransactionLocator& locator,
-                                            TransactionJournal& journal,
-                                            const InstallTransactionPhase phase)
+                                            TransactionJournal& journal, const InstallTransactionPhase phase)
         {
             journal.Phase = phase;
             return WriteJournal(locator, journal);
@@ -403,9 +402,8 @@ namespace KeireHub
                 if (std::filesystem::exists(receiptPath, error) || error)
                 {
                     return HubResult<std::optional<InstallReceipt>>::Failure(TransactionError(
-                        HubErrorCode::UnsafeInstallRoot,
-                        "A non-empty destination contains an invalid product receipt.", request.DestinationRoot,
-                        error ? error.message() : receipt.Error().TechnicalDetails));
+                        HubErrorCode::UnsafeInstallRoot, "A non-empty destination contains an invalid product receipt.",
+                        request.DestinationRoot, error ? error.message() : receipt.Error().TechnicalDetails));
                 }
                 auto migrated = Detail::MigrateLegacyInstallation(mutation, request);
                 if (!migrated)
@@ -422,10 +420,7 @@ namespace KeireHub
             return HubResult<std::optional<InstallReceipt>>::Success(std::move(receipt).Value());
         }
 
-        [[nodiscard]] std::string NewInstallationId()
-        {
-            return Detail::SecureInstallRandomId();
-        }
+        [[nodiscard]] std::string NewInstallationId() { return Detail::SecureInstallRandomId(); }
 
         [[nodiscard]] HubResult<InstallOwnedFile> DescribeFile(const std::filesystem::path& root,
                                                                const std::filesystem::path& relative)
@@ -518,6 +513,11 @@ namespace KeireHub
             for (auto parent = (root / relative).parent_path(); parent != root && !parent.empty();
                  parent = parent.parent_path())
             {
+                // Remaining owned or user files are not transient deletion failures. This is only a
+                // pruning hint; the anchored mutation still validates and removes the actual directory.
+                std::error_code error;
+                if (!std::filesystem::is_empty(parent, error) || error)
+                    break;
                 const auto parentRelative = parent.lexically_relative(root);
                 if (const auto removed = fileSystem.Value()->RemoveEmptyDirectory(parentRelative); !removed)
                     break;
@@ -606,8 +606,8 @@ namespace KeireHub
         {
             const auto stageReceiptPath = StageRoot(locator) / InstallReceiptFileName;
             const auto activeReceiptPath = request.DestinationRoot / InstallReceiptFileName;
-            const auto receiptRoot = std::filesystem::exists(stageReceiptPath) ? StageRoot(locator)
-                                                                               : request.DestinationRoot;
+            const auto receiptRoot =
+                std::filesystem::exists(stageReceiptPath) ? StageRoot(locator) : request.DestinationRoot;
             auto receipt = ReadInstallReceipt(receiptRoot);
             if (!receipt)
                 return HubStatus::Failure(receipt.Error());
@@ -744,7 +744,8 @@ namespace KeireHub
             if (const auto status = stageFiles.WriteTextAtomically(InstallReceiptFileName, encoded.Value(), false);
                 !status)
                 return HubResult<InstallReceipt>::Failure(status.Error());
-            if (const auto status = stageFiles.WriteTextAtomically(InstallMarkerFileName, marker.Value(), false); !status)
+            if (const auto status = stageFiles.WriteTextAtomically(InstallMarkerFileName, marker.Value(), false);
+                !status)
                 return HubResult<InstallReceipt>::Failure(status.Error());
             // The receipt is durable before package copying starts. If a copy is interrupted, cleanup can remove only
             // exact matching partial files and preserve any unknown transaction neighbor.
@@ -1204,8 +1205,8 @@ namespace KeireHub
 
         if (previous.Value())
         {
-            if (const auto moved = MoveReceiptInventory(mutation, request.DestinationRoot,
-                                                        BackupRoot(locator), *previous.Value(), true);
+            if (const auto moved = MoveReceiptInventory(mutation, request.DestinationRoot, BackupRoot(locator),
+                                                        *previous.Value(), true);
                 !moved)
                 return PreserveOriginalFailure(mutation, request, journal, locator, moved.Error());
         }
@@ -1223,8 +1224,8 @@ namespace KeireHub
         auto stagedReceiptFile = DescribeReceiptFile(StageRoot(locator), staged.Value());
         if (!stagedReceiptFile)
             return PreserveOriginalFailure(mutation, request, journal, locator, stagedReceiptFile.Error());
-        if (const auto copied = CopyOwnedFile(mutation, StageRoot(locator), request.DestinationRoot,
-                                              stagedReceiptFile.Value());
+        if (const auto copied =
+                CopyOwnedFile(mutation, StageRoot(locator), request.DestinationRoot, stagedReceiptFile.Value());
             !copied)
             return PreserveOriginalFailure(mutation, request, journal, locator, copied.Error());
         if (const auto status = UpdatePhase(locator, journal, InstallTransactionPhase::PayloadActivated); !status)
@@ -1234,8 +1235,7 @@ namespace KeireHub
 
         if (const auto status = request.Registration.Write(*journal.NewRegistration); !status)
             return PreserveOriginalFailure(mutation, request, journal, locator, status.Error());
-        if (const auto status = UpdatePhase(locator, journal, InstallTransactionPhase::RegistrationWritten);
-            !status)
+        if (const auto status = UpdatePhase(locator, journal, InstallTransactionPhase::RegistrationWritten); !status)
             return PreserveOriginalFailure(mutation, request, journal, locator, status.Error());
         if (!ContinueAfter(request, journal.Phase))
             return Interrupted(locator.TransactionRoot, journal.Phase);
@@ -1370,8 +1370,7 @@ namespace KeireHub
             }
             if (!std::filesystem::exists(path, error))
                 continue;
-            if (const auto moved =
-                    MoveVerifiedOwnedFile(mutation, request.DestinationRoot, BackupRoot(locator), file);
+            if (const auto moved = MoveVerifiedOwnedFile(mutation, request.DestinationRoot, BackupRoot(locator), file);
                 !moved)
                 return HubResult<InstallUninstallResult>::Failure(
                     PreserveOriginalFailure(mutation, request, journal, locator, moved.Error()).Error());
@@ -1381,8 +1380,8 @@ namespace KeireHub
         auto receiptFile = DescribeReceiptFile(request.DestinationRoot, receipt.Value());
         if (!receiptFile)
             return HubResult<InstallUninstallResult>::Failure(receiptFile.Error());
-        if (const auto moved = MoveVerifiedOwnedFile(mutation, request.DestinationRoot,
-                                                     BackupRoot(locator), receiptFile.Value());
+        if (const auto moved =
+                MoveVerifiedOwnedFile(mutation, request.DestinationRoot, BackupRoot(locator), receiptFile.Value());
             !moved)
             return HubResult<InstallUninstallResult>::Failure(
                 PreserveOriginalFailure(mutation, request, journal, locator, moved.Error()).Error());
@@ -1395,8 +1394,7 @@ namespace KeireHub
         if (const auto status = request.Registration.Remove(*journal.PreviousRegistration); !status)
             return HubResult<InstallUninstallResult>::Failure(
                 PreserveOriginalFailure(mutation, request, journal, locator, status.Error()).Error());
-        if (const auto status = UpdatePhase(locator, journal, InstallTransactionPhase::RegistrationWritten);
-            !status)
+        if (const auto status = UpdatePhase(locator, journal, InstallTransactionPhase::RegistrationWritten); !status)
             return HubResult<InstallUninstallResult>::Failure(
                 PreserveOriginalFailure(mutation, request, journal, locator, status.Error()).Error());
         if (!ContinueAfter(request, journal.Phase))

@@ -29,6 +29,12 @@ public sealed class UIDocument : Keire.Component
         set => SetBuiltinAsset("panelSettings", value);
     }
 
+    public Keire.Material? Material
+    {
+        get => GetBuiltinAsset<Keire.Material>("material");
+        set => SetBuiltinAsset("material", value);
+    }
+
     public int SortingOrder
     {
         get => checked((int)GetBuiltinInteger("sortingOrder"));

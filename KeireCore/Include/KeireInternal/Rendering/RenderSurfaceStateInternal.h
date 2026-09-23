@@ -291,6 +291,8 @@ namespace Keire::RenderBackend
 
     struct SurfaceFrameWorkset final
     {
+        // Scratch textures are owned by TransientTextures and scoped to this frame workset.
+        std::array<SDL_GPUTexture*, 2> FullscreenInputs{};
         SDL_GPUTexture* HdrColor = nullptr;
         SDL_GPUTexture* MultisampleHdrColor = nullptr;
         SDL_GPUTexture* GBufferBaseColorMetallic = nullptr;

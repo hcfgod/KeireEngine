@@ -171,6 +171,25 @@ namespace
 
     RootSwapAttack* s_RootSwapAttack = nullptr;
 
+    struct PruneObserver final
+    {
+        std::filesystem::path Root;
+        std::size_t NonEmptyAttempts = 0;
+    };
+
+    PruneObserver* s_PruneObserver = nullptr;
+
+    void ObserveDirectoryPruning(const std::string_view operation, const std::filesystem::path& relative)
+    {
+        if (s_PruneObserver && operation == "remove-directory")
+        {
+            std::error_code error;
+            const auto empty = std::filesystem::is_empty(s_PruneObserver->Root / relative, error);
+            if (!error && !empty)
+                ++s_PruneObserver->NonEmptyAttempts;
+        }
+    }
+
     void SwapVisibleInstallRoot(const std::string_view operation, const std::filesystem::path&)
     {
         if (!s_RootSwapAttack || s_RootSwapAttack->Fired || operation != "remove-root" ||
@@ -288,6 +307,44 @@ TEST_CASE("anchored install directory removal retries pending Windows child dele
         REQUIRE(removed);
     }
     CHECK_FALSE(std::filesystem::exists(root));
+}
+
+TEST_CASE("install worker pruning skips parents with remaining owned or user files")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto source = CreatePackage(temporary.Path(), InstallProduct::Hub, "1.2.3", "owned");
+    const auto destination = temporary.Path() / "hub";
+    TestRegistrationStore registration;
+    auto request = Request(InstallProduct::Hub, source, destination, registration);
+    REQUIRE(InstallPackageTransaction(request));
+    KeireHubTests::WriteText(destination / "Config" / "user.txt", "preserve-me");
+    PruneObserver observer{.Root = destination};
+    struct HookScope final
+    {
+        explicit HookScope(PruneObserver& value)
+        {
+            s_PruneObserver = &value;
+            KeireHub::Detail::SetInstallMutationHookForTesting(&ObserveDirectoryPruning);
+        }
+        ~HookScope()
+        {
+            KeireHub::Detail::SetInstallMutationHookForTesting(nullptr);
+            s_PruneObserver = nullptr;
+        }
+    } scope(observer);
+    request.ContinueAfterPhase = [](const InstallTransactionPhase phase)
+    {
+        // Only observe destination pruning, not the separate backup-tree cleanup.
+        if (phase == InstallTransactionPhase::BackupMoved)
+            s_PruneObserver = nullptr;
+        return true;
+    };
+    const auto result = UninstallPackageTransaction(request);
+    REQUIRE(result);
+    CHECK(observer.NonEmptyAttempts == 0);
+    CHECK(KeireHubTests::ReadText(destination / "Config" / "user.txt") == "preserve-me");
+    CHECK_FALSE(std::filesystem::exists(destination / "bin"));
+    CHECK_FALSE(registration.Value);
 }
 #endif
 

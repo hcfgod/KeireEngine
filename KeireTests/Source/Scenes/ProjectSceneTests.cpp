@@ -2,6 +2,7 @@
 
 #include "KeireInternal/FileSystem.h"
 
+#include "Keire/ECS/Components/CameraComponent.h"
 #include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/Ui/UiToolkit.h"
 
@@ -1104,26 +1105,41 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
     CHECK(std::ranges::find(first.AssetDependencies, ignoredEntity) == first.AssetDependencies.end());
 }
 
-TEST_CASE("Scene reimport retains UI Document visual-tree and panel dependencies")
+TEST_CASE("Scene and prefab reimport retain UI materials and all camera effect dependencies")
 {
     const auto visualTree = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000020");
     const auto panelSettings = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000021");
+    const auto uiMaterial = Keire::AssetId(1, 1);
+    const auto before = Keire::AssetId(1, 2);
+    const auto after = Keire::AssetId(1, 3);
+    const auto afterUi = Keire::AssetId(1, 4);
     auto definition = Keire::SceneAsset::EmptyDefinition("UI Document Dependencies");
     definition.Objects.push_back(
         {.Id = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000020"),
          .Name = "HUD",
          .Components = {{Keire::UiDocumentComponent::StaticType(), 1, true,
-                         "{\"visualTree\":" + JsonString(visualTree.ToString()) + ",\"panelSettings\":" +
-                             JsonString(panelSettings.ToString()) + ",\"sortingOrder\":0,\"receivesInput\":true}"}}});
+                         "{\"visualTree\":" + JsonString(visualTree.ToString()) +
+                             ",\"panelSettings\":" + JsonString(panelSettings.ToString()) + ",\"material\":" +
+                             JsonString(uiMaterial.ToString()) + ",\"sortingOrder\":0,\"receivesInput\":true}"}}});
 
+    definition.Objects.front().Components.push_back({Keire::CameraComponent::StaticType(), 1, true,
+                                                     "{\"effectBeforeTonemapping\":" + JsonString(before.ToString()) +
+                                                         ",\"effectAfterTonemapping\":" + JsonString(after.ToString()) +
+                                                         ",\"effectAfterUi\":" + JsonString(afterUi.ToString()) + "}"});
     const auto importer = Keire::CreateSceneAssetImporter();
     REQUIRE(importer.ContextualImport);
-    auto expected = std::vector{visualTree, panelSettings};
+    auto expected = std::vector{visualTree, panelSettings, uiMaterial, before, after, afterUi};
     std::ranges::sort(expected);
     const auto first = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
     const auto second = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
     CHECK(first.AssetDependencies == expected);
     CHECK(second.AssetDependencies == expected);
+    CHECK(importer.Version == 9);
+    Keire::PrefabDefinition prefab;
+    prefab.Template = definition;
+    const auto prefabImporter = Keire::CreatePrefabAssetImporter();
+    CHECK(prefabImporter.Version == 2);
+    CHECK(prefabImporter.ContextualImport({}, Keire::PrefabAsset::Encode(prefab)).AssetDependencies == expected);
 }
 
 TEST_CASE("A rooted UI Document scene cook retains complete toolkit dependency closure and every panel target")

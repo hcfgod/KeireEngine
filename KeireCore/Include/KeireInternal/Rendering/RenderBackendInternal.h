@@ -1219,8 +1219,11 @@ namespace Keire::RenderBackend
         [[nodiscard]] bool BindRuntimeUiMaterial(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass,
                                                  AssetId material, SDL_GPUGraphicsPipeline* fallback,
                                                  SDL_GPUTextureSamplerBinding source, bool worldSurface, bool depthTest,
-                                                 SDL_GPUSampleCount samples, SDL_GPUTextureFormat format);
+                                                 SDL_GPUSampleCount samples, SDL_GPUTextureFormat format,
+                                                 bool fullscreen = false, Vector2 time = {});
         void ReleaseRuntimeUiMaterialPipelines(bool abandon) noexcept;
+        void RecordFullscreenEffect(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface, AssetId material,
+                                    bool hdr, Vector2 time);
         void RecordRuntimeUiCameraPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void RecordRuntimeUiWorldPanels(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface);
         void EndFrame(ImDrawData* drawData);
@@ -1410,7 +1413,7 @@ namespace Keire::RenderBackend
         std::uint64_t MaterialBindingBuilds = 0;
         std::uint64_t MaterialDependencyChecks = 0;
         std::unordered_map<AssetId, GpuShaderEntry> ShaderCache;
-        std::unordered_map<AssetId, GpuRuntimeUiShaderEntry> RuntimeUiShaderCache;
+        std::array<std::unordered_map<AssetId, GpuRuntimeUiShaderEntry>, 2> ScreenShaderCaches;
         std::vector<std::pair<SamplerDescription, SDL_GPUSampler*>> SamplerCache;
         std::vector<RenderPipelineSet> Pipelines;
         std::vector<RenderSurfaceRegistryEntry> Surfaces;

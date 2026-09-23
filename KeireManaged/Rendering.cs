@@ -65,6 +65,21 @@ public sealed class Camera : Component
 {
     internal Camera(Entity entity) : base(entity) { }
     private const NativeRenderingComponent Component = NativeRenderingComponent.Camera;
+    public Material? EffectBeforeTonemapping
+    {
+        get => Asset.FromId<Material>(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.EffectBeforeTonemapping));
+        set => NativeRuntimeRendering.SetAsset(Entity, Component, NativeRenderingAssetProperty.EffectBeforeTonemapping, value?.Id ?? default);
+    }
+    public Material? EffectAfterTonemapping
+    {
+        get => Asset.FromId<Material>(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.EffectAfterTonemapping));
+        set => NativeRuntimeRendering.SetAsset(Entity, Component, NativeRenderingAssetProperty.EffectAfterTonemapping, value?.Id ?? default);
+    }
+    public Material? EffectAfterUi
+    {
+        get => Asset.FromId<Material>(NativeRuntimeRendering.GetAsset(Entity, Component, NativeRenderingAssetProperty.EffectAfterUi));
+        set => NativeRuntimeRendering.SetAsset(Entity, Component, NativeRenderingAssetProperty.EffectAfterUi, value?.Id ?? default);
+    }
     public CameraProjection Projection
     {
         get => (CameraProjection)NativeRuntimeRendering.GetInteger(Entity, Component,

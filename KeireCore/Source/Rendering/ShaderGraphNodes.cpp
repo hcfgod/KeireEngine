@@ -500,6 +500,13 @@ namespace Keire
             node.Value = Vector2{};
             output("UV", ShaderGraphValueType::Vector2);
             break;
+        case ShaderGraphNodeKind::SceneColor:
+            node.Name = "Scene Color";
+            node.ValueType = ShaderGraphValueType::Color;
+            node.Value = Color{};
+            input("UV", ShaderGraphValueType::Vector2, Vector2{});
+            output("Color", ShaderGraphValueType::Color);
+            break;
         case ShaderGraphNodeKind::DepthFade:
             node.Name = "Depth Fade";
             node.ValueType = ShaderGraphValueType::Scalar;

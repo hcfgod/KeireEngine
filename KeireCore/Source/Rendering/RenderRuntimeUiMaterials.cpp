@@ -14,23 +14,29 @@ namespace Keire::RenderBackend
                                                   const AssetId materialId, SDL_GPUGraphicsPipeline* fallback,
                                                   const SDL_GPUTextureSamplerBinding source, const bool worldSurface,
                                                   const bool depthTest, const SDL_GPUSampleCount samples,
-                                                  const SDL_GPUTextureFormat format)
+                                                  const SDL_GPUTextureFormat format, const bool fullscreen,
+                                                  const Vector2 time)
     {
-        if (!materialId)
+        const auto bindFallback = [&]
         {
+            if (!fallback || fullscreen)
+                return false;
             SDL_BindGPUGraphicsPipeline(pass, fallback);
             SDL_BindGPUFragmentSamplers(pass, 0, &source, 1);
             return true;
-        }
+        };
+        if (!materialId)
+            return bindFallback();
         try
         {
             const auto material = ResolveMaterial(materialId);
             if (!material || !material->Definition().Shader || !Assets)
-                return false;
+                return bindFallback();
             const auto shaderId = material->Definition().Shader;
-            if (!RuntimeUiShaderCache.contains(shaderId) && RuntimeUiShaderCache.size() >= 256U)
+            auto& shaderCache = ScreenShaderCaches[fullscreen ? 1 : 0];
+            if (!shaderCache.contains(shaderId) && shaderCache.size() >= 256U)
                 throw std::length_error("Runtime UI shader cache exceeds 256 programs.");
-            auto [iterator, inserted] = RuntimeUiShaderCache.try_emplace(shaderId);
+            auto [iterator, inserted] = shaderCache.try_emplace(shaderId);
             auto& entry = iterator->second;
             if (inserted)
                 entry.Asset = Assets->Load<ShaderAsset>(shaderId, AssetPriority::High);
@@ -42,6 +48,9 @@ namespace Keire::RenderBackend
                 {
                     try
                     {
+                        if (shader->Definition().ProgramTarget != (fullscreen ? "Fullscreen" : "UI"))
+                            throw std::invalid_argument(
+                                "Material shader target does not match this screen-space consumer.");
                         Detail::ValidateRuntimeUiShader(shader->Definition());
                         auto replacements = entry.Pipelines;
                         if (replacements.empty())
@@ -75,8 +84,8 @@ namespace Keire::RenderBackend
                     }
                 }
             }
-            if (!entry.LastGood)
-                return false;
+            if (!entry.LastGood || entry.LastGood->Definition().ProgramTarget != (fullscreen ? "Fullscreen" : "UI"))
+                return bindFallback();
             const auto values =
                 Detail::BuildRuntimeUiMaterialValues(entry.LastGood->Definition(), material->Definition());
             auto pipeline = std::ranges::find_if(entry.Pipelines,
@@ -113,6 +122,8 @@ namespace Keire::RenderBackend
             scene.DirectionalDirectionExposure.W = 1.0F;
             scene.SurfaceParameters = {material->Definition().Surface.AlphaCutoff,
                                        static_cast<float>(material->Definition().Surface.AlphaMode), 0.0F, 0.0F};
+            scene.FrameParameters.X = time.X;
+            scene.FrameParameters.Y = time.Y;
             scene.FrameParameters.Z = static_cast<float>(Statistics.Frame);
             SDL_BindGPUGraphicsPipeline(pass, pipeline->Handle);
             SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
@@ -127,19 +138,22 @@ namespace Keire::RenderBackend
         {
             ThrowIfDeviceLost("runtime UI material binding", error.what());
             KEIRE_CORE_ERROR("Runtime UI material {} unavailable: {}", materialId.ToString(), error.what());
-            return false;
+            return bindFallback();
         }
     }
 
     void RenderSharedState::ReleaseRuntimeUiMaterialPipelines(const bool abandon) noexcept
     {
-        if (!abandon)
-            for (const auto& [id, entry] : RuntimeUiShaderCache)
-            {
-                (void)id;
-                for (const auto& pipeline : entry.Pipelines)
-                    SDL_ReleaseGPUGraphicsPipeline(Device, pipeline.Handle);
-            }
-        RuntimeUiShaderCache.clear();
+        for (auto& shaderCache : ScreenShaderCaches)
+        {
+            if (!abandon)
+                for (const auto& [id, entry] : shaderCache)
+                {
+                    (void)id;
+                    for (const auto& pipeline : entry.Pipelines)
+                        SDL_ReleaseGPUGraphicsPipeline(Device, pipeline.Handle);
+                }
+            shaderCache.clear();
+        }
     }
 } // namespace Keire::RenderBackend

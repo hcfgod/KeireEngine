@@ -475,6 +475,7 @@ namespace
                 camera.ClearColor = selected.Camera->Camera->ClearColor();
                 camera.NearPlane = selected.Camera->Camera->NearPlane();
                 camera.FarPlane = selected.Camera->Camera->FarPlane();
+                camera.FullscreenEffects = selected.Camera->Camera->FullscreenEffects();
             }
             m_View->SetCamera(camera);
             KeireRuntime::SubmitRuntimeWorldRendering(Owner().Renderer(), world, m_View, environment,

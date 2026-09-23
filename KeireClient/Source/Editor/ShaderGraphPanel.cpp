@@ -313,7 +313,7 @@ namespace KeireEditor
         const bool reusable = document.ReusableGraph();
         const bool compact = ui.ContentAvailable().Width < 1000.0F;
         ui.TextColoredWrapped(!compiling && document.Publishable() ? theme.Success : theme.Warning,
-                              compiling                ? "LIVE COMPILING + UPDATING SCENE"
+                              compiling                ? "LIVE COMPILING"
                               : document.Publishable() ? reusable ? "REUSABLE GRAPH VALID" : "GENERATED SHADER READY"
                               : reusable               ? "REUSABLE GRAPH HAS ERRORS"
                                                        : "PREVIEW USING LAST GOOD SHADER");

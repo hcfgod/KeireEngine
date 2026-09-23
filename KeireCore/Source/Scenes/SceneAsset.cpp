@@ -40,7 +40,7 @@ namespace Keire
         constexpr std::size_t MaximumComponentDataBytes = 4ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
-        constexpr std::uint32_t SceneAssetImporterVersion = 8;
+        constexpr std::uint32_t SceneAssetImporterVersion = 9;
 
         [[nodiscard]] std::string_view LegacyUiComponentName(const ComponentTypeId type) noexcept
         {
@@ -252,6 +252,11 @@ namespace Keire
                         InsertDependency(dependencies, dependency);
                 }
             }
+            else if (component.Type == CameraComponent::StaticType())
+            {
+                for (const auto key : {"effectBeforeTonemapping", "effectAfterTonemapping", "effectAfterUi"})
+                    CollectSerializedAsset(data, key, dependencies);
+            }
             else if (component.Type == AnimatorComponent::StaticType())
             {
                 for (const auto key : {"graph", "skeleton", "skinnedMesh", "avatarMask", "avatarMasks",
@@ -286,6 +291,7 @@ namespace Keire
             {
                 CollectSerializedAsset(data, "visualTree", dependencies);
                 CollectSerializedAsset(data, "panelSettings", dependencies);
+                CollectSerializedAsset(data, "material", dependencies);
             }
             CollectManagedStateDependencies(context, data, dependencies);
         }

@@ -74,8 +74,8 @@ namespace Keire::Detail
         if (source->Type != ShaderGraphAsset::StaticType())
             throw std::invalid_argument("Material requires a compatible Shader Graph.");
         const auto graph = ShaderGraphAsset::DecodeSource(bytes);
-        if (graph.Target.Target != ShaderGraphTarget::Material)
-            throw std::invalid_argument("Mesh materials require a surface Shader Graph.");
+        if (graph.Target.Target == ShaderGraphTarget::Compute)
+            throw std::invalid_argument("Material properties require a graphics shader target.");
         return ReflectMaterialProperties(graph, source->RelativePath);
     }
 

@@ -365,7 +365,10 @@ namespace Keire
     enum class ManagedRenderingAssetProperty : std::uint8_t
     {
         Mesh,
-        Cookie
+        Cookie,
+        EffectBeforeTonemapping,
+        EffectAfterTonemapping,
+        EffectAfterUi
     };
 
     class KEIRE_API IScriptRuntimeServices

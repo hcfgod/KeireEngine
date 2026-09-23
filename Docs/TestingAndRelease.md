@@ -443,6 +443,11 @@ macOS Hub package and native-installer gates; each artifact is built and validat
 
 ## Windows Installer Release Gate
 
+The NSIS runtime fixtures include 32 sibling files and record elapsed milliseconds for each install, update,
+rollback, and uninstall operation. Directory pruning skips parents that still contain files instead of treating
+ordinary nonempty directories as transient Windows deletion failures. Actual empty-directory removal remains
+anchored and retains its bounded retry for pending child deletion.
+
 Keep transaction testing separate from architecture-specific Dist packaging. The Debug worker and actual-NSIS
 fixtures exercise both products with custom roots, interruptions, drift, unsafe links, and unowned nested
 `Config`, `Docs`, and `Samples` content. The normal Windows test launcher runs the Editor and Hub worker/NSIS matrices

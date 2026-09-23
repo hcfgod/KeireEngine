@@ -1,6 +1,6 @@
 # Material Ecosystem Parity Matrix
 
-Review date: 2026-08-21
+Review date: 2026-09-22 (source reconciliation; historical package evidence retains its original dates)
 Comparison model: Unreal-inspired material workflow, adapted to Kéire's renderer-neutral asset and runtime boundaries
 
 This matrix is the acceptance authority for the Material Ecosystem initiative. `Complete` means the capability has an
@@ -8,14 +8,14 @@ implemented engine/editor path and focused evidence. `Partial` means the shipped
 instead of silently degrading. `Planned` is not a supported feature. Counts are useful for planning, but production
 scenarios and executable validation decide milestone acceptance.
 
-Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
+Current ledger: **145 rows — 100 Complete, 9 Partial, and 36 Planned**.
 
 ## Capability Matrix
 
 | ID | Capability | Status | Priority | Evidence or remaining gate |
 | --- | --- | --- | --- | --- |
 | ME-AS-001 | Distinct Shader Graph asset | Complete | P0 | `.keireshadergraph`, importer, editor, generated variants, and tests. |
-| ME-AS-002 | Canonical Material asset | Complete | P0 | `.keirematerial` schema 7, Material Output, importer, editor, preview, and tests. |
+| ME-AS-002 | Canonical Material asset | Complete | P0 | New schema-5 property materials and existing schema-7 surface graphs share `.keirematerial`; importer, Inspector/graph routing, preview, and tests. |
 | ME-AS-003 | Legacy Material compatibility | Complete | P0 | `.keiremateriallegacy` remains assignable and raw/custom-shader backed. |
 | ME-AS-004 | Material Instance asset | Complete | P0 | Versioned inheritance, static/dynamic overrides, bounded ancestry, and tests. |
 | ME-AS-005 | Material Function subgraph | Complete | P0 | `.keiresubgraph` purpose selects a typed material-function body. |
@@ -58,14 +58,14 @@ Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 | ME-GR-022 | General exponent/log nodes | Complete | P1 | Natural exponential/logarithm with contained domains. |
 | ME-GR-023 | Hyperbolic math nodes | Complete | P2 | Sinh, cosh, and tanh use portable HLSL intrinsics. |
 | ME-GR-024 | Scale and Bias node | Complete | P1 | Typed input with scalar scale and bias. |
-| ME-GR-025 | Node comments | Planned | P1 | Requires serialized comment regions and canvas interaction. |
+| ME-GR-025 | Node comments | Complete | P1 | Serialized graph authoring comments, canvas editing, duplication, and clipboard coverage. |
 | ME-GR-026 | Named reroute declarations/usages | Planned | P2 | Requires cross-canvas name resolution. |
 | ME-GR-027 | Collapsible graph regions | Planned | P2 | Requires persistent region ownership and navigation. |
-| ME-GR-028 | Graph bookmarks | Planned | P2 | Requires workspace-scoped navigation state. |
-| ME-GR-029 | Copy/paste across assets | Planned | P1 | Requires collision-safe stable-ID remapping and dependency transfer. |
+| ME-GR-028 | Graph bookmarks | Partial | P2 | Bounded session bookmarks restore canvas views; persistence across document close/restart remains. |
+| ME-GR-029 | Copy/paste across assets | Complete | P1 | Canonical bounded clipboard fragments remap topology, comments, and parameter symbols; destination validation is transactional. |
 | ME-GR-030 | Diff/merge visualization | Planned | P1 | Requires semantic graph diff independent of JSON ordering. |
 | ME-MA-001 | Material Output node | Complete | P0 | Owns surface contract and remains distinct from Shader Output. |
-| ME-MA-002 | Standalone surface ownership | Complete | P0 | New Materials compile and preview without an external Shader Graph template. |
+| ME-MA-002 | Standalone surface ownership | Complete | P0 | Existing graph-owned Materials retain standalone surface compilation; ordinary new Materials select a shared or project shader. |
 | ME-MA-003 | Raw Shader compatibility workflow | Complete | P1 | Direct/compatibility material values remain supported. |
 | ME-MA-004 | Dynamic exposed parameters | Complete | P0 | Parameter nodes become instance-editable material properties. |
 | ME-MA-005 | Static switch parameters | Complete | P0 | Bounded deterministic shader variants and instance overrides. |
@@ -108,7 +108,7 @@ Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 | ME-ED-007 | Material live scene preview | Complete | P0 | Draft runtime material is published to assigned scene objects. |
 | ME-ED-008 | Reusable body preview | Planned | P1 | Needs caller-supplied preview values and output visualization. |
 | ME-ED-009 | Per-node preview tiles | Planned | P1 | Needs selective compilation and bounded thumbnail scheduling. |
-| ME-ED-010 | Node/pin diagnostic focus | Partial | P1 | IDs are reported; canvas focus/navigation remains. |
+| ME-ED-010 | Node/pin diagnostic focus | Complete | P1 | Clicking graph diagnostics selects and frames the authored node/pin; pin-only resolution has focused coverage. |
 | ME-ED-011 | Undo/redo graph topology | Complete | P0 | Bounded document contexts cover nodes, cables, values, and metadata. |
 | ME-ED-012 | Collection undo/redo | Planned | P1 | Current editor uses explicit save/revert. |
 | ME-ED-013 | Last-good compile recovery | Complete | P0 | Failed drafts do not replace preview or runtime shader variants. |
@@ -143,7 +143,7 @@ Current ledger: **145 rows — 98 Complete, 8 Partial, and 39 Planned**.
 | ME-PF-002 | Texture resource hard limits | Complete | P0 | Portable material texture budget is validated. |
 | ME-PF-003 | Keyword/variant hard limits | Complete | P0 | Deterministic maximum and explicit diagnostic. |
 | ME-PF-004 | Compile cancellation/supersession | Complete | P0 | Generation-checked background jobs. |
-| ME-PF-005 | Derived-data shader cache | Complete | P0 | Asset import cache plus canonical toolchain/source/include/target work keys make immutable inputs explicit. |
+| ME-PF-005 | Derived-data shader cache | Partial | P0 | Asset import caching is implemented; the canonical ShaderCompileWorkKey helper has no production caller, so full compiler-work-key integration remains. |
 | ME-PF-006 | Reference-scene CPU budget | Planned | P0 | Define hardware tiers and measured thresholds. |
 | ME-PF-007 | Reference-scene GPU budget | Planned | P0 | Define hardware tiers and measured thresholds. |
 | ME-PF-008 | Shader compile-time gate | Planned | P0 | Add cold/warm percentile validation. |

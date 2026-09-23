@@ -578,6 +578,8 @@ TEST_CASE("UI document layout follows resized game viewports while world panels 
     REQUIRE(worldDocument);
     worldDocument->SetVisualTree(worldTreeId);
     worldDocument->SetPanelSettings(worldPanelId);
+    const auto uiMaterial = Keire::AssetId::Generate();
+    worldDocument->SetMaterial(uiMaterial);
 
     auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
     presentation->Synchronize(scene, 640.0F, 360.0F, false);
@@ -595,6 +597,8 @@ TEST_CASE("UI document layout follows resized game viewports while world panels 
         initialSubmissions, Keire::RuntimeUiRenderTarget::WorldSurface, &Keire::RuntimeUiRenderSubmission::Target);
     REQUIRE(initialWorldSubmission != initialSubmissions.end());
     CHECK(initialWorldSubmission->Viewport == (Keire::Vector2{640.0F, 360.0F}));
+    CHECK(initialWorldSubmission->Material == uiMaterial);
+    worldDocument->SetMaterial({});
 
     presentation->Synchronize(scene, 1440.0F, 900.0F, false);
     const auto maximizedScreen = presentation->UiDocumentDebugSnapshot(screenEntity.Id());
@@ -613,6 +617,8 @@ TEST_CASE("UI document layout follows resized game viewports while world panels 
         maximizedSubmissions, Keire::RuntimeUiRenderTarget::WorldSurface, &Keire::RuntimeUiRenderSubmission::Target);
     REQUIRE(maximizedWorldSubmission != maximizedSubmissions.end());
     CHECK(maximizedWorldSubmission->Viewport == (Keire::Vector2{1440.0F, 900.0F}));
+    CHECK_FALSE(maximizedWorldSubmission->Material);
+    CHECK(maximizedWorld->DocumentGeneration == initialWorld->DocumentGeneration);
     CHECK(maximizedWorldSubmission->ReferenceResolution == initialWorldSubmission->ReferenceResolution);
     CHECK(maximizedWorldSubmission->WorldUnitsPerPixel == initialWorldSubmission->WorldUnitsPerPixel);
 

@@ -253,6 +253,58 @@ TEST_CASE("Animation state-machine subgraphs round trip and execute through stab
     CHECK_THROWS_AS(Keire::ValidateAnimationGraph(invalid), std::invalid_argument);
 }
 
+TEST_CASE("Looping animator exit times survive wrapping seeking crossfades and checkpoints")
+{
+    const auto skeletonId = Keire::AssetId::Generate();
+    const auto clipId = Keire::AssetId::Generate();
+    const auto clip = ConstantHandClip(skeletonId, 0.0F);
+    auto idle = ClipState("idle", "Idle", clipId);
+    auto run = ClipState("run", "Run", clipId);
+    idle.Loop = true;
+    run.Loop = true;
+    idle.Transitions.push_back({"Run", 0.0F, true, 1.0F, {}, "exit", run.Id});
+    auto definition = GraphWithBaseLayer({}, {idle, run});
+    const auto makeGraph = [&]
+    { return Keire::AnimationGraphAsset::Decode(Keire::AnimationGraphAsset::Encode(definition)); };
+    Keire::AnimatorInstance animator(TestSkeleton(), makeGraph(), [&](Keire::AssetId) { return clip; });
+
+    CHECK(animator.Update(0.75F).State == "Idle");
+    CHECK(animator.Update(0.5F).NormalizedTime == doctest::Approx(0.25F));
+    CHECK(animator.Update(0.0F).State == "Run");
+
+    definition.Layers.front().States.front().Transitions.front().ExitTime = 2.0F;
+    CHECK(animator.Reload(makeGraph()));
+    animator.Play("Idle");
+    CHECK(animator.Update(1.5F).State == "Idle");
+    const auto checkpoint = animator.CaptureCheckpoint();
+    CHECK(checkpoint.Layers.front().ExitTimeProgress == doctest::Approx(1.5));
+    auto preciseCheckpoint = checkpoint;
+    preciseCheckpoint.Layers.front().ExitTimeProgress =
+        static_cast<double>(preciseCheckpoint.Layers.front().NormalizedTime) - 1.0e-9;
+    animator.RestoreCheckpoint(preciseCheckpoint);
+    CHECK(animator.CaptureCheckpoint().Layers.front().ExitTimeProgress ==
+          preciseCheckpoint.Layers.front().ExitTimeProgress);
+    animator.Play("Run");
+    animator.RestoreCheckpoint(checkpoint);
+    CHECK(animator.Update(0.25F).State == "Idle");
+    CHECK(animator.Update(0.5F).State == "Idle");
+    CHECK(animator.Update(0.0F).State == "Run");
+
+    animator.Play("Idle", {}, 0.5F);
+    CHECK(animator.Update(0.75F).State == "Idle");
+    CHECK(animator.Update(0.0F).State == "Idle");
+    animator.Play("Run");
+    animator.CrossFade("Idle", 0.5F, {}, 0.5F);
+    CHECK(animator.Update(0.5F).State == "Idle");
+    CHECK(animator.Update(1.25F).State == "Idle");
+    CHECK(animator.Update(0.0F).State == "Run");
+
+    auto invalid = checkpoint;
+    invalid.Layers.front().ExitTimeProgress = std::numeric_limits<double>::quiet_NaN();
+    CHECK_THROWS_AS(animator.RestoreCheckpoint(invalid), std::invalid_argument);
+    CHECK(animator.Update(0.0F).State == "Run");
+}
+
 TEST_CASE("Animator evaluates typed transitions with crossfade bookkeeping and consumes triggers")
 {
     const auto skeletonId = Keire::AssetId::Parse("30000000-0000-4000-8000-000000000001");

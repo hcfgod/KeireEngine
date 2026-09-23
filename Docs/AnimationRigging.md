@@ -83,6 +83,8 @@ The state machine uses the same stable production canvas as VFX authoring:
 
 - Drag a state's **Transition** output pin onto another state's **Enter** input pin to create a transition.
 - Click a cable to inspect its duration, exit time, destination, and conditions; press Delete to unlink it.
+- Exit time counts normalized state cycles: `1` permits a transition after one complete cycle, and `2` after two.
+  Looping clips retain this progress across wraps and replay checkpoints; Play or entering another state resets it.
 - Drag a state card to move it. One completed gesture produces one undoable layout edit.
 - Right-click a state to make it the entry state, unlink its outgoing transitions, or delete it.
 - Right-click an input pin to unlink incoming transitions, or right-click a cable to delete that exact transition.

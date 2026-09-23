@@ -77,7 +77,8 @@ namespace Keire::Detail
         }
 
         const bool ui = m_Definition.Target.Target == ShaderGraphTarget::Ui;
-        if (ui)
+        const bool screenSpace = ui || m_Definition.Target.Target == ShaderGraphTarget::Fullscreen;
+        if (screenSpace)
             ValidateUiShaderGraph(m_Definition);
         std::optional<std::string> worldPositionOffset;
         if (const auto* offsetPin = FindShaderGraphPin(*master, "WorldPositionOffset", ShaderGraphPinDirection::Input))
@@ -244,7 +245,7 @@ namespace Keire::Detail
                << ShaderGraphGeneratedShaderVersion << ", source schema " << m_Definition.SchemaVersion << ".\n";
         for (const auto& include : m_CustomIncludes)
             source << "#include \"" << include.generic_string() << "\"\n";
-        if (ui)
+        if (screenSpace)
             source << ShaderGraphUiVertexInputHlsl();
         else
             source << R"HLSL(
@@ -281,7 +282,7 @@ struct VertexOutput
     float4 Position : SV_Position;
 };
 )HLSL";
-        if (!ui)
+        if (!screenSpace)
             source << R"HLSL(
 cbuffer ObjectData : register(b0, space1)
 {
@@ -305,7 +306,7 @@ cbuffer InstanceAddressingData : register(b2, space1)
                     source << "    float4 " << ShaderGraphVertexPropertySymbol(property.Name) << ";\n";
             source << "};\n\n";
         }
-        if (!ui)
+        if (!screenSpace)
             source << R"HLSL(
 struct InstanceData
 {
@@ -369,7 +370,7 @@ cbuffer MaterialData : register(b1, space3)
             GenerateShaderGraphResourceDeclarations(m_Definition.Resources, textureIndex, textureIndex);
         source << resourceDeclarations.Hlsl;
         textureIndex = std::max(resourceDeclarations.NextTextureRegister, resourceDeclarations.NextSamplerRegister);
-        if (ui)
+        if (screenSpace)
         {
             source << "Texture2D KeireUiSourceTexture : register(t" << textureIndex << ", space2);\n";
             source << "SamplerState KeireUiSourceSampler : register(s" << textureIndex << ", space2);\n";
@@ -1142,7 +1143,7 @@ return 0.0F.xxx;
     return (surface + directSpecular + coatSpecular + sheen) * radiance * noL;
 }
 )HLSL";
-        if (ui)
+        if (screenSpace)
             source << ShaderGraphUiVertexMainHlsl();
         else
         {
@@ -1385,6 +1386,12 @@ graphBaseColor.rgb * (1.0F - graphMetallic) * AmbientColorIntensity.rgb * Ambien
                       CookieAtlasTexture.SampleLevel(CookieAtlasSampler, retentionUv, 0.0F).rgb;
     }
 )HLSL";
+        }
+        if (screenSpace && !ui)
+        {
+            // Keep the reserved scene sampler in the ABI even for effects that only generate a color.
+            source << "    if (!all(isfinite(FrameParameters)))\n";
+            source << "        graphColor += KeireUiSourceTexture.Sample(KeireUiSourceSampler, input.UV0).rgb;\n";
         }
         if (ui)
         {

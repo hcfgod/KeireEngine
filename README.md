@@ -8,10 +8,12 @@
 UI and fullscreen Shader Graphs display a flat image preview with transparency, rather than a lit mesh.
 See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current scope.
 Shader Graph focus selects the graph's undo history. Edit output values through the expanded **Input Defaults**.
+Newly created graph nodes are brought into view automatically, including function and blackboard additions.
 Newly opened graphs frame their nodes, and narrow docks wrap authoring controls. Creating or revealing an asset clears
 the Project search so the selected asset remains visible.
 
 Property-only materials retain incompatible shader overrides in the Inspector's **Inactive Overrides** section.
+The Inspector reserves scrollbar space so asset previews remain stable when resizing the panel or changing selections.
 Restore the matching shader to recover them, or use **Remove Inactive Overrides** for explicit, undoable cleanup.
 Material variants expose a searchable Parent field even when their existing parent is missing. Parent changes reject
 inheritance cycles before saving; property, parent, keyword, and reset edits participate in asset undo/redo.
@@ -400,6 +402,8 @@ Packaging is performed on the target operating system:
 Windows Editor and Hub installers use the shared first-party install worker for exact hash receipts, transactional
 rollback, reparse-safe destination checks, and drift-preserving uninstall. Fresh installs require an absent or empty
 ordinary directory; unknown and modified neighboring files are never recursively removed.
+Installer details show transaction phases. Uninstall and rollback skip directory-pruning retries while sibling
+files remain, avoiding a multi-second delay for every file in a populated directory.
 
 For support investigations, use **Help > Collect Diagnostics...** in the Editor or Hub. Kéire builds a local,
 sanitized ZIP and shows the exact filenames, sizes, hashes, redactions, and omissions before saving it. Nothing is
@@ -542,3 +546,11 @@ Do not open public issues for suspected vulnerabilities; follow the private repo
 
 Kéire Engine is released under the [MIT License](LICENSE.txt). Third-party components retain their own licenses and are
 tracked through the immutable dependency manifest and distribution notices.
+
+Camera fullscreen materials can be assigned in the Camera Inspector before tone mapping, after tone mapping, or after
+camera UI. Create a Fullscreen Effect Shader Graph, create a Material using that graph, then assign the material to
+the desired camera slot. Connect UV0 to Scene Color to sample the camera image; use the Scene/Game views or camera
+preview to evaluate the actual effect. See [Shaders and Materials](Docs/ShadersAndMaterials.md).
+
+UI-target materials can be assigned in a scene UI Document's **UI Material** field. See the
+[UI Toolkit workflow](Docs/Scripting/UiAndEvents.md) for editor and C# usage.

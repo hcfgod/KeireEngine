@@ -8,6 +8,7 @@
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
 #include "KeireClient/Editor/MaterialDocument.h"
+#include "KeireClient/Editor/MaterialGraphCreationPicker.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
 #include "KeireClient/Editor/MaterialSelectionDocument.h"
 #include "KeireClient/Editor/MaterialVariantEditing.h"
@@ -1027,7 +1028,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                             return std::nullopt;
                         const auto loaded = assets->Load<Keire::ShaderAsset>(shader.Asset, Keire::AssetPriority::High);
                         const auto definition = loaded.TryGetLoaded();
-                        if (!definition)
+                        if (!definition || !KeireEditor::MaterialShaderInterface(definition->Definition()))
                             return std::nullopt;
                         return KeireEditor::MaterialDocument::ResolvedShader{shader.Asset, definition->Definition()};
                     }
@@ -1035,7 +1036,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                         !assets)
                         return std::nullopt;
                     const auto& graph = readGraph(*shaderRecord);
-                    if (graph.Target.Target != Keire::ShaderGraphTarget::Material)
+                    if (graph.Target.Target == Keire::ShaderGraphTarget::Compute)
                         return std::nullopt;
                     Keire::ShaderGraphInstanceDefinition selection;
                     selection.Parent = shader.Asset;
@@ -1136,12 +1137,36 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             const KeireEditor::AssetPickerOptions shaderOptions{
                 .Label = "Shader",
                 .Filter =
-                    [this, &database, &records](const Keire::AssetSourceRecord& candidate)
+                    [this, &database, &records, &assets, &document](const Keire::AssetSourceRecord& candidate)
                 {
                     if (candidate.Type == Keire::ShaderAsset::StaticType())
-                        return !MaterialInspectorPanel::IsGeneratedShaderSource(candidate, records);
+                    {
+                        if (!assets || MaterialInspectorPanel::IsGeneratedShaderSource(candidate, records) ||
+                            assets->TryGetType(candidate.Id) != Keire::ShaderAsset::StaticType())
+                            return false;
+                        const auto loaded = assets->Load<Keire::ShaderAsset>(candidate.Id, Keire::AssetPriority::High);
+                        const auto shader = loaded.TryGetLoaded();
+                        return shader && shader->Definition().ProgramTarget ==
+                                             (document.ShaderTarget().empty() ? "Material" : document.ShaderTarget());
+                    }
                     if (candidate.Type != Keire::ShaderGraphAsset::StaticType())
                         return false;
+                    if (!document.ShaderTarget().empty() && document.ShaderTarget() != "Material")
+                    {
+                        try
+                        {
+                            const auto& specification = database->Specification();
+                            return Keire::ShaderGraphTargetName(
+                                       Keire::ShaderGraphAsset::DecodeSource(
+                                           ReadBytes(specification.ProjectRoot / specification.SourceDirectory /
+                                                     candidate.RelativePath))
+                                           .Target.Target) == document.ShaderTarget();
+                        }
+                        catch (const std::exception&)
+                        {
+                            return false;
+                        }
+                    }
                     const auto cached = m_SurfaceShaderCompatibility.find(candidate.Id);
                     if (cached != m_SurfaceShaderCompatibility.end() && cached->second.first == candidate.SourceDigest)
                         return cached->second.second;

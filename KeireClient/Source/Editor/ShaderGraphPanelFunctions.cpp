@@ -80,6 +80,8 @@ namespace KeireEditor
             m_SelectedNode = id;
             m_SelectedNodes = {id};
             m_SelectedConnection.reset();
+            m_FrameNode = id;
+            m_FramePin.reset();
         }
         return changed;
     }

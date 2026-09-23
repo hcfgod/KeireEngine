@@ -166,3 +166,31 @@ TEST_CASE("managed material parameter collections preserve compatible overrides 
     CHECK(parameters.Snapshot().empty());
     assets->Close();
 }
+
+TEST_CASE("managed camera fullscreen materials validate slots and clear independently")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Effects"));
+    auto entity = scene->CreateEntity("Camera");
+    const auto camera = entity.AddComponent<Keire::CameraComponent>();
+    const auto id = entity.Id().Value();
+    for (const auto property : {Keire::ManagedRenderingAssetProperty::EffectBeforeTonemapping,
+                                Keire::ManagedRenderingAssetProperty::EffectAfterTonemapping,
+                                Keire::ManagedRenderingAssetProperty::EffectAfterUi})
+    {
+        const auto material = Keire::AssetId::Generate();
+        CHECK(Keire::Detail::SetManagedRenderingAsset(scene, id, Keire::ManagedRenderingComponent::Camera, property,
+                                                      material));
+        CHECK(Keire::Detail::ReadManagedRenderingAsset(scene, id, Keire::ManagedRenderingComponent::Camera, property) ==
+              material);
+    }
+    const auto before = camera->FullscreenEffects();
+    CHECK_FALSE(Keire::Detail::SetManagedRenderingAsset(scene, id, Keire::ManagedRenderingComponent::Camera,
+                                                        Keire::ManagedRenderingAssetProperty::Cookie, {}));
+    CHECK(camera->FullscreenEffects() == before);
+    CHECK(Keire::Detail::SetManagedRenderingAsset(scene, id, Keire::ManagedRenderingComponent::Camera,
+                                                  Keire::ManagedRenderingAssetProperty::EffectAfterUi, {}));
+    CHECK_FALSE(camera->FullscreenEffects()[2]);
+    CHECK(camera->FullscreenEffects()[0] == before[0]);
+    CHECK(camera->FullscreenEffects()[1] == before[1]);
+}

@@ -367,6 +367,8 @@ namespace Keire
         // SetCamera requires finite clip planes satisfying 0 < NearPlane < FarPlane <= 10,000,000.
         float NearPlane = 0.1F;
         float FarPlane = 1000.0F;
+        // Materials with a Fullscreen shader; stages match CameraComponent::FullscreenEffects.
+        std::array<AssetId, 3> FullscreenEffects{};
     };
 
     inline constexpr std::uint32_t RenderEnvironmentSettingsSchemaVersion = 5;

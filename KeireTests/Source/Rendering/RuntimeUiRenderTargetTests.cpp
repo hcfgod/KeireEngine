@@ -33,6 +33,7 @@ namespace
     {
         LegacyOverlay,
         FilteredRoot,
+        IncompatibleMaterial,
         CameraOverlay,
         WorldSurface,
         WorldSurfaceWithoutDepth,
@@ -79,6 +80,17 @@ namespace
                                                      .Width = 64,
                                                      .Height = 64,
                                                      .Depth = m_Case != SubmissionCase::WorldSurfaceWithoutDepth});
+            if (m_Case == SubmissionCase::IncompatibleMaterial)
+            {
+                const Keire::AssetId shaderId(0x5549544152474554ULL, 1);
+                const Keire::AssetId materialId(0x5549544152474554ULL, 2);
+                REQUIRE(Owner().Assets()->PublishDevelopmentAsset(
+                    shaderId, Keire::CreateRef<Keire::ShaderAsset>(Keire::ShaderAssetDefinition{})));
+                Keire::MaterialAssetDefinition material;
+                material.Shader = shaderId;
+                REQUIRE(Owner().Assets()->PublishDevelopmentAsset(materialId,
+                                                                  Keire::CreateRef<Keire::MaterialAsset>(material)));
+            }
             m_Tree = Keire::CreateRef<Keire::RuntimeUiTree>();
             m_First = m_Tree->Create(Keire::RuntimeUiElementType::Panel);
             const auto firstChild = m_Tree->Create(Keire::RuntimeUiElementType::Text, m_First);
@@ -116,7 +128,12 @@ namespace
                 submission.Root = m_First;
                 submission.View = m_View;
                 submission.Viewport = {64.0F, 64.0F};
-                if (m_Case == SubmissionCase::FilteredRoot)
+                if (m_Case == SubmissionCase::IncompatibleMaterial)
+                {
+                    submission.Target = Keire::RuntimeUiRenderTarget::ScreenOverlay;
+                    submission.Material = Keire::AssetId(0x5549544152474554ULL, 2);
+                }
+                else if (m_Case == SubmissionCase::FilteredRoot)
                     submission.Target = Keire::RuntimeUiRenderTarget::ScreenOverlay;
                 else if (m_Case == SubmissionCase::CameraOverlay)
                     submission.Target = Keire::RuntimeUiRenderTarget::CameraOverlay;
@@ -170,6 +187,7 @@ namespace
         specification.ManageLogging = false;
         specification.Render.Mode = Keire::RenderMode::Headless;
         specification.Ui.Mode = Keire::UiMode::Disabled;
+        specification.Assets.Mode = Keire::AssetMode::Development;
         return specification;
     }
 
@@ -676,4 +694,13 @@ TEST_CASE("World runtime UI submissions are root-filtered and accepted into boun
 
     const auto missingDepth = RunSubmissionCase(SubmissionCase::WorldSurfaceWithoutDepth);
     CHECK(missingDepth.Diagnostic == "Depth-tested world-surface runtime UI requires a depth-enabled surface.");
+}
+
+TEST_CASE("Runtime UI incompatible materials do not reject the authored document submission")
+{
+    UseRuntimeUiTargetDummyVideoDriver();
+    const auto probe = RunSubmissionCase(SubmissionCase::IncompatibleMaterial);
+    CHECK(probe.PendingCommands == probe.ExpectedCommands);
+    CHECK(probe.Diagnostic.empty());
+    CHECK(probe.Statistics.AcceptedFrames == 1U);
 }

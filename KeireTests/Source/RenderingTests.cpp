@@ -1985,3 +1985,21 @@ TEST_CASE("camera and mesh renderer components validate renderer-neutral authori
     CHECK(registry->Contains(Keire::PointLightComponent::StaticType()));
     CHECK(registry->Contains(Keire::SpotLightComponent::StaticType()));
 }
+
+TEST_CASE("camera fullscreen effect stages persist reset and reject invalid slots")
+{
+    auto camera = Keire::CreateRef<Keire::CameraComponent>();
+    const std::array effects{Keire::AssetId::Generate(), Keire::AssetId::Generate(), Keire::AssetId::Generate()};
+    for (std::size_t stage = 0; stage < effects.size(); ++stage)
+        camera->SetFullscreenEffect(static_cast<Keire::CameraEffectStage>(stage), effects[stage]);
+    CHECK_THROWS_AS(camera->SetFullscreenEffect(static_cast<Keire::CameraEffectStage>(3), {}), std::out_of_range);
+    CHECK(camera->FullscreenEffects() == effects);
+    const auto registration = Keire::CreateCameraComponentRegistration();
+    auto restored = Keire::CreateRef<Keire::CameraComponent>();
+    registration.Deserialize(*restored, registration.Serialize(*camera), 1);
+    CHECK(restored->FullscreenEffects() == effects);
+    restored->Reset();
+    CHECK(restored->FullscreenEffects() == std::array<Keire::AssetId, 3>{});
+    registration.Deserialize(*restored, {}, 1);
+    CHECK(restored->FullscreenEffects() == std::array<Keire::AssetId, 3>{});
+}

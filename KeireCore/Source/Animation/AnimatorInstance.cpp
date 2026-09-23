@@ -644,6 +644,7 @@ namespace Keire
         runtime->StateId = stateDefinition->Id;
         runtime->Time = MotionDuration(clips) * normalizedTime;
         runtime->NormalizedTime = normalizedTime;
+        runtime->ExitTimeProgress = normalizedTime;
         runtime->BlendWeights.clear();
         runtime->Transition.reset();
         m_Playing = true;
@@ -691,6 +692,7 @@ namespace Keire
         runtime->Transition =
             RuntimeTransition{runtime->StateId, destination->Id, runtime->Time, destinationTime, 0.0F, duration, {}};
         runtime->StateId = destination->Id;
+        runtime->ExitTimeProgress = normalizedTime;
         m_Playing = true;
         PublishDebugSnapshot();
     }
@@ -792,13 +794,14 @@ namespace Keire
                 for (const auto& transition : state->Transitions)
                 {
                     ++transitionsTested;
-                    if (transition.HasExitTime && runtime.NormalizedTime < transition.ExitTime)
+                    if (transition.HasExitTime && runtime.ExitTimeProgress < transition.ExitTime)
                         continue;
                     if (!std::ranges::all_of(transition.Conditions, conditionMatches))
                         continue;
                     runtime.Transition = RuntimeTransition{state->Id, transition.DestinationId, runtime.Time, 0.0F,
                                                            0.0F,      transition.Duration,      transition.Id};
                     runtime.StateId = transition.DestinationId;
+                    runtime.ExitTimeProgress = 0.0;
                     for (const auto& condition : transition.Conditions)
                     {
                         const auto* parameter = FindParameterById(definition, condition.ParameterId);
@@ -843,6 +846,11 @@ namespace Keire
                 evaluated.RootMotion = evaluated.RootMotion || sourceEvaluation.RootMotion;
                 runtime.Time = transition.DestinationTime;
                 runtime.NormalizedTime = evaluated.Duration > 0.0F ? runtime.Time / evaluated.Duration : 0.0F;
+                if (evaluated.Duration > 0.0F)
+                    runtime.ExitTimeProgress +=
+                        static_cast<double>(deltaSeconds) * destination->Speed / evaluated.Duration;
+                if (!destination->Loop)
+                    runtime.ExitTimeProgress = std::min(runtime.ExitTimeProgress, 1.0);
                 runtime.BlendWeights = evaluated.Weights;
                 if (layerIndex == 0)
                 {
@@ -864,6 +872,11 @@ namespace Keire
                     AdvanceStateTime(runtime.Time, deltaSeconds * state->Speed, duration, state->Loop, wrapped);
                 evaluated = EvaluateMotion(clips, runtime.Time, previousTime, wrapped, m_Skeleton->Bones());
                 runtime.NormalizedTime = duration > 0.0F ? runtime.Time / duration : 0.0F;
+                // Sampling wraps, but exit times can refer to one or more completed loops.
+                if (duration > 0.0F)
+                    runtime.ExitTimeProgress += static_cast<double>(deltaSeconds) * state->Speed / duration;
+                if (!state->Loop)
+                    runtime.ExitTimeProgress = std::min(runtime.ExitTimeProgress, 1.0);
                 runtime.BlendWeights = evaluated.Weights;
                 if (layerIndex == 0)
                 {
@@ -973,6 +986,7 @@ namespace Keire
         for (const auto& layer : m_Layers)
         {
             AnimatorCheckpointLayer captured{layer.Id, layer.StateId, layer.Time, layer.Weight, layer.NormalizedTime};
+            captured.ExitTimeProgress = layer.ExitTimeProgress;
             if (layer.Transition)
             {
                 const auto& transition = *layer.Transition;
@@ -1020,12 +1034,14 @@ namespace Keire
             if (!layer || !FindState(*layer, captured.StateId) || !layerIds.insert(captured.Id).second ||
                 !std::isfinite(captured.Time) || captured.Time < 0.0F || !std::isfinite(captured.Weight) ||
                 captured.Weight < 0.0F || captured.Weight > 1.0F || !std::isfinite(captured.NormalizedTime) ||
-                captured.NormalizedTime < 0.0F || captured.NormalizedTime > 1.0F)
+                captured.NormalizedTime < 0.0F || captured.NormalizedTime > 1.0F ||
+                !std::isfinite(captured.ExitTimeProgress) || captured.ExitTimeProgress < 0.0)
             {
                 throw std::invalid_argument("Animator checkpoint layer state is incompatible.");
             }
             RuntimeLayer runtime{captured.Id, captured.StateId, captured.Time, captured.Weight,
                                  captured.NormalizedTime};
+            runtime.ExitTimeProgress = captured.ExitTimeProgress;
             if (captured.Transition)
             {
                 const auto& transition = *captured.Transition;

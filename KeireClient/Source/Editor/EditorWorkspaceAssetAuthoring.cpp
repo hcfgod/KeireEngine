@@ -414,15 +414,6 @@ bool EditorWorkspaceLayer::CreateMaterialGraph(const std::string_view name, cons
         const auto shaderRecord = m_AssetDatabase->Find(shaderAsset);
         if (!shaderRecord)
             throw std::invalid_argument("The selected shader no longer exists. Choose another shader.");
-        if (shaderRecord->Type == Keire::ShaderGraphAsset::StaticType())
-        {
-            const auto& specification = m_AssetDatabase->Specification();
-            const auto shaderSource =
-                specification.ProjectRoot / specification.SourceDirectory / shaderRecord->RelativePath;
-            const auto graph = Keire::ShaderGraphAsset::DecodeSource(ReadBytes(shaderSource));
-            if (graph.Target.Target != Keire::ShaderGraphTarget::Material)
-                throw std::invalid_argument("A mesh material requires a surface Shader Graph.");
-        }
         Keire::MaterialShaderReference shaderReference;
         shaderReference.Asset = shaderAsset;
         shaderReference.Kind = shaderRecord->Type == Keire::ShaderGraphAsset::StaticType()

@@ -85,3 +85,31 @@ TEST_CASE("Runtime UI geometry preserves material boundaries and quad UV coordin
     commands[2].Material = quad.Material;
     CHECK(Keire::RenderBackend::BuildRuntimeUiGeometry(commands).Batches.size() == 1U);
 }
+
+TEST_CASE("Runtime UI camera geometry follows render scale without changing authored data")
+{
+    Keire::RuntimeUiDrawCommand quad;
+    quad.Rect = {20, 10, 40, 20};
+    quad.ClipRect = {0, 0, 100, 50};
+    quad.Material = Keire::AssetId(1, 2);
+    Keire::RenderBackend::CapturedRuntimeUiCameraPanel panel;
+    panel.Viewport = {200, 100};
+    panel.Commands = {quad};
+    const auto original = Keire::RenderBackend::BuildRuntimeUiGeometry(panel.Commands);
+    const auto scaled = Keire::RenderBackend::BuildRuntimeUiCameraGeometry(panel, 100, 25);
+    REQUIRE(scaled.Vertices.size() == original.Vertices.size());
+    REQUIRE_FALSE(scaled.Vertices.empty());
+    for (std::size_t index = 0; index < scaled.Vertices.size(); ++index)
+    {
+        CHECK(scaled.Vertices[index].Position.X == doctest::Approx(original.Vertices[index].Position.X * 0.5F));
+        CHECK(scaled.Vertices[index].Position.Y == doctest::Approx(original.Vertices[index].Position.Y * 0.25F));
+        CHECK(scaled.Vertices[index].UV == original.Vertices[index].UV);
+    }
+    REQUIRE(scaled.Batches.size() == 1U);
+    CHECK(scaled.Batches.front().ClipRect == Keire::RuntimeUiRect{0, 0, 50, 12.5F});
+    CHECK(scaled.Batches.front().Material == quad.Material);
+    CHECK(panel.Commands.front().Rect == quad.Rect);
+    CHECK_THROWS_AS(Keire::RenderBackend::BuildRuntimeUiCameraGeometry(panel, 0, 25), std::invalid_argument);
+    panel.Viewport.X = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(Keire::RenderBackend::BuildRuntimeUiCameraGeometry(panel, 100, 25), std::invalid_argument);
+}

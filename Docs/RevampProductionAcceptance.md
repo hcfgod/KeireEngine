@@ -1,5 +1,72 @@
 # Material/shader production acceptance
 
+## Camera effects and UI shaders — September 23, 2026
+
+Fullscreen camera stages and UI Document material assignment now execute in the editor and cooked player.
+See `RevampShaderGraphicsDetails.md` for the native Windows scenarios and exact focused test results.
+The local cooked-player check found and fixed missing camera/UI material dependencies; scene/prefab import cache
+versions advance to include these references. All 21 scene tests passed under ASan and optimized Dist (314 assertions each), including
+the two focused dependency/cook tests (19 assertions). The disposable project is
+`D:/Projects/KeireProjects/MaterialAnimationUserTest0922`; its saved scene contains the tint and custom UI material.
+
+This does not close authored VFX billboard/ribbon execution, arbitrary custom-pass scheduling, continuous material
+drag-time flicker, exhaustive lighting/shadow acceptance, or the clean installer/SDK publication gates below.
+
+## Existing-workflow and installer follow-up — September 22, 2026
+
+Reviewed the current material replacement, integration, parity, shader/material, contract-review, and production
+readiness documents against their implementation. Historical gaps that now have production callers are reconciled
+in those documents; this does not close the remaining compiler, performance, platform, or full visual acceptance gates.
+
+The material Inspector accepted raw code shaders with non-surface targets although its Shader Graph picker already
+excluded them. `MaterialInspectorPanel` now supplies the same surface-target predicate to raw shader selection and
+resolution in `AssetInspectorPanel`. Unavailable or incompatible references retain saved overrides. Focused coverage
+in `MaterialIdentityTests` checks rejection, source preservation, and recovery when compatible reflection returns.
+
+Windows testing in `D:/Projects/KeireProjects/MaterialAnimationUserTest0922` reproduced the old picker showing both
+`PickerMaterial` and `PickerFullscreen`. Material edits and undo retained Roughness 0.85. Creating an instance took
+87.730 ms of worker execution; its Metallic 0.5 override was saved, and assignment through the Cube's Mesh Renderer
+slot survived scene save/reopen. This warm sample is not a cold-creation benchmark. One earlier unmonitored editor
+exit was not reproduced during the monitored editing session, which closed normally with exit code 0. Continuous
+drag-time black flicker has not been established as resolved by these observations.
+
+After rebuilding Dist `KeireClient`, Windows control confirmed `PickerMaterial` remained selectable and
+`PickerFullscreen` was absent. Assigning the compatible code shader refreshed the preview; Undo restored the original
+shared Lit shader, pink base color, and Roughness 0.85. Selecting the instance after restart showed Metallic 0.5 and
+the inherited values intact. No default reset occurred in these tested actions.
+During Play, changing the instance's Metallic to 0.7 persisted after stopping and discarding simulation changes;
+Undo with the Inspector focused restored 0.5. The existing Fox animation script passed all seven playback checks
+again. The editor closed with exit code 0. Tested client SHA-256:
+`3AE55A432DD290A6854FA7D12E472287B6862AA41E5D282C90D077B87ED30B7E`.
+
+The installer slowdown came from pruning nonempty parent directories after each owned file removal: Windows retried
+`ERROR_DIR_NOT_EMPTY` for about 2.575 seconds per parent. `InstallTransaction` now skips known nonempty parents before
+the anchored removal operation. Ownership verification, file hashing, drift rejection, rollback, and user-file
+preservation remain enforced. Both NSIS templates show the worker phase; the Windows runtime harness records timing
+and includes 32 sibling files to exercise the pathological case.
+
+- Dist installer transaction selection: 15 cases / 225 assertions passed.
+- Debug and DebugASan install-worker suites: 19 cases / 247 assertions each passed, including pruning and failure paths.
+- Hub and Editor NSIS worker runtime matrices passed. Hub fresh install/update/uninstall measured 2.706/8.671/4.054
+  seconds; Editor measured 8.171/3.927/3.212 seconds. These isolated fixtures ran under concurrent machine load and
+  are not production payload benchmarks. Intentional timeout tests still wait for their configured timeout.
+- Windows control exercised the actual Hub NSIS wizard with isolated test registration and a disposable destination:
+  install and uninstall both reached completion within the first approximately nine-second observation.
+- Dist core material/shader/compute selection: 168 cases / 3,404 assertions passed.
+- Dist editor material/shader/graph selection: 133 cases / 14,247 assertions passed. The new code-shader rejection
+  regression also passed independently: 1 case / 25 assertions.
+- Source budgets passed for 1,512 first-party files; changed C++ formatting and `git diff --check` passed.
+- Documentation validation passed for 99 canonical guides, 9 navigation groups, 31 Mermaid diagrams, local links,
+  and 11 schema contracts. This checks documentation structure/contracts, not every guide's interactive workflow.
+- Dist `KeireClient` and `KeireInstallWorker` builds passed through `Scripts/project.ps1`. Both
+  `test-hub-package-windows.ps1` and `test-editor-package-windows.ps1` passed; these package-contract harnesses do not
+  replace compilation/execution of the two extracted SDK consumers.
+- Logs are under `Build/Validation`: `install-transactions-{dist,debug,asan}.log`,
+  `nsis-{hub,editor}-performance.log`, and `material-readiness-{core,editor}.log`.
+
+The public download has not been republished with these changes. Full production-sized package timing, both packaged
+SDK consumers, Linux/macOS validation, and the remaining combined material/lighting visual matrix are still open.
+
 ## Migration follow-up validation — September 15, 2026
 
 Continued in the canonical checkout with one agent. The existing staged migration fix and regression changes were

@@ -33,20 +33,29 @@ device-loss injection, Linux/Vulkan, macOS/Metal, or complete migration/UI accep
 The sections below are historical evidence, not separate requests to repeat already completed work. The remaining
 material/shader revamp work is tracked here; historical audio and scripting notes do not broaden this milestone.
 
-- Material authoring: multi-selection with mixed values and transactional undo, and texture tiling/offset semantics.
-- Shared shaders: package dependency integration, an explicit upgrade workflow, and pinning of compiler/include
-  inputs and visual fixtures in addition to source bytes.
-- Migration: reviewed editor UI and validation of the complete conversion before atomically publishing source index
-  and runtime catalog, including interrupted publication and rollback evidence.
-- Shader authoring: the complete dockable graph/code workflow, blackboard and typed subgraph extraction, node/pin
-  diagnostics and navigation, compatible creation/wire insertion, generated source inspection, stage/target
-  restrictions, and bounded target-specific previews.
-- Compilation and consumers: common graph/code artifacts and reflection, asynchronous cancellation and stale-job
-  rejection, complete dependency/cache keys, reconciled static variants, all graphics targets and required passes,
-  and evidence that value edits cause zero shader compilations.
-- Compute: typed graph operations and HLSL generation, backend compilation/execution, kernel/resource validation,
-  opaque C++ and C# resources, binding sets, direct/indirect dispatch, scheduling/hazards, completion/readback, and
-  shutdown/disposal/reload/device-loss handling.
+September 22 source reconciliation found several former implementation gaps already wired into the editor:
+`MaterialSelectionDocument` and the asset Inspector implement mixed selections, transactional publication/history,
+and independent texture tiling/offset edits. `EditorWorkspaceMaterialUpgrade` exposes reviewed migration and shared
+shader input/package adoption; importer-aware migration validates and publishes source/index/catalog transactionally.
+Graph comments, cross-document clipboard remapping, and clickable node/pin diagnostics also have production callers.
+These are no longer implementation TODOs. Their focused source tests passed in the September 22 Dist run;
+comprehensive interactive and platform acceptance is still a separate gate.
+
+- Material authoring: finish the combined interactive matrix below, particularly mixed selections, texture
+  transforms, instances, Play/Stop, and recovery during rapid edits. First-use shared-shader compilation latency
+  still needs a controlled cold/warm benchmark; a warm creation sample does not close that gate.
+- Shared shaders: validate package adoption and pinned-input workflows end to end. A caller-supplied fixture hash
+  is not generated visual evidence, and dependency pinning is not a complete shader compiler cache.
+- Migration: execute the reviewed UI conversion/restart scenarios against representative legacy projects. Native
+  transaction and failure-path coverage already exists and passes; it does not replace interactive acceptance.
+- Shader authoring: target-specific VFX/custom-pass previews, persistent graph bookmarks, and remaining capability
+  rows in `MaterialParityMatrix.md`. Generic mesh previews and session-only bookmarks are not full completion.
+- Compilation and consumers: connect the currently unused `ShaderCompileWorkKey` to production compilation,
+  complete dependency snapshots, and cancellation of an in-progress native compiler. Verify real compiler invocation
+  counts for value edits; counting fixture importers establish only the import-dependency contract.
+- Compute: complete authoring beyond the existing bounded graph subset and independent device API, shared renderer
+  scheduling/hazards, and device-loss acceptance. Existing direct/indirect dispatch and readback tests are not absent
+  implementations and should not be recreated.
 - Production validation: cooked fixture players and both SDK consumers, visual baselines, recorded compilation and
   editing performance/memory/CPU/GPU measurements, full Windows/D3D12 interaction, Linux/Vulkan, and macOS/Metal.
 - Legacy cutover: remove creation workflows only after their replacement and migration are operational; retain

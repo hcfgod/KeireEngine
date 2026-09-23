@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 24);
+    CHECK(importer.Version == 25);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 
@@ -174,7 +174,7 @@ TEST_CASE("Shader Graph v2 catalogs stable node identities and migrates v1 sourc
 TEST_CASE("Shader Graph compatibility versions are explicit and future sources fail recoverably")
 {
     CHECK(Keire::ShaderGraphSourceSchemaVersion == 6);
-    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 13);
+    CHECK(Keire::ShaderGraphGeneratedShaderVersion == 14);
     CHECK(Keire::ShaderGraphVertexLayoutVersion == 3);
 
     const auto graph = Keire::CreateDefaultShaderGraph();
@@ -192,7 +192,7 @@ TEST_CASE("Shader Graph compatibility versions are explicit and future sources f
     CHECK(manifest.at("occlusionSupport") == 3U);
     CHECK(manifest.at("spatialLightingAbiVersion") == 3U);
     CHECK(manifest.at("maximumWorldPositionDisplacementRadius").get<float>() == doctest::Approx(0.0F));
-    CHECK(variant.Hlsl.find("Generator version 13, source schema 6") != std::string::npos);
+    CHECK(variant.Hlsl.find("Generator version 14, source schema 6") != std::string::npos);
     REQUIRE(manifest.at("passes").size() == 3U);
     CHECK(manifest.at("passes")[0].at("role") == "depthVelocity");
     CHECK(manifest.at("passes")[1].at("role") == "deferredGBufferStandard");
@@ -651,6 +651,79 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     CHECK_THROWS_WITH_AS((void)importer.ContextualImport(context, ReadBytes(manifest)),
                          "Shader instance-addressing ABI v2 requires uint4 InstanceParameters at vertex b2/space1.",
                          std::invalid_argument);
+}
+
+TEST_CASE("every graphics shader template compiles through the production importer")
+{
+    TemporaryDirectory directory;
+    for (const bool sampleScene : {false, true})
+    {
+        for (const auto graphTemplate : {Keire::ShaderGraphTemplate::Lit, Keire::ShaderGraphTemplate::Unlit,
+                                         Keire::ShaderGraphTemplate::Transparent, Keire::ShaderGraphTemplate::Decal,
+                                         Keire::ShaderGraphTemplate::Hair, Keire::ShaderGraphTemplate::Eye,
+                                         Keire::ShaderGraphTemplate::Ui, Keire::ShaderGraphTemplate::Fullscreen,
+                                         Keire::ShaderGraphTemplate::Vfx, Keire::ShaderGraphTemplate::CustomGraphics})
+        {
+            if (sampleScene && graphTemplate != Keire::ShaderGraphTemplate::Fullscreen)
+                continue;
+            INFO(static_cast<int>(graphTemplate));
+            INFO(sampleScene);
+            auto graph = Keire::CreateShaderGraphTemplate(graphTemplate);
+            auto tint = Parameter("TestTint", Keire::ShaderGraphValueType::Color, Keire::Color{0.2F, 0.6F, 0.9F, 1.0F});
+            const auto colorPin =
+                std::ranges::any_of(graph.Nodes.front().Pins, [](const auto& pin) { return pin.Name == "Color"; })
+                    ? "Color"
+                    : "BaseColor";
+            if (sampleScene)
+            {
+                auto uv = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::UV);
+                auto scene = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::SceneColor);
+                auto multiply = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Multiply,
+                                                             Keire::ShaderGraphValueType::Color);
+                Connect(graph, uv, "UV", scene, "UV");
+                Connect(graph, scene, "Color", multiply, "A");
+                Connect(graph, tint, "Value", multiply, "B");
+                Connect(graph, multiply, "Result", graph.Nodes.front(), colorPin);
+                graph.Nodes.insert(graph.Nodes.end(), {uv, scene, multiply});
+            }
+            else
+                Connect(graph, tint, "Value", graph.Nodes.front(), colorPin);
+            graph.Nodes.push_back(tint);
+            Keire::ShaderGraphCompileOptions options;
+            options.GeneratedSource =
+                "Assets/Generated/Target" + std::to_string(static_cast<int>(graphTemplate)) + ".hlsl";
+            const auto compilation = Keire::CompileShaderGraph(graph, options);
+            REQUIRE(compilation.Succeeded());
+            REQUIRE(compilation.Variants.size() == 1U);
+            const auto& variant = compilation.Variants.front();
+            const auto source = directory.Path / variant.GeneratedSource;
+            auto manifest = source;
+            manifest.replace_extension(".keireshader");
+            WriteText(source, variant.Hlsl);
+            WriteText(manifest, variant.Manifest);
+            Keire::AssetImportContext context;
+            context.ProjectRoot = directory.Path;
+            context.SourceRoot = directory.Path / "Assets";
+            context.SourcePath = manifest;
+            context.RelativePath = manifest.lexically_relative(context.SourceRoot);
+            context.ReadProjectFile = [root = directory.Path](const auto& relative)
+            { return ReadBytes(root / relative); };
+            const auto imported = Keire::CreateShaderAssetImporter().ContextualImport(context, ReadBytes(manifest));
+            const auto shader = Keire::ShaderAsset::Decode(imported.Bytes);
+            CHECK(shader->Definition().ProgramTarget == Keire::ShaderGraphTargetName(graph.Target.Target));
+            REQUIRE(shader->Definition().Properties.size() == 1U);
+            CHECK(shader->Definition().Properties.front().Id == tint.Id);
+            CHECK(imported.Diagnostics.empty());
+            const auto manifestDocument = nlohmann::json::parse(variant.Manifest);
+            for (const auto& pass : manifestDocument.at("passes"))
+            {
+                const auto name = pass.at("role").get<std::string>();
+                CHECK(shader->Variant(Keire::ShaderBinaryFormat::Dxil, name) != nullptr);
+                CHECK(shader->Variant(Keire::ShaderBinaryFormat::SpirV, name) != nullptr);
+                CHECK(shader->Variant(Keire::ShaderBinaryFormat::Msl, name) != nullptr);
+            }
+        }
+    }
 }
 
 TEST_CASE("Shader Graph advanced node library lowers modern layered materials and reports cost")
@@ -1321,4 +1394,22 @@ TEST_CASE("Shader Graph texture transforms reject missing and incompatible param
     graph.Nodes[1].ParameterMetadata.TextureTransformProperty = {};
     graph.Nodes.back().ParameterMetadata.TextureTransformProperty = texture.Id;
     CHECK_THROWS_AS(Keire::ValidateShaderGraph(graph), std::invalid_argument);
+}
+
+TEST_CASE("Scene Color rejects mesh and UI consumers and preserves source identity")
+{
+    for (const auto target : {Keire::ShaderGraphTarget::Material, Keire::ShaderGraphTarget::Ui})
+    {
+        auto graph = Keire::CreateTargetShaderGraph(target);
+        auto scene = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::SceneColor);
+        Connect(graph, scene, "Color", graph.Nodes.front(),
+                target == Keire::ShaderGraphTarget::Material ? "BaseColor" : "Color");
+        graph.Nodes.push_back(scene);
+        const auto roundtrip = Keire::ShaderGraphAsset::DecodeSource(Keire::ShaderGraphAsset::EncodeSource(graph));
+        CHECK(roundtrip.Nodes.back().Kind == Keire::ShaderGraphNodeKind::SceneColor);
+        const auto compilation = Keire::CompileShaderGraph(roundtrip);
+        CHECK_FALSE(compilation.Succeeded());
+        REQUIRE_FALSE(compilation.Diagnostics.empty());
+        CHECK(compilation.Diagnostics.front().Message.find("Fullscreen") != std::string::npos);
+    }
 }

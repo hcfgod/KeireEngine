@@ -24,6 +24,8 @@ namespace Keire::Detail
             flags |= ImGuiWindowFlags_NoScrollbar;
         if (options.NoScrollWithMouse)
             flags |= ImGuiWindowFlags_NoScrollWithMouse;
+        if (options.AlwaysVerticalScrollbar)
+            flags |= ImGuiWindowFlags_AlwaysVerticalScrollbar;
         return flags;
     }
 } // namespace Keire::Detail

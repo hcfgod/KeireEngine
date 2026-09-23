@@ -39,12 +39,15 @@ coherent.
 
 ```csharp
 Animator? animator = GetComponent<Animator>();
-if (!animator.IsValid)
+if (animator is null || !animator.IsValid)
 {
     Debug.Warn($"{Entity.Name} has no Animator component.");
     return;
 }
 ```
+
+The following examples use this validated `animator` component handle. Retrieve it inside callbacks or retain it on
+the Behaviour.
 
 Stateful playback:
 
@@ -73,8 +76,8 @@ The handle also exposes `CurrentState`, `NormalizedTime`, `IsPlaying`, `IsPaused
 ## Playback Arguments
 
 ```csharp
-Animator.Play(Entity, "UpperBody.Reload", normalizedTime: 0.25f, layer: "UpperBody");
-Animator.CrossFade(Entity, "Locomotion.Run", duration: 0.2f, normalizedTime: 0.0f, layer: "Base");
+animator.Play("UpperBody.Reload", normalizedTime: 0.25f, layer: "UpperBody");
+animator.CrossFade("Locomotion.Run", duration: 0.2f, normalizedTime: 0.0f, layer: "Base");
 ```
 
 Contracts:
@@ -93,25 +96,25 @@ Invalid values throw before native playback. Unknown states and layers are rejec
 Write controller parameters:
 
 ```csharp
-Animator.SetFloat(Entity, "Speed", velocity.Length);
-Animator.SetInteger(Entity, "WeaponIndex", weaponIndex);
-Animator.SetBool(Entity, "Grounded", grounded);
-Animator.SetTrigger(Entity, "Jump");
-Animator.ResetTrigger(Entity, "Jump");
+animator.SetFloat("Speed", velocity.Length);
+animator.SetInteger("WeaponIndex", weaponIndex);
+animator.SetBool("Grounded", grounded);
+animator.SetTrigger("Jump");
+animator.ResetTrigger("Jump");
 ```
 
 Read parameters:
 
 ```csharp
-float speed = Animator.GetFloat(Entity, "Speed");
-int weaponIndex = Animator.GetInteger(Entity, "WeaponIndex");
-bool grounded = Animator.GetBool(Entity, "Grounded");
+float speed = animator.GetFloat("Speed");
+int weaponIndex = animator.GetInteger("WeaponIndex");
+bool grounded = animator.GetBool("Grounded");
 ```
 
 `Get*` throws when a parameter is unavailable. Use `TryGet*` when absence is expected:
 
 ```csharp
-if (Animator.TryGetFloat(Entity, "Speed", out float speed))
+if (animator.TryGetFloat("Speed", out float speed))
     UpdateSpeedDisplay(speed);
 ```
 
@@ -129,9 +132,9 @@ private const string SpeedParameter = "Speed";
 ## Layers
 
 ```csharp
-Animator.SetLayerWeight(Entity, "UpperBody", 0.75f);
+animator.SetLayerWeight("UpperBody", 0.75f);
 
-if (Animator.TryGetLayerWeight(Entity, "UpperBody", out float weight))
+if (animator.TryGetLayerWeight("UpperBody", out float weight))
     Debug.Log($"Upper-body weight: {weight:0.00}");
 ```
 
@@ -184,8 +187,7 @@ protected override void FixedUpdate()
     Vector3 desiredVelocity =
         (Entity.Transform.Right * move.X + Entity.Transform.Forward * move.Y) * _moveSpeed;
 
-    Animator.SetProceduralLocomotion(
-        Entity,
+    animator.SetProceduralLocomotion(
         new ProceduralLocomotionIntent(
             desiredVelocity,
             Entity.Transform.Forward,
@@ -201,7 +203,7 @@ protected override void FixedUpdate()
 Read the actual resolved state without taking ownership of native pose data:
 
 ```csharp
-ProceduralLocomotionState state = Animator.GetProceduralState(Entity);
+ProceduralLocomotionState state = animator.ProceduralState;
 if (state.State == ProceduralMotionState.Landing)
     Debug.Log($"Landing intensity: {state.LandingIntensity:0.00}");
 ```
@@ -224,8 +226,7 @@ procedural foot plant continues to emit the legacy `Footstep` animation event fo
 Submit a named two-bone goal:
 
 ```csharp
-Animator.SetTwoBoneIK(
-    Entity,
+animator.SetTwoBoneIK(
     goal: "LeftHand",
     rootBone: "LeftUpperArm",
     middleBone: "LeftLowerArm",
@@ -239,8 +240,7 @@ Animator.SetTwoBoneIK(
 ## FABRIK IK
 
 ```csharp
-Animator.SetFabrikIK(
-    Entity,
+animator.SetFabrikIK(
     goal: "SpineAim",
     bones: new[] { "Pelvis", "Spine", "Chest", "Neck", "Head" },
     target: lookTarget,
@@ -253,7 +253,7 @@ Animator.SetFabrikIK(
 Goals persist by name until replaced or cleared:
 
 ```csharp
-Animator.ClearIK(Entity, "LeftHand");
+animator.ClearIK("LeftHand");
 ```
 
 `AnimatorIkSpace.Model` interprets positions in model space. `World` converts world-space targets at the animation
@@ -265,8 +265,7 @@ Submit frame-specific goals there:
 ```csharp
 protected override void OnAnimatorIk(AnimationIkContext context)
 {
-    Animator.SetTwoBoneIK(
-        Entity,
+    animator.SetTwoBoneIK(
         "LookHand",
         "UpperArm.R",
         "LowerArm.R",
@@ -283,7 +282,7 @@ Clear goals on disable when they should not remain active:
 protected override void OnDisable()
 {
     if (Entity.IsValid)
-        Animator.ClearIK(Entity, "LookHand");
+        animator.ClearIK("LookHand");
 }
 ```
 
@@ -294,7 +293,7 @@ changing or serializing those authored settings:
 
 ```csharp
 float groundingWeight = grounded && !jumping ? 1.0f : 0.0f;
-Animator.SetFootGroundingWeight(Entity, groundingWeight);
+animator.SetFootGroundingWeight(groundingWeight);
 ```
 
 The runtime value is a `0..1` multiplier over the Animator's authored foot-position, foot-rotation, and pelvis
@@ -318,21 +317,22 @@ public sealed class CharacterAnimation : Behaviour
     private const string JumpTrigger = "Jump";
 
     [SerializeField, StableFieldId("79ed4997-9e73-4154-ad29-1a0ca35163da")]
-    private Entity _movementSource;
+    private Entity? _movementSource = null;
 
     protected override void Update()
     {
-        if (!Entity.Animator.IsValid)
+        var animator = GetComponent<Animator>();
+        if (animator is null || !animator.IsValid)
             return;
 
-        Entity source = _movementSource.IsValid ? _movementSource : Entity;
+        Entity source = _movementSource is { IsValid: true } ? _movementSource : Entity;
         float speed = Input.Axis2D("Move").Length;
 
-        Animator.SetFloat(Entity, SpeedParameter, speed);
-        Animator.SetBool(Entity, GroundedParameter, IsGrounded(source));
+        animator.SetFloat(SpeedParameter, speed);
+        animator.SetBool(GroundedParameter, IsGrounded(source));
 
         if (Input.Pressed("Jump"))
-            Animator.SetTrigger(Entity, JumpTrigger);
+            animator.SetTrigger(JumpTrigger);
     }
 
     private static bool IsGrounded(Entity source)

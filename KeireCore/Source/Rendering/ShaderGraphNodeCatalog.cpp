@@ -129,6 +129,8 @@ namespace Keire
                            ShaderGraphValueType::Scalar, ShaderGraphShaderStage::Fragment},
             NodeDescriptor{ShaderGraphNodeKind::FilterWidth, "keire.math.filter_width", "Filter Width", "Math",
                            ShaderGraphValueType::Scalar, ShaderGraphShaderStage::Fragment, 2},
+            NodeDescriptor{ShaderGraphNodeKind::SceneColor, "keire.scene.color", "Scene Color", "Scene",
+                           ShaderGraphValueType::Color, ShaderGraphShaderStage::Fragment, 4},
             NodeDescriptor{ShaderGraphNodeKind::DepthFade, "keire.scene.depth_fade", "Depth Fade", "Scene",
                            ShaderGraphValueType::Scalar, ShaderGraphShaderStage::Fragment, 6},
             NodeDescriptor{ShaderGraphNodeKind::Luminance, "keire.color.luminance", "Luminance", "Color",

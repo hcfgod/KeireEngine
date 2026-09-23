@@ -62,8 +62,8 @@ namespace Keire
             const auto sourcePrefix = std::filesystem::relative(context.SourceRoot, context.ProjectRoot);
             const auto graph =
                 ShaderGraphAsset::DecodeSource(context.ReadProjectFile(sourcePrefix / source->RelativePath));
-            if (graph.Target.Target != ShaderGraphTarget::Material)
-                throw std::invalid_argument("A mesh material requires a surface Shader Graph.");
+            if (graph.Target.Target == ShaderGraphTarget::Compute)
+                throw std::invalid_argument("A material requires a graphics shader; Compute uses explicit dispatch.");
             ShaderGraphInstanceDefinition selection;
             selection.Parent = reference.Asset;
             selection.KeywordOverrides = reference.Keywords;
@@ -1433,7 +1433,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.LegacyMaterial";
-        result.Version = 7;
+        result.Version = 8;
         result.Type = MaterialAsset::StaticType();
         result.Extensions = {std::string(LegacyMaterialAssetSourceExtension)};
         result.PreviousNames = {"Keire.Material"};

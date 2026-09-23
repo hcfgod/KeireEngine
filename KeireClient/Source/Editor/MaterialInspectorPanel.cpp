@@ -23,13 +23,13 @@ namespace KeireEditor
             if (texture.Type != Keire::ShaderPropertyType::Texture2D || !texture.TextureTransformProperty)
                 return nullptr;
             const auto properties = document.Properties();
-            const auto found = std::ranges::find(properties, texture.TextureTransformProperty,
-                                                  &Keire::ShaderPropertyDefinition::Id);
+            const auto found =
+                std::ranges::find(properties, texture.TextureTransformProperty, &Keire::ShaderPropertyDefinition::Id);
             return found != properties.end() && found->Type == Keire::ShaderPropertyType::Vector4 ? &*found : nullptr;
         }
 
         bool DrawTextureTransform(IPropertyEditor& editor, MaterialDocument& document,
-                                   MaterialSelectionDocument* selection, const Keire::ShaderPropertyDefinition& texture)
+                                  MaterialSelectionDocument* selection, const Keire::ShaderPropertyDefinition& texture)
         {
             const auto* transform = TextureTransform(document, texture);
             if (!transform)
@@ -43,10 +43,9 @@ namespace KeireEditor
                 for (const auto& selected : selection->Documents())
                 {
                     const auto properties = selected.Properties();
-                    const auto selectedTexture = std::ranges::find_if(properties, [&](const auto& candidate)
-                    {
-                        return texture.Id ? candidate.Id == texture.Id : candidate.Name == texture.Name;
-                    });
+                    const auto selectedTexture = std::ranges::find_if(
+                        properties, [&](const auto& candidate)
+                        { return texture.Id ? candidate.Id == texture.Id : candidate.Name == texture.Name; });
                     if (selectedTexture == properties.end() ||
                         selectedTexture->TextureTransformProperty != transform->Id)
                         return false;
@@ -58,17 +57,17 @@ namespace KeireEditor
                     mixedOffset |= current.Z != offset.X || current.W != offset.Y;
                 }
             const auto identity = texture.Id ? texture.Id.ToString() : texture.Name;
-            const bool tilingChanged = editor.EditVector2(
-                std::string("Tiling") + (mixedTiling ? " (Mixed)" : "") + "###material-tiling-" + identity,
-                tiling, transform->Step.value_or(0.01F));
-            const bool offsetChanged = editor.EditVector2(
-                std::string("Offset") + (mixedOffset ? " (Mixed)" : "") + "###material-offset-" + identity,
-                offset, transform->Step.value_or(0.01F));
+            const bool tilingChanged = editor.EditVector2(std::string("Tiling") + (mixedTiling ? " (Mixed)" : "") +
+                                                              "###material-tiling-" + identity,
+                                                          tiling, transform->Step.value_or(0.01F));
+            const bool offsetChanged = editor.EditVector2(std::string("Offset") + (mixedOffset ? " (Mixed)" : "") +
+                                                              "###material-offset-" + identity,
+                                                          offset, transform->Step.value_or(0.01F));
             if (!tilingChanged && !offsetChanged)
                 return false;
             if (selection)
                 return selection->SetTextureTransform(*transform, tilingChanged ? std::optional{tiling} : std::nullopt,
-                                                       offsetChanged ? std::optional{offset} : std::nullopt);
+                                                      offsetChanged ? std::optional{offset} : std::nullopt);
             return document.SetProperty(transform->Name, Keire::Vector4{tiling.X, tiling.Y, offset.X, offset.Y});
         }
     } // namespace
@@ -89,6 +88,11 @@ namespace KeireEditor
         return std::ranges::any_of(
             records, [&](const auto& record)
             { return record.Type == Keire::ShaderGraphAsset::StaticType() && record.Id.ToString() == owner; });
+    }
+
+    bool MaterialInspectorPanel::AcceptsSurfaceShader(const Keire::ShaderAssetDefinition& shader) noexcept
+    {
+        return shader.ProgramTarget == "Material";
     }
 
     bool MaterialInspectorPanel::AcceptsSurfaceShaderGraph(const std::span<const std::byte> source)
@@ -182,7 +186,7 @@ namespace KeireEditor
         std::vector<const Keire::ShaderPropertyDefinition*> properties;
         for (const auto& property : document.Properties())
             if (!std::ranges::any_of(document.Properties(), [&](const auto& texture)
-                                    { return TextureTransform(document, texture) == &property; }))
+                                     { return TextureTransform(document, texture) == &property; }))
                 properties.push_back(&property);
         std::stable_sort(properties.begin(), properties.end(),
                          [](const auto* left, const auto* right) { return left->Category < right->Category; });

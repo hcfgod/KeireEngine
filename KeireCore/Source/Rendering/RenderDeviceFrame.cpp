@@ -1172,7 +1172,7 @@ namespace Keire::RenderBackend
             color.format = targetFormat != SDL_GPU_TEXTUREFORMAT_INVALID ? targetFormat
                            : worldSurface ? SceneColorFormat
                                           : SDL_GetGPUSwapchainTextureFormat(Device, NativeWindow);
-            color.blend_state.enable_blend = true;
+            color.blend_state.enable_blend = !shader || shader->ProgramTarget != "Fullscreen";
             color.blend_state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_SRC_ALPHA;
             color.blend_state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
             color.blend_state.color_blend_op = SDL_GPU_BLENDOP_ADD;

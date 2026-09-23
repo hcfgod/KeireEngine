@@ -32,7 +32,6 @@
 #include <span>
 #include <sstream>
 #include <stdexcept>
-#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -65,47 +64,6 @@ namespace
         return !found.empty();
     }
 
-    [[nodiscard]] std::string JoinEntityTags(const std::span<const std::string> tags)
-    {
-        std::string result;
-        for (const auto& tag : tags)
-        {
-            if (!result.empty())
-                result += ", ";
-            result += tag;
-        }
-        return result;
-    }
-
-    [[nodiscard]] std::optional<std::vector<std::string>> ParseEntityTags(const std::string_view text)
-    {
-        std::vector<std::string> result;
-        std::unordered_set<std::string> unique;
-        std::size_t begin = 0;
-        while (begin < text.size())
-        {
-            const auto separator = text.find(',', begin);
-            auto value =
-                text.substr(begin, separator == std::string_view::npos ? text.size() - begin : separator - begin);
-            const auto first = value.find_first_not_of(" \t\r\n");
-            if (first == std::string_view::npos)
-                return std::nullopt;
-            value.remove_prefix(first);
-            const auto last = value.find_last_not_of(" \t\r\n");
-            value = value.substr(0, last + 1);
-            if (!Keire::SceneAsset::IsValidEntityTag(value) || !unique.emplace(value).second ||
-                result.size() >= Keire::MaximumEntityTagCount)
-                return std::nullopt;
-            result.emplace_back(value);
-            if (separator == std::string_view::npos)
-                break;
-            begin = separator + 1;
-            if (begin == text.size())
-                return std::nullopt;
-        }
-        return result;
-    }
-
 } // namespace
 
 KeireEditor::InspectorPanel::InspectorPanel(IInspectorController& controller)
@@ -118,7 +76,8 @@ KeireEditor::InspectorPanel::~InspectorPanel() = default;
 
 void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
 {
-    auto panel = ui.BeginPanel(m_Registration);
+    // Width-dependent previews must not toggle the scrollbar and resize themselves every frame.
+    auto panel = ui.BeginPanel(m_Registration, {.AlwaysVerticalScrollbar = true});
     if (!panel)
         return;
     auto& sceneDocument = m_Controller.InspectorSceneDocument();
@@ -691,7 +650,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     {
                         ui.Spacing();
                         auto& cameraExpanded = expansion("camera");
-                        if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 440.0F : 38.0F}, true);
+                        if (auto card = ui.BeginChild("CameraCard", {0.0F, cameraExpanded ? 620.0F : 38.0F}, true);
                             card)
                         {
                             const auto registration = scene->Components()->Find(camera->Type());
@@ -800,6 +759,23 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                         setComponentProperty(camera->Type(), "clearColor",
                                                              Keire::Color{clearColor.Red, clearColor.Green,
                                                                           clearColor.Blue, clearColor.Alpha});
+                                    }
+                                }
+                                ui.Text("Fullscreen Effects");
+                                InspectorPropertyEditor effectEditor(ui, records, assets, scene, *m_AssetPicker);
+                                constexpr std::array effectKeys{"effectBeforeTonemapping", "effectAfterTonemapping",
+                                                                "effectAfterUi"};
+                                constexpr std::array effectLabels{"Before Tonemapping", "After Tonemapping",
+                                                                  "After UI"};
+                                for (std::size_t stage = 0; stage < effectKeys.size(); ++stage)
+                                {
+                                    ui.Text(effectLabels[stage]);
+                                    auto material = camera->FullscreenEffects()[stage];
+                                    if (effectEditor.EditAsset(std::string("##") + effectKeys[stage], material,
+                                                               Keire::MaterialAsset::StaticType()))
+                                    {
+                                        m_Controller.RecordInspectorUndo();
+                                        setComponentProperty(camera->Type(), effectKeys[stage], material);
                                     }
                                 }
                                 if (ui.Button("Reset Camera"))

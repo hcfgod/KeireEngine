@@ -112,6 +112,8 @@ static void UnityShapedObjectApiContract()
     Assert(typeof(Keire.UI.UIDocument).GetProperty(nameof(Keire.UI.UIDocument.VisualTreeAsset)) is
                { CanRead: true, CanWrite: true } &&
                typeof(Keire.UI.UIDocument).GetProperty(nameof(Keire.UI.UIDocument.PanelSettings)) is
+               { CanRead: true, CanWrite: true } &&
+               typeof(Keire.UI.UIDocument).GetProperty(nameof(Keire.UI.UIDocument.Material)) is
                { CanRead: true, CanWrite: true },
            "UI Toolkit documents must expose visual-tree and panel-settings assets as one native component.");
     string[] retiredUiTypes =
@@ -723,6 +725,24 @@ static unsafe void ManagedRenderingContract()
                    MathF.Abs(NativeRenderingFixture.ScalarValue - 91.0f) < 0.0001f &&
                    NativeRenderingFixture.IntegerValue == (int)Keire.CameraProjection.Orthographic,
                "Camera writes must preserve the native component, property, and value.");
+
+        Assert(camera.EffectBeforeTonemapping?.Id == new Keire.AssetId(105, 205) &&
+                   camera.EffectAfterTonemapping?.Id == new Keire.AssetId(105, 205) &&
+                   camera.EffectAfterUi?.Id == new Keire.AssetId(105, 205),
+               "Camera effect getters must resolve material asset handles.");
+        var effectMaterial = Keire.Asset.FromId<Keire.Material>(NativeRenderingFixture.ReplacementMaterial);
+        camera.EffectBeforeTonemapping = effectMaterial;
+        Assert(NativeRenderingFixture.AssetComponent == Keire.NativeRenderingComponent.Camera &&
+                   NativeRenderingFixture.AssetProperty == Keire.NativeRenderingAssetProperty.EffectBeforeTonemapping &&
+                   NativeRenderingFixture.AssetValue == NativeRenderingFixture.ReplacementMaterial,
+               "Camera effects must preserve the native property and material identity.");
+        camera.EffectAfterTonemapping = effectMaterial;
+        Assert(NativeRenderingFixture.AssetProperty == Keire.NativeRenderingAssetProperty.EffectAfterTonemapping,
+               "Tone-mapped effects must address their own slot.");
+        camera.EffectAfterUi = null;
+        Assert(NativeRenderingFixture.AssetProperty == Keire.NativeRenderingAssetProperty.EffectAfterUi &&
+                   NativeRenderingFixture.AssetValue == default,
+               "Clearing a camera effect must send an empty material handle.");
 
         var renderer = new Keire.MeshRenderer(entity);
         Assert(renderer.Materials.Count == 2 && renderer.Materials[1].Id == NativeRenderingFixture.SecondMaterial,
@@ -2053,6 +2073,9 @@ file static unsafe class NativeRenderingFixture
     internal static readonly Keire.AssetId SecondMaterial = new(102, 202);
     internal static readonly Keire.AssetId ReplacementMaterial = new(103, 203);
     internal static readonly Keire.AssetId ReplacementTexture = new(104, 204);
+    internal static Keire.NativeRenderingComponent AssetComponent;
+    internal static Keire.NativeRenderingAssetProperty AssetProperty;
+    internal static Keire.AssetId AssetValue;
     internal static Keire.NativeRenderingComponent ScalarComponent;
     internal static Keire.NativeRenderingScalarProperty ScalarProperty;
     internal static float ScalarValue;
@@ -2234,8 +2257,13 @@ file static unsafe class NativeRenderingFixture
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte SetAsset(ulong high, ulong low, byte component, byte property, Keire.AssetId value) =>
-        high == 23 && low == 29 ? (byte)1 : (byte)0;
+    private static byte SetAsset(ulong high, ulong low, byte component, byte property, Keire.AssetId value)
+    {
+        AssetComponent = (Keire.NativeRenderingComponent)component;
+        AssetProperty = (Keire.NativeRenderingAssetProperty)property;
+        AssetValue = value;
+        return high == 23 && low == 29 ? (byte)1 : (byte)0;
+    }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
     private static int GetMaterials(ulong high, ulong low, Keire.AssetId* destination, int capacity)

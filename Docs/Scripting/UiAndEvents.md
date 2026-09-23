@@ -20,6 +20,16 @@ Add a `UIDocument` component to a scene entity and assign both the visual-tree a
 panel sorting orders are added together. Later documents draw above earlier documents; pointer input is offered in the
 reverse order until handled.
 
+The component's optional **UI Material** field applies a UI-target shader material to the rendered document.
+Create a UI Shader Graph, use **Material from Shader**, then assign its compiled material in the Inspector.
+`UIDocument.Material` exposes the same reference to C#; `UiDocumentComponent::SetMaterial` is the C++ API.
+Clearing it restores standard UI rendering without rebuilding the document or losing focus/input state.
+An unavailable or incompatible material uses standard UI rendering and reports a diagnostic; a failed reload
+retains the last usable shader when one exists. Scene and prefab cooking retain the assigned material dependencies.
+Materials apply to screen overlays, camera overlays, render textures, and world surfaces. Game-view and player
+overlays execute in the camera GPU pass, before the camera's After UI effect. UI Builder remains an
+authoring preview; verify the GPU shader in the scene or player.
+
 ## UI Builder Workflow
 
 Create a UI Document from the Project panel, then assign imported `.keirestyle` and `.keireuipanel` assets as needed.

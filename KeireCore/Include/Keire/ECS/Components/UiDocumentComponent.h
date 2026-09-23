@@ -22,6 +22,9 @@ namespace Keire
         [[nodiscard]] std::int32_t SortingOrder() const noexcept { return m_SortingOrder; }
         [[nodiscard]] bool ReceivesInput() const noexcept { return m_ReceivesInput; }
 
+        [[nodiscard]] AssetId Material() const noexcept { return m_Material; }
+
+        void SetMaterial(AssetId value);
         void SetVisualTree(AssetId value);
         void SetPanelSettings(AssetId value);
         void SetSortingOrder(std::int32_t value);
@@ -31,6 +34,7 @@ namespace Keire
         friend ComponentRegistration CreateUiDocumentComponentRegistration();
         AssetId m_VisualTree;
         AssetId m_PanelSettings;
+        AssetId m_Material;
         std::int32_t m_SortingOrder = 0;
         bool m_ReceivesInput = true;
     };

@@ -115,7 +115,8 @@ namespace Keire
         Surface,
         Vfx,
         Fullscreen,
-        CustomGraphicsPass
+        CustomGraphicsPass,
+        Ui
     };
 
     struct ShaderInterfaceDefinition

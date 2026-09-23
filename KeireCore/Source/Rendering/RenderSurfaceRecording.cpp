@@ -751,7 +751,15 @@ namespace Keire::RenderBackend
                     started = std::chrono::steady_clock::now();
                     const bool temporalHistoryContinuous =
                         request != requests.end() && request->Packet.TemporalHistoryContinuous;
+                    if (request != requests.end())
+                        RecordFullscreenEffect(
+                            commands, surface, request->Packet.Camera.FullscreenEffects[0], true,
+                            {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
                     RecordToneMap(commands, surface, featureSelection.EffectiveAntiAliasing, temporalHistoryContinuous);
+                    if (request != requests.end())
+                        RecordFullscreenEffect(
+                            commands, surface, request->Packet.Camera.FullscreenEffects[1], false,
+                            {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
                     Statistics.ToneMapMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     return;
@@ -760,6 +768,10 @@ namespace Keire::RenderBackend
                 {
                     const auto started = std::chrono::steady_clock::now();
                     RecordRuntimeUiCameraPanels(commands, surface);
+                    if (request != requests.end())
+                        RecordFullscreenEffect(
+                            commands, surface, request->Packet.Camera.FullscreenEffects[2], false,
+                            {request->Packet.MaterialTimeSeconds, request->Packet.MaterialDeltaSeconds});
                     Statistics.UiRecordingMilliseconds +=
                         std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - started).count();
                     if (request != requests.end())

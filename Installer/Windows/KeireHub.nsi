@@ -129,6 +129,7 @@ FunctionEnd
 Function RecoverPendingHubInstall
     StrCmp $KeireInstallWorkerPending "1" 0 RecoverPendingHubInstallDone
     SetOutPath "$PLUGINSDIR"
+    DetailPrint "Restoring the previous Hub installation..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" recover --product hub --root "$INSTDIR"'
     Pop $0
     Pop $1
@@ -254,6 +255,7 @@ Section "${PRODUCT_NAME} (required)" MainSection
 !ifdef KEIRE_HUB_TEST_FAIL_DURING_STAGE
     Goto HubInstallWorkerFailed
 !endif
+    DetailPrint "Verifying and installing the Hub payload..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product hub --source "$PLUGINSDIR\payload" --root "$INSTDIR"'
     Pop $0
     Pop $1
@@ -295,6 +297,7 @@ Section "-Finalize Hub installation" HubInstallWorkerCommitSection
     DetailPrint "$1"
     !insertmacro KeireHubTestTrace "integrate exit=$0 output=$1"
     StrCmp $0 "0" 0 HubInstallWorkerShellRollback
+    DetailPrint "Finalizing the Hub installation..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" commit --product hub --root "$INSTDIR"'
     Pop $0
     Pop $1
@@ -330,6 +333,7 @@ Section "Uninstall"
     File /oname=KeireInstallWorker.exe "${SOURCE_DIRECTORY}\bin\KeireInstallWorker.exe"
     IfErrors UnsafeUninstall
     !insertmacro KeireHubTestTrace "uninstall embedded worker extracted"
+    DetailPrint "Removing verified Hub files and preserving user content..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" uninstall --product hub --root "$INSTDIR"'
     Pop $0
     Pop $1

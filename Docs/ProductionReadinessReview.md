@@ -220,7 +220,8 @@ Windows, DEB, and RPM records and states the native-signing limitations explicit
 
 - The frozen Unity 6.3 VFX ledger contains 278 rows: 248 implemented and 30 disabled. This is substantial coverage, not
   a complete Unity parity claim.
-- The Unreal-inspired Material Ecosystem matrix contains 145 rows: 98 Complete, 8 Partial, and 39 Planned. The ledger
+- The September 22 source reconciliation of the Unreal-inspired Material Ecosystem matrix
+  contains 145 rows: 100 Complete, 9 Partial, and 36 Planned. The ledger
   distinguishes current source capability from immutable 0.3.2 package evidence; Planned rows remain unsupported.
 - Current content authorities are project schema 4, scene schema 6, mesh schema 5, Shader source schema 5, VFX schema 5,
   Material source schema 5, Animator component schema 7, procedural motion profile schema 1, and cooked runtime-manifest

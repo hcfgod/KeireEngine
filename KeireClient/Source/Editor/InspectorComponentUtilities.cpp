@@ -2,9 +2,51 @@
 
 #include <algorithm>
 #include <sstream>
+#include <unordered_set>
 
 namespace KeireEditor
 {
+    [[nodiscard]] std::string JoinEntityTags(const std::span<const std::string> tags)
+    {
+        std::string result;
+        for (const auto& tag : tags)
+        {
+            if (!result.empty())
+                result += ", ";
+            result += tag;
+        }
+        return result;
+    }
+
+    [[nodiscard]] std::optional<std::vector<std::string>> ParseEntityTags(const std::string_view text)
+    {
+        std::vector<std::string> result;
+        std::unordered_set<std::string> unique;
+        std::size_t begin = 0;
+        while (begin < text.size())
+        {
+            const auto separator = text.find(',', begin);
+            auto value =
+                text.substr(begin, separator == std::string_view::npos ? text.size() - begin : separator - begin);
+            const auto first = value.find_first_not_of(" \t\r\n");
+            if (first == std::string_view::npos)
+                return std::nullopt;
+            value.remove_prefix(first);
+            const auto last = value.find_last_not_of(" \t\r\n");
+            value = value.substr(0, last + 1);
+            if (!Keire::SceneAsset::IsValidEntityTag(value) || !unique.emplace(value).second ||
+                result.size() >= Keire::MaximumEntityTagCount)
+                return std::nullopt;
+            result.emplace_back(value);
+            if (separator == std::string_view::npos)
+                break;
+            begin = separator + 1;
+            if (begin == text.size())
+                return std::nullopt;
+        }
+        return result;
+    }
+
     std::string EncodeComponentOrderPayload(const ComponentOrderPayload& value)
     {
         return value.Entity.ToString() + '\n' + value.Type.ToString() + '\n' + std::to_string(value.Ordinal);

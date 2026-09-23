@@ -120,6 +120,7 @@ FunctionEnd
 Function RecoverPendingEditorInstall
     StrCmp $KeireInstallWorkerPending "1" 0 RecoverPendingEditorInstallDone
     SetOutPath "$PLUGINSDIR"
+    DetailPrint "Restoring the previous Editor installation..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" recover --product editor --root "$INSTDIR"'
     Pop $0
     Pop $1
@@ -191,6 +192,7 @@ Section "${PRODUCT_NAME} (required)" MainSection
 !ifdef KEIRE_EDITOR_TEST_FAIL_DURING_STAGE
     Goto EditorInstallWorkerFailed
 !endif
+    DetailPrint "Verifying and installing the Editor payload..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product editor --source "$PLUGINSDIR\payload" --root "$INSTDIR"'
     Pop $0
     Pop $1
@@ -232,6 +234,7 @@ Section "-Finalize Editor installation" EditorInstallWorkerCommitSection
     DetailPrint "$1"
     !insertmacro KeireEditorTestTrace "integrate exit=$0 output=$1"
     StrCmp $0 "0" 0 EditorInstallWorkerShellRollback
+    DetailPrint "Finalizing the Editor installation..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" commit --product editor --root "$INSTDIR"'
     Pop $0
     Pop $1
@@ -266,6 +269,7 @@ Section "Uninstall"
     File /oname=KeireInstallWorker.exe "${SOURCE_DIRECTORY}\bin\KeireInstallWorker.exe"
     IfErrors UnsafeUninstall
     !insertmacro KeireEditorTestTrace "uninstall embedded worker extracted"
+    DetailPrint "Removing verified Editor files and preserving user content..."
     nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" uninstall --product editor --root "$INSTDIR"'
     Pop $0
     Pop $1

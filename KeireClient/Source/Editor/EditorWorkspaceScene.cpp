@@ -1378,6 +1378,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             camera.ClearColor = selected->Camera->ClearColor();
             camera.NearPlane = selected->Camera->NearPlane();
             camera.FarPlane = selected->Camera->FarPlane();
+            camera.FullscreenEffects = selected->Camera->FullscreenEffects();
         }
         m_GameRenderView->SetCamera(camera);
         m_GameRenderView->Surface()->RequestSampleCount(Keire::ResolveRenderSurfaceSampleCount(featureSelection));
@@ -1447,10 +1448,10 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             {
                 for (auto submission : presentation->UiRenderSubmissions(m_GameRenderView))
                 {
-                    if (KeireEditor::SubmitsRuntimeUiToSceneRenderer(submission.Target))
-                        Owner().Renderer()->SubmitRuntimeUiTarget(std::move(submission));
+                    if (submission.Target == Keire::RuntimeUiRenderTarget::ScreenOverlay)
+                        submission.Target = Keire::RuntimeUiRenderTarget::CameraOverlay;
+                    Owner().Renderer()->SubmitRuntimeUiTarget(std::move(submission));
                 }
-                presentation->DrawScreenUi(ui, m_GameRenderView, imageRect.Minimum.X, imageRect.Minimum.Y);
             }
         }
         const auto runtimeUiRouting =

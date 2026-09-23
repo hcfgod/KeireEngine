@@ -237,6 +237,7 @@ namespace Keire::Detail
             state.RenderTexture = document.Settings.RenderTexture;
             state.DepthTest = document.Settings.DepthTest;
             state.ReceivesInput = document.ReceivesInput;
+            state.Material = document.Material;
             state.SortingOrder = document.Settings.SortingOrder;
             state.Geometry.Canvas = document.Entity;
             state.Root = document.Root;
@@ -468,7 +469,8 @@ namespace Keire::Detail
                               .WorldUnitsPerPixel = canvas.WorldUnitsPerPixel,
                               .RenderTexture = canvas.RenderTexture,
                               .SortingOrder = canvas.SortingOrder,
-                              .DepthTest = canvas.DepthTest});
+                              .DepthTest = canvas.DepthTest,
+                              .Material = canvas.Material});
         }
         return result;
     }

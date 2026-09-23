@@ -51,7 +51,8 @@ TEST_CASE("material shader interfaces preserve graph metadata and reject incompa
     graph.Target.Target = Keire::ShaderGraphTarget::Compute;
     CHECK_FALSE(KeireEditor::MaterialShaderInterface(graph));
     graph.Target.Target = Keire::ShaderGraphTarget::Ui;
-    CHECK_FALSE(KeireEditor::MaterialShaderInterface(graph));
+    REQUIRE(KeireEditor::MaterialShaderInterface(graph));
+    CHECK(KeireEditor::MaterialShaderInterface(graph)->Domain == Keire::ShaderInterfaceDomain::Ui);
 }
 
 TEST_CASE("material creation keeps the selected shader and inherits its exposed defaults")
@@ -90,7 +91,22 @@ TEST_CASE("material creation keeps the selected shader and inherits its exposed 
     CHECK_THROWS_AS((void)KeireEditor::CreateMaterialForShader(invalid, interface), std::invalid_argument);
     invalid.Type = Keire::ShaderAsset::StaticType();
     interface.Domain = Keire::ShaderInterfaceDomain::Fullscreen;
-    CHECK_THROWS_AS((void)KeireEditor::CreateMaterialForShader(invalid, interface), std::invalid_argument);
+    const auto effect = KeireEditor::CreateMaterialForShader(invalid, interface);
+    CHECK(effect.Shader.Asset == invalid.Id);
+    CHECK(Keire::MaterialAsset::DecodeAuthoringSource(Keire::MaterialAsset::EncodeAuthoringSource(effect)) == effect);
+    for (const auto domain : {Keire::ShaderInterfaceDomain::Ui, Keire::ShaderInterfaceDomain::Vfx,
+                              Keire::ShaderInterfaceDomain::CustomGraphicsPass})
+    {
+        interface.Domain = domain;
+        const auto material = KeireEditor::CreateMaterialForShader(invalid, interface);
+        CHECK(material.Shader.Asset == invalid.Id);
+        CHECK(material.Properties.empty());
+        CHECK(material.Surface.AlphaMode == (domain == Keire::ShaderInterfaceDomain::CustomGraphicsPass
+                                                 ? Keire::MaterialAlphaMode::Opaque
+                                                 : Keire::MaterialAlphaMode::Blend));
+        CHECK(Keire::MaterialAsset::DecodeAuthoringSource(Keire::MaterialAsset::EncodeAuthoringSource(material)) ==
+              material);
+    }
 }
 
 TEST_CASE("material Inspector preserves missing shader values and permits transactional recovery")

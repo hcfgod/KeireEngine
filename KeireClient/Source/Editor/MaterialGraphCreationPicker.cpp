@@ -17,6 +17,8 @@ namespace KeireEditor
         Keire::ShaderInterfaceDefinition result;
         if (shader.ProgramTarget == "Material")
             result.Domain = Keire::ShaderInterfaceDomain::Surface;
+        else if (shader.ProgramTarget == "UI")
+            result.Domain = Keire::ShaderInterfaceDomain::Ui;
         else if (shader.ProgramTarget == "VFX")
             result.Domain = Keire::ShaderInterfaceDomain::Vfx;
         else if (shader.ProgramTarget == "Fullscreen")
@@ -44,8 +46,8 @@ namespace KeireEditor
     {
         if (!shader.Id || !IsMaterialShader(shader))
             throw std::invalid_argument("Choose a Shader Graph or code Shader to create this material.");
-        if (shaderInterface.Domain != Keire::ShaderInterfaceDomain::Surface)
-            throw std::invalid_argument("A mesh material requires a surface shader.");
+        if (shaderInterface.Domain > Keire::ShaderInterfaceDomain::Ui)
+            throw std::invalid_argument("Material shader domain is unsupported.");
         Keire::MaterialShaderReference reference;
         reference.Asset = shader.Id;
         reference.Kind = shader.Type == Keire::ShaderGraphAsset::StaticType()
@@ -53,6 +55,9 @@ namespace KeireEditor
                              : Keire::MaterialShaderSourceKind::ShaderAsset;
         Keire::MaterialAuthoringDefinition result;
         result.Shader = std::move(reference);
+        if (shaderInterface.Domain == Keire::ShaderInterfaceDomain::Vfx ||
+            shaderInterface.Domain == Keire::ShaderInterfaceDomain::Ui)
+            result.Surface.AlphaMode = Keire::MaterialAlphaMode::Blend;
         // Leave defaults on the shader so subsequent shader default edits are inherited.
         return result;
     }
@@ -79,8 +84,7 @@ namespace KeireEditor
         (void)m_Picker.Draw(ui, records, m_Shader, options);
         ui.TextColored(theme.MutedText, "The shader defines the properties shown in the Material Inspector.");
         if (!hasShader)
-            ui.TextColored(theme.Warning,
-                           "Create a Surface / Lit or Surface / Unlit Shader Graph before creating a material.");
+            ui.TextColored(theme.Warning, "Create a graphics Shader Graph or code Shader before creating a material.");
         if (!m_Picker.Diagnostic().empty())
             ui.TextColored(theme.Warning, m_Picker.Diagnostic());
     }

@@ -522,6 +522,7 @@ namespace Keire
         float Weight = 1.0F;
         float NormalizedTime = 0.0F;
         std::optional<AnimatorCheckpointTransition> Transition;
+        double ExitTimeProgress = 0.0;
     };
 
     struct AnimatorCheckpoint
@@ -596,6 +597,7 @@ namespace Keire
             float NormalizedTime = 0.0F;
             std::vector<AnimatorBlendWeight> BlendWeights;
             std::optional<RuntimeTransition> Transition;
+            double ExitTimeProgress = 0.0;
         };
 
         void PublishDebugSnapshot(Vector3 rootMotion = {}, Quaternion rootRotation = {},

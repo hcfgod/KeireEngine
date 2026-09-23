@@ -2,6 +2,7 @@
 
 #include "Keire/ECS/Component.h"
 
+#include <array>
 #include <cstdint>
 
 namespace Keire
@@ -16,6 +17,13 @@ namespace Keire
     {
         Skybox,
         SolidColor
+    };
+
+    enum class CameraEffectStage : std::uint8_t
+    {
+        BeforeTonemapping,
+        AfterTonemapping,
+        AfterUi
     };
 
     class KEIRE_API CameraComponent final : public Component
@@ -38,6 +46,10 @@ namespace Keire
         [[nodiscard]] float FarPlane() const noexcept { return m_FarPlane; }
         [[nodiscard]] Color ClearColor() const noexcept { return m_ClearColor; }
 
+        // Before tonemapping, after tonemapping, and after camera UI, respectively.
+        [[nodiscard]] const std::array<AssetId, 3>& FullscreenEffects() const noexcept { return m_FullscreenEffects; }
+        void SetFullscreenEffect(CameraEffectStage stage, AssetId material);
+
         void SetProjection(CameraProjection projection);
         void SetClearMode(CameraClearMode mode);
         void SetPrimary(bool primary);
@@ -51,6 +63,7 @@ namespace Keire
 
       private:
         friend ComponentRegistration CreateCameraComponentRegistration();
+        std::array<AssetId, 3> m_FullscreenEffects{};
         CameraProjection m_Projection = CameraProjection::Perspective;
         CameraClearMode m_ClearMode = CameraClearMode::Skybox;
         bool m_Primary = true;

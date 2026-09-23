@@ -469,7 +469,8 @@ simulation scheduling and rejects any simulation-affecting module or serializer 
 intermediate GPU results. Runtime flags support record, play, verify, headless execution, startup-scene override, tick
 limits, profile selection, and atomic JSON result reports. Checkpoint restoration validates every serializer before
 mutation and rolls all restored serializers back if a later one fails. Runtime checkpoints include the scene graph,
-Jolt transforms/velocities/sleep state, animator layers and transitions, managed behaviour state, presentation focus and
+Jolt transforms/velocities/sleep state, animator layers and transitions (including cumulative exit-time progress),
+managed behaviour state, presentation focus and
 queued UI events, logical audio voice frames/pause state, and VFX emitter/random/spawn state. Strict replay selects the
 canonical CPU VFX path and stores CPU particles; performance captures retain GPU emitter progress without claiming
 cross-device bit identity. Networking and rollback transport remain outside this layer.
@@ -1944,3 +1945,19 @@ position/rotation changes on both CPU and GPU. Asset preview pause affects only 
 advancing. Handles are stopped on uncheck, disable, deletion, scene replacement, Play transition, panel close where
 applicable, and shutdown. Capturing that world for the Scene viewport never creates entities or mutates authored scene
 state.
+
+### Camera fullscreen material execution
+
+CameraComponent stores three optional material IDs, copied into the immutable RenderCamera packet. The renderer
+executes them around tone mapping and camera-overlay UI. Fullscreen graphs share the unlit screen vertex ABI with
+retained UI, reserve the final sampler for Scene Color, and use replacement blending. Each frame workset owns its
+HDR/SDR scratch inputs in its existing texture retirement collection; resize, device loss, and shutdown use the
+normal surface lifecycle. The shared screen material cache transactionally replaces shader pipelines and retains
+last-good programs. Mesh pipelines reject the screen vertex ABI before creating a GPU pipeline.
+
+UI Document material references are component-owned and copied through presentation projections into immutable
+UI render submissions. Changing the material does not recreate the retained document or invalidate element handles.
+
+Game-view and player screen overlays are submitted as camera overlays, not redrawn with immediate editor UI calls.
+The renderer scales captured UI geometry and scissor rectangles from the logical viewport to the render surface.
+This keeps shader execution and camera after-UI effects in the same pipeline at every render scale.

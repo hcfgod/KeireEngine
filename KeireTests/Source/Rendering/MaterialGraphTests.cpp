@@ -816,6 +816,22 @@ TEST_CASE("Direct material authoring supports tagged raw and Shader Graph refere
     };
     const auto imported = Keire::CreateMaterialAssetImporter().ContextualImport(context, bytes);
     CHECK(Keire::MaterialAsset::Decode(imported.Bytes)->Definition().Shader == resolved);
+    for (const auto target : {Keire::ShaderGraphTarget::Ui, Keire::ShaderGraphTarget::Fullscreen,
+                              Keire::ShaderGraphTarget::Vfx, Keire::ShaderGraphTarget::CustomGraphics})
+    {
+        auto targetGraph = Keire::CreateTargetShaderGraph(target);
+        targetGraph.GeneratedAssetOwner = variantOwner;
+        targetGraph.Keywords = shaderGraph.Keywords;
+        context.ReadProjectFile = [encoded = Keire::ShaderGraphAsset::EncodeSource(targetGraph)](const auto&)
+        { return encoded; };
+        const auto targetMaterial = Keire::CreateMaterialAssetImporter().ContextualImport(context, bytes);
+        CHECK(Keire::MaterialAsset::Decode(targetMaterial.Bytes)->Definition().Shader == resolved);
+        context.Asset = Keire::AssetId::Generate();
+        context.ResolveSubAssetId = [](std::string_view) { return Keire::AssetId(7, 9); };
+        const auto modern = Keire::CreateMaterialGraphAssetImporter().ContextualImport(context, bytes);
+        REQUIRE(modern.SubAssets.size() == 1);
+        CHECK(Keire::MaterialAsset::Decode(modern.SubAssets.front().Bytes)->Definition().Shader == resolved);
+    }
 }
 
 TEST_CASE("Legacy procedural Material Graph migration is transactional and preserves published identities")

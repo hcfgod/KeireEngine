@@ -7,6 +7,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -643,6 +644,30 @@ namespace Keire::RenderBackend
             TransformRuntimeUiVertices(std::span(result.Vertices).subspan(first, result.Vertices.size() - first),
                                        command);
             appendBatch(RuntimeUiTextureAsset(command), command.ClipRect, first, command.Material);
+        }
+        return result;
+    }
+
+    RuntimeUiGeometry BuildRuntimeUiCameraGeometry(const CapturedRuntimeUiCameraPanel& panel, const std::uint32_t width,
+                                                   const std::uint32_t height)
+    {
+        if (!std::isfinite(panel.Viewport.X) || !std::isfinite(panel.Viewport.Y) || panel.Viewport.X <= 0.0F ||
+            panel.Viewport.Y <= 0.0F || width == 0 || height == 0)
+            throw std::invalid_argument("Camera UI geometry requires finite positive viewport and surface extents.");
+        auto result = BuildRuntimeUiGeometry(panel.Commands);
+        const float scaleX = static_cast<float>(width) / panel.Viewport.X;
+        const float scaleY = static_cast<float>(height) / panel.Viewport.Y;
+        for (auto& vertex : result.Vertices)
+        {
+            vertex.Position.X *= scaleX;
+            vertex.Position.Y *= scaleY;
+        }
+        for (auto& batch : result.Batches)
+        {
+            batch.ClipRect.X *= scaleX;
+            batch.ClipRect.Y *= scaleY;
+            batch.ClipRect.Width *= scaleX;
+            batch.ClipRect.Height *= scaleY;
         }
         return result;
     }

@@ -222,7 +222,10 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     if (hasScene && m_RenderView)
     {
         if (const auto sceneCamera = SelectGameCamera(renderScene))
+        {
             camera.ClearColor = sceneCamera->Camera->ClearColor();
+            camera.FullscreenEffects = sceneCamera->Camera->FullscreenEffects();
+        }
         else
             camera.ClearColor = {0.075F, 0.085F, 0.105F, 1.0F};
         m_RenderView->SetCamera(camera);
@@ -449,6 +452,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             previewCamera.ClearColor = sceneCamera->Camera->ClearColor();
             previewCamera.NearPlane = sceneCamera->Camera->NearPlane();
             previewCamera.FarPlane = sceneCamera->Camera->FarPlane();
+            previewCamera.FullscreenEffects = sceneCamera->Camera->FullscreenEffects();
             m_CameraPreviewView->SetCamera(previewCamera);
             Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
             const auto& materialTime = m_Controller.SceneViewportTime();

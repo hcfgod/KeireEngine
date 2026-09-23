@@ -185,7 +185,7 @@ namespace Keire::Detail
                                             AssetId* value) noexcept
         {
             if (!ActiveServices || !value || !ValidComponent(component) ||
-                property > static_cast<std::uint8_t>(ManagedRenderingAssetProperty::Cookie))
+                property > static_cast<std::uint8_t>(ManagedRenderingAssetProperty::EffectAfterUi))
             {
                 return 0;
             }
@@ -203,7 +203,7 @@ namespace Keire::Detail
                                             const AssetId value) noexcept
         {
             return ActiveServices && ValidComponent(component) &&
-                           property <= static_cast<std::uint8_t>(ManagedRenderingAssetProperty::Cookie) &&
+                           property <= static_cast<std::uint8_t>(ManagedRenderingAssetProperty::EffectAfterUi) &&
                            ActiveServices->SetManagedRenderingAsset(
                                AssetId(high, low), static_cast<ManagedRenderingComponent>(component),
                                static_cast<ManagedRenderingAssetProperty>(property), value)
