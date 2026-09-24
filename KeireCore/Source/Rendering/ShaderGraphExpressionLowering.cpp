@@ -538,6 +538,11 @@ namespace Keire::Detail
                       ShaderGraphValueType::Color};
             break;
         }
+        case ShaderGraphNodeKind::SceneTexelSize:
+            if (m_Definition.Target.Target != ShaderGraphTarget::Fullscreen)
+                throw std::invalid_argument("Scene Texel Size requires a Fullscreen shader target.");
+            result = {"KeireSceneTexelSize()", ShaderGraphValueType::Vector2};
+            break;
         case ShaderGraphNodeKind::DepthFade:
         {
             const auto distance = CoerceShaderGraphExpression(namedInput("Distance"), ShaderGraphValueType::Scalar);

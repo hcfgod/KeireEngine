@@ -1,6 +1,6 @@
 # C# Scripting
 
-Kéire 0.4.0 gameplay scripting targets .NET 10 and C# 14. Scripts use canonical managed objects rather than public
+Kéire 0.4.4 gameplay scripting targets .NET 10 and C# 14. Scripts use canonical managed objects rather than public
 native handles: `Entity` represents a scene object, concrete `Component` subclasses represent attached functionality,
 and `Asset` subclasses represent project content. Unassigned references are `null`; destroyed scene wrappers remain
 non-null and report `IsValid == false`.

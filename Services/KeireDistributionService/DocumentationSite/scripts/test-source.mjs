@@ -239,6 +239,15 @@ const versionContracts = [
     ["ProceduralMotion.md", new RegExp(`\\.keiremotionprofile[^\\n]*schema version ${proceduralMotionSchema}\\b`, "i")],
     ["GameplayFoundations.md", new RegExp(`runtime manifests use schema ${runtimeSchema}\\b`, "i")],
 ];
+const shaderGraphHeader = await readFile(path.join(repositoryRoot, "KeireCore", "Include", "Keire", "Rendering", "ShaderGraph.h"), "utf8");
+const shaderGeneratorVersion = parseUnsignedConstant(shaderGraphHeader, "ShaderGraphGeneratedShaderVersion");
+const shaderImporterSource = await readFile(path.join(repositoryRoot, "KeireCore", "Source", "Rendering", "ShaderGraphImporters.cpp"), "utf8");
+const shaderImporterVersion = /CreateShaderGraphAssetImporter\(\)[\s\S]*?result\.Version\s*=\s*(\d+)/.exec(shaderImporterSource)?.[1];
+assert(shaderImporterVersion, "Could not locate the Shader Graph importer version.");
+versionContracts.push(
+    ["ShadersAndMaterials.md", new RegExp(`Shader Graph generator version is ${shaderGeneratorVersion}\\b`)],
+    ["ShadersAndMaterials.md", new RegExp(`Shader Graph importer version is ${shaderImporterVersion}\\b`)],
+);
 for (const [sourcePath, contract] of versionContracts) {
     const source = await readMarkdown(path.join(docsRoot, ...sourcePath.split("/")));
     assert(contract.test(source), `Documentation schema contract is stale: Docs/${sourcePath} (${contract}).`);

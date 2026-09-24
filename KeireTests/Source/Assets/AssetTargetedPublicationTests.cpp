@@ -131,4 +131,26 @@ TEST_CASE("targeted publication includes newly referenced dependency sources and
         CHECK(ReadAll(initial.CatalogPath) == initialCatalog);
         CHECK_NOTHROW(Keire::AssetCooker::Validate(initial.CatalogPath));
     }
+    SUBCASE("reimport replaces stale dependencies in the source record and metadata")
+    {
+        (void)Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(*database, targets,
+                                                                                    Keire::AssetImportPolicy::FailFast);
+        const auto importedMaterial = database->Find(material);
+        REQUIRE(importedMaterial);
+        CHECK(importedMaterial->Dependencies.size() == 2);
+        CHECK(std::ranges::find(importedMaterial->Dependencies, shader) != importedMaterial->Dependencies.end());
+        CHECK(std::ranges::find(importedMaterial->Dependencies, generated) != importedMaterial->Dependencies.end());
+
+        project.Write("material.newdeps", "baseline");
+        (void)database->Refresh();
+        (void)Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(*database, targets,
+                                                                                    Keire::AssetImportPolicy::FailFast);
+
+        REQUIRE(database->Find(material));
+        CHECK(database->Find(material)->Dependencies.empty());
+        const auto metadata = ReadAll(project.Root / "Assets/material.newdeps.keiremeta");
+        const std::string metadataText(metadata.begin(), metadata.end());
+        CHECK(metadataText.find(shader.ToString()) == std::string::npos);
+        CHECK(metadataText.find(generated.ToString()) == std::string::npos);
+    }
 }

@@ -38,10 +38,16 @@ namespace Keire::RenderBackend
                             [](const std::size_t count, const VfxRenderSnapshot& snapshot)
                             { return count + snapshot.Particles().size(); });
         particles.reserve(particleCount);
-        for (const auto& snapshot : packet.VfxSnapshots)
+        std::vector<AssetId> particleLighting;
+        particleLighting.reserve(particleCount);
+        for (std::size_t index = 0; index < packet.VfxSnapshots.size(); ++index)
         {
-            const auto source = snapshot.Particles();
+            const auto source = packet.VfxSnapshots[index].Particles();
             particles.insert(particles.end(), source.begin(), source.end());
+            const auto lighting = index < packet.SpatialContributions.size()
+                                      ? packet.SpatialContributions[index].BakedLighting
+                                      : packet.BakedLighting;
+            particleLighting.insert(particleLighting.end(), source.size(), lighting);
         }
         if (particles.empty())
             return {};
@@ -53,6 +59,7 @@ namespace Keire::RenderBackend
             Vector3 BillboardRight;
             Vector3 BillboardUp;
             float Depth = 0.0F;
+            AssetId BakedLighting;
         };
         std::vector<Vector3> ribbonStarts(particles.size());
         std::vector<std::size_t> ribbonOrder;
@@ -127,7 +134,8 @@ namespace Keire::RenderBackend
                 continue;
             }
             particlesByDepth.push_back({std::addressof(particle), start, billboardRight, billboardUp,
-                                        Math::TransformPoint(packet.Camera.View, particle.Position).Z});
+                                        Math::TransformPoint(packet.Camera.View, particle.Position).Z,
+                                        particleLighting[index]});
         }
         if (particlesByDepth.empty())
             return {};
@@ -148,9 +156,11 @@ namespace Keire::RenderBackend
                 throw std::length_error("CPU VFX vertices exceed the renderer's 32-bit draw limit.");
 
             const auto* composed = particle.Material ? ResolveAssetMaterial(particle.Material, samples) : nullptr;
+            const auto authored = particle.Renderer != VfxRendererType::Volumetric && composed &&
+                                  composed->PassPipeline(RuntimeMaterialPassRole::VfxCpu);
             Color tint = particle.Tint;
             std::array<float, 4> surfaceParameters{};
-            if (composed)
+            if (composed && !authored)
             {
                 if (composed->TintSlot && *composed->TintSlot < composed->NumericProperties.size())
                 {
@@ -174,7 +184,9 @@ namespace Keire::RenderBackend
                     : SDL_GPUTextureSamplerBinding{texture.Texture, texture.Sampler};
 
             const auto firstVertex = static_cast<std::uint32_t>(spriteVertices.size());
-            AppendPreparedCpuVfxBatch(result.Batches, firstVertex, 6U, textureBinding, surfaceParameters);
+            AppendPreparedCpuVfxBatch(result.Batches, firstVertex, 6U, textureBinding, surfaceParameters,
+                                      authored ? particle.Material : AssetId{},
+                                      authored ? value.BakedLighting : AssetId{});
             const Vector4 gpuTint{tint.Red, tint.Green, tint.Blue, tint.Alpha};
             const auto appendVertex = [&](const Vector3 position, const float u, const float v, const float mode)
             { spriteVertices.push_back({{position.X, position.Y, position.Z, 1.0F}, gpuTint, {u, v, mode, 0.0F}}); };
@@ -223,20 +235,6 @@ namespace Keire::RenderBackend
                                     const ShadowFrameData& shadows, const PreparedCpuVfx& preparedCpu)
     {
         auto& pipelines = PipelinesFor(ToSdlSampleCount(surface.ActualSamples));
-        const auto& requestedEnvironment =
-            packet.Environment.Environment ? ResolveTexture(packet.Environment.Environment) : DefaultSkyTexture;
-        const auto& environment = requestedEnvironment.HasDiffuseIrradiance ? requestedEnvironment : DefaultSkyTexture;
-        AssetEnvironmentUniforms environmentUniforms{};
-        environmentUniforms.DiffuseIrradiance = environment.DiffuseIrradiance;
-        environmentUniforms.Parameters = {
-            packet.Environment.EnvironmentRotationDegrees, packet.Environment.EnvironmentDiffuseIntensity,
-            packet.Environment.EnvironmentSpecularIntensity, static_cast<float>(environment.MipLevels - 1U)};
-        environmentUniforms.Encoding = {static_cast<float>(environment.EnvironmentLayout) +
-                                            (environment.HdrEncoded ? 16.0F : 0.0F),
-                                        0.0F, 0.0F, 0.0F};
-        const std::array environmentBindings{
-            SDL_GPUTextureSamplerBinding{environment.Texture, environment.Sampler},
-            SDL_GPUTextureSamplerBinding{BrdfIntegrationLut.Texture, BrdfIntegrationLut.Sampler}};
         if (pipelines.GpuVfx && pipelines.GpuVfxRibbon && pipelines.GpuVfxMesh)
         {
             for (std::size_t snapshotIndex = 0; snapshotIndex < packet.VfxSnapshots.size(); ++snapshotIndex)
@@ -250,31 +248,6 @@ namespace Keire::RenderBackend
                 const auto bakedLighting = snapshotIndex < packet.SpatialContributions.size()
                                                ? packet.SpatialContributions[snapshotIndex].BakedLighting
                                                : packet.BakedLighting;
-                const auto vfxBakedLighting = ResolveLightingSet(bakedLighting);
-                const auto* vfxLightingSet = vfxBakedLighting ? &vfxBakedLighting->Definition() : nullptr;
-                const auto& vfxLightmaps =
-                    vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Lightmaps) : DefaultLightingArray;
-                const auto& vfxDirectionality =
-                    vfxLightingSet ? ResolveLightingTexture(vfxLightingSet->Directionality) : DefaultLightingArray;
-                const auto& vfxShadowMasks = vfxLightingSet
-                                                 ? ResolveLightingTexture(vfxLightingSet->ShadowMasks, false, true)
-                                                 : DefaultLightingMaskArray;
-                const auto& vfxReflections = vfxLightingSet
-                                                 ? ResolveLightingTexture(vfxLightingSet->ReflectionCubemaps, true)
-                                                 : DefaultReflectionCubeArray;
-                std::array<SDL_GPUTextureSamplerBinding, 5> vfxSpatialBindings{};
-                vfxSpatialBindings[0] = {vfxLightmaps.Texture, vfxLightmaps.Sampler};
-                vfxSpatialBindings[1] = {vfxDirectionality.Texture, vfxDirectionality.Sampler};
-                vfxSpatialBindings[2] = {vfxShadowMasks.Texture, vfxShadowMasks.Sampler};
-                vfxSpatialBindings[3] = {vfxReflections.Texture, vfxReflections.Sampler};
-                vfxSpatialBindings[4] = {WhiteTexture.Texture, WhiteTexture.Sampler};
-                AssetSpatialLightingUniforms vfxSpatialUniforms{};
-                vfxSpatialUniforms.LightmapScaleOffset = {1.0F, 1.0F, 0.0F, 0.0F};
-                vfxSpatialUniforms.ShadowMaskParameters.X =
-                    vfxLightingSet ? static_cast<float>(vfxLightingSet->Renderers.size()) : 0.0F;
-                vfxSpatialUniforms.ViewProjection = Math::Multiply(packet.Camera.Projection, packet.Camera.View);
-                vfxSpatialUniforms.DirectionalCookieAndContact = {0.0F, packet.Lighting.ContactShadows ? 1.0F : 0.0F,
-                                                                  0.35F, 0.0025F};
                 struct alignas(16) CameraUniforms final
                 {
                     Matrix4 ViewProjection;
@@ -315,35 +288,6 @@ namespace Keire::RenderBackend
                     {},
                 };
                 const auto samples = ToSdlSampleCount(surface.ActualSamples);
-                AssetLocalLightUniforms localLights{};
-                const auto localLightCount = std::min(packet.LocalLights.size(), MaximumShaderLocalLights);
-                localLights.Counts.X = static_cast<float>(packet.LocalLights.size());
-                localLights.Counts.Y = static_cast<float>(surface.ActiveWorkset().ForwardPlus.Columns);
-                for (std::size_t lightIndex = 0; lightIndex < localLightCount; ++lightIndex)
-                {
-                    const auto& light = packet.LocalLights[lightIndex];
-                    auto& uniform = localLights.Lights[lightIndex];
-                    uniform.PositionRange = {light.Position.X, light.Position.Y, light.Position.Z, light.Range};
-                    uniform.DirectionOuter = {light.Direction.X, light.Direction.Y, light.Direction.Z,
-                                              light.OuterConeCosine};
-                    uniform.ColorIntensity = {light.ColorAndIntensity.Red, light.ColorAndIntensity.Green,
-                                              light.ColorAndIntensity.Blue, light.ColorAndIntensity.Alpha};
-                    uniform.Parameters = {light.InnerConeCosine, light.Type == SceneLocalLightType::Spot ? 1.0F : 0.0F,
-                                          0.0F, light.ContactShadows ? 16.0F : 0.0F};
-                }
-                AssetShadowUniforms shadowUniforms{shadows.Directional, shadows.Local};
-                for (std::size_t lightIndex = 0; lightIndex < localLightCount; ++lightIndex)
-                {
-                    const auto& light = packet.LocalLights[lightIndex];
-                    shadowUniforms.Local.Parameters[lightIndex] = {shadows.LocalLayers[lightIndex],
-                                                                   light.ShadowStrength,
-                                                                   light.Shadows == ShadowQuality::Soft ? 1.0F : 0.0F,
-                                                                   std::max(light.ShadowBias * 0.01F, 0.0001F)};
-                }
-                const std::array forwardPlusBuffers{surface.ActiveWorkset().ForwardPlus.Lights,
-                                                    surface.ActiveWorkset().ForwardPlus.Tiles,
-                                                    surface.ActiveWorkset().ForwardPlus.LightIndices};
-                const auto deviceGeneration = DeviceGeneration.load(std::memory_order_acquire);
                 for (const auto& snapshotEmitter : snapshot.GpuEmitters())
                 {
                     const auto key = (static_cast<std::uint64_t>(snapshotEmitter.Handle.Index()) << 32U) |
@@ -366,6 +310,24 @@ namespace Keire::RenderBackend
                     const std::array storage{world->second.Particles, renderIndices};
                     SDL_BindGPUVertexStorageBuffers(pass, 0, storage.data(),
                                                     static_cast<std::uint32_t>(storage.size()));
+                    const auto* particleMaterial =
+                        emitter.Material ? ResolveAssetMaterial(emitter.Material, samples) : nullptr;
+                    const auto particleRole = emitter.Renderer == VfxRendererType::Ribbon
+                                                  ? RuntimeMaterialPassRole::VfxRibbon
+                                                  : RuntimeMaterialPassRole::VfxBillboard;
+                    auto* particlePipeline = particleMaterial ? particleMaterial->PassPipeline(particleRole) : nullptr;
+                    if (emitter.Renderer != VfxRendererType::Mesh && emitter.Renderer != VfxRendererType::Volumetric &&
+                        particlePipeline)
+                    {
+                        SDL_BindGPUGraphicsPipeline(pass, particlePipeline);
+                        BindVfxMaterial(commands, pass, surface, packet, shadows, particleMaterial, bakedLighting);
+                        SDL_DrawGPUPrimitivesIndirect(pass, renderIndirect, 0, 1);
+                        if (maskedOutput)
+                            ++surface.ActiveWorkset().GpuVfx.ConsumedDraws;
+                        ++Statistics.DrawCalls;
+                        ++Statistics.VfxIndirectDraws;
+                        continue;
+                    }
                     if (emitter.Renderer == VfxRendererType::Mesh)
                     {
                         const auto& mesh = ResolveMesh(emitter.Mesh);
@@ -387,98 +349,7 @@ namespace Keire::RenderBackend
                                 SDL_PushGPUVertexUniformData(commands, 2, instanceParameters.data(),
                                                              sizeof(instanceParameters));
                             }
-                            if (composed->SpatialLightingAbiVersion == 3U)
-                            {
-                                if (!SpatialSelectionFallbackBuffer ||
-                                    SpatialSelectionFallbackDeviceGeneration != deviceGeneration)
-                                {
-                                    throw std::logic_error(
-                                        "The mandatory device-generation spatial-selection fallback buffer is "
-                                        "unavailable for ABI-v3 mesh VFX.");
-                                }
-                                const std::array storageBuffers{forwardPlusBuffers[0], forwardPlusBuffers[1],
-                                                                forwardPlusBuffers[2], SpatialSelectionFallbackBuffer};
-                                SDL_BindGPUFragmentStorageBuffers(pass, 0, storageBuffers.data(),
-                                                                  static_cast<std::uint32_t>(storageBuffers.size()));
-                            }
-                            else if (composed->UsesForwardPlus)
-                            {
-                                SDL_BindGPUFragmentStorageBuffers(
-                                    pass, 0, forwardPlusBuffers.data(),
-                                    static_cast<std::uint32_t>(forwardPlusBuffers.size()));
-                            }
-                            const AssetObjectUniforms object{{}, packet.Camera.View, packet.Camera.Projection, {}};
-                            AssetSceneUniforms scene{};
-                            scene.AmbientColorIntensity = {
-                                packet.Environment.AmbientColor.Red, packet.Environment.AmbientColor.Green,
-                                packet.Environment.AmbientColor.Blue, packet.Environment.AmbientIntensity};
-                            scene.DirectionalColorIntensity = {
-                                packet.Lighting.ColorAndIntensity.Red, packet.Lighting.ColorAndIntensity.Green,
-                                packet.Lighting.ColorAndIntensity.Blue, packet.Lighting.ColorAndIntensity.Alpha};
-                            scene.DirectionalDirectionExposure = {
-                                packet.Lighting.Direction.X, packet.Lighting.Direction.Y, packet.Lighting.Direction.Z,
-                                packet.Environment.Exposure};
-                            scene.SurfaceParameters = {composed->Surface.AlphaCutoff,
-                                                       static_cast<float>(composed->Surface.AlphaMode), 1.0F, 0.0F};
-                            scene.LocalLightCounts = localLights.Counts;
-                            scene.LocalLights = localLights.Lights;
-                            scene.FrameParameters = {packet.MaterialTimeSeconds, packet.MaterialDeltaSeconds,
-                                                     static_cast<float>(packet.FrameIndex & 0x00ffffffULL), 0.0F};
-                            SDL_PushGPUVertexUniformData(commands, 0, &object, sizeof(object));
-                            SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));
-                            const Vector4 bindingSentinel{};
-                            const auto* numericProperties = composed->NumericProperties.empty()
-                                                                ? &bindingSentinel
-                                                                : composed->NumericProperties.data();
-                            const auto numericPropertyBytes = static_cast<std::uint32_t>(
-                                std::max<std::size_t>(composed->NumericProperties.size(), 1U) * sizeof(Vector4));
-                            if (composed->UsesVertexMaterialParameters)
-                                SDL_PushGPUVertexUniformData(commands, 1, numericProperties, numericPropertyBytes);
-                            SDL_PushGPUFragmentUniformData(commands, 1, numericProperties, numericPropertyBytes);
-                            if (composed->ReceivesShadows)
-                                SDL_PushGPUFragmentUniformData(commands, 2, &shadowUniforms, sizeof(shadowUniforms));
-                            else
-                                SDL_PushGPUFragmentUniformData(commands, 2, &localLights, sizeof(localLights));
-                            if (composed->UsesSpatialLighting)
-                            {
-                                vfxSpatialUniforms.SpatialSelection[0] = InvalidAssetSpatialSelectionIndex;
-                                const AssetEnvironmentSpatialUniforms combined{environmentUniforms, vfxSpatialUniforms};
-                                SDL_PushGPUFragmentUniformData(commands, 3, &combined, sizeof(combined));
-                            }
-                            else if (composed->UsesImageBasedLighting)
-                                SDL_PushGPUFragmentUniformData(commands, 3, &environmentUniforms,
-                                                               sizeof(environmentUniforms));
-                            if (!composed->Textures.empty() || composed->ReceivesShadows ||
-                                composed->UsesImageBasedLighting || composed->UsesSpatialLighting)
-                            {
-                                std::array<SDL_GPUTextureSamplerBinding, 40> bindings{};
-                                std::ranges::copy(composed->Textures, bindings.begin());
-                                auto bindingCount = composed->Textures.size();
-                                if (composed->ReceivesShadows)
-                                {
-                                    bindings[bindingCount++] = {surface.ActiveWorkset().DirectionalShadow
-                                                                    ? surface.ActiveWorkset().DirectionalShadow
-                                                                    : EmptyShadowTexture,
-                                                                ShadowSampler};
-                                    bindings[bindingCount++] = {surface.ActiveWorkset().LocalShadow
-                                                                    ? surface.ActiveWorkset().LocalShadow
-                                                                    : EmptyShadowTexture,
-                                                                ShadowSampler};
-                                }
-                                if (composed->UsesImageBasedLighting)
-                                {
-                                    bindings[bindingCount++] = environmentBindings[0];
-                                    bindings[bindingCount++] = environmentBindings[1];
-                                }
-                                if (composed->UsesSpatialLighting)
-                                {
-                                    std::ranges::copy(vfxSpatialBindings,
-                                                      bindings.begin() + static_cast<std::ptrdiff_t>(bindingCount));
-                                    bindingCount += vfxSpatialBindings.size();
-                                }
-                                SDL_BindGPUFragmentSamplers(pass, 0, bindings.data(),
-                                                            static_cast<std::uint32_t>(bindingCount));
-                            }
+                            BindVfxMaterial(commands, pass, surface, packet, shadows, composed, bakedLighting);
                             emitter.MaterialDiagnosticReported = false;
                         }
                         else
@@ -568,9 +439,23 @@ namespace Keire::RenderBackend
         SDL_BindGPUVertexBuffers(pass, 0, &vertexBinding, 1);
         for (const auto& batch : preparedCpu.Batches)
         {
-            CpuMaterialUniforms material{{1.0F, 1.0F, 1.0F, 1.0F}, batch.SurfaceParameters};
-            SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
-            SDL_BindGPUFragmentSamplers(pass, 0, &batch.Texture, 1);
+            const auto* composed = batch.Material
+                                       ? ResolveAssetMaterial(batch.Material, ToSdlSampleCount(surface.ActualSamples))
+                                       : nullptr;
+            auto* authored = composed ? composed->PassPipeline(RuntimeMaterialPassRole::VfxCpu) : nullptr;
+            if (authored)
+            {
+                SDL_BindGPUGraphicsPipeline(pass, authored);
+                BindVfxMaterial(commands, pass, surface, packet, shadows, composed, batch.BakedLighting);
+            }
+            else
+            {
+                SDL_BindGPUGraphicsPipeline(pass, pipelines.Vfx);
+                SDL_PushGPUVertexUniformData(commands, 0, &uniforms, sizeof(uniforms));
+                CpuMaterialUniforms material{{1.0F, 1.0F, 1.0F, 1.0F}, batch.SurfaceParameters};
+                SDL_PushGPUFragmentUniformData(commands, 0, &material, sizeof(material));
+                SDL_BindGPUFragmentSamplers(pass, 0, &batch.Texture, 1);
+            }
             SDL_DrawGPUPrimitives(pass, batch.VertexCount, 1, batch.FirstVertex, 0);
             ++Statistics.DrawCalls;
             ++Statistics.CpuVfxDrawBatches;

@@ -1,5 +1,29 @@
 # Material/shader production acceptance
 
+## Authored particle shaders and fresh-project interaction — September 23, 2026
+
+VFX graphs now compile mesh, GPU billboard, GPU ribbon, and CPU particle passes. The renderer executes the graph's
+parameters and textures on Sprite/Ribbon outputs through the existing transactional shader cache. Production import
+passed 1 case / 157 assertions across all graphics templates and backend binaries. Actual D3D12 and Vulkan readback
+each passed the new test (1 case / 16 assertions), covering green-to-red shader/material live reload on CPU and GPU
+billboards and ribbons. Volumetric output retains its built-in density shading; arbitrary custom-pass scheduling and
+fullscreen scene-depth input remain open.
+
+The complete rendering suites subsequently passed: D3D12 86 cases / 6,528 assertions and Vulkan 86 cases / 6,581
+assertions. A later CPU batch change preserves per-snapshot baked-lighting identity; its focused core regression
+passed together with dependency replacement (2 cases / 45 assertions). The complete GPU suites precede that last
+batch-key refinement and do not substitute for the remaining native visual scenarios.
+
+Windows control created `D:/Projects/KeireProjects/ShaderFinalQA0923` through the Hub and opened it with the rebuilt
+Debug editor. A material was created, its color picker was dragged and changed from white to red/orange to blue,
+and Roughness was dragged from 0.5 to 1.0. The settled preview and saved property overrides matched the edits, with
+no observed default reset in those actions. Point-in-time screenshots do not exclude brief flicker between captures.
+The first material's worker took 14,788.865 ms while preparing the shared shader; subsequent edit imports took
+122–696 ms. Cold material creation therefore remains an unresolved performance issue, not a passed speed gate.
+The editor closed normally with exit code 0. Windows control reopened the project, searched for the material, and
+confirmed the blue preview, RGB 35/90/178, and Roughness 1.0 remained in the Inspector. This fresh-project pass does not establish full native VFX acceptance
+or a new public installer release.
+
 ## Live edit overlap and render checks — September 23, 2026
 
 A deterministic regression reproduced rejected development publications while a catalog reload was in flight.
@@ -258,3 +282,25 @@ Linux/Vulkan and macOS/Metal remain open without the required hosts and hardware
 - The disposable project copy resides under ignored `Temp` and is not a source change.
 
 Main progress, README and changelog integration is deferred until implementation and evidence are ready.
+
+## Credit-reserve handoff - September 23, 2026
+
+Work paused at the user's 150-credit reserve. Source changes remain uncommitted; no new Windows release was published.
+
+Validated additions:
+- Authored VFX sprite/ribbon material rendering and hot reload passed focused D3D12 and Vulkan tests (16 assertions each).
+- Fullscreen blur, chromatic aberration, animated distortion and vignette presets, plus SceneTexelSize, passed shader import coverage (40 assertions).
+- Fullscreen camera rendering and clearing passed 64 assertions on each of D3D12 and Vulkan across Forward+ and deferred/hybrid paths. Anti-aliasing is disabled in this deterministic pixel comparison; temporal-AA interaction remains a separate QA gate.
+- Relevant logs: Build/Validation/fullscreen-final-build.log, fullscreen-final-d3d12.log, fullscreen-final-vulkan.log, fullscreen-presets-import.log, final-vfx-d3d12.log and final-vfx-vulkan.log.
+- Changed C++ files were formatted and clang-format dry-run and git diff --check passed.
+- Staged Editor and Hub were launched through project.bat. The Editor stage predates the newest fullscreen presets; rebuild/stage before expecting those presets in the packaged UI.
+- Fresh-project material values persisted through save/reopen and packaged Editor reopening. Cold material creation remained slow (about 14.8 seconds); brief drag flicker has not been conclusively excluded.
+
+Remaining work:
+- Rebuild/stage the latest fullscreen source and perform native Windows editor menu, graph-editing and camera-effect QA.
+- Fix Hub installation cards retaining stale Running activity after an editor exits. Reproduced in Windows; an unfinished polling patch was removed rather than left unvalidated.
+- Investigate cold material creation latency and transient value-edit flicker; finish broader animation, lighting, shader and installer/uninstaller acceptance.
+- Complete documentation review, repeat final documentation build after latest edits, validate packaged SDK consumers, then commit/push and publish a clean Windows release.
+- Windows fast regression is blocked by the pre-existing empty lowercase root src directory; it was preserved. Unix/macOS validation remains outstanding.
+
+Run existing stages with Scripts/project.bat run-staged-editor and Scripts/project.bat run-staged-hub. These stages are usable QA builds, not a clean published release.

@@ -10,6 +10,16 @@ x86-64 0.4.4 Editor and Hub packages while retaining the independently validated
 describe the checked-in implementation and identify unfinished work honestly. Roadmap
 material is labeled as roadmap material and does not redefine the supported API or activate a release.
 
+Development guides describe this checkout. A previously downloaded package can predate a documented fix even when
+its display version matches; compare its build manifest commit with the checkout. Use the
+[staged-build workflow](GettingStarted.md#test-the-locally-staged-editor-and-hub-on-windows) to test local changes.
+The manual gives task steps, API guides describe validation and ownership, and dated acceptance reports preserve
+historical evidence. An older report's open item is not a current feature matrix; read its latest dated update.
+
+Documentation validation checks every published guide's inventory, local links, source-authority paths, diagrams,
+and selected version contracts. The manual examples are compiled against the managed API. These checks detect
+structural and API drift; they do not establish that every prose claim or UI workflow has been visually retested.
+
 ## Choose a Starting Point
 
 | Goal | Start here | Continue with |
@@ -214,7 +224,8 @@ The site build performs the following drift checks:
 - The declared inventory exactly matches every `Docs/**/*.md` file and every route is unique.
 - Every guide has one level-one heading and at least one mapped implementation, configuration, or test authority.
 - Local Markdown targets and fragments resolve, including links from nested scripting and diagnostics guides.
-- Published project, scene, mesh, VFX, and cooked-runtime schema statements match their code constants/parsers.
+- Published project, scene, mesh, VFX, cooked-runtime, and shader generator/importer version statements match their
+  code constants/parsers.
 - Mermaid source fences remain intact for GitHub, while the site converts them to responsive, accessible inline SVG
   during the static build; no browser-side diagram library or external font request is required.
 - The generated site contains every guide, required metadata, full-text search data, internal links, assets, sitemap

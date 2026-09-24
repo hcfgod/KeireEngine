@@ -1,6 +1,6 @@
 # Managed API Index
 
-This index covers the Kéire 0.4.0 Unity-shaped authoring surface. Native IDs and internal-call records are advanced
+This index covers the current Kéire 0.4.4 Unity-shaped authoring surface. Native IDs and internal-call records are advanced
 interop details and are not part of normal gameplay code.
 
 ## Object Model

@@ -91,6 +91,12 @@ drawer. Mesh and Material metadata carries its expected asset type so those fiel
 fields select from the open scene. An edit is validated against a fresh component first, records undo only after that
 validation succeeds, and restores the original property bag if applying the validated change unexpectedly fails.
 
+Camera components expose **Fullscreen Effects** with **Before Tonemapping**, **After Tonemapping**, and **After UI**
+material slots. Assign a material created from a Fullscreen Effect Shader Graph, not the graph asset itself. Each slot
+can be cleared independently and participates in scene save/load and Inspector undo. The Scene/Game/camera-preview
+images show the effect; the graph's flat thumbnail does not have Scene Color input. Follow the
+[camera tint recipe](Manual/ShaderGraphExamples.md#example-4-camera-tint-effect) for a complete setup.
+
 ## UI Resource Boundary
 
 `UiImage` is an opaque reference-counted image owned by the UI service. Call `UiFrame::CreateImage` on the UI owner

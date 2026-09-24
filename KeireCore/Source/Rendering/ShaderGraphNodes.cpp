@@ -507,6 +507,12 @@ namespace Keire
             input("UV", ShaderGraphValueType::Vector2, Vector2{});
             output("Color", ShaderGraphValueType::Color);
             break;
+        case ShaderGraphNodeKind::SceneTexelSize:
+            node.Name = "Scene Texel Size";
+            node.ValueType = ShaderGraphValueType::Vector2;
+            node.Value = Vector2{};
+            output("Size", ShaderGraphValueType::Vector2);
+            break;
         case ShaderGraphNodeKind::DepthFade:
             node.Name = "Depth Fade";
             node.ValueType = ShaderGraphValueType::Scalar;

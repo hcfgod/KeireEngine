@@ -437,7 +437,7 @@ namespace Keire
                 const auto effectiveType = imported.PrimaryType.value_or(record.Type);
                 UpdateMetadataImportOutput(*m_Impl->SourceFiles,
                                            record.MetadataPath.lexically_relative(m_Impl->SourceRoot), effectiveType,
-                                           imported.SubAssets);
+                                           imported.SubAssets, imported.AssetDependencies);
                 record.Type = effectiveType;
                 const auto metadataBytes = m_Impl->SourceFiles->Read(
                     record.MetadataPath.lexically_relative(m_Impl->SourceRoot), 16ULL * 1024ULL * 1024U);
@@ -458,12 +458,10 @@ namespace Keire
                         stored->SubAssets.reserve(imported.SubAssets.size());
                         for (const auto& subAsset : imported.SubAssets)
                             stored->SubAssets.push_back(subAsset.Id);
-                        for (const auto dependency : imported.AssetDependencies)
-                        {
-                            if (std::ranges::find(stored->Dependencies, dependency) == stored->Dependencies.end())
-                                stored->Dependencies.push_back(dependency);
-                        }
+                        stored->Dependencies = imported.AssetDependencies;
                         std::ranges::sort(stored->Dependencies);
+                        const auto duplicate = std::ranges::unique(stored->Dependencies);
+                        stored->Dependencies.erase(duplicate.begin(), duplicate.end());
                     }
                 }
                 const auto object = m_Impl->ObjectPath(record, m_Impl->ImportDigest(record, imported));

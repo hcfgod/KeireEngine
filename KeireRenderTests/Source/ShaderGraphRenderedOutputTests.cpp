@@ -6,6 +6,7 @@
 #include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Scenes/Scene.h"
+#include "Keire/Vfx/VfxSystem.h"
 #include "KeireInternal/RenderInternal.h"
 
 #include <SDL3/SDL.h>
@@ -16,10 +17,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -118,10 +121,12 @@ namespace
     class LiveShaderGraphFixture final
     {
       public:
-        LiveShaderGraphFixture()
+        explicit LiveShaderGraphFixture(const Keire::ShaderGraphTarget target = Keire::ShaderGraphTarget::Material,
+                                        const std::optional<Keire::ShaderGraphTemplate> preset = {})
             : Root(std::filesystem::temp_directory_path() /
                    ("Keire-LiveShaderGraphTests-" +
-                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
+                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))),
+              Target(target)
         {
             std::filesystem::create_directories(Root / "Assets");
             const auto shaderImporter = Keire::CreateShaderAssetImporter();
@@ -132,26 +137,40 @@ namespace
                 .Importers =
                     std::vector<Keire::AssetImporterRegistration>{shaderImporter, materialImporter, graphImporter}});
 
-            auto graph = Keire::CreateDefaultShaderGraph();
-            auto parameter =
-                Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
-            parameter.Name = "BaseColor";
-            parameter.Symbol = "BaseColor";
-            parameter.Value = Keire::Color{0.0F, 1.0F, 0.0F, 1.0F};
-            graph.Nodes.push_back(std::move(parameter));
-            const auto output = std::ranges::find(graph.Nodes.back().Pins, "Value", &Keire::ShaderGraphPin::Name);
-            const auto input = std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::ShaderGraphPin::Name);
-            if (output == graph.Nodes.back().Pins.end() || input == graph.Nodes.front().Pins.end())
-                throw std::logic_error("The default Shader Graph does not expose a BaseColor input.");
-            graph.Connections.push_back(
-                {Keire::AssetId::Generate(), {graph.Nodes.back().Id, output->Id}, {graph.Nodes.front().Id, input->Id}});
+            auto graph = preset ? Keire::CreateShaderGraphTemplate(*preset) : Keire::CreateTargetShaderGraph(Target);
+            if (!preset)
+            {
+                auto parameter = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter,
+                                                              Keire::ShaderGraphValueType::Color);
+                parameter.Name = "BaseColor";
+                parameter.Symbol = "BaseColor";
+                parameter.Value = Keire::Color{0.0F, 1.0F, 0.0F, 1.0F};
+                graph.Nodes.push_back(std::move(parameter));
+                const auto output = std::ranges::find(graph.Nodes.back().Pins, "Value", &Keire::ShaderGraphPin::Name);
+                const auto input =
+                    std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::ShaderGraphPin::Name);
+                if (output == graph.Nodes.back().Pins.end() || input == graph.Nodes.front().Pins.end())
+                    throw std::logic_error("The default Shader Graph does not expose a BaseColor input.");
+                graph.Connections.push_back({Keire::AssetId::Generate(),
+                                             {graph.Nodes.back().Id, output->Id},
+                                             {graph.Nodes.front().Id, input->Id}});
+            }
             Graph = Database->CreateAsset("Live.keireshadergraph", graphImporter,
                                           Keire::ShaderGraphAsset::EncodeSource(graph));
             const auto record = Database->Find(Graph);
-            if (!record || record->SubAssets.size() < 2)
+            if (!record || record->SubAssets.empty())
                 throw std::runtime_error("The Shader Graph import did not publish shader and material subassets.");
             Shader = record->SubAssets.front();
-            Material = record->SubAssets.back();
+            if (Target == Keire::ShaderGraphTarget::Material)
+                Material = record->SubAssets.back();
+            else
+            {
+                Keire::MaterialAssetDefinition material;
+                material.Shader = Shader;
+                material.Surface.AlphaMode = Keire::MaterialAlphaMode::Blend;
+                Material = Database->CreateAsset("Live.keiremateriallegacy", materialImporter,
+                                                 Keire::MaterialAsset::EncodeSource(material));
+            }
             Catalog = Database->ImportAll(Keire::AssetImportPolicy::KeepLastGood).CatalogPath;
         }
 
@@ -163,7 +182,7 @@ namespace
 
         [[nodiscard]] bool PublishRedRevision(Keire::Application& application) const
         {
-            auto graph = Keire::CreateDefaultShaderGraph();
+            auto graph = Keire::CreateTargetShaderGraph(Target);
             auto parameter =
                 Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Parameter, Keire::ShaderGraphValueType::Color);
             parameter.Name = "BaseColor";
@@ -236,6 +255,7 @@ namespace
         Keire::AssetId Graph;
         Keire::AssetId Shader;
         Keire::AssetId Material;
+        Keire::ShaderGraphTarget Target;
     };
 
     struct LiveShaderGraphResults final
@@ -244,6 +264,114 @@ namespace
         std::vector<std::uint8_t> Revised;
         std::vector<std::uint8_t> LastFrame;
         bool RevisionPublished = false;
+    };
+
+    struct FullscreenResults final
+    {
+        std::vector<std::uint8_t> Baseline;
+        std::vector<std::uint8_t> Effect;
+        std::vector<std::uint8_t> Cleared;
+    };
+
+    class FullscreenCaptureLayer final : public Keire::Layer
+    {
+      public:
+        FullscreenCaptureLayer(const Keire::AssetId material, const Keire::RenderPath path,
+                               std::shared_ptr<FullscreenResults> results)
+            : Layer("Fullscreen spatial effects"), m_Material(material), m_Path(path), m_Results(std::move(results))
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("Fullscreen spatial effects"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            for (int index = 0; index < 3; ++index)
+            {
+                auto entity = m_Scene->CreateEntity("White geometry");
+                entity.GetComponent<Keire::TransformComponent>()->SetLocalPosition(
+                    {static_cast<float>(index - 1) * 0.85F, index == 1 ? 0.4F : -0.3F, 0});
+                entity.GetComponent<Keire::TransformComponent>()->SetLocalScale({0.55F, 0.55F, 0.55F});
+                auto mesh = entity.AddComponent<Keire::MeshRendererComponent>();
+                mesh->SetMesh(Keire::MeshAsset::CubeId());
+                mesh->SetTint({1, 1, 1, 1});
+            }
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "Fullscreen spatial effects";
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            m_View = Owner().Renderer()->CreateView(surface);
+            m_Camera.View = Keire::Math::LookAt({0, 0, 3}, {0, 0, 0}, {0, 1, 0});
+            m_Camera.Projection = Keire::Math::Perspective(55, 1, 0.1F, 100);
+            m_Camera.ClearColor = {0, 0, 0, 1};
+            m_View->SetCamera(m_Camera);
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (++m_Frames > 200)
+            {
+                Owner().RequestExit();
+                return;
+            }
+            if (m_Frames > 4)
+            {
+                auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                if (!pixels.empty() && m_Results->Baseline.empty())
+                {
+                    m_Results->Baseline = pixels;
+                    m_Camera.FullscreenEffects[1] = m_Material;
+                    m_View->SetCamera(m_Camera);
+                }
+                else if (m_Results->Effect.empty() && pixels.size() == m_Results->Baseline.size() &&
+                         pixels != m_Results->Baseline)
+                {
+                    std::size_t changed = 0;
+                    for (std::size_t index = 0; index < pixels.size(); ++index)
+                        changed += std::abs(static_cast<int>(pixels[index]) - m_Results->Baseline[index]) > 8;
+                    if (changed > 60)
+                    {
+                        m_Results->Effect = pixels;
+                        m_Camera.FullscreenEffects[1] = {};
+                        m_View->SetCamera(m_Camera);
+                        m_ClearFrame = m_Frames;
+                    }
+                }
+                else if (!m_Results->Effect.empty() && m_Frames > m_ClearFrame + 2)
+                {
+                    m_Results->Cleared = std::move(pixels);
+                    Owner().RequestExit();
+                    return;
+                }
+            }
+            auto environment = ShaderBindingTestEnvironment();
+            environment.RequestedRenderPath = m_Path;
+            environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
+            if (m_Frames == 1)
+                REQUIRE(Keire::ResolveRenderFeatureSelection(environment, Owner().Renderer()->FeatureCapabilities())
+                            .EffectivePath == m_Path);
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+        }
+
+      private:
+        Keire::AssetId m_Material;
+        Keire::RenderPath m_Path;
+        std::shared_ptr<FullscreenResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::RenderCamera m_Camera;
+        unsigned m_Frames = 0;
+        unsigned m_ClearFrame = 0;
     };
 
     class LiveShaderGraphCaptureLayer final : public Keire::Layer
@@ -326,6 +454,109 @@ namespace
         std::uint32_t m_FrameCount = 0;
         std::uint32_t m_Stage = 0;
         bool m_Submitted = false;
+    };
+
+    class VfxShaderCaptureLayer final : public Keire::Layer
+    {
+      public:
+        VfxShaderCaptureLayer(LiveShaderGraphFixture& fixture, std::shared_ptr<LiveShaderGraphResults> results,
+                              Keire::VfxBackend backend, Keire::VfxRendererType renderer)
+            : Layer("Authored particle shader"), m_Fixture(fixture), m_Results(std::move(results)), m_Backend(backend),
+              m_Renderer(renderer)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("Authored particle shader"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            Keire::RenderSurfaceSpecification surface;
+            surface.Width = SurfaceSize;
+            surface.Height = SurfaceSize;
+            surface.ClearColor = {0, 0, 0, 1};
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            m_View = Owner().Renderer()->CreateView(surface);
+            Keire::RenderCamera camera;
+            camera.View = Keire::Math::LookAt({0.8F, 0.4F, 2.5F}, {}, {0, 1, 0});
+            camera.Projection = Keire::Math::Perspective(55, 1, 0.1F, 100);
+            camera.ClearColor = surface.ClearColor;
+            m_View->SetCamera(camera);
+            Keire::VfxEffectDefinition effect;
+            effect.EmitterId = Keire::AssetId::Generate();
+            effect.Name = "Authored particle shader";
+            effect.Duration = 10;
+            effect.Capacity = 16;
+            effect.Modules = {
+                {Keire::AssetId::Generate(), true, Keire::VfxBurstModule{0, 8, 1, 0.1F}},
+                {Keire::AssetId::Generate(), true, Keire::VfxShapeModule{Keire::VfxShape::Box}},
+                {Keire::AssetId::Generate(), true, Keire::VfxInitializeModule{10, 10}},
+                {Keire::AssetId::Generate(), true, Keire::VfxSizeOverLifetimeModule{Keire::Curve1D::Constant(0.5F)}},
+                {Keire::AssetId::Generate(), true,
+                 Keire::VfxColorOverLifetimeModule{Keire::ColorGradient::Constant({1, 1, 1, 1})}},
+                {Keire::AssetId::Generate(), true, Keire::VfxRendererModule{m_Renderer, {}, {}, m_Fixture.Material}}};
+            effect = Keire::ConvertVfxEffectToGraph(effect);
+            if (m_Renderer == Keire::VfxRendererType::Ribbon)
+            {
+                effect.Systems.front().DataType = Keire::VfxParticleDataType::ParticleStrip;
+                effect.Systems.front().ParticlesPerStrip = 8;
+            }
+            m_World = Keire::CreateRef<Keire::VfxWorld>(
+                Keire::VfxWorldSpecification{.MaximumEffects = 1, .MaximumParticles = 16, .Backend = m_Backend});
+            if (!m_World->Activate({Keire::CreateRef<Keire::VfxEffectAsset>(std::move(effect))}))
+                throw std::runtime_error("Could not activate authored VFX fixture.");
+            m_World->Update(0.01F);
+        }
+
+        void OnDetach() noexcept override
+        {
+            m_World.Reset();
+            if (m_Scene)
+                m_Scene->Close();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (m_Frames != 0)
+            {
+                auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                if (m_Results->Initial.empty() && ContainsDominantChannel(pixels, 1))
+                {
+                    m_Results->Initial = pixels;
+                    m_Results->RevisionPublished = m_Fixture.PublishRedRevision(Owner());
+                }
+                else if (m_Results->RevisionPublished && ContainsDominantChannel(pixels, 0))
+                {
+                    m_Results->Revised = pixels;
+                    Owner().RequestExit();
+                }
+                m_Results->LastFrame = std::move(pixels);
+            }
+            if (++m_Frames > 120)
+            {
+                Owner().RequestExit();
+                return;
+            }
+            Keire::RenderEnvironmentSettings environment;
+            environment.SkyVisible = false;
+            environment.AmbientColor = {1, 1, 1, 1};
+            environment.AmbientIntensity = 1;
+            m_World->Update(1.0F / 60.0F);
+            Owner().Renderer()->Submit({m_Scene, m_View, false, environment, {}, m_World->CaptureRenderSnapshot()});
+        }
+
+      private:
+        LiveShaderGraphFixture& m_Fixture;
+        std::shared_ptr<LiveShaderGraphResults> m_Results;
+        Keire::VfxBackend m_Backend;
+        Keire::VfxRendererType m_Renderer;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::VfxWorld> m_World;
+        std::uint32_t m_Frames = 0;
     };
 
     class MaterialPropertyBlockCaptureLayer final : public Keire::Layer
@@ -556,6 +787,70 @@ TEST_CASE("live Shader Graph shader and parameter revisions update assigned scen
     REQUIRE_FALSE(results->Revised.empty());
     CHECK(ContainsDominantChannel(results->Initial, 1));
     CHECK(ContainsDominantChannel(results->Revised, 0));
+}
+
+TEST_CASE("authored VFX shaders render and hot reload on CPU and GPU billboards and ribbons")
+{
+    LiveShaderGraphFixture assets(Keire::ShaderGraphTarget::Vfx);
+    for (const auto backend : {Keire::VfxBackend::Cpu, Keire::VfxBackend::Gpu})
+        for (const auto renderer : {Keire::VfxRendererType::Sprite, Keire::VfxRendererType::Ribbon})
+        {
+            CAPTURE(backend);
+            CAPTURE(renderer);
+            const auto results = std::make_shared<LiveShaderGraphResults>();
+            auto specification = RenderTestSpecification();
+            specification.Assets.Mode = Keire::AssetMode::Development;
+            specification.Assets.DevelopmentCatalog = assets.Catalog;
+            {
+                Keire::Application application(std::move(specification));
+                (void)application.PushLayer(
+                    std::make_unique<VfxShaderCaptureLayer>(assets, results, backend, renderer));
+                REQUIRE(application.Run() == 0);
+            }
+            const auto dominance = MaximumChannelDominance(results->LastFrame);
+            INFO("Last frame channel dominance: ", dominance[0], "/", dominance[1], "/", dominance[2]);
+            CHECK(results->RevisionPublished);
+            CHECK_FALSE(results->Initial.empty());
+            CHECK_FALSE(results->Revised.empty());
+        }
+}
+
+TEST_CASE("fullscreen spatial presets modify camera images and clearing restores both render paths")
+{
+    for (const auto preset :
+         {Keire::ShaderGraphTemplate::FullscreenBlur, Keire::ShaderGraphTemplate::FullscreenChromaticAberration,
+          Keire::ShaderGraphTemplate::FullscreenDistortion, Keire::ShaderGraphTemplate::FullscreenVignette})
+    {
+        CAPTURE(preset);
+        LiveShaderGraphFixture assets(Keire::ShaderGraphTarget::Fullscreen, preset);
+        for (const auto path : {Keire::RenderPath::ForwardPlus, Keire::RenderPath::DeferredHybrid})
+        {
+            CAPTURE(path);
+            const auto results = std::make_shared<FullscreenResults>();
+            auto specification = RenderTestSpecification();
+            specification.Assets.Mode = Keire::AssetMode::Development;
+            specification.Assets.DevelopmentCatalog = assets.Catalog;
+            {
+                Keire::Application application(std::move(specification));
+                (void)application.PushLayer(std::make_unique<FullscreenCaptureLayer>(assets.Material, path, results));
+                REQUIRE(application.Run() == 0);
+            }
+            REQUIRE(results->Baseline.size() == SurfaceSize * SurfaceSize * 4U);
+            REQUIRE(results->Effect.size() == results->Baseline.size());
+            CHECK((results->Effect != results->Baseline));
+            CHECK((results->Cleared == results->Baseline));
+            std::uint64_t baselineEnergy = 0;
+            std::uint64_t effectEnergy = 0;
+            for (std::size_t index = 0; index < results->Baseline.size(); ++index)
+                if (index % 4 != 3)
+                {
+                    baselineEnergy += results->Baseline[index];
+                    effectEnergy += results->Effect[index];
+                }
+            CHECK(effectEnergy > baselineEnergy / 4);
+            CHECK(effectEnergy < baselineEnergy * 2);
+        }
+    }
 }
 
 TEST_CASE("per-renderer material property blocks reach Shader Graph GPU bindings")

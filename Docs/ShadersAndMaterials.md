@@ -135,8 +135,12 @@ current image intact; invalid shader reloads retain the last executable shader. 
 executed as mesh shaders.
 
 Material creation now accepts Surface, UI, Fullscreen, VFX, and Custom Graphics shaders. Replacement shader choices
-stay within the resolved material's target. Retained UI uses UI materials; VFX and Custom Graphics materials use
-existing mesh consumers. Authored shader execution on VFX billboards/ribbons is still a separate integration task.
+stay within the resolved material's target. Retained UI uses UI materials. VFX materials execute authored graph logic
+on CPU and GPU Sprite/Ribbon outputs and the existing mesh consumer. Volumetric VFX retains built-in density shading.
+Custom Graphics has the existing mesh consumer; it does not expose arbitrary render-pass scheduling.
+
+The current Shader Graph generator version is 16 and the Shader Graph importer version is 27. These versions describe
+generated binaries and cache invalidation, not the serialized graph schema or the engine release number.
 
 C++ uses `CameraComponent::SetFullscreenEffect(CameraEffectStage::AfterTonemapping, materialId)`.
 C# exposes nullable Material properties `Camera.EffectBeforeTonemapping`, `Camera.EffectAfterTonemapping`, and
@@ -144,6 +148,18 @@ C# exposes nullable Material properties `Camera.EffectBeforeTonemapping`, `Camer
 is saved outside Play Mode.
 
 ## Shader Graph Authoring
+
+**Create > Shader Graph > Fullscreen Presets** supplies editable Blur, Chromatic Aberration, Distortion, and Vignette
+graphs. These are ordinary graphs sampling the camera image, not fixed color overlays. Create a material from the
+chosen graph and assign it to a camera stage. `RadiusPixels`, `OffsetPixels`, and `AmplitudePixels` control sampling
+distances in pixels through the fragment-only **Scene Texel Size** node, which returns `(1 / width, 1 / height)` for
+the current Scene Color copy. It remains correct when the surface resolution changes. Distortion also exposes Speed
+and Frequency; Vignette exposes Radius, Softness, and Strength.
+
+Blur uses nine equally weighted taps; RadiusPixels changes their spacing, not the number of taps. It is a compact
+single-pass blur, not a full bloom pyramid or a large separable Gaussian filter. Extend the graph with additional
+Scene Color samples, textures, math, and time nodes for other spatial effects. Scene depth, prior-frame history,
+and arbitrary multi-pass intermediate targets are not provided by these presets.
 
 Create **Shader Graph** in the Project panel, then choose a **Surface / ...** template, UI, Fullscreen Effect, VFX, or
 Custom Graphics. **Compute (not supported)** is disabled. The
@@ -191,7 +207,7 @@ published runtime assets.
 
 Shader Graph schema 6 stores its explicit target definition and retains the finite, non-negative maximum
 world-position-displacement radius introduced by schema 5. Schemas 1–5 migrate in memory; old Fullscreen outputs infer
-the Fullscreen target and other old graphs infer Material. Generated shader contract 8 publishes target/stage metadata,
+the Fullscreen target and other old graphs infer Material. The generated shader contract publishes target/stage metadata,
 the validated displacement bound, and exact pass roles in a schema-3 shader manifest. Compute compiler/runtime progress
 has separate [acceptance evidence](RevampComputeCompilerLane.md); it does not enable Compute creation in the editor menu.
 

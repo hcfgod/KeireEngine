@@ -114,6 +114,16 @@ TEST_CASE("CPU VFX coalesces only adjacent particles with identical render state
     CHECK(batches[1].FirstVertex == 12);
     CHECK(batches[2].FirstVertex == 18);
     CHECK(batches[3].FirstVertex == 24);
+    const auto material = Keire::AssetId::Generate();
+    AppendPreparedCpuVfxBatch(batches, 30, 6, {firstTexture, sampler}, alphaBlend, material);
+    AppendPreparedCpuVfxBatch(batches, 36, 6, {firstTexture, sampler}, alphaBlend, material);
+    AppendPreparedCpuVfxBatch(batches, 42, 6, {firstTexture, sampler}, alphaBlend, Keire::AssetId::Generate());
+    REQUIRE(batches.size() == 6);
+    CHECK(batches[4].VertexCount == 12);
+    CHECK(batches[4].Material == material);
+    AppendPreparedCpuVfxBatch(batches, 48, 6, {firstTexture, sampler}, alphaBlend, batches.back().Material,
+                              Keire::AssetId::Generate());
+    CHECK(batches.size() == 7);
 }
 
 TEST_CASE("sampled scene depth is requested only by GPU depth collision operations")

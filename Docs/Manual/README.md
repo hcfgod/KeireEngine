@@ -18,7 +18,7 @@ retains the independently validated 0.4.2 Linux packages.
 | 4 | [Input, Physics, and Audio](InputPhysicsAndAudio.md) | Connect authored data to frame and fixed-step gameplay. |
 | 5 | [UI, Jobs, and Diagnostics](UiJobsAndDiagnostics.md) | Build responsive UI and background work with visible failures. |
 | 6 | [Shader Graph](ShaderGraph.md) | Author a reusable renderer-facing shader contract. |
-| 7 | [Material Graph](MaterialGraph.md) | Build assignable surface logic against a Shader Graph. |
+| 7 | [Material Graph](MaterialGraph.md) | Create shader-selected materials, edit properties, and maintain existing graph-owned assets. |
 | 8 | [VFX Graph](VfxGraph.md) | Author, preview, attach, and control a visual effect. |
 | 9 | [Graph Editing](GraphEditing.md) | Use selection, comments, collapse, clipboard, and reuse consistently. |
 | 10 | [Debugging and Profiling](DebuggingAndProfiling.md) | Diagnose scripts, assets, graphs, and frame performance. |
@@ -26,7 +26,7 @@ retains the independently validated 0.4.2 Linux packages.
 | 12 | [C# API Quick Reference](CSharpApiQuickReference.md) | Find the supported Unity-shaped gameplay surface quickly. |
 | 13 | [Visual Workflow Maps](VisualWorkflowMaps.md) | See how projects, scripts, graphs, scenes, and players fit together. |
 | 14 | [C# Scripting Recipes](ScriptingRecipes.md) | Adapt complete gameplay patterns for movement, reload, scenes, and presentation. |
-| 15 | [Shader Graph Examples](ShaderGraphExamples.md) | Build tinted, emissive, and height-blended shader contracts. |
+| 15 | [Shader Graph Examples](ShaderGraphExamples.md) | Build tinted, emissive, height-blended, and camera fullscreen effects. |
 | 16 | [Material Graph Examples](MaterialGraphExamples.md) | Build damage, wetness, instance, and global-parameter surfaces. |
 | 17 | [VFX Graph Examples](VfxGraphExamples.md) | Build looping, burst, event-driven, and reusable particle systems. |
 

@@ -22,7 +22,7 @@ namespace Keire
     /// Latest canonical source schema emitted by ShaderGraphAsset::EncodeSource.
     inline constexpr std::uint32_t ShaderGraphSourceSchemaVersion = 6;
     /// Version of the deterministic HLSL generator contract embedded in every generated shader manifest.
-    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 14;
+    inline constexpr std::uint32_t ShaderGraphGeneratedShaderVersion = 16;
     /// Renderer-facing vertex input and interpolator contract required by generated Shader Graph shaders.
     inline constexpr std::uint32_t ShaderGraphVertexLayoutVersion = 3;
 
@@ -49,7 +49,11 @@ namespace Keire
         Ui,
         Vfx,
         CustomGraphics,
-        Compute
+        Compute,
+        FullscreenBlur,
+        FullscreenChromaticAberration,
+        FullscreenDistortion,
+        FullscreenVignette
     };
 
     enum class ShaderGraphPurpose : std::uint8_t
@@ -249,7 +253,8 @@ namespace Keire
         AddSlabs,
         CoatSlab,
         FuzzSlab,
-        SceneColor
+        SceneColor,
+        SceneTexelSize
     };
 
     enum class ShaderGraphDiagnosticSeverity : std::uint8_t

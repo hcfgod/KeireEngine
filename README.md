@@ -266,7 +266,9 @@ staging defaults to Ninja so repeated runs retain compatible incremental outputs
 The equivalent PowerShell commands are `./Scripts/project.ps1 stage-editor -Toolset msc` and
 `./Scripts/project.ps1 stage-hub -Toolset msc`. Open `Launch-KeireHub.cmd` inside its `Build\Distributions` folder to
 test the Hub. To open a project directly in the staged Editor, run `Launch-KeireEditor.cmd --project "C:\path\to\project"`
-from the Editor distribution folder.
+from the Editor distribution folder. You can also launch directly through `Scripts\project.bat run-staged-hub` or
+`Scripts\project.bat run-staged-editor -ProjectPath "C:\path\to\project"` without building. Interactive menu options
+19 and 20 launch the staged Editor and Hub; options 7 and 8 update those stages after source changes.
 Player exports prefer the Editor's bundled Build Support when compatible, so a same-version module installed by an
 older development build cannot override it. Installed modules remain the fallback for other targets or configurations.
 
@@ -557,3 +559,7 @@ UI-target materials can be assigned in a scene UI Document's **UI Material** fie
 
 Live material edits remain authoritative while a background asset reload finishes; an older reload cannot replace
 the newer preview value. Material source persistence and undo continue through the normal Inspector workflow.
+
+VFX Shader Graph materials execute on CPU and GPU Sprite and Ribbon outputs as well as mesh particles. Assign the
+material in the VFX output's Material field; exposed parameters and material texture properties run in the authored
+shader. Volumetric output still uses built-in density shading. See [VFX](Docs/Vfx.md).

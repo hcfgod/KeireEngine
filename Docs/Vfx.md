@@ -1,5 +1,12 @@
 # VFX Authoring And Runtime
 
+Sprite and Ribbon outputs execute assigned VFX Shader Graph materials on CPU and GPU simulation paths. Create a VFX
+Shader Graph, create a Material from that shader, and assign it to the output's Material field. Use material texture
+properties for authored sampling; the separate Sprite texture belongs to the built-in fallback. Particle color is
+available as Vertex Color, and UV0/UV1 span each billboard or ribbon segment. Live material and shader revisions use
+the renderer's last-good pipeline cache. Mesh outputs retain their instanced material path; Volumetric outputs retain
+built-in density shading. The Shader Graph's CPU thumbnail is not a particle simulation preview.
+
 Kéire's VFX system combines an executable visual graph, bounded modular particle payloads, typed Blackboard
 parameters, Portable Custom HLSL, scene components, native C++ control, and managed C# playback control. This guide
 covers the complete supported workflow and identifies the deliberately bounded parts of the graph runtime.

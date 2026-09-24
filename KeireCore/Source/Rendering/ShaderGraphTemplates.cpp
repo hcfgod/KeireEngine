@@ -6,6 +6,10 @@
 
 namespace Keire
 {
+    namespace Detail
+    {
+        ShaderGraphDefinition CreateFullscreenEffectTemplate(ShaderGraphTemplate graphTemplate);
+    }
     ShaderGraphDefinition CreateDefaultShaderGraph(const ShaderGraphOutput output)
     {
         ShaderGraphDefinition definition;
@@ -94,6 +98,11 @@ namespace Keire
     {
         switch (graphTemplate)
         {
+        case ShaderGraphTemplate::FullscreenBlur:
+        case ShaderGraphTemplate::FullscreenChromaticAberration:
+        case ShaderGraphTemplate::FullscreenDistortion:
+        case ShaderGraphTemplate::FullscreenVignette:
+            return Detail::CreateFullscreenEffectTemplate(graphTemplate);
         case ShaderGraphTemplate::Lit:
             return CreateDefaultShaderGraph(ShaderGraphOutput::Surface);
         case ShaderGraphTemplate::Unlit:

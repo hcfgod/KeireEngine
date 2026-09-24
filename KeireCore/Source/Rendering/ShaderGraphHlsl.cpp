@@ -14,6 +14,7 @@ namespace Keire::Detail
     void ValidateUiShaderGraph(const ShaderGraphDefinition& definition);
     [[nodiscard]] std::string_view ShaderGraphUiVertexInputHlsl() noexcept;
     [[nodiscard]] std::string_view ShaderGraphUiVertexMainHlsl() noexcept;
+    [[nodiscard]] std::string_view ShaderGraphVfxVertexHlsl() noexcept;
 
     [[nodiscard]] std::string ShaderGraphCompiler::BuildHlsl()
     {
@@ -315,7 +316,9 @@ struct InstanceData
     float4 Tint;
 };
 
+#if !defined(KEIRE_PASS_VFX_BILLBOARD) && !defined(KEIRE_PASS_VFX_RIBBON) && !defined(KEIRE_PASS_VFX_CPU)
 StructuredBuffer<InstanceData> Instances : register(t0, space0);
+#endif
 )HLSL";
         source << R"HLSL(
 struct ShaderGraphLocalLight
@@ -374,6 +377,10 @@ cbuffer MaterialData : register(b1, space3)
         {
             source << "Texture2D KeireUiSourceTexture : register(t" << textureIndex << ", space2);\n";
             source << "SamplerState KeireUiSourceSampler : register(s" << textureIndex << ", space2);\n";
+            if (!ui)
+                source << "float2 KeireSceneTexelSize() { uint width, height; "
+                          "KeireUiSourceTexture.GetDimensions(width, height); "
+                          "return 1.0F / max(float2(width, height), 1.0F.xx); }\n";
         }
         if (!unlit)
         {
@@ -1147,12 +1154,31 @@ return 0.0F.xxx;
             source << ShaderGraphUiVertexMainHlsl();
         else
         {
+            if (m_Definition.Target.Target == ShaderGraphTarget::Vfx)
+                source << ShaderGraphVfxVertexHlsl();
             source << R"HLSL(
 
+#if defined(KEIRE_PASS_VFX_BILLBOARD) || defined(KEIRE_PASS_VFX_RIBBON)
+VertexOutput VSMain(uint vertexId : SV_VertexID, uint instanceId : SV_InstanceID)
+{
+    VertexInput input = VfxInput(vertexId, instanceId);
+#elif defined(KEIRE_PASS_VFX_CPU)
+VertexOutput VSMain(VfxCpuInput vertex)
+{
+    VertexInput input = VfxInput(vertex);
+#else
 VertexOutput VSMain(VertexInput input, const uint instanceId : SV_InstanceID)
 {
+#endif
     VertexOutput output;
+#if defined(KEIRE_PASS_VFX_BILLBOARD) || defined(KEIRE_PASS_VFX_RIBBON) || defined(KEIRE_PASS_VFX_CPU)
+    InstanceData instance;
+    instance.Model = float4x4(1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1);
+    instance.NormalMatrix = instance.Model;
+    instance.Tint = 1.0F.xxxx;
+#else
     const InstanceData instance = Instances[InstanceParameters.x + instanceId];
+#endif
     float4 world = mul(instance.Model, float4(input.Position, 1.0F));
 )HLSL";
             if (worldPositionOffset)

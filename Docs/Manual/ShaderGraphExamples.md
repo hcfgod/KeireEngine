@@ -66,6 +66,27 @@ This produces a stable vertical transition for terrain, water edges, or stylized
 non-zero default. If the desired result must move with the object, choose the corresponding object-space coordinate
 instead of world position.
 
+## Example 4: Camera Tint Effect
+
+1. Choose **Create > Shader Graph**, select **Fullscreen Effect**, name it, and open it.
+2. Add **UV0** and **Scene Color**. Connect UV0 to Scene Color's UV input.
+3. Add an exposed Color parameter named `Tint`, initially white, and a color Multiply node.
+4. Multiply Scene Color's Color output by Tint; connect the result to **Fullscreen Shader Output.Color**. Save.
+5. Select the shader in Project and choose **Material from Shader**. Open the material and set Tint to a pale blue.
+6. Select the entity with the Camera component. Under **Fullscreen Effects**, assign the material to **After Tonemapping**.
+7. Open Game view or camera preview. The camera image should become blue-tinted; a white Tint should restore its colors.
+8. Save the material and scene. Reopen the scene and confirm the camera assignment and tint remain.
+
+Use **Before Tonemapping** for an operation on linear HDR scene color. **After Tonemapping** changes the tone-mapped
+scene before camera UI. **After UI** also changes camera overlay UI. One material is accepted per stage, with stages
+executed in that order. Clearing a slot disables only that stage. Changing the graph's injection metadata does not
+move an explicitly assigned camera slot.
+
+The graph's flat thumbnail has no camera framebuffer and cannot demonstrate this effect. Use the actual camera image.
+Scene Color is a fragment-only input for Fullscreen graphs. Scene Depth sampling is not implemented. If assignment
+does nothing, check the material's target, pending import diagnostics, and which camera is rendering; an unavailable
+or incompatible effect preserves the existing image. An invalid reload keeps the last executable shader.
+
 ## Turn A Working Graph Into A Contract
 
 - Rename exposed properties without changing their stable IDs.

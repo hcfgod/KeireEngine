@@ -1,5 +1,13 @@
 # Shader graphics target lane — September 12, 2026
 
+## September 23 authored VFX follow-up
+
+Generator 15/importer 26 adds GPU billboard/ribbon and CPU expanded-particle pass variants to VFX graphs. Those paths
+now execute authored shader logic, using the existing mesh material/lighting binding and transactional pipeline cache.
+The production compiler and D3D12/Vulkan green-to-red live-reload readback tests passed; exact evidence and native
+limitations are recorded in `RevampProductionAcceptance.md`. Volumetric shading, arbitrary custom-pass scheduling,
+and fullscreen scene-depth input are not completed by this change. Earlier gap descriptions below are historical.
+
 ## September 22 runtime implementation follow-up
 
 The camera now stores three fullscreen material slots. Renderer execution uses frame-workset scene-color copies,

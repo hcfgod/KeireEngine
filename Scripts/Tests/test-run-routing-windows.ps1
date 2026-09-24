@@ -6,10 +6,12 @@ try {
     $windows = Join-Path $fixture "Scripts\Windows"
     New-Item -ItemType Directory -Force $windows | Out-Null
     Copy-Item (Join-Path $PSScriptRoot "..\Windows\run.ps1") (Join-Path $windows "run.ps1")
+    Copy-Item (Join-Path $PSScriptRoot "..\Windows\run-staged.ps1") (Join-Path $windows "run-staged.ps1")
     @'
 function Get-ProjectConfig {
-    return [pscustomobject]@{ CLIENT_TARGET = "Client"; HUB_TARGET = "Hub"; PROJECT_NAMESPACE = "Fixture" }
+    return [pscustomobject]@{ CLIENT_TARGET = "Client"; HUB_TARGET = "Hub"; PROJECT_NAMESPACE = "Fixture"; ARTIFACT_PREFIX = "fixture" }
 }
+function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path }
 function Normalize-Architecture([string]$Architecture) { return "x86_64" }
 function Get-NativeArchitecture { return "x86_64" }
 function Resolve-WindowsToolset { return "msc" }
@@ -91,7 +93,35 @@ public static class RunRoutingFixture
             throw "Conflicting smoke modes must fail before building or launching a target."
         }
     }
-    Write-Host "Windows Hub and Editor smoke routing checks passed."
+    $projectPath = Join-Path $fixture $unicodeName
+    New-Item -ItemType Directory -Path $projectPath | Out-Null
+    foreach ($kind in @("editor", "hub")) {
+        $target = if ($kind -eq "editor") { "Client" } else { "Hub" }
+        $stageBin = Join-Path $fixture "Build\Distributions\fixture-$kind-windows-x86_64-Dist\bin"
+        New-Item -ItemType Directory -Force $stageBin | Out-Null
+        Copy-Item -LiteralPath $client -Destination (Join-Path $stageBin "$target.exe")
+        [IO.File]::WriteAllText($env:KEIRE_RUN_ROUTING_TRACE, "")
+        $arguments = @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+            (Join-Path $windows "run-staged.ps1"))
+        if ($kind -eq "editor") { $arguments += @("-Editor", "-ProjectPath", $projectPath) }
+        $result = Invoke-WindowsExecutableCapture -Path (Get-Command powershell.exe).Source -Arguments $arguments
+        $deadline = [DateTime]::UtcNow.AddSeconds(5)
+        do {
+            $trace = [IO.File]::ReadAllText($env:KEIRE_RUN_ROUTING_TRACE)
+            if ($trace) { break }
+            Start-Sleep -Milliseconds 20
+        } while ([DateTime]::UtcNow -lt $deadline)
+        $expectedTrace = if ($kind -eq "editor") { "Client --project $projectPath`n" } else { "Hub `n" }
+        if ($result.ExitCode -ne 0 -or $trace -cne $expectedTrace) {
+            throw "Staged $kind must launch without building and preserve the project path: $trace $($result.StandardError)"
+        }
+        Remove-Item -LiteralPath (Join-Path $stageBin "$target.exe")
+        $missing = Invoke-WindowsExecutableCapture -Path (Get-Command powershell.exe).Source -Arguments $arguments
+        if ($missing.ExitCode -eq 0 -or $missing.StandardError -notmatch "stage-$kind") {
+            throw "A missing $kind stage must explain how to create it."
+        }
+    }
+    Write-Host "Windows Hub and Editor smoke and staged-launch routing checks passed."
 }
 finally {
     $env:KEIRE_RUN_ROUTING_TRACE = $previousTrace

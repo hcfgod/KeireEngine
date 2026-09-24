@@ -39,6 +39,20 @@ Subgraphs validate purpose, typed boundaries, dependencies, recursion, and bound
 not imply the remainder of another engine's node catalog, and there is no general selection-to-subgraph conversion in
 0.4.0.
 
+## Use An Authored Particle Material
+
+1. Create a **Shader Graph > VFX** asset and expose a Color parameter. Connect it to the VFX output's Base Color.
+2. Save the graph, select it, and choose **Material from Shader**. Set the material's color to an obvious green.
+3. Open the VFX Effect and assign this material to its Sprite or Ribbon output's **Material** field.
+4. Preview the effect, then assign it to a scene VFX Emitter and check it in Game view.
+5. Change the material color to red. CPU and GPU Sprite/Ribbon rendering should use the updated authored shader.
+6. Save the material, effect, and scene; reopen them and check the saved references.
+
+Particle Vertex Color supplies particle tint, while UV0/UV1 provide output coordinates for texture sampling. Add these
+nodes to the shader when the graph should use those particle values. Authored textures are material properties; the
+output's legacy Sprite texture is the built-in fallback input. Volumetric output still uses built-in density shading.
+The Shader Graph thumbnail is not a particle simulation. See [VFX rendering details](../Vfx.md) for backend constraints.
+
 ## Runtime Control
 
 Assign a `VfxEffect` and drive it with the managed service:

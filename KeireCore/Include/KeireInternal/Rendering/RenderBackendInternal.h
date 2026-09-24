@@ -1037,24 +1037,29 @@ namespace Keire::RenderBackend
         SDL_GPUTextureSamplerBinding Texture{};
         std::array<float, 4> SurfaceParameters{};
 
+        AssetId Material;
+        AssetId BakedLighting;
+
         [[nodiscard]] bool Matches(const SDL_GPUTextureSamplerBinding binding,
-                                   const std::array<float, 4>& surfaceParameters) const noexcept
+                                   const std::array<float, 4>& surfaceParameters, const AssetId material = {},
+                                   const AssetId bakedLighting = {}) const noexcept
         {
             return Texture.texture == binding.texture && Texture.sampler == binding.sampler &&
-                   SurfaceParameters == surfaceParameters;
+                   SurfaceParameters == surfaceParameters && Material == material && BakedLighting == bakedLighting;
         }
     };
     inline void AppendPreparedCpuVfxBatch(std::vector<PreparedCpuVfxBatch>& batches, const std::uint32_t firstVertex,
                                           const std::uint32_t vertexCount, const SDL_GPUTextureSamplerBinding texture,
-                                          const std::array<float, 4>& surfaceParameters)
+                                          const std::array<float, 4>& surfaceParameters, const AssetId material = {},
+                                          const AssetId bakedLighting = {})
     {
         if (!batches.empty() && batches.back().FirstVertex + batches.back().VertexCount == firstVertex &&
-            batches.back().Matches(texture, surfaceParameters))
+            batches.back().Matches(texture, surfaceParameters, material, bakedLighting))
         {
             batches.back().VertexCount += vertexCount;
             return;
         }
-        batches.push_back({firstVertex, vertexCount, texture, surfaceParameters});
+        batches.push_back({firstVertex, vertexCount, texture, surfaceParameters, material, bakedLighting});
     }
 
     struct PreparedCpuVfx final
@@ -1204,6 +1209,9 @@ namespace Keire::RenderBackend
         void DrawVfx(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
                      const SceneRenderPacket& packet, const ShadowFrameData& shadows,
                      const PreparedCpuVfx& preparedCpu);
+        void BindVfxMaterial(SDL_GPUCommandBuffer* commands, SDL_GPURenderPass* pass, RenderSurfaceState& surface,
+                             const SceneRenderPacket& packet, const ShadowFrameData& shadows,
+                             const ResolvedAssetMaterial* material, AssetId bakedLighting);
         [[nodiscard]] ShadowFrameData RecordShadows(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,
                                                     const SceneRenderPacket& packet);
         void RecordSampledDepth(SDL_GPUCommandBuffer* commands, RenderSurfaceState& surface,

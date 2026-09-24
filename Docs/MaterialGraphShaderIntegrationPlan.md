@@ -16,16 +16,18 @@ publication boundary:
 - Shader Graph schema 6 owns target programs. The serialized target declares `Ui`, `Fullscreen`, `Vfx`,
   `Material`, `CustomGraphics`, or `Compute`, legal stages, fullscreen
   injection point, and compute thread-group size.
-- Generated graphics shaders use contract 7 and schema-2 shader manifests. Manifests publish the target, stages,
+- Generated graphics shaders use contract 16 and schema-3 shader manifests. Manifests publish the target, stages,
   fullscreen/compute settings, stable properties, resources, render state, occlusion capabilities, and displacement
   bounds.
 - Schemas 1–6 remain readable. Historical fullscreen graphs infer the Fullscreen target; other historical Shader
   Graphs infer Material. Historical Material Graph expressions are promoted into the schema-7 `surfaceGraph` when
   saved.
 - UI, Fullscreen, VFX, and Custom Graphics targets publish shader variants without manufacturing a user material.
-  Compute validates and serializes now but fails compilation explicitly until the compute-program artifact ABI ships.
+  Compute uses the separate ProgramArtifact compiler/runtime path; it is rejected by the graphics ShaderAsset
+  importer and remains disabled in the editor's creation menu. See [compute acceptance](RevampComputeCompilerLane.md).
 
-The `.keirematerial` extension is the canonical schema-7 surface-authoring container. Historical flat material
+The `.keirematerial` extension contains new schema-5 shader-selected materials and existing schema-7 surface graphs.
+Historical flat material
 sources use the explicit `.keiremateriallegacy` compatibility extension; `.keirematerialgraph` is no longer
 registered for new assets. Material Instance schema 3 stores stable property-ID overrides; redirector cleanup remains
 a separate migration step.

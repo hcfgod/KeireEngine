@@ -3,6 +3,34 @@
 This guide takes a fresh checkout to a verified local Kéire build. Repository launchers are the supported interface;
 they resolve tools, verify locked dependencies, generate build files, and select compatible compiler settings.
 
+## Test The Locally Staged Editor And Hub On Windows
+
+From the repository root, run these after pulling or changing engine source:
+
+```bat
+Scripts\project.bat stage-editor -Toolset msc
+Scripts\project.bat stage-hub -Toolset msc
+```
+
+These commands incrementally build Dist and update runnable folders under `Build\Distributions`. They do not create
+a release archive or run the full release validation matrix. After staging, launch without rebuilding:
+
+```bat
+Scripts\project.bat run-staged-hub
+Scripts\project.bat run-staged-editor -ProjectPath "D:\Projects\My Game"
+```
+
+The project path is the project folder. Omit `-ProjectPath` to open the Editor without selecting a project in the
+command. The interactive `project.bat` menu exposes staging as options 7/8 and launching as options 19/20. A missing
+stage reports which staging command to run. Close an already running installed Hub before testing a different Hub
+build: the Hub's single-instance behavior can otherwise activate the existing process.
+
+For a first material check, create a new project in Hub, open the Editor, choose **Create > Material** in Project,
+change Base Color and Roughness, assign it to a Mesh Renderer, save, and reopen. The first shared-shader import can
+take substantially longer than later property edits; wait for the asset operation to finish and inspect diagnostics
+if it fails. See [Material Graph](Manual/MaterialGraph.md) for asset types and
+[Shader Graph Examples](Manual/ShaderGraphExamples.md) for a camera effect you can verify on screen.
+
 ## Clone
 
 Clone all pinned submodules with the repository:

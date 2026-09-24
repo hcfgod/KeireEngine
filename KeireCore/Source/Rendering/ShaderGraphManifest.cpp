@@ -157,6 +157,12 @@ namespace Keire::Detail
             definition.Output == ShaderGraphOutput::Fullscreen)
         {
             addPass("primary", {});
+            if (vfx)
+            {
+                addPass("vfxBillboard", "KEIRE_PASS_VFX_BILLBOARD");
+                addPass("vfxRibbon", "KEIRE_PASS_VFX_RIBBON");
+                addPass("vfxCpu", "KEIRE_PASS_VFX_CPU");
+            }
         }
         else
         {

@@ -275,7 +275,7 @@ namespace Keire
                 }
                 UpdateMetadataImportOutput(*stagingFiles, Detail::PathWithSuffix(item.Destination, ".keiremeta"),
                                            item.Validated.PrimaryType.value_or(stagedRecord.Type),
-                                           item.Validated.SubAssets);
+                                           item.Validated.SubAssets, item.Validated.AssetDependencies);
                 if (item.Replaced)
                 {
                     const auto prefix = std::to_string(index);

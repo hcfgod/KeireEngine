@@ -14,6 +14,9 @@ namespace Keire::RenderBackend
         ForwardOpaque,
         ForwardTransparent,
         DecalDBuffer,
+        VfxBillboard,
+        VfxRibbon,
+        VfxCpu,
         Unsupported
     };
 
@@ -44,6 +47,12 @@ namespace Keire::RenderBackend
             return "forwardTransparent";
         case RuntimeMaterialPassRole::DecalDBuffer:
             return "decalDBuffer";
+        case RuntimeMaterialPassRole::VfxBillboard:
+            return "vfxBillboard";
+        case RuntimeMaterialPassRole::VfxRibbon:
+            return "vfxRibbon";
+        case RuntimeMaterialPassRole::VfxCpu:
+            return "vfxCpu";
         case RuntimeMaterialPassRole::Unsupported:
             break;
         }
@@ -57,7 +66,8 @@ namespace Keire::RenderBackend
              {RuntimeMaterialPassRole::Primary, RuntimeMaterialPassRole::DepthVelocity,
               RuntimeMaterialPassRole::DeferredGBufferStandard, RuntimeMaterialPassRole::DeferredGBufferExtended,
               RuntimeMaterialPassRole::ForwardOpaque, RuntimeMaterialPassRole::ForwardTransparent,
-              RuntimeMaterialPassRole::DecalDBuffer})
+              RuntimeMaterialPassRole::DecalDBuffer, RuntimeMaterialPassRole::VfxBillboard,
+              RuntimeMaterialPassRole::VfxRibbon, RuntimeMaterialPassRole::VfxCpu})
         {
             if (RuntimeMaterialPassName(role) == name)
                 return role;
@@ -73,6 +83,9 @@ namespace Keire::RenderBackend
         case RuntimeMaterialPassRole::Primary:
         case RuntimeMaterialPassRole::ForwardOpaque:
         case RuntimeMaterialPassRole::ForwardTransparent:
+        case RuntimeMaterialPassRole::VfxBillboard:
+        case RuntimeMaterialPassRole::VfxRibbon:
+        case RuntimeMaterialPassRole::VfxCpu:
             return MaterialPassTargetLayout::ForwardColor;
         case RuntimeMaterialPassRole::DepthVelocity:
             return MaterialPassTargetLayout::Velocity;

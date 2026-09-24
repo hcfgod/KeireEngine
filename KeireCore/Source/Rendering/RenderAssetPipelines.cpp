@@ -72,6 +72,10 @@ namespace Keire::RenderBackend
                                                   : 0U;
         if (vertex && definition.UsesInstancing)
             information.num_storage_buffers = 1U;
+        if (vertex && (passRole == "vfxBillboard" || passRole == "vfxRibbon"))
+            information.num_storage_buffers = 2U;
+        else if (vertex && passRole == "vfxCpu")
+            information.num_storage_buffers = 0U;
         information.num_uniform_buffers = vertex ? (definition.InstanceAddressingAbiVersion == 2U
                                                         ? 3U
                                                         : (definition.UsesVertexMaterialParameters ? 2U : 1U))
@@ -182,6 +186,10 @@ namespace Keire::RenderBackend
                 SDL_GPUVertexAttribute{4, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuMeshVertex, Tangent)},
                 SDL_GPUVertexAttribute{5, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(GpuMeshVertex, UV1)},
                 SDL_GPUVertexAttribute{6, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(GpuMeshVertex, Position)}};
+            const std::array particleAttributes{
+                SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuRenderVertex, Position)},
+                SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuRenderVertex, Color)},
+                SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(GpuRenderVertex, Normal)}};
             SDL_GPUGraphicsPipelineCreateInfo information{};
             information.vertex_shader = vertex;
             information.fragment_shader = fragment;
@@ -194,6 +202,15 @@ namespace Keire::RenderBackend
                                                                    : definition.VertexLayoutVersion == 3 ? 6U
                                                                    : definition.VertexLayoutVersion == 2 ? 5U
                                                                                                          : 4U;
+            if (runtimeRole == RuntimeMaterialPassRole::VfxCpu)
+            {
+                buffers[0].pitch = sizeof(GpuRenderVertex);
+                information.vertex_input_state.vertex_attributes = particleAttributes.data();
+                information.vertex_input_state.num_vertex_attributes = 3U;
+            }
+            else if (runtimeRole == RuntimeMaterialPassRole::VfxBillboard ||
+                     runtimeRole == RuntimeMaterialPassRole::VfxRibbon)
+                information.vertex_input_state = {};
             information.primitive_type =
                 definition.Topology == ShaderPrimitiveTopology::PointList  ? SDL_GPU_PRIMITIVETYPE_POINTLIST
                 : definition.Topology == ShaderPrimitiveTopology::LineList ? SDL_GPU_PRIMITIVETYPE_LINELIST

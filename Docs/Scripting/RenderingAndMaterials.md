@@ -37,6 +37,34 @@ camera.ClearColor = new Color(0.01f, 0.02f, 0.04f, 1.0f);
 Native component validation remains authoritative. Invalid lens, plane, color, light, shadow, cone, and range values
 are rejected without changing the previous state.
 
+### Camera Fullscreen Materials
+
+`EffectBeforeTonemapping`, `EffectAfterTonemapping`, and `EffectAfterUi` each hold one nullable `Material` asset.
+Create the material from a Fullscreen Effect shader, assign it to a serialized field, then set the camera slot:
+
+```csharp
+[SerializeField, StableFieldId("7a2d1acf-b773-4ec5-99f6-735e95eae980")]
+private Material? _cameraTint = null;
+
+protected override void Awake()
+{
+    Camera? camera = GetComponent<Camera>();
+    if (camera is { IsValid: true })
+        camera.EffectAfterTonemapping = _cameraTint;
+}
+```
+
+Assign `null` to clear a stage. Slots execute before tone mapping, after tone mapping, then after camera UI; the shader's
+injection metadata does not reorder these camera assignments. Before tone mapping receives linear HDR Scene Color.
+The later slots receive the tone-mapped image; After UI includes camera overlays. Scene Depth is not available.
+An unavailable or incompatible material leaves the image unchanged. Gameplay assignments affect the running scene;
+save an edit-mode scene assignment when it must be authored into the project.
+
+For C++, include `Keire/ECS/Components/CameraComponent.h` and call
+`camera.SetFullscreenEffect(Keire::CameraEffectStage::AfterTonemapping, materialId)` on the component.
+Pass an empty `Keire::AssetId` to clear the slot. See the
+[camera tint recipe](../Manual/ShaderGraphExamples.md#example-4-camera-tint-effect) for graph wiring and editor setup.
+
 ## Meshes And Material Slots
 
 Asset markers make Inspector references and runtime assignments type-safe:

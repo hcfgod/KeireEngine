@@ -10,6 +10,17 @@ namespace KeireEditor
                 return Keire::ShaderGraphTemplate::Ui;
             if (ui.MenuItem("Fullscreen Effect"))
                 return Keire::ShaderGraphTemplate::Fullscreen;
+            if (auto effects = ui.BeginMenu("Fullscreen Presets"); effects)
+            {
+                if (ui.MenuItem("Blur"))
+                    return Keire::ShaderGraphTemplate::FullscreenBlur;
+                if (ui.MenuItem("Chromatic Aberration"))
+                    return Keire::ShaderGraphTemplate::FullscreenChromaticAberration;
+                if (ui.MenuItem("Distortion"))
+                    return Keire::ShaderGraphTemplate::FullscreenDistortion;
+                if (ui.MenuItem("Vignette"))
+                    return Keire::ShaderGraphTemplate::FullscreenVignette;
+            }
             if (ui.MenuItem("VFX"))
                 return Keire::ShaderGraphTemplate::Vfx;
             if (ui.MenuItem("Custom Graphics"))

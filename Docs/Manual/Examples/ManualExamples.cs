@@ -2,6 +2,20 @@ using Keire;
 
 namespace KeireManualExamples;
 
+[StableComponentId("a016dd36-117a-4f9b-b52a-7e0bcd88bb96")]
+public sealed class CameraTint : Behaviour
+{
+    [SerializeField, StableFieldId("7a2d1acf-b773-4ec5-99f6-735e95eae980")]
+    private Material? _cameraTint = null;
+
+    protected override void Awake()
+    {
+        Camera? camera = GetComponent<Camera>();
+        if (camera is { IsValid: true })
+            camera.EffectAfterTonemapping = _cameraTint;
+    }
+}
+
 [StableComponentId("7b5ac27e-4531-4a42-97b8-9a643661660e")]
 public sealed class Mover : Behaviour
 {

@@ -1,6 +1,6 @@
 # C# API Quick Reference
 
-This page maps common Unity-shaped concepts to Kéire 0.4.0's supported managed types. Use the linked scripting guides
+This page maps common Unity-shaped concepts to Kéire 0.4.4's supported managed types. Use the linked scripting guides
 for lifecycle, validation, and failure behavior; this is a navigation aid, not a promise of complete Unity API parity.
 
 ## Objects And Lifecycle
@@ -46,6 +46,7 @@ for lifecycle, validation, and failure behavior; this is a navigation aid, not a
 | --- | --- |
 | Runtime UI | `Keire.UI.UIDocument`, `VisualElement`, controls, queries, events, bindings, and custom elements |
 | Rendering | `Camera`, `MeshRenderer`, typed lights, `MaterialPropertyBlock`, `DynamicMaterial` |
+| Camera effects | `Camera.EffectBeforeTonemapping`, `EffectAfterTonemapping`, `EffectAfterUi`; nullable Fullscreen materials |
 | Global material data | `MaterialParameterCollection`, `GlobalMaterialParameters` |
 | Jobs | `Jobs.Submit/Run`, `Job`, `JobDescription`, `JobContext`, `Job.Completion` |
 | Logging | `Debug`, `Log` |

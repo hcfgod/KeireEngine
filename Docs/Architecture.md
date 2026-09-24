@@ -7,6 +7,12 @@ newly published asset stuck reloading. The normal owner-thread callback and life
 
 ## Material and shader replacement direction
 
+VFX Shader Graphs retain the standard instanced mesh pass and additionally compile `vfxBillboard`, `vfxRibbon`, and
+`vfxCpu` passes. GPU particle passes read the simulation particle/index buffers; CPU passes read the existing expanded
+world-space particle vertices. Their fragment logic and material/lighting bindings are shared with mesh VFX.
+The material cache owns all pass pipelines and replaces or retires them together using its existing last-good and
+device-generation lifecycle. Adjacent CPU batches must also match the material identity before coalescing.
+
 Compute compilation validates the generated SPIR-V buffer ABI against `ProgramArtifact` reflection before publishing
 backend binaries. The current `ComputeDevice` owns an independent GPU device and opaque device-scoped identities;
 copies of identities do not extend resource lifetime. Operations and destruction require the construction thread.

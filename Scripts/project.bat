@@ -10,8 +10,10 @@ if not exist "%WINDOWS_POWERSHELL%" (
     exit /b 1
 )
 
-echo %cmdcmdline% | findstr /I /C:" /c " >nul
-if not errorlevel 1 set "PAUSE_ON_EXIT=1"
+if "%~1"=="" (
+    echo %cmdcmdline% | findstr /I /C:" /c " >nul
+    if not errorlevel 1 set "PAUSE_ON_EXIT=1"
+)
 
 "%WINDOWS_POWERSHELL%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%project.ps1" %*
 set "EXIT_CODE=%ERRORLEVEL%"

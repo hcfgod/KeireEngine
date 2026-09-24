@@ -200,7 +200,8 @@ namespace Keire
             WriteMetadata(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot), id, importer.Type,
                           importer.Name, importer.Version, settings, parentSource);
             UpdateMetadataImportOutput(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot),
-                                       validated.PrimaryType.value_or(importer.Type), validated.SubAssets);
+                                       validated.PrimaryType.value_or(importer.Type), validated.SubAssets,
+                                       validated.AssetDependencies);
         }
         catch (...)
         {
@@ -264,7 +265,8 @@ namespace Keire
         {
             m_Impl->SourceFiles->WriteFileAtomically(existing->RelativePath, sourceBytes);
             UpdateMetadataImportOutput(*m_Impl->SourceFiles, metadata.lexically_relative(m_Impl->SourceRoot),
-                                       validated.PrimaryType.value_or(existing->Type), validated.SubAssets);
+                                       validated.PrimaryType.value_or(existing->Type), validated.SubAssets,
+                                       validated.AssetDependencies);
             auto replacement = ReadMetadata(*m_Impl->SourceFiles, existing->RelativePath,
                                             m_Impl->Specification.MaximumSourceBytes, true, &importer->second);
             if (replacement.Id != id)

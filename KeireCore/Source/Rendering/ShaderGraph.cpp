@@ -637,7 +637,7 @@ namespace Keire
                 throw std::invalid_argument("Shader Graph include roots must be confined relative paths.");
         for (const auto& node : definition.Nodes)
         {
-            if (!node.Id || !identities.insert(node.Id).second || node.Kind > ShaderGraphNodeKind::SceneColor ||
+            if (!node.Id || !identities.insert(node.Id).second || node.Kind > ShaderGraphNodeKind::SceneTexelSize ||
                 node.ValueType > ShaderGraphValueType::Bsdf || node.Name.size() > MaximumGraphText ||
                 node.TextureSemantic > ShaderTextureSemantic::Specular || node.Pins.empty() ||
                 node.Pins.size() > MaximumGraphPinsPerNode || !Math::IsFinite(node.EditorPosition) ||

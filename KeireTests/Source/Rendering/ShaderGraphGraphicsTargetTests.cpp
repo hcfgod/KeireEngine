@@ -37,8 +37,14 @@ TEST_CASE("Shader Graph graphics targets retain deliberate raster state")
         CHECK(state.at("blend").get<bool>() == expected.Blend);
         if (expected.Target != Keire::ShaderGraphTarget::Material)
         {
-            REQUIRE(manifest.at("passes").size() == 1U);
+            REQUIRE(manifest.at("passes").size() == (expected.Target == Keire::ShaderGraphTarget::Vfx ? 4U : 1U));
             CHECK(manifest.at("passes")[0].at("role") == "primary");
+            if (expected.Target == Keire::ShaderGraphTarget::Vfx)
+            {
+                CHECK(manifest.at("passes")[1].at("role") == "vfxBillboard");
+                CHECK(manifest.at("passes")[2].at("role") == "vfxRibbon");
+                CHECK(manifest.at("passes")[3].at("role") == "vfxCpu");
+            }
         }
     }
 }

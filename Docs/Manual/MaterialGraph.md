@@ -48,12 +48,13 @@ a bounded runtime override without mutating the shared asset:
 MeshRenderer? renderer = Entity.GetComponent<MeshRenderer>();
 if (renderer is not null)
 {
-    renderer.PropertyBlock.SetColor("Tint", new Color(1.0f, 0.25f, 0.1f, 1.0f));
-    renderer.PropertyBlock.SetFloat("Damage", 0.5f);
+    renderer.PropertyBlock.SetColor("BaseColor", new Color(1.0f, 0.25f, 0.1f, 1.0f));
+    renderer.PropertyBlock.SetFloat("Roughness", 0.5f);
 }
 ```
 
-Names must match reflected compatible properties. Reset one value with `Reset(name)` or all per-renderer overrides with
+These names match the shared Lit shader. For a custom shader, names must match its reflected compatible properties.
+Reset one value with `Reset(name)` or all per-renderer overrides with
 `Clear()`. `GetMaterialInstance(slot)` provides slot-specific dynamic overrides.
 
 ## Reusable Surface Logic

@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "clean", "coverage", "stage-editor", "stage-hub", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
+    [ValidateSet("menu", "bootstrap", "generate", "build", "test", "run", "run-staged-editor", "run-staged-hub", "clean", "coverage", "stage-editor", "stage-hub", "package", "package-editor", "package-hub", "package-installer", "package-hub-installer", "doctor", "rename", "vendor-update", "help")]
     [string]$Command = "menu",
     [string]$Generator = "vs2022",
     [ValidateSet("Debug", "Release", "Profile", "Dist", "DebugASan", "DebugUBSan", "DebugTSan", "Coverage")]
@@ -88,11 +88,15 @@ function Invoke-IsolatedWindowsPowerShell {
 function Invoke-ProjectCommand {
     param([string]$SelectedCommand)
     $workspaceLock = $null
-    if ($SelectedCommand -notin @("help", "stage-editor", "stage-hub")) {
+    if ($SelectedCommand -notin @("help", "stage-editor", "stage-hub", "run-staged-editor", "run-staged-hub")) {
         $workspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot (Get-RepositoryRoot) -CommandName $SelectedCommand
     }
     try {
         switch ($SelectedCommand) {
+        { $_ -in @("run-staged-editor", "run-staged-hub") } {
+            & (Join-Path $WindowsScripts "run-staged.ps1") -Editor:($SelectedCommand -eq "run-staged-editor") `
+                -Architecture $Architecture -ProjectPath $ProjectPath
+        }
         "bootstrap" {
             Invoke-CheckedCommand {
                 & (Join-Path $WindowsScripts "bootstrap.ps1") -Generators @($Generator) -Architecture $Architecture `
@@ -230,6 +234,7 @@ function Show-Help {
 Usage: Scripts\project.ps1 <command> [options]
 
 Commands: bootstrap, generate, build, test, run, clean, coverage, stage-editor, stage-hub,
+          run-staged-editor, run-staged-hub,
           package, package-editor, package-hub, package-installer, package-hub-installer,
           doctor, rename, vendor-update, help
 
@@ -246,6 +251,7 @@ Common options:
   -CleanScope <full|build|generated> (clean only; full removes the complete Build directory)
   stage-editor incrementally updates a runnable Dist editor without release tests or archive validation
   stage-hub incrementally updates a runnable Dist Hub without creating or extracting an archive
+  run-staged-editor and run-staged-hub launch existing Dist stages without building (-ProjectPath for editor)
   development staging defaults to Ninja unless -Generator is supplied explicitly
   package-editor writes a ready-to-run Dist editor under Build\Distributions and an archive under Artifacts
   package-hub writes a standalone Dist Hub under Build\Distributions and an archive under Artifacts
@@ -294,6 +300,8 @@ function Show-Menu {
         Write-Host "16. Vendor update"
         Write-Host "17. Rename template"
         Write-Host "18. Exit"
+        Write-Host "19. Launch staged Editor (no build)"
+        Write-Host "20. Launch staged Hub (no build)"
         Write-Host ""
         $choice = Read-Host "Choose an option"
         try {
@@ -306,6 +314,8 @@ function Show-Menu {
                 "6" { Read-BuildSettings $false; Invoke-ProjectCommand coverage }
                 "7" { $script:Generator = "ninja"; Read-BuildSettings $false; Invoke-ProjectCommand stage-editor }
                 "8" { $script:Generator = "ninja"; Read-BuildSettings $false; Invoke-ProjectCommand stage-hub }
+                "19" { Invoke-ProjectCommand run-staged-editor }
+                "20" { Invoke-ProjectCommand run-staged-hub }
                 "9" { Read-BuildSettings $false; $script:Configuration=Read-Setting "Package configuration (Release, Dist)" "Release"; Invoke-ProjectCommand package }
                 "10" { Read-BuildSettings $false; Invoke-ProjectCommand package-editor }
                 "11" { Read-BuildSettings $false; Invoke-ProjectCommand package-hub }

@@ -37,6 +37,22 @@ not make Compute creation available through this editor menu.
 
 ## Preview, Compile, And Save
 
+### Where Each Target Executes
+
+| Target | How to use its material | What the authoring preview cannot establish |
+| --- | --- | --- |
+| Surface | Assign to a Mesh Renderer material slot. | Final scene lights, shadows, and player rendering. |
+| UI | Assign the UI material on the UI Document. | The retained document's complete layout and draw order. |
+| Fullscreen Effect | Assign to one of the Camera's three Fullscreen Effects slots. | Scene Color sampling; verify in Scene/Game or camera preview. |
+| VFX | Assign to the Sprite/Ribbon output's Material field, or the mesh output. CPU and GPU particles execute the graph. | Particle simulation; Volumetric output still uses built-in density shading. |
+| Custom Graphics | Use the existing mesh material consumer. | Arbitrary custom-pass scheduling is not exposed. |
+| Compute | Creation is disabled in this menu. | Separate compiler work does not enable an editor workflow. |
+
+Select the saved shader and choose **Material from Shader** to create the assignable asset. A shader asset and its
+material are different assets: assigning the graph itself to a material slot is not the supported workflow.
+See [worked camera-effect steps](ShaderGraphExamples.md#example-4-camera-tint-effect) and
+[particle material steps](VfxGraph.md#use-an-authored-particle-material).
+
 Graph edits update the live preview through a validated candidate. Invalid topology reports diagnostics and retains the
 last valid result. Shader and Material Graph documents autosave after 500 ms of inactivity; **Save** immediately flushes
 a still-dirty document. Source changes trigger targeted compilation and hot reload.

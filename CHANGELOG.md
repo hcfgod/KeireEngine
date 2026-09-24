@@ -5,6 +5,16 @@ versions.
 
 ## Unreleased
 
+- Fullscreen Shader Graph creation includes editable blur, chromatic aberration, animated distortion, and vignette presets, with resolution-aware Scene Texel Size sampling offsets.
+
+- Windows `project.bat` can launch staged Editor and Hub builds directly without rebuilding; missing stages report the command needed to create them.
+- Updated shader target, camera-effect, particle-material, and staged-build guides with editor recipes and a compile-checked managed camera example; documentation checks now track shader generator/importer versions.
+
+- VFX Shader Graph materials now execute on CPU and GPU billboards and ribbons, including live shader/material
+  reload, exposed parameters, textures, and the shared lighting bindings.
+- Asset reimports replace dependency metadata instead of accumulating stale references, so changed scene/UI
+  assignments and removed assets no longer poison player-build dependency closure.
+
 - Windows build regeneration preserves compatible compiler outputs when only the source inventory changes, rather
   than deleting running editor dependencies and all configuration caches.
 - Missing asset workers and request-staging failures now report failed operations without closing the editor;

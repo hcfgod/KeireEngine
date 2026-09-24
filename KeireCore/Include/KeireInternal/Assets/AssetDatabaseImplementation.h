@@ -2,7 +2,6 @@
 
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/RenderingAssets.h"
-
 #include "Keire/Log.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
@@ -28,6 +27,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -345,18 +345,25 @@ namespace Keire
 
         [[maybe_unused]] void UpdateMetadataImportOutput(const Detail::AnchoredFileSystem& files,
                                                          const std::filesystem::path& relative, const AssetTypeId type,
-                                                         const std::span<const AssetGeneratedSubAsset> generated)
+                                                         const std::span<const AssetGeneratedSubAsset> generated,
+                                                         const std::span<const AssetId> dependencies)
         {
             auto metadata = ReadJsonFile(files, relative, 1024ULL * 1024U);
             Json subAssets = Json::array();
             for (const auto& subAsset : generated)
                 subAssets.push_back(subAsset.Id.ToString());
+            Json encodedDependencies = Json::array();
+            const std::set<AssetId> sortedDependencies(dependencies.begin(), dependencies.end());
+            for (const auto dependency : sortedDependencies)
+                encodedDependencies.push_back(dependency.ToString());
             const auto encodedType = type.ToString();
             if (!metadata.contains("type") || metadata["type"] != encodedType || !metadata.contains("subAssets") ||
-                metadata["subAssets"] != subAssets)
+                metadata["subAssets"] != subAssets || !metadata.contains("dependencies") ||
+                metadata["dependencies"] != encodedDependencies)
             {
                 metadata["type"] = encodedType;
                 metadata["subAssets"] = std::move(subAssets);
+                metadata["dependencies"] = std::move(encodedDependencies);
                 WriteJsonAtomically(files, relative, metadata);
             }
         }
