@@ -390,6 +390,18 @@ namespace KeireEditor
             const auto material = Keire::DynamicRefCast<const Keire::MaterialAsset>(request.PreviewAsset);
             if (!material)
                 return MakeIcon(width, height, {48, 31, 48}, {226, 78, 211}, 'M', true);
+            if (request.PreviewShader && request.PreviewShader->Definition().ProgramTarget != "Material" &&
+                !request.PreviewShader->Definition().ProgramTarget.empty())
+            {
+                const auto target = request.PreviewShader->Definition().ProgramTarget;
+                auto result = MakeIcon(width, height, {34, 35, 57}, {105, 151, 255}, 'S', false);
+                ApplyBadge(result, width, height,
+                           target == "Fullscreen" ? "FS"
+                           : target == "UI"       ? "UI"
+                           : target == "VFX"      ? "FX"
+                                                  : "2D");
+                return result;
+            }
             const auto& definition = material->Definition();
             const auto tint = RepresentativeMaterialColor(definition, request.PreviewShader.Get());
             const auto baseTexture = RepresentativeMaterialTexture(definition, request.PreviewShader.Get());
@@ -436,7 +448,9 @@ namespace KeireEditor
                                                                     const std::string_view badge)
         {
             auto result = MakeMaterialPreview(request, width, height);
-            ApplyBadge(result, width, height, badge);
+            if (!request.PreviewShader || request.PreviewShader->Definition().ProgramTarget == "Material" ||
+                request.PreviewShader->Definition().ProgramTarget.empty())
+                ApplyBadge(result, width, height, badge);
             return result;
         }
 
@@ -1268,13 +1282,13 @@ namespace KeireEditor
                                        Keire::Ref<Keire::JobSystem> jobs)
         : m_Impl(std::make_unique<Impl>(std::move(cacheDirectory), queueCapacity, std::move(jobs)))
     {
-        RegisterProvider(".keirematerial", 7, [](const ThumbnailRequest& request, const auto width, const auto height)
+        RegisterProvider(".keirematerial", 8, [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MAT"); });
-        RegisterProvider(".keiremateriallegacy", 1, MakeMaterialPreview);
-        RegisterProvider(".keireshadergraph", 2,
+        RegisterProvider(".keiremateriallegacy", 2, MakeMaterialPreview);
+        RegisterProvider(".keireshadergraph", 3,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "SG"); });
-        RegisterProvider(".keirematerialinstance", 2,
+        RegisterProvider(".keirematerialinstance", 3,
                          [](const ThumbnailRequest& request, const auto width, const auto height)
                          { return MakeShaderGraphPreview(request, width, height, "MI"); });
         RegisterProvider(".keirevfx", 1, MakeVfxPreview);

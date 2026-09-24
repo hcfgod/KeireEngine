@@ -2,9 +2,12 @@
 
 #include "Keire/Scripting/ScriptSystem.h"
 
+#include <any>
+
 namespace Keire
 {
     class ScenePresentationRuntime;
+    class SceneRuntimeSession;
 } // namespace Keire
 
 namespace Keire::Detail
@@ -46,4 +49,11 @@ namespace Keire::Detail
     [[nodiscard]] bool FocusManagedUiDocumentElement(const Ref<ScenePresentationRuntime>& presentation,
                                                      AssetId document, std::uint64_t documentGeneration,
                                                      std::uint64_t element) noexcept;
+    [[nodiscard]] bool SetManagedUiDocumentBindingValue(const Ref<SceneRuntimeSession>& session, AssetId document,
+                                                        std::string_view path, std::any value) noexcept;
+    [[nodiscard]] std::optional<std::any> ReadManagedUiDocumentBindingValue(const Ref<SceneRuntimeSession>& session,
+                                                                            AssetId document,
+                                                                            std::string_view path) noexcept;
+    [[nodiscard]] bool ClearManagedUiDocumentBindingSource(const Ref<SceneRuntimeSession>& session,
+                                                           AssetId document) noexcept;
 } // namespace Keire::Detail

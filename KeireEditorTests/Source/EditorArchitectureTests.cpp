@@ -2359,6 +2359,16 @@ TEST_CASE("content previews use immutable loaded assets without blocking shutdow
     CHECK(std::to_integer<unsigned>(generatedMaterialGraphResult.Pixels[center + 1]) >
           std::to_integer<unsigned>(generatedMaterialGraphResult.Pixels[center + 2]));
 
+    REQUIRE(thumbnails.Request({.Asset = Keire::AssetId::Generate(),
+                                .PreviewAsset = material,
+                                .PreviewShader = Keire::CreateRef<Keire::ShaderAsset>(
+                                    Keire::ShaderAssetDefinition{.ProgramTarget = "Fullscreen"}),
+                                .RelativePath = "Fullscreen.keirematerial",
+                                .Digest = "fullscreen-material-placeholder"}));
+    const auto fullscreenResult = await();
+    REQUIRE(fullscreenResult.Pixels.size() == 96U * 96U * 4U);
+    CHECK(std::to_integer<unsigned>(fullscreenResult.Pixels[center + 2]) == 57U);
+
     const auto vfxId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000076");
     REQUIRE(thumbnails.Request({.Asset = vfxId,
                                 .Type = Keire::VfxEffectAsset::StaticType(),

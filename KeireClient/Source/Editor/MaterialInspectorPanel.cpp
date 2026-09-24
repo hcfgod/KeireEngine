@@ -144,43 +144,45 @@ namespace KeireEditor
                                       MaterialSelectionDocument* selection) const
     {
         bool changed = false;
-        auto surface = document.Surface();
-        std::int64_t alphaMode = static_cast<std::int64_t>(surface.AlphaMode);
-        constexpr std::array<std::string_view, 7> alphaModes{
-            "Opaque", "Mask", "Blend", "Additive", "Modulate", "Alpha Composite", "Alpha Holdout"};
-        const auto surfaceLabel = [&](std::string_view label, const auto member)
+        const auto surfaceShader = [](const MaterialDocument& candidate)
+        { return !candidate.Shader() || candidate.ShaderTarget() == "Material"; };
+        if (surfaceShader(document) && (!selection || std::ranges::all_of(selection->Documents(), surfaceShader)))
         {
-            if (!selection)
-                return std::string(label);
-            const bool mixed =
-                selection && std::ranges::any_of(selection->Documents(), [&](const auto& selected)
-                                                 { return selected.Surface().*member != surface.*member; });
-            return std::string(label) + (mixed ? " (Mixed)###" : "###") + std::string(label);
-        };
-        const bool modeChanged = editor.EditChoice(
-            surfaceLabel("Surface Mode", &Keire::MaterialSurfaceState::AlphaMode), alphaMode, alphaModes);
-        bool cutoffChanged = false;
-        if (modeChanged)
-            surface.AlphaMode = static_cast<Keire::MaterialAlphaMode>(alphaMode);
-        if (surface.AlphaMode == Keire::MaterialAlphaMode::Mask)
-        {
-            double cutoff = surface.AlphaCutoff;
-            if (editor.EditScalar(surfaceLabel("Alpha Cutoff", &Keire::MaterialSurfaceState::AlphaCutoff), cutoff, 0.01,
-                                  0.0, 1.0))
+            auto surface = document.Surface();
+            std::int64_t alphaMode = static_cast<std::int64_t>(surface.AlphaMode);
+            constexpr std::array<std::string_view, 7> alphaModes{
+                "Opaque", "Mask", "Blend", "Additive", "Modulate", "Alpha Composite", "Alpha Holdout"};
+            const auto surfaceLabel = [&](std::string_view label, const auto member)
             {
-                surface.AlphaCutoff = static_cast<float>(cutoff);
-                cutoffChanged = true;
+                if (!selection)
+                    return std::string(label);
+                const bool mixed = std::ranges::any_of(selection->Documents(), [&](const auto& selected)
+                                                       { return selected.Surface().*member != surface.*member; });
+                return std::string(label) + (mixed ? " (Mixed)###" : "###") + std::string(label);
+            };
+            const bool modeChanged = editor.EditChoice(
+                surfaceLabel("Surface Mode", &Keire::MaterialSurfaceState::AlphaMode), alphaMode, alphaModes);
+            bool cutoffChanged = false;
+            if (modeChanged)
+                surface.AlphaMode = static_cast<Keire::MaterialAlphaMode>(alphaMode);
+            if (surface.AlphaMode == Keire::MaterialAlphaMode::Mask)
+            {
+                double cutoff = surface.AlphaCutoff;
+                if (editor.EditScalar(surfaceLabel("Alpha Cutoff", &Keire::MaterialSurfaceState::AlphaCutoff), cutoff,
+                                      0.01, 0.0, 1.0))
+                {
+                    surface.AlphaCutoff = static_cast<float>(cutoff);
+                    cutoffChanged = true;
+                }
             }
-        }
-        const bool sidedChanged = editor.EditBoolean(
-            surfaceLabel("Double Sided", &Keire::MaterialSurfaceState::DoubleSided), surface.DoubleSided);
-        if (modeChanged || cutoffChanged || sidedChanged)
-        {
-            changed = selection
-                          ? selection->SetSurface(modeChanged ? std::optional{surface.AlphaMode} : std::nullopt,
-                                                  cutoffChanged ? std::optional{surface.AlphaCutoff} : std::nullopt,
-                                                  sidedChanged ? std::optional{surface.DoubleSided} : std::nullopt)
-                          : document.SetSurface(surface);
+            const bool sidedChanged = editor.EditBoolean(
+                surfaceLabel("Double Sided", &Keire::MaterialSurfaceState::DoubleSided), surface.DoubleSided);
+            if (modeChanged || cutoffChanged || sidedChanged)
+                changed = selection
+                              ? selection->SetSurface(modeChanged ? std::optional{surface.AlphaMode} : std::nullopt,
+                                                      cutoffChanged ? std::optional{surface.AlphaCutoff} : std::nullopt,
+                                                      sidedChanged ? std::optional{surface.DoubleSided} : std::nullopt)
+                              : document.SetSurface(surface);
         }
 
         std::vector<const Keire::ShaderPropertyDefinition*> properties;

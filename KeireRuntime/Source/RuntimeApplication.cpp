@@ -21,6 +21,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <any>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -943,6 +944,24 @@ namespace
         {
             return Keire::Detail::FocusManagedUiDocumentElement(PresentationFor(document), document, documentGeneration,
                                                                 element);
+        }
+
+        [[nodiscard]] bool SetManagedUiDocumentBindingValue(const Keire::AssetId document, const std::string_view path,
+                                                            std::any value) noexcept override
+        {
+            return Keire::Detail::SetManagedUiDocumentBindingValue(RuntimeSessionFor(document), document, path,
+                                                                   std::move(value));
+        }
+
+        [[nodiscard]] std::optional<std::any>
+        ReadManagedUiDocumentBindingValue(const Keire::AssetId document, const std::string_view path) noexcept override
+        {
+            return Keire::Detail::ReadManagedUiDocumentBindingValue(RuntimeSessionFor(document), document, path);
+        }
+
+        [[nodiscard]] bool ClearManagedUiDocumentBindingSource(const Keire::AssetId document) noexcept override
+        {
+            return Keire::Detail::ClearManagedUiDocumentBindingSource(RuntimeSessionFor(document), document);
         }
 
         [[nodiscard]] Keire::Ref<Keire::Scene>

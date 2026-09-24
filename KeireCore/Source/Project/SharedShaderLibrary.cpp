@@ -280,9 +280,11 @@ namespace Keire
                                        {"importerVersion", CreateShaderGraphAssetImporter().Version},
                                        {"dependencies", Json::array()},
                                        {"subAssets", Json::array()}};
-            files.push_back({std::filesystem::path("Assets") / path, std::nullopt, source});
             files.push_back({std::filesystem::path("Assets") / (path.string() + ".keiremeta"), std::nullopt,
                              Bytes(metadata.dump(2) + '\n')});
+            // Publish metadata before the source so an active asset scan never sees a new source without its
+            // pinned identity and creates an unrelated generated sidecar for it.
+            files.push_back({std::filesystem::path("Assets") / path, std::nullopt, source});
             entries.push_back(
                 {{"name", name}, {"id", id.ToString()}, {"path", path.generic_string()}, {"sha256", Digest(source)}});
         }

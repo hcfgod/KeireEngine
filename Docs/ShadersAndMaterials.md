@@ -39,7 +39,10 @@ the old request from applying. Missing/broken variants remain pending with repai
 keyword reflection or equivalent authoring controls to handwritten shader assets.
 The surface material shader picker hides generated code duplicates when their owning Shader Graph exists; it keeps
 orphaned legacy shader sources selectable. Existing references to generated code are still loadable.
-The material references the selected surface Shader Graph or code shader and inherits defaults until overridden.
+The material references the selected Shader Graph or code shader and inherits defaults until overridden. The
+Inspector shows mesh surface controls only for surface shaders. UI, fullscreen, VFX, and custom graphics materials
+show a target badge in their asset thumbnail instead of a misleading lit sphere; view a fullscreen effect through
+a camera effect slot to see its actual output.
 Double-clicking these sources reopens the Inspector. Surface controls, compatible-value preservation when switching
 shaders, reset, save, and undo use the property-material document. Preview and undo publish to the stable generated
 runtime material ID. Value imports resolve shader references without compiling shader code. Nested material instances

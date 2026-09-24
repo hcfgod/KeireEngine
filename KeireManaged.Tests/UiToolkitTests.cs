@@ -87,6 +87,15 @@ internal static class UiToolkitTests
         Check(Keire.UI.UxmlElementRegistry.Create("StatusBadge") is StatusBadge &&
                   Keire.UI.UxmlElementRegistry.Snapshot().Any(value => value.ElementType == typeof(StatusBadge)),
               "Registered custom controls must be constructible without ambient assembly scanning.");
+
+        var nativeDocument = new Keire.UI.UIDocument(new Keire.Entity(1, new Keire.EntityId(2, 3)));
+        CheckThrows<ArgumentException>(() => nativeDocument.SetBindingValue(" ", 5.0f),
+            "Native document bindings must reject empty paths before crossing the native boundary.");
+        CheckThrows<ArgumentOutOfRangeException>(() => nativeDocument.SetBindingValue("Player.Health", float.NaN),
+            "Native document bindings must reject non-finite numbers.");
+        Check(!nativeDocument.TryGetBindingValue("Player.Health", out float _) &&
+                  !nativeDocument.ClearBindingSource(),
+              "Native document binding handles must become inert when no presentation is active.");
     }
 
     private static void Check(bool condition, string message)

@@ -1,6 +1,10 @@
 #include "KeireInternal/Scripting/ManagedRuntimeUiServices.h"
 
+#include "Keire/ECS/Components/UiDocumentComponent.h"
+#include "Keire/Scenes/Scene.h"
 #include "Keire/Scenes/ScenePresentationRuntime.h"
+
+#include <utility>
 
 namespace Keire::Detail
 {
@@ -18,6 +22,24 @@ namespace Keire::Detail
         [[nodiscard]] ScenePresentationUiDocumentFlag Convert(const ManagedUiDocumentFlag property) noexcept
         {
             return static_cast<ScenePresentationUiDocumentFlag>(property);
+        }
+
+        [[nodiscard]] Ref<ScenePresentationRuntime> BindingPresentation(const Ref<SceneRuntimeSession>& session,
+                                                                        const AssetId document) noexcept
+        {
+            try
+            {
+                if (!session || !document)
+                    return {};
+                const auto scene = session->RuntimeScene();
+                const auto entity = scene ? scene->FindEntity(EntityId(document)) : Entity{};
+                return entity && entity.GetComponent<UiDocumentComponent>() ? session->Presentation()
+                                                                            : Ref<ScenePresentationRuntime>{};
+            }
+            catch (...)
+            {
+                return {};
+            }
         }
     } // namespace
 
@@ -137,5 +159,49 @@ namespace Keire::Detail
                                        const std::uint64_t documentGeneration, const std::uint64_t element) noexcept
     {
         return presentation && presentation->FocusUiDocumentElement(EntityId(document), documentGeneration, element);
+    }
+
+    bool SetManagedUiDocumentBindingValue(const Ref<SceneRuntimeSession>& session, const AssetId document,
+                                          const std::string_view path, std::any value) noexcept
+    {
+        try
+        {
+            const auto presentation = BindingPresentation(session, document);
+            return presentation &&
+                   presentation->SetManagedUiDocumentBindingValue(EntityId(document), path, std::move(value));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    std::optional<std::any> ReadManagedUiDocumentBindingValue(const Ref<SceneRuntimeSession>& session,
+                                                              const AssetId document,
+                                                              const std::string_view path) noexcept
+    {
+        try
+        {
+            const auto presentation = BindingPresentation(session, document);
+            return presentation ? presentation->ReadManagedUiDocumentBindingValue(EntityId(document), path)
+                                : std::nullopt;
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    bool ClearManagedUiDocumentBindingSource(const Ref<SceneRuntimeSession>& session, const AssetId document) noexcept
+    {
+        try
+        {
+            const auto presentation = BindingPresentation(session, document);
+            return presentation && presentation->ClearManagedUiDocumentBindingSource(EntityId(document));
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 } // namespace Keire::Detail

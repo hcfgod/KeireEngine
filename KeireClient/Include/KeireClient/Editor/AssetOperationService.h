@@ -94,6 +94,7 @@ namespace KeireEditor
         std::filesystem::path ManagedSourceRoot;
         Keire::AssetId ParentSource;
         std::string Reason;
+        bool DefaultLitWarmup = false;
 
         [[nodiscard]] bool CanAdoptSceneCopy(Keire::AssetId currentAsset,
                                              const Keire::SceneDefinition& currentDefinition) const;
@@ -157,6 +158,8 @@ namespace KeireEditor
         [[nodiscard]] std::optional<Keire::AssetOperationProgress> Progress() const noexcept;
         [[nodiscard]] std::string ActivityLabel() const;
         [[nodiscard]] bool Busy() const noexcept;
+        [[nodiscard]] bool PendingDefaultLitWarmup() const noexcept;
+        [[nodiscard]] bool RunningDefaultLitWarmup() const noexcept;
         [[nodiscard]] bool Publishing() const noexcept;
         [[nodiscard]] std::size_t QueuedCount() const noexcept { return m_Queue.size(); }
 

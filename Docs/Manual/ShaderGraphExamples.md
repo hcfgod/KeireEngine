@@ -87,6 +87,24 @@ Scene Color is a fragment-only input for Fullscreen graphs. Scene Depth sampling
 does nothing, check the material's target, pending import diagnostics, and which camera is rendering; an unavailable
 or incompatible effect preserves the existing image. An invalid reload keeps the last executable shader.
 
+## Start From A Fullscreen Preset
+
+The Shader Graph creation menu includes four connected fullscreen examples. In Project, choose **Create > Shader Graph >
+Fullscreen Presets**, then select **Blur**, **Chromatic Aberration**, **Distortion**, or **Vignette**. Each preset samples
+Scene Color and includes exposed controls with these starting values:
+
+| Preset | Controls | Default values |
+| --- | --- | --- |
+| Blur | `RadiusPixels` | 2 |
+| Chromatic Aberration | `OffsetPixels` | 3 |
+| Distortion | `Speed`, `Frequency`, `AmplitudePixels` | 1, 24, 6 |
+| Vignette | `Radius`, `Softness`, `Strength` | 0.75, 2, 0.6 |
+
+Save the graph, select it in Project, and choose **Material from Shader**. Assign the resulting material to a Camera
+component's **Fullscreen Effects** slot: **Before Tonemapping**, **After Tonemapping**, or **After UI**. The stages run
+in that order, and each slot accepts one material. Tune the controls in the material, then inspect Game view or the
+camera preview; the graph thumbnail has no camera framebuffer and shows only a CPU approximation.
+
 ## Turn A Working Graph Into A Contract
 
 - Rename exposed properties without changing their stable IDs.

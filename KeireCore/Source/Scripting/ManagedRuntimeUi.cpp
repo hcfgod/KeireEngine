@@ -11,6 +11,7 @@
 #pragma warning(pop)
 #endif
 
+#include <any>
 #include <cstring>
 #include <limits>
 
@@ -192,6 +193,120 @@ namespace Keire::Detail
                        ? 1
                        : 0;
         }
+
+        [[nodiscard]] std::uint8_t SetDocumentBindingText(const std::uint64_t high, const std::uint64_t low,
+                                                          const Coral::String path, const Coral::String value) noexcept
+        {
+            try
+            {
+                return ActiveServices &&
+                               ActiveServices->SetManagedUiDocumentBindingValue(
+                                   AssetId(high, low), static_cast<std::string>(path), static_cast<std::string>(value))
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t SetDocumentBindingNumber(const std::uint64_t high, const std::uint64_t low,
+                                                            const Coral::String path, const float value) noexcept
+        {
+            try
+            {
+                return ActiveServices && ActiveServices->SetManagedUiDocumentBindingValue(
+                                             AssetId(high, low), static_cast<std::string>(path), value)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t SetDocumentBindingBoolean(const std::uint64_t high, const std::uint64_t low,
+                                                             const Coral::String path,
+                                                             const std::uint8_t value) noexcept
+        {
+            try
+            {
+                return ActiveServices && ActiveServices->SetManagedUiDocumentBindingValue(
+                                             AssetId(high, low), static_cast<std::string>(path), value != 0)
+                           ? 1
+                           : 0;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] int GetDocumentBindingText(const std::uint64_t high, const std::uint64_t low,
+                                                 const Coral::String path, std::uint8_t* destination,
+                                                 const int capacity) noexcept
+        {
+            try
+            {
+                const auto value = ActiveServices ? ActiveServices->ReadManagedUiDocumentBindingValue(
+                                                        AssetId(high, low), static_cast<std::string>(path))
+                                                  : std::nullopt;
+                const auto* textValue = value ? std::any_cast<std::string>(&*value) : nullptr;
+                return textValue ? CopyText(*textValue, destination, capacity) : -1;
+            }
+            catch (...)
+            {
+                return -1;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t GetDocumentBindingNumber(const std::uint64_t high, const std::uint64_t low,
+                                                            const Coral::String path, float* value) noexcept
+        {
+            try
+            {
+                const auto result = ActiveServices && value ? ActiveServices->ReadManagedUiDocumentBindingValue(
+                                                                  AssetId(high, low), static_cast<std::string>(path))
+                                                            : std::nullopt;
+                const auto* number = result ? std::any_cast<float>(&*result) : nullptr;
+                if (!number)
+                    return 0;
+                *value = *number;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t GetDocumentBindingBoolean(const std::uint64_t high, const std::uint64_t low,
+                                                             const Coral::String path, std::uint8_t* value) noexcept
+        {
+            try
+            {
+                const auto result = ActiveServices && value ? ActiveServices->ReadManagedUiDocumentBindingValue(
+                                                                  AssetId(high, low), static_cast<std::string>(path))
+                                                            : std::nullopt;
+                const auto* boolean = result ? std::any_cast<bool>(&*result) : nullptr;
+                if (!boolean)
+                    return 0;
+                *value = *boolean ? 1 : 0;
+                return 1;
+            }
+            catch (...)
+            {
+                return 0;
+            }
+        }
+
+        [[nodiscard]] std::uint8_t ClearDocumentBindingSource(const std::uint64_t high,
+                                                              const std::uint64_t low) noexcept
+        {
+            return ActiveServices && ActiveServices->ClearManagedUiDocumentBindingSource(AssetId(high, low)) ? 1 : 0;
+        }
     } // namespace
 
     ManagedRuntimeUiScope::ManagedRuntimeUiScope(IScriptRuntimeServices* services) noexcept : m_Previous(ActiveServices)
@@ -227,5 +342,19 @@ namespace Keire::Detail
                                  reinterpret_cast<void*>(&ConsumeDocumentElementEvent));
         assembly.AddInternalCall("Keire.NativeRuntimeUi", "FocusDocumentElementIcall",
                                  reinterpret_cast<void*>(&FocusDocumentElement));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetDocumentBindingTextIcall",
+                                 reinterpret_cast<void*>(&SetDocumentBindingText));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetDocumentBindingNumberIcall",
+                                 reinterpret_cast<void*>(&SetDocumentBindingNumber));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "SetDocumentBindingBooleanIcall",
+                                 reinterpret_cast<void*>(&SetDocumentBindingBoolean));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetDocumentBindingTextIcall",
+                                 reinterpret_cast<void*>(&GetDocumentBindingText));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetDocumentBindingNumberIcall",
+                                 reinterpret_cast<void*>(&GetDocumentBindingNumber));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "GetDocumentBindingBooleanIcall",
+                                 reinterpret_cast<void*>(&GetDocumentBindingBoolean));
+        assembly.AddInternalCall("Keire.NativeRuntimeUi", "ClearDocumentBindingSourceIcall",
+                                 reinterpret_cast<void*>(&ClearDocumentBindingSource));
     }
 } // namespace Keire::Detail

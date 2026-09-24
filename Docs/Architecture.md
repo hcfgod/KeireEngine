@@ -1,5 +1,10 @@
 # Architecture
 
+Hub editor management owns a bounded, periodic asynchronous process-activity probe. The worker captures immutable
+registrations, publishes only to the matching registration snapshot, and is joined during workflow shutdown.
+Activity changes update installation cards without repeating package inventory validation; failed or indeterminate
+process probes retain the running guard until a later successful probe.
+
 Development asset publication may replace a reloading asset. Each queued load retains its starting revision;
 completion pumping discards results superseded by a newer live publication, including stale failures. Worker
 loading-state transitions and owner-thread publication share the asset-system lock so an old job cannot leave a
@@ -1112,6 +1117,11 @@ validates owner thread and active generation. Its RAII scopes balance backend be
 exception unwinding. Typed color and scalar/vector style scopes map semantic public roles to private backend slots and
 restore them through the same generation-safe stack, so product UI code never owns a Dear ImGui style stack. Scene/Game
 declarations and UI draw data are recorded into one coordinated RenderSystem frame.
+The UI drawing facade accepts per-vertex colored triangles and UI-image textured triangles. UI Builder presents
+retained quad and fallback-font glyph geometry through these value-only APIs, sharing runtime shape, gradient, border,
+shadow, clipping, and transform calculations without exposing Dear ImGui to KeireClient. The Builder owns its UI-image
+copy of the immutable runtime fallback atlas and releases it with the panel's transient UI state.
+Textured triangles reject images from a different or closed UI runtime before accessing their texture storage.
 
 `SceneTransitionCoordinator` is the editor-only serialization point for Open, New, Close, and Exit. UI, shortcuts,
 Project actions, internal drops, and post-import external drops enqueue requests; the next update preflights the target
@@ -1359,6 +1369,26 @@ initialize or frame Dear ImGui. Windows assembly patches the copied PE template 
 the low-level console runtime used by tests and SDK consumers. Windows-host assembly also replaces the executable icon
 resource with the selected or generated multi-resolution ICO; the template's linked resource supplies the fallback on
 other assembly hosts. See [Desktop Player Builds](PlayerBuilds.md).
+
+The UI library owns the immutable CPU fallback font atlas and its glyph metrics. Text layout and the GPU compositor
+share those advances, so wrapping and glyph placement agree without making the UI library depend on the rendering
+library. UI Builder draws fallback-font glyphs from that same atlas and geometry; its editor-font path remains a preview
+for runtime custom fonts. Match Game View takes logical viewport dimensions, before DPI
+and dynamic render-resolution scaling.
+
+Scene UI Document managed bindings use a presentation-owned typed path store implementing `UiDocumentBindingSource`.
+The callback-scoped scripting bridge supplies or reads values without retaining managed object handles. Values may be
+supplied before an assigned visual tree's first presentation; the source attaches to the retained instance when available and
+survives successful asset reloads. Document removal and presentation shutdown release the store, while explicit clear
+detaches it. Editor Play sessions and standalone runtime sessions route calls to the owning scene presentation.
+Stopping a scene clears presentation after script shutdown callbacks finish, so a late callback cannot recreate a
+binding store that survives the stopped session.
+
+Retained UI documents copy visual control changes into their runtime elements immediately. Each frame synchronizes
+runtime interaction state before refreshing bindings, preserving direct tree edits and subsequent source updates.
+Document-owned change callbacks disconnect on destruction and
+construction rollback; retaining a visual element does not retain a callback into a destroyed document. Direct scene
+UI setters synchronize only their target element, avoiding a document-wide traversal for each gameplay write.
 
 Player build scene policy is a separate schema-1 value document under `ProjectSettings/BuildScenes.keiresettings`.
 Rows retain stable Scene asset IDs, enablement, and user-authored order; the first enabled row is startup. AssetTool

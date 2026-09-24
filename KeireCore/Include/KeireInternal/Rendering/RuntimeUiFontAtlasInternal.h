@@ -39,7 +39,7 @@ namespace Keire::RenderBackend
     };
 
     [[nodiscard]] const std::shared_ptr<const RuntimeUiGlyphAtlasCpuData>& RuntimeUiFallbackGlyphAtlas();
-    [[nodiscard]] const RuntimeUiGlyph& RuntimeUiFallbackGlyph(std::uint8_t character) noexcept;
+    [[nodiscard]] const RuntimeUiGlyph& RuntimeUiFallbackGlyph(std::uint8_t character);
     [[nodiscard]] std::shared_ptr<const RuntimeUiGlyphAtlasCpuData>
     BuildRuntimeUiGlyphAtlas(std::span<const std::byte> fontBytes, std::uint32_t collectionIndex,
                              std::span<const std::uint32_t> glyphs, std::uint64_t generation);

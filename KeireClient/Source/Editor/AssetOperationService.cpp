@@ -79,6 +79,7 @@ namespace KeireEditor
             if (queued != m_Queue.end())
             {
                 queued->Context.Generation = std::max(queued->Context.Generation, context.Generation);
+                queued->Context.DefaultLitWarmup |= context.DefaultLitWarmup;
                 if (queued->Context.ReloadAsset != context.ReloadAsset)
                     queued->Context.ReloadAsset = {};
                 return;
@@ -123,6 +124,7 @@ namespace KeireEditor
                 const auto merged = std::ranges::unique(queued->Request.ImportAssets);
                 queued->Request.ImportAssets.erase(merged.begin(), merged.end());
                 queued->Context.Generation = std::max(queued->Context.Generation, context.Generation);
+                queued->Context.DefaultLitWarmup |= context.DefaultLitWarmup;
                 if (queued->Context.ReloadAsset != context.ReloadAsset)
                     queued->Context.ReloadAsset = {};
                 return;
@@ -313,7 +315,8 @@ namespace KeireEditor
                           return (operation.Priority == AssetOperationPriority::AutomaticRefresh ||
                                   operation.Priority == AssetOperationPriority::MaterialRefresh) &&
                                  (operation.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll ||
-                                  operation.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets);
+                                  operation.Request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets) &&
+                                 !operation.Context.DefaultLitWarmup;
                       });
         bool preempted = m_Queue.size() != queuedBefore;
         if (m_Running &&
@@ -516,6 +519,17 @@ namespace KeireEditor
     }
 
     bool AssetOperationService::Busy() const noexcept { return m_Running.has_value() || !m_Queue.empty(); }
+
+    bool AssetOperationService::PendingDefaultLitWarmup() const noexcept
+    {
+        return RunningDefaultLitWarmup() || std::ranges::any_of(m_Queue, [](const PendingOperation& operation)
+                                                                { return operation.Context.DefaultLitWarmup; });
+    }
+
+    bool AssetOperationService::RunningDefaultLitWarmup() const noexcept
+    {
+        return m_Running && m_Running->Pending.Context.DefaultLitWarmup;
+    }
 
     bool AssetOperationService::Publishing() const noexcept
     {

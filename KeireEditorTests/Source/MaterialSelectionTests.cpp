@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace
@@ -18,10 +19,12 @@ namespace
         Keire::AssetId Shader = Keire::AssetId::Generate();
         Keire::ShaderPropertyDefinition Property{"Amount", Keire::ShaderPropertyType::Scalar, {0.2F}};
         SelectionFixture() { Property.Id = Keire::AssetId::Generate(); }
-        KeireEditor::MaterialDocument Document(float value, std::string name = "Amount", float maximum = 1.0F) const
+        KeireEditor::MaterialDocument Document(float value, std::string name = "Amount", float maximum = 1.0F,
+                                               std::string target = "Material") const
         {
             Keire::ShaderAssetDefinition shader;
             shader.Source = "Shared.hlsl";
+            shader.ProgramTarget = std::move(target);
             shader.Properties = {Property};
             shader.Properties.front().Name = name;
             shader.Properties.front().Maximum = maximum;
@@ -332,9 +335,10 @@ TEST_CASE("material selection Inspector displays mixed values and edits the firs
             secondTexture.Open(secondTexture.SaveSource(), [&](Keire::AssetId) { return std::optional(bounded); });
             const auto original = firstTexture.SaveSource();
             KeireEditor::MaterialSelectionDocument boundedSelection({firstTexture, secondTexture},
-                [&](const auto, const auto) { ++publications; });
-            CHECK_THROWS_AS((void)boundedSelection.SetTextureTransform(transform, Keire::Vector2{2.0F, 3.0F},
-                                                                       std::nullopt), std::invalid_argument);
+                                                                    [&](const auto, const auto) { ++publications; });
+            CHECK_THROWS_AS(
+                (void)boundedSelection.SetTextureTransform(transform, Keire::Vector2{2.0F, 3.0F}, std::nullopt),
+                std::invalid_argument);
             CHECK(publications == 0);
             CHECK(boundedSelection.Documents().front().SaveSource() == original);
             CHECK_FALSE(boundedSelection.CanUndo());
@@ -348,7 +352,8 @@ TEST_CASE("material selection Inspector displays mixed values and edits the firs
               editor.Labels.end());
         CHECK(std::ranges::find(editor.Labels, "Offset (Mixed)###material-offset-" + texture.Id.ToString()) !=
               editor.Labels.end());
-        CHECK_FALSE(std::ranges::any_of(editor.Labels, [](const auto& label) { return label.starts_with("TextureST"); }));
+        CHECK_FALSE(
+            std::ranges::any_of(editor.Labels, [](const auto& label) { return label.starts_with("TextureST"); }));
         editor.ApplyTiling = true;
         REQUIRE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, textures));
         CHECK(std::get<Keire::Vector4>(textures.Documents()[0].Property(transform.Name)) ==
@@ -367,5 +372,28 @@ TEST_CASE("material selection Inspector displays mixed values and edits the firs
         CHECK(std::get<Keire::Vector4>(single.Property(transform.Name)) == Keire::Vector4{4.0F, 5.0F, 0.1F, 0.2F});
         REQUIRE(single.ResetProperty(transform.Name));
         CHECK(std::get<Keire::Vector4>(single.Property(transform.Name)) == transform.DefaultValue);
+    }
+    SUBCASE("non-surface materials retain properties but hide mesh surface controls")
+    {
+        auto fullscreen = fixture.Document(0.3F, "Amount", 1.0F, "Fullscreen");
+        editor.Labels.clear();
+        CHECK_FALSE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, fullscreen));
+        CHECK(std::ranges::find(editor.Labels, "Surface Mode") == editor.Labels.end());
+        CHECK(std::ranges::find(editor.Labels, "Double Sided") == editor.Labels.end());
+        CHECK(std::ranges::find(editor.Labels, "Amount###material-property-" + fixture.Property.Id.ToString()) !=
+              editor.Labels.end());
+
+        fullscreen.Open(fullscreen.SaveSource(),
+                        [](Keire::AssetId) -> std::optional<Keire::ShaderAssetDefinition> { return std::nullopt; });
+        editor.Labels.clear();
+        CHECK_FALSE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, fullscreen));
+        CHECK(std::ranges::find(editor.Labels, "Surface Mode") == editor.Labels.end());
+
+        KeireEditor::MaterialSelectionDocument mixedTargets(
+            {fixture.Document(0.3F), fixture.Document(0.3F, "Amount", 1.0F, "Fullscreen")});
+        editor.Labels.clear();
+        CHECK_FALSE(KeireEditor::MaterialInspectorPanel{}.Draw(editor, mixedTargets));
+        CHECK(std::ranges::none_of(editor.Labels, [](const auto& label)
+                                   { return label.starts_with("Surface Mode") || label.starts_with("Double Sided"); }));
     }
 }

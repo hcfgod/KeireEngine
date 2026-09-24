@@ -9,6 +9,8 @@
 #include <filesystem>
 #include <future>
 #include <latch>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -143,6 +145,177 @@ TEST_CASE("Editor management refresh runs on a value-only worker and projects it
     REQUIRE(completion);
     CHECK(completion->Operation == HubEditorManagementOperation::Refresh);
     CHECK_FALSE(completion->Failure);
+}
+
+TEST_CASE("Editor activity polling clears stale external running state without refreshing package inventory")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    const auto installation =
+        TestInstallation(temporary.Path() / "Editor", "external-editor", InstallationOwnership::External);
+    REQUIRE(controller.Installations().Upsert(installation));
+    std::atomic_bool running = true;
+    std::atomic_int refreshes = 0;
+    std::atomic_bool pathCorrect = false;
+    HubEditorManagementServices services;
+    services.Refresh =
+        [&](const std::vector<HubEditorManagementWorkItem>& items, const std::string&, const std::string&)
+    {
+        ++refreshes;
+        return HubResult<std::vector<EditorInstallationHealthSnapshot>>::Success(
+            {{.Installation = items.front().Installation,
+              .Health = InstallationHealth::Damaged,
+              .Activity = {.Running = true},
+              .Issues = {{.Code = EditorInstallationIssueCode::RegistrationMismatch}}}});
+    };
+    HubEditorManagementWorkflow workflow(controller,
+                                         {.HostPlatform = "windows",
+                                          .HostArchitecture = "x86_64",
+                                          .ProbeRunning = [](const EditorInstallation&) { return false; },
+                                          .ProbeEntrypointActivity =
+                                              [&](const std::filesystem::path& path)
+                                          {
+                                              pathCorrect = path == installation.Root / installation.EditorEntrypoint;
+                                              return running.load() ? EditorEntrypointActivity::Running
+                                                                    : EditorEntrypointActivity::NotRunning;
+                                          },
+                                          .ActivityProbeInterval = 0ms},
+                                         std::move(services));
+    REQUIRE(workflow.Refresh());
+    REQUIRE(PollUntilTerminal(workflow));
+    running = false;
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (workflow.Snapshot()->front().Activity.Running && std::chrono::steady_clock::now() < deadline)
+    {
+        REQUIRE(workflow.Poll());
+        std::this_thread::sleep_for(1ms);
+    }
+    CHECK_FALSE(workflow.Snapshot()->front().Activity.Running);
+    CHECK(pathCorrect);
+    CHECK(workflow.Snapshot()->front().Health == InstallationHealth::Damaged);
+    CHECK(refreshes == 1);
+    HubProductSnapshot product;
+    workflow.ApplySnapshot(product);
+    REQUIRE(product.Editors.size() == 1);
+    CHECK_FALSE(product.Editors.front().Running);
+    CHECK(product.Editors.front().RegistrationRefreshAvailable);
+}
+
+TEST_CASE("Editor activity probe failure keeps the installation guarded and later recovers")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    const auto installation =
+        TestInstallation(temporary.Path() / "Editor", "external-editor", InstallationOwnership::External);
+    REQUIRE(controller.Installations().Upsert(installation));
+    std::atomic_bool fail = true;
+    HubEditorManagementWorkflow workflow(controller, {.HostPlatform = "windows",
+                                                      .HostArchitecture = "x86_64",
+                                                      .ProbeRunning = [](const EditorInstallation&) { return false; },
+                                                      .ProbeEntrypointActivity =
+                                                          [&](const std::filesystem::path&)
+                                                      {
+                                                          if (fail.load())
+                                                              throw std::runtime_error("probe failed");
+                                                          return EditorEntrypointActivity::NotRunning;
+                                                      },
+                                                      .ActivityProbeInterval = 0ms});
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (!workflow.Snapshot()->front().Activity.Running && std::chrono::steady_clock::now() < deadline)
+    {
+        REQUIRE(workflow.Poll());
+        std::this_thread::sleep_for(1ms);
+    }
+    CHECK(workflow.Snapshot()->front().Activity.Running);
+    fail = false;
+    while (workflow.Snapshot()->front().Activity.Running && std::chrono::steady_clock::now() < deadline)
+    {
+        REQUIRE(workflow.Poll());
+        std::this_thread::sleep_for(1ms);
+    }
+    CHECK_FALSE(workflow.Snapshot()->front().Activity.Running);
+}
+
+TEST_CASE("Editor activity polling discards a result for an obsolete registration")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    auto installation =
+        TestInstallation(temporary.Path() / "Editor", "external-editor", InstallationOwnership::External);
+    REQUIRE(controller.Installations().Upsert(installation));
+    std::latch entered(1);
+    std::latch release(1);
+    std::atomic_int probes = 0;
+    HubEditorManagementWorkflow workflow(controller, {.HostPlatform = "windows",
+                                                      .HostArchitecture = "x86_64",
+                                                      .ProbeRunning = [](const EditorInstallation&) { return false; },
+                                                      .ProbeEntrypointActivity =
+                                                          [&](const std::filesystem::path&)
+                                                      {
+                                                          if (++probes == 1)
+                                                          {
+                                                              entered.count_down();
+                                                              release.wait();
+                                                              return EditorEntrypointActivity::Running;
+                                                          }
+                                                          return EditorEntrypointActivity::NotRunning;
+                                                      },
+                                                      .ActivityProbeInterval = 0ms});
+    REQUIRE(workflow.Poll());
+    entered.wait();
+    installation.Version = "2.0.0";
+    REQUIRE(controller.Installations().Upsert(installation));
+    workflow.ReloadRegistrations();
+    release.count_down();
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (probes < 2 && std::chrono::steady_clock::now() < deadline)
+    {
+        REQUIRE(workflow.Poll());
+        std::this_thread::sleep_for(1ms);
+    }
+    CHECK(probes >= 2);
+    CHECK(workflow.Snapshot()->front().Installation.Version == "2.0.0");
+    CHECK_FALSE(workflow.Snapshot()->front().Activity.Running);
+}
+
+TEST_CASE("Editor activity polling joins an in-flight probe during shutdown")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
+    REQUIRE(controller.Load(1));
+    const auto installation =
+        TestInstallation(temporary.Path() / "Editor", "external-editor", InstallationOwnership::External);
+    REQUIRE(controller.Installations().Upsert(installation));
+    std::latch probeEntered(1);
+    std::latch releaseProbe(1);
+    std::latch shutdownStarted(1);
+    auto workflow = std::make_unique<HubEditorManagementWorkflow>(
+        controller, HubEditorManagementSpecification{.HostPlatform = "windows",
+                                                     .HostArchitecture = "x86_64",
+                                                     .ProbeRunning = [](const EditorInstallation&) { return false; },
+                                                     .ProbeEntrypointActivity =
+                                                         [&](const std::filesystem::path&)
+                                                     {
+                                                         probeEntered.count_down();
+                                                         releaseProbe.wait();
+                                                         return EditorEntrypointActivity::NotRunning;
+                                                     }});
+    REQUIRE(workflow->Poll());
+    probeEntered.wait();
+    auto shutdown = std::async(std::launch::async,
+                               [&]
+                               {
+                                   shutdownStarted.count_down();
+                                   workflow.reset();
+                               });
+    shutdownStarted.wait();
+    CHECK(shutdown.wait_for(20ms) == std::future_status::timeout);
+    releaseProbe.count_down();
+    CHECK(shutdown.wait_for(2s) == std::future_status::ready);
+    shutdown.get();
 }
 
 TEST_CASE("Editor verification rejects a result when current tracked activity changes")

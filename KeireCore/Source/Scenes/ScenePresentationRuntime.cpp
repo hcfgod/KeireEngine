@@ -1225,6 +1225,21 @@ namespace Keire
     {
         m_Impl->UiDocuments.SetBindingSource(document, std::move(source));
     }
+    bool ScenePresentationRuntime::SetManagedUiDocumentBindingValue(const EntityId document,
+                                                                    const std::string_view path, std::any value)
+    {
+        return m_Impl->UiDocuments.SetManagedBindingValue(document, path, std::move(value));
+    }
+    std::optional<std::any>
+    ScenePresentationRuntime::ReadManagedUiDocumentBindingValue(const EntityId document,
+                                                                const std::string_view path) const
+    {
+        return m_Impl->UiDocuments.ReadManagedBindingValue(document, path);
+    }
+    bool ScenePresentationRuntime::ClearManagedUiDocumentBindingSource(const EntityId document)
+    {
+        return m_Impl->UiDocuments.ClearManagedBindingSource(document);
+    }
     std::optional<ScenePresentationUiDocumentDebugSnapshot>
     ScenePresentationRuntime::UiDocumentDebugSnapshot(const EntityId document) const
     {

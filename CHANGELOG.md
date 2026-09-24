@@ -5,6 +5,29 @@ versions.
 
 ## Unreleased
 
+- UI bindings preserve programmatic control and source changes across frame synchronization, and scene shutdown
+  releases values written by script shutdown callbacks.
+
+- Non-surface materials now hide mesh-only Inspector controls and use a target thumbnail instead of a lit sphere.
+
+- Scene UI Document bindings can receive explicit text, number, and boolean path values from C# gameplay callbacks;
+  scripts can read TwoWay updates and detach the source when it is no longer needed.
+
+- UI Builder now draws panel gradients, borders, shadows, rounded corners, and visual transforms from the same quad
+  geometry used in Game view, and draws fallback-font text from the same transformed glyph geometry and atlas.
+- UI Builder's top Debug mode now opens the Debugger pane directly, including in compact layouts.
+- UI Builder's top Save, Revert, Undo, and Redo controls now follow the open style sheet in Styles mode.
+- UI Builder selection outlines now follow a control's rounded corners instead of making selected rounded controls
+  appear square.
+- UI Builder text previews now honor runtime wrapping, truncation, line height, and alignment, making narrow labels
+  show their authored line breaks before opening Game view.
+- Runtime UI fallback text measures glyphs with the same atlas advances used to draw them, preventing incorrect
+  spacing and wrapping. UI Builder's Match Game View uses logical dimensions rather than render-resolution pixels.
+- The Editor prepares the shared Lit shader in the background after loading a project, then continues the first
+  requested material creation when preparation succeeds; failed preparation reports its diagnostic and can be retried.
+- Hub installation cards refresh external editor process activity without rechecking the package inventory, so
+  closing an editor restores the appropriate installation actions.
+
 - Fullscreen Shader Graph creation includes editable blur, chromatic aberration, animated distortion, and vignette presets, with resolution-aware Scene Texel Size sampling offsets.
 
 - Windows `project.bat` can launch staged Editor and Hub builds directly without rebuilding; missing stages report the command needed to create them.

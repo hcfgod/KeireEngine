@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/UiBuilderDocument.h"
 #include "KeireClient/Editor/UiBuilderLiveDraft.h"
+#include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
 #include "KeireClient/Editor/UiMarkupSourceEditor.h"
 #include "KeireClient/Editor/UiStyleSourceEditor.h"
@@ -9,14 +10,17 @@
 #include "Keire/ECS/Components/UiDocumentComponent.h"
 #include "Keire/Ui/UiElements.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Rendering/RuntimeUiGeometryInternal.h"
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
 #include <limits>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -56,6 +60,16 @@ TEST_CASE("runtime game UI is isolated from the Scene viewport")
     CHECK(KeireEditor::SubmitsRuntimeUiToSceneRenderer(Keire::RuntimeUiRenderTarget::WorldSurface));
 }
 
+TEST_CASE("UI Builder toolbar actions follow an open Styles document")
+{
+    using KeireEditor::UiBuilderToolbarUsesStyleSheet;
+    using KeireEditor::UiBuilderWorkspaceMode;
+    CHECK(UiBuilderToolbarUsesStyleSheet(UiBuilderWorkspaceMode::Styles, true));
+    CHECK_FALSE(UiBuilderToolbarUsesStyleSheet(UiBuilderWorkspaceMode::Styles, false));
+    CHECK_FALSE(UiBuilderToolbarUsesStyleSheet(UiBuilderWorkspaceMode::Design, true));
+    CHECK_FALSE(UiBuilderToolbarUsesStyleSheet(UiBuilderWorkspaceMode::Debug, true));
+}
+
 TEST_CASE("UI Builder canvas gestures stay parent bounded and transform live preview geometry")
 {
     const Keire::RuntimeUiRect parent{50.0F, 50.0F, 400.0F, 300.0F};
@@ -92,6 +106,109 @@ TEST_CASE("UI Builder canvas gestures stay parent bounded and transform live pre
     CHECK_NOTHROW((void)KeireEditor::ResolveUiBuilderCanvasGesture(undersizedInitial, {10.0F, 10.0F, 64.0F, 64.0F},
                                                                    {-20.0F, -20.0F},
                                                                    KeireEditor::UiBuilderCanvasGesture::ResizeTopLeft));
+}
+
+TEST_CASE("UI Builder text preview follows runtime wrapping truncation and alignment")
+{
+    Keire::RuntimeUiDrawCommand command;
+    command.Type = Keire::RuntimeUiDrawType::Text;
+    command.Rect = {10.0F, 20.0F, 54.0F, 160.0F};
+    command.Text = "YOYOYOYOYO";
+    command.FontSize = 24.0F;
+    command.TextWrap = Keire::RuntimeUiTextWrap::Normal;
+    command.HorizontalAlignment = Keire::RuntimeUiAlignment::Center;
+    command.VerticalAlignment = Keire::RuntimeUiAlignment::Center;
+
+    const auto wrapped = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(wrapped.size() > 1U);
+    std::string joined;
+    for (const auto& line : wrapped)
+    {
+        joined += line.Text;
+        CHECK(line.Width <= command.Rect.Width);
+        CHECK(line.Position.X == doctest::Approx(command.Rect.X + (command.Rect.Width - line.Width) * 0.5F));
+    }
+    CHECK(joined == command.Text);
+    CHECK(wrapped.front().Position.Y > command.Rect.Y);
+    CHECK(wrapped.back().Position.Y > wrapped.front().Position.Y);
+
+    command.Rect.Height = 18.0F;
+    command.ClipRect = {0.0F, 0.0F, 200.0F, 200.0F};
+    const auto compact = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(compact.size() > 1U);
+    CHECK(compact.front().Position.Y < command.Rect.Y);
+    CHECK(KeireEditor::UiBuilderPreviewTextClip(command) == command.Rect);
+    command.Translation = {5.0F, 0.0F};
+    CHECK(KeireEditor::UiBuilderPreviewTextClip(command) == command.ClipRect);
+    command.Translation = {};
+    command.Rect.Height = 160.0F;
+
+    command.TextWrap = Keire::RuntimeUiTextWrap::NoWrap;
+    const auto unwrapped = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(unwrapped.size() == 1U);
+    CHECK(unwrapped.front().Text == command.Text);
+
+    command.TextWrap = Keire::RuntimeUiTextWrap::Normal;
+    command.MaximumLines = 1;
+    command.TextOverflow = Keire::RuntimeUiTextOverflow::Ellipsis;
+    const auto truncated = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(truncated.size() == 1U);
+    CHECK(truncated.front().Text.ends_with("\xE2\x80\xA6"));
+
+    command.Text = "K\xC3\xA9ire\n\xE4\xB8\x96\xE7\x95\x8C";
+    command.TextWrap = Keire::RuntimeUiTextWrap::NoWrap;
+    command.MaximumLines = 0;
+    const auto unicode = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(unicode.size() == 2U);
+    CHECK(unicode[0].Text == "K\xC3\xA9ire");
+    CHECK(unicode[1].Text == "\xE4\xB8\x96\xE7\x95\x8C");
+
+    command.Text = std::string("\xC0", 1U);
+    CHECK_THROWS_AS((void)KeireEditor::LayoutUiBuilderPreviewText(command), std::invalid_argument);
+
+    command.Text = "A A";
+    command.Rect.Width = 200.0F;
+    command.LetterSpacing = 0.0F;
+    command.WordSpacing = 0.0F;
+    const auto plain = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(plain.size() == 1U);
+    REQUIRE(plain.front().Glyphs.size() == 3U);
+    command.LetterSpacing = 3.0F;
+    command.WordSpacing = 5.0F;
+    const auto spaced = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(spaced.size() == 1U);
+    REQUIRE(spaced.front().Glyphs.size() == 3U);
+    CHECK(spaced.front().Glyphs[1].Position.X - spaced.front().Glyphs[0].Position.X ==
+          doctest::Approx(plain.front().Glyphs[1].Position.X - plain.front().Glyphs[0].Position.X + 3.0F));
+    CHECK(spaced.front().Glyphs[2].Position.X - spaced.front().Glyphs[1].Position.X ==
+          doctest::Approx(plain.front().Glyphs[2].Position.X - plain.front().Glyphs[1].Position.X + 8.0F));
+}
+
+TEST_CASE("UI Builder text preview bounds long text at a complete UTF-8 codepoint")
+{
+    Keire::RuntimeUiDrawCommand command;
+    command.Type = Keire::RuntimeUiDrawType::Text;
+    command.Rect = {0.0F, 0.0F, 100'000.0F, 100.0F};
+    command.FontSize = 12.0F;
+    command.TextWrap = Keire::RuntimeUiTextWrap::NoWrap;
+
+    command.Text = std::string(5000U, 'A');
+    const auto ascii = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(ascii.size() == 1U);
+    CHECK(ascii.front().Text == std::string(4096U, 'A'));
+    CHECK(ascii.front().Glyphs.size() == 4096U);
+
+    command.Text = std::string(4095U, 'A') + "\xC3\xA9" + "B";
+    const auto splitCodepoint = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(splitCodepoint.size() == 1U);
+    CHECK(splitCodepoint.front().Text == std::string(4095U, 'A'));
+    CHECK(splitCodepoint.front().Glyphs.size() == 4095U);
+
+    command.Text = std::string(4094U, 'A') + "\xC3\xA9" + "B";
+    const auto completeCodepoint = KeireEditor::LayoutUiBuilderPreviewText(command);
+    REQUIRE(completeCodepoint.size() == 1U);
+    CHECK(completeCodepoint.front().Text == std::string(4094U, 'A') + "\xC3\xA9");
+    CHECK(completeCodepoint.front().Glyphs.size() == 4095U);
 }
 
 TEST_CASE("UI Builder canvas hit testing preserves a move target inside compact controls")
@@ -527,6 +644,78 @@ TEST_CASE("UI Builder retained preview applies safe area and selected pseudo-sta
     CHECK_FALSE(undo->CanUndo());
 
     undoService->Close();
+}
+
+TEST_CASE("UI Builder selected rounded button retains its runtime corner radius")
+{
+    auto definition = TestDocument();
+    auto& button = definition.Root.Children.front();
+    button.Type = Keire::UiVisualElementType::Button;
+    button.InlineStyles = {
+        {"width", "480px"}, {"height", "120px"}, {"background-color", "#225599ff"}, {"border-radius", "20px"}};
+    KeireEditor::UiBuilderPreviewSettings settings;
+    settings.Width = 960;
+    settings.Height = 540;
+    const auto preview = KeireEditor::BuildUiBuilderRetainedPreview(definition, button.StableId, settings);
+    REQUIRE(preview.SelectedState);
+    CHECK(preview.SelectedState->Style.CornerRadius == doctest::Approx(20.0F));
+    CHECK(preview.SelectedState->LayoutScale == doctest::Approx(0.5F));
+    const auto element =
+        std::ranges::find(preview.Elements, button.StableId, &KeireEditor::UiBuilderPreviewElement::StableId);
+    REQUIRE(element != preview.Elements.end());
+    const auto quad =
+        std::ranges::find_if(preview.DrawCommands, [id = element->RuntimeId](const Keire::RuntimeUiDrawCommand& command)
+                             { return command.Element == id && command.Type == Keire::RuntimeUiDrawType::Quad; });
+    REQUIRE(quad != preview.DrawCommands.end());
+    CHECK(quad->CornerRadius == doctest::Approx(10.0F));
+}
+
+TEST_CASE("UI Builder preview quad uses runtime gradient and transform geometry")
+{
+    auto definition = TestDocument();
+    auto& panel = definition.Root.Children.front();
+    panel.InlineStyles = {
+        {"position", "absolute"},  {"left", "100px"},
+        {"top", "80px"},           {"width", "200px"},
+        {"height", "100px"},       {"background", "linear-gradient(90deg, #ff0000ff 0%, #0000ffff 100%)"},
+        {"border-radius", "12px"}, {"translate", "40px 20px"},
+        {"rotate", "15deg"}};
+    const auto preview = KeireEditor::BuildUiBuilderRetainedPreview(definition, panel.StableId, {});
+    const auto element =
+        std::ranges::find(preview.Elements, panel.StableId, &KeireEditor::UiBuilderPreviewElement::StableId);
+    REQUIRE(element != preview.Elements.end());
+    const auto quad =
+        std::ranges::find_if(preview.DrawCommands, [id = element->RuntimeId](const Keire::RuntimeUiDrawCommand& command)
+                             { return command.Element == id && command.Type == Keire::RuntimeUiDrawType::Quad; });
+    REQUIRE(quad != preview.DrawCommands.end());
+    CHECK(quad->BackgroundGradient.Kind == Keire::RuntimeUiGradientKind::Linear);
+    CHECK(quad->Translation == Keire::Vector2{40.0F, 20.0F});
+    CHECK(quad->RotationDegrees == doctest::Approx(15.0F));
+    const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&*quad, 1U));
+    REQUIRE_FALSE(geometry.Vertices.empty());
+    CHECK(geometry.Vertices.size() % 3U == 0U);
+    CHECK(std::ranges::any_of(
+        geometry.Vertices, [quad](const auto& vertex)
+        { return vertex.Position.X < quad->Rect.X || vertex.Position.X > quad->Rect.X + quad->Rect.Width; }));
+    CHECK(std::ranges::any_of(geometry.Vertices, [&geometry](const auto& vertex)
+                              { return vertex.ColorValue != geometry.Vertices.front().ColorValue; }));
+    auto empty = *quad;
+    empty.Rect = {};
+    CHECK(Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&empty, 1U)).Vertices.empty());
+
+    const auto text =
+        std::ranges::find_if(preview.DrawCommands, [id = element->RuntimeId](const Keire::RuntimeUiDrawCommand& command)
+                             { return command.Element == id && command.Type == Keire::RuntimeUiDrawType::Text; });
+    REQUIRE(text != preview.DrawCommands.end());
+    const auto transformedText = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&*text, 1U));
+    REQUIRE_FALSE(transformedText.Vertices.empty());
+    auto untransformedText = *text;
+    untransformedText.Translation = {};
+    untransformedText.RotationDegrees = 0.0F;
+    const auto flatText = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&untransformedText, 1U));
+    REQUIRE(flatText.Vertices.size() == transformedText.Vertices.size());
+    CHECK(transformedText.Vertices.front().Position != flatText.Vertices.front().Position);
+    CHECK(transformedText.Vertices.front().UV == flatText.Vertices.front().UV);
 }
 
 TEST_CASE("UI Builder preview skips zero-area draw commands from data-bound custom controls")

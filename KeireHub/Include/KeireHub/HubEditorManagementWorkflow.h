@@ -5,6 +5,7 @@
 #include "KeireHubRuntime/EditorInstallationManager.h"
 #include "KeireHubRuntime/HubController.h"
 
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -23,10 +24,13 @@ namespace KeireHub
     struct HubEditorManagementSpecification final
     {
         using RunningProbe = std::function<bool(const EditorInstallation&)>;
+        using EntrypointActivityProbe = std::function<EditorEntrypointActivity(const std::filesystem::path&)>;
 
         std::string HostPlatform;
         std::string HostArchitecture;
         RunningProbe ProbeRunning;
+        EntrypointActivityProbe ProbeEntrypointActivity;
+        std::chrono::steady_clock::duration ActivityProbeInterval = std::chrono::seconds(1);
     };
 
     struct HubEditorManagementWorkItem final
@@ -143,6 +147,7 @@ namespace KeireHub
         [[nodiscard]] HubStatus ValidateCommandTarget(const HubUiCommand& command) const;
         [[nodiscard]] HubStatus ValidateCurrentTarget() const;
         [[nodiscard]] EditorInstallationActivity Activity(const EditorInstallation& installation) const;
+        void PollActivity();
         void PublishOperation(HubEditorManagementOperationSnapshot snapshot);
         void PublishVerificationProgress(std::uint64_t operationId, const std::string& installationId,
                                          std::uint64_t verifiedFiles, std::uint64_t totalFiles,
@@ -157,12 +162,17 @@ namespace KeireHub
         std::string m_HostPlatform;
         std::string m_HostArchitecture;
         HubEditorManagementSpecification::RunningProbe m_ProbeRunning;
+        HubEditorManagementSpecification::EntrypointActivityProbe m_ProbeEntrypointActivity;
+        std::chrono::steady_clock::duration m_ActivityProbeInterval;
         HubEditorManagementServices m_Services;
         std::thread::id m_OwnerThread;
         std::shared_ptr<const std::vector<EditorInstallationHealthSnapshot>> m_Snapshot;
         std::shared_ptr<const std::vector<EditorInstallation>> m_ActiveRegistrations;
         std::optional<EditorInstallation> m_ActiveTarget;
         std::future<WorkerResult> m_WorkFuture;
+        std::shared_ptr<const std::vector<EditorInstallation>> m_ActivityRegistrations;
+        std::future<std::vector<bool>> m_ActivityFuture;
+        std::chrono::steady_clock::time_point m_NextActivityProbe{};
         std::optional<HubEditorManagementCompletion> m_Completion;
         std::uint64_t m_NextOperationId = 1;
         mutable std::mutex m_OperationMutex;

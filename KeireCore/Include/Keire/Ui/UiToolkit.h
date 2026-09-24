@@ -385,6 +385,8 @@ namespace Keire
         void UpdateBindings();
         [[nodiscard]] bool DispatchRuntimeEvent(const RuntimeUiEvent& event);
         [[nodiscard]] bool SynchronizeInteractionStates();
+        // Use after a direct runtime-tree property edit to update one visual element and its two-way binding.
+        [[nodiscard]] bool SynchronizeVisualElementFromRuntime(RuntimeUiElementId element);
         [[nodiscard]] bool Advance(float deltaSeconds);
         void SetPseudoState(RuntimeUiElementId element, UiStylePseudoState state, bool enabled);
         [[nodiscard]] bool SetStyleEvaluationContext(UiStyleEvaluationContext context);

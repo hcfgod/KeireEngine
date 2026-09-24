@@ -22,6 +22,7 @@
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 #include "KeireInternal/Scripting/ManagedRuntimeInput.h"
 
+#include <any>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -728,6 +729,11 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                                             Keire::RuntimeUiEventType type) noexcept override;
     [[nodiscard]] bool FocusManagedUiDocumentElement(Keire::AssetId document, std::uint64_t documentGeneration,
                                                      std::uint64_t element) noexcept override;
+    [[nodiscard]] bool SetManagedUiDocumentBindingValue(Keire::AssetId document, std::string_view path,
+                                                        std::any value) noexcept override;
+    [[nodiscard]] std::optional<std::any> ReadManagedUiDocumentBindingValue(Keire::AssetId document,
+                                                                            std::string_view path) noexcept override;
+    [[nodiscard]] bool ClearManagedUiDocumentBindingSource(Keire::AssetId document) noexcept override;
     [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId entity = {}) const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
@@ -797,6 +803,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrainQueuedAssetMutation();
     void DrainQueuedPrefabCreation();
     void PollAssetHotReload();
+    void QueueDefaultLitWarmup();
+    void QueueMaterialCreation(const std::filesystem::path& destination);
 
     Keire::UiPanelRegistration m_Game;
     Keire::UiPanelRegistration m_ThemeEditor;
@@ -863,6 +871,9 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::optional<Keire::SceneDefinition> m_PendingPlayEditorBefore;
     std::unique_ptr<KeireEditor::ExternalAssetImportController> m_ExternalAssetImport;
     std::unique_ptr<KeireEditor::AssetOperationService> m_AssetOperations;
+    bool m_DefaultLitWarmupAttempted = false;
+    bool m_DefaultLitWarmupReady = false;
+    std::optional<std::filesystem::path> m_PendingMaterialCreation;
     std::unique_ptr<KeireEditor::PlayerBuildService> m_PlayerBuildService;
     Keire::UiThemeDefinition m_Theme;
     Keire::UiThemeId m_PendingTheme;
@@ -975,6 +986,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     Keire::Internal::DynamicResolutionController m_GameDynamicResolution;
     Keire::Ref<Keire::ScenePresentationRuntime> m_GameEditPresentation;
     Keire::UiItemRect m_GameViewportRect;
+    Keire::UiSize m_GameLogicalViewportSize;
     Keire::AudioVoiceId m_InspectorAudioPreviewVoice;
     Keire::AssetId m_AudioMixerPreviewAsset;
     Keire::AssetId m_VfxEffectPreviewAsset;

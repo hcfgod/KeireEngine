@@ -477,6 +477,37 @@ TEST_CASE("Runtime UI text shaping is Unicode aware bounded and generation cache
     CHECK(cache.Statistics().Entries == 0U);
 }
 
+TEST_CASE("Runtime UI fallback text uses atlas advances for glyph placement and wrapping")
+{
+    const auto& wide = Keire::RenderBackend::RuntimeUiFallbackGlyph('W');
+    const auto& narrow = Keire::RenderBackend::RuntimeUiFallbackGlyph('i');
+    REQUIRE(wide.Advance > 0.0F);
+    REQUIRE(narrow.Advance > 0.0F);
+    constexpr float fontSize = 24.0F;
+    constexpr float scale = fontSize / 12.0F;
+
+    Keire::Detail::RuntimeUiTextLayoutRequest request;
+    request.Text = "WiW";
+    request.FontSize = fontSize;
+    request.AvailableWidth = (wide.Advance + narrow.Advance) * scale + 0.25F;
+    const auto layout = Keire::Detail::BuildRuntimeUiTextLayout(request);
+    REQUIRE(layout.Lines.size() == 2U);
+    REQUIRE(layout.Glyphs.size() == 3U);
+    CHECK(layout.Glyphs[0].Advance == doctest::Approx(wide.Advance * scale));
+    CHECK(layout.Glyphs[1].Advance == doctest::Approx(narrow.Advance * scale));
+    CHECK(layout.Glyphs[1].X == doctest::Approx(wide.Advance * scale));
+    CHECK(layout.Glyphs[1].X + narrow.Offset.X * scale + 0.25F >= (wide.Offset.X + wide.Width) * scale);
+    CHECK(layout.Lines.front().Width == doctest::Approx((wide.Advance + narrow.Advance) * scale));
+    CHECK(layout.Glyphs[2].X == doctest::Approx(0.0F));
+
+    request.Text = "\t";
+    request.WordSpacing = 3.0F;
+    const auto tab = Keire::Detail::BuildRuntimeUiTextLayout(request);
+    REQUIRE(tab.Glyphs.size() == 1U);
+    const auto& renderedTab = Keire::RenderBackend::RuntimeUiFallbackGlyph('\t');
+    CHECK(tab.Glyphs.front().Advance == doctest::Approx(renderedTab.Advance * scale + request.WordSpacing));
+}
+
 TEST_CASE("Runtime UI text uses per-glyph fallback faces and bounded multi-page atlases")
 {
     const auto readFont = [](const std::filesystem::path& path)
@@ -825,6 +856,91 @@ TEST_CASE("Source-backed UI documents instantiate custom controls and resolve au
     bindingSource->Values.insert_or_assign("Telemetry.Status", std::string("Running"));
     document->UpdateBindings();
     CHECK(document->Tree()->State(*status)->Content.Text == "Running");
+}
+
+TEST_CASE("UI document two-way visual edits survive binding refresh and release callbacks on destruction")
+{
+    Keire::UiVisualTreeDefinition definition;
+    definition.Name = "TwoWay";
+    definition.Root.StableId = Keire::AssetId::Generate();
+    Keire::UiVisualElementDefinition toggle;
+    toggle.StableId = Keire::AssetId::Generate();
+    toggle.Type = Keire::UiVisualElementType::Toggle;
+    toggle.Name = "toggle";
+    toggle.Bindings = {{"value", "Player.Ready", "TwoWay"}};
+    definition.Root.Children.push_back(toggle);
+    Keire::UiVisualElementDefinition rawToggle;
+    rawToggle.StableId = Keire::AssetId::Generate();
+    rawToggle.Type = Keire::UiVisualElementType::Toggle;
+    definition.Root.Children.push_back(rawToggle);
+    Keire::UiVisualElementDefinition rawLabel;
+    rawLabel.StableId = Keire::AssetId::Generate();
+    rawLabel.Type = Keire::UiVisualElementType::Label;
+    definition.Root.Children.push_back(rawLabel);
+    constexpr std::string_view styles = "@keire-style 1; #toggle { opacity: 0.25; } #toggle:checked { opacity: 1; }";
+    const auto styleSheet =
+        Keire::CreateRef<Keire::UiStyleSheetAsset>(Keire::UiStyleSheetAsset::ParseSource(AsBytes(styles)));
+    const auto source = Keire::CreateRef<UiMapBindingSource>();
+    source->Values.emplace("Player.Ready", true);
+    auto document =
+        Keire::CreateRef<Keire::UiDocument>(Keire::CreateRef<Keire::UiVisualTreeAsset>(definition),
+                                            std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{styleSheet});
+    document->SetBindingSource(source);
+    const auto runtime = document->Find(toggle.StableId);
+    const auto visual = Keire::DynamicRefCast<Keire::Ui::Toggle>(document->Visual(toggle.StableId));
+    REQUIRE(runtime);
+    REQUIRE(visual);
+    CHECK(visual->Value());
+    CHECK(document->Tree()->State(*runtime)->Style.Opacity == doctest::Approx(1.0F));
+    visual->SetValue(false);
+    CHECK_FALSE(std::any_cast<bool>(source->Values.at("Player.Ready")));
+    REQUIRE(document->Tree()->State(*runtime));
+    CHECK_FALSE(document->Tree()->State(*runtime)->Control.Checked);
+    (void)document->Advance(0.0F);
+    CHECK_FALSE(visual->Value());
+    CHECK(document->Tree()->State(*runtime)->Style.Opacity == doctest::Approx(0.25F));
+    source->Values.insert_or_assign("Player.Ready", true);
+    document->UpdateBindings();
+    CHECK(visual->Value());
+    CHECK(document->Tree()->State(*runtime)->Style.Opacity == doctest::Approx(1.0F));
+    REQUIRE(document->Tree()->State(*runtime));
+    CHECK(document->Tree()->State(*runtime)->Control.Checked);
+
+    const auto rawToggleRuntime = document->Find(rawToggle.StableId);
+    const auto rawLabelRuntime = document->Find(rawLabel.StableId);
+    const auto rawToggleVisual = Keire::DynamicRefCast<Keire::Ui::Toggle>(document->Visual(rawToggle.StableId));
+    const auto rawLabelVisual = Keire::DynamicRefCast<Keire::Ui::Label>(document->Visual(rawLabel.StableId));
+    REQUIRE(rawToggleRuntime);
+    REQUIRE(rawLabelRuntime);
+    REQUIRE(rawToggleVisual);
+    REQUIRE(rawLabelVisual);
+    auto rawControl = document->Tree()->State(*rawToggleRuntime)->Control;
+    rawControl.Checked = true;
+    REQUIRE(document->Tree()->SetControl(*rawToggleRuntime, rawControl));
+    auto rawContent = document->Tree()->State(*rawLabelRuntime)->Content;
+    rawContent.Text = "Tree label";
+    REQUIRE(document->Tree()->SetContent(*rawLabelRuntime, rawContent));
+    (void)document->Advance(0.0F);
+    CHECK(rawToggleVisual->Value());
+    CHECK(rawLabelVisual->Text() == "Tree label");
+    CHECK(document->Tree()->State(*rawToggleRuntime)->Control.Checked);
+    CHECK(document->Tree()->State(*rawLabelRuntime)->Content.Text == "Tree label");
+
+    auto boundControl = document->Tree()->State(*runtime)->Control;
+    boundControl.Checked = false;
+    REQUIRE(document->Tree()->SetControl(*runtime, boundControl));
+    (void)document->Advance(0.0F);
+    CHECK_FALSE(visual->Value());
+    CHECK_FALSE(std::any_cast<bool>(source->Values.at("Player.Ready")));
+    source->Values.insert_or_assign("Player.Ready", true);
+    (void)document->Advance(0.0F);
+    CHECK(visual->Value());
+    CHECK(document->Tree()->State(*runtime)->Style.Opacity == doctest::Approx(1.0F));
+
+    const auto tree = document->Tree();
+    document.Reset();
+    CHECK_FALSE(tree->State(*runtime));
+    CHECK_NOTHROW(visual->SetValue(false));
 }
 
 TEST_CASE("Runtime UI default styles validate and transitions advance without warming unchanged trees")

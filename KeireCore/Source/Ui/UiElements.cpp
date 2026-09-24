@@ -1,4 +1,5 @@
 #include "Keire/Ui/UiElements.h"
+#include "KeireInternal/Ui/UiDocumentElementsInternal.h"
 
 #include <cctype>
 #include <cmath>
@@ -7,6 +8,7 @@
 #include <mutex>
 #include <ranges>
 #include <stdexcept>
+#include <utility>
 
 namespace Keire::Ui
 {
@@ -1063,3 +1065,100 @@ namespace Keire::Ui
         return registry.Generation;
     }
 } // namespace Keire::Ui
+
+namespace Keire::Detail
+{
+    RuntimeUiElementType UiDocumentRuntimeType(const UiVisualElementType type) noexcept
+    {
+        switch (type)
+        {
+        case UiVisualElementType::Label:
+            return RuntimeUiElementType::Text;
+        case UiVisualElementType::Image:
+            return RuntimeUiElementType::Image;
+        case UiVisualElementType::Button:
+            return RuntimeUiElementType::Button;
+        case UiVisualElementType::TextField:
+            return RuntimeUiElementType::InputField;
+        case UiVisualElementType::Toggle:
+            return RuntimeUiElementType::Toggle;
+        case UiVisualElementType::Slider:
+        case UiVisualElementType::ProgressBar:
+            return RuntimeUiElementType::Slider;
+        case UiVisualElementType::ScrollView:
+        case UiVisualElementType::ListView:
+        case UiVisualElementType::TreeView:
+            return RuntimeUiElementType::ScrollView;
+        case UiVisualElementType::Spacer:
+            return RuntimeUiElementType::Spacer;
+        default:
+            // Retained VisualElements default to vertical flex containers.
+            return RuntimeUiElementType::VerticalLayout;
+        }
+    }
+
+    Ref<Ui::VisualElement> CreateUiDocumentVisualElement(const UiVisualElementDefinition& definition)
+    {
+        using namespace Ui;
+        switch (definition.Type)
+        {
+        case UiVisualElementType::TemplateContainer:
+            return CreateRef<TemplateContainer>();
+        case UiVisualElementType::Label:
+            return CreateRef<Label>();
+        case UiVisualElementType::Image:
+            return CreateRef<Image>();
+        case UiVisualElementType::Button:
+            return CreateRef<Button>();
+        case UiVisualElementType::TextField:
+            return CreateRef<TextField>();
+        case UiVisualElementType::Toggle:
+            return CreateRef<Toggle>();
+        case UiVisualElementType::Slider:
+            return CreateRef<Slider>();
+        case UiVisualElementType::ProgressBar:
+            return CreateRef<ProgressBar>();
+        case UiVisualElementType::ScrollView:
+            return CreateRef<ScrollView>();
+        case UiVisualElementType::ListView:
+            return CreateRef<ListView>();
+        case UiVisualElementType::TreeView:
+            return CreateRef<TreeView>();
+        case UiVisualElementType::DropdownField:
+            return CreateRef<DropdownField>();
+        case UiVisualElementType::Foldout:
+            return CreateRef<Foldout>();
+        case UiVisualElementType::TabView:
+            return CreateRef<TabView>();
+        case UiVisualElementType::Toolbar:
+            return CreateRef<Toolbar>();
+        case UiVisualElementType::Custom:
+        {
+            auto custom = UxmlElementRegistry::Create(definition.CustomType);
+            return custom ? std::move(custom) : CreateRef<VisualElement>();
+        }
+        default:
+            return CreateRef<VisualElement>();
+        }
+    }
+
+    RuntimeUiElementType UiDocumentRuntimeType(const Ui::VisualElement& element,
+                                               const UiVisualElementType fallback) noexcept
+    {
+        if (dynamic_cast<const Ui::Button*>(&element))
+            return RuntimeUiElementType::Button;
+        if (dynamic_cast<const Ui::TextField*>(&element))
+            return RuntimeUiElementType::InputField;
+        if (dynamic_cast<const Ui::Toggle*>(&element))
+            return RuntimeUiElementType::Toggle;
+        if (dynamic_cast<const Ui::Slider*>(&element) || dynamic_cast<const Ui::ProgressBar*>(&element))
+            return RuntimeUiElementType::Slider;
+        if (dynamic_cast<const Ui::ListView*>(&element) || dynamic_cast<const Ui::ScrollView*>(&element))
+            return RuntimeUiElementType::ScrollView;
+        if (dynamic_cast<const Ui::Image*>(&element))
+            return RuntimeUiElementType::Image;
+        if (dynamic_cast<const Ui::TextElement*>(&element))
+            return RuntimeUiElementType::Text;
+        return UiDocumentRuntimeType(fallback);
+    }
+} // namespace Keire::Detail

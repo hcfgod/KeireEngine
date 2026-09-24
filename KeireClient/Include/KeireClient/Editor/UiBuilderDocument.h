@@ -117,6 +117,33 @@ namespace KeireEditor
         std::size_t InlineStyleProperties = 0;
     };
 
+    struct UiBuilderPreviewTextGlyph final
+    {
+        std::string Text;
+        Keire::Vector2 Position;
+    };
+
+    struct UiBuilderPreviewTextLine final
+    {
+        std::string Text;
+        Keire::Vector2 Position;
+        float Width = 0.0F;
+        float Height = 0.0F;
+        std::vector<UiBuilderPreviewTextGlyph> Glyphs;
+    };
+
+    [[nodiscard]] std::vector<UiBuilderPreviewTextLine>
+    LayoutUiBuilderPreviewText(const Keire::RuntimeUiDrawCommand& command);
+
+    [[nodiscard]] inline Keire::RuntimeUiRect
+    UiBuilderPreviewTextClip(const Keire::RuntimeUiDrawCommand& command) noexcept
+    {
+        const bool transformed = command.Translation != Keire::Vector2{} ||
+                                 command.TransformScale != Keire::Vector2{1.0F, 1.0F} ||
+                                 command.RotationDegrees != 0.0F;
+        return transformed ? command.ClipRect : command.Rect.Intersect(command.ClipRect);
+    }
+
     [[nodiscard]] UiBuilderRetainedPreview
     BuildUiBuilderRetainedPreview(const Keire::UiVisualTreeDefinition& definition, Keire::AssetId selected,
                                   const UiBuilderPreviewSettings& settings,

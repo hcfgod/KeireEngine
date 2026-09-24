@@ -323,13 +323,7 @@ void EditorWorkspaceLayer::RevealUiBuilderAsset(const Keire::AssetId asset)
 
 std::optional<Keire::UiSize> EditorWorkspaceLayer::UiBuilderGameViewSize() const noexcept
 {
-    if (m_GameRenderView && m_GameRenderView->Surface() && m_GameRenderView->Surface()->Available())
-    {
-        const auto surface = m_GameRenderView->Surface();
-        if (surface->Width() != 0 && surface->Height() != 0)
-            return Keire::UiSize{static_cast<float>(surface->Width()), static_cast<float>(surface->Height())};
-    }
-    const auto size = m_GameViewportRect.Size();
+    const auto size = m_GameLogicalViewportSize;
     return size.Width > 0.0F && size.Height > 0.0F ? std::optional(size) : std::nullopt;
 }
 
@@ -815,4 +809,22 @@ bool EditorWorkspaceLayer::FocusManagedUiDocumentElement(const Keire::AssetId do
     return Keire::Detail::FocusManagedUiDocumentElement(session ? session->Presentation()
                                                                 : Keire::Ref<Keire::ScenePresentationRuntime>{},
                                                         document, documentGeneration, element);
+}
+
+bool EditorWorkspaceLayer::SetManagedUiDocumentBindingValue(const Keire::AssetId document, const std::string_view path,
+                                                            std::any value) noexcept
+{
+    return Keire::Detail::SetManagedUiDocumentBindingValue(ManagedRuntimeSession(document), document, path,
+                                                           std::move(value));
+}
+
+std::optional<std::any> EditorWorkspaceLayer::ReadManagedUiDocumentBindingValue(const Keire::AssetId document,
+                                                                                const std::string_view path) noexcept
+{
+    return Keire::Detail::ReadManagedUiDocumentBindingValue(ManagedRuntimeSession(document), document, path);
+}
+
+bool EditorWorkspaceLayer::ClearManagedUiDocumentBindingSource(const Keire::AssetId document) noexcept
+{
+    return Keire::Detail::ClearManagedUiDocumentBindingSource(ManagedRuntimeSession(document), document);
 }

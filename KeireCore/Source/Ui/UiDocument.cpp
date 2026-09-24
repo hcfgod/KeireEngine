@@ -1,4 +1,5 @@
 #include "Keire/Ui/UiToolkit.h"
+#include "KeireInternal/Ui/UiDocumentElementsInternal.h"
 
 #include "Keire/Ui/UiElements.h"
 #include "KeireInternal/Ui/RuntimeUiStyleParsingInternal.h"
@@ -355,101 +356,6 @@ namespace Keire
             throw std::runtime_error("UI flex-wrap property contains an unsupported value.");
         }
 
-        [[nodiscard]] RuntimeUiElementType RuntimeType(const UiVisualElementType type) noexcept
-        {
-            switch (type)
-            {
-            case UiVisualElementType::Label:
-                return RuntimeUiElementType::Text;
-            case UiVisualElementType::Image:
-                return RuntimeUiElementType::Image;
-            case UiVisualElementType::Button:
-                return RuntimeUiElementType::Button;
-            case UiVisualElementType::TextField:
-                return RuntimeUiElementType::InputField;
-            case UiVisualElementType::Toggle:
-                return RuntimeUiElementType::Toggle;
-            case UiVisualElementType::Slider:
-            case UiVisualElementType::ProgressBar:
-                return RuntimeUiElementType::Slider;
-            case UiVisualElementType::ScrollView:
-            case UiVisualElementType::ListView:
-            case UiVisualElementType::TreeView:
-                return RuntimeUiElementType::ScrollView;
-            case UiVisualElementType::Spacer:
-                return RuntimeUiElementType::Spacer;
-            default:
-                // Unity-style retained VisualElements are flex containers whose default main axis is vertical.
-                // Explicit flex-direction properties still replace this type during the style cascade.
-                return RuntimeUiElementType::VerticalLayout;
-            }
-        }
-
-        [[nodiscard]] Ref<Ui::VisualElement> CreateVisualElement(const UiVisualElementDefinition& definition)
-        {
-            using namespace Ui;
-            switch (definition.Type)
-            {
-            case UiVisualElementType::TemplateContainer:
-                return CreateRef<TemplateContainer>();
-            case UiVisualElementType::Label:
-                return CreateRef<Label>();
-            case UiVisualElementType::Image:
-                return CreateRef<Image>();
-            case UiVisualElementType::Button:
-                return CreateRef<Button>();
-            case UiVisualElementType::TextField:
-                return CreateRef<TextField>();
-            case UiVisualElementType::Toggle:
-                return CreateRef<Toggle>();
-            case UiVisualElementType::Slider:
-                return CreateRef<Slider>();
-            case UiVisualElementType::ProgressBar:
-                return CreateRef<ProgressBar>();
-            case UiVisualElementType::ScrollView:
-                return CreateRef<ScrollView>();
-            case UiVisualElementType::ListView:
-                return CreateRef<ListView>();
-            case UiVisualElementType::TreeView:
-                return CreateRef<TreeView>();
-            case UiVisualElementType::DropdownField:
-                return CreateRef<DropdownField>();
-            case UiVisualElementType::Foldout:
-                return CreateRef<Foldout>();
-            case UiVisualElementType::TabView:
-                return CreateRef<TabView>();
-            case UiVisualElementType::Toolbar:
-                return CreateRef<Toolbar>();
-            case UiVisualElementType::Custom:
-            {
-                auto custom = UxmlElementRegistry::Create(definition.CustomType);
-                return custom ? std::move(custom) : CreateRef<VisualElement>();
-            }
-            default:
-                return CreateRef<VisualElement>();
-            }
-        }
-
-        [[nodiscard]] RuntimeUiElementType RuntimeType(const Ui::VisualElement& element,
-                                                       const UiVisualElementType fallback) noexcept
-        {
-            if (dynamic_cast<const Ui::Button*>(&element))
-                return RuntimeUiElementType::Button;
-            if (dynamic_cast<const Ui::TextField*>(&element))
-                return RuntimeUiElementType::InputField;
-            if (dynamic_cast<const Ui::Toggle*>(&element))
-                return RuntimeUiElementType::Toggle;
-            if (dynamic_cast<const Ui::Slider*>(&element) || dynamic_cast<const Ui::ProgressBar*>(&element))
-                return RuntimeUiElementType::Slider;
-            if (dynamic_cast<const Ui::ListView*>(&element) || dynamic_cast<const Ui::ScrollView*>(&element))
-                return RuntimeUiElementType::ScrollView;
-            if (dynamic_cast<const Ui::Image*>(&element))
-                return RuntimeUiElementType::Image;
-            if (dynamic_cast<const Ui::TextElement*>(&element))
-                return RuntimeUiElementType::Text;
-            return RuntimeType(fallback);
-        }
-
         [[nodiscard]] std::string_view TypeName(const UiVisualElementDefinition& element) noexcept
         {
             if (element.Type == UiVisualElementType::Custom)
@@ -528,6 +434,7 @@ namespace Keire
             UiStylePseudoState PseudoStates = UiStylePseudoState::None;
             std::unordered_map<std::string, std::string> Variables;
             std::vector<UiResolvedStyleSelectorTrace> SelectorTrace;
+            Ui::CallbackToken ValueChangedCallback;
         };
 
         using SlotContent = std::unordered_map<std::string, std::vector<const UiVisualElementDefinition*>>;
@@ -556,6 +463,7 @@ namespace Keire
             }
             catch (...)
             {
+                DisconnectCallbacks();
                 if (!Elements.empty())
                     (void)Tree->Destroy(Elements.front().Runtime);
                 throw;
@@ -564,6 +472,7 @@ namespace Keire
 
         ~Impl() noexcept
         {
+            DisconnectCallbacks();
             try
             {
                 if (Tree && Root)
@@ -572,6 +481,16 @@ namespace Keire
             catch (...)
             {
                 // Scene teardown must remain noexcept even if a corrupted tree cannot release its subtree.
+            }
+        }
+
+        void DisconnectCallbacks() noexcept
+        {
+            for (auto& element : Elements)
+            {
+                if (element.ValueChangedCallback)
+                    (void)element.Visual->UnregisterCallback(element.ValueChangedCallback);
+                element.ValueChangedCallback = {};
             }
         }
 
@@ -638,7 +557,7 @@ namespace Keire
                 return;
             }
 
-            auto visual = CreateVisualElement(definition);
+            auto visual = Detail::CreateUiDocumentVisualElement(definition);
             visual->SetStableId(definition.StableId);
             visual->SetName(definition.Name);
             for (const auto& className : definition.Classes)
@@ -648,12 +567,27 @@ namespace Keire
             if (visualParent)
                 visualParent->Add(visual);
 
-            const auto runtime = Tree->Create(RuntimeType(*visual, definition.Type), parent);
+            const auto runtime = Tree->Create(Detail::UiDocumentRuntimeType(*visual, definition.Type), parent);
             Elements.push_back({&definition, visual, runtime, parent});
             StableIds.emplace(definition.StableId, runtime);
             if (!definition.Name.empty())
                 Names.emplace(definition.Name, runtime);
             RuntimeIndices.emplace(runtime.Value(), Elements.size() - 1);
+
+            const auto synchronizeValue = [this, runtime](auto& event)
+            {
+                if (auto* element = FindElement(runtime); element && event.Target() == element->Visual.Get())
+                    SynchronizeRuntimeState(*element);
+            };
+            if (dynamic_cast<Ui::TextField*>(visual.Get()))
+                Elements.back().ValueChangedCallback =
+                    visual->RegisterCallback<Ui::ChangeEvent<std::string>>(synchronizeValue);
+            else if (dynamic_cast<Ui::Toggle*>(visual.Get()))
+                Elements.back().ValueChangedCallback =
+                    visual->RegisterCallback<Ui::ChangeEvent<bool>>(synchronizeValue);
+            else if (dynamic_cast<Ui::Slider*>(visual.Get()) || dynamic_cast<Ui::ProgressBar*>(visual.Get()))
+                Elements.back().ValueChangedCallback =
+                    visual->RegisterCallback<Ui::ChangeEvent<float>>(synchronizeValue);
 
             RuntimeUiContent content;
             if (const auto* value = NamedValue(definition.Attributes, "text"))
@@ -903,6 +837,16 @@ namespace Keire
             return cascadeChanged;
         }
 
+        [[nodiscard]] bool SynchronizeVisualElementFromRuntime(const RuntimeUiElementId runtime)
+        {
+            auto* element = FindElement(runtime);
+            if (!element)
+                return false;
+            if (SynchronizeVisualState(*element))
+                RefreshStyles();
+            return true;
+        }
+
         [[nodiscard]] bool DispatchRuntimeEvent(const RuntimeUiEvent& runtimeEvent)
         {
             auto* element = FindElement(runtimeEvent.Target);
@@ -1000,18 +944,28 @@ namespace Keire
 
         [[nodiscard]] bool Advance(const float deltaSeconds)
         {
-            bool changed = SynchronizeInteractionStates();
+            const bool changed = SynchronizeInteractionStates();
             UpdateBindings();
             return Tree->AdvanceTransitions(deltaSeconds) || changed;
         }
 
         void UpdateBindings()
         {
+            bool cascadeChanged = false;
             for (auto& element : Elements)
             {
                 element.Visual->UpdateBindings();
                 SynchronizeRuntimeState(element);
+                if (const auto* toggle = dynamic_cast<const Ui::Toggle*>(element.Visual.Get()))
+                {
+                    const bool checked = (static_cast<std::uint16_t>(element.PseudoStates) &
+                                          static_cast<std::uint16_t>(UiStylePseudoState::Checked)) != 0;
+                    if (checked != toggle->Value())
+                        cascadeChanged = SynchronizeVisualState(element) || cascadeChanged;
+                }
             }
+            if (cascadeChanged)
+                RefreshStyles();
         }
 
         void Rebind(Ref<UiDocumentBindingSource> source)
@@ -1058,11 +1012,7 @@ namespace Keire
                         element.Visual->SetBinding(authored.Property, std::move(binding));
                     }
                 }
-                for (auto& element : Elements)
-                {
-                    element.Visual->UpdateBindings();
-                    SynchronizeRuntimeState(element);
-                }
+                UpdateBindings();
                 BindingSource = std::move(source);
             }
             catch (const std::exception& error)
@@ -1297,7 +1247,7 @@ namespace Keire
                         variables[name] = ResolveVariable(property.Value, variables);
                 }
                 element.Variables = variables;
-                RuntimeUiElementType runtimeType = RuntimeType(element.Definition->Type);
+                RuntimeUiElementType runtimeType = Detail::UiDocumentRuntimeType(element.Definition->Type);
                 bool visible = NamedValue(element.Definition->Attributes, "visible") == nullptr ||
                                ParseBoolean(*NamedValue(element.Definition->Attributes, "visible"));
                 std::vector<std::pair<std::string, CascadedValue>> ordered(cascade.begin(), cascade.end());
@@ -1459,6 +1409,10 @@ namespace Keire
     bool UiDocument::DispatchRuntimeEvent(const RuntimeUiEvent& event) { return m_Impl->DispatchRuntimeEvent(event); }
 
     bool UiDocument::SynchronizeInteractionStates() { return m_Impl->SynchronizeInteractionStates(); }
+    bool UiDocument::SynchronizeVisualElementFromRuntime(const RuntimeUiElementId element)
+    {
+        return m_Impl->SynchronizeVisualElementFromRuntime(element);
+    }
 
     bool UiDocument::Advance(const float deltaSeconds) { return m_Impl->Advance(deltaSeconds); }
 

@@ -55,6 +55,29 @@ public sealed class UIDocument : Keire.Component
 
     /// <summary>Finds the live source-backed element with the supplied stable asset identifier.</summary>
     public RuntimeVisualElement? Q(Keire.AssetId stableId) => RuntimeVisualElement.Resolve(Entity, stableId);
+
+    /// <summary>Supplies a named value to this document's authored OneWay or TwoWay bindings.</summary>
+    public void SetBindingValue(string path, string value) =>
+        Keire.NativeRuntimeUi.SetDocumentBindingValue(Entity, path, value);
+
+    public void SetBindingValue(string path, float value) =>
+        Keire.NativeRuntimeUi.SetDocumentBindingValue(Entity, path, value);
+
+    public void SetBindingValue(string path, bool value) =>
+        Keire.NativeRuntimeUi.SetDocumentBindingValue(Entity, path, value);
+
+    /// <summary>Reads the current value, including changes written by a TwoWay binding.</summary>
+    public bool TryGetBindingValue(string path, out string value) =>
+        Keire.NativeRuntimeUi.TryGetDocumentBindingValue(Entity, path, out value);
+
+    public bool TryGetBindingValue(string path, out float value) =>
+        Keire.NativeRuntimeUi.TryGetDocumentBindingValue(Entity, path, out value);
+
+    public bool TryGetBindingValue(string path, out bool value) =>
+        Keire.NativeRuntimeUi.TryGetDocumentBindingValue(Entity, path, out value);
+
+    /// <summary>Clears this document's managed binding values when their supplying script is disabled.</summary>
+    public bool ClearBindingSource() => Keire.NativeRuntimeUi.ClearDocumentBindingSource(Entity);
 }
 
 public enum RuntimeVisualElementType : byte

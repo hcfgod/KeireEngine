@@ -1,5 +1,7 @@
 #include "Keire/Ui.h"
 
+#include "KeireInternal/RenderInternal.h"
+
 #include <imgui.h>
 
 #include <cmath>
@@ -8,6 +10,17 @@
 
 namespace Keire
 {
+    void UiFrame::DrawImage(const Ref<RenderSurface>& surface, const UiItemRect rectangle)
+    {
+        RequireActive("DrawImage(RenderSurface)");
+        if (!surface || rectangle.Maximum.X <= rectangle.Minimum.X || rectangle.Maximum.Y <= rectangle.Minimum.Y)
+            throw std::invalid_argument("UiFrame::DrawImage requires a valid surface and rectangle.");
+        if (auto* texture = RenderSystemInternalAccess::CaptureUiSurfaceTexture(*surface))
+            ImGui::GetWindowDrawList()->AddImage(
+                ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture))),
+                {rectangle.Minimum.X, rectangle.Minimum.Y}, {rectangle.Maximum.X, rectangle.Maximum.Y});
+    }
+
     namespace
     {
         [[nodiscard]] bool ValidDrawingColor(const UiColor color) noexcept
@@ -89,6 +102,25 @@ namespace Keire
         RequireActive("DrawFilledTriangle");
         ImGui::GetWindowDrawList()->AddTriangleFilled({first.X, first.Y}, {second.X, second.Y}, {third.X, third.Y},
                                                       ToImGuiDrawingColor(color));
+    }
+
+    void UiFrame::DrawFilledTriangle(const UiColoredVertex first, const UiColoredVertex second,
+                                     const UiColoredVertex third)
+    {
+        RequireActive("DrawFilledTriangle");
+        const auto validPosition = [](const UiPosition position)
+        { return std::isfinite(position.X) && std::isfinite(position.Y); };
+        if (!validPosition(first.Position) || !validPosition(second.Position) || !validPosition(third.Position))
+            throw std::invalid_argument("UI drawing positions must be finite.");
+        const auto firstColor = ToImGuiDrawingColor(first.ColorValue);
+        const auto secondColor = ToImGuiDrawingColor(second.ColorValue);
+        const auto thirdColor = ToImGuiDrawingColor(third.ColorValue);
+        auto* draw = ImGui::GetWindowDrawList();
+        const auto white = ImGui::GetFontTexUvWhitePixel();
+        draw->PrimReserve(3, 3);
+        draw->PrimVtx({first.Position.X, first.Position.Y}, white, firstColor);
+        draw->PrimVtx({second.Position.X, second.Position.Y}, white, secondColor);
+        draw->PrimVtx({third.Position.X, third.Position.Y}, white, thirdColor);
     }
 
     UiSize UiFrame::MeasureText(const std::string_view text, const float fontSize) const

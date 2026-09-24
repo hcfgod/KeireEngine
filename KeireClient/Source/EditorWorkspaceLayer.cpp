@@ -1,6 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "Keire/ECS/Components/AudioComponents.h"
+#include "Keire/Project/SharedShaderLibrary.h"
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 
@@ -786,6 +787,7 @@ void EditorWorkspaceLayer::OnAttach()
         m_ThemeUndoContext = undo->CreateContext({.Name = "Theme Authoring"});
         m_ManagedDataUndoContext = undo->CreateContext({.Name = "Managed Data Authoring"});
     }
+    m_GameLogicalViewportSize = {};
     if (const auto renderer = Owner().Renderer(); renderer && renderer->Mode() != Keire::RenderMode::Disabled)
     {
         Keire::RenderSurfaceSpecification gameSurface;
@@ -843,6 +845,14 @@ void EditorWorkspaceLayer::OnAttach()
             if (const auto undo = Owner().Undo())
                 m_AssetBrowserPanel->SetUndoContext(undo->CreateContext({.Name = "Project Assets"}));
             ConfigureAssetImporters(databaseSpecification);
+            try
+            {
+                (void)Keire::EnsureSharedShaderLibrary(project->Root());
+            }
+            catch (const std::exception& error)
+            {
+                ReportError("Assets", std::string("Default shared shaders could not be prepared: ") + error.what());
+            }
             const auto sourceIndex = project->Root() / "Library/AssetCache/Runtime/source-index.json";
             bool openedFromSourceIndex = false;
             std::error_code sourceIndexError;
@@ -868,6 +878,9 @@ void EditorWorkspaceLayer::OnAttach()
             const auto restoredScene = editorSession.LastScene;
             m_MaximizeGameOnPlay = editorSession.MaximizeGameOnPlay;
             const auto startupCandidate = restoredScene ? restoredScene : project->Descriptor().StartupScene;
+            m_DefaultLitWarmupAttempted = false;
+            m_DefaultLitWarmupReady = false;
+            m_PendingMaterialCreation.reset();
             m_AssetOperations = std::make_unique<KeireEditor::AssetOperationService>(
                 KeireEditor::AssetOperationService::ResolveWorkerExecutable(m_ExecutablePath), project->Root());
             InitializePlayerBuild();
@@ -902,9 +915,12 @@ void EditorWorkspaceLayer::OnAttach()
                 ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
             }
             else
+            {
                 m_AssetStatus = openedFromSourceIndex
                                     ? "Opened the cached catalog. Source reconciliation is running in the background."
                                     : "Opened the current development catalog after rebuilding the source index.";
+                QueueDefaultLitWarmup();
+            }
             if (const auto input = Owner().Input())
             {
                 m_EditorInputUser = input->CreateUser("Editor");

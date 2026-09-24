@@ -3,6 +3,7 @@
 #include "KeireHub/HubEditorDiscovery.h"
 
 #include "KeireHubRuntime/LicenseCatalog.h"
+#include "KeireHubRuntimeInternal/Persistence.h"
 
 #include <algorithm>
 #include <chrono>
@@ -286,7 +287,9 @@ namespace KeireHub
                                                              HubEditorManagementServices services)
         : m_Controller(controller), m_HostPlatform(std::move(specification.HostPlatform)),
           m_HostArchitecture(std::move(specification.HostArchitecture)),
-          m_ProbeRunning(std::move(specification.ProbeRunning)), m_Services(std::move(services)),
+          m_ProbeRunning(std::move(specification.ProbeRunning)),
+          m_ProbeEntrypointActivity(std::move(specification.ProbeEntrypointActivity)),
+          m_ActivityProbeInterval(specification.ActivityProbeInterval), m_Services(std::move(services)),
           m_OwnerThread(std::this_thread::get_id()),
           m_Snapshot(std::make_shared<const std::vector<EditorInstallationHealthSnapshot>>()),
           m_OperationSnapshot(std::make_shared<const HubEditorManagementOperationSnapshot>())
@@ -394,6 +397,7 @@ namespace KeireHub
     {
         if (const auto owner = RequireOwnerThread("poll"); !owner)
             return HubResult<bool>::Failure(owner.Error());
+        PollActivity();
         if (!m_WorkFuture.valid() || m_WorkFuture.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
             return HubResult<bool>::Success(false);
 
@@ -955,6 +959,91 @@ namespace KeireHub
         return activity;
     }
 
+    void HubEditorManagementWorkflow::PollActivity()
+    {
+        if (m_ActivityFuture.valid() && m_ActivityFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        {
+            std::vector<bool> observed;
+            try
+            {
+                observed = m_ActivityFuture.get();
+            }
+            catch (...)
+            {
+                observed.assign(m_ActivityRegistrations->size(), true);
+            }
+            if (m_ActivityRegistrations == m_Controller.Installations().Snapshot() &&
+                observed.size() == m_Snapshot->size() &&
+                std::ranges::equal(*m_ActivityRegistrations, *m_Snapshot, {}, &EditorInstallation::Id,
+                                   [](const EditorInstallationHealthSnapshot& snapshot)
+                                   { return snapshot.Installation.Id; }))
+            {
+                auto snapshots = *m_Snapshot;
+                bool changed = false;
+                for (std::size_t index = 0; index < snapshots.size(); ++index)
+                {
+                    const auto local = Activity(snapshots[index].Installation);
+                    const EditorInstallationActivity current{.Running = observed[index] || local.Running,
+                                                             .HasActiveTask = local.HasActiveTask};
+                    if (snapshots[index].Activity.Running != current.Running ||
+                        snapshots[index].Activity.HasActiveTask != current.HasActiveTask)
+                    {
+                        snapshots[index].Activity = current;
+                        changed = true;
+                    }
+                }
+                if (changed)
+                    m_Snapshot =
+                        std::make_shared<const std::vector<EditorInstallationHealthSnapshot>>(std::move(snapshots));
+            }
+            m_ActivityRegistrations.reset();
+        }
+
+        if (m_ActivityFuture.valid() || m_WorkFuture.valid() || std::chrono::steady_clock::now() < m_NextActivityProbe)
+            return;
+        const auto installations = m_Controller.Installations().Snapshot();
+        if (installations->empty())
+            return;
+        m_NextActivityProbe = std::chrono::steady_clock::now() + m_ActivityProbeInterval;
+        m_ActivityRegistrations = installations;
+        auto probe = m_ProbeEntrypointActivity;
+        try
+        {
+            m_ActivityFuture =
+                std::async(std::launch::async,
+                           [installations, probe = std::move(probe)]
+                           {
+                               std::vector<bool> running;
+                               running.reserve(installations->size());
+                               for (const auto& installation : *installations)
+                               {
+                                   const auto entrypoint = ResolveEditorEntrypoint(installation);
+                                   if (!installation.Root.is_absolute() || !Detail::IsSafeRelativePath(entrypoint))
+                                   {
+                                       running.push_back(true);
+                                       continue;
+                                   }
+                                   try
+                                   {
+                                       const auto path = (installation.Root / entrypoint).lexically_normal();
+                                       const auto activity =
+                                           probe ? probe(path) : ProbeEditorEntrypointProcessActivity(path);
+                                       running.push_back(activity != EditorEntrypointActivity::NotRunning);
+                                   }
+                                   catch (...)
+                                   {
+                                       running.push_back(true);
+                                   }
+                               }
+                               return running;
+                           });
+        }
+        catch (...)
+        {
+            m_ActivityRegistrations.reset();
+        }
+    }
+
     void HubEditorManagementWorkflow::PublishOperation(HubEditorManagementOperationSnapshot snapshot)
     {
         std::scoped_lock lock(m_OperationMutex);
@@ -1056,6 +1145,8 @@ namespace KeireHub
         {
             if (m_WorkFuture.valid())
                 m_WorkFuture.wait();
+            if (m_ActivityFuture.valid())
+                m_ActivityFuture.wait();
             if (m_LicenseFuture.valid())
                 m_LicenseFuture.wait();
         }

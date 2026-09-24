@@ -42,11 +42,12 @@ yellow Scene Color tint and blue custom UI as the editor. Focused scene/prefab d
 
 ## September 22 follow-up
 
-The historical consumer trace below is not wholly current: retained UI now has a dedicated generated vertex ABI,
-`ValidateRuntimeUiShader`, and material binding/pipeline reload in `RenderRuntimeUiMaterials.cpp`. Fullscreen scene
-injection and custom graphics submission are still absent. A successful graph preview or backend compilation does
-not establish those runtime workflows. VFX mesh-material rendering must also be distinguished from the built-in
-billboard/ribbon paths.
+This dated consumer trace is a historical assessment, superseded for fullscreen camera effects by the September 22
+runtime implementation above and the September 23 native readback recorded in `RevampProductionAcceptance.md`.
+Explicit camera slots now execute fullscreen materials in the renderer. That does not make the graph preview a GPU
+preview: the graph thumbnail remains a bounded CPU approximation. Arbitrary custom-pass submission and fullscreen
+scene-depth input remain open. VFX mesh-material rendering must also be distinguished from the built-in billboard/ribbon
+paths, which received their own September 23 implementation follow-up.
 
 The production-import regression now covers Lit, Unlit, Transparent, Decal, Hair, Eye, UI, Fullscreen, VFX, and Custom
 Graphics templates with an exposed color parameter. All ten compiled, preserved target/property reflection, and
@@ -64,10 +65,14 @@ project for reopen checks. New nodes were initially placed outside the visible c
 through the existing node-focus path. The compiling status also no longer promises a scene update for all targets.
 
 Logs: `Build/Validation/shader-targets-compiler-tests.log`, `shader-targets-compute-d3d12.log`,
-`shader-targets-compute-vulkan.log`, and `shader-targets-editor-tests.log`. No Metal execution, packaged-player parity,
-fullscreen scene effect, or arbitrary custom-pass execution is claimed by this follow-up.
+`shader-targets-compute-vulkan.log`, and `shader-targets-editor-tests.log`. At the time of this September 22 follow-up,
+it had no Metal execution, packaged-player parity, fullscreen scene-effect readback, or arbitrary custom-pass execution.
+The later fullscreen runtime evidence is recorded separately in `RevampProductionAcceptance.md`; Metal and arbitrary
+custom-pass execution remain unclaimed.
 
-This lane adds the following changes beyond the restored seed. GPU preview and runtime target acceptance remain open.
+The following sections describe this lane's September 12 changes and validation, not the current fullscreen runtime
+status. GPU graph-thumbnail preview remains a CPU approximation; target-specific runtime status is recorded in the
+dated follow-ups above.
 
 ## Added implementation
 
@@ -76,14 +81,20 @@ This lane adds the following changes beyond the restored seed. GPU preview and r
   depth-tested transparent state. Fullscreen replacement, custom graphics, and historical material output states
   remain unchanged. The generated shader version must advance with these manifest changes to invalidate cached imports.
 - `KeireClient/Source/Editor/ShaderGraphPanelPreview.cpp`: labels the existing CPU graph evaluation as an approximation,
-  explicitly states that compiled GPU execution is absent, and names missing particle simulation/billboards,
-  custom-pass inputs/scheduling, and fullscreen scene color/depth/injection. No GPU execution was added by this lane.
+  explicitly states that the graph thumbnail does not execute the compiled GPU shader. The historical label named
+  missing particle simulation/billboards, custom-pass inputs/scheduling, and fullscreen scene color/depth/injection;
+  fullscreen Scene Color and explicit camera-stage execution were implemented later.
 - `KeireTests/Source/Rendering/ShaderGraphGraphicsTargetTests.cpp`: two focused tests cover the five graphics targets'
   culling, depth, blend, and pass roles, plus preservation of the legacy transparent material contract.
 
 The seed already supplied the flat UI/fullscreen CPU preview; this lane does not claim that implementation as new.
 
-## Runtime consumer trace and required next implementation
+## Historical runtime consumer trace and then-open work
+
+The trace below records the September 12 architecture. Its fullscreen claims are superseded by the September 22 camera
+implementation above: the renderer now executes fullscreen materials assigned to explicit camera slots. The remaining
+fullscreen gaps are arbitrary graph-metadata-driven/custom pass scheduling and Scene Depth input. Shader Graph thumbnail
+preview still evaluates on the CPU.
 
 `ShaderGraphPanelPreview.cpp` expands the last-good graph and passes it to `RenderShaderGraphPreview` in a CPU job.
 `UiFrame::CreateImage` uploads those evaluated pixels. `ShaderGraphCompilation` holds HLSL/manifest strings and properties,
@@ -103,15 +114,14 @@ path resolves only material tint and first texture, then binds the built-in `Gpu
 the VFX graph requires particle-instance vertex inputs and graph parameter/resource bindings in that path, plus
 equivalent CPU-particle behavior and appropriate lifetime/last-good handling.
 
-For fullscreen/custom graphics, no renderer-owned submission list consumes the graph's `fullscreenInjectionPoint`
-or `programTarget` metadata. Those fields currently occur in graph serialization/manifest generation and tests,
-not renderer dispatch. Required work includes preserving target/injection in the imported runtime shader contract,
-validating stage and resource layouts, scene color/depth inputs, frame-graph ordering/hazards, and retirement of
-target pipelines/resources after reload and device loss. Core ProgramArtifact/reflection changes belong to the
-compute lane and must be coordinated before introducing this ABI.
+The implemented fullscreen camera path uses the camera's three explicit slots and its renderer-owned scene-color
+passes. It does not schedule arbitrary custom passes from the graph's `fullscreenInjectionPoint` or `programTarget`
+metadata. Custom graphics submission, Scene Depth input, and their resource-layout, frame-graph ordering/hazard,
+reload, and device-loss contracts remain future work. Do not treat graph metadata alone as evidence those workflows
+execute.
 
-These are concrete missing execution paths. A generic mesh illustration, corrected raster-state manifest, or an
-offscreen surface displaying CPU pixels does not close them.
+These are concrete remaining gaps. For custom graphics, a generic mesh illustration, corrected raster-state manifest,
+or an offscreen surface displaying CPU pixels does not establish custom-pass execution.
 
 ## Validation
 
@@ -126,8 +136,8 @@ Linux/Vulkan, or macOS/Metal validation. Test execution results must be appended
 
 ## Proposed integration documentation
 
-README: Shader Graph previews currently show a bounded CPU approximation, with target-specific notes about inputs
-and execution that are absent. Compiled GPU preview acceptance is pending for UI, VFX, fullscreen, and custom graphics.
+README: Shader Graph thumbnails show a bounded CPU approximation. The renderer separately executes fullscreen effects
+assigned to camera slots; custom graphics execution and Scene Depth input remain open.
 
 CHANGELOG: Corrected generated UI shader blend/depth/culling state and made VFX shaders two-sided. Shader Graph preview
 labels now identify CPU approximation and absent target-specific execution.

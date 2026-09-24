@@ -25,6 +25,12 @@ namespace KeireEditor
         Debug
     };
 
+    [[nodiscard]] constexpr bool UiBuilderToolbarUsesStyleSheet(const UiBuilderWorkspaceMode mode,
+                                                                const bool styleSheetOpen) noexcept
+    {
+        return mode == UiBuilderWorkspaceMode::Styles && styleSheetOpen;
+    }
+
     class IUiBuilderController
     {
       public:
@@ -118,6 +124,7 @@ namespace KeireEditor
         Keire::AssetId m_PreviewSelection;
         std::uint64_t m_PreviewGeneration = 0;
         std::optional<UiBuilderRetainedPreview> m_PreviewSnapshot;
+        Keire::Ref<Keire::UiImage> m_FallbackFontAtlasImage;
         std::vector<const Keire::UiStyleSheetAsset*> m_PreviewStyleSheets;
         std::vector<const Keire::UiVisualTreeAsset*> m_PreviewTemplates;
         UiBuilderPreviewSettings m_PreviewSettings;

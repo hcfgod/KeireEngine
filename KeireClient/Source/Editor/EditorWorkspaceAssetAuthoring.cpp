@@ -977,34 +977,38 @@ bool EditorWorkspaceLayer::CreateMaterial(const std::string_view name)
 {
     if (!m_AssetDatabase || !m_AssetOperations)
         return false;
+    if (m_PendingMaterialCreation)
+    {
+        SetAssetError("A material creation is already waiting for asset preparation to finish.");
+        return false;
+    }
     try
     {
-        if (m_AssetOperations->Busy())
-            (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
         if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
             throw std::invalid_argument("Material name must be one non-empty path component.");
         const auto destination = directory / (std::string(name) + std::string(Keire::MaterialAssetSourceExtension));
         if (m_AssetDatabase->Find(destination))
             throw std::runtime_error("A material with that name already exists in this folder.");
+        if (!m_DefaultLitWarmupReady)
+        {
+            m_PendingMaterialCreation = destination;
+            if (!m_AssetOperations->PendingDefaultLitWarmup() && !m_DefaultLitWarmupAttempted &&
+                !m_AssetOperations->Busy())
+                QueueDefaultLitWarmup();
+            if (m_DefaultLitWarmupAttempted)
+                m_AssetStatus = "Preparing Default Lit; material creation will continue when it is ready.";
+            else if (!m_AssetStatus.starts_with("Default Lit shader warmup failed:"))
+                m_AssetStatus = "Material creation is waiting for the active asset operation.";
+            return m_PendingMaterialCreation.has_value();
+        }
         if (m_AssetOperations->Busy())
-            throw std::runtime_error("Wait for the active asset operation before creating a material.");
-        const auto library = Keire::EnsureSharedShaderLibrary(m_AssetDatabase->Specification().ProjectRoot);
-        const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
-        if (lit == library.Shaders.end())
-            throw std::runtime_error("The pinned shared shader library has no Kéire/Lit shader.");
-        (void)m_AssetDatabase->Refresh();
-        Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(
-            *m_AssetDatabase,
-            m_AssetDatabase->Specification().ProjectRoot / "Library/AssetCache/Runtime/source-index.json");
-        Keire::MaterialAuthoringDefinition definition;
-        definition.SchemaVersion = 5;
-        definition.Shader = {Keire::MaterialShaderSourceKind::ShaderGraph, lit->Id};
-        m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialAsset::EncodeAuthoringSource(definition), {},
-                                            {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenMaterialGraph,
-                                             .UndoName = "Create Material",
-                                             .Reason = "material-creation"});
-        m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
+        {
+            m_PendingMaterialCreation = destination;
+            m_AssetStatus = "Material creation is waiting for the active asset operation.";
+            return true;
+        }
+        QueueMaterialCreation(destination);
         return true;
     }
     catch (const std::exception& error)
@@ -1012,6 +1016,32 @@ bool EditorWorkspaceLayer::CreateMaterial(const std::string_view name)
         SetAssetError(std::string("Material creation failed: ") + error.what());
         return false;
     }
+}
+
+void EditorWorkspaceLayer::QueueMaterialCreation(const std::filesystem::path& destination)
+{
+    if (!m_AssetDatabase || !m_AssetOperations || !m_DefaultLitWarmupReady)
+        throw std::logic_error("Default Lit shader warmup must succeed before creating a material.");
+    if (m_AssetDatabase->Find(destination))
+        throw std::runtime_error("A material with that name already exists in this folder.");
+    if (m_AssetOperations->Busy())
+        throw std::runtime_error("Wait for the active asset operation before creating a material.");
+    const auto library = Keire::ReadSharedShaderLibrary(m_AssetDatabase->Specification().ProjectRoot);
+    const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
+    if (lit == library.Shaders.end())
+        throw std::runtime_error("The pinned shared shader library has no Kéire/Lit shader.");
+    (void)m_AssetDatabase->Refresh();
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*m_AssetDatabase,
+                                                                 m_AssetDatabase->Specification().ProjectRoot /
+                                                                     "Library/AssetCache/Runtime/source-index.json");
+    Keire::MaterialAuthoringDefinition definition;
+    definition.SchemaVersion = 5;
+    definition.Shader = {Keire::MaterialShaderSourceKind::ShaderGraph, lit->Id};
+    m_AssetOperations->QueueCreateAsset(destination, Keire::MaterialAsset::EncodeAuthoringSource(definition), {},
+                                        {.FollowUp = KeireEditor::AssetOperationFollowUp::OpenMaterialGraph,
+                                         .UndoName = "Create Material",
+                                         .Reason = "material-creation"});
+    m_AssetStatus = "Creating " + destination.generic_string() + " in the isolated asset worker.";
 }
 
 bool EditorWorkspaceLayer::CreateAnimationGraph(const std::string_view name)

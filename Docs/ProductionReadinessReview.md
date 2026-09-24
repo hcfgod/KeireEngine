@@ -50,6 +50,41 @@ reference and visual result. The individual lighting pass above is complete, but
 cross-system restart sequence. Native Linux/macOS interaction and the intentional future-work items already identified
 in this review remain outside this Windows source-candidate pass.
 
+### September 24 Windows UI and shader workflow validation
+
+A disposable copy of a user project exercised the native Editor UI: authoring and saving a menu button, a bound
+health overlay, rounded panels, a rotated gradient, narrow wrapping labels, and a camera vignette. The test used
+the actual UI Builder, Inspector, asset browser, and Play controls. The managed health binding updated in Play,
+stopped updating when its Behaviour was disabled, and resumed when re-enabled. Match Game View reported the
+observed logical viewport size; Debug mode opened the diagnostics pane directly.
+The saved UI survived an editor restart and viewport resizing. A native TwoWay toggle changed the value observed
+by its C# Behaviour in both directions. A timed script update also changed that toggle and remained stable across
+frames; subsequent mouse input still wrote back to the script. Styles-mode toolbar Save, Undo, and Redo were corrected
+and retested with a gradient-angle edit; Save retained the live preview and wrote the stylesheet, not the visual-tree
+document.
+
+The review found and corrected preview differences in panel geometry and fallback-font measurements. Builder now
+uses the runtime panel and fallback-glyph geometry, including gradients, transforms, clipping, and shadows.
+Custom font assets, image assets, and shader-driven UI still require Game view for final visual acceptance:
+Builder uses editor-font previews for custom fonts, placeholders for images, and does not evaluate UI materials.
+
+Native material creation completed in approximately 129 ms after shader preparation. A roughness override persisted
+after import and reselection. Changing camera vignette strength updated the image and persisted the override.
+These timings describe a prepared development project, not a cold machine or a packaged installation benchmark.
+The focused UI and Shader Graph GPU suite passed six cases and 104 assertions on each of Direct3D 12 and Vulkan.
+The final Debug core suite passed 1,106 cases and 74,309 assertions (two explicitly skipped tests); the Editor suite
+passed 411 cases and 18,044 assertions (one skipped test). The Hub suite passed 412 cases and 4,246 assertions.
+AddressSanitizer passed 77 focused UI/lifecycle cases and 1,684 assertions, including retained-image ownership,
+binding callback teardown, raw runtime-tree edits, and immediate checked-state styling. Managed API tests and
+the documentation tests/build also passed, including compilation of the C# manual examples.
+Windows Hub and Editor installer regression harnesses passed their isolated fixture install, uninstall, rollback,
+and timeout cases; full-size release installation timing remains a separate package acceptance gate.
+
+The full Windows script harness remains blocked by an existing unrelated lowercase `src` directory that violates
+the repository layout check. The isolated installer harness results above do not imply that the full harness passed.
+This is source-candidate evidence, not a new published Windows release, a newly staged Dist build, or native
+Linux/macOS acceptance. Restage or package the updated source before testing it through the staged launch commands.
+
 ## 0.4.2 Release Update
 
 Version 0.4.2 adds same-frame camera-local GPU occlusion culling, compacted indirect draws, deterministic direct

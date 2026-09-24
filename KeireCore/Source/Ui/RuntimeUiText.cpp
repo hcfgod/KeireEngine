@@ -1,3 +1,4 @@
+#include "KeireInternal/Rendering/RuntimeUiFontAtlasInternal.h"
 #include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 
 #include <ft2build.h>
@@ -158,10 +159,12 @@ namespace Keire::Detail
             return FRIBIDI_PAR_ON;
         }
 
-        [[nodiscard]] float FallbackAdvance(const char32_t codepoint,
-                                            const RuntimeUiTextLayoutRequest& request) noexcept
+        [[nodiscard]] float FallbackAdvance(const char32_t codepoint, const RuntimeUiTextLayoutRequest& request)
         {
-            float result = request.FontSize * (codepoint == U' ' || codepoint == U'\t' ? 0.34F : 0.56F);
+            const auto character = codepoint <= RenderBackend::RuntimeUiLastFallbackGlyph
+                                       ? static_cast<std::uint8_t>(codepoint)
+                                       : static_cast<std::uint8_t>('?');
+            float result = RenderBackend::RuntimeUiFallbackGlyph(character).Advance * request.FontSize / 12.0F;
             result += request.LetterSpacing;
             if (codepoint == U' ' || codepoint == U'\t')
                 result += request.WordSpacing;

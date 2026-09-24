@@ -6,6 +6,7 @@
 #include "Keire/Ref.h"
 #include "Keire/Ui/RuntimeUi.h"
 
+#include <any>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -271,6 +272,10 @@ namespace Keire
         [[nodiscard]] Ref<Ui::VisualElement> UiDocumentVisualElement(EntityId document,
                                                                      AssetId stableId) const noexcept;
         void SetUiDocumentBindingSource(EntityId document, Ref<UiDocumentBindingSource> source);
+        [[nodiscard]] bool SetManagedUiDocumentBindingValue(EntityId document, std::string_view path, std::any value);
+        [[nodiscard]] std::optional<std::any> ReadManagedUiDocumentBindingValue(EntityId document,
+                                                                                std::string_view path) const;
+        [[nodiscard]] bool ClearManagedUiDocumentBindingSource(EntityId document);
         [[nodiscard]] std::optional<ScenePresentationUiDocumentDebugSnapshot>
         UiDocumentDebugSnapshot(EntityId document) const;
         [[nodiscard]] std::optional<ScenePresentationUiDocumentHit> HitTestUiDocument(float x, float y) const noexcept;

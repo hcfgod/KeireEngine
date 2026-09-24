@@ -11,6 +11,7 @@
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 
+#include <any>
 #include <chrono>
 #include <compare>
 #include <cstddef>
@@ -633,6 +634,16 @@ namespace Keire
         {
             return false;
         }
+        [[nodiscard]] virtual bool SetManagedUiDocumentBindingValue(AssetId, std::string_view, std::any) noexcept
+        {
+            return false;
+        }
+        [[nodiscard]] virtual std::optional<std::any> ReadManagedUiDocumentBindingValue(AssetId,
+                                                                                        std::string_view) noexcept
+        {
+            return std::nullopt;
+        }
+        [[nodiscard]] virtual bool ClearManagedUiDocumentBindingSource(AssetId) noexcept { return false; }
         [[nodiscard]] virtual std::optional<float> ReadManagedRenderingScalar(AssetId, ManagedRenderingComponent,
                                                                               ManagedRenderingScalarProperty) noexcept
         {

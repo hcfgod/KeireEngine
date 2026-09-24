@@ -1,6 +1,8 @@
 #include "KeireClient/Editor/UiBuilderPanel.h"
 
 #include "Keire/Ui/UiElements.h"
+#include "KeireInternal/Rendering/RuntimeUiFontAtlasInternal.h"
+#include "KeireInternal/Rendering/RuntimeUiGeometryInternal.h"
 
 #include <algorithm>
 #include <array>
@@ -664,12 +666,22 @@ namespace KeireEditor
             switch (command.Type)
             {
             case Keire::RuntimeUiDrawType::Quad:
-                ui.DrawFilledRectangle(rectangle, ToUiColor(command.ColorValue), command.CornerRadius * rasterScale);
-                if (command.BorderWidth > 0.0F && command.BorderColor.Alpha > 0.0F)
-                    ui.DrawRectangle(rectangle, ToUiColor(command.BorderColor),
-                                     std::max(1.0F, command.BorderWidth * rasterScale),
-                                     command.CornerRadius * rasterScale);
+            {
+                const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&command, 1U));
+                const auto previewVertex = [&](const Keire::RenderBackend::RuntimeUiVertex& vertex)
+                {
+                    return Keire::UiColoredVertex{{canvasOrigin.X + vertex.Position.X * rasterScale,
+                                                   canvasOrigin.Y + vertex.Position.Y * rasterScale},
+                                                  ToUiColor(vertex.ColorValue)};
+                };
+                for (std::size_t first = 0; first + 2U < geometry.Vertices.size(); first += 3U)
+                {
+                    ui.DrawFilledTriangle(previewVertex(geometry.Vertices[first]),
+                                          previewVertex(geometry.Vertices[first + 1U]),
+                                          previewVertex(geometry.Vertices[first + 2U]));
+                }
                 break;
+            }
             case Keire::RuntimeUiDrawType::Image:
                 ui.DrawFilledRectangle(rectangle, {0.12F, 0.15F, 0.2F, command.ColorValue.Alpha},
                                        command.CornerRadius * rasterScale);
@@ -679,18 +691,37 @@ namespace KeireEditor
                 break;
             case Keire::RuntimeUiDrawType::Text:
             {
+                if (!command.Asset && !command.PreparedFontBinding)
+                {
+                    if (!m_FallbackFontAtlasImage)
+                    {
+                        const auto& atlas = *Keire::RenderBackend::RuntimeUiFallbackGlyphAtlas();
+                        m_FallbackFontAtlasImage = ui.CreateImage(atlas.Width, atlas.Height, atlas.Pixels);
+                    }
+                    const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&command, 1U));
+                    const auto previewVertex = [&](const Keire::RenderBackend::RuntimeUiVertex& vertex)
+                    {
+                        return Keire::UiTexturedVertex{{canvasOrigin.X + vertex.Position.X * rasterScale,
+                                                        canvasOrigin.Y + vertex.Position.Y * rasterScale},
+                                                       {vertex.UV.X, vertex.UV.Y},
+                                                       ToUiColor(vertex.ColorValue)};
+                    };
+                    for (std::size_t first = 0; first + 2U < geometry.Vertices.size(); first += 3U)
+                        ui.DrawTexturedTriangle(m_FallbackFontAtlasImage, previewVertex(geometry.Vertices[first]),
+                                                previewVertex(geometry.Vertices[first + 1U]),
+                                                previewVertex(geometry.Vertices[first + 2U]));
+                    break;
+                }
+                const auto textClip =
+                    TransformPreviewRect(UiBuilderPreviewTextClip(command), canvasOrigin, rasterScale);
+                if (!IsPositiveFinite(textClip))
+                    break;
                 const float fontSize = std::max(1.0F, command.FontSize * rasterScale);
-                const auto measured = ui.MeasureText(command.Text, fontSize);
-                Keire::UiPosition position = rectangle.Minimum;
-                if (command.HorizontalAlignment == Keire::RuntimeUiAlignment::Center)
-                    position.X += (rectangle.Size().Width - measured.Width) * 0.5F;
-                else if (command.HorizontalAlignment == Keire::RuntimeUiAlignment::End)
-                    position.X += rectangle.Size().Width - measured.Width;
-                if (command.VerticalAlignment == Keire::RuntimeUiAlignment::Center)
-                    position.Y += (rectangle.Size().Height - measured.Height) * 0.5F;
-                else if (command.VerticalAlignment == Keire::RuntimeUiAlignment::End)
-                    position.Y += rectangle.Size().Height - measured.Height;
-                ui.DrawOverlayText(position, ToUiColor(command.ColorValue), command.Text, fontSize, clipRectangle);
+                for (const auto& line : LayoutUiBuilderPreviewText(command))
+                    for (const auto& glyph : line.Glyphs)
+                        ui.DrawOverlayText({canvasOrigin.X + glyph.Position.X * rasterScale,
+                                            canvasOrigin.Y + glyph.Position.Y * rasterScale},
+                                           ToUiColor(command.ColorValue), glyph.Text, fontSize, textClip);
                 break;
             }
             case Keire::RuntimeUiDrawType::PushClip:
@@ -746,11 +777,15 @@ namespace KeireEditor
                                                                ? m_PreviewSnapshot->SelectedState->Rect
                                                                : m_CanvasGesture.Draft,
                                                            canvasOrigin, rasterScale);
+            const float selectionRadius =
+                std::clamp(m_PreviewSnapshot->SelectedState->Style.CornerRadius *
+                               m_PreviewSnapshot->SelectedState->LayoutScale * rasterScale,
+                           0.0F, std::min(selectedRect.Size().Width, selectedRect.Size().Height) * 0.5F);
             auto selectionFill = theme.Accent;
             selectionFill.Alpha = 0.055F;
-            ui.DrawFilledRectangle(selectedRect, selectionFill, 1.0F);
-            ui.DrawRectangle(selectedRect, {0.01F, 0.015F, 0.02F, 0.92F}, 3.0F, 1.0F);
-            ui.DrawRectangle(selectedRect, theme.Accent, 1.0F, 1.0F);
+            ui.DrawFilledRectangle(selectedRect, selectionFill, selectionRadius);
+            ui.DrawRectangle(selectedRect, {0.01F, 0.015F, 0.02F, 0.92F}, 3.0F, selectionRadius);
+            ui.DrawRectangle(selectedRect, theme.Accent, 1.0F, selectionRadius);
             const float centerX = (selectedRect.Minimum.X + selectedRect.Maximum.X) * 0.5F;
             const float centerY = (selectedRect.Minimum.Y + selectedRect.Maximum.Y) * 0.5F;
             struct SelectionGrip final

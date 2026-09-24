@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <any>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -30,6 +32,40 @@ namespace
         }
 
         std::string Status = "Bound";
+    };
+
+    struct BindingShutdownProbeState
+    {
+        Keire::SceneRuntimeSession* Session = nullptr;
+        Keire::EntityId Document;
+        bool SawPresentedDocument = false;
+        bool PublishedOnDisable = false;
+    };
+
+    class BindingShutdownProbe final : public Keire::Component
+    {
+      public:
+        explicit BindingShutdownProbe(std::shared_ptr<BindingShutdownProbeState> state)
+            : Component(StaticType()), m_State(std::move(state))
+        {
+        }
+
+        [[nodiscard]] static constexpr Keire::ComponentTypeId StaticType() noexcept
+        {
+            return Keire::ComponentTypeId(Keire::AssetId(0x746573742d756962ULL, 0x696e64696e670001ULL));
+        }
+
+      protected:
+        void OnDisable() override
+        {
+            const auto presentation = m_State->Session->Presentation();
+            m_State->SawPresentedDocument = presentation && presentation->UiDocumentRoot(m_State->Document);
+            m_State->PublishedOnDisable = presentation && presentation->SetManagedUiDocumentBindingValue(
+                                                              m_State->Document, "Player.Health", 25.0F);
+        }
+
+      private:
+        std::shared_ptr<BindingShutdownProbeState> m_State;
     };
 
     class TemporaryPresentationProject final
@@ -1221,6 +1257,163 @@ TEST_CASE("scene UI documents bind source data dispatch callbacks and recascade 
     REQUIRE(checkedToggle != checked->Elements.end());
     CHECK(checkedToggle->State.Style.Border.Green == doctest::Approx(1.0F));
     presentation->Clear();
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("managed scene UI binding values survive presentation and support two-way writes")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(specification));
+    const auto documentId = Keire::AssetId::Generate();
+    const auto labelId = Keire::AssetId::Generate();
+    const auto progressId = Keire::AssetId::Generate();
+    const auto toggleId = Keire::AssetId::Generate();
+    Keire::UiVisualTreeDefinition definition;
+    definition.Name = "ManagedBindings";
+    definition.Root.StableId = Keire::AssetId::Generate();
+    Keire::UiVisualElementDefinition label;
+    label.StableId = labelId;
+    label.Type = Keire::UiVisualElementType::Label;
+    label.Bindings = {{"text", "Player.Name", "OneWay"}};
+    Keire::UiVisualElementDefinition progress;
+    progress.StableId = progressId;
+    progress.Type = Keire::UiVisualElementType::ProgressBar;
+    progress.Attributes = {{"minimum", "0"}, {"maximum", "100"}};
+    progress.Bindings = {{"value", "Player.Health", "OneWay"}};
+    Keire::UiVisualElementDefinition toggle;
+    toggle.StableId = toggleId;
+    toggle.Type = Keire::UiVisualElementType::Toggle;
+    toggle.Bindings = {{"value", "Player.Ready", "TwoWay"}};
+    definition.Root.Children = {label, progress, toggle};
+    REQUIRE(assets->PublishDevelopmentAsset(documentId, Keire::CreateRef<Keire::UiVisualTreeAsset>(definition)));
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Managed bindings"));
+    auto entity = scene->CreateEntity("Document");
+    const auto component = entity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(component);
+    component->SetVisualTree(documentId);
+    auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Name", std::string("Ada")));
+    REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Health", 42.0F));
+    REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Ready", true));
+    CHECK_FALSE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "", 1.0F));
+    CHECK_FALSE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), " \t", 1.0F));
+    CHECK_FALSE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Health", 12));
+    CHECK_FALSE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Health",
+                                                               std::numeric_limits<float>::infinity()));
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    presentation->AdvanceUi(0.0F);
+    const auto labelElement = presentation->FindUiDocumentElement(entity.Id(), labelId);
+    const auto progressElement = presentation->FindUiDocumentElement(entity.Id(), progressId);
+    const auto toggleElement = presentation->FindUiDocumentElement(entity.Id(), toggleId);
+    REQUIRE(labelElement);
+    REQUIRE(progressElement);
+    REQUIRE(toggleElement);
+    CHECK(presentation->ReadUiDocumentElementText(entity.Id(), labelElement->DocumentGeneration,
+                                                  labelElement->Element) == "Ada");
+    CHECK(presentation->ReadUiDocumentElementValue(entity.Id(), progressElement->DocumentGeneration,
+                                                   progressElement->Element) == doctest::Approx(42.0F));
+    const auto toggleVisual =
+        Keire::DynamicRefCast<Keire::Ui::Toggle>(presentation->UiDocumentVisualElement(entity.Id(), toggleId));
+    REQUIRE(toggleVisual);
+    CHECK(toggleVisual->Value());
+    toggleVisual->SetValue(false);
+    const auto ready = presentation->ReadManagedUiDocumentBindingValue(entity.Id(), "Player.Ready");
+    REQUIRE(ready);
+    REQUIRE(std::any_cast<bool>(&*ready));
+    CHECK_FALSE(*std::any_cast<bool>(&*ready));
+    REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Health", 19.0F));
+    presentation->AdvanceUi(0.0F);
+    CHECK_FALSE(toggleVisual->Value());
+    CHECK(presentation->ReadUiDocumentElementValue(entity.Id(), progressElement->DocumentGeneration,
+                                                   progressElement->Element) == doctest::Approx(19.0F));
+    REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Ready", true));
+    presentation->AdvanceUi(0.0F);
+    CHECK(toggleVisual->Value());
+    REQUIRE(presentation->SetUiDocumentElementFlag(entity.Id(), toggleElement->DocumentGeneration,
+                                                   toggleElement->Element,
+                                                   Keire::ScenePresentationUiDocumentFlag::Checked, false));
+    const auto runtimeReady = presentation->ReadManagedUiDocumentBindingValue(entity.Id(), "Player.Ready");
+    REQUIRE(runtimeReady);
+    REQUIRE(std::any_cast<bool>(&*runtimeReady));
+    CHECK_FALSE(*std::any_cast<bool>(&*runtimeReady));
+    presentation->AdvanceUi(0.0F);
+    CHECK_FALSE(toggleVisual->Value());
+    CHECK(presentation->ClearManagedUiDocumentBindingSource(entity.Id()));
+    CHECK_FALSE(presentation->ReadManagedUiDocumentBindingValue(entity.Id(), "Player.Health"));
+    CHECK_FALSE(presentation->ClearManagedUiDocumentBindingSource(entity.Id()));
+    presentation->Clear();
+    CHECK_FALSE(presentation->ReadManagedUiDocumentBindingValue(entity.Id(), "Player.Name"));
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("managed scene UI binding services reject non-documents and closed sessions")
+{
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(Keire::AssetSystemSpecification{});
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Binding service"));
+    auto document = scene->CreateEntity("Document");
+    REQUIRE(document.AddComponent<Keire::UiDocumentComponent>());
+    auto plain = scene->CreateEntity("Plain");
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, assets, Keire::Ref<Keire::AudioSystem>{});
+    session->Play();
+    CHECK_FALSE(Keire::Detail::SetManagedUiDocumentBindingValue(session, plain.Id().Value(), "Player.Health", 50.0F));
+    CHECK_FALSE(Keire::Detail::ReadManagedUiDocumentBindingValue(session, plain.Id().Value(), "Player.Health"));
+    REQUIRE(Keire::Detail::SetManagedUiDocumentBindingValue(session, document.Id().Value(), "Player.Health", 50.0F));
+    CHECK(Keire::Detail::ReadManagedUiDocumentBindingValue(session, document.Id().Value(), "Player.Health"));
+    session->Stop();
+    CHECK_FALSE(Keire::Detail::ReadManagedUiDocumentBindingValue(session, document.Id().Value(), "Player.Health"));
+    CHECK_FALSE(
+        Keire::Detail::SetManagedUiDocumentBindingValue(session, document.Id().Value(), "Player.Health", 30.0F));
+    scene->Close();
+    assets->Close();
+}
+
+TEST_CASE("scene runtime releases UI bindings published by shutdown callbacks")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(specification));
+    const auto visualTreeId = Keire::AssetId::Generate();
+    Keire::UiVisualTreeDefinition definition;
+    definition.Name = "ShutdownBindings";
+    definition.Root.StableId = Keire::AssetId::Generate();
+    REQUIRE(assets->PublishDevelopmentAsset(visualTreeId, Keire::CreateRef<Keire::UiVisualTreeAsset>(definition)));
+
+    auto probe = std::make_shared<BindingShutdownProbeState>();
+    auto registry = Keire::ComponentRegistry::CreateDefault();
+    Keire::ComponentRegistration registration;
+    registration.Type = BindingShutdownProbe::StaticType();
+    registration.Name = "Binding shutdown probe";
+    registration.Factory = [probe]
+    { return Keire::Ref<Keire::Component>(Keire::CreateRef<BindingShutdownProbe>(probe)); };
+    registration.Serialize = [](const Keire::Component&) { return Keire::ComponentPropertyBag{}; };
+    registration.Deserialize = [](Keire::Component&, const Keire::ComponentPropertyBag&, std::uint32_t) {};
+    registry->Register(std::move(registration));
+
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Shutdown bindings"), registry);
+    auto entity = scene->CreateEntity("Document");
+    const auto document = entity.AddComponent<Keire::UiDocumentComponent>();
+    REQUIRE(document);
+    document->SetVisualTree(visualTreeId);
+    REQUIRE(entity.AddComponent<BindingShutdownProbe>());
+    probe->Document = entity.Id();
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, assets, Keire::Ref<Keire::AudioSystem>{});
+    probe->Session = session.Get();
+    session->Play();
+    const auto presentation = session->Presentation();
+    REQUIRE(presentation);
+    REQUIRE(presentation->UiDocumentRoot(entity.Id()));
+    session->Stop();
+    CHECK(probe->SawPresentedDocument);
+    CHECK(probe->PublishedOnDisable);
+    CHECK_FALSE(presentation->ReadManagedUiDocumentBindingValue(entity.Id(), "Player.Health"));
     scene->Close();
     assets->Close();
 }

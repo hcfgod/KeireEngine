@@ -50,6 +50,21 @@ A `.keireui` document opens with these working authoring surfaces:
 - A retained-tree preview with resolution presets or a custom size, landscape/portrait orientation, **Match Game
   View**, DPI/reference scaling, safe-area visualization, zoom/pan, rulers, guides, and live pseudo-state toggles.
 
+The top **Debug** mode opens the Debugger in the tools pane directly; **Design** returns to the hierarchy and Inspector,
+and **Styles** opens the Style Studio panes.
+The top toolbar acts on the open style sheet in **Styles** mode: Save persists its draft, Undo/Redo use its history,
+and Revert reloads it from disk after a warning. In other modes it acts on the UI document. The status beside the title
+shows which source has unsaved changes.
+
+The preview draws fallback-font text from the runtime glyph atlas and transformed glyph geometry, including wrapping,
+truncation, alignment, shadows, and clipping. Authored custom font families still use the Editor font preview and
+should be checked in Game view. Use **Match Game View** when comparing placement
+at the same viewport size; it copies the Game view's logical layout dimensions, independent of display DPI and render
+resolution scaling.
+The selected-element outline follows a uniform `border-radius`, so selection does not square off a rounded control.
+Builder panel fills, borders, shadows, gradients, per-corner radii, and visual transforms use the runtime quad geometry.
+Image textures, custom font rasterization, and material shaders still need Game view for an exact visual check.
+
 New documents open on a 1920x1080 authoring canvas when they do not reference Panel Settings. Clicking a library
 control places it near the active parent center; dragging honors the drop point and keeps the complete control inside
 the parent content box. Direct canvas moves and resizes write explicit absolute `left`, `top`, `width`, and `height`
@@ -174,6 +189,27 @@ Native source-backed documents require an explicit `UiDocumentBindingSource`; au
 element and publish `UiBindingSourceUnavailable` until that provider is attached. The runtime never searches ambient
 objects or assemblies to guess a data source. A successful document reload retains the provider, while a failed reload
 keeps the prior bound document generation.
+
+For a scene `UIDocument` driven by C#, add a ProgressBar in UI Builder and set its **Minimum** to `0` and **Maximum**
+to `100` (a source with no range attributes defaults to 0–1). Select the control and set **Target Property** to `value`,
+**Source Path** to `Player.Health`, choose **OneWay**, and click **Add or Replace Binding**. Save the document and
+attach a Behaviour to the entity holding its UIDocument. During a gameplay callback, publish a typed path value:
+
+```csharp
+UIDocument document = Entity.GetComponent<UIDocument>()!;
+document.SetBindingValue("Player.Health", 75.0f);
+```
+
+`SetBindingValue` accepts `float`, `bool`, or `string`. Paths are explicit keys: `Player.Health` does not search for
+a managed object named Player. Publish updated values when gameplay state changes. Values supplied before the first
+presentation of an assigned VisualTree attach when its asset becomes available, and survive successful document
+reloads within the session. Removing the VisualTree clears the source; supply the values again after assigning a new tree.
+For a **TwoWay** control, read its updated source value with
+`document.TryGetBindingValue("Player.Health", out float health)`. Keep the supplied value type consistent with the
+control property. `ClearBindingSource()` detaches the managed source; stopping the runtime session releases it.
+These calls require a live scene document and the gameplay callback context. Missing or incompatible sources are
+reported rather than silently creating an ambient reflection binding.
+The compile-checked [Health HUD binding example](../Manual/Examples/UiBindings.cs) shows the complete Behaviour lifecycle.
 
 ## Custom Controls
 

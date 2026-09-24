@@ -6,6 +6,7 @@
 #include "Keire/Ui/UiToolkit.h"
 #include "KeireInternal/Scenes/ScenePresentationCanvasProjectionInternal.h"
 
+#include <any>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -61,6 +62,9 @@ namespace Keire::Detail
         [[nodiscard]] bool Focus(EntityId document, std::uint64_t generation, std::uint64_t element) noexcept;
         [[nodiscard]] Ref<Ui::VisualElement> Visual(EntityId document, AssetId stableId) const noexcept;
         void SetBindingSource(EntityId document, Ref<UiDocumentBindingSource> source);
+        [[nodiscard]] bool SetManagedBindingValue(EntityId document, std::string_view path, std::any value);
+        [[nodiscard]] std::optional<std::any> ReadManagedBindingValue(EntityId document, std::string_view path) const;
+        [[nodiscard]] bool ClearManagedBindingSource(EntityId document);
         [[nodiscard]] bool DispatchEvent(const RuntimeUiEvent& event);
         void Update(float deltaSeconds);
         void SynchronizeInteractionStates();

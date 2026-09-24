@@ -262,11 +262,40 @@ namespace
                 ui.DrawFilledRectangle({{95.0F, 30.0F}, {115.0F, 50.0F}}, {1.0F, 0.0F, 1.0F, 0.5F});
                 ui.DrawTriangle({120.0F, 50.0F}, {130.0F, 30.0F}, {140.0F, 50.0F}, {0.0F, 1.0F, 1.0F, 1.0F});
                 ui.DrawFilledTriangle({145.0F, 50.0F}, {155.0F, 30.0F}, {165.0F, 50.0F}, {1.0F, 0.5F, 0.0F, 1.0F});
+                const auto firstColoredVertex = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+                ui.DrawFilledTriangle({{145.0F, 70.0F}, {1.0F, 0.0F, 0.0F, 1.0F}},
+                                      {{155.0F, 55.0F}, {0.0F, 1.0F, 0.0F, 1.0F}},
+                                      {{165.0F, 70.0F}, {0.0F, 0.0F, 1.0F, 1.0F}});
+                const auto& coloredVertices = ImGui::GetWindowDrawList()->VtxBuffer;
+                CHECK(coloredVertices.Size == firstColoredVertex + 3);
+                CHECK(coloredVertices[firstColoredVertex].col ==
+                      ImGui::ColorConvertFloat4ToU32({1.0F, 0.0F, 0.0F, 1.0F}));
+                CHECK(coloredVertices[firstColoredVertex + 1].col ==
+                      ImGui::ColorConvertFloat4ToU32({0.0F, 1.0F, 0.0F, 1.0F}));
+                CHECK(coloredVertices[firstColoredVertex + 2].col ==
+                      ImGui::ColorConvertFloat4ToU32({0.0F, 0.0F, 1.0F, 1.0F}));
+                CHECK_THROWS_AS(ui.DrawFilledTriangle({{std::numeric_limits<float>::infinity(), 0.0F}, {}},
+                                                      {{0.0F, 0.0F}, {}}, {{1.0F, 1.0F}, {}}),
+                                std::invalid_argument);
                 ui.DrawOverlayText({170.0F, 30.0F}, {1.0F, 1.0F, 1.0F, 1.0F}, "overlay");
                 const std::array<std::byte, 4> imagePixels{std::byte{0x33}, std::byte{0x66}, std::byte{0x99},
                                                            std::byte{0xFF}};
                 const auto image = ui.CreateImage(1, 1, imagePixels);
                 ui.DrawImage(image, {{170.0F, 52.0F}, {186.0F, 68.0F}});
+                auto* drawList = ImGui::GetWindowDrawList();
+                const auto firstTexturedVertex = drawList->VtxBuffer.Size;
+                const auto textureDepth = drawList->_TextureStack.Size;
+                ui.DrawTexturedTriangle(image, {{170.0F, 70.0F}, {0.0F, 0.0F}, {1.0F, 0.0F, 0.0F, 1.0F}},
+                                        {{186.0F, 70.0F}, {1.0F, 0.0F}, {0.0F, 1.0F, 0.0F, 1.0F}},
+                                        {{186.0F, 86.0F}, {1.0F, 1.0F}, {0.0F, 0.0F, 1.0F, 1.0F}});
+                CHECK(drawList->VtxBuffer.Size == firstTexturedVertex + 3);
+                CHECK(drawList->_TextureStack.Size == textureDepth);
+                CHECK(drawList->VtxBuffer[firstTexturedVertex + 2].uv.y == doctest::Approx(1.0F));
+                CHECK(drawList->VtxBuffer[firstTexturedVertex].col ==
+                      ImGui::ColorConvertFloat4ToU32({1.0F, 0.0F, 0.0F, 1.0F}));
+                CHECK_THROWS_AS(ui.DrawTexturedTriangle(image, {{0.0F, 0.0F}, {2.0F, 0.0F}, {}}, {}, {}),
+                                std::invalid_argument);
+                CHECK(drawList->_TextureStack.Size == textureDepth);
                 CHECK_THROWS_AS(ui.DrawImage(Keire::Ref<Keire::UiImage>{}, {{170.0F, 52.0F}, {186.0F, 68.0F}}),
                                 std::invalid_argument);
                 CHECK_THROWS_AS(ui.DrawImage(image, {{170.0F, 52.0F}, {170.0F, 68.0F}}), std::invalid_argument);
@@ -969,6 +998,60 @@ TEST_CASE("Headless UI runs after updates and rejects stale and cross-thread use
     }
     CHECK(staleRejected);
     CHECK(threadRejected.load(std::memory_order_acquire));
+}
+
+TEST_CASE("textured UI triangles reject images retained from a closed runtime")
+{
+    UseDummyVideoDriver();
+    class ImageProbeLayer final : public Keire::Layer
+    {
+      public:
+        ImageProbeLayer(Keire::Ref<Keire::UiImage>& image, int& visits)
+            : Layer("Image ownership"), m_Image(image), m_Visits(visits)
+        {
+        }
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            auto window = ui.BeginWindow("Image ownership");
+            REQUIRE(window);
+            const Keire::UiTexturedVertex first{{10.0F, 10.0F}, {0.0F, 0.0F}, {}};
+            const Keire::UiTexturedVertex second{{20.0F, 10.0F}, {1.0F, 0.0F}, {}};
+            const Keire::UiTexturedVertex third{{10.0F, 20.0F}, {0.0F, 1.0F}, {}};
+            if (m_Image)
+                CHECK_THROWS_AS(ui.DrawTexturedTriangle(m_Image, first, second, third), std::invalid_argument);
+            else
+            {
+                const std::array<std::byte, 4> pixels{};
+                m_Image = ui.CreateImage(1, 1, pixels);
+                CHECK_NOTHROW(ui.DrawTexturedTriangle(m_Image, first, second, third));
+            }
+            ++m_Visits;
+            Owner().RequestExit();
+        }
+
+      private:
+        Keire::Ref<Keire::UiImage>& m_Image;
+        int& m_Visits;
+    };
+    class ImageProbeApplication final : public Keire::Application
+    {
+      public:
+        ImageProbeApplication(Keire::Ref<Keire::UiImage>& image, int& visits)
+            : Application(UiSpecification("image ownership", Keire::UiMode::Headless))
+        {
+            (void)PushLayer(std::make_unique<ImageProbeLayer>(image, visits));
+        }
+    };
+    Keire::Ref<Keire::UiImage> image;
+    int visits = 0;
+    for (int run = 0; run < 2; ++run)
+    {
+        ImageProbeApplication application(image, visits);
+        CHECK(application.Run() == 0);
+    }
+    CHECK(visits == 2);
 }
 
 TEST_CASE("UI scope cleanup preserves callback exceptions and permits a later runtime")

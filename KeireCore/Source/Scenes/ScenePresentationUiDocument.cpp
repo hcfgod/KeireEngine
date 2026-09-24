@@ -14,6 +14,40 @@ namespace Keire::Detail
 {
     namespace
     {
+        class ManagedUiBindingSource final : public UiDocumentBindingSource
+        {
+          public:
+            [[nodiscard]] std::any Read(const std::string_view path) const override
+            {
+                const auto found = m_Values.find(path);
+                if (found == m_Values.end())
+                    throw std::invalid_argument("UI binding path has no supplied value.");
+                return found->second;
+            }
+
+            void Write(const std::string_view path, const std::any& value) override
+            {
+                const auto found = m_Values.find(path);
+                if (found == m_Values.end() || found->second.type() != value.type())
+                    throw std::invalid_argument("UI binding path rejected the written value.");
+                found->second = value;
+            }
+
+            void Set(const std::string_view path, std::any value)
+            {
+                m_Values.insert_or_assign(std::string(path), std::move(value));
+            }
+
+            [[nodiscard]] std::optional<std::any> Get(const std::string_view path) const
+            {
+                const auto found = m_Values.find(path);
+                return found == m_Values.end() ? std::nullopt : std::optional(found->second);
+            }
+
+          private:
+            std::map<std::string, std::any, std::less<>> m_Values;
+        };
+
         void CollectTemplateReferences(const UiVisualElementDefinition& element, std::set<AssetId>& result)
         {
             if (element.Template)
@@ -444,7 +478,21 @@ namespace Keire::Detail
                 return false;
             auto content = state->Content;
             content.Text = text;
-            return m_Impl->Tree->SetContent(*runtime, std::move(content));
+            if (!m_Impl->Tree->SetContent(*runtime, std::move(content)))
+                return false;
+            const auto* documentState = m_Impl->FindState(document, generation);
+            try
+            {
+                if (documentState && documentState->Instance->SynchronizeVisualElementFromRuntime(*runtime))
+                    return true;
+            }
+            catch (...)
+            {
+                (void)m_Impl->Tree->SetContent(*runtime, state->Content);
+                throw;
+            }
+            (void)m_Impl->Tree->SetContent(*runtime, state->Content);
+            return false;
         }
         catch (...)
         {
@@ -480,7 +528,21 @@ namespace Keire::Detail
             auto control = state->Control;
             control.Value = std::clamp(value, std::min(control.Minimum, control.Maximum),
                                        std::max(control.Minimum, control.Maximum));
-            return m_Impl->Tree->SetControl(*runtime, control);
+            if (!m_Impl->Tree->SetControl(*runtime, control))
+                return false;
+            const auto* documentState = m_Impl->FindState(document, generation);
+            try
+            {
+                if (documentState && documentState->Instance->SynchronizeVisualElementFromRuntime(*runtime))
+                    return true;
+            }
+            catch (...)
+            {
+                (void)m_Impl->Tree->SetControl(*runtime, state->Control);
+                throw;
+            }
+            (void)m_Impl->Tree->SetControl(*runtime, state->Control);
+            return false;
         }
         catch (...)
         {
@@ -538,7 +600,21 @@ namespace Keire::Detail
                     return false;
                 auto control = state->Control;
                 control.Checked = value;
-                return m_Impl->Tree->SetControl(*runtime, control);
+                if (!m_Impl->Tree->SetControl(*runtime, control))
+                    return false;
+                const auto* documentState = m_Impl->FindState(document, generation);
+                try
+                {
+                    if (documentState && documentState->Instance->SynchronizeVisualElementFromRuntime(*runtime))
+                        return true;
+                }
+                catch (...)
+                {
+                    (void)m_Impl->Tree->SetControl(*runtime, state->Control);
+                    throw;
+                }
+                (void)m_Impl->Tree->SetControl(*runtime, state->Control);
+                return false;
             }
             case ScenePresentationUiDocumentFlag::Focused:
                 return value && m_Impl->Tree->SetFocus(*runtime);
@@ -610,6 +686,51 @@ namespace Keire::Detail
             throw std::invalid_argument("UI Document binding source target is not presented.");
         state->Instance->SetBindingSource(source);
         state->BindingSource = std::move(source);
+    }
+
+    bool ScenePresentationUiDocumentStore::SetManagedBindingValue(const EntityId document, const std::string_view path,
+                                                                  std::any value)
+    {
+        if (!document || path.empty() || path.size() > 1'024 || path.find_first_not_of(" \t\r\n") == path.npos ||
+            (value.type() != typeid(std::string) && value.type() != typeid(float) && value.type() != typeid(bool)) ||
+            (value.type() == typeid(float) && !std::isfinite(std::any_cast<float>(value))))
+            return false;
+        auto& state = m_Impl->Documents[document];
+        auto source = DynamicRefCast<ManagedUiBindingSource>(state.BindingSource);
+        if (state.BindingSource && !source)
+            return false;
+        if (!source)
+        {
+            source = CreateRef<ManagedUiBindingSource>();
+            source->Set(path, std::move(value));
+            if (state.Instance)
+                state.Instance->SetBindingSource(source);
+            state.BindingSource = source;
+        }
+        else
+            source->Set(path, std::move(value));
+        return true;
+    }
+
+    std::optional<std::any> ScenePresentationUiDocumentStore::ReadManagedBindingValue(const EntityId document,
+                                                                                      const std::string_view path) const
+    {
+        const auto found = m_Impl->Documents.find(document);
+        const auto source = found == m_Impl->Documents.end()
+                                ? Ref<ManagedUiBindingSource>{}
+                                : DynamicRefCast<ManagedUiBindingSource>(found->second.BindingSource);
+        return source ? source->Get(path) : std::nullopt;
+    }
+
+    bool ScenePresentationUiDocumentStore::ClearManagedBindingSource(const EntityId document)
+    {
+        const auto found = m_Impl->Documents.find(document);
+        if (found == m_Impl->Documents.end() || !DynamicRefCast<ManagedUiBindingSource>(found->second.BindingSource))
+            return false;
+        if (found->second.Instance)
+            found->second.Instance->SetBindingSource({});
+        found->second.BindingSource.Reset();
+        return true;
     }
 
     bool ScenePresentationUiDocumentStore::DispatchEvent(const RuntimeUiEvent& event)

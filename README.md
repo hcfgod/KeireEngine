@@ -556,6 +556,10 @@ preview to evaluate the actual effect. See [Shaders and Materials](Docs/ShadersA
 
 UI-target materials can be assigned in a scene UI Document's **UI Material** field. See the
 [UI Toolkit workflow](Docs/Scripting/UiAndEvents.md) for editor and C# usage.
+UI Builder previews use runtime text wrapping, truncation, alignment, and spacing. Use **Match Game View** to compare
+the same layout dimensions; verify authored font faces and UI materials in Game view.
+For scene UI bindings, author the target property and source path in Builder, then publish typed values from a
+gameplay Behaviour through `UIDocument.SetBindingValue`; `TryGetBindingValue` reads TwoWay control updates.
 
 Live material edits remain authoritative while a background asset reload finishes; an older reload cannot replace
 the newer preview value. Material source persistence and undo continue through the normal Inspector workflow.

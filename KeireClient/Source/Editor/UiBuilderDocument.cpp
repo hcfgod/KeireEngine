@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/UiBuilderDocument.h"
 
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 
 #include <algorithm>
 #include <charconv>
@@ -10,6 +11,8 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -357,6 +360,95 @@ namespace KeireEditor
             Keire::UndoOperation m_Undo;
         };
     } // namespace
+
+    std::vector<UiBuilderPreviewTextLine> LayoutUiBuilderPreviewText(const Keire::RuntimeUiDrawCommand& command)
+    {
+        if (command.Type != Keire::RuntimeUiDrawType::Text || command.Text.empty())
+            return {};
+        constexpr std::size_t MaximumPreviewTextBytes = 4096U;
+        std::string_view text = command.Text;
+        if (text.size() > MaximumPreviewTextBytes)
+        {
+            auto length = MaximumPreviewTextBytes;
+            while (length > 0U && (static_cast<unsigned char>(text[length]) & 0xc0U) == 0x80U)
+                --length;
+            if (length == 0U)
+                throw std::invalid_argument("Runtime UI text contains invalid UTF-8.");
+            text = text.substr(0U, length);
+        }
+        const auto layout = Keire::Detail::BuildRuntimeUiTextLayout({.Text = text,
+                                                                     .Language = command.Language,
+                                                                     .Direction = command.TextDirection,
+                                                                     .Wrap = command.TextWrap,
+                                                                     .Overflow = command.TextOverflow,
+                                                                     .FontSize = command.FontSize,
+                                                                     .AvailableWidth = command.Rect.Width,
+                                                                     .AuthoredLineHeight = command.LineHeight,
+                                                                     .LetterSpacing = command.LetterSpacing,
+                                                                     .WordSpacing = command.WordSpacing,
+                                                                     .MaximumLines = command.MaximumLines,
+                                                                     .Weight = command.FontWeight,
+                                                                     .Slant = command.FontSlant});
+
+        const auto appendCodepoint = [](std::string& text, const char32_t codepoint)
+        {
+            if (codepoint < 0x80U)
+                text.push_back(static_cast<char>(codepoint));
+            else if (codepoint < 0x800U)
+            {
+                text.push_back(static_cast<char>(0xc0U | (codepoint >> 6U)));
+                text.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+            }
+            else if (codepoint < 0x10000U)
+            {
+                text.push_back(static_cast<char>(0xe0U | (codepoint >> 12U)));
+                text.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3fU)));
+                text.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+            }
+            else
+            {
+                text.push_back(static_cast<char>(0xf0U | (codepoint >> 18U)));
+                text.push_back(static_cast<char>(0x80U | ((codepoint >> 12U) & 0x3fU)));
+                text.push_back(static_cast<char>(0x80U | ((codepoint >> 6U) & 0x3fU)));
+                text.push_back(static_cast<char>(0x80U | (codepoint & 0x3fU)));
+            }
+        };
+
+        std::vector<UiBuilderPreviewTextLine> result;
+        result.reserve(layout.Lines.size());
+        const float verticalOffset = command.VerticalAlignment == Keire::RuntimeUiAlignment::Center
+                                         ? (command.Rect.Height - layout.Height) * 0.5F
+                                     : command.VerticalAlignment == Keire::RuntimeUiAlignment::End
+                                         ? command.Rect.Height - layout.Height
+                                         : 0.0F;
+        for (std::size_t index = 0; index < layout.Lines.size(); ++index)
+        {
+            const auto& line = layout.Lines[index];
+            const float horizontalOffset = command.HorizontalAlignment == Keire::RuntimeUiAlignment::Center
+                                               ? (command.Rect.Width - line.Width) * 0.5F
+                                           : command.HorizontalAlignment == Keire::RuntimeUiAlignment::End
+                                               ? command.Rect.Width - line.Width
+                                               : 0.0F;
+            UiBuilderPreviewTextLine previewLine;
+            previewLine.Position = {command.Rect.X + horizontalOffset,
+                                    command.Rect.Y + verticalOffset + static_cast<float>(index) * layout.LineHeight};
+            previewLine.Width = line.Width;
+            previewLine.Height = layout.LineHeight;
+            previewLine.Glyphs.reserve(line.GlyphCount);
+            for (std::size_t glyphIndex = line.FirstGlyph; glyphIndex < line.FirstGlyph + line.GlyphCount; ++glyphIndex)
+            {
+                const auto& glyph = layout.Glyphs[glyphIndex];
+                UiBuilderPreviewTextGlyph previewGlyph;
+                appendCodepoint(previewGlyph.Text, glyph.Codepoint);
+                previewGlyph.Position = {previewLine.Position.X + glyph.X + glyph.OffsetX,
+                                         previewLine.Position.Y + glyph.OffsetY};
+                previewLine.Text += previewGlyph.Text;
+                previewLine.Glyphs.push_back(std::move(previewGlyph));
+            }
+            result.push_back(std::move(previewLine));
+        }
+        return result;
+    }
 
     UiBuilderCanvasGesture HitTestUiBuilderCanvasGesture(const Keire::UiItemRect rectangle,
                                                          const Keire::UiPosition position, const float radius) noexcept

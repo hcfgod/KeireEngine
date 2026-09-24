@@ -956,17 +956,28 @@ namespace Keire
                                              {rectangle.Maximum.X, rectangle.Maximum.Y});
     }
 
-    void UiFrame::DrawImage(const Ref<RenderSurface>& surface, const UiItemRect rectangle)
+    void UiFrame::DrawTexturedTriangle(const Ref<UiImage>& image, const UiTexturedVertex first,
+                                       const UiTexturedVertex second, const UiTexturedVertex third)
     {
-        m_Impl->RequireActive("DrawImage(RenderSurface)");
-        if (!surface || rectangle.Maximum.X <= rectangle.Minimum.X || rectangle.Maximum.Y <= rectangle.Minimum.Y)
-            throw std::invalid_argument("UiFrame::DrawImage requires a valid surface and rectangle.");
-        if (auto* texture = RenderSystemInternalAccess::CaptureUiSurfaceTexture(*surface))
+        m_Impl->RequireActive("DrawTexturedTriangle");
+        if (!image || !image->m_Impl->Texture || image->m_Impl->Owner.lock() != m_Impl->Images)
+            throw std::invalid_argument("UiFrame::DrawTexturedTriangle requires a valid UI image.");
+        const auto validVertex = [](const UiTexturedVertex& vertex)
         {
-            ImGui::GetWindowDrawList()->AddImage(
-                ImTextureRef(static_cast<ImTextureID>(reinterpret_cast<intptr_t>(texture))),
-                {rectangle.Minimum.X, rectangle.Minimum.Y}, {rectangle.Maximum.X, rectangle.Maximum.Y});
-        }
+            return std::isfinite(vertex.Position.X) && std::isfinite(vertex.Position.Y) && std::isfinite(vertex.UV.X) &&
+                   std::isfinite(vertex.UV.Y) && vertex.UV.X >= 0.0F && vertex.UV.X <= 1.0F && vertex.UV.Y >= 0.0F &&
+                   vertex.UV.Y <= 1.0F && ValidColor(vertex.ColorValue);
+        };
+        if (!validVertex(first) || !validVertex(second) || !validVertex(third))
+            throw std::invalid_argument("UI textured vertices require finite positions, normalized UVs, and colors.");
+        auto* draw = ImGui::GetWindowDrawList();
+        draw->PushTexture(image->m_Impl->Texture->GetTexRef());
+        draw->PrimReserve(3, 3);
+        for (const auto& vertex : std::array{first, second, third})
+            draw->PrimVtx({vertex.Position.X, vertex.Position.Y}, {vertex.UV.X, vertex.UV.Y},
+                          ImGui::ColorConvertFloat4ToU32({vertex.ColorValue.Red, vertex.ColorValue.Green,
+                                                          vertex.ColorValue.Blue, vertex.ColorValue.Alpha}));
+        draw->PopTexture();
     }
 
     bool UiFrame::ImageButton(const std::string_view id, const Ref<UiImage>& image, UiSize size)

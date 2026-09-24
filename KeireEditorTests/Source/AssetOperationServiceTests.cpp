@@ -1,3 +1,6 @@
+#include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/BuiltinAssetRegistry.h"
+#include "Keire/Project/SharedShaderLibrary.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 
 #include <doctest/doctest.h>
@@ -73,16 +76,20 @@ TEST_CASE("Asset worker startup failures become completions and leave the queue 
     const auto asset = Keire::AssetId::Generate();
     for (std::uint64_t generation = 1; generation <= 2; ++generation)
     {
+        const bool warmup = true;
         operations.QueueAssetImport(asset, KeireEditor::AssetOperationPriority::MaterialRefresh,
-                                    {.ReloadAsset = asset, .Generation = generation});
+                                    {.ReloadAsset = asset, .Generation = generation, .DefaultLitWarmup = warmup});
+        CHECK(operations.PendingDefaultLitWarmup() == warmup);
         CHECK_NOTHROW(operations.Update());
         CHECK_FALSE(operations.Busy());
+        CHECK_FALSE(operations.PendingDefaultLitWarmup());
         const auto completion = operations.TakeCompletion();
         REQUIRE(completion);
         CHECK_FALSE(completion->Result.Success);
         CHECK(completion->Result.Diagnostic.starts_with("Asset worker could not start:"));
         CHECK(completion->Context.ReloadAsset == asset);
         CHECK(completion->Context.Generation == generation);
+        CHECK(completion->Context.DefaultLitWarmup == warmup);
         CHECK_FALSE(completion->OperationId.empty());
         CHECK_FALSE(operations.TakeCompletion());
     }
@@ -519,10 +526,11 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
         interrupted.QueueAssetImport(first, KeireEditor::AssetOperationPriority::MaterialRefresh,
                                      {.ReloadAsset = first, .Generation = 1});
         interrupted.QueueAssetImport(second, KeireEditor::AssetOperationPriority::MaterialRefresh,
-                                     {.ReloadAsset = second, .Generation = 2});
+                                     {.ReloadAsset = second, .Generation = 2, .DefaultLitWarmup = true});
         CHECK(interrupted.QueuedCount() == 1);
         CHECK(clockSample == 1);
         interrupted.Update();
+        CHECK(interrupted.RunningDefaultLitWarmup());
         SetTestWorkerMode(nullptr);
         REQUIRE(interrupted.PreemptBackgroundImports());
         CHECK_FALSE(interrupted.Busy());
@@ -531,6 +539,7 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
         CHECK(completion->Result.Cancelled);
         CHECK_FALSE(completion->Result.Success);
         CHECK(completion->Context.Generation == 2);
+        CHECK(completion->Context.DefaultLitWarmup);
         CHECK_FALSE(completion->Context.ReloadAsset);
         CHECK_FALSE(completion->OperationId.empty());
         CHECK(completion->QueueMilliseconds == 80.0);
@@ -538,6 +547,81 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
         CHECK(clockSample == 3);
         CHECK_FALSE(interrupted.TakeCompletion());
         CHECK_FALSE(interrupted.PreemptBackgroundImports());
+    }
+    SetTestWorkerMode("hang");
+    {
+        auto database = Keire::CreateRef<Keire::AssetDatabase>(
+            Keire::AssetDatabaseSpecification{.ProjectRoot = project->Root(),
+                                              .ChangeDebounce = std::chrono::milliseconds(0),
+                                              .ChangeMonitorInterval = std::chrono::milliseconds(1),
+                                              .Importers = Keire::CreateBuiltinAssetImporters()});
+        const auto initialScans = database->ChangeMonitorStatistics().PublishedScans;
+        const auto initialScanDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (database->ChangeMonitorStatistics().PublishedScans == initialScans &&
+               std::chrono::steady_clock::now() < initialScanDeadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        REQUIRE(database->ChangeMonitorStatistics().PublishedScans > initialScans);
+        const auto library = Keire::EnsureSharedShaderLibrary(project->Root());
+        REQUIRE(library.Shaders.size() == 6);
+        CHECK_NOTHROW((void)Keire::ReadSharedShaderLibrary(project->Root()));
+        (void)database->Refresh();
+        for (const auto& shader : library.Shaders)
+            CHECK(database->Find(shader.Id).has_value());
+        const auto scans = database->ChangeMonitorStatistics().PublishedScans;
+        const auto scanDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while (database->ChangeMonitorStatistics().PublishedScans < scans + 2 &&
+               std::chrono::steady_clock::now() < scanDeadline)
+        {
+            CHECK(database->PollChangedAssets().empty());
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        REQUIRE(database->ChangeMonitorStatistics().PublishedScans >= scans + 2);
+        const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
+        REQUIRE(lit != library.Shaders.end());
+        KeireEditor::AssetOperationService queuedWarmup(KeireEditorTests::ExecutablePath, project->Root());
+        queuedWarmup.QueueImport(KeireEditor::AssetOperationPriority::AutomaticRefresh);
+        queuedWarmup.QueueAssetImport(lit->Id, KeireEditor::AssetOperationPriority::AutomaticRefresh,
+                                      {.DefaultLitWarmup = true});
+        CHECK(queuedWarmup.PendingDefaultLitWarmup());
+        CHECK(queuedWarmup.PreemptBackgroundImports());
+        CHECK(queuedWarmup.PendingDefaultLitWarmup());
+        CHECK(queuedWarmup.QueuedCount() == 1);
+        queuedWarmup.Shutdown();
+
+        KeireEditor::AssetOperationService warmup(KeireEditorTests::ExecutablePath, project->Root());
+        warmup.QueueAssetImport(lit->Id, KeireEditor::AssetOperationPriority::AutomaticRefresh,
+                                {.Reason = "default-lit-warmup", .DefaultLitWarmup = true});
+        CHECK(warmup.PendingDefaultLitWarmup());
+        CHECK_FALSE(warmup.RunningDefaultLitWarmup());
+        warmup.Update();
+        REQUIRE(warmup.RunningDefaultLitWarmup());
+        std::size_t warmupRequests = 0;
+        for (const auto& entry : std::filesystem::directory_iterator(project->Root() / "Library/AssetOperations"))
+        {
+            const auto requestPath = entry.path() / "request.json";
+            if (!std::filesystem::is_regular_file(requestPath))
+                continue;
+            const auto request = Keire::Detail::ReadAssetWorkerRequest(requestPath);
+            if (request.Reason != "default-lit-warmup")
+                continue;
+            ++warmupRequests;
+            CHECK(request.Kind == Keire::Detail::AssetWorkerOperationKind::ImportAssets);
+            CHECK(request.ImportAssets == std::vector{lit->Id});
+        }
+        CHECK(warmupRequests == 1);
+        warmup.Shutdown();
+        CHECK_FALSE(warmup.PendingDefaultLitWarmup());
+
+        KeireEditor::AssetOperationService queued(KeireEditorTests::ExecutablePath, project->Root());
+        queued.QueueAssetImport(lit->Id, KeireEditor::AssetOperationPriority::AutomaticRefresh,
+                                {.DefaultLitWarmup = true});
+        CHECK(queued.PendingDefaultLitWarmup());
+        CHECK_FALSE(queued.PreemptBackgroundImports());
+        CHECK(queued.PendingDefaultLitWarmup());
+        queued.Shutdown();
+        CHECK_FALSE(queued.PendingDefaultLitWarmup());
     }
     SetTestWorkerMode(nullptr);
     std::filesystem::remove_all(location, cleanupError);

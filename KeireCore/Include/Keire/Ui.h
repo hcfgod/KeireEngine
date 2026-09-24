@@ -100,6 +100,19 @@ namespace Keire
         bool TextInput = false;
     };
 
+    struct UiColoredVertex
+    {
+        UiPosition Position;
+        UiColor ColorValue;
+    };
+
+    struct UiTexturedVertex
+    {
+        UiPosition Position;
+        UiPosition UV;
+        UiColor ColorValue;
+    };
+
     enum class UiAxis : std::uint8_t
     {
         Horizontal,
@@ -671,6 +684,9 @@ namespace Keire
         void DrawFilledRectangle(UiItemRect rectangle, UiColor color, float rounding = 0.0F);
         void DrawTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color, float thickness = 1.0F);
         void DrawFilledTriangle(UiPosition first, UiPosition second, UiPosition third, UiColor color);
+        void DrawFilledTriangle(UiColoredVertex first, UiColoredVertex second, UiColoredVertex third);
+        void DrawTexturedTriangle(const Ref<UiImage>& image, UiTexturedVertex first, UiTexturedVertex second,
+                                  UiTexturedVertex third);
         [[nodiscard]] UiSize MeasureText(std::string_view text, float fontSize = 0.0F) const;
         void DrawOverlayText(UiPosition position, UiColor color, std::string_view text, float fontSize = 0.0F,
                              std::optional<UiItemRect> clip = {});

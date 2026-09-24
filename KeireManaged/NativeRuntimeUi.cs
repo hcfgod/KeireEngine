@@ -72,6 +72,13 @@ internal static unsafe class NativeRuntimeUi
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte, byte, byte> SetDocumentElementFlagIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte, byte> ConsumeDocumentElementEventIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, ulong, byte> FocusDocumentElementIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, NativeString, byte> SetDocumentBindingTextIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, float, byte> SetDocumentBindingNumberIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, byte, byte> SetDocumentBindingBooleanIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, byte*, int, int> GetDocumentBindingTextIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, float*, byte> GetDocumentBindingNumberIcall;
+    internal static delegate* unmanaged<ulong, ulong, NativeString, byte*, byte> GetDocumentBindingBooleanIcall;
+    internal static delegate* unmanaged<ulong, ulong, byte> ClearDocumentBindingSourceIcall;
 #pragma warning restore CS0649
 
     internal static NativeUiDocumentElement? ResolveDocumentRoot(Entity document)
@@ -82,6 +89,90 @@ internal static unsafe class NativeRuntimeUi
             ? result
             : null;
     }
+
+    internal static void SetDocumentBindingValue(Entity document, string path, string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(value);
+        using NativeString nativePath = path;
+        using NativeString nativeValue = value;
+        if (SetDocumentBindingTextIcall == null ||
+            SetDocumentBindingTextIcall(document.Id.High, document.Id.Low, nativePath, nativeValue) == 0)
+            throw new InvalidOperationException("The UI Document binding source is unavailable.");
+    }
+
+    internal static void SetDocumentBindingValue(Entity document, string path, float value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (!float.IsFinite(value))
+            throw new ArgumentOutOfRangeException(nameof(value));
+        using NativeString nativePath = path;
+        if (SetDocumentBindingNumberIcall == null ||
+            SetDocumentBindingNumberIcall(document.Id.High, document.Id.Low, nativePath, value) == 0)
+            throw new InvalidOperationException("The UI Document binding source is unavailable.");
+    }
+
+    internal static void SetDocumentBindingValue(Entity document, string path, bool value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        using NativeString nativePath = path;
+        if (SetDocumentBindingBooleanIcall == null ||
+            SetDocumentBindingBooleanIcall(document.Id.High, document.Id.Low, nativePath, value ? (byte)1 : (byte)0) == 0)
+            throw new InvalidOperationException("The UI Document binding source is unavailable.");
+    }
+
+    internal static bool TryGetDocumentBindingValue(Entity document, string path, out string value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        value = string.Empty;
+        if (GetDocumentBindingTextIcall == null)
+            return false;
+        using NativeString nativePath = path;
+        int length = GetDocumentBindingTextIcall(document.Id.High, document.Id.Low, nativePath, null, 0);
+        if (length < 0)
+            return false;
+        byte[] bytes = new byte[length];
+        fixed (byte* destination = bytes)
+        {
+            if (GetDocumentBindingTextIcall(document.Id.High, document.Id.Low, nativePath, destination,
+                                            bytes.Length) != length)
+                return false;
+        }
+        value = Encoding.UTF8.GetString(bytes);
+        return true;
+    }
+
+    internal static bool TryGetDocumentBindingValue(Entity document, string path, out float value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        value = default;
+        if (GetDocumentBindingNumberIcall == null)
+            return false;
+        using NativeString nativePath = path;
+        float result;
+        if (GetDocumentBindingNumberIcall(document.Id.High, document.Id.Low, nativePath, &result) == 0)
+            return false;
+        value = result;
+        return true;
+    }
+
+    internal static bool TryGetDocumentBindingValue(Entity document, string path, out bool value)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        value = default;
+        if (GetDocumentBindingBooleanIcall == null)
+            return false;
+        using NativeString nativePath = path;
+        byte result;
+        if (GetDocumentBindingBooleanIcall(document.Id.High, document.Id.Low, nativePath, &result) == 0)
+            return false;
+        value = result != 0;
+        return true;
+    }
+
+    internal static bool ClearDocumentBindingSource(Entity document) =>
+        ClearDocumentBindingSourceIcall != null &&
+        ClearDocumentBindingSourceIcall(document.Id.High, document.Id.Low) != 0;
 
     internal static NativeUiDocumentElement? ResolveDocumentElement(Entity document, AssetId stableId)
     {

@@ -551,10 +551,10 @@ namespace Keire
             m_Impl->ClearAnimation();
             m_Impl->ClearVfx();
             m_Impl->ClearPhysics();
-            if (m_Impl->Presentation)
-                m_Impl->Presentation->Clear();
             m_Impl->Runtime->EndPlay();
             m_Impl->Runtime->Close();
+            if (m_Impl->Presentation)
+                m_Impl->Presentation->Clear();
             m_Impl->Runtime.Reset();
         }
         m_Impl->PlayState = ScenePlayState::Stopped;

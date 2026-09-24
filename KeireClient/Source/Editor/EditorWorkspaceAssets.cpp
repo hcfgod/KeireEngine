@@ -1,6 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "Keire/Assets/BuiltinAssetRegistry.h"
+#include "Keire/Project/SharedShaderLibrary.h"
 
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
@@ -709,6 +710,41 @@ void EditorWorkspaceLayer::ImportAssets(const KeireEditor::AssetOperationPriorit
     }
 }
 
+void EditorWorkspaceLayer::QueueDefaultLitWarmup()
+{
+    if (m_DefaultLitWarmupAttempted || !m_AssetDatabase || !m_AssetOperations)
+        return;
+    m_DefaultLitWarmupAttempted = true;
+    m_DefaultLitWarmupReady = false;
+    bool queuedWarmup = false;
+    try
+    {
+        const auto projectRoot = m_AssetDatabase->Specification().ProjectRoot;
+        const auto library = Keire::EnsureSharedShaderLibrary(projectRoot);
+        const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
+        if (lit == library.Shaders.end())
+            throw std::runtime_error("The pinned shared shader library has no Kéire/Lit shader.");
+        (void)m_AssetDatabase->Refresh();
+        Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(
+            *m_AssetDatabase, projectRoot / "Library/AssetCache/Runtime/source-index.json");
+        RefreshAssetBrowserRecords();
+        m_AssetOperations->QueueAssetImport(lit->Id, KeireEditor::AssetOperationPriority::AutomaticRefresh,
+                                            {.Reason = "default-lit-warmup", .DefaultLitWarmup = true});
+        queuedWarmup = true;
+        m_AssetOperations->Update();
+    }
+    catch (const std::exception& error)
+    {
+        if (!queuedWarmup)
+        {
+            m_DefaultLitWarmupAttempted = false;
+            m_DefaultLitWarmupReady = false;
+        }
+        m_PendingMaterialCreation.reset();
+        SetAssetError(std::string("Default Lit shader warmup failed: ") + error.what());
+    }
+}
+
 void EditorWorkspaceLayer::DrainQueuedAssetMutation()
 {
     if (m_PendingAssetMutations.empty() || !m_AssetOperations || m_AssetOperations->Busy())
@@ -839,6 +875,12 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
     m_AssetOperations->Update();
     while (auto completion = m_AssetOperations->TakeCompletion())
     {
+        if (completion->Context.DefaultLitWarmup && !completion->Result.Success)
+        {
+            m_DefaultLitWarmupAttempted = false;
+            m_DefaultLitWarmupReady = false;
+            m_PendingMaterialCreation.reset();
+        }
         if (!completion->Result.Success)
         {
             const auto generation = completion->Context.Generation;
@@ -882,10 +924,41 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                                 std::to_string(cooked.PackCount) + " pack(s).";
                 continue;
             }
+            bool defaultLitWarmupFailed = false;
+            std::string defaultLitWarmupDiagnostic;
+            if (completion->Context.DefaultLitWarmup)
+            {
+                const auto library = Keire::ReadSharedShaderLibrary(m_AssetDatabase->Specification().ProjectRoot);
+                const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
+                const auto status =
+                    lit == library.Shaders.end()
+                        ? completion->Result.Import.Statuses.end()
+                        : std::ranges::find(completion->Result.Import.Statuses, lit->Id, &Keire::AssetImportStatus::Id);
+                defaultLitWarmupFailed = status == completion->Result.Import.Statuses.end() ||
+                                         status->State == Keire::AssetImportState::Failed;
+                if (defaultLitWarmupFailed)
+                {
+                    m_DefaultLitWarmupAttempted = false;
+                    m_DefaultLitWarmupReady = false;
+                    m_PendingMaterialCreation.reset();
+                    defaultLitWarmupDiagnostic =
+                        status != completion->Result.Import.Statuses.end() && !status->Diagnostics.empty()
+                            ? status->Diagnostics.front().Message
+                            : "the worker returned no successful import status for Kéire/Lit";
+                }
+            }
             ApplyAssetImportResult(completion->Result.Import,
                                    completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll,
                                    completion->Context.ReloadAsset);
             CompletePendingMaterialAssignment(completion->Context.ReloadAsset);
+            if (defaultLitWarmupFailed)
+            {
+                SetAssetError("Default Lit shader warmup failed: " + defaultLitWarmupDiagnostic +
+                              ". Retry material creation after fixing the shader error.");
+                continue;
+            }
+            if (completion->Context.DefaultLitWarmup)
+                m_DefaultLitWarmupReady = true;
             const auto activeSceneAsset = m_SceneDocument->Asset();
             if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::Mutate && activeSceneAsset &&
                 std::ranges::find(completion->Result.MutatedAssets, activeSceneAsset) !=
@@ -1124,12 +1197,37 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
             if (completion->Context.Generation > 0)
                 m_MaterialDocument->MarkCatalogRefreshApplied(completion->Context.Generation);
             OpenPendingStartupScene();
+            if (completion->Kind == Keire::Detail::AssetWorkerOperationKind::ImportAll)
+                QueueDefaultLitWarmup();
         }
         catch (const std::exception& error)
         {
+            if (completion->Context.DefaultLitWarmup)
+            {
+                m_DefaultLitWarmupAttempted = false;
+                m_DefaultLitWarmupReady = false;
+                m_PendingMaterialCreation.reset();
+            }
             SetAssetError(std::string("Asset worker result could not be applied: ") + error.what());
         }
     }
+    if (!m_PendingMaterialCreation || !m_AssetOperations)
+        return;
+    if (m_DefaultLitWarmupReady && !m_AssetOperations->Busy())
+    {
+        auto destination = std::move(*m_PendingMaterialCreation);
+        m_PendingMaterialCreation.reset();
+        try
+        {
+            QueueMaterialCreation(destination);
+        }
+        catch (const std::exception& error)
+        {
+            SetAssetError(std::string("Material creation failed: ") + error.what());
+        }
+    }
+    else if (!m_DefaultLitWarmupAttempted && !m_DefaultLitWarmupReady && !m_AssetOperations->Busy())
+        QueueDefaultLitWarmup();
 }
 
 void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult& result, const bool reloadLoadedAssets,

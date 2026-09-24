@@ -1369,6 +1369,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             m_GameDynamicResolution.Update(environment, featureSelection, Owner().Renderer()->Statistics());
         const auto size = PrepareRenderSurface(m_GameRenderView, previewSize, Owner().MainWindow()->DisplayScale(),
                                                effectiveRenderScale);
+        m_GameLogicalViewportSize = size;
         const float aspect = size.Width / std::max(size.Height, 1.0F);
         Keire::RenderCamera camera;
         if (selected)

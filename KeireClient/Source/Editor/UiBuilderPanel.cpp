@@ -267,6 +267,7 @@ namespace KeireEditor
         m_PreviewSelection = {};
         m_PreviewGeneration = 0;
         m_PreviewSnapshot.reset();
+        m_FallbackFontAtlasImage.Reset();
         m_PreviewStyleSheets.clear();
         m_PreviewTemplates.clear();
         m_BuiltPreviewSettings.reset();
@@ -340,6 +341,9 @@ namespace KeireEditor
         if (!panel)
             return;
         auto& document = m_Controller.UiBuilderState();
+        auto& styleDocument = m_Controller.UiBuilderStyleSheetState();
+        const bool usesStyleSheet =
+            UiBuilderToolbarUsesStyleSheet(m_WorkspaceMode, static_cast<bool>(styleDocument.Asset()));
         const auto& theme = m_Controller.UiBuilderTheme();
         if (ui.WindowFocused())
             m_Controller.ActivateUiBuilderHistory();
@@ -384,45 +388,71 @@ namespace KeireEditor
             ui.Text(document.Definition().Name.empty() ? "UI Document" : document.Definition().Name);
         }
         ui.SameLine();
-        ui.TextColored(document.Dirty() ? theme.Warning : theme.MutedText,
-                       document.Dirty() ? "Unsaved changes" : document.SourcePath().filename().string());
+        ui.TextColored(
+            usesStyleSheet ? (styleDocument.Dirty() ? theme.Warning : theme.MutedText)
+                           : (document.Dirty() ? theme.Warning : theme.MutedText),
+            usesStyleSheet
+                ? (styleDocument.Dirty() ? "Unsaved style changes" : styleDocument.SourcePath().filename().string())
+                : (document.Dirty() ? "Unsaved changes" : document.SourcePath().filename().string()));
         ui.Separator();
-        if (ui.IconButton("UiBuilderSave", Keire::UiIcon::Save, false, {30.0F, 28.0F}))
+        if (auto disabled =
+                ui.BeginDisabled(usesStyleSheet && (!styleDocument.SourceValid() || styleDocument.ExternalConflict()));
+            disabled)
         {
-            try
+            if (ui.IconButton("UiBuilderSave", Keire::UiIcon::Save, false, {30.0F, 28.0F}))
             {
-                m_Controller.SaveUiBuilderDocument();
-            }
-            catch (const std::exception& error)
-            {
-                m_Message = error.what();
-                m_Controller.ReportUiBuilderError(m_Message);
+                try
+                {
+                    if (usesStyleSheet)
+                    {
+                        m_Controller.SaveUiBuilderStyleSheet();
+                        m_Message = "Saved " + styleDocument.SourcePath().filename().string() + ".";
+                    }
+                    else
+                        m_Controller.SaveUiBuilderDocument();
+                }
+                catch (const std::exception& error)
+                {
+                    m_Message = error.what();
+                    m_Controller.ReportUiBuilderError(m_Message);
+                }
             }
         }
         if (ui.LastItemState().Hovered)
-            ui.SetTooltip("Save UI document", {.Delayed = true});
+            ui.SetTooltip(usesStyleSheet ? "Save style sheet" : "Save UI document", {.Delayed = true});
         ui.SameLine();
         if (ui.IconButton("UiBuilderRevert", Keire::UiIcon::Refresh, false, {30.0F, 28.0F}))
         {
             m_RevertConfirmationOpen = true;
-            ui.OpenPopup("Revert UI Document");
+            ui.OpenPopup(usesStyleSheet ? "Revert Style Sheet" : "Revert UI Document");
         }
         ui.SameLine();
-        if (auto disabled = ui.BeginDisabled(!document.UndoContext() || !document.UndoContext()->CanUndo()); disabled)
+        const auto history = usesStyleSheet ? styleDocument.UndoContext() : document.UndoContext();
+        if (auto disabled = ui.BeginDisabled(!history || !history->CanUndo()); disabled)
         {
             if (ui.IconButton("UiBuilderUndo", Keire::UiIcon::Undo, false, {30.0F, 28.0F}))
             {
-                (void)document.Undo();
-                m_DraftElement = {};
+                if (usesStyleSheet)
+                    (void)styleDocument.Undo();
+                else
+                {
+                    (void)document.Undo();
+                    m_DraftElement = {};
+                }
             }
         }
         ui.SameLine();
-        if (auto disabled = ui.BeginDisabled(!document.UndoContext() || !document.UndoContext()->CanRedo()); disabled)
+        if (auto disabled = ui.BeginDisabled(!history || !history->CanRedo()); disabled)
         {
             if (ui.IconButton("UiBuilderRedo", Keire::UiIcon::Redo, false, {30.0F, 28.0F}))
             {
-                (void)document.Redo();
-                m_DraftElement = {};
+                if (usesStyleSheet)
+                    (void)styleDocument.Redo();
+                else
+                {
+                    (void)document.Redo();
+                    m_DraftElement = {};
+                }
             }
         }
         ui.SameLine();
@@ -434,21 +464,35 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, m_Message);
         ui.Separator();
 
-        if (auto popup = ui.BeginPopupModal("Revert UI Document"); popup)
+        if (auto popup = ui.BeginPopupModal(usesStyleSheet ? "Revert Style Sheet" : "Revert UI Document"); popup)
         {
-            ui.Text("Revert this UI document to its imported source?");
-            ui.TextColoredWrapped(theme.Warning,
-                                  "Unsaved visual and source changes will be replaced. The revert can be undone.");
+            ui.Text(usesStyleSheet ? "Reload this style sheet from disk?"
+                                   : "Revert this UI document to its imported source?");
+            ui.TextColoredWrapped(theme.Warning, usesStyleSheet
+                                                     ? "Unsaved style changes will be replaced. Style undo history "
+                                                       "will be cleared."
+                                                     : "Unsaved visual and source changes will be replaced. The "
+                                                       "revert can be undone.");
             if (ui.Button("Revert"))
             {
                 try
                 {
-                    m_Controller.ReloadUiBuilderDocument();
-                    m_DraftElement = {};
-                    m_SourceAsset = {};
-                    m_SourceDirty = false;
-                    m_SourceDiagnostic.clear();
-                    m_Message = "Reverted to the imported source. Undo is available.";
+                    if (usesStyleSheet)
+                    {
+                        m_Controller.ReloadUiBuilderStyleSheet();
+                        m_StyleSourceGeneration = 0;
+                        m_StyleExternalComparison.clear();
+                        m_Message = "Reloaded style sheet from disk. Style undo history was cleared.";
+                    }
+                    else
+                    {
+                        m_Controller.ReloadUiBuilderDocument();
+                        m_DraftElement = {};
+                        m_SourceAsset = {};
+                        m_SourceDirty = false;
+                        m_SourceDiagnostic.clear();
+                        m_Message = "Reverted to the imported source. Undo is available.";
+                    }
                     m_RevertConfirmationOpen = false;
                     ui.CloseCurrentPopup();
                 }
@@ -491,9 +535,14 @@ namespace KeireEditor
             const float viewportHeight = std::max(220.0F, available.Height * 0.52F);
             if (auto center = ui.BeginChild("UiBuilderCompactCenter", {0.0F, viewportHeight}, true); center)
                 DrawViewport(ui);
-            if (auto tools = ui.BeginChild("UiBuilderCompactTools", {0.0F, 0.0F}, true); tools)
+            const auto toolsId = m_WorkspaceMode == UiBuilderWorkspaceMode::Debug    ? "UiBuilderCompactDebugTools"
+                                 : m_WorkspaceMode == UiBuilderWorkspaceMode::Styles ? "UiBuilderCompactStyleTools"
+                                                                                     : "UiBuilderCompactTools";
+            if (auto tools = ui.BeginChild(toolsId, {0.0F, 0.0F}, true); tools)
             {
-                if (auto tabs = ui.BeginTabBar("UiBuilderCompactTabs"); tabs)
+                if (m_WorkspaceMode == UiBuilderWorkspaceMode::Debug)
+                    DrawDebugger(ui);
+                else if (auto tabs = ui.BeginTabBar("UiBuilderCompactTabs"); tabs)
                 {
                     if (m_WorkspaceMode == UiBuilderWorkspaceMode::Styles)
                     {
@@ -552,7 +601,10 @@ namespace KeireEditor
         if (ui.Splitter(Keire::UiAxis::Horizontal, "UiBuilderRightSplitter", centerWidth, rightWidth, 260.0F, 230.0F))
             m_RightPaneWidth = rightWidth;
         ui.SameLine();
-        if (auto right = ui.BeginChild("UiBuilderRight", {rightWidth, 0.0F}, true); right)
+        const auto rightId = m_WorkspaceMode == UiBuilderWorkspaceMode::Debug    ? "UiBuilderDebugRight"
+                             : m_WorkspaceMode == UiBuilderWorkspaceMode::Styles ? "UiBuilderStyleRight"
+                                                                                 : "UiBuilderRight";
+        if (auto right = ui.BeginChild(rightId, {rightWidth, 0.0F}, true); right)
         {
             if (m_WorkspaceMode == UiBuilderWorkspaceMode::Styles)
             {
@@ -566,6 +618,8 @@ namespace KeireEditor
                         DrawStyleSource(ui);
                 }
             }
+            else if (m_WorkspaceMode == UiBuilderWorkspaceMode::Debug)
+                DrawDebugger(ui);
             else if (auto tabs = ui.BeginTabBar("UiBuilderRightTabs"); tabs)
             {
                 if (auto inspector = ui.BeginTabItem("Inspector"); inspector)
