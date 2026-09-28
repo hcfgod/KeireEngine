@@ -189,6 +189,7 @@ export function databaseFailure(error: { message: string; code?: string }): Requ
         ["organization_authorization_required", [403, "marketplace.organization_forbidden", "Your account cannot perform this action for the organization."]],
         ["license_revision_changed", [409, "marketplace.license_changed", "The package license changed. Review it before continuing."]],
         ["product_not_found", [404, "marketplace.product_not_found", "The marketplace product was not found."]],
+        ["free_offer_unavailable", [409, "marketplace.offer_unavailable", "This asset is not available for a free claim. Paid purchasing is not available yet. You have not been charged."]],
         ["device_session_revoked", [401, "account.session_revoked", "This device session is no longer active."]],
         ["device_session_invalid", [401, "account.session_revoked", "This device session is no longer active."]],
         ["entitlement_required", [403, "marketplace.entitlement_required", "Add this product to your library before downloading it."]],

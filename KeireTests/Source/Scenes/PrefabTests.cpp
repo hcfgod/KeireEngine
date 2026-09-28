@@ -2,6 +2,7 @@
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <cstring>
 #include <string>
@@ -159,6 +160,14 @@ TEST_CASE("first person package prefab and input survive native decoding")
     CHECK(objects[1].Parent == objects[0].Id);
     CHECK(objects[0].Components.size() == 2);
     CHECK(objects[1].Components.size() == 4);
+    const auto controller = nlohmann::json::parse(objects[1].Components.back().Data);
+    CHECK(controller.at("_walkSpeed").get<double>() == doctest::Approx(5.0));
+    CHECK(controller.at("_sprintMultiplier").get<double>() == doctest::Approx(1.6));
+    CHECK(controller.at("_jumpHeight").get<double>() == doctest::Approx(1.2));
+    CHECK(controller.at("_gravity").get<double>() == doctest::Approx(24.0));
+    CHECK(controller.at("_mouseSensitivity").get<double>() == doctest::Approx(0.12));
+    CHECK(controller.at("_gamepadLookSpeed").get<double>() == doctest::Approx(150.0));
+    CHECK_FALSE(controller.at("_invertY").get<bool>());
     const auto input =
         Keire::InputActionAsset::Decode(Bytes(KeireTests::ReadFile(root / "FirstPersonInput.keireinput")));
     REQUIRE(input);

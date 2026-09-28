@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -326,7 +327,7 @@ def managed_assemblies(
 
 
 def create_manifest(
-    definition: PackageDefinition, payload: pathlib.Path
+    definition: PackageDefinition, payload: pathlib.Path, package_version: str | None = None
 ) -> dict[str, object]:
     files, installed_size = inventory(payload)
     assets = asset_inventory(payload)
@@ -355,7 +356,7 @@ def create_manifest(
         "schemaVersion": 1,
         "signatureKeyId": "",
         "summary": definition.summary,
-        "version": VERSION,
+        "version": package_version or VERSION,
     }
 
 
@@ -366,7 +367,9 @@ def create_package(
     asset_tool: pathlib.Path,
     tracked_files: set[pathlib.Path] | None,
     definition: PackageDefinition,
+    package_version: str | None = None,
 ) -> dict[str, object]:
+    package_version = package_version or VERSION
     destination = output_root / definition.slug
     if destination.exists():
         raise FileExistsError(
@@ -374,7 +377,7 @@ def create_package(
         )
     staging = output_root / f".{definition.slug}-{uuid.uuid4().hex}.tmp"
     payload = staging / "Payload"
-    package = staging / f"{definition.slug}-{VERSION}.keireassetpackage"
+    package = staging / f"{definition.slug}-{package_version}.keireassetpackage"
     manifest_path = staging / "manifest.json"
     try:
         payload.mkdir(parents=True)
@@ -383,7 +386,7 @@ def create_package(
         shutil.copyfile(repository / "LICENSE.txt", payload / "LICENSE.txt")
         write_utf8_lf(
             manifest_path,
-            canonical_json(create_manifest(definition, payload)),
+            canonical_json(create_manifest(definition, payload, package_version)),
         )
         run(
             asset_tool,
@@ -405,7 +408,7 @@ def create_package(
         archive = inspected.get("archive")
         if (
             inspected.get("packageId") != definition.package_id
-            or inspected.get("version") != VERSION
+            or inspected.get("version") != package_version
         ):
             raise RuntimeError(f"Generated identity does not match {definition.slug}.")
         if inspected.get("detachedSignature") is not None:
@@ -425,7 +428,7 @@ def create_package(
             "packageId": definition.package_id,
             "productSlug": definition.slug,
             "signed": False,
-            "version": VERSION,
+            "version": package_version,
         }
         write_utf8_lf(
             staging / "artifact.json",
@@ -443,6 +446,7 @@ def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asset-tool", type=pathlib.Path)
     parser.add_argument("--package", choices=[definition.slug for definition in PACKAGES])
+    parser.add_argument("--package-version", help="Independent package patch version; engine/API compatibility remains configured by Project.conf.")
     parser.add_argument("--include-untracked", action="store_true", help="Include new source files in selected roots for local unsigned preview builds.")
     parser.add_argument(
         "--project", type=pathlib.Path, default=repository / "Samples" / "KeireSandbox"
@@ -452,7 +456,10 @@ def parse_arguments() -> argparse.Namespace:
         type=pathlib.Path,
         default=repository / "Build" / "Marketplace" / "Official" / VERSION,
     )
-    return parser.parse_args()
+    arguments = parser.parse_args()
+    if arguments.package_version and (not arguments.package or not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", arguments.package_version)):
+        parser.error("--package-version requires --package and a stable major.minor.patch version")
+    return arguments
 
 
 def main() -> int:
@@ -475,7 +482,7 @@ def main() -> int:
     try:
         artifacts = [
             create_package(
-                repository, project, output, asset_tool, tracked_files, definition
+                repository, project, output, asset_tool, tracked_files, definition, arguments.package_version
             )
             for definition in PACKAGES if arguments.package is None or definition.slug == arguments.package
         ]
@@ -483,7 +490,7 @@ def main() -> int:
             "artifacts": artifacts,
             "publisherId": PUBLISHER_ID,
             "schemaVersion": 1,
-            "version": VERSION,
+            "version": arguments.package_version or VERSION,
         }
         write_utf8_lf(
             output / "release-index.json",

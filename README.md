@@ -496,7 +496,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 100 guides and progress records grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 101 guides and progress records grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.4 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
@@ -618,3 +618,7 @@ Asset packages now retain compatibility records across Editor upgrades. **Window
 assets, compatibility notices, and updates from the synchronized Hub library. Local imports have a review step.
 The [First Person Controller](Samples/KeireSandbox/Assets/FirstPersonController/README.md) includes a configured player
 prefab and input bindings; see [Asset Packages](Docs/AssetPackages.md) for building its Marketplace archive.
+
+Claim free assets on their Marketplace page, choose **Open in Editor**, then review and import them in
+**Package Manager > My Assets**. Hub sign-in is separate from the website. Paid assets show **Purchasing coming soon**;
+checkout is not enabled and no payment is taken. Missing offers show **Currently unavailable**, not **Free**.

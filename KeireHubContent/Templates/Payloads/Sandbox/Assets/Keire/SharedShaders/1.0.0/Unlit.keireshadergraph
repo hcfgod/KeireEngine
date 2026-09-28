@@ -1,0 +1,256 @@
+{
+  "authoring": {
+    "annotations": [],
+    "comments": []
+  },
+  "connections": [
+    {
+      "id": "bb7cae03-1c09-45cb-b0e9-2c3b1383f8e8",
+      "input": [
+        "f9735253-5629-eb69-d2c7-129636d0fc3f",
+        "e4c7a5a1-3322-b07a-81a4-c7c1f5e2cc08"
+      ],
+      "output": [
+        "a1e1c9d3-0571-1aab-2778-655b3b8d1c9d",
+        "30ffeadc-766b-15e7-3c78-94262defffbd"
+      ],
+      "routing": []
+    },
+    {
+      "id": "ed605618-31db-91d8-4fb1-f0d5de6a8d53",
+      "input": [
+        "f9735253-5629-eb69-d2c7-129636d0fc3f",
+        "d4bac5a6-532d-8b84-138e-4369b9ec0936"
+      ],
+      "output": [
+        "1456109f-cf9a-6699-7e02-d27a4ca667cf",
+        "9a652d41-b66b-645e-8c1e-5897746d9ed9"
+      ],
+      "routing": []
+    },
+    {
+      "id": "3cf61567-39f1-7e57-6191-be09f3930f87",
+      "input": [
+        "f9735253-5629-eb69-d2c7-129636d0fc3f",
+        "dc2787b9-3deb-cf69-9ece-458bb3beadb5"
+      ],
+      "output": [
+        "25d01f8e-c22f-28a9-d28b-6f6eee591783",
+        "f41d92cb-6045-9f5a-f3fb-f6d77c39e534"
+      ],
+      "routing": []
+    }
+  ],
+  "fullscreenInjectionPoint": 1,
+  "includeRoots": [
+    "Assets"
+  ],
+  "keywords": [],
+  "maximumWorldPositionDisplacementRadius": 0.0,
+  "nodes": [
+    {
+      "function": "",
+      "id": "f9735253-5629-eb69-d2c7-129636d0fc3f",
+      "include": "",
+      "kind": 0,
+      "name": "Unlit Shader Output",
+      "parameterMetadata": {
+        "category": "",
+        "description": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "direction": 0,
+          "id": "e4c7a5a1-3322-b07a-81a4-c7c1f5e2cc08",
+          "name": "Color",
+          "type": 4
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ],
+          "direction": 0,
+          "id": "d4bac5a6-532d-8b84-138e-4369b9ec0936",
+          "name": "Emission",
+          "type": 4
+        },
+        {
+          "default": 1.0,
+          "direction": 0,
+          "id": "dc2787b9-3deb-cf69-9ece-458bb3beadb5",
+          "name": "Opacity",
+          "type": 0
+        },
+        {
+          "default": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "direction": 0,
+          "id": "4bd684d0-8c75-9ca2-aff2-d21a47db59e0",
+          "name": "WorldPositionOffset",
+          "type": 2
+        },
+        {
+          "default": 0.0,
+          "direction": 0,
+          "id": "9242fad0-036b-2224-4dc4-173569f903f4",
+          "name": "PixelDepthOffset",
+          "type": 0
+        }
+      ],
+      "position": [
+        480.0,
+        120.0
+      ],
+      "referencedAsset": null,
+      "symbol": "",
+      "textureSemantic": 0,
+      "typeId": "keire.output.material",
+      "value": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "valueType": 4
+    },
+    {
+      "function": "",
+      "id": "a1e1c9d3-0571-1aab-2778-655b3b8d1c9d",
+      "include": "",
+      "kind": 1,
+      "name": "BaseColor",
+      "parameterMetadata": {
+        "category": "Surface",
+        "description": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "direction": 1,
+          "id": "30ffeadc-766b-15e7-3c78-94262defffbd",
+          "name": "Value",
+          "type": 4
+        }
+      ],
+      "position": [
+        40.0,
+        120.0
+      ],
+      "referencedAsset": null,
+      "symbol": "BaseColor",
+      "textureSemantic": 0,
+      "typeId": "keire.input.parameter",
+      "value": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "valueType": 4
+    },
+    {
+      "function": "",
+      "id": "1456109f-cf9a-6699-7e02-d27a4ca667cf",
+      "include": "",
+      "kind": 1,
+      "name": "Emission",
+      "parameterMetadata": {
+        "category": "Surface",
+        "description": "",
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "default": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "direction": 1,
+          "id": "9a652d41-b66b-645e-8c1e-5897746d9ed9",
+          "name": "Value",
+          "type": 4
+        }
+      ],
+      "position": [
+        40.0,
+        240.0
+      ],
+      "referencedAsset": null,
+      "symbol": "Emission",
+      "textureSemantic": 0,
+      "typeId": "keire.input.parameter",
+      "value": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "valueType": 4
+    },
+    {
+      "function": "",
+      "id": "25d01f8e-c22f-28a9-d28b-6f6eee591783",
+      "include": "",
+      "kind": 1,
+      "name": "Opacity",
+      "parameterMetadata": {
+        "category": "Surface",
+        "description": "",
+        "maximum": 1.0,
+        "minimum": 0.0,
+        "sortPriority": 0
+      },
+      "pins": [
+        {
+          "default": 0.0,
+          "direction": 1,
+          "id": "f41d92cb-6045-9f5a-f3fb-f6d77c39e534",
+          "name": "Value",
+          "type": 0
+        }
+      ],
+      "position": [
+        40.0,
+        360.0
+      ],
+      "referencedAsset": null,
+      "symbol": "Opacity",
+      "textureSemantic": 0,
+      "typeId": "keire.input.parameter",
+      "value": 1.0,
+      "valueType": 0
+    }
+  ],
+  "output": 3,
+  "purpose": 0,
+  "resources": [],
+  "schemaVersion": 6,
+  "stages": 3,
+  "target": 0,
+  "threadGroupSize": [
+    8,
+    8,
+    1
+  ]
+}

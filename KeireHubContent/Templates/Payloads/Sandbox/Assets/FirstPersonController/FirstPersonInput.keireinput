@@ -1,0 +1,306 @@
+{
+  "actionMaps": [
+    {
+      "actions": [
+        {
+          "id": "876f26bb-535e-5114-80cc-e81e843125f9",
+          "interactions": [],
+          "name": "Move",
+          "processors": [],
+          "type": "Value",
+          "valueType": "Axis2D"
+        },
+        {
+          "id": "56628304-d495-544b-bf22-b98c30fc8c36",
+          "interactions": [],
+          "name": "Look",
+          "processors": [],
+          "type": "Value",
+          "valueType": "Axis2D"
+        },
+        {
+          "id": "19ac2042-e225-5d3f-a57a-cda051b4047e",
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {
+                "pressPoint": 0.5
+              }
+            }
+          ],
+          "name": "Escape",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "d22885ca-27a3-5f05-a46d-2215893d4715",
+          "interactions": [],
+          "name": "Jump",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "35e3a121-fa4f-56af-a96b-68952581df19",
+          "interactions": [],
+          "name": "Sprint",
+          "processors": [],
+          "type": "Button",
+          "valueType": "Boolean"
+        },
+        {
+          "id": "debead93-cb69-5769-843f-c9c205492f33",
+          "interactions": [],
+          "name": "GamepadLook",
+          "processors": [],
+          "type": "Value",
+          "valueType": "Axis2D"
+        }
+      ],
+      "bindings": [
+        {
+          "action": "876f26bb-535e-5114-80cc-e81e843125f9",
+          "composite": "Vector2",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "35651023-8730-5d98-bbd4-a904a1e2dbb3",
+          "interactions": [],
+          "name": "WASD",
+          "part": "",
+          "path": "",
+          "processors": []
+        },
+        {
+          "action": "876f26bb-535e-5114-80cc-e81e843125f9",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "5dfa774c-a10a-5279-9009-90f66069ff86",
+          "interactions": [],
+          "name": "",
+          "part": "Up",
+          "path": "<Keyboard>/w",
+          "processors": []
+        },
+        {
+          "action": "876f26bb-535e-5114-80cc-e81e843125f9",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "06f26628-5259-5245-a87f-d029090d2fa1",
+          "interactions": [],
+          "name": "",
+          "part": "Down",
+          "path": "<Keyboard>/s",
+          "processors": []
+        },
+        {
+          "action": "876f26bb-535e-5114-80cc-e81e843125f9",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "0dd02e30-7a03-53a7-a62a-9e14504b5da0",
+          "interactions": [],
+          "name": "",
+          "part": "Left",
+          "path": "<Keyboard>/a",
+          "processors": []
+        },
+        {
+          "action": "876f26bb-535e-5114-80cc-e81e843125f9",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "9c09c47b-b7a9-5b9b-890b-20a3a4bc565f",
+          "interactions": [],
+          "name": "",
+          "part": "Right",
+          "path": "<Keyboard>/d",
+          "processors": []
+        },
+        {
+          "action": "876f26bb-535e-5114-80cc-e81e843125f9",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "f9181343-b4a1-5863-bbeb-6d7c90960353",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/leftStick",
+          "processors": [
+            {
+              "name": "Deadzone",
+              "parameters": {
+                "maximum": 0.925,
+                "minimum": 0.125
+              }
+            }
+          ]
+        },
+        {
+          "action": "56628304-d495-544b-bf22-b98c30fc8c36",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "4420f9be-d98e-55af-ac69-b07949a18c2e",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Mouse>/delta",
+          "processors": []
+        },
+        {
+          "action": "debead93-cb69-5769-843f-c9c205492f33",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "2c03581e-d9fd-5a07-82ff-7c63f7af3c16",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/rightStick",
+          "processors": [
+            {
+              "name": "Deadzone",
+              "parameters": {
+                "maximum": 0.925,
+                "minimum": 0.125
+              }
+            }
+          ]
+        },
+        {
+          "action": "19ac2042-e225-5d3f-a57a-cda051b4047e",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "08f7362f-9168-58ad-b3de-2606410c5784",
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {}
+            }
+          ],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/escape",
+          "processors": []
+        },
+        {
+          "action": "d22885ca-27a3-5f05-a46d-2215893d4715",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "14bf692c-6b67-5247-b7d2-b144b6f8423c",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/space",
+          "processors": []
+        },
+        {
+          "action": "d22885ca-27a3-5f05-a46d-2215893d4715",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "c8e9a7ef-6b73-57dd-8d76-ad8767645c12",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/buttonSouth",
+          "processors": []
+        },
+        {
+          "action": "35e3a121-fa4f-56af-a96b-68952581df19",
+          "composite": "",
+          "groups": [
+            "KeyboardMouse"
+          ],
+          "id": "cd34a4f0-bf7f-5619-9c7f-7277d9776048",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Keyboard>/leftShift",
+          "processors": []
+        },
+        {
+          "action": "35e3a121-fa4f-56af-a96b-68952581df19",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "1a880a26-3303-5ec9-9292-91ea67e38118",
+          "interactions": [],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/leftStickPress",
+          "processors": []
+        },
+        {
+          "action": "19ac2042-e225-5d3f-a57a-cda051b4047e",
+          "composite": "",
+          "groups": [
+            "Gamepad"
+          ],
+          "id": "fc949960-1d8a-5c39-93d5-8ae10e05ed44",
+          "interactions": [
+            {
+              "name": "Press",
+              "parameters": {}
+            }
+          ],
+          "name": "",
+          "part": "",
+          "path": "<Gamepad>/start",
+          "processors": []
+        }
+      ],
+      "capturePolicy": "AlwaysReceive",
+      "id": "166789a6-f7ff-52ab-a8d4-9e540b14802b",
+      "name": "Player"
+    }
+  ],
+  "controlSchemes": [
+    {
+      "bindingGroup": "KeyboardMouse",
+      "devices": [
+        {
+          "device": "Keyboard",
+          "optional": false
+        },
+        {
+          "device": "Mouse",
+          "optional": false
+        }
+      ],
+      "id": "eabc551f-5aa2-51c0-9a18-30faf1ed1b90",
+      "name": "Keyboard & Mouse"
+    },
+    {
+      "bindingGroup": "Gamepad",
+      "devices": [
+        {
+          "device": "Gamepad",
+          "optional": false
+        }
+      ],
+      "id": "c313c527-03a2-5ad5-9031-caa5b109ccb1",
+      "name": "Gamepad"
+    }
+  ],
+  "name": "FirstPersonInput",
+  "schemaVersion": 1
+}

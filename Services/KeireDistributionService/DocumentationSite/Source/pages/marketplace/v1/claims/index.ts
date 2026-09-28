@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { loadOffer, purchaseState } from "../../../../lib/marketplace-purchase";
 import { apiError, apiResponse, boundedString, MarketplaceApiError, parseJsonObject, requireSupabase, requireUser,
     throwEdgeFunctionError } from "../../../../lib/api";
 
@@ -17,6 +18,10 @@ export const POST: APIRoute = async (context) => {
             .select("id,license_spdx,license_revision,license_acceptance_snapshot").eq("id", productId).maybeSingle();
         if (productError) throw productError;
         if (!product) throw new MarketplaceApiError(404, "marketplace.product_not_found", "Product was not found.");
+        const acquisition = purchaseState(await loadOffer(supabase, productId));
+        if (!acquisition.canClaim) throw new MarketplaceApiError(409,
+            acquisition.state === "purchase_unavailable" ? "marketplace.purchase_unavailable" : "marketplace.offer_unavailable",
+            acquisition.message);
         const licenseSnapshot = boundedString(product.license_acceptance_snapshot, "licenseAcceptanceSnapshot", 1, 100_000);
         const { data, error } = await supabase.functions.invoke("marketplace-library", {
             body: {

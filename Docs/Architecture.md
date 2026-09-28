@@ -1,5 +1,14 @@
 # Architecture
 
+Managed input actions retain their identity when the editor Game viewport loses focus. The editor suppresses sampled
+values and transient events while preserving action type, frame, and enabled state. Missing or released contexts still
+report invalid handles; focus changes do not masquerade as disposal or fault gameplay scripts.
+Paused simulation and Play change review suspend Game input and native pointer capture. Cancelling review restores
+runtime ownership without disposing the game's action contexts.
+
+Managed builds include a source-content digest in each generated compiler project. Unchanged content preserves the
+project timestamp and warm-build reuse; changed content invalidates MSBuild even when imported files have older timestamps.
+
 Managed entity interop resolves a handle's world through the host's loaded scene sessions before consulting
 Behaviour instances. A scene containing only native components therefore remains accessible from a persistent
 session Behaviour. Entity IDs are validated within the specified world, including when two scenes share an ID;

@@ -234,7 +234,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25045959,
+      "estimatedSizeBytes": 25113083,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -533,6 +533,56 @@
           "sha256": "33cc78c881568cbc850864864d10c05d82837a9ab5bfbcb853c57ce70c0cfb42"
         },
         {
+          "path": "Assets/FirstPersonController/FirstPerson.keireasm",
+          "sizeBytes": 213,
+          "sha256": "8e398fa83714f438a4c7fe6e97396462bfff3464d9f66e4156e88c3d5531164d"
+        },
+        {
+          "path": "Assets/FirstPersonController/FirstPerson.keireasm.keiremeta",
+          "sizeBytes": 227,
+          "sha256": "3f4d73a2d8f859267d7bb26725f4cb9cc5447dd2715187bd415e0554346080a8"
+        },
+        {
+          "path": "Assets/FirstPersonController/FirstPersonInput.keireinput",
+          "sizeBytes": 8008,
+          "sha256": "a79a8b5a7496cf296cd44b1c4fe655a1cf449c7bcb58e1c0a4555b3303a64f2d"
+        },
+        {
+          "path": "Assets/FirstPersonController/FirstPersonInput.keireinput.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "7a3cc76caa4c483bd280b0705b9071f4cfc1f734e8f8e6cfaf5c90fb432bf24e"
+        },
+        {
+          "path": "Assets/FirstPersonController/FirstPersonPlayer.keireprefab",
+          "sizeBytes": 3315,
+          "sha256": "6414b875a1eff4e2cd3653d5770bde9ce99b86113a22bfa0d0955d6b83fd9ced"
+        },
+        {
+          "path": "Assets/FirstPersonController/FirstPersonPlayer.keireprefab.keiremeta",
+          "sizeBytes": 352,
+          "sha256": "8fb62264426d4653531f98a12e9a4fe69648322a4fa3def3debb6372eece2746"
+        },
+        {
+          "path": "Assets/FirstPersonController/README.md",
+          "sizeBytes": 2159,
+          "sha256": "39d94fa3a3327c30672015e9489ecd88ce27799286144c8266009ddaedfda581"
+        },
+        {
+          "path": "Assets/FirstPersonController/README.md.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "f28e298197bc8e68f2c026864588d4d1a8f6dbd4153ac1c785d762163bd078f4"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonController.cs",
+          "sizeBytes": 5595,
+          "sha256": "b77c890a537a7c6a0485237074579b314dabdc10713a15a0618dce57bd8e7005"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonController.cs.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "fa684fb313cc2003416229c03f025fafbaf8c1d8ca5982883f9355bb5921b871"
+        },
+        {
           "path": "Assets/Input/DefaultInput.keireinput",
           "sizeBytes": 20345,
           "sha256": "b88af662fea782d9decf3a6be2f17f5800d9d09cd0aa850029aab9c2b47ec108"
@@ -541,6 +591,66 @@
           "path": "Assets/Input/DefaultInput.keireinput.keiremeta",
           "sizeBytes": 224,
           "sha256": "956c4bf5ca3c9a827416f12b9ab631fc43472a923ee54735074c14dee15b884f"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/CustomGraphics.keireshadergraph",
+          "sizeBytes": 5496,
+          "sha256": "8f6e1a200219d267088fd39814ff82ff194ec2a9e30737a7cff21c70cf91f718"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/CustomGraphics.keireshadergraph.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "31ad3c0fc52302bc3bf8686d85f47443ebd7f0078286c3471229b28660a0ac5a"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/Fullscreen.keireshadergraph",
+          "sizeBytes": 5498,
+          "sha256": "1ef46059c7f695dc1e7735749fe924668c00032842fe16a58918f34b542715a1"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/Fullscreen.keireshadergraph.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "6d6cc26e3aa147904b511ae6479d1cb270fd6d9974a3d15e1cc07a1d2563fe09"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/Lit.keireshadergraph",
+          "sizeBytes": 11638,
+          "sha256": "a3ab5fe6adad4a3915d82a973566fd98cab7617878baf30f1d9a276496975e02"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/Lit.keireshadergraph.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "78cc1dd74cb4354634e575c2b81a99b98b2145f54891221d4b512a00ba89d123"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/UI.keireshadergraph",
+          "sizeBytes": 5490,
+          "sha256": "d8dbd978155ca724e234ab77d661f13b73d2d0756f8bd4c17011e64654938d6e"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/UI.keireshadergraph.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "985b4b0020adf23b07687ed9634185eb70e8857ec5880dcc84b09e208b1946cd"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/Unlit.keireshadergraph",
+          "sizeBytes": 5493,
+          "sha256": "99a06e012c33f9042faa43c986e00f8001e13ed485b1a3da0282791611a5c31f"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/Unlit.keireshadergraph.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "dffcda71bad064f2a41a15738314b752c146f0b2a03bf1a3f737746be06d9c5d"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/VFX.keireshadergraph",
+          "sizeBytes": 11638,
+          "sha256": "0f450adb2241f2f6b31427566303125056c3f3921ec959968eec07207a960694"
+        },
+        {
+          "path": "Assets/Keire/SharedShaders/1.0.0/VFX.keireshadergraph.keiremeta",
+          "sizeBytes": 224,
+          "sha256": "b3f5af57618affcb3c3ce6483fa189bb952a513ff6f633587e326e81963f9802"
         },
         {
           "path": "Assets/Materials/DefaultUnlit.keiremateriallegacy",

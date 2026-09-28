@@ -794,6 +794,7 @@ void EditorWorkspaceLayer::RequestStopPlayMode()
             return;
         }
         m_PlayChangesPanel->Open();
+        SetGameViewportInputActive(false);
     }
     catch (const std::exception& error)
     {
@@ -1450,8 +1451,8 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             m_GameViewportCaptureSuspended = false;
         const auto mainWindow = Owner().MainWindow();
         const bool productionInputActive = KeireEditor::GameViewportOwnsRuntimeInput(
-            playActive, mainWindow && mainWindow->Focused(), ui.WindowFocused(), m_ManagedCursorLocked,
-            m_GameViewportCaptureSuspended);
+            playSession && playSession->State() == Keire::ScenePlayState::Playing, mainWindow && mainWindow->Focused(),
+            ui.WindowFocused(), m_ManagedCursorLocked, m_GameViewportCaptureSuspended, m_PlayChanges != nullptr);
         // The window manager may refuse to focus a process launched by an unattended validation harness. Keep the
         // production focus contract intact while allowing --smoke-play to exercise the real SDL/ImGui pointer path in
         // packaged builds, where renderer fault-injection hooks remain disabled.

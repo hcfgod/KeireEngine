@@ -21,6 +21,6 @@ const { product } = Astro.props;
             <span>{product.publisher_name}{product.publisher_verified ? " · Verified" : ""}</span>
             <span>{Number(product.rating_average).toFixed(1)} / 5 · {product.rating_count}</span>
         </div>
-        <div class="market-card__footer"><span>{product.license_spdx}</span><strong>Free</strong></div>
+        <div class="market-card__footer"><span>{product.license_spdx}</span><strong>View asset</strong></div>
     </div>
 </article>

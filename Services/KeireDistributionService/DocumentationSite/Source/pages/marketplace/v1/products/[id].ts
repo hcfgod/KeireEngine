@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { apiError, apiResponse, MarketplaceApiError, requireSupabase } from "../../../../lib/api";
 import { marketplaceEnabled } from "../../../../lib/marketplace";
+import { loadOffer, purchaseState } from "../../../../lib/marketplace-purchase";
 
 export const prerender = false;
 export const GET: APIRoute = async (context) => {
@@ -18,6 +19,8 @@ export const GET: APIRoute = async (context) => {
         if (productResult.error) throw productResult.error;
         if (!productResult.data) throw new MarketplaceApiError(404, "marketplace.product_not_found", "Product was not found.");
         for (const result of [versionsResult, mediaResult, reviewsResult]) if (result.error) throw result.error;
-        return apiResponse(context, { data: { ...productResult.data, versions: versionsResult.data, media: mediaResult.data, reviews: reviewsResult.data }, meta: { apiVersion: "marketplace/v1", correlationId: context.locals.correlationId } }, 200, "public, max-age=60, stale-while-revalidate=300");
+        const offer = await loadOffer(supabase, id);
+        const acquisition = purchaseState(offer, false, versionsResult.data?.some(version => version.state === "published"));
+        return apiResponse(context, { data: { ...productResult.data, offer, acquisition, versions: versionsResult.data, media: mediaResult.data, reviews: reviewsResult.data }, meta: { apiVersion: "marketplace/v1", correlationId: context.locals.correlationId } }, 200, "public, max-age=60, stale-while-revalidate=300");
     } catch (error) { return apiError(context, error); }
 };

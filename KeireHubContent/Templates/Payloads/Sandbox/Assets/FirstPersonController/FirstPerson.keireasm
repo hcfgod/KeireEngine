@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "KeireFirstPerson",
+  "rootNamespace": "Keire.FirstPerson",
+  "classification": "runtime",
+  "sourceRoots": [
+    "Assets/FirstPersonController/Runtime"
+  ],
+  "references": []
+}

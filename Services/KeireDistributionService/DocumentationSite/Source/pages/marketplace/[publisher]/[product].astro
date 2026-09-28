@@ -1,6 +1,8 @@
 ---
 import PlatformLayout from "../../../layouts/PlatformLayout.astro";
+import AssetDescription from "../../../components/AssetDescription.astro";
 import { marketplaceEnabled } from "../../../lib/marketplace";
+import { loadOffer, offerPrice, purchaseState } from "../../../lib/marketplace-purchase";
 
 export const prerender = false;
 
@@ -9,11 +11,15 @@ const supabase = Astro.locals.supabase;
 let listing: any = null;
 let versions: any[] = [];
 let ownsPersonalCopy = false;
+let offer = null;
+let offerLoadFailed = false;
 if (supabase && await marketplaceEnabled(supabase)) {
     const result = await supabase.from("marketplace_catalog").select("*")
         .eq("publisher_slug", publisher).eq("slug", product).maybeSingle();
     listing = result.data;
     if (listing) {
+        try { offer = await loadOffer(supabase, listing.id); }
+        catch { offerLoadFailed = true; }
         const versionResult = await supabase.from("marketplace_product_versions")
             .select("id,version,install_kind,minimum_engine_version,maximum_engine_version,platforms,architectures,release_notes_markdown,published_at,state")
             .eq("product_id", listing.id).in("state", ["published", "withdrawn", "security_revoked"])
@@ -33,10 +39,10 @@ if (!listing) {
 const structuredData = listing ? {
     "@context": "https://schema.org", "@type": "Product", name: listing.display_name,
     description: listing.short_description, brand: { "@type": "Organization", name: listing.publisher_name },
-    offers: { "@type": "Offer", price: "0", priceCurrency: "USD", availability: "https://schema.org/InStock" },
     aggregateRating: listing.rating_count > 0 ? { "@type": "AggregateRating", ratingValue: listing.rating_average, reviewCount: listing.rating_count } : undefined,
 } : undefined;
 const currentVersion = versions.find((version) => version.state === "published");
+const acquisition = purchaseState(offer, ownsPersonalCopy, Boolean(currentVersion));
 const openActionLabel = currentVersion?.install_kind === "complete_project" ? "Create in Hub" : "Open in Editor";
 ---
 
@@ -45,14 +51,14 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
         <section class="platform-shell product-hero">
             <div><p class="eyebrow">{listing.category_name} · {listing.license_spdx}</p><h1>{listing.display_name}</h1><p class="lead">{listing.short_description}</p><p>By <a href={`/marketplace/publishers/${listing.publisher_slug}/`}>{listing.publisher_name}</a>{listing.publisher_verified ? " · Verified publisher" : ""}</p></div>
             <aside class="product-buybox" aria-label="Get this asset">
-                <span class="product-buybox__price">Free</span>
-                <button class="button" type="button" data-claim-product={listing.id} disabled={ownsPersonalCopy}>
-                    {ownsPersonalCopy ? "In My Assets" : "Get asset"}
+                <span class="product-buybox__price">{offerPrice(offer)}</span>
+                <button class="button" type="button" data-claim-product={listing.id} disabled={!acquisition.canClaim}>
+                    {offerLoadFailed ? "Pricing unavailable" : acquisition.label}
                 </button>
                 <p class="form-message" aria-live="polite" data-claim-message>
-                    {ownsPersonalCopy
-                        ? "This asset is already in your personal library."
-                        : "Claim this asset for your personal library after signing in."}
+                    {offerLoadFailed && !ownsPersonalCopy
+                        ? "We couldn't load pricing. Refresh this page to try again. You have not been charged."
+                        : acquisition.message}
                 </p>
                 <a class="button button--secondary" href="/account/#library" data-library-link hidden={!ownsPersonalCopy}>
                     View My Assets
@@ -64,7 +70,7 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
             </aside>
         </section>
         <section class="platform-shell product-details">
-            <article class="prose"><h2>About this asset</h2><p class="preserve-lines">{listing.description_markdown}</p><h2>Release history</h2>{versions.length ? versions.map((version) => <section><h3>{version.version}</h3><p>{version.release_notes_markdown || "No release notes were supplied."}</p><span class={`status-badge ${version.state === "published" ? "status-badge--ready" : ""}`}>{version.state}</span></section>) : <p>No compatible published version is currently available.</p>}</article>
+            <article class="prose"><h2>About this asset</h2><AssetDescription text={listing.description_markdown} /><h2>Release history</h2>{versions.length ? versions.map((version) => <section><h3>{version.version}</h3><p>{version.release_notes_markdown || "No release notes were supplied."}</p><span class={`status-badge ${version.state === "published" ? "status-badge--ready" : ""}`}>{version.state}</span></section>) : <p>No compatible published version is currently available.</p>}</article>
             <aside><dl class="fact-list"><div><dt>Publisher</dt><dd>{listing.publisher_name}</dd></div><div><dt>License</dt><dd>{listing.license_spdx} ({listing.license_revision})</dd></div><div><dt>Rating</dt><dd>{Number(listing.rating_average).toFixed(1)} / 5 ({listing.rating_count})</dd></div><div><dt>Ownership</dt><dd>Perpetual personal or organization entitlement</dd></div></dl></aside>
         </section>
     </> : <section class="platform-section"><div class="platform-shell empty-state"><p class="eyebrow">404</p><h1>Product unavailable.</h1><p>The listing may not exist, may still be in review, or may have been delisted.</p><a class="button" href="/marketplace/">Return to Marketplace</a></div></section>}
@@ -121,7 +127,7 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
                     : null;
                 message.dataset.kind = "error";
                 message.textContent = response.status >= 500
-                    ? "The marketplace service was temporarily unavailable. Check My Assets; if it is not there, retry safely."
+                    ? "We couldn't confirm the claim. Check My Assets; if it is not there, retry safely. You have not been charged."
                     : apiMessage ?? "The asset could not be claimed. Review the request and try again.";
                 if (response.status >= 500 && libraryLink instanceof HTMLAnchorElement) libraryLink.hidden = false;
                 return;
@@ -146,3 +152,7 @@ const openActionLabel = currentVersion?.install_kind === "complete_project" ? "C
         }
     });
 </script>
+
+<style>
+    .product-buybox [hidden] { display: none !important; }
+</style>

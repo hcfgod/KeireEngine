@@ -1,0 +1,19 @@
+---
+interface Props { text: string; }
+// Publisher text is rendered as escaped Astro children, never injected HTML.
+const blocks = Astro.props.text.split(/\r?\n\s*\r?\n/).filter(block => block.trim()).map(block => {
+    const lines = block.trim().split(/\r?\n/);
+    if (lines.every(line => /^[-*] /.test(line))) return { kind: "list", lines: lines.map(line => line.slice(2)) };
+    if (lines.length === 1 && /^#{1,6} /.test(lines[0])) return { kind: "heading", lines: [lines[0].replace(/^#{1,6} /, "")] };
+    return { kind: "paragraph", lines: [lines.join(" ")] };
+});
+const inline = (text: string) => text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g).filter(Boolean).map(value => ({
+    kind: value.startsWith("**") && value.endsWith("**") ? "strong" : value.startsWith("`") && value.endsWith("`") ? "code" : "text",
+    value: value.startsWith("**") && value.endsWith("**") ? value.slice(2, -2) : value.startsWith("`") && value.endsWith("`") ? value.slice(1, -1) : value,
+}));
+---
+{blocks.map(block => block.kind === "heading" ? <h3>{block.lines[0]}</h3>
+    : block.kind === "list" ? <ul>{block.lines.map(line => <li>{inline(line).map(part =>
+        part.kind === "strong" ? <strong>{part.value}</strong> : part.kind === "code" ? <code>{part.value}</code> : part.value)}</li>)}</ul>
+    : <p>{inline(block.lines[0]).map(part => part.kind === "strong" ? <strong>{part.value}</strong>
+        : part.kind === "code" ? <code>{part.value}</code> : part.value)}</p>)}

@@ -16,6 +16,12 @@ versions.
 
 ## Unreleased
 
+- Preserve valid managed input actions while the editor viewport is unfocused; suppress input instead of faulting scripts.
+- Release gameplay cursor capture while paused or reviewing Play changes, so editor dialogs remain usable.
+- Recompile changed managed source content even when package updates or restored files carry older timestamps.
+- Save explicit FPS prefab movement, jump, gravity, and look defaults so imported players work immediately.
+- Distinguish free, paid-purchasing-unavailable, and missing offers in Marketplace UI/API; show library actions only after ownership is confirmed.
+
 - Align Marketplace managed compilation with the engine/editor API bundle and trusted native-service generator;
   preserve runtime/editor isolation and diagnose incomplete validator deployments.
 

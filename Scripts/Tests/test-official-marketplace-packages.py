@@ -74,12 +74,20 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
             f"{definition.slug} declares a missing entry point.",
         )
         if definition.slug == "first-person-controller":
+            patch_manifest = module.create_manifest(definition, payload, "0.4.5")
+            require(patch_manifest["version"] == "0.4.5", "Package patches need independent versions.")
+            require(patch_manifest["compatibility"] == manifest["compatibility"], "Package patch versions must not raise engine/API requirements.")
             import json
             prefab = json.loads((payload / definition.entry_points[0]).read_text(encoding="utf-8"))
             body, camera = prefab["entities"]
             require(camera["parent"] == body["id"], "FPS camera must remain parented to its motor.")
             require(any(c["type"] == "4b454952-4543-4841-5241-435445520001" for c in body["components"]), "FPS prefab needs a character motor.")
             require(any(c["type"] == "d7e0f0a1-bfe2-46d2-bc47-4083f77a8100" for c in camera["components"]), "FPS prefab needs the packaged behaviour.")
+            controller = next(c["data"] for c in camera["components"] if c["type"] == "d7e0f0a1-bfe2-46d2-bc47-4083f77a8100")
+            for name, value in {"_walkSpeed": 5.0, "_sprintMultiplier": 1.6, "_jumpHeight": 1.2,
+                                "_gravity": 24.0, "_mouseSensitivity": 0.12, "_gamepadLookSpeed": 150.0,
+                                "_invertY": False}.items():
+                require(controller.get(name) == value, f"FPS prefab must serialize its playable {name} default.")
             input_asset = json.loads((payload / "Assets/FirstPersonController/FirstPersonInput.keireinput").read_text(encoding="utf-8"))
             actions = {a["name"]: a["id"] for a in input_asset["actionMaps"][0]["actions"]}
             require(set(actions) == {"Move", "Look", "GamepadLook", "Jump", "Sprint", "Escape"}, "FPS input actions must match the controller.")

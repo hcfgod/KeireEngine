@@ -6,6 +6,7 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/ViewportInputRouting.h"
 
 #include "Keire/BuildInfo.h"
 #include "Keire/ECS/Components/AudioComponents.h"
@@ -801,9 +802,10 @@ Keire::AssetId EditorWorkspaceLayer::FindManagedInputAction(const std::uint64_t 
 std::optional<Keire::ManagedInputActionSnapshot>
 EditorWorkspaceLayer::ManagedInputAction(const std::uint64_t handle, const Keire::AssetId action) noexcept
 {
-    if (!m_SceneDocument->PlaySession() || !m_GameViewportInputActive)
+    if (!m_SceneDocument->PlaySession())
         return std::nullopt;
-    return m_ManagedInputContexts.Action(handle, action);
+    return KeireEditor::RouteGameViewportAction(m_ManagedInputContexts.Action(handle, action),
+                                                m_GameViewportInputActive);
 }
 
 std::optional<Keire::InputDeviceId>

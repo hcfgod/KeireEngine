@@ -207,6 +207,19 @@ include the receipt and project descriptor alongside asset files. Archives and l
 
 ## First Person Controller
 
+The prefab serializes all movement and look settings explicitly. After import, create a floor with a Collider,
+disable other primary cameras and listeners, then drag `FirstPersonPlayer` into the Scene viewport. A 20 × 1 × 20
+cube at Y = -0.5 makes a simple test floor. Press Play, click the Game viewport, and use WASD, mouse, Space, and Shift.
+Escape releases the pointer; click the Game viewport and recapture when returning to gameplay.
+The 0.4.5 package corrects serialized defaults. Existing scene instances keep their saved settings; use the package
+README's upgrade steps to repair an older instance or replace it with the corrected prefab.
+
+Marketplace product API responses include `offer` and `acquisition` state. Free claims require an active zero-price
+offer. Missing offers return `marketplace.offer_unavailable` (409); paid offers return
+`marketplace.purchase_unavailable` (409). `POST /marketplace/v1/checkout/` accepts a product ID but deliberately creates
+no payment session, order, or entitlement while checkout is unavailable. Prices and availability come from the server,
+never a browser-supplied amount. Existing ownership remains visible even if an offer is removed.
+
 The `com.keire.official.first-person-controller` package contains a ready-to-place player prefab, collision motor,
 primary camera, audio listener, C# behaviour, and independent input actions. It supports walking, sprinting, grounded
 jumping, mouse look, gamepad look, cursor release, and Inspector settings. See its
@@ -217,6 +230,9 @@ Build only this unsigned package with:
 ```sh
 python Scripts/Marketplace/create-official-marketplace-packages.py --package first-person-controller
 ```
+
+Use `--package-version 0.4.5` with a selected package to publish a package-only patch. This changes the archive version
+without changing its engine or managed API compatibility, which still comes from `Config/Project.conf`.
 
 For local previews before new source files are tracked, add `--include-untracked` and a fresh `--output-directory`.
 That option includes files under the selected source roots and does not sign or publish anything. Production builds

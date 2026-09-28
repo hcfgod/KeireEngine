@@ -2,8 +2,43 @@
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
+#include <algorithm>
+#include <filesystem>
+#include <span>
+#include <string>
+#include <vector>
+
 namespace Keire
 {
+    namespace
+    {
+        [[nodiscard]] std::string AssemblySourceDigest(const std::filesystem::path& projectRoot,
+                                                       const ManagedAssemblyDefinition& assembly)
+        {
+            std::vector<std::filesystem::path> sources;
+            for (const auto& root : assembly.SourceRoots)
+            {
+                const auto directory = projectRoot / root;
+                if (!std::filesystem::exists(directory))
+                    continue;
+                for (const auto& entry : std::filesystem::recursive_directory_iterator(directory))
+                    if (entry.is_regular_file() && entry.path().extension() == ".cs")
+                        sources.push_back(entry.path());
+            }
+            std::ranges::sort(sources);
+            std::string identity;
+            for (const auto& source : sources)
+            {
+                const auto path = source.lexically_relative(projectRoot).generic_u8string();
+                const auto bytes = Detail::ReadTextFile(source, std::size_t{16} << 20U);
+                identity += std::to_string(path.size()) + ":";
+                identity.append(reinterpret_cast<const char*>(path.data()), path.size());
+                identity += Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(bytes))));
+            }
+            return Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(identity))));
+        }
+    } // namespace
+
     void ScriptSystem::Impl::SetState(const ManagedBuildState state)
     {
         {
@@ -148,7 +183,11 @@ namespace Keire
                     assembly, names, ProjectRoot, projectDirectory, compilerApi, {}, compilerEditorApi,
                     compilerGenerator, assembly.Definition.Classification == ManagedAssemblyClassification::Editor,
                     "net10.0", "14.0");
-                WriteText(projectDirectory / (assembly.Definition.Name + ".csproj"), text);
+                // Package updates and source restores can preserve old timestamps. Changing the project when source
+                // bytes change prevents MSBuild from silently reusing the previous assembly in that case.
+                WriteText(projectDirectory / (assembly.Definition.Name + ".csproj"),
+                          text + "<!-- Keire source digest: " + AssemblySourceDigest(ProjectRoot, assembly.Definition) +
+                              " -->\n");
                 buildIdentity += std::to_string(text.size()) + ":" + text;
             }
             const auto aggregatorPath = projectDirectory / "Keire.Managed.Build.csproj";

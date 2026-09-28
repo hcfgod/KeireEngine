@@ -623,6 +623,8 @@ TEST_CASE("Managed builds publish only successful replacements")
         std::ofstream stream(source, std::ios::binary | std::ios::trunc);
         stream << "namespace Game; public static class Gameplay { public static int Value => 43; }\n";
     }
+    // An imported package can carry source timestamps older than the last successful compiler output.
+    std::filesystem::last_write_time(source, compiledTime - std::chrono::hours(24));
     const auto edited = scripts->StartBuild(request);
     REQUIRE(scripts->WaitForBuild(edited, std::chrono::seconds(60)));
     REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
