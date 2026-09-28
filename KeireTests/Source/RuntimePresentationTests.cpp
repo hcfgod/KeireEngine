@@ -658,6 +658,14 @@ TEST_CASE("UI document layout follows resized game viewports while world panels 
     CHECK(maximizedWorldSubmission->ReferenceResolution == initialWorldSubmission->ReferenceResolution);
     CHECK(maximizedWorldSubmission->WorldUnitsPerPixel == initialWorldSubmission->WorldUnitsPerPixel);
 
+    camera.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.0F, -0.1F});
+    worldEntity.GetComponent<Keire::TransformComponent>()->SetLocalRotation(
+        Keire::Math::EulerDegreesToQuaternion({0.0F, 60.0F, 0.0F}));
+    presentation->Synchronize(scene, 640.0F, 360.0F, false);
+    const auto crossingSubmissions = presentation->UiRenderSubmissions({});
+    CHECK(std::ranges::any_of(crossingSubmissions, [](const auto& submission)
+                              { return submission.Target == Keire::RuntimeUiRenderTarget::WorldSurface; }));
+
     presentation->Clear();
     scene->Close();
     assets->Close();

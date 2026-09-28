@@ -7,6 +7,7 @@ Keep the player upright with unit scale. The capsule centre starts one metre abo
 
 - WASD / left stick: move. Diagonal movement is normalized.
 - Mouse / right stick: look. Mouse sensitivity and stick turn rate are independent.
+- Moving the mouse upward looks up by default; enable Invert Y to reverse vertical look.
 - Space / gamepad south button: jump when grounded.
 - Left Shift / left stick press: sprint.
 - Escape / gamepad Start: release or recapture the cursor.

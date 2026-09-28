@@ -1196,6 +1196,8 @@ the Scene viewport cannot composite or intercept them. Render-texture panels sel
 World-surface panels retain physical dimensions, pixels-per-unit, transform, and depth policy; presentation maps input
 rays through panel UV and renderer submission treats the panel as scene content. Additive scenes retain deterministic
 document order and dispatch pointer input from the topmost document backward until handled.
+World-panel visibility is conservative when corners cross behind the camera. The renderer clips each triangle against
+its local UI clip rectangle and homogeneous camera planes before perspective division, retaining visible portions.
 
 Accepted render frames copy UI values, immutable text geometry, and logical texture and surface leases. No frame packet
 borrows a visual element, scene pointer, native surface, or mutable draw list. Every lease is qualified by frame slot

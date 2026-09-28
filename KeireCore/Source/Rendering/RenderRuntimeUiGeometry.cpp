@@ -3,6 +3,7 @@
 #include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -10,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Keire::RenderBackend
 {
@@ -528,9 +530,14 @@ namespace Keire::RenderBackend
             }
         }
 
-        [[nodiscard]] std::optional<RuntimeUiVertex>
-        ProjectRuntimeUiWorldVertex(const RuntimeUiVertex& source, const CapturedRuntimeUiWorldPanel& panel,
-                                    const std::uint32_t width, const std::uint32_t height) noexcept
+        struct WorldUiClipVertex
+        {
+            RuntimeUiVertex Source;
+            std::array<float, 4> Clip;
+        };
+
+        [[nodiscard]] WorldUiClipVertex WorldUiClipPoint(const RuntimeUiVertex& source,
+                                                         const CapturedRuntimeUiWorldPanel& panel) noexcept
         {
             const Vector3 local{(source.Position.X / panel.LayoutScale - panel.Pivot.X * panel.ReferenceResolution.X) *
                                     panel.WorldUnitsPerPixel.X,
@@ -538,21 +545,112 @@ namespace Keire::RenderBackend
                                     panel.WorldUnitsPerPixel.Y,
                                 0.0F};
             const auto world = Math::TransformPoint(panel.World, local);
-            const auto& matrix = panel.ViewProjection.Elements;
-            const float clipX = matrix[0] * world.X + matrix[4] * world.Y + matrix[8] * world.Z + matrix[12];
-            const float clipY = matrix[1] * world.X + matrix[5] * world.Y + matrix[9] * world.Z + matrix[13];
-            const float clipZ = matrix[2] * world.X + matrix[6] * world.Y + matrix[10] * world.Z + matrix[14];
-            const float clipW = matrix[3] * world.X + matrix[7] * world.Y + matrix[11] * world.Z + matrix[15];
-            if (!std::isfinite(clipW) || clipW <= 0.0001F)
-                return std::nullopt;
-            const float inverseW = 1.0F / clipW;
-            const float depth = clipZ * inverseW;
-            if (!std::isfinite(depth) || depth < 0.0F || depth > 1.0F)
-                return std::nullopt;
-            return RuntimeUiVertex{{(clipX * inverseW * 0.5F + 0.5F) * static_cast<float>(width),
-                                    (0.5F - clipY * inverseW * 0.5F) * static_cast<float>(height), depth},
-                                   source.ColorValue,
-                                   source.UV};
+            const auto& m = panel.ViewProjection.Elements;
+            return {source,
+                    {m[0] * world.X + m[4] * world.Y + m[8] * world.Z + m[12],
+                     m[1] * world.X + m[5] * world.Y + m[9] * world.Z + m[13],
+                     m[2] * world.X + m[6] * world.Y + m[10] * world.Z + m[14],
+                     m[3] * world.X + m[7] * world.Y + m[11] * world.Z + m[15]}};
+        }
+
+        [[nodiscard]] WorldUiClipVertex InterpolateWorldUi(const WorldUiClipVertex& a, const WorldUiClipVertex& b,
+                                                           const float t) noexcept
+        {
+            WorldUiClipVertex result;
+            for (std::size_t i = 0; i < result.Clip.size(); ++i)
+                result.Clip[i] = std::lerp(a.Clip[i], b.Clip[i], t);
+            const auto& x = a.Source;
+            const auto& y = b.Source;
+            result.Source = {{std::lerp(x.Position.X, y.Position.X, t), std::lerp(x.Position.Y, y.Position.Y, t), 0.0F},
+                             {std::lerp(x.ColorValue.Red, y.ColorValue.Red, t),
+                              std::lerp(x.ColorValue.Green, y.ColorValue.Green, t),
+                              std::lerp(x.ColorValue.Blue, y.ColorValue.Blue, t),
+                              std::lerp(x.ColorValue.Alpha, y.ColorValue.Alpha, t)},
+                             {std::lerp(x.UV.X, y.UV.X, t), std::lerp(x.UV.Y, y.UV.Y, t)}};
+            return result;
+        }
+
+        void AppendClippedWorldUiTriangle(std::vector<RuntimeUiVertex>& output,
+                                          const std::array<RuntimeUiVertex, 3>& triangle,
+                                          const CapturedRuntimeUiWorldPanel& panel, const RuntimeUiRect clip,
+                                          const std::uint32_t width, const std::uint32_t height)
+        {
+            // Each half-space can add at most one vertex to a convex triangle: 3 + 11 fits in 16.
+            std::array<WorldUiClipVertex, 16> polygon{};
+            std::size_t count = 0;
+            for (const auto& vertex : triangle)
+            {
+                const auto point = WorldUiClipPoint(vertex, panel);
+                if (!std::ranges::all_of(point.Clip, [](const float value) { return std::isfinite(value); }))
+                    return;
+                polygon[count++] = point;
+            }
+            // Clip in homogeneous space before dividing by W. Local clipping preserves panel overflow rules.
+            for (int plane = 0; plane < 11 && count != 0; ++plane)
+            {
+                const auto distance = [&](const WorldUiClipVertex& vertex)
+                {
+                    const auto& v = vertex.Clip;
+                    switch (plane)
+                    {
+                    case 0:
+                        return vertex.Source.Position.X - clip.X;
+                    case 1:
+                        return clip.X + clip.Width - vertex.Source.Position.X;
+                    case 2:
+                        return vertex.Source.Position.Y - clip.Y;
+                    case 3:
+                        return clip.Y + clip.Height - vertex.Source.Position.Y;
+                    case 4:
+                        return v[3] - 0.0001F;
+                    case 5:
+                        return v[0] + v[3];
+                    case 6:
+                        return v[3] - v[0];
+                    case 7:
+                        return v[1] + v[3];
+                    case 8:
+                        return v[3] - v[1];
+                    case 9:
+                        return v[2];
+                    default:
+                        return v[3] - v[2];
+                    }
+                };
+                std::array<WorldUiClipVertex, 16> clipped{};
+                std::size_t clippedCount = 0;
+                auto previous = polygon[count - 1];
+                float previousDistance = distance(previous);
+                for (std::size_t index = 0; index < count; ++index)
+                {
+                    const auto& current = polygon[index];
+                    const float currentDistance = distance(current);
+                    if ((previousDistance >= 0.0F) != (currentDistance >= 0.0F))
+                        clipped[clippedCount++] = InterpolateWorldUi(
+                            previous, current, previousDistance / (previousDistance - currentDistance));
+                    if (currentDistance >= 0.0F)
+                        clipped[clippedCount++] = current;
+                    previous = current;
+                    previousDistance = currentDistance;
+                }
+                polygon = clipped;
+                count = clippedCount;
+            }
+            const auto project = [&](const WorldUiClipVertex& vertex)
+            {
+                auto result = vertex.Source;
+                const auto& v = vertex.Clip;
+                result.Position = {(v[0] / v[3] * 0.5F + 0.5F) * static_cast<float>(width),
+                                   (0.5F - v[1] / v[3] * 0.5F) * static_cast<float>(height),
+                                   std::clamp(v[2] / v[3], 0.0F, 1.0F)};
+                return result;
+            };
+            for (std::size_t i = 1; i + 1 < count; ++i)
+            {
+                if (output.size() > MaximumRuntimeUiVertices - 3U)
+                    return;
+                output.insert(output.end(), {project(polygon[0]), project(polygon[i]), project(polygon[i + 1])});
+            }
         }
     } // namespace
 
@@ -721,56 +819,18 @@ namespace Keire::RenderBackend
             const auto end = static_cast<std::size_t>(batch.FirstVertex) + batch.VertexCount;
             for (std::size_t first = batch.FirstVertex; first + 2U < end; first += 3U)
             {
-                const auto a = ProjectRuntimeUiWorldVertex(flat.Vertices[first], panel, width, height);
-                const auto b = ProjectRuntimeUiWorldVertex(flat.Vertices[first + 1U], panel, width, height);
-                const auto c = ProjectRuntimeUiWorldVertex(flat.Vertices[first + 2U], panel, width, height);
-                if (a && b && c)
-                    result.Vertices.insert(result.Vertices.end(), {*a, *b, *c});
+                AppendClippedWorldUiTriangle(
+                    result.Vertices, {flat.Vertices[first], flat.Vertices[first + 1U], flat.Vertices[first + 2U]},
+                    panel, batch.ClipRect, width, height);
             }
             const auto vertexCount = result.Vertices.size() - firstVertex;
             if (vertexCount != 0U)
             {
-                const std::array clipCorners{
-                    RuntimeUiVertex{{batch.ClipRect.X, batch.ClipRect.Y, 0.0F}},
-                    RuntimeUiVertex{{batch.ClipRect.X + batch.ClipRect.Width, batch.ClipRect.Y, 0.0F}},
-                    RuntimeUiVertex{
-                        {batch.ClipRect.X + batch.ClipRect.Width, batch.ClipRect.Y + batch.ClipRect.Height, 0.0F}},
-                    RuntimeUiVertex{{batch.ClipRect.X, batch.ClipRect.Y + batch.ClipRect.Height, 0.0F}}};
-                RuntimeUiRect projectedClip;
-                bool projected = true;
-                float maximumX = 0.0F;
-                float maximumY = 0.0F;
-                for (std::size_t index = 0; index < clipCorners.size(); ++index)
-                {
-                    const auto corner = ProjectRuntimeUiWorldVertex(clipCorners[index], panel, width, height);
-                    if (!corner)
-                    {
-                        projected = false;
-                        break;
-                    }
-                    if (index == 0U)
-                    {
-                        projectedClip.X = corner->Position.X;
-                        projectedClip.Y = corner->Position.Y;
-                        maximumX = corner->Position.X;
-                        maximumY = corner->Position.Y;
-                    }
-                    else
-                    {
-                        projectedClip.X = std::min(projectedClip.X, corner->Position.X);
-                        projectedClip.Y = std::min(projectedClip.Y, corner->Position.Y);
-                        maximumX = std::max(maximumX, corner->Position.X);
-                        maximumY = std::max(maximumY, corner->Position.Y);
-                    }
-                }
-                if (projected)
-                {
-                    projectedClip.Width = maximumX - projectedClip.X;
-                    projectedClip.Height = maximumY - projectedClip.Y;
-                }
-                result.Batches.push_back({batch.Asset, projected ? projectedClip : RuntimeUiRect{},
+                result.Batches.push_back({batch.Asset,
+                                          {0.0F, 0.0F, static_cast<float>(width), static_cast<float>(height)},
                                           static_cast<std::uint32_t>(firstVertex),
-                                          static_cast<std::uint32_t>(vertexCount), batch.Material});
+                                          static_cast<std::uint32_t>(vertexCount),
+                                          batch.Material});
             }
         }
         return result;

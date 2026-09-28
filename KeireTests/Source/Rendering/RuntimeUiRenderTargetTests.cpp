@@ -793,3 +793,37 @@ TEST_CASE("Runtime UI incompatible materials do not reject the authored document
     CHECK(probe.Diagnostic.empty());
     CHECK(probe.Statistics.AcceptedFrames == 1U);
 }
+
+TEST_CASE("World runtime UI clips crossing panels instead of dropping visible triangles")
+{
+    Keire::RenderBackend::CapturedRuntimeUiWorldPanel panel;
+    panel.Commands.push_back({.Type = Keire::RuntimeUiDrawType::Quad,
+                              .Rect = {0.0F, 0.0F, 400.0F, 200.0F},
+                              .ClipRect = {0.0F, 0.0F, 400.0F, 200.0F}});
+    panel.ReferenceResolution = {400.0F, 200.0F};
+    panel.Pivot = {0.5F, 0.5F};
+    panel.WorldUnitsPerPixel = {0.005F, 0.005F};
+    panel.LayoutScale = 1.0F;
+    panel.ViewProjection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 10.0F);
+    panel.World = Keire::Math::ComposeTransform(
+        {0.0F, 0.0F, 0.2F}, Keire::Math::EulerDegreesToQuaternion({0.0F, 60.0F, 0.0F}), {1.0F, 1.0F, 1.0F});
+    const auto geometry = Keire::RenderBackend::BuildRuntimeUiWorldGeometry(panel, 640U, 640U);
+    REQUIRE_FALSE(geometry.Vertices.empty());
+    REQUIRE_FALSE(geometry.Batches.empty());
+    CHECK_FALSE(geometry.Batches.front().ClipRect.Empty());
+    for (const auto& vertex : geometry.Vertices)
+    {
+        CHECK(std::isfinite(vertex.Position.X));
+        CHECK(std::isfinite(vertex.Position.Y));
+        CHECK(vertex.Position.X >= -0.001F);
+        CHECK(vertex.Position.X <= 640.001F);
+        CHECK(vertex.Position.Y >= -0.001F);
+        CHECK(vertex.Position.Y <= 640.001F);
+        CHECK(vertex.Position.Z >= 0.0F);
+        CHECK(vertex.Position.Z <= 1.0F);
+    }
+    panel.World = Keire::Math::ComposeTransform({0.0F, 0.0F, -2.0F}, {}, {1.0F, 1.0F, 1.0F});
+    CHECK(Keire::RenderBackend::BuildRuntimeUiWorldGeometry(panel, 640U, 640U).Vertices.empty());
+    panel.World = Keire::Math::ComposeTransform({0.0F, 0.0F, 11.0F}, {}, {1.0F, 1.0F, 1.0F});
+    CHECK(Keire::RenderBackend::BuildRuntimeUiWorldGeometry(panel, 640U, 640U).Vertices.empty());
+}

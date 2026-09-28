@@ -303,16 +303,19 @@ namespace Keire::Detail
                 const std::array layoutCorners{Vector2{0.0F, 0.0F}, Vector2{layoutWidth, 0.0F},
                                                Vector2{layoutWidth, layoutHeight}, Vector2{0.0F, layoutHeight}};
                 state.Geometry.Visible = true;
+                bool anyCornerInFront = false;
                 for (std::size_t index = 0; index < layoutCorners.size(); ++index)
                 {
                     const auto projected = MapCanvasLayoutToViewport(state, layoutCorners[index]);
                     if (!projected)
                     {
-                        state.Geometry.Visible = false;
-                        break;
+                        continue;
                     }
+                    anyCornerInFront = true;
                     state.Geometry.ViewportCorners[index] = *projected;
                 }
+                // The renderer clips crossing triangles. A corner behind the eye must not hide the whole panel.
+                state.Geometry.Visible = anyCornerInFront;
                 break;
             }
             }

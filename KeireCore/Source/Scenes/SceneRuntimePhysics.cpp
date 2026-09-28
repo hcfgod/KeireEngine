@@ -291,15 +291,18 @@ namespace Keire
             {
                 if (!hasResolvableDisplacement(movement))
                     return std::nullopt;
-                return PhysicsWorldService->CastCapsule({.Origin = origin,
-                                                         .Rotation = rotation,
-                                                         .Radius = castRadius,
-                                                         .Height = castHeight,
-                                                         .Displacement = movement,
-                                                         .Mask = character->Mask(),
-                                                         .IncludeTriggers = false,
-                                                         .Layer = character->Layer(),
-                                                         .IgnoreBody = state.Body});
+                return PhysicsWorldService->CastCapsule(
+                    {.Origin = origin,
+                     .Rotation = rotation,
+                     .Radius = castRadius,
+                     .Height = castHeight,
+                     // The query shape is inset by the skin. Sweep far enough to
+                     // preserve that clearance even for sub-skin movement steps.
+                     .Displacement = multiply(movement, 1.0F + padding / length(movement)),
+                     .Mask = character->Mask(),
+                     .IncludeTriggers = false,
+                     .Layer = character->Layer(),
+                     .IgnoreBody = state.Body});
             };
             const auto moveAndSlide = [&](Vector3 movement, const bool slideAlongSurface)
             {
@@ -405,7 +408,8 @@ namespace Keire
                  .Rotation = worldRotation,
                  .Radius = definition.Radius - padding,
                  .Height = definition.Height - padding * 2.0F,
-                 .Displacement = {0.0F, -(character->StepHeight() + padding + 0.05F), 0.0F},
+                 // Step following is handled by movement; airborne characters must reach contact first.
+                 .Displacement = {0.0F, -(padding + 0.002F), 0.0F},
                  .Mask = character->Mask(),
                  .IncludeTriggers = false,
                  .Layer = character->Layer(),

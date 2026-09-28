@@ -89,10 +89,11 @@ public sealed class FirstPersonController : Behaviour
         _jumpQueued |= _jump?.WasPressedThisFrame == true;
         // Mouse delta is a per-frame displacement; stick input is a rate in degrees per second.
         Vector2 look = (_look?.ReadValue<Vector2>() ?? default) * MathF.Max(0, _mouseSensitivity);
-        look += (_gamepadLook?.ReadValue<Vector2>() ?? default) *
+        Vector2 stickLook = (_gamepadLook?.ReadValue<Vector2>() ?? default) *
             (MathF.Max(0, _gamepadLookSpeed) * MathF.Max(0, Time.DeltaTime));
-        _motor.Entity.Transform.Rotate(Quaternion.Euler(0, look.X));
-        _pitch = Math.Clamp(_pitch + look.Y * (_invertY ? 1 : -1), -89.0f, 89.0f);
+        _motor.Entity.Transform.Rotate(Quaternion.Euler(0, look.X + stickLook.X));
+        // Mouse Y points down; the engine's stick Y points up. Positive pitch looks down.
+        _pitch = Math.Clamp(_pitch + (look.Y - stickLook.Y) * (_invertY ? -1 : 1), -89.0f, 89.0f);
         Entity.Transform.LocalRotation = Quaternion.Euler(_pitch, 0);
     }
 

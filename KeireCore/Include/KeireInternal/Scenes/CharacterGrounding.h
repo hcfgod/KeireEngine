@@ -32,6 +32,11 @@ namespace Keire::Detail
                                                        std::uint32_t& missedWalkableFrames,
                                                        const std::uint32_t maximumMissedWalkableFrames = 3U) noexcept
     {
+        if (requestedVerticalDisplacement > 0.0F)
+        {
+            missedWalkableFrames = 0;
+            return false;
+        }
         if (hasWalkableHit)
         {
             missedWalkableFrames = 0;

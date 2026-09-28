@@ -16,6 +16,10 @@ versions.
 
 ## Unreleased
 
+- Keep partially visible world-space UI panels rendering by clipping triangles at camera planes instead of dropping the panel.
+- Preserve character capsule skin clearance on short movement steps, preventing movement from sticking after landing.
+- Ground airborne characters only at contact and clear grounding during takeoff, eliminating premature landing snaps.
+- Correct default FPS mouse pitch while preserving gamepad vertical look and the Invert Y option.
 - Preserve valid managed input actions while the editor viewport is unfocused; suppress input instead of faulting scripts.
 - Release gameplay cursor capture while paused or reviewing Play changes, so editor dialogs remain usable.
 - Recompile changed managed source content even when package updates or restored files carry older timestamps.

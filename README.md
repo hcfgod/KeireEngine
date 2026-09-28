@@ -618,6 +618,8 @@ Asset packages now retain compatibility records across Editor upgrades. **Window
 assets, compatibility notices, and updates from the synchronized Hub library. Local imports have a review step.
 The [First Person Controller](Samples/KeireSandbox/Assets/FirstPersonController/README.md) includes a configured player
 prefab and input bindings; see [Asset Packages](Docs/AssetPackages.md) for building its Marketplace archive.
+Default mouse look follows mouse direction; enable **Invert Y** on the camera child to reverse vertical look.
+Character collision fixes require restarting into the updated editor; importing a script update alone cannot update physics.
 
 Claim free assets on their Marketplace page, choose **Open in Editor**, then review and import them in
 **Package Manager > My Assets**. Hub sign-in is separate from the website. Paid assets show **Purchasing coming soon**;

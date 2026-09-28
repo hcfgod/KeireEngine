@@ -111,3 +111,71 @@ TEST_CASE("rigid body registration retains gravity authoring")
     registration->Deserialize(*target, registration->Serialize(*source), registration->SchemaVersion);
     CHECK_FALSE(dynamic_cast<const Keire::RigidBodyComponent&>(*target).UseGravity());
 }
+
+TEST_CASE("character landing preserves fall distance and allows grounded walking")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Landing"));
+    auto floor = scene->CreateEntity("Floor");
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, -0.5F, 0.0F});
+    floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5.0F, 0.5F, 5.0F});
+    auto wall = scene->CreateEntity("Wall");
+    wall.GetComponent<Keire::TransformComponent>()->SetLocalPosition({4.0F, 2.0F, 0.0F});
+    wall.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({0.5F, 2.0F, 5.0F});
+    auto player = scene->CreateEntity("Player");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.5F, 0.0F});
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.35F, 1.8F, 0.35F, 0.04F);
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    const auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    const auto transform = runtimePlayer.GetComponent<Keire::TransformComponent>();
+    for (int frame = 0; frame < 30; ++frame)
+    {
+        const auto before = transform->LocalPosition().Y;
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.04F, 0.0F}));
+        session->FixedUpdate(1.0F / 60.0F);
+        REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+        CHECK(transform->LocalPosition().Y >= before - 0.041F);
+    }
+    CHECK(motor->Grounded());
+    CHECK(transform->LocalPosition().Y == doctest::Approx(0.9F).epsilon(0.005));
+    REQUIRE(motor->QueueDesiredMovement({0.0F, -0.04F, 0.1F}));
+    session->FixedUpdate(1.0F / 60.0F);
+    CHECK(transform->LocalPosition().Z == doctest::Approx(0.1F).epsilon(0.005));
+    REQUIRE(motor->QueueDesiredMovement({0.0F, 0.1F, 0.0F}));
+    session->FixedUpdate(1.0F / 60.0F);
+    CHECK_FALSE(motor->Grounded());
+    CHECK(transform->LocalPosition().Y > 0.99F);
+    // Repeated ballistic landings must not embed the inset query capsule in the floor.
+    for (int jump = 0; jump < 3; ++jump)
+    {
+        float verticalSpeed = 7.5F;
+        for (int frame = 0; frame < 90; ++frame)
+        {
+            verticalSpeed = motor->Grounded() && verticalSpeed < 0.0F ? -2.0F : verticalSpeed;
+            verticalSpeed -= 24.0F / 60.0F;
+            const float downward = verticalSpeed / 60.0F;
+            const auto before = transform->LocalPosition();
+            REQUIRE(motor->QueueDesiredMovement({0.01F, downward, 0.0F}));
+            session->FixedUpdate(1.0F / 60.0F);
+            REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+            CHECK(transform->LocalPosition().X == doctest::Approx(before.X + 0.01F).epsilon(0.001));
+            if (downward < 0.0F)
+                CHECK(transform->LocalPosition().Y >= before.Y + downward - 0.002F);
+        }
+        CHECK(motor->Grounded());
+        CHECK(transform->LocalPosition().Y == doctest::Approx(0.9F).epsilon(0.005));
+    }
+    REQUIRE(motor->QueueDesiredMovement({3.0F, -0.04F, 0.0F}));
+    session->FixedUpdate(1.0F / 60.0F);
+    CHECK(transform->LocalPosition().X == doctest::Approx(3.15F).epsilon(0.005));
+    CHECK(transform->LocalPosition().Y == doctest::Approx(0.9F).epsilon(0.005));
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
