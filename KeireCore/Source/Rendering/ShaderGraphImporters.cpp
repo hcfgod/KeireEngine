@@ -30,7 +30,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ShaderGraph";
-        result.Version = 27;
+        result.Version = 28; // Rebuild cached UI graphs with perspective-correct vertex interpolation.
         result.Type = ShaderGraphAsset::StaticType();
         result.Extensions = {".keireshadergraph"};
         result.ContextualImport = [](const AssetImportContext& context, const std::span<const std::byte> bytes)

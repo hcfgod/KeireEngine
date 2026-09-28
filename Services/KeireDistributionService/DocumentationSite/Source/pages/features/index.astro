@@ -1,20 +1,29 @@
 ---
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import ProductNavigation from "../../components/ProductNavigation.astro";
 import ProductMedia from "../../components/ProductMedia.astro";
-import { releaseStatus } from "../../lib/release-status";
+import { productFeatures } from "../../lib/product-features";
 export const prerender = true;
-const tools = [
-    ["Scenes & prefabs", "Arrange your world, reuse objects, and test ideas in Play Mode.", "/docs/reference/overview/"],
-    ["Shader & Material Graphs", "Build a reusable shader, then tune the materials that give each object its character.", "/docs/reference/manual/shader-graph/"],
-    ["Visual effects", "Author particles and effects, preview the result, and trigger them from gameplay.", "/docs/reference/manual/vfx-graph/"],
-    ["C# scripting", "Give objects behavior, respond to input, and connect your game systems.", "/docs/reference/manual/scripting-fundamentals/"],
-    ["Animation & rigging", "Import characters and clips, map rigs, and build animation transitions.", "/docs/reference/animation-rigging/"],
-    ["Player builds", "Bring scenes, scripts, and assets together in a standalone player.", "/docs/reference/manual/player-builds-and-packages/"],
-];
 ---
-<PlatformLayout title="Engine and Editor" description="Explore Kéire’s scene editor, Shader and Material Graphs, VFX, animation, C# scripting, and player builds." active="product">
-    <section class="platform-section platform-shell"><div class="section-heading" data-reveal><div><p class="eyebrow">Your ideas, in motion</p><h1>Tools that stay<br />close to the work.</h1></div><p>Build a scene, find its look, and give it behavior. Kéire brings the visual tools and code into one project you can understand and shape.</p></div><ProductMedia name="editor" alt="The Outpost project open in Kéire’s scene editor." priority caption="An actual Kéire project, open in the editor." /></section>
-    <section class="platform-section platform-section--line"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">The creative toolkit</p><h2>Make the pieces.<br />Connect the experience.</h2></div><p>Start with a single object. Add depth as your project grows, with documentation close at hand.</p></div><div class="making-steps tools-grid">{tools.map(([title, text, href], index) => <article data-reveal><span>0{index + 1}</span><h3>{title}</h3><p>{text}</p><a href={href}>Read the guide →</a></article>)}</div></div></section>
-    <section class="platform-section platform-shell feature-story" data-reveal><ProductMedia name="graph" alt="A material graph in Kéire." caption="Reusable graphs. A result you can see." /><div><p class="eyebrow">Find your visual language</p><h2>Try a different<br />kind of surface.</h2><p>Keep shader logic and material choices separate. Experiment with texture, color, and surface response without rebuilding each object from scratch.</p><a class="text-action" href="/showcase/">See the Outpost experiments →</a></div></section>
-    <section class="platform-section platform-section--line"><div class="platform-shell open-development"><div><p class="eyebrow">Open C++20 foundations</p><h2>Go deeper<br />when you need to.</h2></div><div><p>Read the implementation, follow the architecture, and extend the engine for your project. Diagnostics and documented boundaries help you understand what is happening.</p><p class="release-note">These pages describe source {releaseStatus.sourceVersion}. Available packages remain on {releaseStatus.availableVersion}{releaseStatus.preparing ? " while the next release is prepared" : ""}.</p><div class="actions"><a class="text-action" href="/docs/reference/overview/">Explore the architecture →</a><a class="text-action" href="/changelog/">Read the release notes →</a></div></div></div></section>
+<PlatformLayout title="Engine and Editor" description="Explore Kéire’s scene editor, Shader Graph, Inspector-based materials, VFX Graph, animation, C# scripting, and player builds." active="product">
+    <ProductNavigation />
+    <section class="platform-shell feature-detail">
+        <div class="feature-detail__heading">
+            <p class="eyebrow">The Kéire toolkit</p><h1>Big ideas.<br />Meet your tools.</h1>
+            <p class="lead">Build a scene, find its look, and give it behavior. A connected creative toolkit, with the source open when you want to go deeper.</p>
+            <div class="actions"><a class="button" href="/downloads/">Get Kéire Hub ↗</a><a class="text-action" href="/showcase/">See it in action →</a></div>
+        </div>
+        <ProductMedia name="editor" alt="The Outpost project open in Kéire’s scene editor." priority />
+    </section>
+    <section class="platform-section platform-shell">
+        <div class="section-heading"><div><p class="eyebrow">Choose your discipline</p><h2>Everything starts<br />with an idea.</h2></div><p>Find a focused overview of each toolset, with guides to take you from exploring to creating.</p></div>
+        <div class="feature-cards">{productFeatures.map((feature, index) => <a class="feature-card" href={`/features/${feature.id}/`}>
+            <ProductMedia name={feature.image} alt={feature.alt} />
+            <div><span class="eyebrow">0{index + 1} / {feature.label}</span><h3>{feature.title}</h3><p>{feature.summary}</p><span class="text-action">Explore {feature.label} ↗</span></div>
+        </a>)}</div>
+    </section>
+    <section class="platform-shell feature-next">
+        <div><p class="eyebrow">See the result</p><h2>A project you can look inside.</h2><p>The Outpost brings the editor, materials, and effects into one demonstration scene.</p><a class="button button--secondary" href="/showcase/">Explore the showcase ↗</a></div>
+        <aside><strong>Know the current boundaries.</strong><p>Kéire is an independent, pre-1.0 engine. Check current platform support and capability limits when evaluating it for a project.</p><a class="text-action" href="/docs/reference/production-readiness-review/">Read the production review →</a></aside>
+    </section>
 </PlatformLayout>

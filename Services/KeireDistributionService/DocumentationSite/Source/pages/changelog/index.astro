@@ -24,11 +24,11 @@ const structuredData = {
         <div class="platform-shell changelog-hero__grid">
             <div>
                 <p class="eyebrow">Release notes</p>
-                <h1>Every meaningful change. One accountable record.</h1>
-                <p class="lead">Kéire release notes separate downloadable product behavior, live platform work, and changes still moving through packaging and validation.</p>
+                <h1>A better engine,<br />release by release.</h1>
+                <p class="lead">See what’s new, what’s available, and what’s still in validation. Every release keeps its complete record of changes.</p>
                 <div class="actions">
                     <a class="button" href={`/changelog/${currentRelease.version}/`}>Read the complete {currentRelease.version} notes</a>
-                    <a class="button button--secondary" href="/downloads/">Download Kéire Hub</a>
+                    <a class="button button--secondary" href="#release-archive">Browse past releases ↓</a>
                 </div>
             </div>
             <aside class="current-release-card" aria-label={`Current ${currentRelease.published ? "release" : "release candidate"} ${currentRelease.version}`}>
@@ -65,7 +65,7 @@ const structuredData = {
         <div class="platform-shell release-archive">
             <div class="release-archive__intro">
                 <p class="eyebrow">Release archive</p>
-                <h2 id="release-archive">A versioned history, not a marketing rewrite.</h2>
+                <h2 id="release-archive">Explore earlier releases.</h2>
                 <p>Older notes remain available as the product evolves. Historical availability does not imply current support.</p>
                 <a class="feed-link" href="/changelog/rss.xml">Subscribe to the release feed <span aria-hidden="true">↗</span></a>
             </div>

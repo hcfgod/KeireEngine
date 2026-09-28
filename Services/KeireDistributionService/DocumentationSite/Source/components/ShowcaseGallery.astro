@@ -1,0 +1,78 @@
+---
+import ProductMedia from "./ProductMedia.astro";
+interface Props {
+    frames: { name: string; title: string; alt: string; text: string }[];
+}
+const { frames } = Astro.props;
+---
+<div class="showcase-gallery" data-showcase-gallery>
+    {frames.map((frame) => <article>
+        <a href={`/assets/outpost/${frame.name}.webp`} data-gallery-image data-title={frame.title}
+            data-description={frame.text} aria-label={`Open full-size image: ${frame.title}`}>
+            <ProductMedia name={frame.name} alt={frame.alt} />
+            <span class="gallery-zoom" aria-hidden="true">↗</span>
+        </a>
+        <h3>{frame.title}</h3><p>{frame.text}</p>
+    </article>)}
+</div>
+<dialog class="gallery-dialog" aria-labelledby="gallery-title" data-gallery-dialog>
+    <div class="gallery-dialog__toolbar">
+        <span class="eyebrow">The Outpost / Made with Kéire</span>
+        <button type="button" class="gallery-control" data-gallery-close autofocus aria-label="Close image viewer">Close <span aria-hidden="true">×</span></button>
+    </div>
+    <figure>
+        <img data-gallery-full alt="" width="1920" height="1080" />
+        <figcaption><h2 id="gallery-title"></h2><p data-gallery-description></p></figcaption>
+    </figure>
+    <div class="gallery-dialog__controls">
+        <button type="button" class="gallery-control" data-gallery-previous aria-label="Previous image">← Previous</button>
+        <span role="status" aria-live="polite" data-gallery-position></span>
+        <button type="button" class="gallery-control" data-gallery-next aria-label="Next image">Next →</button>
+    </div>
+</dialog>
+<script>
+    const dialog = document.querySelector<HTMLDialogElement>("[data-gallery-dialog]");
+    const links = [...document.querySelectorAll<HTMLAnchorElement>("[data-gallery-image]")];
+    const fullImage = dialog?.querySelector<HTMLImageElement>("[data-gallery-full]");
+    const title = dialog?.querySelector("#gallery-title");
+    const description = dialog?.querySelector("[data-gallery-description]");
+    const position = dialog?.querySelector("[data-gallery-position]");
+    let current = 0;
+
+    function showImage(index: number): void {
+        if (!dialog || !fullImage || !title || !description || !position || links.length === 0) return;
+        current = (index + links.length) % links.length;
+        const link = links[current];
+        fullImage.src = link.href;
+        fullImage.alt = link.querySelector("img")?.alt ?? "";
+        title.textContent = link.dataset.title ?? "";
+        description.textContent = link.dataset.description ?? "";
+        position.textContent = `${current + 1} / ${links.length}`;
+    }
+
+    if (dialog && typeof dialog.showModal === "function") {
+        links.forEach((link, index) => {
+            link.setAttribute("aria-haspopup", "dialog");
+            link.addEventListener("click", (event) => {
+                if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey || event.button !== 0) return;
+                event.preventDefault();
+                showImage(index);
+                dialog.showModal();
+            });
+        });
+        dialog.querySelector("[data-gallery-close]")?.addEventListener("click", () => dialog.close());
+        dialog.querySelector("[data-gallery-previous]")?.addEventListener("click", () => showImage(current - 1));
+        dialog.querySelector("[data-gallery-next]")?.addEventListener("click", () => showImage(current + 1));
+        dialog.addEventListener("keydown", (event) => {
+            if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+                event.preventDefault();
+                showImage(current + (event.key === "ArrowLeft" ? -1 : 1));
+            }
+        });
+        dialog.addEventListener("click", (event) => {
+            const bounds = dialog.getBoundingClientRect();
+            if (event.target === dialog && (event.clientX < bounds.left || event.clientX > bounds.right ||
+                event.clientY < bounds.top || event.clientY > bounds.bottom)) dialog.close();
+        });
+    }
+</script>

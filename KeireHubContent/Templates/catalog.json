@@ -234,7 +234,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25113305,
+      "estimatedSizeBytes": 25132428,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -554,8 +554,8 @@
         },
         {
           "path": "Assets/FirstPersonController/FirstPersonPlayer.keireprefab",
-          "sizeBytes": 3315,
-          "sha256": "6414b875a1eff4e2cd3653d5770bde9ce99b86113a22bfa0d0955d6b83fd9ced"
+          "sizeBytes": 3634,
+          "sha256": "c0f8ba2268bf6f975fa7e0c0bd87ecc2400c570a0c489788f6e6fbc3e067ba8c"
         },
         {
           "path": "Assets/FirstPersonController/FirstPersonPlayer.keireprefab.keiremeta",
@@ -564,8 +564,8 @@
         },
         {
           "path": "Assets/FirstPersonController/README.md",
-          "sizeBytes": 2248,
-          "sha256": "1654afa7bdeb94cf0daf7cb093eaa51562935e73d520a56f9b8e7cc0994df922"
+          "sizeBytes": 5581,
+          "sha256": "665474d8075064e7f0c24888a1686b21bed9ad57b23ecde8bbafd2dbd82f4fc1"
         },
         {
           "path": "Assets/FirstPersonController/README.md.keiremeta",
@@ -574,13 +574,43 @@
         },
         {
           "path": "Assets/FirstPersonController/Runtime/FirstPersonController.cs",
-          "sizeBytes": 5728,
-          "sha256": "2c502a43c260506d7f53515cdab2b680c1cdb127762a878db0eed99d65dc57f9"
+          "sizeBytes": 10025,
+          "sha256": "4884f59abac730d5d5fc1766a126401905052f2d0ccdce47fd2e73bc6ec152db"
         },
         {
           "path": "Assets/FirstPersonController/Runtime/FirstPersonController.cs.keiremeta",
           "sizeBytes": 218,
           "sha256": "fa684fb313cc2003416229c03f025fafbaf8c1d8ca5982883f9355bb5921b871"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonInput.cs",
+          "sizeBytes": 2615,
+          "sha256": "1f3512764b6328400a9f6dab15e9eec3bc01b9e466f00ea9832602c18efb93a1"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonInput.cs.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "f24953114e8312c1de6495064e12edef06b986bfe1d4fd90be49e515b311d456"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonLook.cs",
+          "sizeBytes": 1911,
+          "sha256": "2e3dff6c61b9d09bf1754d024d31890957130aefd277de3ed8c7039b141765bc"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonLook.cs.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "01c56f5ba0475cfc8b48a3395f24826e3dd1cfba72eaa94ce56b0d666a52516f"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonMotor.cs",
+          "sizeBytes": 5994,
+          "sha256": "874f12cd681a951ccf7f739d17b991cedeae0fec1e72e20091ce7a29844084fe"
+        },
+        {
+          "path": "Assets/FirstPersonController/Runtime/FirstPersonMotor.cs.keiremeta",
+          "sizeBytes": 218,
+          "sha256": "e38ad1db6fcd1d178452cb8c2a0b9581e3ab00a378ba130a6a85e53d66a4ef76"
         },
         {
           "path": "Assets/Input/DefaultInput.keireinput",

@@ -25,6 +25,7 @@ struct VertexInput
     float3 Position : TEXCOORD0;
     float4 Color : TEXCOORD1;
     float2 UV0 : TEXCOORD2;
+    float PerspectiveW : TEXCOORD3;
 };
 
 cbuffer ViewportData : register(b0, space1)
@@ -43,6 +44,7 @@ VertexOutput VSMain(VertexInput input)
     const float2 viewportSize = max(Viewport.xy, float2(1.0F, 1.0F));
     output.Position = float4(input.Position.xy / viewportSize * float2(2.0F, -2.0F) +
                             float2(-1.0F, 1.0F), input.Position.z, 1.0F);
+    output.Position *= input.PerspectiveW;
     output.Normal = float3(0.0F, 0.0F, 1.0F);
     output.Tangent = float3(1.0F, 0.0F, 0.0F);
     output.Bitangent = float3(0.0F, 1.0F, 0.0F);

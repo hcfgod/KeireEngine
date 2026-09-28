@@ -120,7 +120,16 @@
             "_mouseSensitivity": 0.12,
             "_gamepadLookSpeed": 150.0,
             "_invertY": false,
-            "managedState": "{\"fields\":[],\"version\":1}"
+            "managedState": "{\"fields\":[],\"version\":1}",
+            "_acceleration": 35.0,
+            "_deceleration": 45.0,
+            "_airControl": 0.35,
+            "_coyoteTime": 0.1,
+            "_jumpBufferTime": 0.12,
+            "_terminalSpeed": 60.0,
+            "_minimumPitch": -89.0,
+            "_maximumPitch": 89.0,
+            "_configurationVersion": 1
           }
         }
       ],

@@ -19,10 +19,10 @@ const structuredData = {
         <div class="platform-shell roadmap-hero__grid">
             <div class="roadmap-hero__copy">
                 <p class="eyebrow">Product direction</p>
-                <h1>See where Kéire is heading.</h1>
+                <h1>The next chapter<br />starts here.</h1>
                 <p class="lead">We’re improving the engine, Editor, and Hub around the work of making a game. Here’s what we’re working on now, what comes next, and what still needs proving.</p>
                 <div class="actions">
-                    <a class="button" href="/changelog/0.4.4/">Review the 0.4.4 candidate</a>
+                    <a class="button" href={`/changelog/${releaseStatus.sourceVersion}/`}>Review {releaseStatus.sourceVersion} changes</a>
                     <a class="button button--secondary" href="/docs/reference/production-readiness-review/">Read the production review</a>
                 </div>
             </div>
@@ -51,32 +51,31 @@ const structuredData = {
         </div>
     </nav>
 
-    <div class="roadmap-horizons">
-        {roadmapHorizons.map((horizon, horizonIndex) => (
-            <section id={horizon.id} class:list={["platform-section", horizonIndex % 2 === 1 && "platform-section--line"]}>
-                <div class="platform-shell roadmap-horizon">
-                    <header class="roadmap-horizon__intro">
-                        <div class="roadmap-horizon__number">{String(horizonIndex + 1).padStart(2, "0")}</div>
-                        <p class="eyebrow">{horizon.timeframe}</p>
-                        <h2>{horizon.label}</h2>
-                        <p>{horizon.statement}</p>
-                    </header>
-                    <div class="roadmap-initiatives">
-                        {horizon.initiatives.map((initiative, initiativeIndex) => (
-                            <article data-reveal style={`--reveal-index: ${initiativeIndex}`}>
-                                <header>
-                                    <span class:list={["roadmap-status", `roadmap-status--${initiative.status.toLowerCase().replaceAll(" ", "-")}`]}>{initiative.status}</span>
-                                    <span class="roadmap-initiative__index">{horizon.label.slice(0, 1)}{initiativeIndex + 1}</span>
-                                </header>
-                                <h3>{initiative.title}</h3>
-                                <p>{initiative.outcome}</p>
+    <div class="platform-shell roadmap-board">
+        {roadmapHorizons.map((horizon) => (
+            <section id={horizon.id} class="roadmap-column">
+                <header>
+                    <p class="eyebrow">{horizon.timeframe}</p>
+                    <h2>{horizon.label}</h2>
+                    <p>{horizon.statement}</p>
+                </header>
+                <div>
+                    {horizon.initiatives.map((initiative) => (
+                        <article class="roadmap-item">
+                            <header>
+                                <span class:list={["roadmap-status", `roadmap-status--${initiative.status.toLowerCase().replaceAll(" ", "-")}`]}>{initiative.status}</span>
+                            </header>
+                            <h3>{initiative.title}</h3>
+                            <p>{initiative.outcome}</p>
+                            <details>
+                                <summary>Capabilities &amp; evidence<span class="visually-hidden"> for {initiative.title}</span></summary>
                                 <ul>
                                     {initiative.capabilities.map((capability) => <li>{capability}</li>)}
                                 </ul>
                                 {initiative.evidenceUrl && <a href={initiative.evidenceUrl}>Inspect current evidence <span aria-hidden="true">→</span></a>}
-                            </article>
-                        ))}
-                    </div>
+                            </details>
+                        </article>
+                    ))}
                 </div>
             </section>
         ))}

@@ -827,3 +827,39 @@ TEST_CASE("World runtime UI clips crossing panels instead of dropping visible tr
     panel.World = Keire::Math::ComposeTransform({0.0F, 0.0F, 11.0F}, {}, {1.0F, 1.0F, 1.0F});
     CHECK(Keire::RenderBackend::BuildRuntimeUiWorldGeometry(panel, 640U, 640U).Vertices.empty());
 }
+
+TEST_CASE("World UI retains perspective interpolation while screen UI stays affine")
+{
+    Keire::RenderBackend::CapturedRuntimeUiWorldPanel panel;
+    panel.Commands.push_back({.Type = Keire::RuntimeUiDrawType::Image,
+                              .Rect = {0.0F, 0.0F, 400.0F, 200.0F},
+                              .ClipRect = {0.0F, 0.0F, 400.0F, 200.0F},
+                              .Asset = Keire::AssetId::Generate()});
+    panel.ReferenceResolution = {400.0F, 200.0F};
+    panel.Pivot = {0.5F, 0.5F};
+    panel.WorldUnitsPerPixel = {0.005F, 0.005F};
+    panel.LayoutScale = 1.0F;
+    panel.ViewProjection = Keire::Math::Perspective(60.0F, 1.0F, 0.1F, 10.0F);
+    for (const float yaw : {-60.0F, -25.0F, 25.0F, 60.0F})
+    {
+        panel.World = Keire::Math::ComposeTransform(
+            {0.0F, 0.0F, 3.0F}, Keire::Math::EulerDegreesToQuaternion({0.0F, yaw, 0.0F}), {1.0F, 1.0F, 1.0F});
+        const auto geometry = Keire::RenderBackend::BuildRuntimeUiWorldGeometry(panel, 640U, 640U);
+        REQUIRE(geometry.Vertices.size() == 6);
+        const auto& left = geometry.Vertices[0];
+        const auto& right = geometry.Vertices[1];
+        REQUIRE(left.UV.X == 0.0F);
+        REQUIRE(right.UV.X == 1.0F);
+        // The authored top-edge midpoint is at world X=0, hence screen X=320 at every tested yaw.
+        const float screenFraction = (320.0F - left.Position.X) / (right.Position.X - left.Position.X);
+        const float leftWeight = (1.0F - screenFraction) / left.PerspectiveW;
+        const float rightWeight = screenFraction / right.PerspectiveW;
+        CHECK((left.UV.X * leftWeight + right.UV.X * rightWeight) / (leftWeight + rightWeight) ==
+              doctest::Approx(0.5F));
+        CHECK(std::abs(screenFraction - 0.5F) > 0.05F);
+    }
+    const auto screen = Keire::RenderBackend::BuildRuntimeUiGeometry(panel.Commands);
+    REQUIRE_FALSE(screen.Vertices.empty());
+    for (const auto& vertex : screen.Vertices)
+        CHECK(vertex.PerspectiveW == 1.0F);
+}

@@ -16,24 +16,49 @@ const availabilityLabels = {
 
 <div class="release-groups">
     {groups.map((group, index) => (
-        <section class="release-group" id={group.id} data-reveal style={`--reveal-index: ${Math.min(index, 8)}`}>
-            <header class="release-group__heading">
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <div>
-                    <h2>{group.label}</h2>
-                    {showDescriptions && <p>{group.description}</p>}
-                </div>
-            </header>
-            <ul class="release-change-list">
-                {group.changes.map((change) => (
-                    <li>
-                        <span class:list={["availability-label", `availability-label--${change.availability}`]}>
-                            {availabilityLabels[change.availability]}
-                        </span>
-                        <p set:html={formatChangelogInline(change.text)} />
-                    </li>
-                ))}
-            </ul>
+        <section class="release-group" id={group.id}>
+            <details class="release-disclosure" open={index === 0}>
+                <summary class="release-group__heading">
+                    <span>{String(index + 1).padStart(2, "0")}</span>
+                    <div>
+                        <h2>{group.label}</h2>
+                        <p>{group.changes.length} {group.changes.length === 1 ? "change" : "changes"}<span aria-hidden="true"> · Expand / collapse</span></p>
+                    </div>
+                </summary>
+                {showDescriptions && <p class="release-group-description">{group.description}</p>}
+                <ul class="release-change-list">
+                    {group.changes.map((change) => (
+                        <li>
+                            <span class:list={["availability-label", `availability-label--${change.availability}`]}>
+                                {availabilityLabels[change.availability]}
+                            </span>
+                            <p set:html={formatChangelogInline(change.text)} />
+                        </li>
+                    ))}
+                </ul>
+            </details>
         </section>
     ))}
 </div>
+
+<script>
+    function revealLinkedReleaseGroup(hash = window.location.hash): void {
+        let id: string;
+        try { id = decodeURIComponent(hash.slice(1)); }
+        catch { return; }
+        if (!id) return;
+        const group = document.getElementById(id)?.closest(".release-group");
+        const details = group?.querySelector("details");
+        if (details instanceof HTMLDetailsElement) {
+            details.open = true;
+            group?.scrollIntoView({ block: "start", behavior: "instant" });
+        }
+    }
+    revealLinkedReleaseGroup();
+    window.addEventListener("hashchange", () => revealLinkedReleaseGroup());
+    document.addEventListener("click", (event) => {
+        if (!(event.target instanceof Element)) return;
+        const anchor = event.target.closest('.release-toc a[href^="#"]');
+        if (anchor instanceof HTMLAnchorElement) revealLinkedReleaseGroup(anchor.hash);
+    });
+</script>

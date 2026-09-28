@@ -19,12 +19,13 @@ export const prerender = true;
                 <p class="form-message" data-download-state>Checking available Linux packages…</p><div class="download-variants" data-download-variants></div>
                 <details><summary>Platform availability</summary><p>Linux packages are validated independently of Windows. Arch is a source-build target. Check the package version shown above before installing.</p></details>
             </article>
-            <article id="macos" class="editorial-panel download-card" data-platform="macos">
+            <article id="macos" class="editorial-panel download-card download-card--pending" data-platform="macos">
                 <span class="eyebrow">macOS</span><h2>Still on the way.</h2><p>A native download needs platform validation, signing, and notarization before release.</p>
                 <p class="form-message" data-download-state>Checking release status…</p><div class="download-variants" data-download-variants></div>
             </article>
             <article class="editorial-panel"><span class="eyebrow">Earlier releases</span><h2>Looking for a version?</h2><p>Browse earlier release records and package details in the archive.</p><a class="button button--secondary" href="/downloads/archive/">Open release archive →</a></article>
         </div>
+        <div class="download-help"><p>Windows and Linux packages · Free to download</p><a class="text-action" href="/docs/reference/getting-started/">First time here? Start with the guide →</a></div>
         <noscript><p class="notice-panel">Enable JavaScript to check current catalog-verified downloads. You can still <a href="/docs/reference/getting-started/">read the getting-started guide</a>.</p></noscript>
     </section>
 </PlatformLayout>

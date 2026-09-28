@@ -1,0 +1,15 @@
+---
+import { productFeatures } from "../lib/product-features";
+interface Props { active?: string; }
+const { active = "overview" } = Astro.props;
+const pages = [
+    ["overview", "Overview", "/features/"],
+    ...productFeatures.map((feature) => [feature.id, feature.label, `/features/${feature.id}/`]),
+];
+---
+<nav class="product-navigation" aria-label="Engine features">
+    <div class="platform-shell">
+        <span class="product-navigation__label">Explore the engine</span>
+        <div>{pages.map(([id, label, href]) => <a href={href} aria-current={active === id ? "page" : undefined}>{label}</a>)}</div>
+    </div>
+</nav>

@@ -62,7 +62,7 @@ const categoryDefinitions: readonly CategoryDefinition[] = [
     {
         id: "rendering-graphs-vfx",
         label: "Rendering, graphs, and VFX",
-        description: "Rendering backends, model import, Shader Graph, Material Graph, VFX, previews, and sample content.",
+        description: "Rendering backends, model import, Shader Graph, materials, VFX Graph, previews, and sample content.",
         patterns: [/shader/i, /material graph/i, /\bvfx\b/i, /render/i, /d3d12/i, /direct3d12/i, /vulkan/i,
             /model import/i, /mesh/i, /sandbox showcase/i, /material lab/i, /thumbnail/i],
     },

@@ -2,7 +2,7 @@
 import SessionAwareAccountLink from "./SessionAwareAccountLink.astro";
 
 interface Props {
-    active?: "product" | "marketplace" | "roadmap" | "downloads" | "docs" | "changelog" | "community";
+    active?: "product" | "marketplace" | "roadmap" | "downloads" | "docs" | "changelog" | "community" | "showcase";
     signedIn?: boolean;
     staffRole?: "moderator" | "administrator" | null;
 }
@@ -24,6 +24,7 @@ const { active, signedIn = false, staffRole = null } = Astro.props;
         <nav id="platform-navigation" class="platform-nav" aria-label="Primary navigation" data-platform-nav>
             <a href="/features/" aria-current={active === "product" ? "page" : undefined}>Engine &amp; Editor</a>
             <a href="/marketplace/" aria-current={active === "marketplace" ? "page" : undefined}>Marketplace</a>
+            <a href="/showcase/" aria-current={active === "showcase" ? "page" : undefined}>Showcase</a>
             <a href="/roadmap/" aria-current={active === "roadmap" ? "page" : undefined}>Roadmap</a>
             <a href="/downloads/" aria-current={active === "downloads" ? "page" : undefined}>Downloads</a>
             <a href="/docs/" aria-current={active === "docs" ? "page" : undefined}>Documentation</a>
@@ -36,6 +37,14 @@ const { active, signedIn = false, staffRole = null } = Astro.props;
         </div>
     </div>
 </header>
+
+<noscript>
+    <nav class="platform-shell navigation-fallback" aria-label="Navigation without JavaScript">
+        <a href="/features/">Engine &amp; Editor</a><a href="/marketplace/">Marketplace</a>
+        <a href="/showcase/">Showcase</a><a href="/downloads/">Downloads</a>
+        <a href="/docs/">Documentation</a><a href="/roadmap/">Roadmap</a><a href="/changelog/">Changelog</a>
+    </nav>
+</noscript>
 
 <script>
     const toggle = document.querySelector("[data-platform-nav-toggle]");
@@ -52,7 +61,7 @@ const { active, signedIn = false, staffRole = null } = Astro.props;
         setNavigationOpen(!expanded);
     });
     navigation?.addEventListener("click", (event) => {
-        if (event.target instanceof HTMLAnchorElement) setNavigationOpen(false);
+        if (event.target instanceof Element && event.target.closest("a")) setNavigationOpen(false);
     });
     document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && toggle?.getAttribute("aria-expanded") === "true") {

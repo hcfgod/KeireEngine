@@ -13,5 +13,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\KeireManaged\Keire.Managed.csproj" />
+    <Compile Include="../Samples/KeireSandbox/Assets/FirstPersonController/Runtime/*.cs" Link="FirstPerson/%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

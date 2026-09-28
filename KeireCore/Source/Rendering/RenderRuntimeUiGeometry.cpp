@@ -640,6 +640,7 @@ namespace Keire::RenderBackend
             {
                 auto result = vertex.Source;
                 const auto& v = vertex.Clip;
+                result.PerspectiveW = v[3];
                 result.Position = {(v[0] / v[3] * 0.5F + 0.5F) * static_cast<float>(width),
                                    (0.5F - v[1] / v[3] * 0.5F) * static_cast<float>(height),
                                    std::clamp(v[2] / v[3], 0.0F, 1.0F)};

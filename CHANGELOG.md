@@ -16,6 +16,15 @@ versions.
 
 ## Unreleased
 
+- Correct website material-authoring terminology and distinguish marketplace outages from an empty public catalog;
+  clarify free asset browsing and sign-in requirements without implying paid checkout is available.
+
+- Redesign the website with a shorter homepage, dedicated editor/graphics/scripting pages, responsive product
+  navigation, a compact roadmap, expandable release notes, and clearer showcase and download layouts.
+
+- Preserve perspective interpolation for world-space UI text and images while moving the camera.
+- Split the FPS package into reusable input, movement, and look modules with validated runtime tuning, acceleration,
+  air control, buffered/coyote jumps, terminal speed, state capture, and jump/landing/grounded/sprint events.
 - Keep partially visible world-space UI panels rendering by clipping triangles at camera planes instead of dropping the panel.
 - Preserve character capsule skin clearance on short movement steps, preventing movement from sticking after landing.
 - Ground airborne characters only at contact and clear grounding during takeoff, eliminating premature landing snaps.

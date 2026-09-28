@@ -1157,6 +1157,8 @@ namespace Keire::RenderBackend
                 SDL_GPUVertexAttribute{0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT3, offsetof(RuntimeUiVertex, Position)},
                 SDL_GPUVertexAttribute{1, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(RuntimeUiVertex, ColorValue)},
                 SDL_GPUVertexAttribute{2, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(RuntimeUiVertex, UV)},
+                SDL_GPUVertexAttribute{3, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT,
+                                       offsetof(RuntimeUiVertex, PerspectiveW)},
             };
             SDL_GPUVertexInputState input{};
             input.vertex_buffer_descriptions = &buffer;

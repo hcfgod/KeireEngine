@@ -142,7 +142,7 @@ stay within the resolved material's target. Retained UI uses UI materials. VFX m
 on CPU and GPU Sprite/Ribbon outputs and the existing mesh consumer. Volumetric VFX retains built-in density shading.
 Custom Graphics has the existing mesh consumer; it does not expose arbitrary render-pass scheduling.
 
-The current Shader Graph generator version is 16 and the Shader Graph importer version is 27. These versions describe
+The current Shader Graph generator version is 16 and the Shader Graph importer version is 28. These versions describe
 generated binaries and cache invalidation, not the serialized graph schema or the engine release number.
 
 C++ uses `CameraComponent::SetFullscreenEffect(CameraEffectStage::AfterTonemapping, materialId)`.

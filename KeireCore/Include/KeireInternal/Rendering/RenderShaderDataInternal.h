@@ -54,9 +54,10 @@ namespace Keire::RenderBackend
         Vector3 Position;
         Color ColorValue;
         Vector2 UV;
+        float PerspectiveW = 1.0F;
     };
 
-    static_assert(sizeof(RuntimeUiVertex) == sizeof(float) * 9);
+    static_assert(sizeof(RuntimeUiVertex) == sizeof(float) * 10);
 
     [[nodiscard]] constexpr bool SupportsComputeSkinning(const std::string_view driver,
                                                          const SkinningMethod method) noexcept

@@ -117,7 +117,7 @@ TEST_CASE("Shader Graph source and cooked assets preserve stable graph identity"
 
     const auto importer = Keire::CreateShaderGraphAssetImporter();
     CHECK(importer.Name == "Keire.ShaderGraph");
-    CHECK(importer.Version == 27);
+    CHECK(importer.Version == 28);
     CHECK(importer.Extensions == std::vector<std::string>{".keireshadergraph"});
 }
 

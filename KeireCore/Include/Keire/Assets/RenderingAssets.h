@@ -21,7 +21,8 @@ namespace Keire
 {
     inline constexpr std::uint32_t ShaderAssetSchemaVersion = 3;
     inline constexpr std::size_t ShaderAssetPassRoleHardLimit = 32;
-    /// Retained UI: float3 pixel position, float4 vertex color, float2 UV; viewport uniform b0/space1.
+    /// Retained UI: float3 pixel position, float4 color, float2 UV; optional float perspective W at location 3.
+    /// Multiply reconstructed clip position by W for perspective interpolation; viewport uniform is b0/space1.
     inline constexpr std::uint8_t UiShaderVertexLayoutVersion = 4;
 
     enum class ShaderBinaryFormat : std::uint8_t

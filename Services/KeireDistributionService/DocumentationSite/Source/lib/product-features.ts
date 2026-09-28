@@ -1,0 +1,47 @@
+export const productFeatures = [
+    {
+        id: "editor",
+        label: "Scene & Editor",
+        title: "Your world. Within reach.",
+        summary: "Compose scenes, reuse prefabs, and test ideas without leaving your project.",
+        intro: "From the first object to a playable scene, keep the work in view. Arrange your world, inspect its components, and use Play Mode to try the next idea.",
+        image: "editor",
+        alt: "The Outpost project open in the Kéire scene editor.",
+        topics: [
+            { title: "Build a scene", text: "Arrange objects in the viewport and inspect their components. Keep scene structure and the result side by side.", href: "/docs/reference/overview/", link: "Explore the editor" },
+            { title: "Reuse what works", text: "Use prefabs to build reusable objects and keep recurring pieces of your project consistent.", href: "/docs/reference/scene-authoring/", link: "Work with prefabs" },
+            { title: "Make iteration a habit", text: "Enter Play Mode, try your gameplay, and follow diagnostics as you develop. Return to editing to refine the result.", href: "/docs/reference/getting-started/", link: "Create your first project" },
+        ],
+        next: "graphics",
+    },
+    {
+        id: "graphics",
+        label: "Graphics & Effects",
+        title: "Give every surface a story.",
+        summary: "Shape the look with Shader Graphs, reusable materials, animation, and VFX.",
+        intro: "Work from a visible result. Build shader logic with graphs, tune reusable materials, and bring your scene to life with animation and effects.",
+        image: "graph",
+        alt: "Shader authoring in the Kéire editor.",
+        topics: [
+            { title: "Shader Graph & Materials", text: "Build shader logic in Shader Graph. Create reusable materials in the Inspector, choose a shader, and tune textures, colors, and surface properties.", href: "/docs/reference/manual/shader-graph/", link: "Explore Shader Graph" },
+            { title: "VFX Graph", text: "Author particles and effects, inspect diagnostics, and connect effects to gameplay events.", href: "/docs/reference/manual/vfx-graph/", link: "Explore VFX Graph" },
+            { title: "Animation & rigging", text: "Import characters and clips, map rigs, and build transitions that connect animation to your game.", href: "/docs/reference/animation-rigging/", link: "Explore animation" },
+        ],
+        next: "scripting",
+    },
+    {
+        id: "scripting",
+        label: "Code & Runtime",
+        title: "Make it do something new.",
+        summary: "Write gameplay in C#, explore the C++20 source, and build a standalone player.",
+        intro: "Give your objects behavior and connect the systems behind your game. Start with managed gameplay, then explore the engine implementation when you need to go deeper.",
+        image: "vehicle",
+        alt: "The Outpost vehicle in a scene rendered by Kéire.",
+        topics: [
+            { title: "C# gameplay", text: "Respond to input, work with scene objects, and connect your game systems using the managed scripting API.", href: "/docs/reference/manual/scripting-fundamentals/", link: "Start scripting" },
+            { title: "Open C++20 foundations", text: "Inspect the implementation and its documented boundaries. The MIT license lets you adapt the engine to your project.", href: "/docs/reference/overview/", link: "Understand the architecture" },
+            { title: "Standalone players", text: "Bring scenes, scripts, and assets together in a player build. Review platform requirements and packaging guidance before distribution.", href: "/docs/reference/manual/player-builds-and-packages/", link: "Build a player" },
+        ],
+        next: "editor",
+    },
+] as const;

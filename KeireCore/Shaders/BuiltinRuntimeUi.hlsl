@@ -3,6 +3,7 @@ struct VertexInput
     float3 Position : TEXCOORD0;
     float4 Color : TEXCOORD1;
     float2 UV : TEXCOORD2;
+    float PerspectiveW : TEXCOORD3;
 };
 
 struct VertexOutput
@@ -23,6 +24,7 @@ VertexOutput VSMain(const VertexInput input)
     VertexOutput output;
     const float2 normalized = input.Position.xy / max(ViewportSize, 1.0F.xx);
     output.Position = float4(normalized.x * 2.0F - 1.0F, 1.0F - normalized.y * 2.0F, input.Position.z, 1.0F);
+    output.Position *= input.PerspectiveW;
     output.Color = input.Color;
     output.UV = input.UV;
     return output;

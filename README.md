@@ -66,6 +66,16 @@ macOS downloads remain gated pending platform, signing, and notarization validat
 [Roadmap](https://keireengine.duckdns.org/roadmap/) ·
 [Report an issue](https://github.com/hcfgod/KeireEngine/issues/new/choose)
 
+Explore the website’s focused [Scene & Editor](https://keireengine.duckdns.org/features/editor/),
+[Graphics & Effects](https://keireengine.duckdns.org/features/graphics/), and
+[Code & Runtime](https://keireengine.duckdns.org/features/scripting/) pages. The roadmap and release notes
+keep detailed capabilities and changes in expandable sections. Website development and visual checks are documented
+in the [website README](Services/KeireDistributionService/DocumentationSite/README.md).
+
+The Marketplace supports signed-out browsing of published free assets; sign in to add them to your library.
+Paid purchases are not available. Material authoring uses reusable Inspector-based materials with Shader Graph
+and VFX Graph for visual shader and effect authoring.
+
 Editor Console controls stay fixed while log entries scroll. Drag prefabs or meshes into the Scene viewport to place
 them beneath the pointer; prefab placement is retained when the source is reloaded. C# scripts can schedule
 `Destroy(entity, 5f)` and log multiple values with `Debug.Log("Values: {0}, {1}", first, second)`.

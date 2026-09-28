@@ -542,8 +542,8 @@ namespace Keire
 
             constexpr std::array<std::string_view, 6> vertexTypes{"float3", "float3", "float2",
                                                                   "float4", "float4", "float2"};
-            constexpr std::array<std::string_view, 3> uiVertexTypes{"float3", "float4", "float2"};
-            const auto expectedInputs = ui                                    ? 3U
+            constexpr std::array<std::string_view, 4> uiVertexTypes{"float3", "float4", "float2", "float"};
+            const auto expectedInputs = ui                                    ? 4U
                                         : definition.VertexLayoutVersion == 3 ? 6U
                                         : definition.VertexLayoutVersion == 2 ? 5U
                                                                               : 4U;

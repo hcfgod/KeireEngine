@@ -1,0 +1,34 @@
+---
+import PlatformLayout from "../../layouts/PlatformLayout.astro";
+import ProductNavigation from "../../components/ProductNavigation.astro";
+import ProductMedia from "../../components/ProductMedia.astro";
+import { productFeatures } from "../../lib/product-features";
+import { releaseStatus } from "../../lib/release-status";
+export const prerender = true;
+export function getStaticPaths() {
+    return productFeatures.map((feature) => ({ params: { feature: feature.id }, props: { feature } }));
+}
+const { feature } = Astro.props;
+const next = productFeatures.find((item) => item.id === feature.next)!;
+---
+<PlatformLayout title={feature.label} description={feature.summary} active="product">
+    <ProductNavigation active={feature.id} />
+    <section class="platform-shell feature-detail">
+        <div class="feature-detail__heading">
+            <p class="eyebrow">Kéire / {feature.label}</p>
+            <h1>{feature.title}</h1>
+            <p class="lead">{feature.intro}</p>
+            <div class="actions"><a class="button" href="/downloads/">Get Kéire Hub <span aria-hidden="true">↗</span></a><a class="text-action" href={feature.topics[0].href}>Read the guide →</a></div>
+        </div>
+        <ProductMedia name={feature.image} alt={feature.alt} priority />
+    </section>
+    <section class="platform-shell feature-topics" aria-label={`${feature.label} capabilities`}>
+        {feature.topics.map((topic, index) => <article>
+            <span class="eyebrow">0{index + 1}</span><h2>{topic.title}</h2><p>{topic.text}</p><a class="text-action" href={topic.href}>{topic.link} →</a>
+        </article>)}
+    </section>
+    <section class="platform-shell feature-next">
+        <div><p class="eyebrow">Keep exploring</p><h2>{next.label}</h2><p>{next.summary}</p><a class="button button--secondary" href={`/features/${next.id}/`}>Explore {next.label} →</a></div>
+        <aside><strong>Open source. Actively evolving.</strong><p>Source {releaseStatus.sourceVersion} · Available packages {releaseStatus.availableVersion}. Kéire is pre-1.0; review current capabilities and limits before committing a production project.</p><a class="text-action" href="/roadmap/">Follow development →</a></aside>
+    </section>
+</PlatformLayout>

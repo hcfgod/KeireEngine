@@ -26,11 +26,11 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
         initiatives: [
             {
                 title: "Unified graph and scripting authoring",
-                outcome: "Validate the source-breaking managed API and shared Shader, Material, and VFX editing contracts as one current release boundary.",
+                outcome: "Validate the source-breaking managed API and Shader Graph, Inspector-based materials, and VFX Graph workflows as one current release boundary.",
                 status: "In validation",
                 capabilities: [
                     "Multi-selection, comments, clipboard remap, arrange commands, bookmarks, and diagnostic framing",
-                    "Shader/Material schema 4 and VFX schema 5 migration",
+                    "Shader and material asset migration, plus VFX schema 5 migration",
                     "Executable Operator, Block, and System VFX Subgraphs",
                     "Unity-shaped managed objects, direct asset references, and managed-state v2",
                 ],
@@ -65,7 +65,7 @@ export const roadmapHorizons: readonly RoadmapHorizon[] = [
                 outcome: "Artists and gameplay teams can build, preview, diagnose, and reuse content without editing generated code.",
                 status: "In validation",
                 capabilities: [
-                    "Shader Graph and Material Graph interoperability",
+                    "Shader Graph with reusable Inspector-based materials",
                     "VFX authoring, diagnostics, and sample effects",
                     "Procedural animation, automatic IK, and ground adaptation",
                     "Multi-scene C# gameplay, runtime UI, and native-asset residency",

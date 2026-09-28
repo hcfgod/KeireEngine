@@ -2,19 +2,39 @@
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
 import ProductMedia from "../../components/ProductMedia.astro";
 import ShowcaseFilm from "../../components/ShowcaseFilm.astro";
+import ShowcaseGallery from "../../components/ShowcaseGallery.astro";
 export const prerender = true;
 const frames = [
     { name: "arrival", title: "A place to arrive.", alt: "The outpost courtyard, barracks, and watchtower.", text: "A compact environment built from modular models, with a clear route through the scene." },
-    { name: "materials", title: "Make the surface your own.", alt: "Material variations beside the outpost workshop.", text: "Paired Shader and Material Graphs bring different surface treatments into the same lighting." },
+    { name: "materials", title: "Make the surface your own.", alt: "Material variations beside the outpost workshop.", text: "Reusable materials bring different surface treatments into the same lighting. Choose a shader and tune its properties in the Inspector." },
     { name: "vehicle", title: "Details that belong together.", alt: "A vehicle displayed in the outpost yard.", text: "Model geometry, atlas textures, and light work together in a scene you can walk through." },
     { name: "effects", title: "Give a moment some life.", alt: "An effect demonstration in the outpost.", text: "Scene effects are authored in Kéire and run alongside the environment." },
     { name: "editor", title: "The scene behind the shot.", alt: "The Outpost open in the Kéire editor.", text: "The same project is editable in Kéire. Its objects, materials, and scripts remain available to inspect." },
     { name: "graph", title: "Follow an idea through the graph.", alt: "A Kéire graph used by the showcase.", text: "The authoring tools expose how the result is built, from graph inputs to the surface in the scene." },
 ];
 ---
-<PlatformLayout title="Showcase" description="Explore Kéire Outpost: a real scene built with Kéire, with a guided camera tour, material experiments, and visual effects.">
-    <section class="platform-section platform-shell"><div class="section-heading" data-reveal><div><p class="eyebrow">Made with Kéire</p><h1>Welcome to<br />the Outpost.</h1></div><p>A small world with a lot going on. Explore the scene, look closer at the details, and see the tools behind the final frame.</p></div><ProductMedia name="arrival" alt="The Outpost courtyard, barracks, aircraft, and tank, rendered in Kéire." priority /></section>
-    <section class="platform-section platform-section--line"><div class="platform-shell"><div class="section-heading"><div><p class="eyebrow">A closer look</p><h2>From the whole world<br />to the smallest detail.</h2></div><p>These images show Kéire’s renderer and editor. The outpost uses owned POLYGON War art alongside original scene composition and Kéire sample graphs and effects.</p></div><div class="showcase-gallery">{frames.map(frame => <article data-reveal><ProductMedia name={frame.name} alt={frame.alt} /><h3>{frame.title}</h3><p>{frame.text}</p></article>)}</div></div></section>
-    <section class="platform-section platform-shell" id="tour"><div class="section-heading"><div><p class="eyebrow">Take a short tour</p><h2>See the scene<br />in motion.</h2></div><p>A 55-second, silent tour through the Outpost. Press Play when you’re ready to look around.</p></div><ShowcaseFilm /></section>
-    <section class="platform-section platform-shell"><div class="open-development"><div><p class="eyebrow">Start your own experiment</p><h2>What would<br />you make here?</h2></div><div><p>The Outpost is a private demonstration project. Kéire’s included Sandbox gives you a starting point with editable graphs, effects, and gameplay examples.</p><div class="actions"><a class="button" href="/downloads/">Get Kéire Hub ↗</a><a class="text-action" href="/docs/reference/getting-started/">Open the getting-started guide →</a></div></div></div></section>
+<PlatformLayout title="Showcase" description="Explore Kéire Outpost: a real scene built with Kéire, with a guided camera tour, material experiments, and visual effects." active="showcase">
+    <section class="platform-shell feature-detail showcase-intro">
+        <div class="feature-detail__heading">
+            <p class="eyebrow">Made with Kéire / 01</p><h1>Welcome to<br />the Outpost.</h1>
+            <p class="lead">One small world. Room to experiment. Look closer at the materials, effects, and tools behind a real Kéire scene.</p>
+            <div class="actions"><a class="button" href="#tour">Watch the 55-second tour ↓</a><a class="text-action" href="#gallery">Explore the gallery →</a></div>
+            <p class="hero-footnote">Real engine output · Original scene composition</p>
+        </div>
+        <ProductMedia name="arrival" alt="The Outpost courtyard, barracks, aircraft, and tank, rendered in Kéire." priority />
+    </section>
+    <section class="platform-section platform-section--line" id="gallery">
+        <div class="platform-shell">
+            <div class="section-heading"><div><p class="eyebrow">Behind the frame</p><h2>A closer look.</h2></div><p>Select an image to open the full-size render. The Outpost uses owned POLYGON War art alongside original scene composition and Kéire sample graphs and effects.</p></div>
+            <ShowcaseGallery frames={frames} />
+        </div>
+    </section>
+    <section class="platform-section platform-shell" id="tour">
+        <div class="section-heading"><div><p class="eyebrow">Take a short tour</p><h2>See the scene in motion.</h2></div><p>A 55-second, silent tour through the Outpost. Press Play when you’re ready to look around.</p></div>
+        <ShowcaseFilm />
+    </section>
+    <section class="platform-shell feature-next">
+        <div><p class="eyebrow">Start your own experiment</p><h2>What would you make?</h2><p>The Outpost is a private demonstration project. Kéire’s included Sandbox gives you a starting point with editable graphs, effects, and gameplay examples.</p><a class="button" href="/downloads/">Get Kéire Hub ↗</a></div>
+        <aside><strong>Find the tools behind the scene.</strong><p>Explore scene authoring, graphics, and gameplay on their own dedicated pages.</p><a class="text-action" href="/features/">Explore the engine →</a></aside>
+    </section>
 </PlatformLayout>

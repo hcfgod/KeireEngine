@@ -1,60 +1,30 @@
 ---
 import MarketplaceCard from "../../components/MarketplaceCard.astro";
 import PlatformLayout from "../../layouts/PlatformLayout.astro";
-import { marketplaceEnabled } from "../../lib/marketplace";
+import { loadMarketplaceCatalog } from "../../lib/marketplace";
 
 export const prerender = false;
 
 const supabase = Astro.locals.supabase;
-const enabled = await marketplaceEnabled(supabase);
 const search = (Astro.url.searchParams.get("q") ?? "").trim().slice(0, 100);
 const category = (Astro.url.searchParams.get("category") ?? "").trim().slice(0, 64);
-let products: any[] = [];
-let categories: any[] = [];
-const releaseQueue = [
-    { title: "Kéire Sandbox Content Pack", category: "Samples", summary: "The maintained Sandbox project content, organized for selective import and learning." },
-    { title: "Shader and Material Graph Showcase", category: "Rendering", summary: "Production examples showing custom Shader Graphs driving reusable Material Graphs." },
-    { title: "VFX Starter Pack", category: "VFX", summary: "Authoring-ready effects and examples built against the current VFX capability set." },
-    { title: "Gameplay and C# Samples", category: "Code", summary: "Managed gameplay patterns, data assets, lifecycle examples, and diagnostics." },
-    { title: "Starter UI and Input Assets", category: "UI", summary: "Portable input and interface foundations for new Kéire projects." },
-] as const;
-if (supabase && enabled) {
-    let query = supabase.from("marketplace_catalog")
-        .select("id,slug,display_name,short_description,license_spdx,featured,publisher_slug,publisher_name,publisher_verified,category_slug,category_name,rating_average,rating_count,published_at")
-        .order("featured", { ascending: false })
-        .order("published_at", { ascending: false })
-        .limit(30);
-    if (search) query = query.ilike("display_name", `%${search.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`);
-    if (category) query = query.eq("category_slug", category);
-    const [{ data }, categoryResult] = await Promise.all([
-        query,
-        supabase.from("marketplace_categories").select("slug,display_name").eq("active", true).order("sort_order"),
-    ]);
-    products = data ?? [];
-    categories = categoryResult.data ?? [];
-}
-Astro.response.headers.set("cache-control", Astro.locals.user ? "private, no-store" : "public, max-age=60, stale-while-revalidate=300");
+const { status, products, categories } = await loadMarketplaceCatalog(supabase, search, category);
+if (status !== "ready") Astro.response.status = 503;
+Astro.response.headers.set("cache-control", status !== "ready" || Astro.locals.user ? "private, no-store" : "public, max-age=60, stale-while-revalidate=300");
 ---
 
 <PlatformLayout title="Marketplace" description="Discover verified free content, tools, shaders, VFX, and gameplay packages for Kéire Engine." active="marketplace">
     <section class="platform-section marketplace-catalog"><div class="platform-shell">
         <div class="section-heading"><div><p class="eyebrow">Kéire Marketplace</p><h1>Find a starting point for your next idea.</h1></div><p>Browse free assets, tools, and examples for Kéire. Each published package includes its version, compatibility, and publisher details so you can decide whether it fits your project.</p></div>
+        <p class="fine-print">Browse without an account. Sign in to add free assets to your library. Paid purchases are not available.</p>
         <form class="market-toolbar" method="get" role="search">
             <label class="search-field"><span>Search assets</span><input type="search" name="q" value={search} placeholder="Shaders, VFX, gameplay, UI…" maxlength="100" /></label>
             <label class="field"><span>Category</span><select name="category"><option value="">All categories</option>{categories.map((item) => <option value={item.slug} selected={item.slug === category}>{item.display_name}</option>)}</select></label>
             <button class="button" type="submit">Search</button>
         </form>
-        {!enabled ? <div class="empty-state"><p class="eyebrow">Coming soon</p><h2>The marketplace is still in preparation.</h2><p>The catalog will open when its release checks are complete. In the meantime, explore the included Sandbox and follow progress on the roadmap.</p></div>
-        : products.length === 0 && (search || category) ? <div class="empty-state"><h2>No products matched.</h2><p>Try a broader search or remove the category filter.</p></div>
-        : products.length === 0 ? <div class="marketplace-release-queue">
-            <div class="notice-panel"><p class="eyebrow">Catalog preview online</p><h2>The first releases are on their way.</h2><p>The catalog is open for browsing. Packages become available to add to your library after their release checks are complete.</p><a class="text-action" href="/roadmap/">Inspect launch evidence →</a></div>
-            <div class="market-grid" aria-label="Official products preparing for release">
-                {releaseQueue.map((item) => <article class="market-card market-card--preview">
-                    <div class="market-card__media"><span class="status-badge">Signing queue</span></div>
-                    <div class="market-card__body"><span class="eyebrow">{item.category}</span><h3>{item.title}</h3><p>{item.summary}</p><span class="fine-print">Not claimable until signed publication completes</span></div>
-                </article>)}
-            </div>
-        </div>
+        {status !== "ready" ? <div class="empty-state"><p class="eyebrow">Catalog temporarily unavailable</p><h2>We couldn’t load the assets right now.</h2><p>Free assets can be browsed without signing in. Please try again shortly.</p><a class="button button--secondary" href={Astro.url.pathname + Astro.url.search}>Try again</a></div>
+        : products.length === 0 && (search || category) ? <div class="empty-state"><h2>No products matched.</h2><p>Try a broader search or remove the category filter.</p><a class="text-action" href="/marketplace/">Clear filters →</a></div>
+        : products.length === 0 ? <div class="empty-state"><h2>No published assets yet.</h2><p>Published free assets will appear here as they become available.</p></div>
         : <div class="market-grid">{products.map((product) => <MarketplaceCard product={product} />)}</div>}
     </div></section>
     <section class="platform-section platform-section--line platform-section--compact"><div class="platform-shell cta-band"><div><p class="eyebrow">Build for Kéire</p><h2>Share something useful.</h2></div><div class="actions"><a class="button" href="/publisher/">Publisher portal</a><a class="button button--secondary" href="/docs/reference/asset-packages/">Package documentation</a><a class="button button--quiet" href="/roadmap/">Launch roadmap</a></div></div></section>

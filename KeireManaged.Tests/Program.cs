@@ -1,5 +1,6 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("FPS modules preserve movement, jump, landing, and look contracts", FirstPersonControllerTests.Run),
     ("Compute rejects invalid ownership and keeps disposed resources inert", ComputeTests.Run),
     ("Gameplay logging preserves all severities formatting assertions and nested exceptions", GameplayLoggingTests.Run),
     ("Constructor defaults formatted logs and delayed destroy preserve managed contracts", CreationLoggingTests.Run),

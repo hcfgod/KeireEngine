@@ -8,6 +8,8 @@ internal static unsafe class NativeInputFixture
     internal static int ResolveCalls;
     internal static int PersistenceCalls;
     internal static int ActionSnapshotCalls;
+    internal static int ReleaseContextCalls;
+    internal static bool FailActionLookup;
     internal static byte LastContextOperation;
     internal static Keire.AssetId LastContextTarget;
     internal static Keire.InputRebindResolution Resolution;
@@ -23,6 +25,8 @@ internal static unsafe class NativeInputFixture
         ResolveCalls = 0;
         PersistenceCalls = 0;
         ActionSnapshotCalls = 0;
+        ReleaseContextCalls = 0;
+        FailActionLookup = false;
         LastContextOperation = byte.MaxValue;
         LastContextTarget = default;
         Resolution = default;
@@ -191,7 +195,11 @@ internal static unsafe class NativeInputFixture
         generation == 8101 && assetHigh == 31 && assetLow == 37 ? 101UL : 0UL;
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
-    private static byte ReleaseContext(ulong context) => context == 101 ? (byte)1 : (byte)0;
+    private static byte ReleaseContext(ulong context)
+    {
+        ++ReleaseContextCalls;
+        return context == 101 ? (byte)1 : (byte)0;
+    }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
     private static byte OperateContext(ulong context, byte operation, ulong targetHigh, ulong targetLow)
@@ -220,7 +228,7 @@ internal static unsafe class NativeInputFixture
     private static byte FindAction(ulong context, ulong mapHigh, ulong mapLow, Keire.NativeString name,
                                    ulong* high, ulong* low)
     {
-        if (context != 101 || mapHigh != 41 || mapLow != 43 || high == null || low == null)
+        if (FailActionLookup || context != 101 || mapHigh != 41 || mapLow != 43 || high == null || low == null)
             return 0;
         *high = 47;
         *low = 53;

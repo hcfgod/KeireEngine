@@ -1198,6 +1198,11 @@ rays through panel UV and renderer submission treats the panel as scene content.
 document order and dispatch pointer input from the topmost document backward until handled.
 World-panel visibility is conservative when corners cross behind the camera. The renderer clips each triangle against
 its local UI clip rectangle and homogeneous camera planes before perspective division, retaining visible portions.
+Projected UI vertices retain homogeneous W in optional vertex location 3 (`TEXCOORD3`). Built-in and newly compiled
+UI Shader Graph vertices restore clip-space W so textures and colors interpolate in perspective. Screen UI supplies
+W=1. The Shader Graph importer version invalidates cached UI programs so existing graphs rebuild automatically.
+Existing custom shaders retain their original position/color/UV attributes; consume the optional W attribute in custom
+vertex shaders to enable perspective correction on world panels.
 
 Accepted render frames copy UI values, immutable text geometry, and logical texture and surface leases. No frame packet
 borrows a visual element, scene pointer, native surface, or mutable draw list. Every lease is qualified by frame slot
