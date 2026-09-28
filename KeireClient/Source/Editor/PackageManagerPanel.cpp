@@ -245,6 +245,8 @@ namespace KeireEditor
         m_MarketplaceSnapshot = {};
         m_Manifest = {};
         m_Lock = {};
+        m_Imported.clear();
+        m_CompatibilityWarnings.clear();
         m_SelectedPackage.clear();
         m_LocalArchive.clear();
         m_LocalSearch.clear();
@@ -289,6 +291,16 @@ namespace KeireEditor
             return;
         m_Manifest = m_Manager->Manifest();
         m_Lock = m_Manager->Lock();
+        m_Imported = m_AssetImporter->Receipts();
+        m_CompatibilityWarnings = m_Manager->CompatibilityDiagnostics();
+        for (const auto& receipt : m_Imported)
+        {
+            const auto diagnostic = m_AssetImporter->CompatibilityDiagnostic(receipt);
+            if (!diagnostic.empty())
+                m_CompatibilityWarnings.push_back(receipt.PackageId + ": " + diagnostic);
+        }
+        if (!m_CompatibilityWarnings.empty())
+            m_Registration.SetVisible(true);
         if (!m_SelectedPackage.empty() &&
             std::ranges::find(m_Lock.Packages, m_SelectedPackage, &Keire::ProjectPackageLockEntry::PackageId) ==
                 m_Lock.Packages.end())
@@ -555,6 +567,7 @@ namespace KeireEditor
         try
         {
             const auto result = m_AssetImporter->Import(confirmation.Request);
+            Refresh();
             m_Status = "Imported " + std::to_string(result.Written.size()) + " file(s) from " +
                        confirmation.DisplayName + "; retained " + std::to_string(result.Retained.size()) +
                        " local file(s).";
@@ -783,12 +796,8 @@ namespace KeireEditor
                 }
                 plan = m_AssetImporter->Preflight(request);
             }
-            if (!plan.Valid())
-                throw std::runtime_error("Asset import preflight failed: " + plan.Conflicts.front().Message);
-            const auto result = m_AssetImporter->Import(request);
-            m_Status = "Imported " + std::to_string(result.Written.size()) + " file(s) from " +
-                       m_LocalMetadata->Manifest.DisplayName + "; retained " + std::to_string(result.Retained.size()) +
-                       " local file(s).";
+            m_ImportReview.Prepare(m_LocalMetadata->Manifest.DisplayName, std::move(request), std::move(plan));
+            m_Status = "Review the files and local changes before importing.";
             m_Error.clear();
         }
         catch (const std::exception& error)
@@ -866,6 +875,18 @@ namespace KeireEditor
         ui.SameLine();
         ui.TextColored(theme.MutedText, std::to_string(m_Lock.Packages.size()) + " resolved package(s)");
         ui.Separator();
+        if (!m_Imported.empty())
+        {
+            ui.TextColored(theme.Accent, "Imported assets");
+            for (const auto& receipt : m_Imported)
+            {
+                ui.Text((receipt.Manifest ? receipt.Manifest->DisplayName : receipt.PackageId) + "  " +
+                        receipt.Version);
+                ui.TextColored(theme.MutedText, std::to_string(receipt.Entries.size()) +
+                                                    " tracked files - local edits are preserved during updates");
+            }
+            ui.Separator();
+        }
         if (m_Lock.Packages.empty())
         {
             ui.Text("No registry packages are installed in this project.");
@@ -911,10 +932,16 @@ namespace KeireEditor
             if (selected->Embedded)
             {
                 if (ui.Button("Revert to Registry"))
+                {
                     RevertSelected();
+                    return;
+                }
             }
             else if (ui.Button("Embed"))
+            {
                 EmbedSelected();
+                return;
+            }
             const auto direct =
                 std::ranges::find(m_Manifest.Dependencies, selected->PackageId,
                                   &Keire::ProjectPackageRequirement::PackageId) != m_Manifest.Dependencies.end();
@@ -927,6 +954,68 @@ namespace KeireEditor
             if (!direct)
                 ui.TextColored(theme.MutedText, "Remove the direct package that owns this transitive dependency.");
         }
+    }
+
+    void PackageManagerPanel::DrawUpdates(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
+    {
+        ui.Text("Package updates");
+        ui.TextColoredWrapped(theme.MutedText,
+                              "Updates are checked against the library synchronized by Kéire Hub. Review "
+                              "imports before applying changes.");
+        if (!m_MarketplaceSessionAuthorized)
+        {
+            ui.TextColoredWrapped(theme.Warning, m_MarketplaceSessionMessage);
+            return;
+        }
+        static_cast<void>(ui.Checkbox("Allow updated package C# assemblies to compile", m_AllowExecutableCode));
+        static_cast<void>(ui.Checkbox("Keep locally modified files on conflicts", m_KeepLocalConflicts));
+        bool found = false;
+        for (const auto& item : m_MarketplaceSnapshot.Items)
+        {
+            if (!item.Entitled || item.PackageId.empty() || item.Version.empty())
+                continue;
+            const auto registry =
+                std::ranges::find(m_Lock.Packages, item.PackageId, &Keire::ProjectPackageLockEntry::PackageId);
+            const auto imported =
+                std::ranges::find(m_Imported, item.PackageId, &Keire::ProjectAssetImportReceipt::PackageId);
+            const bool isRegistry = item.InstallKind == "registry" && registry != m_Lock.Packages.end();
+            const bool isImport = item.InstallKind == "asset_import" && imported != m_Imported.end();
+            if (!isRegistry && !isImport)
+                continue;
+            const auto version = isRegistry ? registry->Version : imported->Version;
+            try
+            {
+                if (!Keire::AssetPackageVersionSatisfies(item.Version, ">" + version))
+                    continue;
+            }
+            catch (const std::exception&)
+            {
+                ui.TextColoredWrapped(theme.Warning,
+                                      item.DisplayName + ": unable to compare package versions. Refresh through Hub.");
+                found = true;
+                continue;
+            }
+            found = true;
+            ui.Separator();
+            ui.TextColoredWrapped(theme.Accent, item.DisplayName + "  " + version + " -> " + item.Version);
+            if (isRegistry && registry->Embedded)
+                ui.TextColoredWrapped(theme.MutedText, "Embedded copy: revert to Registry before updating.");
+            else if (item.State != KeireHub::MarketplaceCacheState::Ready)
+                ui.TextColoredWrapped(theme.MutedText,
+                                      "Choose Open in Editor on the store page to download this update through Hub.");
+            else if (ui.Button(std::string(isRegistry ? "Install update##" : "Review update##") + item.PackageId))
+            {
+                if (isRegistry)
+                    InstallMarketplacePackage(item);
+                else
+                    PrepareMarketplaceImport(item);
+                return;
+            }
+        }
+        if (!found)
+            ui.TextColoredWrapped(theme.MutedText,
+                                  "No newer versions found in the synchronized library. Open the asset in "
+                                  "Hub to refresh available releases.");
     }
 
     void PackageManagerPanel::DrawLocalPackages(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme)
@@ -974,10 +1063,12 @@ namespace KeireEditor
             if (!manifest.ManagedAssemblies.empty())
             {
                 static_cast<void>(ui.Checkbox("Allow this package's C# assemblies to compile", m_AllowExecutableCode));
-                ui.TextColored(theme.Warning, "Executable code consent is recorded per imported package version.");
+                ui.TextColored(
+                    theme.Warning,
+                    "Code changes require renewed approval. Local edits are preserved unless you choose replacement.");
             }
             static_cast<void>(ui.Checkbox("Keep locally modified files on conflicts", m_KeepLocalConflicts));
-            if (ui.Button("Preflight and Import All"))
+            if (ui.Button("Review Import..."))
                 ImportLocalAssetPackage();
         }
         else
@@ -1002,6 +1093,8 @@ namespace KeireEditor
             ui.TextColored(theme.Error, m_Error.empty() ? "Package management is unavailable." : m_Error);
             return;
         }
+        for (const auto& diagnostic : m_CompatibilityWarnings)
+            ui.TextColoredWrapped(theme.Warning, diagnostic);
         if (auto tabs = ui.BeginTabBar("PackageManagerTabs"); tabs)
         {
             if (auto assets = ui.BeginTabItem("My Assets"); assets)
@@ -1022,9 +1115,7 @@ namespace KeireEditor
                 DrawInProject(ui, theme);
             if (auto updates = ui.BeginTabItem("Updates"); updates)
             {
-                ui.Text("No catalog-backed updates are pending.");
-                ui.TextColored(theme.MutedText,
-                               "Embedded packages remain pinned until explicitly reverted to the Registry.");
+                DrawUpdates(ui, theme);
             }
             if (auto local = ui.BeginTabItem("Local Packages"); local)
                 DrawLocalPackages(ui, theme);
@@ -1043,9 +1134,9 @@ namespace KeireEditor
             ui.ProgressBar(std::clamp(progress, 0.0F, 1.0F), {}, m_LastEvent.Message);
         }
         if (!m_Status.empty())
-            ui.TextColored(theme.Success, m_Status);
+            ui.TextColoredWrapped(theme.Success, m_Status);
         if (!m_Error.empty())
-            ui.TextColored(theme.Error, m_Error);
+            ui.TextColoredWrapped(theme.Error, m_Error);
         DrawImportReview(ui, theme);
     }
 } // namespace KeireEditor

@@ -34,7 +34,7 @@ TEST_CASE("Scene Save As recovery state follows the saved copy and preserves the
     document.Open(scene, original, temporary.Path / "Original.keirescene");
     document.SetRecoveryPath(originalRecovery);
     REQUIRE(document.WriteRecovery());
-    REQUIRE(document.RecoveryAvailable());
+    REQUIRE_FALSE(document.RecoveryAvailable());
     document.AdvanceRecovery(12.0);
 
     auto saved = Keire::CreateRef<Keire::Scene>(copy, scene->Snapshot());
@@ -65,6 +65,43 @@ TEST_CASE("Scene Save As recovery state follows the saved copy and preserves the
     CHECK(document.RecoverySeconds() == 0.0);
     CHECK(std::filesystem::is_regular_file(originalRecovery));
     document.SetRecoveryPath(temporary.Path);
+    CHECK_FALSE(document.RecoveryAvailable());
+    document.Close();
+}
+
+TEST_CASE("Scene autosave stays quiet and preserves unresolved recovery from an earlier document")
+{
+    RecoveryDirectory temporary;
+    const auto recovery = temporary.Path / "scene.recovery";
+    const auto asset = Keire::AssetId::Generate();
+    auto scene = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("Autosave"));
+    const auto entity = scene->CreateEntity("First edit").Id();
+    KeireEditor::SceneDocument document;
+    document.Open(scene, asset);
+    document.SetRecoveryPath(recovery);
+    document.AdvanceRecovery(30.0);
+    REQUIRE(document.WriteRecovery());
+    CHECK_FALSE(document.RecoveryAvailable());
+    CHECK(document.RecoverySeconds() == 0.0);
+    scene->FindEntity(entity).SetName("Latest autosave");
+    REQUIRE(document.WriteRecovery());
+    CHECK_FALSE(document.RecoveryAvailable());
+    const auto snapshot = scene->Snapshot();
+    document.Close();
+
+    auto reopened = Keire::CreateRef<Keire::Scene>(asset, snapshot);
+    reopened->FindEntity(entity).SetName("New unsaved edit");
+    document.Open(reopened, asset);
+    document.SetRecoveryPath(recovery);
+    REQUIRE(document.RecoveryAvailable());
+    CHECK_FALSE(document.WriteRecovery());
+    CHECK(document.RecoveryAvailable());
+    document.RestoreRecovery();
+    CHECK(document.EditingScene()->FindEntity(entity).Name() == "Latest autosave");
+    CHECK_FALSE(document.RecoveryAvailable());
+    CHECK(document.Dirty());
+    document.EditingScene()->FindEntity(entity).SetName("After recovery");
+    CHECK(document.WriteRecovery());
     CHECK_FALSE(document.RecoveryAvailable());
     document.Close();
 }

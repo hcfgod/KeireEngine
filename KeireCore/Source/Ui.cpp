@@ -34,6 +34,32 @@
 static_assert(IMGUI_VERSION_NUM == 19280, "The Kéire UI runtime must use the dependency-lock ImGui version.");
 namespace Keire
 {
+    namespace
+    {
+        void ConstrainFloatingPanelToViewport()
+        {
+            if (ImGui::GetWindowDockID() != 0)
+                return;
+            const auto* viewport = ImGui::GetWindowViewport();
+            if (viewport == nullptr || viewport->WorkSize.x <= 0.0F || viewport->WorkSize.y <= 0.0F)
+                return;
+
+            const auto size = ImGui::GetWindowSize();
+            const ImVec2 constrainedSize{std::min(size.x, viewport->WorkSize.x),
+                                         std::min(size.y, viewport->WorkSize.y)};
+            if (constrainedSize.x != size.x || constrainedSize.y != size.y)
+                ImGui::SetWindowSize(constrainedSize, ImGuiCond_Always);
+
+            const auto position = ImGui::GetWindowPos();
+            const ImVec2 maximumPosition{viewport->WorkPos.x + viewport->WorkSize.x - constrainedSize.x,
+                                         viewport->WorkPos.y + viewport->WorkSize.y - constrainedSize.y};
+            const ImVec2 constrainedPosition{std::clamp(position.x, viewport->WorkPos.x, maximumPosition.x),
+                                             std::clamp(position.y, viewport->WorkPos.y, maximumPosition.y)};
+            if (constrainedPosition.x != position.x || constrainedPosition.y != position.y)
+                ImGui::SetWindowPos(constrainedPosition, ImGuiCond_Always);
+        }
+    } // namespace
+
     class UiImage::Impl final
     {
       public:
@@ -337,11 +363,11 @@ namespace Keire
         return UiPopupScope(*this, visible);
     }
 
-    UiPopupScope UiFrame::BeginPopup(const std::string_view id)
+    UiPopupScope UiFrame::BeginPopup(const std::string_view id, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginPopup");
         const std::string safeId(id);
-        const bool visible = ImGui::BeginPopup(safeId.c_str());
+        const bool visible = ImGui::BeginPopup(safeId.c_str(), Detail::ToImGuiWindowFlags(options));
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::Popup);
         return UiPopupScope(*this, visible);
@@ -488,6 +514,8 @@ namespace Keire
         const bool submitted = ImGui::Begin(panel.SubmittedName().c_str(), visible,
                                             Detail::ToImGuiWindowFlags(effectiveOptions) |
                                                 (maximized ? ImGuiWindowFlags_NoDocking : ImGuiWindowFlags_None));
+        if (!maximized)
+            ConstrainFloatingPanelToViewport();
         panel.NotifyWindowSubmitted();
         panel.NotifyVisibilityChanged(previous);
         m_Impl->OpenScope(UiScope::Kind::Window);

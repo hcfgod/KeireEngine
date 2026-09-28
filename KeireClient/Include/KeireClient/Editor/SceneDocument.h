@@ -109,6 +109,7 @@ namespace KeireEditor
         void SetRecoveryPath(std::filesystem::path path);
         void SetStatus(std::string status);
         void Save();
+        /// Autosaves silently; an unresolved snapshot from a previously opened document is never overwritten.
         [[nodiscard]] bool WriteRecovery();
         void RestoreRecovery();
         void DiscardRecovery() noexcept;

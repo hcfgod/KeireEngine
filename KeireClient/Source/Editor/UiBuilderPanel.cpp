@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/UiBuilderPanel.h"
 
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
+#include "KeireClient/Editor/UiBuilderInspector.h"
 
 #include "Keire/Ui/UiElements.h"
 
@@ -16,22 +17,6 @@ namespace KeireEditor
 {
     namespace
     {
-        struct ElementRow final
-        {
-            const Keire::UiVisualElementDefinition* Element = nullptr;
-            Keire::AssetId Parent;
-            std::size_t ChildIndex = 0;
-            std::size_t Depth = 0;
-        };
-
-        void Flatten(const Keire::UiVisualElementDefinition& element, const std::size_t depth,
-                     std::vector<ElementRow>& rows, const Keire::AssetId parent = {}, const std::size_t childIndex = 0)
-        {
-            rows.push_back({&element, parent, childIndex, depth});
-            for (std::size_t index = 0; index < element.Children.size(); ++index)
-                Flatten(element.Children[index], depth + 1, rows, element.StableId, index);
-        }
-
         [[nodiscard]] std::string JoinClasses(const std::span<const std::string> classes)
         {
             std::string result;
@@ -62,21 +47,6 @@ namespace KeireEditor
         {
             const auto found = std::ranges::find(values, name, &Keire::UiNamedValue::Name);
             return found == values.end() ? std::string{} : found->Value;
-        }
-
-        void SetNamedValue(std::vector<Keire::UiNamedValue>& values, const std::string_view name, std::string value)
-        {
-            const auto found = std::ranges::find(values, name, &Keire::UiNamedValue::Name);
-            if (value.empty())
-            {
-                if (found != values.end())
-                    values.erase(found);
-                return;
-            }
-            if (found != values.end())
-                found->Value = std::move(value);
-            else
-                values.push_back({std::string(name), std::move(value)});
         }
 
         [[nodiscard]] std::string InlineStyles(const std::span<const Keire::UiNamedValue> values)
@@ -202,57 +172,13 @@ namespace KeireEditor
         }
     } // namespace
 
-    std::string_view UiBuilderElementTypeName(const Keire::UiVisualElementType type) noexcept
-    {
-        switch (type)
-        {
-        case Keire::UiVisualElementType::VisualElement:
-            return "Visual Element";
-        case Keire::UiVisualElementType::TemplateContainer:
-            return "Template Container";
-        case Keire::UiVisualElementType::Label:
-            return "Label";
-        case Keire::UiVisualElementType::Image:
-            return "Image";
-        case Keire::UiVisualElementType::Button:
-            return "Button";
-        case Keire::UiVisualElementType::TextField:
-            return "Text Field";
-        case Keire::UiVisualElementType::Toggle:
-            return "Toggle";
-        case Keire::UiVisualElementType::Slider:
-            return "Slider";
-        case Keire::UiVisualElementType::ProgressBar:
-            return "Progress Bar";
-        case Keire::UiVisualElementType::ScrollView:
-            return "Scroll View";
-        case Keire::UiVisualElementType::ListView:
-            return "List View";
-        case Keire::UiVisualElementType::TreeView:
-            return "Tree View";
-        case Keire::UiVisualElementType::DropdownField:
-            return "Dropdown";
-        case Keire::UiVisualElementType::Foldout:
-            return "Foldout";
-        case Keire::UiVisualElementType::TabView:
-            return "Tab View";
-        case Keire::UiVisualElementType::Toolbar:
-            return "Toolbar";
-        case Keire::UiVisualElementType::Spacer:
-            return "Spacer";
-        case Keire::UiVisualElementType::Custom:
-            return "Custom Element";
-        case Keire::UiVisualElementType::Slot:
-            return "Slot";
-        }
-        return "Unknown";
-    }
-
     void UiBuilderPanel::ResetTransientState() noexcept
     {
         if (m_LivePicking && m_LiveDebugAsset)
             m_Controller.SetUiBuilderLivePicking(m_LiveDebugAsset, false);
         m_DraftElement = {};
+        m_DraftAsset = {};
+        m_DraftGeneration = 0;
         m_SourceAsset = {};
         m_SourceGeneration = 0;
         m_DebugAsset = {};
@@ -267,7 +193,15 @@ namespace KeireEditor
         m_PreviewSelection = {};
         m_PreviewGeneration = 0;
         m_PreviewSnapshot.reset();
+        m_GesturePreviewSnapshot.reset();
         m_FallbackFontAtlasImage.Reset();
+        m_PreviewRenderView.Reset();
+        if (m_PreviewRenderScene)
+            m_PreviewRenderScene->Close();
+        m_PreviewRenderScene.Reset();
+        m_PreviewRenderer.Reset();
+        m_PreviewMaterialPicker.Clear();
+        m_PreviewMaterial = {};
         m_PreviewStyleSheets.clear();
         m_PreviewTemplates.clear();
         m_BuiltPreviewSettings.reset();
@@ -300,10 +234,15 @@ namespace KeireEditor
         m_StyleSourceGeneration = 0;
         m_StyleSourceEditTime = {};
         m_StyleSourceParsePending = false;
+        m_StyleSourceEditor = {};
+        m_StyleSourceEditorState = {};
+        m_StyleCompletionSelection = 0;
+        m_StyleCompletionCursor = 0;
         m_StyleEditInline = false;
         m_TemplateDraft.clear();
         m_SlotDraft.clear();
-        m_NewTemplateDraft.clear();
+        m_NewTemplatePicker.Clear();
+        m_NewTemplateAsset = {};
         m_NewSlotDraft = "content";
         m_BindingPropertyDraft.clear();
         m_BindingPathDraft.clear();
@@ -311,7 +250,11 @@ namespace KeireEditor
         m_SourceDraft.clear();
         m_SourceDiagnostic.clear();
         m_SourceEditor = {};
+        m_HierarchySearch.clear();
+        m_LibrarySearch.clear();
         m_SourceEditorState = {};
+        m_SourceCompletionSelection = 0;
+        m_SourceCompletionCursor = 0;
         m_CanvasGesture = {};
         m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
         m_SourceDirty = false;
@@ -323,9 +266,12 @@ namespace KeireEditor
     {
         const auto& document = m_Controller.UiBuilderState();
         const auto* element = document.Find(document.Selection());
-        if (!element || m_DraftElement == element->StableId)
+        if (!element || (m_DraftElement == element->StableId && m_DraftAsset == document.Asset() &&
+                         m_DraftGeneration == document.Generation()))
             return;
         m_DraftElement = element->StableId;
+        m_DraftAsset = document.Asset();
+        m_DraftGeneration = document.Generation();
         m_NameDraft = element->Name;
         m_ClassesDraft = JoinClasses(element->Classes);
         m_TextDraft = NamedValue(element->Attributes, "text");
@@ -346,7 +292,12 @@ namespace KeireEditor
             UiBuilderToolbarUsesStyleSheet(m_WorkspaceMode, static_cast<bool>(styleDocument.Asset()));
         const auto& theme = m_Controller.UiBuilderTheme();
         if (ui.WindowFocused())
-            m_Controller.ActivateUiBuilderHistory();
+        {
+            if (usesStyleSheet)
+                m_Controller.ActivateUiBuilderStyleSheetHistory();
+            else
+                m_Controller.ActivateUiBuilderHistory();
+        }
         if (!document.Asset())
         {
             ui.TextColored(theme.Accent, "UI BUILDER");
@@ -368,7 +319,7 @@ namespace KeireEditor
         {
             try
             {
-                (void)document.PasteElements(document.Selection(), m_Clipboard);
+                (void)document.PasteElements(PreferredInsertionParent(document), m_Clipboard);
                 m_DraftElement = {};
                 m_Message = "Pasted UI elements with regenerated IDs and names.";
             }
@@ -426,6 +377,8 @@ namespace KeireEditor
             m_RevertConfirmationOpen = true;
             ui.OpenPopup(usesStyleSheet ? "Revert Style Sheet" : "Revert UI Document");
         }
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip("Reload saved content (asks before discarding changes).", {.Delayed = true});
         ui.SameLine();
         const auto history = usesStyleSheet ? styleDocument.UndoContext() : document.UndoContext();
         if (auto disabled = ui.BeginDisabled(!history || !history->CanUndo()); disabled)
@@ -441,6 +394,8 @@ namespace KeireEditor
                 }
             }
         }
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip("Undo", {.Delayed = true});
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!history || !history->CanRedo()); disabled)
         {
@@ -455,13 +410,16 @@ namespace KeireEditor
                 }
             }
         }
-        ui.SameLine();
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip("Redo", {.Delayed = true});
+        if (ui.ContentAvailable().Width >= 340.0F)
+            ui.SameLine();
         ui.TextColored(theme.MutedText,
                        std::to_string(m_PreviewSettings.Width) + " x " + std::to_string(m_PreviewSettings.Height) +
                            "  |  " + std::to_string(static_cast<int>(std::lround(m_PreviewSettings.Zoom * 100.0F))) +
-                           "% fit zoom  |  Retained preview");
+                           "% of fit");
         if (!m_Message.empty())
-            ui.TextColored(theme.MutedText, m_Message);
+            ui.TextColoredWrapped(theme.MutedText, m_Message);
         ui.Separator();
 
         if (auto popup = ui.BeginPopupModal(usesStyleSheet ? "Revert Style Sheet" : "Revert UI Document"); popup)
@@ -510,23 +468,24 @@ namespace KeireEditor
             }
         }
 
-        if (ui.Button(m_WorkspaceMode == UiBuilderWorkspaceMode::Design ? "Design  •##UiBuilderDesignMode"
-                                                                        : "Design##UiBuilderDesignMode"))
-            m_WorkspaceMode = UiBuilderWorkspaceMode::Design;
-        ui.SameLine();
-        if (ui.Button(m_WorkspaceMode == UiBuilderWorkspaceMode::Styles ? "Styles  •##UiBuilderStylesMode"
-                                                                        : "Styles##UiBuilderStylesMode"))
-            m_WorkspaceMode = UiBuilderWorkspaceMode::Styles;
-        ui.SameLine();
-        if (ui.Button(m_WorkspaceMode == UiBuilderWorkspaceMode::Debug ? "Debug  •##UiBuilderDebugMode"
-                                                                       : "Debug##UiBuilderDebugMode"))
-            m_WorkspaceMode = UiBuilderWorkspaceMode::Debug;
-        ui.SameLine();
-        ui.TextColored(theme.MutedText, m_WorkspaceMode == UiBuilderWorkspaceMode::Styles
-                                            ? "Visual Style Studio — live draft, explicit save"
-                                        : m_WorkspaceMode == UiBuilderWorkspaceMode::Debug
-                                            ? "Runtime picking, cascade, layout, and performance"
-                                            : "Visual hierarchy and retained layout authoring");
+        constexpr std::array modes{std::pair{UiBuilderWorkspaceMode::Design, "Design"},
+                                   std::pair{UiBuilderWorkspaceMode::Styles, "Styles"},
+                                   std::pair{UiBuilderWorkspaceMode::Debug, "Debug"}};
+        for (const auto& [mode, label] : modes)
+        {
+            if (mode != UiBuilderWorkspaceMode::Design)
+                ui.SameLine();
+            [[maybe_unused]] auto background = ui.PushStyleColor(
+                Keire::UiStyleColorRole::Button, m_WorkspaceMode == mode ? theme.Selection : theme.RaisedPanel);
+            if (ui.Button(label, {70.0F, 28.0F}))
+                m_WorkspaceMode = mode;
+            if (ui.LastItemState().Hovered)
+                ui.SetTooltip(mode == UiBuilderWorkspaceMode::Design ? "Arrange elements and edit their content."
+                              : mode == UiBuilderWorkspaceMode::Styles
+                                  ? "Edit layout, colors, typography and style sheets."
+                                  : "Inspect runtime layout, styles and bindings.",
+                              {.Delayed = true});
+        }
         ui.Separator();
 
         const auto available = ui.ContentAvailable();
@@ -635,8 +594,12 @@ namespace KeireEditor
     void UiBuilderPanel::DrawHierarchy(Keire::UiFrame& ui)
     {
         auto& document = m_Controller.UiBuilderState();
-        std::vector<ElementRow> rows;
-        Flatten(document.Definition().Root, 0, rows);
+        ui.SetNextItemWidth(-1.0F);
+        (void)ui.InputTextWithHint("##UiHierarchySearch", "Search name, type, class or text", m_HierarchySearch);
+        const auto rows = BuildUiBuilderHierarchyRows(document.Definition().Root, m_HierarchySearch);
+        if (rows.empty())
+            ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText,
+                                  "No matching elements. Clear the search to show all.");
         for (std::size_t rowIndex = 0; rowIndex < rows.size(); ++rowIndex)
         {
             const auto& row = rows[rowIndex];
@@ -653,8 +616,9 @@ namespace KeireEditor
                 }
                 else if (ui.ShiftDown())
                 {
-                    const auto anchor = std::ranges::find(rows, document.Selection(), [](const ElementRow& value)
-                                                          { return value.Element->StableId; });
+                    const auto anchor =
+                        std::ranges::find(rows, document.Selection(),
+                                          [](const UiBuilderHierarchyRow& value) { return value.Element->StableId; });
                     const auto anchorIndex =
                         anchor == rows.end() ? rowIndex : static_cast<std::size_t>(std::distance(rows.begin(), anchor));
                     const auto first = std::min(anchorIndex, rowIndex);
@@ -717,7 +681,10 @@ namespace KeireEditor
                                            : insertAfter ? row.ChildIndex + 1
                                                          : row.Element->Children.size();
                         if (document.ReparentElements(dragged, parent, index))
+                        {
                             m_DraftElement = {};
+                            return; // Document edits invalidate every borrowed hierarchy row.
+                        }
                     }
                     catch (const std::exception& error)
                     {
@@ -738,11 +705,11 @@ namespace KeireEditor
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(m_Clipboard.Empty()); disabled)
         {
-            if (ui.Button("Paste as Child"))
+            if (ui.Button("Paste"))
             {
                 try
                 {
-                    (void)document.PasteElements(document.Selection(), m_Clipboard);
+                    (void)document.PasteElements(PreferredInsertionParent(document), m_Clipboard);
                     m_DraftElement = {};
                 }
                 catch (const std::exception& error)
@@ -764,14 +731,19 @@ namespace KeireEditor
 
     void UiBuilderPanel::DrawLibrary(Keire::UiFrame& ui)
     {
-        ui.Text("Click to add, or drag onto the canvas");
-        ui.TextColored(m_Controller.UiBuilderTheme().MutedText,
-                       "Non-container selections add beside the selection. Every insertion supports undo/redo.");
+        ui.SetNextItemWidth(-1.0F);
+        (void)ui.InputTextWithHint("##UiLibrarySearch", "Search controls", m_LibrarySearch);
+        ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText, "Click to add, or drag onto the canvas.");
         ui.Separator();
         auto& document = m_Controller.UiBuilderState();
+        std::size_t matchCount = 0;
         for (const auto type : LibraryTypes)
         {
-            if (ui.Button(std::string("+ ") + std::string(UiBuilderElementTypeName(type))))
+            if (!UiBuilderSearchMatches(UiBuilderElementTypeName(type), m_LibrarySearch))
+                continue;
+            ++matchCount;
+            if (ui.Button(std::string("+ ") + std::string(UiBuilderElementTypeName(type)),
+                          {ui.ContentAvailable().Width, 28.0F}))
             {
                 try
                 {
@@ -804,7 +776,10 @@ namespace KeireEditor
             ui.Text("Registered custom controls");
             for (const auto& descriptor : customControls)
             {
-                if (ui.Button("+ " + descriptor.Name + "##UiBuilderCustom"))
+                if (!UiBuilderSearchMatches(descriptor.Name, m_LibrarySearch))
+                    continue;
+                ++matchCount;
+                if (ui.Button("+ " + descriptor.Name + "##UiBuilderCustom", {ui.ContentAvailable().Width, 28.0F}))
                 {
                     try
                     {
@@ -836,16 +811,25 @@ namespace KeireEditor
                 }
             }
         }
+        if (matchCount == 0)
+            ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText,
+                                  "No matching controls. Clear the search to browse all.");
         ui.Separator();
         ui.Text("Templates and slots");
-        (void)ui.InputText("Visual Tree Asset ID", m_NewTemplateDraft);
+        ui.SetNextItemWidth(std::max(60.0F, ui.ContentAvailable().Width - 100.0F));
+        (void)m_NewTemplatePicker.Draw(
+            ui, m_Controller.UiBuilderAssetRecords(), m_NewTemplateAsset,
+            {.Label = "Template",
+             .EmptyLabel = "Choose UI document",
+             .ExpectedType = Keire::UiVisualTreeAsset::StaticType(),
+             .Reveal = [this](const Keire::AssetId id) { m_Controller.RevealUiBuilderAsset(id); }});
         if (ui.Button("+ Template Instance"))
         {
             try
             {
-                const auto asset = Keire::AssetId::Parse(m_NewTemplateDraft);
+                const auto asset = m_NewTemplateAsset;
                 if (!asset)
-                    throw std::invalid_argument("Enter a non-zero .keireui asset ID for the template.");
+                    throw std::invalid_argument("Choose a UI document for the template.");
                 (void)document.AddTemplate(PreferredInsertionParent(document), asset);
                 m_DraftElement = {};
             }
@@ -873,6 +857,7 @@ namespace KeireEditor
 
     void UiBuilderPanel::DrawInspector(Keire::UiFrame& ui)
     {
+        SynchronizeDraft();
         auto& document = m_Controller.UiBuilderState();
         const auto* element = document.Find(document.Selection());
         if (!element)
@@ -925,8 +910,8 @@ namespace KeireEditor
                 return;
             }
         }
-        (void)ui.InputText("Target Property", m_BindingPropertyDraft);
-        (void)ui.InputText("Source Path", m_BindingPathDraft);
+        (void)ui.InputTextWithHint("Target Property", "text, value, checked...", m_BindingPropertyDraft);
+        (void)ui.InputTextWithHint("Source Path", "Player.Health", m_BindingPathDraft);
         if (auto combo = ui.BeginCombo("Binding Mode", m_BindingModeDraft); combo)
         {
             constexpr std::array modes{"OneWay", "TwoWay", "OneTime"};
@@ -968,47 +953,23 @@ namespace KeireEditor
         {
             try
             {
-                auto candidate = document.Definition();
-                auto find = [&](auto&& self,
-                                Keire::UiVisualElementDefinition& current) -> Keire::UiVisualElementDefinition*
-                {
-                    if (current.StableId == element->StableId)
-                        return &current;
-                    for (auto& child : current.Children)
-                        if (auto* result = self(self, child))
-                            return result;
-                    return nullptr;
-                };
-                auto* edited = find(find, candidate.Root);
-                if (!edited)
-                    throw std::runtime_error("The selected element no longer exists.");
-                edited->Name = m_NameDraft;
-                edited->CustomType = m_CustomTypeDraft;
-                SetNamedValue(edited->Attributes, "text", m_TextDraft);
-                edited->InlineStyles = ParseInlineStyles(m_InlineStyleDraft);
-                edited->Slot = edited->Type == Keire::UiVisualElementType::Slot ? std::string{} : m_SlotDraft;
-                if (edited->Type == Keire::UiVisualElementType::TemplateContainer)
-                {
-                    edited->Template = Keire::AssetId::Parse(m_TemplateDraft);
-                    if (!edited->Template)
-                        throw std::invalid_argument("A template container requires a non-zero visual-tree asset ID.");
-                }
-                const auto classes = SplitClasses(m_ClassesDraft);
-                for (const auto selection : document.Selections())
-                {
-                    auto findSelection =
-                        [&](auto&& self, Keire::UiVisualElementDefinition& current) -> Keire::UiVisualElementDefinition*
-                    {
-                        if (current.StableId == selection)
-                            return &current;
-                        for (auto& child : current.Children)
-                            if (auto* result = self(self, child))
-                                return result;
-                        return nullptr;
-                    };
-                    if (auto* selected = findSelection(findSelection, candidate.Root))
-                        selected->Classes = classes;
-                }
+                UiBuilderInspectorEdit edit;
+                if (nameEdited)
+                    edit.Name = m_NameDraft;
+                if (classesEdited)
+                    edit.Classes = SplitClasses(m_ClassesDraft);
+                if (textEdited)
+                    edit.Text = m_TextDraft;
+                if (customTypeEdited)
+                    edit.CustomType = m_CustomTypeDraft;
+                if (templateEdited)
+                    edit.Template = Keire::AssetId::Parse(m_TemplateDraft);
+                if (slotEdited)
+                    edit.Slot = m_SlotDraft;
+                if (inlineStyleEdited)
+                    edit.InlineStyles = ParseInlineStyles(m_InlineStyleDraft);
+                auto candidate =
+                    ApplyUiBuilderInspectorEdit(document.Definition(), element->StableId, document.Selections(), edit);
                 std::string property = "element";
                 if (nameEdited)
                     property = "name";
@@ -1027,6 +988,8 @@ namespace KeireEditor
                 const auto mergeKey = document.Asset().ToString() + ":" + element->StableId.ToString() + ":" + property;
                 (void)document.Edit(document.Selections().size() > 1 ? "Edit UI elements" : "Edit UI element",
                                     std::move(candidate), mergeKey);
+                // Keep in-progress text intact for our own edit; history/external changes refresh the draft.
+                m_DraftGeneration = document.Generation();
                 m_Message = "Element properties updated.";
             }
             catch (const std::exception& error)
@@ -1373,6 +1336,7 @@ namespace KeireEditor
         (void)ui.InputCodeEditor("XML markup source", m_SourceDraft, m_SourceEditorState,
                                  Keire::UiSize{0.0F, editorHeight});
         const auto sourceState = ui.LastItemState();
+        const auto sourceRect = ui.LastItemRect();
         if (sourceState.Edited)
         {
             m_SourceDirty = true;
@@ -1390,34 +1354,86 @@ namespace KeireEditor
         if (const auto documentation = m_SourceEditor.HoverDocumentation(m_SourceEditor.Cursor()))
             ui.TextColoredWrapped(theme.MutedText, *documentation);
 
-        if (sourceState.Active)
+        auto completions = m_SourceEditor.Completions(m_SourceEditor.Cursor(), 12U);
+        if (m_SourceCompletionCursor != m_SourceEditor.Cursor())
         {
-            const auto completions = m_SourceEditor.Completions(m_SourceEditor.Cursor(), 8U);
-            if (!completions.empty())
+            m_SourceCompletionCursor = m_SourceEditor.Cursor();
+            m_SourceCompletionSelection = 0;
+        }
+        if (!completions.empty())
+            m_SourceCompletionSelection = std::min(m_SourceCompletionSelection, completions.size() - 1U);
+
+        const auto applyCompletion = [&](const UiMarkupSourceCompletion& completion)
+        {
+            if (!m_SourceEditor.ApplyCompletion(m_SourceEditor.Cursor(), completion))
+                return false;
+            m_SourceDraft = m_SourceEditor.Source();
+            m_SourceEditorState.CursorOffset = m_SourceEditor.Cursor();
+            m_SourceEditorState.SelectionBegin = m_SourceEditor.Cursor();
+            m_SourceEditorState.SelectionEnd = m_SourceEditor.Cursor();
+            m_SourceEditorState.RequestCursor = true;
+            m_SourceDirty = true;
+            m_SourceCompletionCursor = m_SourceEditor.Cursor();
+            return true;
+        };
+
+        bool completionApplied = false;
+        if (sourceState.Active && !completions.empty())
+        {
+            if (ui.KeyPressed(Keire::UiKey::Down))
+                m_SourceCompletionSelection = (m_SourceCompletionSelection + 1U) % completions.size();
+            if (ui.KeyPressed(Keire::UiKey::Up))
+                m_SourceCompletionSelection =
+                    (m_SourceCompletionSelection + completions.size() - 1U) % completions.size();
+            if (!m_SourceEditorState.SubmitRequested &&
+                (ui.KeyPressed(Keire::UiKey::Tab) || ui.KeyPressed(Keire::UiKey::Enter)))
             {
-                if (auto suggestions = ui.BeginChild("UiMarkupSourceCompletions", {0.0F, 112.0F}, true); suggestions)
+                completionApplied = applyCompletion(completions[m_SourceCompletionSelection]);
+            }
+            if (!completionApplied)
+                ui.OpenPopup("UiMarkupSourceCompletions");
+        }
+
+        constexpr Keire::UiSize completionSize{440.0F, 250.0F};
+        auto completionPosition =
+            Keire::UiPosition{m_SourceEditorState.CaretScreenPosition.X,
+                              m_SourceEditorState.CaretScreenPosition.Y + m_SourceEditorState.CaretHeight};
+        completionPosition.X = std::clamp(completionPosition.X, sourceRect.Minimum.X,
+                                          std::max(sourceRect.Minimum.X, sourceRect.Maximum.X - completionSize.Width));
+        if (completionPosition.Y + completionSize.Height > sourceRect.Maximum.Y)
+            completionPosition.Y =
+                std::max(sourceRect.Minimum.Y, m_SourceEditorState.CaretScreenPosition.Y - completionSize.Height);
+        ui.SetNextWindowPosition(completionPosition, false);
+        ui.SetNextWindowSize(completionSize, false);
+        if (auto suggestions =
+                ui.BeginPopup("UiMarkupSourceCompletions",
+                              {.NoResize = true, .NoMove = true, .NoSavedSettings = true, .NoFocusOnAppearing = true});
+            suggestions)
+        {
+            if (completionApplied || completions.empty())
+            {
+                ui.CloseCurrentPopup();
+            }
+            else
+            {
+                for (std::size_t index = 0; index < completions.size(); ++index)
                 {
-                    ui.TextColored(theme.Accent, "COMPLETION");
-                    for (const auto& completion : completions)
+                    const auto& completion = completions[index];
+                    if (ui.Selectable(completion.Label + "##UiMarkupCompletion" + completion.Insertion,
+                                      index == m_SourceCompletionSelection))
                     {
-                        if (ui.Selectable(completion.Label + "##UiMarkupCompletion" + completion.Insertion) &&
-                            m_SourceEditor.ApplyCompletion(m_SourceEditor.Cursor(), completion))
-                        {
-                            m_SourceDraft = m_SourceEditor.Source();
-                            m_SourceEditorState.CursorOffset = m_SourceEditor.Cursor();
-                            m_SourceEditorState.SelectionBegin = m_SourceEditor.Cursor();
-                            m_SourceEditorState.SelectionEnd = m_SourceEditor.Cursor();
-                            m_SourceEditorState.RequestCursor = true;
-                            m_SourceDirty = true;
-                        }
-                        if (ui.LastItemState().Hovered)
-                            ui.SetTooltip(completion.Documentation);
+                        m_SourceCompletionSelection = index;
+                        (void)applyCompletion(completion);
+                        ui.CloseCurrentPopup();
                     }
                 }
+                ui.Separator();
+                ui.TextColoredWrapped(theme.MutedText, completions[m_SourceCompletionSelection].Documentation);
+                ui.TextColored(theme.MutedText, "Up/Down to navigate  |  Tab/Enter to accept  |  Esc to close");
             }
         }
 
-        const bool applyShortcut = sourceState.Active && ui.Shortcut({.Key = Keire::UiKey::Enter, .Primary = true});
+        const bool applyShortcut = m_SourceEditorState.SubmitRequested;
         if (ui.Button("Apply Source") || applyShortcut)
         {
             std::string diagnostic;

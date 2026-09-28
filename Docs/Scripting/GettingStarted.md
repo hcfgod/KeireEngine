@@ -124,8 +124,28 @@ The editor watches `.cs` and `.keireasm` files. After the newest change settles,
 5. publishes a new immutable generation only when all steps succeed;
 6. reloads active Play Mode instances transactionally.
 
-Runtime script compilation disables persistent .NET build and shared compiler servers. Closing the editor therefore
-does not leave a compiler process running from the bundled SDK or keep the editor installation locked.
+Runtime script compilation keeps one warm Roslyn compiler owned by the script system, using a private connection
+name. It never shares that connection with Visual Studio or another editor. Cancellation, SDK changes, and editor
+shutdown stop the compiler; MSBuild node reuse remains disabled. The selected SDK resolves the compiler location,
+and changes to ancestor SDK/build configuration restart the session. If discovery is unavailable, the ordinary
+non-shared compiler path remains available. The first build includes compiler startup; later edits reuse it.
+Build orchestration restores and builds the actual assemblies without compiling an empty wrapper assembly.
+It starts with graph roots; SDK project references still restore and build their transitive dependencies. No restore
+validation is bypassed. The Core log reports preparation, compiler setup, build, and publication timings separately.
+API freshness scans retain file enumeration and metadata checks but avoid redundant filesystem path resolution.
+For reproducible headless measurements, see [editor workflow performance](../EditorWorkflowPerformance.md).
+Repeated C# change notifications compare actual contents before scheduling another build. When notified, same-size or
+timestamp-preserving edits still rebuild, and unreadable/oversized sources fall back to normal build diagnostics. Explicit
+Build Scripts bypasses notification deduplication. Assembly-definition changes always request a build.
+Edits arriving during a build are combined into one follow-up build. The editor remains responsive instead of
+waiting synchronously to cancel and restart compilation. Queued Play waits for the latest requested build and reload;
+an intermediate successful generation is not reloaded while another build is pending.
+An already loaded last-good runtime does not bypass an active replacement build when entering Play. The readiness
+check also waits if the worker has published success but the editor has not requested that generation's reload yet.
+If compilation fails, the existing last-good generation remains available. File-change detection is asynchronous;
+Play requested before the editor detects a save may still enter the existing generation and subsequently hot-reload.
+Unchanged scripts reuse MSBuild compiler outputs. Each successful build still publishes an independent runtime
+generation; compiler caches live under `Library/ScriptAssemblies/Intermediate` and can be regenerated.
 
 Attach a successfully compiled script with any of these editor workflows:
 

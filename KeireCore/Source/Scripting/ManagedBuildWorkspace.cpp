@@ -1,11 +1,15 @@
 #include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <ranges>
 #include <regex>
 #include <stdexcept>
+#include <thread>
+#include <unordered_set>
 
 namespace Keire
 {
@@ -47,12 +51,97 @@ namespace Keire
             }
         } // namespace
 
+        ManagedCompilerServer::~ManagedCompilerServer() { Stop(); }
+
+        std::uint64_t ManagedCompilerServer::ProcessId() const noexcept
+        {
+            return m_Process ? m_Process->ProcessId() : 0;
+        }
+
+        bool ManagedCompilerServer::Prepare(const std::filesystem::path& dotnet, const std::filesystem::path& project,
+                                            const std::filesystem::path& workingDirectory,
+                                            const std::stop_token cancellation)
+        {
+            if (cancellation.stop_requested())
+                return false;
+            std::string sdkInputs;
+            for (auto directory = std::filesystem::absolute(workingDirectory); !directory.empty();)
+            {
+                for (const auto name : {"global.json", "Directory.Build.props", "Directory.Build.targets"})
+                {
+                    const auto path = directory / name;
+                    if (std::filesystem::is_regular_file(path))
+                    {
+                        const auto contents = ReadTextFile(path, std::size_t{1} << 20U);
+                        sdkInputs += PathText(path) + ":" + std::to_string(contents.size()) + ":" + contents;
+                    }
+                }
+                const auto parent = directory.parent_path();
+                if (parent == directory)
+                    break;
+                directory = parent;
+            }
+            if (m_Process && m_Dotnet == dotnet && m_SdkInputs == sdkInputs && !m_Process->Poll())
+                return true;
+            Stop();
+            // Ask the selected SDK rather than guessing a version from installed directory names.
+            const std::vector<std::string> queryArguments{"msbuild", PathText(project), "--nologo", "/nodeReuse:false",
+                                                          "-getProperty:RoslynTargetsPath"};
+            auto query = ChildProcess::Start(dotnet, queryArguments, workingDirectory);
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+            while (!query.Poll())
+            {
+                if (cancellation.stop_requested() || std::chrono::steady_clock::now() >= deadline)
+                    return false;
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            if (query.ExitCode().value_or(1) != 0)
+                return false;
+            auto directory = query.TakeOutput();
+            const auto begin = directory.find_first_not_of(" \r\n\t");
+            if (begin == std::string::npos)
+                return false;
+            directory = directory.substr(begin, directory.find_last_not_of(" \r\n\t") - begin + 1);
+            const auto compiler = std::filesystem::path(std::u8string_view(
+                                      reinterpret_cast<const char8_t*>(directory.data()), directory.size())) /
+                                  "bincore" / "VBCSCompiler.dll";
+            if (!std::filesystem::is_regular_file(compiler) || cancellation.stop_requested())
+                return false;
+            m_Dotnet = dotnet;
+            m_Compiler = compiler;
+            m_WorkingDirectory = workingDirectory;
+            m_SdkInputs = std::move(sdkInputs);
+            m_PipeName = "keire-" + AssetId::Generate().ToString();
+            const std::vector<std::string> arguments{"exec", PathText(compiler), "-pipename:" + m_PipeName};
+            m_Process.emplace(ChildProcess::Start(dotnet, arguments, workingDirectory));
+            return true;
+        }
+
+        void ManagedCompilerServer::Stop() noexcept
+        {
+            if (!m_PipeName.empty())
+            {
+                try
+                {
+                    // Only this session's pipe: never shut down Visual Studio or another editor's compiler.
+                    // Also catches a replacement server started by Roslyn after the owned process exits.
+                    const std::vector<std::string> arguments{"exec", PathText(m_Compiler), "-shutdown",
+                                                             "-pipename:" + m_PipeName};
+                    (void)RunProcess(m_Dotnet, arguments, m_WorkingDirectory, std::chrono::seconds(2));
+                }
+                catch (...)
+                {
+                    // ChildProcess remains the fallback owner if graceful shutdown is unavailable.
+                }
+            }
+            m_Process.reset();
+            m_PipeName.clear();
+        }
+
         void WriteText(const std::filesystem::path& path, const std::string_view value)
         {
-            std::filesystem::create_directories(path.parent_path());
-            std::ofstream stream(path, std::ios::binary | std::ios::trunc);
-            if (!stream || !stream.write(value.data(), static_cast<std::streamsize>(value.size())))
-                throw std::runtime_error("Managed build could not write '" + PathText(path) + "'.");
+            // Unchanged project inputs must retain their timestamps for MSBuild's incremental checks.
+            (void)WriteTextFileAtomicallyIfChanged(path, value);
         }
         [[nodiscard]] std::vector<ManagedBuildDiagnostic> ParseDiagnostics(const std::string& output,
                                                                            const std::size_t maximum)
@@ -112,9 +201,8 @@ namespace Keire
             for (const auto& source : sources)
             {
                 error.clear();
-                const auto relative = std::filesystem::relative(source, sourceRoot, error);
-                if (error)
-                    throw std::filesystem::filesystem_error("Could not fingerprint managed API source.", source, error);
+                // Both paths come from this traversal. Computing their identity needs no filesystem resolution.
+                const auto relative = source.lexically_relative(sourceRoot);
                 const auto size = std::filesystem::file_size(source, error);
                 if (error)
                     throw std::filesystem::filesystem_error("Could not read managed API source size.", source, error);
@@ -307,13 +395,22 @@ namespace Keire
 
         [[nodiscard]] std::string GenerateManagedBuildAggregator(const ManagedBuildRequest& request)
         {
-            std::string text = "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n"
-                               "    <TargetFramework>net10.0</TargetFramework>\n"
-                               "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
-                               "  </PropertyGroup>\n  <ItemGroup>\n";
+            // This project only coordinates real assemblies; compiling an empty wrapper wastes every edit cycle.
+            // The validated graph is acyclic. SDK project references restore/build each root's dependencies.
+            std::unordered_set<AssetId> referenced;
             for (const auto& assembly : request.Assemblies)
-                text += "    <ProjectReference Include=\"" + XmlEscape(assembly.Definition.Name) + ".csproj\" />\n";
-            text += "  </ItemGroup>\n</Project>\n";
+                referenced.insert(assembly.Definition.References.begin(), assembly.Definition.References.end());
+            std::string text = "<Project DefaultTargets=\"Build\">\n  <ItemGroup>\n";
+            for (const auto& assembly : request.Assemblies)
+                if (!referenced.contains(assembly.Asset))
+                    text += "    <ProjectReference Include=\"" + XmlEscape(assembly.Definition.Name) + ".csproj\" />\n";
+            text += "  </ItemGroup>\n"
+                    "  <Target Name=\"Restore\">\n"
+                    "    <MSBuild Projects=\"@(ProjectReference)\" Targets=\"Restore\" />\n"
+                    "  </Target>\n"
+                    "  <Target Name=\"Build\">\n"
+                    "    <MSBuild Projects=\"@(ProjectReference)\" Targets=\"Build\" />\n"
+                    "  </Target>\n</Project>\n";
             return text;
         }
 

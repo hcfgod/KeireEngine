@@ -3,6 +3,8 @@
 #include "KeireRuntimeInternal/RuntimeUiInput.h"
 
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_keycode.h>
 #include <SDL3/SDL_mouse.h>
 
 #include <doctest/doctest.h>
@@ -287,6 +289,62 @@ TEST_CASE("runtime UI keyboard and text input target only the focused active pre
     CHECK(upper.Session->Presentation()->ReadUiDocumentElementText(upper.Document, upper.Input.DocumentGeneration,
                                                                    upper.Input.Element) == "upper");
 
+    world->Close();
+    scenes->Close();
+    assets->Close();
+}
+
+TEST_CASE("runtime UI persistent documents keep keyboard and gamepad focus after their scene retires")
+{
+    Keire::AssetSystemSpecification assetSpecification;
+    assetSpecification.Mode = Keire::AssetMode::Development;
+    assetSpecification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    assetSpecification.Decoders.push_back(Keire::CreateUiPanelSettingsAssetDecoder());
+    const auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assetSpecification));
+    const auto scenes = Keire::CreateRef<Keire::SceneSystem>(
+        Keire::SceneSystemSpecification{.Mode = Keire::SceneMode::Enabled}, assets);
+    const auto world = Keire::CreateRef<Keire::SceneRuntimeWorld>(
+        Keire::SceneRuntimeWorldSpecification{.Scenes = scenes, .Assets = assets});
+    const auto persistent = CreatePresentation(assets, "Persistent menu", true);
+    const auto active = CreatePresentation(assets, "Gameplay", false);
+    const auto retiredHandle = world->Adopt(persistent.Session);
+    const auto activeHandle = world->Adopt(active.Session);
+    REQUIRE(world->MakePersistent(persistent.Session->RuntimeScene()->FindEntity(persistent.Document)));
+    REQUIRE(world->SetActive(activeHandle));
+    REQUIRE(world->Unload(retiredHandle));
+    world->Process();
+    REQUIRE_FALSE(world->IsLoaded(retiredHandle));
+    const auto presentation = persistent.Session->Presentation();
+    REQUIRE(presentation->FocusUiDocumentElement(persistent.Document, persistent.Input.DocumentGeneration,
+                                                 persistent.Input.Element));
+    CHECK(KeireRuntime::FocusedRuntimeUiPresentation(world) == presentation);
+    KeireRuntime::RuntimeUiPointerState pointer;
+    SDL_Event text{};
+    text.type = SDL_EVENT_TEXT_INPUT;
+    text.text.text = "persist";
+    CHECK(KeireRuntime::ProcessRuntimeUiEventStack(world, {}, text, 1.0F, 1.0F, pointer) == presentation);
+    CHECK(presentation->ReadUiDocumentElementText(persistent.Document, persistent.Input.DocumentGeneration,
+                                                  persistent.Input.Element) == "persist");
+    SDL_Event key{};
+    key.type = SDL_EVENT_KEY_DOWN;
+    key.key.key = SDLK_BACKSPACE;
+    (void)KeireRuntime::ProcessRuntimeUiEventStack(world, {}, key, 1.0F, 1.0F, pointer);
+    CHECK(presentation->ReadUiDocumentElementText(persistent.Document, persistent.Input.DocumentGeneration,
+                                                  persistent.Input.Element) == "persis");
+    REQUIRE(presentation->FocusUiDocumentElement(persistent.Document, persistent.Button.DocumentGeneration,
+                                                 persistent.Button.Element));
+    SDL_Event accept{};
+    accept.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    accept.gbutton.button = SDL_GAMEPAD_BUTTON_SOUTH;
+    CHECK(KeireRuntime::ProcessRuntimeUiEventStack(world, {}, accept, 1.0F, 1.0F, pointer) == presentation);
+    CHECK(presentation->ConsumeUiDocumentElementEvent(persistent.Document, persistent.Button.DocumentGeneration,
+                                                      persistent.Button.Element, Keire::RuntimeUiEventType::Submit));
+    REQUIRE(active.Session->Presentation()->FocusUiDocumentElement(active.Document, active.Input.DocumentGeneration,
+                                                                   active.Input.Element));
+    CHECK(KeireRuntime::FocusedRuntimeUiPresentation(world) == active.Session->Presentation());
+    REQUIRE(active.Session->Presentation()->Ui()->SetFocus({}));
+    REQUIRE(presentation->Ui()->SetFocus({}));
+    CHECK_FALSE(KeireRuntime::FocusedRuntimeUiPresentation(world));
     world->Close();
     scenes->Close();
     assets->Close();

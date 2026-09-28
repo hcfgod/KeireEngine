@@ -19,7 +19,6 @@ namespace Keire::RenderBackend
     {
         constexpr std::size_t MaximumRuntimeUiFontAtlasPages = 32U;
 
-        constexpr float RuntimeUiCustomAtlasRasterSize = 48.0F;
         constexpr std::size_t MaximumRuntimeUiFontFamilies = 32U;
 
         struct PendingRuntimeUiTextPreparation final
@@ -89,7 +88,8 @@ namespace Keire::RenderBackend
             return AssetId(high, low);
         }
 
-        [[nodiscard]] std::uint64_t CustomFontAtlasGeneration(const RuntimeUiFontCpuCacheEntry& cache) noexcept
+        [[nodiscard]] std::uint64_t CustomFontAtlasGeneration(const RuntimeUiFontCpuCacheEntry& cache,
+                                                              const std::uint32_t rasterSize) noexcept
         {
             std::uint64_t result = 1469598103934665603ULL;
             const auto combine = [&result](const std::uint64_t value)
@@ -101,6 +101,7 @@ namespace Keire::RenderBackend
             combine(cache.Binding.Low());
             combine(cache.FamilyRevision);
             combine(cache.FaceRevision);
+            combine(rasterSize);
             for (const auto glyph : cache.Glyphs)
                 combine(glyph);
             return result == 0 ? 1U : result;
@@ -115,7 +116,7 @@ namespace Keire::RenderBackend
             command.PreparedTextWidth = 0.0F;
             command.PreparedTextHeight = 0.0F;
             command.PreparedTextGlyphs.reserve(layout.Glyphs.size());
-            const float scale = command.FontSize / RuntimeUiCustomAtlasRasterSize;
+            const float scale = command.FontSize / static_cast<float>(RuntimeUiCustomFontBaseRasterSize);
             for (const auto& placement : layout.Glyphs)
             {
                 RuntimeUiPreparedTextGlyph prepared;
@@ -231,6 +232,9 @@ namespace Keire::RenderBackend
                 cache->Glyphs.clear();
                 cache->AtlasPages.clear();
                 cache->AtlasGlyphRequestCount = 0;
+                cache->RasterSize = RuntimeUiCustomFontBaseRasterSize;
+                cache->RequestedRasterSize = RuntimeUiCustomFontBaseRasterSize;
+                cache->MaximumSupportedRasterSize = 384U;
                 cache->Binding = CustomFontBinding(command.Asset, selected.Face, selected.CollectionIndex,
                                                    command.FontWeight, command.FontSlant);
             }
@@ -245,6 +249,9 @@ namespace Keire::RenderBackend
                 cache->Glyphs.clear();
                 cache->AtlasPages.clear();
                 cache->AtlasGlyphRequestCount = 0;
+                cache->RasterSize = RuntimeUiCustomFontBaseRasterSize;
+                cache->RequestedRasterSize = RuntimeUiCustomFontBaseRasterSize;
+                cache->MaximumSupportedRasterSize = 384U;
             }
             return &*cache;
         };
@@ -289,8 +296,8 @@ namespace Keire::RenderBackend
                  .Slant = command.FontSlant});
         };
 
-        const auto captureFontCommands = [this, &pendingText, &resolveFontCache, &resolveTextLayout,
-                                          &touchedCaches](const std::span<RuntimeUiDrawCommand> commands)
+        const auto captureFontCommands = [this, &pendingText, &resolveFontCache, &resolveTextLayout, &touchedCaches](
+                                             const std::span<RuntimeUiDrawCommand> commands, const float surfaceScale)
         {
             for (auto& command : commands)
             {
@@ -337,6 +344,12 @@ namespace Keire::RenderBackend
                 faceBindings.clear();
                 for (const auto* face : faces)
                     faceBindings.push_back(face->Binding);
+                const float transformedScale =
+                    std::max(std::abs(command.TransformScale.X), std::abs(command.TransformScale.Y));
+                const auto requestedRaster =
+                    RuntimeUiCustomFontRasterBucket(command.FontSize * surfaceScale * transformedScale);
+                for (auto* face : faces)
+                    face->RequestedRasterSize = std::max(face->RequestedRasterSize, requestedRaster);
                 const auto layout = resolveTextLayout(faces, command);
                 if (!layout)
                     continue;
@@ -356,14 +369,48 @@ namespace Keire::RenderBackend
                 pendingText.push_back({&command, std::move(faceBindings), layout});
             }
         };
-        captureFontCommands(frame.RuntimeUiCommands);
+        captureFontCommands(frame.RuntimeUiCommands, 1.0F);
         for (auto& panel : frame.RuntimeUiCameraPanels)
-            captureFontCommands(panel.Commands);
+        {
+            const auto surface = ResolveSurface(panel.Surface);
+            if (!surface)
+                throw std::logic_error("A camera-overlay UI surface expired during font capture.");
+            const float surfaceScale = std::max(static_cast<float>(surface->RequestedWidth) / panel.Viewport.X,
+                                                static_cast<float>(surface->RequestedHeight) / panel.Viewport.Y);
+            captureFontCommands(panel.Commands, surfaceScale);
+        }
         for (auto& panel : frame.RuntimeUiWorldPanels)
-            captureFontCommands(panel.Commands);
+            captureFontCommands(panel.Commands, 1.0F);
         for (auto& target : frame.RuntimeUiRenderTextures)
-            captureFontCommands(target.Commands);
+            captureFontCommands(target.Commands, 1.0F);
 
+        const auto buildAtlas = [](RuntimeUiFontCpuCacheEntry& cache, std::uint32_t rasterSize)
+        {
+            const auto face = cache.FaceHandle.TryGetLoaded();
+            if (!face)
+                return;
+            for (;;)
+            {
+                try
+                {
+                    auto pages =
+                        BuildRuntimeUiGlyphAtlasPages(face->Bytes(), cache.CollectionIndex, cache.Glyphs,
+                                                      CustomFontAtlasGeneration(cache, rasterSize), rasterSize);
+                    cache.AtlasPages = std::move(pages);
+                    cache.AtlasGlyphRequestCount = cache.Glyphs.size();
+                    cache.RasterSize = rasterSize;
+                    cache.RequestedRasterSize = std::min(cache.RequestedRasterSize, rasterSize);
+                    return;
+                }
+                catch (const std::length_error&)
+                {
+                    if (rasterSize == RuntimeUiCustomFontBaseRasterSize)
+                        throw;
+                    rasterSize /= 2U;
+                    cache.MaximumSupportedRasterSize = std::min(cache.MaximumSupportedRasterSize, rasterSize);
+                }
+            }
+        };
         for (const auto binding : touchedCaches)
         {
             auto cache = std::ranges::find(RuntimeUiFontCpuCache, binding, &RuntimeUiFontCpuCacheEntry::Binding);
@@ -372,15 +419,10 @@ namespace Keire::RenderBackend
             std::ranges::sort(cache->Glyphs);
             const auto duplicate = std::ranges::unique(cache->Glyphs);
             cache->Glyphs.erase(duplicate.begin(), duplicate.end());
-            if (cache->AtlasPages.empty() || cache->AtlasGlyphRequestCount != cache->Glyphs.size())
-            {
-                const auto face = cache->FaceHandle.TryGetLoaded();
-                if (!face)
-                    continue;
-                cache->AtlasPages = BuildRuntimeUiGlyphAtlasPages(face->Bytes(), cache->CollectionIndex, cache->Glyphs,
-                                                                  CustomFontAtlasGeneration(*cache));
-                cache->AtlasGlyphRequestCount = cache->Glyphs.size();
-            }
+            const auto rasterSize = std::min(cache->RequestedRasterSize, cache->MaximumSupportedRasterSize);
+            if (cache->AtlasPages.empty() || cache->AtlasGlyphRequestCount != cache->Glyphs.size() ||
+                cache->RasterSize < rasterSize)
+                buildAtlas(*cache, rasterSize);
         }
         const auto pageCount = [this]
         {
@@ -406,7 +448,18 @@ namespace Keire::RenderBackend
             }
             if (!eviction)
             {
-                throw std::length_error("Runtime UI font working set exceeds the bounded 32-page atlas cache.");
+                RuntimeUiFontCpuCacheEntry* candidate = nullptr;
+                for (auto& cache : RuntimeUiFontCpuCache)
+                    if (!cache.AtlasPages.empty() && cache.RasterSize > RuntimeUiCustomFontBaseRasterSize &&
+                        (!candidate || std::tuple(cache.AtlasPages.size(), cache.RasterSize) >
+                                           std::tuple(candidate->AtlasPages.size(), candidate->RasterSize)))
+                        candidate = &cache;
+                if (!candidate)
+                    throw std::length_error("Runtime UI font working set exceeds the bounded 32-page atlas cache.");
+                buildAtlas(*candidate, candidate->RasterSize / 2U);
+                candidate->MaximumSupportedRasterSize =
+                    std::min(candidate->MaximumSupportedRasterSize, candidate->RasterSize);
+                continue;
             }
             eviction->AtlasPages.clear();
             eviction->AtlasGlyphRequestCount = 0U;

@@ -13,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -51,6 +52,7 @@ namespace KeireEditor
         void ImportReviewedPackage(const PackageImportConfirmation& confirmation);
         void DrawImportReview(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawMarketplaceLibrary(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
+        void DrawUpdates(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawInProject(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         void DrawLocalPackages(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
 
@@ -63,6 +65,8 @@ namespace KeireEditor
         KeireHub::MarketplaceCacheSnapshot m_MarketplaceSnapshot;
         Keire::ProjectPackageManifest m_Manifest;
         Keire::ProjectPackageLock m_Lock;
+        std::vector<Keire::ProjectAssetImportReceipt> m_Imported;
+        std::vector<std::string> m_CompatibilityWarnings;
         std::string m_SelectedPackage;
         std::string m_LocalArchive;
         std::string m_LocalSearch;

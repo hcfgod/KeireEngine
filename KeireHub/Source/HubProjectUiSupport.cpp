@@ -53,7 +53,7 @@ namespace KeireHub
         case Keire::ProjectStatus::Invalid:
             return "Invalid";
         case Keire::ProjectStatus::RequiresNewerEngine:
-            return "Requires newer engine";
+            return "Compatible editor needed";
         case Keire::ProjectStatus::InUse:
             return "Open in another editor";
         case Keire::ProjectStatus::UnsupportedSchema:

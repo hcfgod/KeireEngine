@@ -5,7 +5,9 @@
 #include "Keire/Ui/UiToolkit.h"
 #include "Keire/Undo.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -98,6 +100,57 @@ namespace KeireEditor
         [[nodiscard]] bool operator==(const UiBuilderPreviewSettings&) const = default;
     };
 
+    struct UiBuilderPreviewPlacement final
+    {
+        Keire::UiItemRect Canvas;
+        Keire::Vector2 RasterScale{1.0F, 1.0F};
+    };
+
+    inline constexpr float UiBuilderPreviewRulerWidth = 38.0F;
+    inline constexpr float UiBuilderPreviewRulerHeight = 18.0F;
+
+    [[nodiscard]] inline UiBuilderPreviewPlacement
+    ResolveUiBuilderPreviewPlacement(const UiBuilderPreviewSettings& settings, const Keire::UiItemRect viewport,
+                                     const float displayScale = 1.0F) noexcept
+    {
+        const float dpi = std::isfinite(displayScale) ? std::max(displayScale, 1.0F) : 1.0F;
+        const float gutterWidth = settings.ShowRulers ? UiBuilderPreviewRulerWidth : 0.0F;
+        const float gutterHeight = settings.ShowRulers ? UiBuilderPreviewRulerHeight : 0.0F;
+        const float workspaceWidth = viewport.Size().Width - gutterWidth;
+        const float workspaceHeight = viewport.Size().Height - gutterHeight;
+        const float availableWidth = std::max(1.0F, workspaceWidth - 24.0F);
+        const float availableHeight = std::max(1.0F, workspaceHeight - 24.0F);
+        const float fit = std::min(availableWidth / static_cast<float>(settings.Width),
+                                   availableHeight / static_cast<float>(settings.Height));
+        const float rasterScale = std::max(0.001F, fit * settings.Zoom);
+        Keire::UiSize canvasSize{static_cast<float>(settings.Width) * rasterScale,
+                                 static_cast<float>(settings.Height) * rasterScale};
+        // The capped render surface still resamples large canvases, but its destination stays on display pixels.
+        canvasSize.Width = std::max(1.0F, std::round(canvasSize.Width * dpi)) / dpi;
+        canvasSize.Height = std::max(1.0F, std::round(canvasSize.Height * dpi)) / dpi;
+        Keire::UiPosition canvasOrigin{
+            viewport.Minimum.X + gutterWidth + (workspaceWidth - canvasSize.Width) * 0.5F + settings.Pan.X,
+            viewport.Minimum.Y + gutterHeight + (workspaceHeight - canvasSize.Height) * 0.5F + settings.Pan.Y,
+        };
+        canvasOrigin.X = std::round(canvasOrigin.X * dpi) / dpi;
+        canvasOrigin.Y = std::round(canvasOrigin.Y * dpi) / dpi;
+        return {
+            {{canvasOrigin.X, canvasOrigin.Y}, {canvasOrigin.X + canvasSize.Width, canvasOrigin.Y + canvasSize.Height}},
+            {canvasSize.Width / static_cast<float>(settings.Width),
+             canvasSize.Height / static_cast<float>(settings.Height)}};
+    }
+
+    [[nodiscard]] inline std::array<std::uint32_t, 2>
+    ResolveUiBuilderPreviewRenderSize(const Keire::UiSize canvas, const float displayScale = 1.0F) noexcept
+    {
+        const float dpi = std::isfinite(displayScale) ? std::max(displayScale, 1.0F) : 1.0F;
+        const float width = std::isfinite(canvas.Width) ? std::max(canvas.Width * dpi, 1.0F) : 1.0F;
+        const float height = std::isfinite(canvas.Height) ? std::max(canvas.Height * dpi, 1.0F) : 1.0F;
+        const float scale = std::min({1.0F, 4096.0F / width, 4096.0F / height});
+        return {static_cast<std::uint32_t>(std::clamp(std::lround(width * scale), 1L, 4096L)),
+                static_cast<std::uint32_t>(std::clamp(std::lround(height * scale), 1L, 4096L))};
+    }
+
     struct UiBuilderPreviewElement final
     {
         Keire::AssetId StableId;
@@ -107,6 +160,7 @@ namespace KeireEditor
 
     struct UiBuilderRetainedPreview final
     {
+        Keire::Ref<Keire::UiDocument> Runtime;
         Keire::RuntimeUiStatistics Statistics;
         std::optional<Keire::RuntimeUiElementState> SelectedState;
         std::vector<Keire::UiResolvedStyleSelectorTrace> SelectedStyleTrace;

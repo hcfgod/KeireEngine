@@ -310,6 +310,14 @@ const Keire::UiThemeDefinition& EditorWorkspaceLayer::UiBuilderTheme() const noe
 
 Keire::Ref<Keire::AssetSystem> EditorWorkspaceLayer::UiBuilderAssets() const noexcept { return Owner().Assets(); }
 
+Keire::Ref<Keire::RenderSystem> EditorWorkspaceLayer::UiBuilderRenderer() const noexcept { return Owner().Renderer(); }
+
+float EditorWorkspaceLayer::UiBuilderDisplayScale() const noexcept
+{
+    const auto window = Owner().MainWindow();
+    return window ? window->DisplayScale() : 1.0F;
+}
+
 std::span<const Keire::AssetSourceRecord> EditorWorkspaceLayer::UiBuilderAssetRecords() const noexcept
 {
     return m_AssetRecords;

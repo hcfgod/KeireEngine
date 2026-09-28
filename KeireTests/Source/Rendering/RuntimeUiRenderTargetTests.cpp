@@ -11,9 +11,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -493,6 +495,93 @@ TEST_CASE("Runtime UI renderer applies rounded alpha clipping to solid gradient 
     CHECK(std::ranges::all_of(
         imageGeometry.Vertices, [](const auto& vertex)
         { return vertex.UV.X >= 0.0F && vertex.UV.X <= 1.0F && vertex.UV.Y >= 0.0F && vertex.UV.Y <= 1.0F; }));
+}
+
+TEST_CASE("Runtime UI rounded bars tessellate corner coverage with a bounded mesh")
+{
+    const auto interpolatedAlpha = [](const Keire::RenderBackend::RuntimeUiGeometry& geometry,
+                                      const Keire::Vector2 point) -> std::optional<float>
+    {
+        for (std::size_t first = 0; first + 2U < geometry.Vertices.size(); first += 3U)
+        {
+            const auto& a = geometry.Vertices[first];
+            const auto& b = geometry.Vertices[first + 1U];
+            const auto& c = geometry.Vertices[first + 2U];
+            const float denominator = (b.Position.Y - c.Position.Y) * (a.Position.X - c.Position.X) +
+                                      (c.Position.X - b.Position.X) * (a.Position.Y - c.Position.Y);
+            if (std::abs(denominator) <= 0.000001F)
+                continue;
+            const float weightA = ((b.Position.Y - c.Position.Y) * (point.X - c.Position.X) +
+                                   (c.Position.X - b.Position.X) * (point.Y - c.Position.Y)) /
+                                  denominator;
+            const float weightB = ((c.Position.Y - a.Position.Y) * (point.X - c.Position.X) +
+                                   (a.Position.X - c.Position.X) * (point.Y - c.Position.Y)) /
+                                  denominator;
+            const float weightC = 1.0F - weightA - weightB;
+            if (weightA >= -0.0001F && weightB >= -0.0001F && weightC >= -0.0001F)
+            {
+                return weightA * a.ColorValue.Alpha + weightB * b.ColorValue.Alpha + weightC * c.ColorValue.Alpha;
+            }
+        }
+        return std::nullopt;
+    };
+
+    const Keire::RuntimeUiDrawCommand bar{.Type = Keire::RuntimeUiDrawType::Quad,
+                                          .Rect = {0.0F, 0.0F, 600.0F, 60.0F},
+                                          .ClipRect = {0.0F, 0.0F, 600.0F, 60.0F},
+                                          .ColorValue = {0.0F, 0.0F, 1.0F, 1.0F},
+                                          .CornerRadius = 12.0F};
+    const auto barGeometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&bar, 1U));
+    const auto barCorner = interpolatedAlpha(barGeometry, {5.0F, 5.0F});
+    REQUIRE(barCorner);
+    CHECK(*barCorner > 0.90F);
+    CHECK(barGeometry.Vertices.size() < 5'000U);
+
+    const Keire::RuntimeUiDrawCommand thinBar{.Type = Keire::RuntimeUiDrawType::Quad,
+                                              .Rect = {0.0F, 0.0F, 600.0F, 8.0F},
+                                              .ClipRect = {0.0F, 0.0F, 600.0F, 8.0F},
+                                              .ColorValue = {0.0F, 0.0F, 1.0F, 1.0F},
+                                              .CornerRadii = {3.0F, 1.0F, 4.0F, 2.0F}};
+    const auto thinBarGeometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&thinBar, 1U));
+    const auto thinBarCorner = interpolatedAlpha(thinBarGeometry, {2.0F, 2.0F});
+    REQUIRE(thinBarCorner);
+    CHECK(*thinBarCorner > 0.99F);
+    CHECK(thinBarGeometry.Vertices.size() < 5'000U);
+}
+
+TEST_CASE("Runtime UI font mip filtering preserves thin-stroke coverage without darkening color")
+{
+    Keire::RenderBackend::RuntimeUiGlyphAtlasCpuData atlas;
+    atlas.Width = 16;
+    atlas.Height = 16;
+    atlas.Pixels.assign(16U * 16U * 4U, std::byte{0xff});
+    for (std::size_t y = 0; y < 16U; ++y)
+        for (std::size_t x = 0; x < 16U; ++x)
+            atlas.Pixels[(y * 16U + x) * 4U + 3U] = (x % 2U == 0) ? std::byte{0xff} : std::byte{};
+    const auto mips = Keire::RenderBackend::BuildRuntimeUiFontMips(atlas);
+    REQUIRE(mips.size() == 4U);
+    CHECK(mips.front().Pixels == atlas.Pixels);
+    for (std::size_t level = 1; level < mips.size(); ++level)
+    {
+        const auto& mip = mips[level];
+        CHECK(mip.Width == 16U >> level);
+        CHECK(mip.Height == 16U >> level);
+        REQUIRE(mip.Pixels.size() == static_cast<std::size_t>(mip.Width) * mip.Height * 4U);
+        for (std::size_t pixel = 0; pixel < mip.Pixels.size(); pixel += 4U)
+        {
+            CHECK(mip.Pixels[pixel] == std::byte{0xff});
+            CHECK(mip.Pixels[pixel + 1U] == std::byte{0xff});
+            CHECK(mip.Pixels[pixel + 2U] == std::byte{0xff});
+            CHECK(mip.Pixels[pixel + 3U] == std::byte{128});
+        }
+    }
+    atlas.Pixels.pop_back();
+    CHECK_THROWS_AS((void)Keire::RenderBackend::BuildRuntimeUiFontMips(atlas), std::invalid_argument);
+    atlas.Width = 0;
+    CHECK_THROWS_AS((void)Keire::RenderBackend::BuildRuntimeUiFontMips(atlas), std::invalid_argument);
+    const auto fallback =
+        Keire::RenderBackend::BuildRuntimeUiFontMips(*Keire::RenderBackend::RuntimeUiFallbackGlyphAtlas());
+    CHECK(fallback.size() == 4U);
 }
 
 TEST_CASE("Runtime UI fallback glyph atlas is bounded reused and frame-generation owned")

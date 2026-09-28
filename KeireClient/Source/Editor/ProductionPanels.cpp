@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/EditorManagedRuntimeCoordinator.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireClient/Editor/AssetOperationService.h"
@@ -716,6 +717,13 @@ void EditorWorkspaceLayer::StartManagedBuild()
     const auto scripts = Owner().Scripts();
     if (!scripts || !m_AssetDatabase)
         return;
+    const auto state = scripts->BuildStatus().State;
+    if (state == Keire::ManagedBuildState::Generating || state == Keire::ManagedBuildState::Compiling ||
+        state == Keire::ManagedBuildState::Publishing)
+    {
+        m_ManagedRuntimeCoordinator->ScheduleBuild(0.0);
+        return;
+    }
     const auto sdk = ProjectManagedSdk();
     scripts->ConfigureManagedSdk(sdk.Selection, sdk.CustomExecutable);
     Keire::ManagedBuildRequest request;
@@ -788,7 +796,8 @@ void EditorWorkspaceLayer::UpdateManagedBuild()
             ReportError("Managed Build", "Script build failed without a compiler diagnostic.");
         }
     }
-    if (status.State != Keire::ManagedBuildState::Succeeded || !status.Operation ||
+    if ((m_ManagedRuntimeCoordinator && m_ManagedRuntimeCoordinator->HasPendingBuild()) ||
+        status.State != Keire::ManagedBuildState::Succeeded || !status.Operation ||
         status.Operation == m_LastManagedReload)
     {
         return;

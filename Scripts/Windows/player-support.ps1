@@ -541,10 +541,10 @@ if (-not $OutputDirectory) {
 }
 $OutputDirectory = [System.IO.Path]::GetFullPath($OutputDirectory)
 
-& (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator $Generator -Configuration Debug `
+& (Join-Path $repositoryRoot 'Scripts\project.ps1') build -Generator $Generator -Configuration Dist `
     -Architecture x86_64 -Toolset $Toolset -Target KeireAssetTool
 if ($LASTEXITCODE -ne 0) { throw 'Could not build the host KeireAssetTool.' }
-$assetTool = Join-Path $repositoryRoot 'Build\Bin\Debug-windows-x86_64\KeireAssetTool\KeireAssetTool.exe'
+$assetTool = Join-Path $repositoryRoot 'Build\Bin\Dist-windows-x86_64\KeireAssetTool\KeireAssetTool.exe'
 $metadata = (& $assetTool describe-player-support-host | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0) { throw 'Could not query player support metadata.' }
 

@@ -720,6 +720,28 @@ TEST_CASE("strict managed data validation uses stable fields and typed dependenc
         Keire::ManagedDataCookAsset{settingsAsset, Keire::ManagedDataAsset::StaticType(), settingsType}};
     CHECK_NOTHROW(Keire::ValidateManagedDataForCook(loadoutAsset, definition, descriptors, assets));
 
+    auto taggedDefinition = definition;
+    taggedDefinition.Fields[1].Value = R"({"$ref":"asset","asset":{"High":)" + std::to_string(settingsAsset.High()) +
+                                       R"(,"Low":)" + std::to_string(settingsAsset.Low()) +
+                                       R"(},"type":"Example.SettingsBase"})";
+    CHECK_NOTHROW(Keire::ValidateManagedDataForCook(loadoutAsset, taggedDefinition, descriptors, assets));
+    const auto taggedNode = Keire::DecodeManagedAssetValue(taggedDefinition.Fields[1].Value, loadout.Properties[1]);
+    CHECK(std::get<Keire::AssetId>(taggedNode.Value) == settingsAsset);
+    const auto canonicalTagged = Keire::EncodeManagedAssetValue(taggedNode, loadout.Properties[1]);
+    CHECK(canonicalTagged.find(R"("$ref":"asset")") != std::string::npos);
+    CHECK(std::get<Keire::AssetId>(Keire::DecodeManagedAssetValue(canonicalTagged, loadout.Properties[1]).Value) ==
+          settingsAsset);
+
+    auto collection = loadout.Properties[1];
+    collection.Kind = Keire::ManagedAssetPropertyKind::Array;
+    collection.ExpectedAssetType.reset();
+    collection.ExpectedManagedType.reset();
+    collection.Children = {loadout.Properties[1]};
+    const auto arrayNode = Keire::DecodeManagedAssetValue("[" + taggedDefinition.Fields[1].Value + "]", collection);
+    REQUIRE(arrayNode.Children.size() == 1);
+    CHECK(std::get<Keire::AssetId>(arrayNode.Children[0].Value) == settingsAsset);
+    CHECK(Keire::EncodeManagedAssetValue(arrayNode, collection).find(R"("$ref":"asset")") != std::string::npos);
+
     auto missingType = definition;
     missingType.ManagedType = Keire::ManagedTypeId::Parse("72000000-0000-4000-8000-00000000ffff");
     CHECK_THROWS_WITH_AS(Keire::ValidateManagedDataForCook(loadoutAsset, missingType, descriptors, assets),

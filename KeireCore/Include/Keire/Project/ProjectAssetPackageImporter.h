@@ -94,7 +94,7 @@ namespace Keire
 
     struct ProjectAssetImportReceipt
     {
-        static constexpr std::uint32_t CurrentSchemaVersion = 1;
+        static constexpr std::uint32_t CurrentSchemaVersion = 2;
 
         std::uint32_t SchemaVersion = CurrentSchemaVersion;
         std::string PackageId;
@@ -103,6 +103,7 @@ namespace Keire
         std::string ExecutableCodeFingerprint;
         bool ExecutableCodeApproved = false;
         std::vector<ProjectAssetImportReceiptEntry> Entries;
+        std::optional<AssetPackageManifest> Manifest;
     };
 
     struct ProjectAssetImportResult
@@ -178,6 +179,8 @@ namespace Keire
         [[nodiscard]] ProjectAssetImportResult Import(const ProjectAssetImportRequest& request);
         [[nodiscard]] ProjectAssetRemovalResult Remove(std::string_view packageId);
         [[nodiscard]] ProjectAssetImportRecoveryResult RecoverInterruptedOperations();
+        [[nodiscard]] std::vector<ProjectAssetImportReceipt> Receipts() const;
+        [[nodiscard]] std::string CompatibilityDiagnostic(const ProjectAssetImportReceipt& receipt) const;
         [[nodiscard]] std::optional<ProjectAssetImportReceipt> Receipt(std::string_view packageId) const;
 
         [[nodiscard]] static std::filesystem::path ReceiptPath(const std::filesystem::path& projectRoot,

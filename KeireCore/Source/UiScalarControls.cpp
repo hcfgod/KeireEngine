@@ -279,6 +279,8 @@ namespace Keire
             const auto* existingChild = FindCodeEditorChild(*parent, id);
             const float previousScrollY = existingChild ? existingChild->Scroll.y : state.ScrollY;
             const bool requestedCursor = state.RequestCursor;
+            const bool submitRequested =
+                ImGui::GetActiveID() == id && ImGui::IsKeyChordPressed(ImGuiMod_Shortcut | ImGuiKey_Enter);
             const auto flags =
                 ImGuiInputTextFlags_AllowTabInput | ImGuiInputTextFlags_CallbackAlways | ImGuiInputTextFlags_WordWrap;
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4{});
@@ -295,6 +297,8 @@ namespace Keire
                 }
             }
             auto* child = FindCodeEditorChild(*parent, id);
+            state.Active = ImGui::IsItemActive();
+            state.SubmitRequested = submitRequested;
             const bool replaceClick = originalMouseClicked && !io.KeyShift && expectedFrame.Contains(io.MousePos) &&
                                       child && child->ClipRect.Contains(io.MousePos);
             if (replaceClick)
@@ -330,6 +334,27 @@ namespace Keire
             state.CursorOffset = std::min(state.CursorOffset, value.size());
             state.SelectionBegin = std::min(state.SelectionBegin, value.size());
             state.SelectionEnd = std::min(state.SelectionEnd, value.size());
+            if (child && !GImGui->InputTextLineIndex.Offsets.empty())
+            {
+                const auto cursor = std::min(state.CursorOffset, value.size());
+                int line = 0;
+                for (int index = 1; index < GImGui->InputTextLineIndex.Offsets.Size; ++index)
+                {
+                    if (static_cast<std::size_t>(GImGui->InputTextLineIndex.Offsets[index]) > cursor)
+                        break;
+                    line = index;
+                }
+                const auto lineBegin =
+                    std::min(static_cast<std::size_t>(GImGui->InputTextLineIndex.Offsets[line]), value.size());
+                const auto padding = ImGui::GetStyle().FramePadding;
+                const ImVec2 origin{child->DC.CursorStartPos.x + padding.x - state.ScrollX,
+                                    child->DC.CursorStartPos.y + padding.y};
+                state.CaretScreenPosition = {origin.x + MeasureCodeEditorText(*GImGui->Font, GImGui->FontSize,
+                                                                              value.data() + lineBegin,
+                                                                              value.data() + cursor),
+                                             origin.y + static_cast<float>(line) * GImGui->FontSize};
+                state.CaretHeight = GImGui->FontSize;
+            }
             if (ImGui::IsItemVisible())
             {
                 DrawCodeEditorText(value, state, id, *parent, ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),

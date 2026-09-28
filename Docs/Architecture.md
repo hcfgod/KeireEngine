@@ -1,5 +1,15 @@
 # Architecture
 
+Managed entity interop resolves a handle's world through the host's loaded scene sessions before consulting
+Behaviour instances. A scene containing only native components therefore remains accessible from a persistent
+session Behaviour. Entity IDs are validated within the specified world, including when two scenes share an ID;
+destroyed entities and closed sessions resolve to an empty handle. This lookup borrows the host-owned session and
+does not extend scene lifetime.
+
+Packaged runtime keyboard/gamepad/text input selects the focused active-scene presentation first, then a focused
+persistent-root document. Event dispatch and per-frame text-input synchronization share this selector. Pointer input
+continues to traverse the presentation stack, and ordinary additive-scene focus remains isolated from the active scene.
+
 Hub editor management owns a bounded, periodic asynchronous process-activity probe. The worker captures immutable
 registrations, publishes only to the matching registration snapshot, and is joined during workflow shutdown.
 Activity changes update installation cards without repeating package inventory validation; failed or indeterminate
@@ -140,6 +150,10 @@ Viewport drops resolve screen coordinates against the captured camera into the Y
 units in front of the camera for horizon/upward rays. Imported assets retain that world point and a weak reference to
 the original scene. Completion may instantiate only into that same scene. Prefab placement offsets all roots together
 and records transform overrides; child local transforms remain intact.
+
+Asset database refresh preserves transient import-derived dependency state only when the importer identity, version,
+and metadata digest remain unchanged. Metadata published by another importer takes precedence over stale in-memory
+dependencies in both full and targeted refresh, so subsequent rooted cooks traverse the newly published subassets.
 
 Worker source-index loading validates source and metadata through anchored file signatures, retaining rejection of
 missing, redirected, and non-regular files without repeated canonical-path walks. External publication updates its
@@ -886,6 +900,8 @@ The editor owns authoring selection, undo/redo, atomic source writes, dirty deci
 activation is refreshed only after source validation/import succeeds. JSON remains private to the scene importer.
 `SceneDocument` resets its recovery timer and detects availability when its recovery path changes, including after
 Save As adopts a new scene identity. Changing that path preserves the previous scene's recovery file.
+Autosaves written by the current document do not mark recovery as pending. While a previously detected snapshot is
+pending, automatic recovery writes leave it intact; restore, discard, or explicit save resolves that state.
 
 Scene schema v6 stores stable entities and component records, prefab instance/override state, entity layers and tags, scene
 lighting-bake settings, and an optional baked-lighting identity. The public ECS surface owns stable IDs, weak `Entity`
@@ -1035,6 +1051,10 @@ Schema 5 stores requested Render Path, anti-aliasing, static and bounded dynamic
 Irradyn quality as project intent. `Automatic` resolves to the best available Forward+/Deferred-Hybrid path; TAA below
 native scale remains TAA followed by spatial presentation upscaling, not TAAU. A pure capability resolver publishes
 requested/effective modes and explicit fallback reasons.
+Camera-overlay UI currently shares the scene render surface. Editor and runtime view owners inspect UI submissions
+before requesting the frame's surface size and bypass reduced render scale for affected views to preserve native-pixel
+UI clarity. Game view also treats its embedded screen overlays this way. This fallback renders the whole scene at
+native resolution; world-space and render-texture UI do not force this fallback.
 Schemas 1–4 migrate without silently enabling temporal or dynamic-resolution behavior.
 The renderer publishes Deferred Hybrid only after its complete backend probe succeeds; Project Settings consumes that
 live capability, and per-surface recording falls back to Forward+ only for unavailable exact attachments.
@@ -1117,10 +1137,15 @@ validates owner thread and active generation. Its RAII scopes balance backend be
 exception unwinding. Typed color and scalar/vector style scopes map semantic public roles to private backend slots and
 restore them through the same generation-safe stack, so product UI code never owns a Dear ImGui style stack. Scene/Game
 declarations and UI draw data are recorded into one coordinated RenderSystem frame.
-The UI drawing facade accepts per-vertex colored triangles and UI-image textured triangles. UI Builder presents
-retained quad and fallback-font glyph geometry through these value-only APIs, sharing runtime shape, gradient, border,
-shadow, clipping, and transform calculations without exposing Dear ImGui to KeireClient. The Builder owns its UI-image
-copy of the immutable runtime fallback atlas and releases it with the panel's transient UI state.
+The UI drawing facade accepts per-vertex colored triangles and UI-image textured triangles. When a renderer is active,
+UI Builder submits its retained document to the runtime UI GPU compositor in a dedicated preview view. That path uses
+the runtime font and image asset requests and accepts an optional transient UI-target material selection. The selected
+material is preview-only and does not change a scene `UIDocument` material assignment. The canvas render surface tracks
+the displayed preview size, including zoom and window display scale, up to 4096 pixels per axis. Below that bound,
+canvas placement aligns to physical pixels and its per-axis mapping is shared by drawing, picking, and gestures.
+Without an active GPU preview, the Builder uses its value-only editor drawing path for geometry and fallback text,
+with image placeholders and a visible GPU availability diagnostic. The Builder owns and releases the fallback-atlas
+image with its transient panel state.
 Textured triangles reject images from a different or closed UI runtime before accessing their texture storage.
 
 `SceneTransitionCoordinator` is the editor-only serialization point for Open, New, Close, and Exit. UI, shortcuts,
@@ -1173,6 +1198,11 @@ atlas realizations are device-generation qualified; recovery abandons old-device
 retried immutable frame. Ordered fallback faces are selected per glyph run, and each shaped glyph records its exact
 face index. Each face uses at most eight deterministic atlas pages; immutable geometry batches and logical leases bind
 the exact face/page pair, so mixed-script labels and recovery retries cannot sample another page or device generation.
+Custom font caches grow through bounded 48/96/192/384-pixel raster sizes according to captured display demand.
+Bitmap metrics remain normalized to the existing layout space, raster size participates in atlas generation identity,
+and accepted frames retain immutable old pages while later frames use a sharper atlas. Glyph width and height are
+checked against the padded page bounds before packing or pixel copying; oversized glyphs use the same recoverable
+capacity failure as a full atlas, allowing a smaller raster bucket to be tried.
 A deterministic high-resolution Latin-1 atlas with 224 codepoint slots remains the no-family/unavailable-face
 fallback; absent optional glyphs use the question-mark replacement. Nested clip intersections are resolved into immutable
 commands before capture, so text and image geometry
@@ -1185,7 +1215,10 @@ generations retain the previous immutable type catalog.
 
 `UiBuilderDocument` and `UiBuilderStyleSheetDocument` own validated authoring definitions, generation counters, dirty
 state, explicit persistence, and independent undo histories. `UiBuilderPanel` translates Design, Styles, and Debug
-interactions into those document operations. Style Studio reads one shared property registry, keeps a lossless source
+interactions into those document operations. Inspector drafts track the asset, selection, and document generation;
+edits apply only changed fields, and only an explicit class edit broadcasts classes across the selection. Hierarchy
+rows borrow the current definition and traversal ends immediately after a successful reparent invalidates those rows.
+Style Studio reads one shared property registry, keeps a lossless source
 draft, publishes only valid development revisions, preserves the last valid preview during parse errors, and rejects
 silent overwrites when the baseline file hash changes. Schema-v1 styles retain source until a v2-only declaration or
 responsive rule advances them one-way. The source model provides syntax spans, completion and documentation from the
@@ -1372,9 +1405,10 @@ other assembly hosts. See [Desktop Player Builds](PlayerBuilds.md).
 
 The UI library owns the immutable CPU fallback font atlas and its glyph metrics. Text layout and the GPU compositor
 share those advances, so wrapping and glyph placement agree without making the UI library depend on the rendering
-library. UI Builder draws fallback-font glyphs from that same atlas and geometry; its editor-font path remains a preview
-for runtime custom fonts. Match Game View takes logical viewport dimensions, before DPI
-and dynamic render-resolution scaling.
+library. UI Builder uses the runtime compositor for custom font and image assets when graphics are enabled; those
+references resolve through the asynchronous asset system and can show fallback output while loading. Its no-GPU editor
+path uses fallback-atlas and editor text drawing plus image placeholders. Match Game View takes logical viewport
+dimensions before DPI and dynamic render-resolution scaling.
 
 Scene UI Document managed bindings use a presentation-owned typed path store implementing `UiDocumentBindingSource`.
 The callback-scoped scripting bridge supplies or reads values without retaining managed object handles. Values may be
@@ -1998,7 +2032,43 @@ last-good programs. Mesh pipelines reject the screen vertex ABI before creating 
 
 UI Document material references are component-owned and copied through presentation projections into immutable
 UI render submissions. Changing the material does not recreate the retained document or invalidate element handles.
+Each render frame also carries an immutable UI-material time pair from the application's unscaled elapsed time and
+unscaled frame delta. Runtime UI shader Time and Delta Time therefore continue advancing while simulation time is
+paused, consistently across submitted UI targets.
 
 Game-view and player screen overlays are submitted as camera overlays, not redrawn with immediate editor UI calls.
 The renderer scales captured UI geometry and scissor rectangles from the logical viewport to the render surface.
 This keeps shader execution and camera after-UI effects in the same pipeline at every render scale.
+
+### Incremental managed compiler workspace
+
+ScriptSystem owns mutable compiler inputs and outputs under Library/ScriptAssemblies/Intermediate. API references
+are copied atomically only when their bytes change. Generated project files retain timestamps when unchanged.
+Compiler output directories are partitioned by configuration and the generated assembly graph; removed assemblies
+therefore cannot leak from a different graph. After a successful build the complete output is copied into a fresh
+immutable generation before active-generation.json is published. Runtime loading only uses that generation, never
+mutable compiler outputs. Failed or cancelled compilation cannot publish a partial generation. MSBuild node reuse
+remains disabled. The build worker owns a warm Roslyn child process and a unique connection name per compiler session;
+other applications' compiler sessions are never stopped. Close joins the build worker before stopping its compiler.
+Cancellation stops it on the worker; SDK configuration changes join the worker and stop the compiler before changing
+SDK state. Discovery asks the selected SDK for its Roslyn directory. Ancestor global.json and Directory.Build props/
+targets changes invalidate the session. A bounded private-pipe shutdown request precedes the owned process's RAII
+termination fallback, including cleanup of a replacement Roslyn may have started after a server exit. The generated
+build coordinator traverses Restore and Build on real assemblies and emits no empty coordinator assembly.
+The editor's managed-runtime coordinator retains one pending request while compilation is active. It starts the latest
+request after the active build ends, without joining a running worker from the frame loop. Its owner-thread source
+digest map deduplicates C# notifications for the editor session, including source-index reconciliation notifications;
+read failures erase the remembered digest and request a build. Creation seeds this observation before scheduling.
+Pending requests suppress
+intermediate reload and queued Play until the latest build completes; compiler errors still preserve last-good state.
+
+Graphics shader import schedules the current pass's binary formats concurrently, with at most six stage jobs from
+three validated formats. Pass-local futures join outstanding compilers before their define storage or the enclosing
+temporary source directory is released, including exception paths. Variant publication preserves format/pass order.
+
+
+Project package lock schema 2 and import receipt schema 2 retain the canonical asset-package manifest as project-owned
+compatibility evidence. Core accepts legacy schema-1 records and reports their unknown compatibility without inventing
+metadata. The Editor presents diagnostics and Hub-cached update candidates; Core remains responsible for preflight,
+archive verification, cache integrity, and transactional file publication. Asset import journals include project version
+metadata and receipts, and failed rollback retains its journal for recovery.

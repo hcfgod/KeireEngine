@@ -78,6 +78,7 @@ namespace Keire::RenderBackend
         std::uint64_t NextFrameId = 1;
         std::uint64_t CaptureFrameId = 0;
         std::chrono::steady_clock::time_point CaptureFrameStartedAt{};
+        Vector2 PendingUiMaterialTime;
         std::mutex RenderQueueMutex;
         std::condition_variable RenderQueueReady;
         std::condition_variable RenderQueueSpace;

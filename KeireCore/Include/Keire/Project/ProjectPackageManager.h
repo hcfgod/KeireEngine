@@ -44,13 +44,14 @@ namespace Keire
         AssetPackageInstallKind InstallKind = AssetPackageInstallKind::Registry;
         std::vector<AssetPackageDependency> Dependencies;
         bool Embedded = false;
+        std::optional<AssetPackageManifest> Manifest;
 
         [[nodiscard]] bool operator==(const ProjectPackageLockEntry&) const = default;
     };
 
     struct ProjectPackageLock
     {
-        static constexpr std::uint32_t CurrentSchemaVersion = 1;
+        static constexpr std::uint32_t CurrentSchemaVersion = 2;
 
         std::uint32_t SchemaVersion = CurrentSchemaVersion;
         std::vector<ProjectPackageLockEntry> Packages;
@@ -189,6 +190,7 @@ namespace Keire
         [[nodiscard]] ProjectPackageLock Embed(std::string_view packageId);
         [[nodiscard]] ProjectPackageLock RevertEmbedded(std::string_view packageId);
         [[nodiscard]] std::vector<ProjectPackageMount> Mounts() const;
+        [[nodiscard]] std::vector<std::string> CompatibilityDiagnostics() const;
         [[nodiscard]] ProjectPackageRecoveryResult RecoverInterruptedOperations();
 
         [[nodiscard]] static std::filesystem::path ManifestPath(const std::filesystem::path& projectRoot);

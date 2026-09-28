@@ -5,9 +5,64 @@
 #include <doctest/doctest.h>
 
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <utility>
 #include <vector>
+
+namespace
+{
+    class NativeSceneRuntimeServices final : public Keire::Detail::ManagedRuntimeSceneServices
+    {
+      public:
+        std::map<std::uint64_t, Keire::Ref<Keire::Scene>> Worlds;
+        void WriteManagedLog(Keire::ManagedLogLevel, std::string_view) noexcept override {}
+        float ManagedDeltaTime() const noexcept override { return 0.0F; }
+        Keire::Vector2 ReadManagedInput(std::string_view) noexcept override { return {}; }
+
+      protected:
+        Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId) const noexcept override { return {}; }
+        Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override { return {}; }
+        Keire::Ref<Keire::Scene> ManagedRuntimeSceneForWorld(std::uint64_t world,
+                                                             Keire::AssetId) const noexcept override
+        {
+            const auto found = Worlds.find(world);
+            return found == Worlds.end() ? Keire::Ref<Keire::Scene>{} : found->second;
+        }
+    };
+} // namespace
+
+TEST_CASE("managed entity resolution reaches native-only worlds beside a persistent session")
+{
+    auto arena =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Native arena"));
+    auto player = arena->CreateEntity("Player");
+    REQUIRE(player.AddComponent<Keire::CharacterControllerComponent>());
+    auto persistent = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), arena->Snapshot());
+    auto duplicate = persistent->FindEntity(player.Id());
+    REQUIRE(duplicate);
+    REQUIRE(duplicate.World() != player.World());
+    NativeSceneRuntimeServices services;
+    services.Worlds.emplace(player.World(), arena);
+    services.Worlds.emplace(duplicate.World(), persistent);
+    const auto id = player.Id().Value();
+    auto resolved = Keire::Detail::ResolveManagedServiceEntity(&services, player.World(), id);
+    REQUIRE(resolved);
+    REQUIRE(resolved.GetComponent<Keire::CharacterControllerComponent>());
+    resolved.GetComponent<Keire::CharacterControllerComponent>()->SetLayer(2);
+    CHECK(player.GetComponent<Keire::CharacterControllerComponent>()->Layer() == 2);
+    CHECK(Keire::Detail::ResolveManagedServiceEntity(&services, duplicate.World(), id).World() == duplicate.World());
+    CHECK_FALSE(Keire::Detail::ResolveManagedServiceEntity(&services, 0, id));
+    CHECK_FALSE(Keire::Detail::ResolveManagedServiceEntity(nullptr, player.World(), id));
+    CHECK_FALSE(Keire::Detail::ResolveManagedServiceEntity(&services, player.World(), Keire::AssetId::Generate()));
+    const auto world = player.World();
+    REQUIRE(arena->DestroyEntity(player.Id()));
+    CHECK_FALSE(Keire::Detail::ResolveManagedServiceEntity(&services, world, id));
+    CHECK(Keire::Detail::ResolveManagedServiceEntity(&services, duplicate.World(), id));
+    persistent->Close();
+    CHECK_FALSE(Keire::Detail::ResolveManagedServiceEntity(&services, duplicate.World(), id));
+    arena->Close();
+}
 
 TEST_CASE("managed rendering services expose validated camera renderer and light state")
 {

@@ -142,7 +142,7 @@ TEST_CASE("project package manager installs dependency closure, mounts read-only
     REQUIRE(lock.Packages.size() == 2);
     CHECK(std::filesystem::is_regular_file(Keire::ProjectPackageManager::ManifestPath(fixture.Project->Root())));
     CHECK(std::filesystem::is_regular_file(Keire::ProjectPackageManager::LockPath(fixture.Project->Root())));
-    CHECK(Keire::Project::InspectMetadata(fixture.Project->Root()).MinimumEngineVersion == "0.3.1");
+    CHECK(Keire::Project::InspectMetadata(fixture.Project->Root()).MinimumEngineVersion == "0.4.4");
 
     const auto mounts = manager.Mounts();
     REQUIRE(mounts.size() == 2);
@@ -199,4 +199,53 @@ TEST_CASE("project package lock records an independently verified marketplace pu
     const auto mounts = manager.Mounts();
     REQUIRE(mounts.size() == 1U);
     CHECK(mounts.front().Trust == Keire::ProjectPackageTrust::MarketplaceSignatureVerified);
+}
+
+TEST_CASE("asset package semantic versions compare prerelease numbers and ignore build metadata")
+{
+    CHECK(Keire::AssetPackageVersionSatisfies("1.0.0-rc.10", ">1.0.0-rc.2"));
+    CHECK(Keire::AssetPackageVersionSatisfies("1.0.0+build.2", "1.0.0+build.1"));
+    CHECK_FALSE(Keire::AssetPackageVersionSatisfies("1.0.0-rc.10+build.2", ">=1.0.0"));
+    CHECK(Keire::AssetPackageVersionSatisfies("1.0.0-rc.2+build.1", "=1.0.0-rc.2"));
+    CHECK_THROWS(Keire::AssetPackageVersionSatisfies("1.0.0-rc.02", "*"));
+    CHECK_THROWS(Keire::AssetPackageVersionSatisfies("1.0.0+build..2", "*"));
+    CHECK_THROWS(Keire::AssetPackageVersionSatisfies("1.0.0+build+2", "*"));
+}
+
+TEST_CASE("project package mounts revalidate cached bytes and report compatibility after upgrades")
+{
+    ProjectPackageFixture fixture;
+    auto manager = fixture.Manager();
+    const auto metadata = fixture.CreatePackage("com.keire.compatibility", "1.0.0");
+    auto lock = manager.Install(
+        {.Archives = {fixture.Source(metadata)}, .DirectDependencies = {{metadata.Manifest.PackageId, "1.0.0"}}});
+    REQUIRE(lock.Packages.front().Manifest.has_value());
+    CHECK(manager.CompatibilityDiagnostics().empty());
+    auto& entry = lock.Packages.front();
+    entry.Manifest->Compatibility.MaximumEngineVersion = "0.3.1";
+    {
+        std::ofstream stream(Keire::ProjectPackageManager::LockPath(fixture.Project->Root()));
+        stream << Keire::EncodeProjectPackageLock(lock);
+    }
+    Keire::ProjectPackageManager upgraded({.ProjectRoot = fixture.Project->Root(),
+                                           .GlobalCacheRoot = fixture.Cache,
+                                           .EngineVersion = "0.4.4",
+                                           .Platform = "windows",
+                                           .Architecture = "x86_64",
+                                           .RendererCapabilities = {"pbr"}});
+    REQUIRE(upgraded.CompatibilityDiagnostics().size() == 1);
+    CHECK_THROWS(upgraded.Mounts());
+    const auto mounts = manager.Mounts();
+    REQUIRE(mounts.size() == 1);
+    const auto file = mounts.front().Root / "Assets/Data.txt";
+    std::filesystem::permissions(file, std::filesystem::perms::owner_write, std::filesystem::perm_options::add);
+    {
+        std::ofstream stream(file);
+        stream << "corrupt";
+    }
+    CHECK_THROWS(manager.Mounts());
+    lock.SchemaVersion = 1;
+    entry.Manifest.reset();
+    CHECK(Keire::DecodeProjectPackageLock(Keire::EncodeProjectPackageLock(lock)).Packages.front().Manifest ==
+          std::nullopt);
 }

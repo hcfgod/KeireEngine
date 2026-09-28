@@ -140,6 +140,59 @@ namespace
     };
 
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
+    class SurfaceRetirementLayer final : public Keire::Layer
+    {
+      public:
+        SurfaceRetirementLayer() : Layer("surface-retirement") {}
+
+      protected:
+        void OnAttach() override
+        {
+            const auto renderer = Owner().Renderer();
+            REQUIRE(Keire::RenderSystemInternalAccess::StartThreadedHeadlessForTest(*renderer));
+
+            auto renderSurface = renderer->CreateSurface({.Name = "render-thread-retirement"});
+            auto state = std::static_pointer_cast<Keire::RenderBackend::RenderSurfaceState>(
+                Keire::RenderSystemInternalAccess::SurfaceLease(*renderSurface));
+            const std::weak_ptr<void> renderLifetime = state;
+            const auto renderOwner = state->Owner.lock();
+            REQUIRE(renderOwner);
+            state.reset();
+            auto holder = std::make_shared<Keire::Ref<Keire::RenderSurface>>(std::move(renderSurface));
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(*renderer, [holder] { holder->Reset(); });
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(*renderer, [] {});
+            CHECK(renderLifetime.expired());
+
+            bool nestedDispatchRan = false;
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(
+                *renderer, [&] { renderOwner->DispatchRender([&] { nestedDispatchRan = true; }); });
+            CHECK(nestedDispatchRan);
+
+            auto ownerSurface = renderer->CreateSurface({.Name = "owner-thread-retirement"});
+            const std::weak_ptr<void> ownerLifetime = Keire::RenderSystemInternalAccess::SurfaceLease(*ownerSurface);
+            ownerSurface.Reset();
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(*renderer, [] {});
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(*renderer, [] {});
+            CHECK(ownerLifetime.expired());
+
+            auto leasedSurface = renderer->CreateSurface({.Name = "leased-retirement"});
+            auto leasedState = std::static_pointer_cast<Keire::RenderBackend::RenderSurfaceState>(
+                Keire::RenderSystemInternalAccess::SurfaceLease(*leasedSurface));
+            const std::weak_ptr<void> leasedLifetime = leasedState;
+            auto frameLease = leasedState->Lifetime;
+            leasedState.reset();
+            leasedSurface.Reset();
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(*renderer, [] {});
+            CHECK_FALSE(leasedLifetime.expired());
+            frameLease.reset();
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(*renderer, [] {});
+            Keire::RenderSystemInternalAccess::RunOnRenderThread(*renderer, [] {});
+            CHECK(leasedLifetime.expired());
+        }
+
+        void OnUpdate(const Keire::Time&) override { Owner().RequestExit(); }
+    };
+
     struct DeferredCaptureProbe final
     {
         std::atomic<std::uint64_t> SceneEnumerationsWhileBlocked{0};
@@ -805,6 +858,16 @@ TEST_CASE("Render pipeline healthy shutdown drains sustained bounded frame traff
         CHECK(probe.Statistics.FramesInFlightHighWaterMark <= depth);
     }
 }
+
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+TEST_CASE("Render surface retirement never waits for its own render thread and releases both thread origins")
+{
+    UsePipelineDummyVideoDriver();
+    Keire::Application application(PipelineSpecification(2U));
+    (void)application.PushLayer(std::make_unique<SurfaceRetirementLayer>());
+    CHECK(application.Run() == 0);
+}
+#endif
 
 TEST_CASE("Render device lifecycle transitions never overwrite concurrent closing or closed states")
 {

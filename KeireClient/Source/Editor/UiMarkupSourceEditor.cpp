@@ -44,6 +44,29 @@ namespace KeireEditor
             return value;
         }
 
+        [[nodiscard]] int MatchScore(const std::string_view candidate, const std::string_view prefix)
+        {
+            if (prefix.empty())
+                return 0;
+            const auto value = Lower(std::string(candidate));
+            const auto query = Lower(std::string(prefix));
+            if (value.starts_with(query))
+                return static_cast<int>(value.size() - query.size());
+            if (const auto offset = value.find(query); offset != std::string::npos)
+                return 100 + static_cast<int>(offset);
+            std::size_t cursor = 0;
+            int gaps = 0;
+            for (const auto character : query)
+            {
+                const auto match = value.find(character, cursor);
+                if (match == std::string::npos)
+                    return -1;
+                gaps += static_cast<int>(match - cursor);
+                cursor = match + 1U;
+            }
+            return 200 + gaps;
+        }
+
         [[nodiscard]] std::string Documentation(const std::string_view value)
         {
             if (std::ranges::find(ElementNames, value) != ElementNames.end())
@@ -97,30 +120,107 @@ namespace KeireEditor
         auto begin = cursor;
         while (begin > 0U && NameCharacter(m_Source[begin - 1U]))
             --begin;
-        const auto prefix = Lower(m_Source.substr(begin, cursor - begin));
+        const auto prefix = std::string_view(m_Source).substr(begin, cursor - begin);
         const auto tagStart = m_Source.rfind('<', cursor);
         const auto tagEnd = m_Source.rfind('>', cursor);
         const bool insideTag = tagStart != std::string::npos && (tagEnd == std::string::npos || tagStart > tagEnd);
+        if (!insideTag)
+            return {};
+
+        char quote = 0;
+        for (auto index = tagStart + 1U; index < cursor; ++index)
+        {
+            if (m_Source[index] != '"' && m_Source[index] != '\'')
+                continue;
+            if (quote == 0)
+                quote = m_Source[index];
+            else if (quote == m_Source[index])
+                quote = 0;
+        }
+        if (quote != 0)
+        {
+            const auto equals = m_Source.rfind('=', cursor);
+            if (equals == std::string::npos || equals < tagStart)
+                return {};
+            auto nameBegin = equals;
+            while (nameBegin > tagStart + 1U && NameCharacter(m_Source[nameBegin - 1U]))
+                --nameBegin;
+            const auto name = std::string_view(m_Source).substr(nameBegin, equals - nameBegin);
+            std::span<const std::string_view> values;
+            constexpr std::array booleanValues{std::string_view("true"), std::string_view("false")};
+            constexpr std::array schemaValues{std::string_view("1")};
+            if (name == "checked" || name == "enabled")
+                values = booleanValues;
+            else if (name == "schemaVersion")
+                values = schemaValues;
+            else
+                return {};
+            std::vector<std::pair<int, std::string_view>> ranked;
+            for (const auto value : values)
+                if (const auto score = MatchScore(value, prefix); score >= 0)
+                    ranked.emplace_back(score, value);
+            std::ranges::sort(ranked, {}, &std::pair<int, std::string_view>::first);
+            std::vector<UiMarkupSourceCompletion> result;
+            for (const auto& [score, value] : ranked | std::views::take(maximum))
+            {
+                (void)score;
+                result.push_back(
+                    {std::string(value), std::string(value), "Valid value for `" + std::string(name) + "`."});
+            }
+            return result;
+        }
+
         const bool elementContext =
             insideTag && (begin <= tagStart + 1U || (tagStart + 1U < m_Source.size() &&
                                                      m_Source[tagStart + 1U] == '/' && begin <= tagStart + 2U));
-        std::vector<UiMarkupSourceCompletion> result;
-        const auto append = [&](const std::span<const std::string_view> values)
+        std::vector<std::pair<int, std::string_view>> ranked;
+        const auto append = [&](const std::span<const std::string_view> values, const int priority = 0)
         {
             for (const auto value : values)
             {
-                if (!prefix.empty() && !Lower(std::string(value)).starts_with(prefix))
+                if (!elementContext &&
+                    std::string_view(m_Source).substr(tagStart, cursor - tagStart).find(std::string(value) + "=") !=
+                        std::string_view::npos)
                     continue;
-                const auto insertion = elementContext ? std::string(value) : std::string(value) + "=\"\"";
-                result.push_back({std::string(value), insertion, Documentation(value)});
-                if (result.size() >= maximum)
-                    break;
+                if (const auto score = MatchScore(value, prefix); score >= 0)
+                    ranked.emplace_back(priority + score, value);
             }
         };
         if (elementContext)
+        {
             append({ElementNames.data(), ElementNames.size()});
+        }
         else
+        {
+            const auto nameStart = tagStart + 1U + (m_Source[tagStart + 1U] == '/' ? 1U : 0U);
+            const auto nameEnd = m_Source.find_first_of(" \t\r\n/>", nameStart);
+            const auto elementName = std::string_view(m_Source).substr(nameStart, nameEnd - nameStart);
+            constexpr std::array textAttributes{std::string_view("text")};
+            constexpr std::array imageAttributes{std::string_view("src")};
+            constexpr std::array valueAttributes{std::string_view("value"), std::string_view("minimum"),
+                                                 std::string_view("maximum")};
+            if (elementName == "Label" || elementName == "Button" || elementName == "TextField")
+                append(textAttributes, -50);
+            if (elementName == "Image")
+                append(imageAttributes, -50);
+            if (elementName == "Slider" || elementName == "ProgressBar")
+                append(valueAttributes, -50);
             append({AttributeNames.data(), AttributeNames.size()});
+        }
+        std::ranges::sort(
+            ranked, [](const auto& left, const auto& right)
+            { return left.first != right.first ? left.first < right.first : left.second < right.second; });
+        std::vector<UiMarkupSourceCompletion> result;
+        for (const auto& [score, value] : ranked)
+        {
+            (void)score;
+            if (std::ranges::find(result, value, &UiMarkupSourceCompletion::Label) != result.end())
+                continue;
+            const auto insertion = elementContext ? std::string(value) : std::string(value) + "=\"\"";
+            result.push_back({std::string(value), insertion, Documentation(value)});
+            if (result.size() >= maximum)
+                break;
+        }
         return result;
     }
 

@@ -6,6 +6,7 @@
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "Keire/Scripting/ScriptSystem.h"
 #include "KeireInternal/Scripting/ManagedAssemblySnapshot.h"
+#include "KeireInternal/Scripting/ManagedBuildWorkspace.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
 
 #include <doctest/doctest.h>
@@ -352,6 +353,173 @@ TEST_CASE("Managed IDE workspace references the engine API project in source che
     CHECK(designTimeProjectText.find("KeireManaged/**/*.cs") != std::string::npos);
 }
 
+TEST_CASE("Managed project generation preserves unchanged timestamps and publishes changed content")
+{
+    const auto root = UniqueTemporaryRoot("KeireManagedWorkspace-");
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{root};
+    const auto path = root / "Projects/Gameplay.csproj";
+    Keire::Detail::WriteText(path, "<Project />");
+    const auto oldTime = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    std::filesystem::last_write_time(path, oldTime);
+    const auto storedTime = std::filesystem::last_write_time(path);
+    Keire::Detail::WriteText(path, "<Project />");
+    CHECK(std::filesystem::last_write_time(path) == storedTime);
+    Keire::Detail::WriteText(path, "<Changed />");
+    CHECK(std::filesystem::last_write_time(path) != storedTime);
+    const auto bytes = ReadBytes(path);
+    CHECK(std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()) == "<Changed />");
+    CHECK_THROWS(Keire::Detail::WriteText(path / "child", "invalid parent"));
+}
+
+TEST_CASE("Managed API fingerprints track source changes and exclude build outputs")
+{
+    const auto root = UniqueTemporaryRoot("KeireApiFingerprint-");
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{root};
+    std::filesystem::create_directories(root / "Nested");
+    std::filesystem::create_directories(root / "bin");
+    std::filesystem::create_directories(root / "obj");
+    const auto project = root / "Api.csproj";
+    Keire::Detail::WriteText(project, "<Project />");
+    Keire::Detail::WriteText(root / "Nested/Value.cs", "class Value {}");
+    const auto initial = Keire::Detail::ManagedApiSourceFingerprint(project);
+    CHECK(initial.find("Api.csproj|") != std::string::npos);
+    CHECK(initial.find("Nested/Value.cs|") != std::string::npos);
+    CHECK(initial == Keire::Detail::ManagedApiSourceFingerprint(project));
+    Keire::Detail::WriteText(root / "bin/Generated.cs", "ignored");
+    Keire::Detail::WriteText(root / "obj/Generated.cs", "ignored");
+    Keire::Detail::WriteText(root / "Nested/Notes.txt", "ignored");
+    CHECK(initial == Keire::Detail::ManagedApiSourceFingerprint(project));
+    Keire::Detail::WriteText(root / "Nested/Value.cs", "class DifferentValue {}");
+    CHECK(initial != Keire::Detail::ManagedApiSourceFingerprint(project));
+    std::filesystem::remove(root / "Nested/Value.cs");
+    const auto removed = Keire::Detail::ManagedApiSourceFingerprint(project);
+    CHECK(removed.find("Nested/Value.cs|") == std::string::npos);
+    Keire::Detail::WriteText(project, "<Project><PropertyGroup /></Project>");
+    CHECK(removed != Keire::Detail::ManagedApiSourceFingerprint(project));
+    std::filesystem::remove(project);
+    CHECK_THROWS_AS((void)Keire::Detail::ManagedApiSourceFingerprint(project), std::filesystem::filesystem_error);
+
+    // Diagnostic only: correctness must not depend on machine load or storage speed.
+    const auto engineProject = std::filesystem::absolute("KeireManaged/Keire.Managed.csproj");
+    REQUIRE(std::filesystem::is_regular_file(engineProject));
+    const auto expected = Keire::Detail::ManagedApiSourceFingerprint(engineProject);
+    std::vector<double> samples;
+    for (int index = 0; index < 21; ++index)
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const auto actual = Keire::Detail::ManagedApiSourceFingerprint(engineProject);
+        samples.push_back(
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+        CHECK(actual == expected);
+    }
+    std::ranges::sort(samples);
+    MESSAGE("Managed API fingerprint median: ", samples[samples.size() / 2], " ms");
+}
+
+TEST_CASE("Managed build traversal visits graph roots and retains independent assemblies")
+{
+    Keire::ManagedBuildRequest request;
+    const auto support = Keire::AssetId::Generate();
+    const auto left = Keire::AssetId::Generate();
+    const auto right = Keire::AssetId::Generate();
+    request.Assemblies = {
+        {support, {.Name = "Support"}},
+        {left, {.Name = "Left", .References = {support}}},
+        {right, {.Name = "Right", .References = {support}}},
+        {Keire::AssetId::Generate(), {.Name = "Game", .References = {left, right}}},
+        {Keire::AssetId::Generate(), {.Name = "Independent"}},
+    };
+    const auto text = Keire::Detail::GenerateManagedBuildAggregator(request);
+    CHECK(text.find("Include=\"Game.csproj\"") != std::string::npos);
+    CHECK(text.find("Include=\"Independent.csproj\"") != std::string::npos);
+    CHECK(text.find("Include=\"Support.csproj\"") == std::string::npos);
+    CHECK(text.find("Include=\"Left.csproj\"") == std::string::npos);
+    CHECK(text.find("Include=\"Right.csproj\"") == std::string::npos);
+    CHECK(text.find("Targets=\"Restore\"") != std::string::npos);
+}
+
+TEST_CASE("Managed compiler sessions reuse an isolated process and release it on stop")
+{
+#if defined(_WIN32)
+    const auto dotnet = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet.exe");
+#else
+    const auto dotnet = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet");
+#endif
+    const auto root = UniqueTemporaryRoot("KeireCompilerSession-");
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{root};
+    const auto project = root / "Game.csproj";
+    Keire::Detail::WriteText(project, "<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup>"
+                                      "<TargetFramework>net10.0</TargetFramework></PropertyGroup></Project>");
+    Keire::Detail::WriteText(root / "Game.cs", "public static class Game { public static int Value => 1; }");
+    Keire::Detail::ManagedCompilerServer compiler;
+    std::stop_source cancelled;
+    cancelled.request_stop();
+    CHECK_FALSE(compiler.Prepare(dotnet, project, root, cancelled.get_token()));
+    CHECK(compiler.ProcessId() == 0);
+    REQUIRE(compiler.Prepare(dotnet, project, root, {}));
+    const auto process = compiler.ProcessId();
+    const auto pipe = compiler.PipeName();
+    REQUIRE(process != 0);
+    const std::vector<std::string> arguments{"build",
+                                             project.string(),
+                                             "--nologo",
+                                             "/nodeReuse:false",
+                                             "-p:UseSharedCompilation=true",
+                                             "-p:SharedCompilationId=" + pipe};
+    const auto result = Keire::Detail::RunProcess(dotnet, arguments, root, std::chrono::seconds(30));
+    INFO(result.Output);
+    REQUIRE(result.ExitCode == 0);
+    CHECK(Keire::Detail::IsProcessAlive(process));
+    REQUIRE(compiler.Prepare(dotnet, project, root, {}));
+    CHECK(compiler.ProcessId() == process);
+    CHECK(compiler.PipeName() == pipe);
+    Keire::Detail::WriteText(root / "Directory.Build.props", "<Project />");
+    REQUIRE(compiler.Prepare(dotnet, project, root, {}));
+    const auto replacement = compiler.ProcessId();
+    CHECK(replacement != process);
+    CHECK(compiler.PipeName() != pipe);
+    CHECK_FALSE(Keire::Detail::IsProcessAlive(process));
+    compiler.Stop();
+    CHECK_FALSE(Keire::Detail::IsProcessAlive(replacement));
+    CHECK(compiler.ProcessId() == 0);
+    CHECK(compiler.PipeName().empty());
+    CHECK_NOTHROW(compiler.Stop());
+    std::uint64_t restarted = 0;
+    {
+        Keire::Detail::ManagedCompilerServer other;
+        REQUIRE(other.Prepare(dotnet, project, root, {}));
+        restarted = other.ProcessId();
+        CHECK(other.PipeName() != pipe);
+    }
+    CHECK_FALSE(Keire::Detail::IsProcessAlive(restarted));
+    CHECK_FALSE(compiler.Prepare(dotnet, root / "Missing.csproj", root, {}));
+    CHECK(compiler.ProcessId() == 0);
+}
+
 TEST_CASE("Managed builds publish only successful replacements")
 {
 #if defined(_WIN32)
@@ -420,21 +588,72 @@ TEST_CASE("Managed builds publish only successful replacements")
     REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
     const auto active = scripts->BuildStatus().ActiveAssemblyDirectory / "Gameplay.dll";
     REQUIRE(std::filesystem::is_regular_file(active));
+    CHECK_FALSE(std::filesystem::exists(scripts->BuildStatus().ActiveAssemblyDirectory / "Keire.Managed.Build.dll"));
     const auto buildProperties =
         ReadBytes(root / "Library/ScriptAssemblies/Intermediate/Projects/Directory.Build.props");
     const std::string buildPropertiesText(reinterpret_cast<const char*>(buildProperties.data()),
                                           buildProperties.size());
     CHECK(buildPropertiesText.find("<UseSharedCompilation>false</UseSharedCompilation>") != std::string::npos);
     const auto successfulWrite = std::filesystem::last_write_time(active);
+    const auto generatedProject = root / "Library/ScriptAssemblies/Intermediate/Projects/Gameplay.csproj";
+    const auto reference = root / "Library/ScriptAssemblies/Intermediate/ManagedReferences/Keire.Managed.dll";
+    const auto projectTime = std::filesystem::last_write_time(generatedProject);
+    const auto referenceTime = std::filesystem::last_write_time(reference);
+    const auto firstApi = scripts->BuildStatus().ManagedApiAssembly;
+    MESSAGE("Initial script build: ", scripts->BuildStatus().Elapsed.count(), " ms");
+    const auto compiledRoot = root / "Library/ScriptAssemblies/Intermediate/Compiled";
+    std::filesystem::path compiledAssembly;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(compiledRoot))
+        if (entry.path().filename() == "Gameplay.dll")
+            compiledAssembly = entry.path();
+    REQUIRE_FALSE(compiledAssembly.empty());
+    const auto compiledTime = std::filesystem::last_write_time(compiledAssembly);
+    const auto warm = scripts->StartBuild(request);
+    REQUIRE(scripts->WaitForBuild(warm, std::chrono::seconds(60)));
+    REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
+    MESSAGE("Warm script build: ", scripts->BuildStatus().Elapsed.count(), " ms");
+    CHECK(std::filesystem::last_write_time(generatedProject) == projectTime);
+    CHECK(std::filesystem::last_write_time(reference) == referenceTime);
+    CHECK(std::filesystem::last_write_time(compiledAssembly) == compiledTime);
+    CHECK(scripts->BuildStatus().ManagedApiAssembly != firstApi);
+    CHECK(ReadBytes(scripts->BuildStatus().ManagedApiAssembly) == ReadBytes(firstApi));
+    CHECK(ReadBytes(scripts->BuildStatus().ActiveAssemblyDirectory / "Gameplay.dll") == ReadBytes(active));
+
+    {
+        std::ofstream stream(source, std::ios::binary | std::ios::trunc);
+        stream << "namespace Game; public static class Gameplay { public static int Value => 43; }\n";
+    }
+    const auto edited = scripts->StartBuild(request);
+    REQUIRE(scripts->WaitForBuild(edited, std::chrono::seconds(60)));
+    REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
+    MESSAGE("Edited script build: ", scripts->BuildStatus().Elapsed.count(), " ms");
+    CHECK(ReadBytes(scripts->BuildStatus().ActiveAssemblyDirectory / "Gameplay.dll") != ReadBytes(active));
+
+    auto extra = definition;
+    extra.Name = "Extra";
+    request.Assemblies.push_back({TestAsset(2), extra});
+    const auto expanded = scripts->StartBuild(request);
+    REQUIRE(scripts->WaitForBuild(expanded, std::chrono::seconds(60)));
+    REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
+    CHECK(std::filesystem::is_regular_file(scripts->BuildStatus().ActiveAssemblyDirectory / "Extra.dll"));
+    request.Assemblies.pop_back();
+    const auto reduced = scripts->StartBuild(request);
+    REQUIRE(scripts->WaitForBuild(reduced, std::chrono::seconds(60)));
+    REQUIRE(scripts->BuildStatus().State == Keire::ManagedBuildState::Succeeded);
+    CHECK_FALSE(std::filesystem::exists(scripts->BuildStatus().ActiveAssemblyDirectory / "Extra.dll"));
 
     {
         std::ofstream stream(source, std::ios::binary | std::ios::trunc);
         stream << "namespace Game; public static class Gameplay { this is not valid C# }\n";
     }
+    const auto lastGood = scripts->BuildStatus().ActiveAssemblyDirectory;
     const auto failed = scripts->StartBuild(std::move(request));
     REQUIRE(scripts->WaitForBuild(failed, std::chrono::seconds(60)));
     CHECK(scripts->BuildStatus().State == Keire::ManagedBuildState::Failed);
     CHECK_FALSE(scripts->BuildStatus().Diagnostics.empty());
+    const auto activeManifest = ReadBytes(root / "Library/ScriptAssemblies/active-generation.json");
+    const auto published = nlohmann::json::parse(activeManifest.begin(), activeManifest.end());
+    CHECK((root / "Library/ScriptAssemblies" / published["directory"].get<std::string>() / "Assemblies") == lastGood);
     CHECK(std::filesystem::is_regular_file(active));
     const bool activeWritePreserved = std::filesystem::last_write_time(active) == successfulWrite;
     CHECK(activeWritePreserved);

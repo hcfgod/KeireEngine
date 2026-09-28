@@ -89,11 +89,12 @@ namespace KeireEditor
         }
 
         [[nodiscard]] Keire::UiItemRect TransformPreviewRect(const Keire::RuntimeUiRect rectangle,
-                                                             const Keire::UiPosition origin, const float scale) noexcept
+                                                             const Keire::UiPosition origin,
+                                                             const Keire::Vector2 scale) noexcept
         {
-            return {{origin.X + rectangle.X * scale, origin.Y + rectangle.Y * scale},
-                    {origin.X + (rectangle.X + rectangle.Width) * scale,
-                     origin.Y + (rectangle.Y + rectangle.Height) * scale}};
+            return {{origin.X + rectangle.X * scale.X, origin.Y + rectangle.Y * scale.Y},
+                    {origin.X + (rectangle.X + rectangle.Width) * scale.X,
+                     origin.Y + (rectangle.Y + rectangle.Height) * scale.Y}};
         }
 
         [[nodiscard]] bool IsPositiveFinite(const Keire::UiItemRect rectangle) noexcept
@@ -176,126 +177,176 @@ namespace KeireEditor
     void UiBuilderPanel::DrawPreviewToolbar(Keire::UiFrame& ui)
     {
         auto& settings = m_PreviewSettings;
-        ui.SetNextItemWidth(210.0F);
-        if (auto combo = ui.BeginCombo("Resolution", ResolutionPresetName(settings.Preset)); combo)
+        const float toolbarWidth = ui.ContentAvailable().Width;
+        ui.SetNextItemWidth(std::min(210.0F, std::max(1.0F, toolbarWidth)));
+        if (auto combo = ui.BeginCombo("##PreviewResolution", ResolutionPresetName(settings.Preset)); combo)
         {
             for (const auto& [preset, label] : ResolutionPresets)
                 if (ui.Selectable(label, settings.Preset == preset))
                     settings.ApplyPreset(preset);
         }
-        ui.SameLine();
-        if (ui.Button("Landscape"))
-            settings.ApplyOrientation(UiBuilderOrientation::Landscape);
-        ui.SameLine();
-        if (ui.Button("Portrait"))
-            settings.ApplyOrientation(UiBuilderOrientation::Portrait);
-        ui.SameLine();
-        const auto gameView = m_Controller.UiBuilderGameViewSize();
-        if (auto disabled = ui.BeginDisabled(!gameView || gameView->Width < 1.0F || gameView->Height < 1.0F); disabled)
-            if (ui.Button("Match Game View") && gameView)
-                (void)settings.MatchGameView(static_cast<std::uint32_t>(std::lround(gameView->Width)),
-                                             static_cast<std::uint32_t>(std::lround(gameView->Height)));
-        ui.SameLine();
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip("Preview resolution. This does not resize your authored document.", {.Delayed = true});
+        if (toolbarWidth >= 340.0F)
+            ui.SameLine();
+        if (ui.Button("Preview options"))
+            ui.OpenPopup("UiBuilderPreviewOptions");
         if (ui.Button("Fit"))
             settings.ResetView();
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip("Fit the whole document and reset pan.", {.Delayed = true});
         ui.SameLine();
         if (ui.Button("-"))
             settings.ZoomBy(1.0F / 1.2F);
         ui.SameLine();
         if (ui.Button("+"))
             settings.ZoomBy(1.2F);
-        ui.SameLine();
-        ui.Text(std::to_string(static_cast<int>(std::lround(settings.Zoom * 100.0F))) + "% of fit");
-
-        if (auto canvasSettings = ui.BeginTreeNode("Canvas settings, safe area, guides, and pseudo-states");
-            canvasSettings)
-        {
-            std::uint64_t width = settings.Width;
-            std::uint64_t height = settings.Height;
-            bool changed = ui.DragUnsignedInteger("Width", width, 8.0, 64, 8192);
-            changed = ui.DragUnsignedInteger("Height", height, 8.0, 64, 8192) || changed;
-            if (changed)
-            {
-                settings.Width = static_cast<std::uint32_t>(width);
-                settings.Height = static_cast<std::uint32_t>(height);
-                settings.Preset = UiBuilderResolutionPreset::Custom;
-            }
-            std::uint64_t referenceWidth = settings.ReferenceWidth;
-            std::uint64_t referenceHeight = settings.ReferenceHeight;
-            changed = ui.DragUnsignedInteger("Reference Width", referenceWidth, 8.0, 64, 8192);
-            changed = ui.DragUnsignedInteger("Reference Height", referenceHeight, 8.0, 64, 8192) || changed;
-            if (changed)
-            {
-                settings.ReferenceWidth = static_cast<std::uint32_t>(referenceWidth);
-                settings.ReferenceHeight = static_cast<std::uint32_t>(referenceHeight);
-            }
-            double dpi = settings.Dpi;
-            if (ui.DragScalar("DPI", dpi, 1.0, 48.0, 288.0))
-                settings.Dpi = static_cast<float>(dpi);
-            const auto scaleModeName = [](const Keire::RuntimeUiScaleMode mode) noexcept -> std::string_view
-            {
-                switch (mode)
-                {
-                case Keire::RuntimeUiScaleMode::ConstantPixels:
-                    return "Constant Pixels";
-                case Keire::RuntimeUiScaleMode::ScaleWithViewport:
-                    return "Scale With Viewport";
-                case Keire::RuntimeUiScaleMode::ConstantPhysicalSize:
-                    return "Constant Physical Size";
-                }
-                return "Scale With Viewport";
-            };
-            if (auto scaleMode = ui.BeginCombo("Scale Mode", scaleModeName(settings.ScaleMode)); scaleMode)
-            {
-                constexpr std::array modes{
-                    Keire::RuntimeUiScaleMode::ConstantPixels,
-                    Keire::RuntimeUiScaleMode::ScaleWithViewport,
-                    Keire::RuntimeUiScaleMode::ConstantPhysicalSize,
-                };
-                for (const auto mode : modes)
-                {
-                    if (ui.Selectable(scaleModeName(mode), settings.ScaleMode == mode))
-                        settings.ScaleMode = mode;
-                }
-            }
-            (void)ui.SliderFloat("UI Scale", settings.UserScale, 0.5F, 2.0F);
-            (void)ui.SliderFloat("Match Width / Height", settings.MatchWidthOrHeight, 0.0F, 1.0F);
-            (void)ui.Checkbox("Safe Area", settings.ShowSafeArea);
-            double left = settings.SafeArea.Left;
-            double top = settings.SafeArea.Top;
-            double right = settings.SafeArea.Right;
-            double bottom = settings.SafeArea.Bottom;
-            changed = ui.DragScalar("Safe Left", left, 1.0, 0.0, static_cast<double>(settings.Width));
-            changed = ui.DragScalar("Safe Top", top, 1.0, 0.0, static_cast<double>(settings.Height)) || changed;
-            changed = ui.DragScalar("Safe Right", right, 1.0, 0.0, static_cast<double>(settings.Width)) || changed;
-            changed = ui.DragScalar("Safe Bottom", bottom, 1.0, 0.0, static_cast<double>(settings.Height)) || changed;
-            if (changed)
-                settings.SafeArea = {static_cast<float>(left), static_cast<float>(top), static_cast<float>(right),
-                                     static_cast<float>(bottom)};
-            (void)ui.Checkbox("Rulers", settings.ShowRulers);
+        if (toolbarWidth >= 230.0F)
             ui.SameLine();
-            (void)ui.Checkbox("Guides", settings.ShowGuides);
-            double verticalGuide = settings.VerticalGuide;
-            double horizontalGuide = settings.HorizontalGuide;
-            if (ui.DragScalar("Vertical Guide", verticalGuide, 1.0, -1.0, static_cast<double>(settings.Width)))
-                settings.VerticalGuide = static_cast<float>(verticalGuide);
-            if (ui.DragScalar("Horizontal Guide", horizontalGuide, 1.0, -1.0, static_cast<double>(settings.Height)))
-                settings.HorizontalGuide = static_cast<float>(horizontalGuide);
-            constexpr std::array pseudoStates{
-                std::pair{"Hover", Keire::UiStylePseudoState::Hover},
-                std::pair{"Active", Keire::UiStylePseudoState::Active},
-                std::pair{"Focus", Keire::UiStylePseudoState::Focus},
-                std::pair{"Disabled", Keire::UiStylePseudoState::Disabled},
-                std::pair{"Checked", Keire::UiStylePseudoState::Checked},
-            };
-            for (const auto& [label, state] : pseudoStates)
+        ui.Text(std::to_string(static_cast<int>(std::lround(settings.Zoom * 100.0F))) + "% of fit");
+        if (ui.LastItemState().Hovered)
+            ui.SetTooltip(
+                "Wheel: zoom. Middle or right drag: pan. Drag an element to move it; drag its handles to resize.",
+                {.Delayed = true});
+
+        if (auto canvasSettings = ui.BeginPopup("UiBuilderPreviewOptions"); canvasSettings)
+        {
+            if (auto body = ui.BeginChild("UiBuilderPreviewOptionsBody", {340.0F, 440.0F}); body)
             {
-                auto enabled = settings.HasPseudoState(state);
-                if (ui.Checkbox(label, enabled))
-                    settings.SetPseudoState(state, enabled);
+                ui.TextColored(m_Controller.UiBuilderTheme().Accent, "PREVIEW SETTINGS");
+                if (ui.Button("Landscape"))
+                    settings.ApplyOrientation(UiBuilderOrientation::Landscape);
                 ui.SameLine();
+                if (ui.Button("Portrait"))
+                    settings.ApplyOrientation(UiBuilderOrientation::Portrait);
+                const auto gameView = m_Controller.UiBuilderGameViewSize();
+                if (auto disabled = ui.BeginDisabled(!gameView || gameView->Width < 1.0F || gameView->Height < 1.0F);
+                    disabled)
+                    if (ui.Button("Match Game View") && gameView)
+                        (void)settings.MatchGameView(static_cast<std::uint32_t>(std::lround(gameView->Width)),
+                                                     static_cast<std::uint32_t>(std::lround(gameView->Height)));
+                ui.Separator();
+                std::uint64_t width = settings.Width;
+                std::uint64_t height = settings.Height;
+                bool changed = ui.DragUnsignedInteger("Width", width, 8.0, 64, 8192);
+                changed = ui.DragUnsignedInteger("Height", height, 8.0, 64, 8192) || changed;
+                if (changed)
+                {
+                    settings.Width = static_cast<std::uint32_t>(width);
+                    settings.Height = static_cast<std::uint32_t>(height);
+                    settings.Preset = UiBuilderResolutionPreset::Custom;
+                }
+                std::uint64_t referenceWidth = settings.ReferenceWidth;
+                std::uint64_t referenceHeight = settings.ReferenceHeight;
+                changed = ui.DragUnsignedInteger("Reference W", referenceWidth, 8.0, 64, 8192);
+                changed = ui.DragUnsignedInteger("Reference H", referenceHeight, 8.0, 64, 8192) || changed;
+                if (changed)
+                {
+                    settings.ReferenceWidth = static_cast<std::uint32_t>(referenceWidth);
+                    settings.ReferenceHeight = static_cast<std::uint32_t>(referenceHeight);
+                }
+                double dpi = settings.Dpi;
+                if (ui.DragScalar("DPI", dpi, 1.0, 48.0, 288.0))
+                    settings.Dpi = static_cast<float>(dpi);
+                const auto scaleModeName = [](const Keire::RuntimeUiScaleMode mode) noexcept -> std::string_view
+                {
+                    switch (mode)
+                    {
+                    case Keire::RuntimeUiScaleMode::ConstantPixels:
+                        return "Constant Pixels";
+                    case Keire::RuntimeUiScaleMode::ScaleWithViewport:
+                        return "Scale With Viewport";
+                    case Keire::RuntimeUiScaleMode::ConstantPhysicalSize:
+                        return "Constant Physical Size";
+                    }
+                    return "Scale With Viewport";
+                };
+                if (auto scaleMode = ui.BeginCombo("Scale Mode", scaleModeName(settings.ScaleMode)); scaleMode)
+                {
+                    constexpr std::array modes{
+                        Keire::RuntimeUiScaleMode::ConstantPixels,
+                        Keire::RuntimeUiScaleMode::ScaleWithViewport,
+                        Keire::RuntimeUiScaleMode::ConstantPhysicalSize,
+                    };
+                    for (const auto mode : modes)
+                    {
+                        if (ui.Selectable(scaleModeName(mode), settings.ScaleMode == mode))
+                            settings.ScaleMode = mode;
+                    }
+                }
+                (void)ui.SliderFloat("UI Scale", settings.UserScale, 0.5F, 2.0F);
+                (void)ui.SliderFloat("Match W / H", settings.MatchWidthOrHeight, 0.0F, 1.0F);
+                if (ui.LastItemState().Hovered)
+                    ui.SetTooltip("0 scales to reference width; 1 scales to reference height.", {.Delayed = true});
+                (void)ui.Checkbox("Safe Area", settings.ShowSafeArea);
+                double left = settings.SafeArea.Left;
+                double top = settings.SafeArea.Top;
+                double right = settings.SafeArea.Right;
+                double bottom = settings.SafeArea.Bottom;
+                changed = ui.DragScalar("Safe Left", left, 1.0, 0.0, static_cast<double>(settings.Width));
+                changed = ui.DragScalar("Safe Top", top, 1.0, 0.0, static_cast<double>(settings.Height)) || changed;
+                changed = ui.DragScalar("Safe Right", right, 1.0, 0.0, static_cast<double>(settings.Width)) || changed;
+                changed =
+                    ui.DragScalar("Safe Bottom", bottom, 1.0, 0.0, static_cast<double>(settings.Height)) || changed;
+                if (changed)
+                    settings.SafeArea = {static_cast<float>(left), static_cast<float>(top), static_cast<float>(right),
+                                         static_cast<float>(bottom)};
+                (void)ui.Checkbox("Rulers", settings.ShowRulers);
+                ui.SameLine();
+                (void)ui.Checkbox("Guides", settings.ShowGuides);
+                double verticalGuide = settings.VerticalGuide;
+                double horizontalGuide = settings.HorizontalGuide;
+                if (ui.DragScalar("Vertical Guide", verticalGuide, 1.0, -1.0, static_cast<double>(settings.Width)))
+                    settings.VerticalGuide = static_cast<float>(verticalGuide);
+                if (ui.DragScalar("Horizontal Guide", horizontalGuide, 1.0, -1.0, static_cast<double>(settings.Height)))
+                    settings.HorizontalGuide = static_cast<float>(horizontalGuide);
+                constexpr std::array pseudoStates{
+                    std::pair{"Hover", Keire::UiStylePseudoState::Hover},
+                    std::pair{"Active", Keire::UiStylePseudoState::Active},
+                    std::pair{"Focus", Keire::UiStylePseudoState::Focus},
+                    std::pair{"Disabled", Keire::UiStylePseudoState::Disabled},
+                    std::pair{"Checked", Keire::UiStylePseudoState::Checked},
+                };
+                ui.Separator();
+                ui.TextColored(m_Controller.UiBuilderTheme().MutedText, "Preview selected element state");
+                for (const auto& [label, state] : pseudoStates)
+                {
+                    auto enabled = settings.HasPseudoState(state);
+                    if (ui.Checkbox(label, enabled))
+                        settings.SetPseudoState(state, enabled);
+                }
+                ui.Separator();
+                const auto assets = m_Controller.UiBuilderAssets();
+                ui.SetNextItemWidth(160.0F);
+                (void)m_PreviewMaterialPicker.Draw(
+                    ui, m_Controller.UiBuilderAssetRecords(), m_PreviewMaterial,
+                    {.Label = "Preview Material",
+                     .EmptyLabel = "Default UI Material",
+                     .ExpectedType = Keire::MaterialAsset::StaticType(),
+                     .ResolveType = [assets](const Keire::AssetId id) -> std::optional<Keire::AssetTypeId>
+                     { return assets ? assets->TryGetType(id) : std::nullopt; },
+                     .Reveal = [this](const Keire::AssetId id) { m_Controller.RevealUiBuilderAsset(id); }});
+                if (ui.LastItemState().Hovered)
+                    ui.SetTooltip("Preview only. Assign the scene UI Document material separately.", {.Delayed = true});
+                if (m_PreviewMaterial && assets)
+                {
+                    const auto material =
+                        assets->Load<Keire::MaterialAsset>(m_PreviewMaterial, Keire::AssetPriority::High)
+                            .TryGetLoaded();
+                    const auto shader =
+                        material && material->Definition().Shader
+                            ? assets
+                                  ->Load<Keire::ShaderAsset>(material->Definition().Shader, Keire::AssetPriority::High)
+                                  .TryGetLoaded()
+                            : Keire::Ref<const Keire::ShaderAsset>{};
+                    if (shader && shader->Definition().ProgramTarget != "UI")
+                        ui.TextColoredWrapped(m_Controller.UiBuilderTheme().Error,
+                                              "This material is not a UI target; the runtime fallback is shown.");
+                    else if (!shader)
+                        ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText,
+                                              "Material shader pending; the runtime fallback is shown.");
+                }
             }
-            ui.TextColored(m_Controller.UiBuilderTheme().MutedText, "Pseudo-state preview");
         }
         settings.Normalize();
     }
@@ -355,6 +406,59 @@ namespace KeireEditor
         m_PreviewDiagnostic.clear();
     }
 
+    bool UiBuilderPanel::DrawGpuPreview(Keire::UiFrame& ui, const UiBuilderRetainedPreview& preview,
+                                        const Keire::UiItemRect canvas)
+    {
+        const auto renderer = m_Controller.UiBuilderRenderer();
+        if (!renderer || renderer->Mode() != Keire::RenderMode::Rendered || !preview.Runtime)
+            return false;
+        if (m_PreviewRenderer.Get() != renderer.Get())
+        {
+            m_PreviewRenderView.Reset();
+            if (m_PreviewRenderScene)
+                m_PreviewRenderScene->Close();
+            m_PreviewRenderScene.Reset();
+            m_PreviewRenderer = renderer;
+        }
+        if (!m_PreviewRenderView)
+        {
+            Keire::RenderSurfaceSpecification surface;
+            surface.Name = "UI Builder Preview";
+            surface.SampleCount = Keire::RenderSampleCount::One;
+            surface.ClearColor = {0.075F, 0.08F, 0.095F, 1.0F};
+            m_PreviewRenderView = renderer->CreateView(surface);
+            auto camera = m_PreviewRenderView->Camera();
+            camera.ClearColor = surface.ClearColor;
+            m_PreviewRenderView->SetCamera(camera);
+        }
+        if (!m_PreviewRenderScene)
+            m_PreviewRenderScene = Keire::CreateRef<Keire::Scene>(
+                Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("UI Builder Preview"));
+
+        const auto canvasSize = canvas.Size();
+        const auto renderSize = ResolveUiBuilderPreviewRenderSize(canvasSize, m_Controller.UiBuilderDisplayScale());
+        m_PreviewRenderView->Surface()->RequestSize(renderSize[0], renderSize[1]);
+        Keire::RuntimeUiRenderSubmission submission;
+        submission.Tree = preview.Runtime->Tree();
+        submission.Root = preview.Runtime->Root();
+        submission.Target = Keire::RuntimeUiRenderTarget::CameraOverlay;
+        submission.View = m_PreviewRenderView;
+        submission.Viewport = {static_cast<float>(m_PreviewSettings.Width),
+                               static_cast<float>(m_PreviewSettings.Height)};
+        submission.Material = m_PreviewMaterial;
+        renderer->SubmitRuntimeUiTarget(std::move(submission));
+        Keire::SceneRenderRequest request;
+        request.Scene = m_PreviewRenderScene;
+        request.View = m_PreviewRenderView;
+        request.DrawSceneContributions = false;
+        request.Environment.RequestedRenderPath = Keire::RenderPath::ForwardPlus;
+        request.Environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
+        request.Environment.SkyVisible = false;
+        renderer->Submit(std::move(request));
+        ui.DrawImage(m_PreviewRenderView->Surface(), canvas);
+        return true;
+    }
+
     Keire::RuntimeUiRect UiBuilderPanel::CanvasParentBounds(const Keire::AssetId parent) const noexcept
     {
         if (m_PreviewSnapshot)
@@ -391,6 +495,7 @@ namespace KeireEditor
             m_PreviewSnapshot.reset();
             m_PreviewDiagnostic = error.what();
         }
+        m_GesturePreviewSnapshot.reset();
         if (!m_PreviewSnapshot && !m_PreviewDiagnostic.empty())
             ui.TextColoredWrapped(theme.Error, "Preview unavailable: " + m_PreviewDiagnostic);
 
@@ -416,19 +521,11 @@ namespace KeireEditor
             return;
         }
 
-        const float availableWidth = std::max(1.0F, viewport.Size().Width - 24.0F);
-        const float availableHeight = std::max(1.0F, viewport.Size().Height - 24.0F);
-        const float fit = std::min(availableWidth / static_cast<float>(m_PreviewSettings.Width),
-                                   availableHeight / static_cast<float>(m_PreviewSettings.Height));
-        const float rasterScale = std::max(0.001F, fit * m_PreviewSettings.Zoom);
-        const Keire::UiSize canvasSize{static_cast<float>(m_PreviewSettings.Width) * rasterScale,
-                                       static_cast<float>(m_PreviewSettings.Height) * rasterScale};
-        const Keire::UiPosition canvasOrigin{
-            viewport.Minimum.X + (viewport.Size().Width - canvasSize.Width) * 0.5F + m_PreviewSettings.Pan.X,
-            viewport.Minimum.Y + (viewport.Size().Height - canvasSize.Height) * 0.5F + m_PreviewSettings.Pan.Y,
-        };
-        const Keire::UiItemRect canvas{canvasOrigin,
-                                       {canvasOrigin.X + canvasSize.Width, canvasOrigin.Y + canvasSize.Height}};
+        const auto placement =
+            ResolveUiBuilderPreviewPlacement(m_PreviewSettings, viewport, m_Controller.UiBuilderDisplayScale());
+        const Keire::Vector2 rasterScale = placement.RasterScale;
+        const Keire::UiItemRect canvas = placement.Canvas;
+        const Keire::UiPosition canvasOrigin = canvas.Minimum;
 
         if (auto target = ui.BeginDragTarget(canvas, "UiBuilderCanvasControlDrop"); target)
         {
@@ -444,8 +541,8 @@ namespace KeireEditor
                         const auto bounds = CanvasParentBounds(parent);
                         const auto created =
                             document.AddCanvasElement(parent, type, bounds,
-                                                      {(pointer.Position.X - canvasOrigin.X) / rasterScale,
-                                                       (pointer.Position.Y - canvasOrigin.Y) / rasterScale});
+                                                      {(pointer.Position.X - canvasOrigin.X) / rasterScale.X,
+                                                       (pointer.Position.Y - canvasOrigin.Y) / rasterScale.Y});
                         document.Select(created);
                         m_DraftElement = {};
                         m_Message = "Placed " + std::string(UiBuilderElementTypeName(type)) + " on the canvas.";
@@ -466,8 +563,8 @@ namespace KeireEditor
                     const auto bounds = CanvasParentBounds(parent);
                     const auto created =
                         document.AddCanvasCustomElement(parent, customType, bounds,
-                                                        {(pointer.Position.X - canvasOrigin.X) / rasterScale,
-                                                         (pointer.Position.Y - canvasOrigin.Y) / rasterScale});
+                                                        {(pointer.Position.X - canvasOrigin.X) / rasterScale.X,
+                                                         (pointer.Position.Y - canvasOrigin.Y) / rasterScale.Y});
                     document.Select(created);
                     m_DraftElement = {};
                     m_Message = "Placed " + customType + " on the canvas.";
@@ -493,8 +590,8 @@ namespace KeireEditor
             m_CanvasGesture.Gesture != UiBuilderCanvasGesture::None ? m_CanvasGesture.Gesture : hoveredSelectionGesture;
         if (cursorGesture == UiBuilderCanvasGesture::None && viewportState.Hovered && canvas.Contains(pointer.Position))
         {
-            const float x = (pointer.Position.X - canvasOrigin.X) / rasterScale;
-            const float y = (pointer.Position.Y - canvasOrigin.Y) / rasterScale;
+            const float x = (pointer.Position.X - canvasOrigin.X) / rasterScale.X;
+            const float y = (pointer.Position.Y - canvasOrigin.Y) / rasterScale.Y;
             const auto hovered =
                 std::ranges::find_if(m_PreviewSnapshot->Elements.rbegin(), m_PreviewSnapshot->Elements.rend(),
                                      [&](const auto& element)
@@ -546,8 +643,8 @@ namespace KeireEditor
 
             if (!hitElement)
             {
-                const float x = (pointer.Position.X - canvasOrigin.X) / rasterScale;
-                const float y = (pointer.Position.Y - canvasOrigin.Y) / rasterScale;
+                const float x = (pointer.Position.X - canvasOrigin.X) / rasterScale.X;
+                const float y = (pointer.Position.Y - canvasOrigin.Y) / rasterScale.Y;
                 for (auto element = m_PreviewSnapshot->Elements.rbegin(); element != m_PreviewSnapshot->Elements.rend();
                      ++element)
                 {
@@ -572,8 +669,8 @@ namespace KeireEditor
 
         if (m_CanvasGesture.Gesture != UiBuilderCanvasGesture::None && pointer.LeftDown)
         {
-            const float deltaX = (pointer.Position.X - m_CanvasGesture.StartPointer.X) / rasterScale;
-            const float deltaY = (pointer.Position.Y - m_CanvasGesture.StartPointer.Y) / rasterScale;
+            const float deltaX = (pointer.Position.X - m_CanvasGesture.StartPointer.X) / rasterScale.X;
+            const float deltaY = (pointer.Position.Y - m_CanvasGesture.StartPointer.Y) / rasterScale.Y;
             m_CanvasGesture.Changed = m_CanvasGesture.Changed ||
                                       std::abs(pointer.Position.X - m_CanvasGesture.StartPointer.X) >= 2.0F ||
                                       std::abs(pointer.Position.Y - m_CanvasGesture.StartPointer.Y) >= 2.0F;
@@ -617,6 +714,139 @@ namespace KeireEditor
             ui.DrawLine({viewport.Minimum.X, y}, {viewport.Maximum.X, y}, minorGrid);
         ui.DrawFilledRectangle(canvas, {0.075F, 0.08F, 0.095F, 1.0F});
         ui.DrawRectangle(canvas, {0.32F, 0.36F, 0.44F, 1.0F});
+        bool gpuPresented = false;
+        std::string gpuDiagnostic;
+        try
+        {
+            const UiBuilderRetainedPreview* renderedPreview = &*m_PreviewSnapshot;
+            if (m_CanvasGesture.Gesture != UiBuilderCanvasGesture::None && m_CanvasGesture.Changed)
+            {
+                auto candidate = document.Definition();
+                auto* element = FindElement(candidate.Root, m_CanvasGesture.Element);
+                if (!element)
+                    throw std::runtime_error("The canvas element was removed before the gesture completed.");
+                PersistUiBuilderCanvasGeometry(*element, m_CanvasGesture.ParentBounds, m_CanvasGesture.Draft);
+                std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>> styleSheets;
+                if (const auto assets = m_Controller.UiBuilderAssets())
+                    for (const auto asset : candidate.StyleSheets)
+                        if (const auto styleSheet =
+                                assets->Load<Keire::UiStyleSheetAsset>(asset, Keire::AssetPriority::High)
+                                    .TryGetLoaded())
+                            styleSheets.push_back(styleSheet);
+                std::vector<const Keire::UiVisualTreeAsset*> templateIdentities;
+                m_GesturePreviewSnapshot =
+                    BuildUiBuilderRetainedPreview(candidate, document.Selection(), m_PreviewSettings, styleSheets,
+                                                  CreateTemplateResolver(candidate, templateIdentities));
+                renderedPreview = &*m_GesturePreviewSnapshot;
+            }
+            gpuPresented = DrawGpuPreview(ui, *renderedPreview, canvas);
+        }
+        catch (const std::exception& error)
+        {
+            gpuDiagnostic = error.what();
+        }
+        if (!gpuPresented)
+            for (const auto& sourceCommand : m_PreviewSnapshot->DrawCommands)
+            {
+                auto command = sourceCommand;
+                if (m_CanvasGesture.Gesture != UiBuilderCanvasGesture::None && m_CanvasGesture.Changed &&
+                    std::ranges::find(m_CanvasGesture.RuntimeElements, command.Element) !=
+                        m_CanvasGesture.RuntimeElements.end())
+                {
+                    command.Rect = TransformUiBuilderCanvasPreviewRect(command.Rect, m_CanvasGesture.Initial,
+                                                                       m_CanvasGesture.Draft);
+                    constexpr float Epsilon = 0.01F;
+                    const bool clipOwnedBySelection =
+                        command.ClipRect.X >= m_CanvasGesture.Initial.X - Epsilon &&
+                        command.ClipRect.Y >= m_CanvasGesture.Initial.Y - Epsilon &&
+                        command.ClipRect.X + command.ClipRect.Width <=
+                            m_CanvasGesture.Initial.X + m_CanvasGesture.Initial.Width + Epsilon &&
+                        command.ClipRect.Y + command.ClipRect.Height <=
+                            m_CanvasGesture.Initial.Y + m_CanvasGesture.Initial.Height + Epsilon;
+                    if (clipOwnedBySelection)
+                    {
+                        command.ClipRect = TransformUiBuilderCanvasPreviewRect(
+                            command.ClipRect, m_CanvasGesture.Initial, m_CanvasGesture.Draft);
+                    }
+                    command.ClipRect = command.ClipRect.Intersect(m_CanvasGesture.ParentBounds);
+                }
+                if (command.Type == Keire::RuntimeUiDrawType::PushClip ||
+                    command.Type == Keire::RuntimeUiDrawType::PopClip)
+                {
+                    continue;
+                }
+                const auto rectangle = TransformPreviewRect(command.Rect, canvasOrigin, rasterScale);
+                const auto clipRectangle = TransformPreviewRect(command.ClipRect, canvasOrigin, rasterScale);
+                if (!IsPositiveFinite(rectangle) || !IsPositiveFinite(clipRectangle))
+                    continue;
+                [[maybe_unused]] auto commandClip = ui.PushClipRect(clipRectangle);
+                switch (command.Type)
+                {
+                case Keire::RuntimeUiDrawType::Quad:
+                {
+                    const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&command, 1U));
+                    const auto previewVertex = [&](const Keire::RenderBackend::RuntimeUiVertex& vertex)
+                    {
+                        return Keire::UiColoredVertex{{canvasOrigin.X + vertex.Position.X * rasterScale.X,
+                                                       canvasOrigin.Y + vertex.Position.Y * rasterScale.Y},
+                                                      ToUiColor(vertex.ColorValue)};
+                    };
+                    for (std::size_t first = 0; first + 2U < geometry.Vertices.size(); first += 3U)
+                    {
+                        ui.DrawFilledTriangle(previewVertex(geometry.Vertices[first]),
+                                              previewVertex(geometry.Vertices[first + 1U]),
+                                              previewVertex(geometry.Vertices[first + 2U]));
+                    }
+                    break;
+                }
+                case Keire::RuntimeUiDrawType::Image:
+                    ui.DrawFilledRectangle(rectangle, {0.12F, 0.15F, 0.2F, command.ColorValue.Alpha},
+                                           command.CornerRadius * std::min(rasterScale.X, rasterScale.Y));
+                    ui.DrawLine(rectangle.Minimum, rectangle.Maximum, {0.38F, 0.48F, 0.62F, 0.85F});
+                    ui.DrawLine({rectangle.Maximum.X, rectangle.Minimum.Y}, {rectangle.Minimum.X, rectangle.Maximum.Y},
+                                {0.38F, 0.48F, 0.62F, 0.85F});
+                    break;
+                case Keire::RuntimeUiDrawType::Text:
+                {
+                    if (!command.Asset && !command.PreparedFontBinding)
+                    {
+                        if (!m_FallbackFontAtlasImage)
+                        {
+                            const auto& atlas = *Keire::RenderBackend::RuntimeUiFallbackGlyphAtlas();
+                            m_FallbackFontAtlasImage = ui.CreateImage(atlas.Width, atlas.Height, atlas.Pixels);
+                        }
+                        const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&command, 1U));
+                        const auto previewVertex = [&](const Keire::RenderBackend::RuntimeUiVertex& vertex)
+                        {
+                            return Keire::UiTexturedVertex{{canvasOrigin.X + vertex.Position.X * rasterScale.X,
+                                                            canvasOrigin.Y + vertex.Position.Y * rasterScale.Y},
+                                                           {vertex.UV.X, vertex.UV.Y},
+                                                           ToUiColor(vertex.ColorValue)};
+                        };
+                        for (std::size_t first = 0; first + 2U < geometry.Vertices.size(); first += 3U)
+                            ui.DrawTexturedTriangle(m_FallbackFontAtlasImage, previewVertex(geometry.Vertices[first]),
+                                                    previewVertex(geometry.Vertices[first + 1U]),
+                                                    previewVertex(geometry.Vertices[first + 2U]));
+                        break;
+                    }
+                    const auto textClip =
+                        TransformPreviewRect(UiBuilderPreviewTextClip(command), canvasOrigin, rasterScale);
+                    if (!IsPositiveFinite(textClip))
+                        break;
+                    const float fontSize = std::max(1.0F, command.FontSize * std::min(rasterScale.X, rasterScale.Y));
+                    for (const auto& line : LayoutUiBuilderPreviewText(command))
+                        for (const auto& glyph : line.Glyphs)
+                            ui.DrawOverlayText({canvasOrigin.X + glyph.Position.X * rasterScale.X,
+                                                canvasOrigin.Y + glyph.Position.Y * rasterScale.Y},
+                                               ToUiColor(command.ColorValue), glyph.Text, fontSize, textClip);
+                    break;
+                }
+                case Keire::RuntimeUiDrawType::PushClip:
+                case Keire::RuntimeUiDrawType::PopClip:
+                    break;
+                }
+            }
+
         if (m_PreviewSettings.ShowSafeArea)
         {
             const Keire::RuntimeUiRect safe{
@@ -629,146 +859,56 @@ namespace KeireEditor
             };
             ui.DrawRectangle(TransformPreviewRect(safe, canvasOrigin, rasterScale), {0.28F, 0.72F, 1.0F, 0.8F}, 1.0F);
         }
-
-        for (const auto& sourceCommand : m_PreviewSnapshot->DrawCommands)
-        {
-            auto command = sourceCommand;
-            if (m_CanvasGesture.Gesture != UiBuilderCanvasGesture::None && m_CanvasGesture.Changed &&
-                std::ranges::find(m_CanvasGesture.RuntimeElements, command.Element) !=
-                    m_CanvasGesture.RuntimeElements.end())
-            {
-                command.Rect =
-                    TransformUiBuilderCanvasPreviewRect(command.Rect, m_CanvasGesture.Initial, m_CanvasGesture.Draft);
-                constexpr float Epsilon = 0.01F;
-                const bool clipOwnedBySelection =
-                    command.ClipRect.X >= m_CanvasGesture.Initial.X - Epsilon &&
-                    command.ClipRect.Y >= m_CanvasGesture.Initial.Y - Epsilon &&
-                    command.ClipRect.X + command.ClipRect.Width <=
-                        m_CanvasGesture.Initial.X + m_CanvasGesture.Initial.Width + Epsilon &&
-                    command.ClipRect.Y + command.ClipRect.Height <=
-                        m_CanvasGesture.Initial.Y + m_CanvasGesture.Initial.Height + Epsilon;
-                if (clipOwnedBySelection)
-                {
-                    command.ClipRect = TransformUiBuilderCanvasPreviewRect(command.ClipRect, m_CanvasGesture.Initial,
-                                                                           m_CanvasGesture.Draft);
-                }
-                command.ClipRect = command.ClipRect.Intersect(m_CanvasGesture.ParentBounds);
-            }
-            if (command.Type == Keire::RuntimeUiDrawType::PushClip || command.Type == Keire::RuntimeUiDrawType::PopClip)
-            {
-                continue;
-            }
-            const auto rectangle = TransformPreviewRect(command.Rect, canvasOrigin, rasterScale);
-            const auto clipRectangle = TransformPreviewRect(command.ClipRect, canvasOrigin, rasterScale);
-            if (!IsPositiveFinite(rectangle) || !IsPositiveFinite(clipRectangle))
-                continue;
-            [[maybe_unused]] auto commandClip = ui.PushClipRect(clipRectangle);
-            switch (command.Type)
-            {
-            case Keire::RuntimeUiDrawType::Quad:
-            {
-                const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&command, 1U));
-                const auto previewVertex = [&](const Keire::RenderBackend::RuntimeUiVertex& vertex)
-                {
-                    return Keire::UiColoredVertex{{canvasOrigin.X + vertex.Position.X * rasterScale,
-                                                   canvasOrigin.Y + vertex.Position.Y * rasterScale},
-                                                  ToUiColor(vertex.ColorValue)};
-                };
-                for (std::size_t first = 0; first + 2U < geometry.Vertices.size(); first += 3U)
-                {
-                    ui.DrawFilledTriangle(previewVertex(geometry.Vertices[first]),
-                                          previewVertex(geometry.Vertices[first + 1U]),
-                                          previewVertex(geometry.Vertices[first + 2U]));
-                }
-                break;
-            }
-            case Keire::RuntimeUiDrawType::Image:
-                ui.DrawFilledRectangle(rectangle, {0.12F, 0.15F, 0.2F, command.ColorValue.Alpha},
-                                       command.CornerRadius * rasterScale);
-                ui.DrawLine(rectangle.Minimum, rectangle.Maximum, {0.38F, 0.48F, 0.62F, 0.85F});
-                ui.DrawLine({rectangle.Maximum.X, rectangle.Minimum.Y}, {rectangle.Minimum.X, rectangle.Maximum.Y},
-                            {0.38F, 0.48F, 0.62F, 0.85F});
-                break;
-            case Keire::RuntimeUiDrawType::Text:
-            {
-                if (!command.Asset && !command.PreparedFontBinding)
-                {
-                    if (!m_FallbackFontAtlasImage)
-                    {
-                        const auto& atlas = *Keire::RenderBackend::RuntimeUiFallbackGlyphAtlas();
-                        m_FallbackFontAtlasImage = ui.CreateImage(atlas.Width, atlas.Height, atlas.Pixels);
-                    }
-                    const auto geometry = Keire::RenderBackend::BuildRuntimeUiGeometry(std::span(&command, 1U));
-                    const auto previewVertex = [&](const Keire::RenderBackend::RuntimeUiVertex& vertex)
-                    {
-                        return Keire::UiTexturedVertex{{canvasOrigin.X + vertex.Position.X * rasterScale,
-                                                        canvasOrigin.Y + vertex.Position.Y * rasterScale},
-                                                       {vertex.UV.X, vertex.UV.Y},
-                                                       ToUiColor(vertex.ColorValue)};
-                    };
-                    for (std::size_t first = 0; first + 2U < geometry.Vertices.size(); first += 3U)
-                        ui.DrawTexturedTriangle(m_FallbackFontAtlasImage, previewVertex(geometry.Vertices[first]),
-                                                previewVertex(geometry.Vertices[first + 1U]),
-                                                previewVertex(geometry.Vertices[first + 2U]));
-                    break;
-                }
-                const auto textClip =
-                    TransformPreviewRect(UiBuilderPreviewTextClip(command), canvasOrigin, rasterScale);
-                if (!IsPositiveFinite(textClip))
-                    break;
-                const float fontSize = std::max(1.0F, command.FontSize * rasterScale);
-                for (const auto& line : LayoutUiBuilderPreviewText(command))
-                    for (const auto& glyph : line.Glyphs)
-                        ui.DrawOverlayText({canvasOrigin.X + glyph.Position.X * rasterScale,
-                                            canvasOrigin.Y + glyph.Position.Y * rasterScale},
-                                           ToUiColor(command.ColorValue), glyph.Text, fontSize, textClip);
-                break;
-            }
-            case Keire::RuntimeUiDrawType::PushClip:
-            case Keire::RuntimeUiDrawType::PopClip:
-                break;
-            }
-        }
-
         if (m_PreviewSettings.ShowGuides)
         {
             const Keire::UiColor guide{0.22F, 0.78F, 1.0F, 0.9F};
             if (m_PreviewSettings.VerticalGuide >= 0.0F)
             {
-                const float x = canvasOrigin.X + m_PreviewSettings.VerticalGuide * rasterScale;
+                const float x = canvasOrigin.X + m_PreviewSettings.VerticalGuide * rasterScale.X;
                 ui.DrawLine({x, canvas.Minimum.Y}, {x, canvas.Maximum.Y}, guide, 1.0F);
             }
             if (m_PreviewSettings.HorizontalGuide >= 0.0F)
             {
-                const float y = canvasOrigin.Y + m_PreviewSettings.HorizontalGuide * rasterScale;
+                const float y = canvasOrigin.Y + m_PreviewSettings.HorizontalGuide * rasterScale.Y;
                 ui.DrawLine({canvas.Minimum.X, y}, {canvas.Maximum.X, y}, guide, 1.0F);
             }
         }
         if (m_PreviewSettings.ShowRulers)
         {
-            constexpr float RulerHeight = 18.0F;
-            constexpr float RulerWidth = 38.0F;
+            const float rulerTop = canvas.Minimum.Y - UiBuilderPreviewRulerHeight;
+            const float rulerLeft = canvas.Minimum.X - UiBuilderPreviewRulerWidth;
             const Keire::UiColor rulerBackground{0.035F, 0.04F, 0.055F, 0.88F};
             const Keire::UiColor rulerText{0.62F, 0.69F, 0.78F, 1.0F};
-            ui.DrawFilledRectangle({canvas.Minimum, {canvas.Maximum.X, canvas.Minimum.Y + RulerHeight}},
+            ui.DrawFilledRectangle({{canvas.Minimum.X, rulerTop}, {canvas.Maximum.X, canvas.Minimum.Y}},
                                    rulerBackground);
-            ui.DrawFilledRectangle({canvas.Minimum, {canvas.Minimum.X + RulerWidth, canvas.Maximum.Y}},
+            ui.DrawFilledRectangle({{rulerLeft, canvas.Minimum.Y}, {canvas.Minimum.X, canvas.Maximum.Y}},
                                    rulerBackground);
-            const float step = RulerStep(rasterScale);
+            ui.DrawFilledRectangle({{rulerLeft, rulerTop}, canvas.Minimum}, rulerBackground);
+            const float step = RulerStep(rasterScale.X);
             for (float value = 0.0F; value <= static_cast<float>(m_PreviewSettings.Width); value += step)
             {
-                const float x = canvasOrigin.X + value * rasterScale;
-                ui.DrawLine({x, canvas.Minimum.Y}, {x, canvas.Minimum.Y + 6.0F}, rulerText);
-                ui.DrawOverlayText({x + 2.0F, canvas.Minimum.Y + 5.0F}, rulerText,
-                                   std::to_string(static_cast<int>(std::lround(value))), 9.0F, canvas);
+                const float x = canvasOrigin.X + value * rasterScale.X;
+                ui.DrawLine({x, canvas.Minimum.Y - 6.0F}, {x, canvas.Minimum.Y}, rulerText);
+                ui.DrawOverlayText({x + 2.0F, rulerTop + 1.0F}, rulerText,
+                                   std::to_string(static_cast<int>(std::lround(value))), 9.0F, viewport);
             }
             for (float value = 0.0F; value <= static_cast<float>(m_PreviewSettings.Height); value += step)
             {
-                const float y = canvasOrigin.Y + value * rasterScale;
-                ui.DrawLine({canvas.Minimum.X, y}, {canvas.Minimum.X + 6.0F, y}, rulerText);
-                ui.DrawOverlayText({canvas.Minimum.X + 7.0F, y + 1.0F}, rulerText,
-                                   std::to_string(static_cast<int>(std::lround(value))), 9.0F, canvas);
+                const float y = canvasOrigin.Y + value * rasterScale.Y;
+                ui.DrawLine({canvas.Minimum.X - 6.0F, y}, {canvas.Minimum.X, y}, rulerText);
+                ui.DrawOverlayText({rulerLeft + 7.0F, y + 1.0F}, rulerText,
+                                   std::to_string(static_cast<int>(std::lround(value))), 9.0F, viewport);
             }
+        }
+
+        if (!gpuPresented)
+        {
+            const auto diagnostic =
+                gpuDiagnostic.empty()
+                    ? "GPU preview unavailable; images use placeholders and custom fonts use editor text."
+                    : "GPU preview unavailable: " + gpuDiagnostic;
+            ui.DrawOverlayText({canvas.Minimum.X + 8.0F, canvas.Minimum.Y + 8.0F}, theme.MutedText, diagnostic, 0.0F,
+                               viewport);
         }
 
         if (m_PreviewSnapshot->SelectedState && document.Selection() != document.Definition().Root.StableId)
@@ -779,7 +919,7 @@ namespace KeireEditor
                                                            canvasOrigin, rasterScale);
             const float selectionRadius =
                 std::clamp(m_PreviewSnapshot->SelectedState->Style.CornerRadius *
-                               m_PreviewSnapshot->SelectedState->LayoutScale * rasterScale,
+                               m_PreviewSnapshot->SelectedState->LayoutScale * std::min(rasterScale.X, rasterScale.Y),
                            0.0F, std::min(selectedRect.Size().Width, selectedRect.Size().Height) * 0.5F);
             auto selectionFill = theme.Accent;
             selectionFill.Alpha = 0.055F;

@@ -5,6 +5,16 @@
 
 **Build worlds. Keep control.**
 
+UI button and label text respects authored padding in runtime draw commands, including scaled and rotated elements.
+Use padding on controls for text clearance and on their containers for spacing around child controls.
+For C# control normalization, list bounds, and child reordering, see [managed control edge cases](Docs/Scripting/UiAndEvents.md#managed-control-edge-cases).
+
+Asset refresh picks up dependency changes published by import workers, including model material sections removed or
+replaced during reimport. Player builds use the refreshed dependency list without requiring a Library cache reset.
+
+Persistent game menus retain keyboard/gamepad focus across packaged scene changes when the new scene has no focused
+UI. See [UI Toolkit input handling](Docs/Scripting/UiAndEvents.md) for button click and submit events.
+
 UI and fullscreen Shader Graphs display a flat image preview with transparency, rather than a lit mesh.
 See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current scope.
 Shader Graph focus selects the graph's undo history. Edit output values through the expanded **Input Defaults**.
@@ -105,7 +115,8 @@ Kéire already includes substantial, integrated engine and authoring foundations
 
 - Project identity, locking, templates, recent-project state, compatibility checks, and transactional upgrades.
 - Versioned scenes, entities, components, prefabs, selection-preserving undo/redo, hierarchy and Inspector editing,
-  last-scene restoration, recovery, and Play Mode.
+  last-scene restoration, recovery, and Play Mode. Reopening a project restores its last opened scene;
+  closing the editor preserves that choice independently of its Play view preferences.
 - Stable asset identities, metadata sidecars, dependency tracking, deterministic imports, asynchronous runtime loading,
   hot reload, cooked packs, native player packaging, deterministic `.keireassetpackage` archives, transactional
   project package resolution, Asset Browser package export for selections and folders, selective asset imports,
@@ -318,7 +329,9 @@ Use File > Save Scene As to create a separate scene at a new path under `Assets/
 new external files to stabilize before assigning asset IDs; explicit asset creation and refresh remain immediate.
 The editor switches to the saved copy when the source document is unchanged. If you edit while the copy is saving,
 the editor keeps those edits in the original document and leaves the saved copy available in Project.
-Recovery warnings follow the saved copy's own recovery file. Asset Inspector file actions use full-width rows so
+Recovery warnings follow the saved copy's own recovery file. Normal autosaves do not display a restore warning.
+When reopening a scene with a recovery snapshot, automatic saves preserve it until you restore it, discard it,
+or explicitly save the scene. Asset Inspector file actions use full-width rows so
 Rename, Duplicate, and Move to Trash remain accessible in narrow panels.
 Inspector Duplicate and Move to Trash participate in Project asset undo/redo after their operations finish.
 
@@ -482,7 +495,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 99 guides and progress records grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 100 guides and progress records grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.4 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
@@ -556,8 +569,14 @@ preview to evaluate the actual effect. See [Shaders and Materials](Docs/ShadersA
 
 UI-target materials can be assigned in a scene UI Document's **UI Material** field. See the
 [UI Toolkit workflow](Docs/Scripting/UiAndEvents.md) for editor and C# usage.
-UI Builder previews use runtime text wrapping, truncation, alignment, and spacing. Use **Match Game View** to compare
-the same layout dimensions; verify authored font faces and UI materials in Game view.
+UI Builder renders its retained document through the runtime GPU path, including custom font and image assets. Choose
+**Preview options > Preview Material** to try a UI-target shader without changing the scene document's material.
+The picker is preview-only. Search the Builder hierarchy by name, type, class, or text, and the Library by control name.
+Use the compact toolbar for Fit/zoom; orientation, Match Game View, guides, and scaling are under Preview options.
+Assets load asynchronously and may show the runtime fallback until ready. If GPU rendering is unavailable, the Builder
+reports that and uses its editor-drawn fallback. Use **Match Game View** to compare the same logical layout dimensions.
+Builder raster sizes include display DPI. Views with camera-overlay UI stay at native pixel resolution for clarity;
+because the UI shares the scene surface, reduced render scale is bypassed for the whole affected view.
 For scene UI bindings, author the target property and source path in Builder, then publish typed values from a
 gameplay Behaviour through `UIDocument.SetBindingValue`; `TryGetBindingValue` reads TwoWay control updates.
 
@@ -567,3 +586,34 @@ the newer preview value. Material source persistence and undo continue through t
 VFX Shader Graph materials execute on CPU and GPU Sprite and Ribbon outputs as well as mesh particles. Assign the
 material in the VFX output's Material field; exposed parameters and material texture properties run in the authored
 shader. Volumetric output still uses built-in density shading. See [VFX](Docs/Vfx.md).
+
+Runtime game settings can switch `Keire.RenderSettings.LightingQuality` between Irradyn Quality, Balanced,
+Performance, and direct/environment lighting during Play or in a packaged player. See
+[the managed gameplay-services guide](Docs/Scripting/GameplayServices.md#runtime-lighting-quality) for persistence
+and hardware-fallback behavior.
+
+Editor latency baselines and current optimization work are recorded in [editor workflow performance](Docs/EditorWorkflowPerformance.md).
+Targeted imports preserve source order while visiting affected dependency chains once. Large batches index source
+owners; small interactive requests avoid constructing that index. After rebuilding an external
+development editor package, use Hub **Installs → Refresh registration** and wait for verification before opening it.
+Repeated script edits reuse an editor-owned Roslyn compiler. Builds still validate and publish a complete generation
+before queued Play begins; edits arriving during compilation are combined into one follow-up build without blocking
+the editor to restart it. The compiler is released when the script system closes.
+Duplicate notifications for identical C# contents are ignored; explicit Build Scripts still runs. Managed build timing
+in the Core log separates preparation, compiler setup, MSBuild, and generation publication.
+Headless test commands and measured limits are recorded in [editor workflow performance](Docs/EditorWorkflowPerformance.md).
+Import-result reconciliation uses indexed source identities, and targeted refresh snapshots only requested owners
+instead of copying the entire source-record list during that phase.
+Material creation reuses the source index published by shader warmup; current dependency validation and name-conflict
+checks run in the isolated worker. Player Build Support packaging builds and uses a Dist host asset tool for packing
+and verification, independently of the Development/Release/Dist player variants included in the bundle.
+
+Runtime UI keyboard menus should assign initial focus after resolving a live element (`RuntimeVisualElement.Focus()`).
+Submit then activates buttons and toggles through the same click path used by pointer input. See
+[UI scripting](Docs/Scripting/UiAndEvents.md) and [UI workspace](Docs/UiWorkspace.md) for focus and small-text guidance.
+
+
+Asset packages now retain compatibility records across Editor upgrades. **Window → Package Manager** shows imported
+assets, compatibility notices, and updates from the synchronized Hub library. Local imports have a review step.
+The [First Person Controller](Samples/KeireSandbox/Assets/FirstPersonController/README.md) includes a configured player
+prefab and input bindings; see [Asset Packages](Docs/AssetPackages.md) for building its Marketplace archive.

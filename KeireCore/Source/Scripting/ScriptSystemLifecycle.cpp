@@ -129,6 +129,7 @@ namespace Keire
     ScriptSystem::Impl::~Impl()
     {
         StopWorker();
+        CompilerServer.Stop();
         if (WorkScope)
         {
             WorkScope->Cancel();

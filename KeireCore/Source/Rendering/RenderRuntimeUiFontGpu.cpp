@@ -65,6 +65,12 @@ namespace Keire::RenderBackend
                 SDL_GPUTransferBuffer* transfer = nullptr;
                 try
                 {
+                    const auto mips = BuildRuntimeUiFontMips(*source);
+                    std::size_t totalBytes = 0;
+                    for (const auto& mip : mips)
+                        totalBytes += mip.Pixels.size();
+                    if (totalBytes > std::numeric_limits<std::uint32_t>::max())
+                        throw std::length_error("Runtime UI font mip upload exceeds the transfer buffer limit.");
                     SDL_GPUTextureCreateInfo information{};
                     information.type = SDL_GPU_TEXTURETYPE_2D;
                     information.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
@@ -72,7 +78,7 @@ namespace Keire::RenderBackend
                     information.width = source->Width;
                     information.height = source->Height;
                     information.layer_count_or_depth = 1;
-                    information.num_levels = 1;
+                    information.num_levels = static_cast<std::uint32_t>(mips.size());
                     information.sample_count = SDL_GPU_SAMPLECOUNT_1;
                     candidate = SDL_CreateGPUTexture(Device, &information);
                     if (!candidate)
@@ -81,7 +87,7 @@ namespace Keire::RenderBackend
 
                     SDL_GPUTransferBufferCreateInfo transferInformation{};
                     transferInformation.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-                    transferInformation.size = static_cast<std::uint32_t>(source->Pixels.size());
+                    transferInformation.size = static_cast<std::uint32_t>(totalBytes);
                     transfer = SDL_CreateGPUTransferBuffer(Device, &transferInformation);
                     if (!transfer)
                     {
@@ -92,12 +98,25 @@ namespace Keire::RenderBackend
                     if (!mapped)
                         throw std::runtime_error("SDL_MapGPUTransferBuffer(runtime UI font atlas) failed: " +
                                                  LastSdlError());
-                    std::memcpy(mapped, source->Pixels.data(), source->Pixels.size());
+                    std::size_t offset = 0;
+                    for (const auto& mip : mips)
+                    {
+                        std::memcpy(mapped + offset, mip.Pixels.data(), mip.Pixels.size());
+                        offset += mip.Pixels.size();
+                    }
                     SDL_UnmapGPUTransferBuffer(Device, transfer);
                     EnsureFrameUploadContext();
-                    const SDL_GPUTextureTransferInfo upload{transfer, 0, source->Width, source->Height};
-                    const SDL_GPUTextureRegion destination{candidate, 0, 0, 0, 0, 0, source->Width, source->Height, 1};
-                    SDL_UploadToGPUTexture(FrameUploadPass, &upload, &destination, false);
+                    offset = 0;
+                    for (std::size_t level = 0; level < mips.size(); ++level)
+                    {
+                        const auto& mip = mips[level];
+                        const SDL_GPUTextureTransferInfo upload{transfer, static_cast<std::uint32_t>(offset), mip.Width,
+                                                                mip.Height};
+                        const SDL_GPUTextureRegion destination{
+                            candidate, static_cast<std::uint32_t>(level), 0, 0, 0, 0, mip.Width, mip.Height, 1};
+                        SDL_UploadToGPUTexture(FrameUploadPass, &upload, &destination, false);
+                        offset += mip.Pixels.size();
+                    }
                     FrameUploadTransfers.push_back(transfer);
                     transfer = nullptr;
                 }

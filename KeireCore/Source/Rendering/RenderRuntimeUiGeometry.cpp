@@ -73,7 +73,9 @@ namespace Keire::RenderBackend
         }
 
         [[nodiscard]] std::vector<float> StyledAxis(const float minimum, const float maximum, const float shapeMinimum,
-                                                    const float shapeMaximum, const float radius, const bool detailed)
+                                                    const float shapeMaximum, const float radius,
+                                                    const float startCornerRadius, const float endCornerRadius,
+                                                    const bool detailed)
         {
             std::vector<float> result{minimum, maximum};
             if (detailed)
@@ -96,6 +98,23 @@ namespace Keire::RenderBackend
                         result.push_back(value);
                 }
             }
+            const auto appendCornerSamples =
+                [&](const float cornerStart, const float cornerRadius, const float direction)
+            {
+                if (cornerRadius <= 0.0F)
+                    return;
+                const float span = cornerRadius + 1.0F;
+                const auto segments = static_cast<std::size_t>(std::clamp(std::ceil(span / 2.0F), 1.0F, 32.0F));
+                for (std::size_t index = 0; index <= segments; ++index)
+                {
+                    const float amount = static_cast<float>(index) / static_cast<float>(segments);
+                    const float value = cornerStart + direction * span * amount;
+                    if (value > minimum && value < maximum)
+                        result.push_back(value);
+                }
+            };
+            appendCornerSamples(shapeMinimum, startCornerRadius, 1.0F);
+            appendCornerSamples(shapeMaximum, endCornerRadius, -1.0F);
             std::ranges::sort(result);
             const auto duplicate = std::ranges::unique(result, [](const float first, const float second)
                                                        { return std::abs(first - second) <= 0.0001F; });
@@ -161,8 +180,16 @@ namespace Keire::RenderBackend
                                       std::max(0.0F, command.Rect.Height - thickness * 2.0F)};
             if (inner.Empty())
                 return outer;
-            const float innerCoverage =
-                RuntimeUiRoundedCoverage(inner, std::max(0.0F, command.CornerRadius - thickness), position);
+            auto innerCommand = command;
+            innerCommand.Rect = inner;
+            innerCommand.CornerRadius = std::max(0.0F, command.CornerRadius - thickness);
+            const auto innerRadius = [thickness](const float radius)
+            { return radius > 0.0F ? std::max(0.0001F, radius - thickness) : 0.0F; };
+            innerCommand.CornerRadii.TopLeft = innerRadius(command.CornerRadii.TopLeft);
+            innerCommand.CornerRadii.TopRight = innerRadius(command.CornerRadii.TopRight);
+            innerCommand.CornerRadii.BottomRight = innerRadius(command.CornerRadii.BottomRight);
+            innerCommand.CornerRadii.BottomLeft = innerRadius(command.CornerRadii.BottomLeft);
+            const float innerCoverage = RoundedCoverage(innerCommand, position);
             return outer * (1.0F - innerCoverage);
         }
 
@@ -177,10 +204,19 @@ namespace Keire::RenderBackend
             const bool gradient = !image && !border && command.BackgroundGradient.Kind != RuntimeUiGradientKind::None;
             const float radius =
                 std::clamp(EffectiveRadius(command), 0.0F, std::min(command.Rect.Width, command.Rect.Height) * 0.5F);
-            const auto horizontal = StyledAxis(clipped.X, clipped.X + clipped.Width, command.Rect.X,
-                                               command.Rect.X + command.Rect.Width, radius, gradient);
-            const auto vertical = StyledAxis(clipped.Y, clipped.Y + clipped.Height, command.Rect.Y,
-                                             command.Rect.Y + command.Rect.Height, radius, gradient);
+            const float maximumRadius = std::min(command.Rect.Width, command.Rect.Height) * 0.5F;
+            const auto cornerRadius = [&](const float specified)
+            { return std::clamp(specified > 0.0F ? specified : command.CornerRadius, 0.0F, maximumRadius); };
+            const float topLeftRadius = cornerRadius(command.CornerRadii.TopLeft);
+            const float topRightRadius = cornerRadius(command.CornerRadii.TopRight);
+            const float bottomRightRadius = cornerRadius(command.CornerRadii.BottomRight);
+            const float bottomLeftRadius = cornerRadius(command.CornerRadii.BottomLeft);
+            const auto horizontal = StyledAxis(
+                clipped.X, clipped.X + clipped.Width, command.Rect.X, command.Rect.X + command.Rect.Width, radius,
+                std::max(topLeftRadius, bottomLeftRadius), std::max(topRightRadius, bottomRightRadius), gradient);
+            const auto vertical = StyledAxis(
+                clipped.Y, clipped.Y + clipped.Height, command.Rect.Y, command.Rect.Y + command.Rect.Height, radius,
+                std::max(topLeftRadius, topRightRadius), std::max(bottomLeftRadius, bottomRightRadius), gradient);
             for (std::size_t y = 0; y + 1U < vertical.size(); ++y)
             {
                 for (std::size_t x = 0; x + 1U < horizontal.size(); ++x)

@@ -100,9 +100,28 @@ namespace Keire
         std::optional<SceneObjectDefinition> SceneState::SnapshotObject(const EntityId id) const
         {
             RequireOwner("SnapshotObject");
-            const auto definition = Snapshot();
-            const auto found = std::ranges::find(definition.Objects, id.Value(), &SceneObjectDefinition::Id);
-            return found == definition.Objects.end() ? std::nullopt : std::optional<SceneObjectDefinition>(*found);
+            const auto* record = m_Impl->Find(id);
+            if (!record)
+                return std::nullopt;
+            SceneObjectDefinition object{id.Value(), record->Parent.Value(), record->Name, record->Active};
+            object.Layer = record->Layer;
+            object.Tags = record->Tags;
+            object.Components.reserve(record->Components.size() + record->MissingComponents.size());
+            for (const auto& component : record->Components)
+            {
+                const auto registration = m_Impl->ComponentsRegistry->Find(component->Type());
+                object.Components.push_back({component->Type(), registration->SchemaVersion, component->Enabled(),
+                                             EncodeComponentPropertyBag(registration->Serialize(*component))});
+                if (component->Type() == TransformComponent::StaticType())
+                {
+                    const auto transform = DynamicRefCast<TransformComponent>(component);
+                    object.Transform = {transform->LocalPosition(), transform->LocalRotation(),
+                                        transform->LocalScale()};
+                }
+            }
+            object.Components.insert(object.Components.end(), record->MissingComponents.begin(),
+                                     record->MissingComponents.end());
+            return object;
         }
 
         SceneDefinition SceneState::Snapshot() const
@@ -115,30 +134,8 @@ namespace Keire
                                    .Lighting = m_Impl->Lighting,
                                    .BakedLighting = m_Impl->BakedLightingAsset};
             result.Objects.reserve(m_Impl->Entities.size());
-            const auto hierarchy = m_Impl->HierarchyOrder();
-            for (const auto id : hierarchy)
-            {
-                const auto* record = m_Impl->Find(id);
-                SceneObjectDefinition object{id.Value(), record->Parent.Value(), record->Name, record->Active};
-                object.Layer = record->Layer;
-                object.Tags = record->Tags;
-                object.Components.reserve(record->Components.size() + record->MissingComponents.size());
-                for (const auto& component : record->Components)
-                {
-                    const auto registration = m_Impl->ComponentsRegistry->Find(component->Type());
-                    object.Components.push_back({component->Type(), registration->SchemaVersion, component->Enabled(),
-                                                 EncodeComponentPropertyBag(registration->Serialize(*component))});
-                    if (component->Type() == TransformComponent::StaticType())
-                    {
-                        const auto transform = DynamicRefCast<TransformComponent>(component);
-                        object.Transform = {transform->LocalPosition(), transform->LocalRotation(),
-                                            transform->LocalScale()};
-                    }
-                }
-                object.Components.insert(object.Components.end(), record->MissingComponents.begin(),
-                                         record->MissingComponents.end());
-                result.Objects.push_back(std::move(object));
-            }
+            for (const auto id : m_Impl->HierarchyOrder())
+                result.Objects.push_back(*SnapshotObject(id));
             return result;
         }
 
@@ -241,16 +238,15 @@ namespace Keire
             RequireOwner("DuplicateEntity");
             if (!Contains(id))
                 return {};
-            const auto snapshot = Snapshot();
             SceneDefinition duplicate = SceneAsset::EmptyDefinition("Duplicate");
             const auto originalRoot = Find(id);
             const auto originalParent = originalRoot.Parent();
             const auto originalTransform = originalRoot.GetComponent<TransformComponent>();
-            for (const auto& object : snapshot.Objects)
+            for (const auto original : m_Impl->HierarchyOrder())
             {
-                const EntityId original(object.Id);
                 if (!m_Impl->DescendsFrom(original, id))
                     continue;
+                auto object = *SnapshotObject(original);
                 if (original == id)
                 {
                     auto root = object;

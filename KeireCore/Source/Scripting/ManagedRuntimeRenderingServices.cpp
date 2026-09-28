@@ -16,6 +16,23 @@
 
 namespace Keire::Detail
 {
+    Entity ManagedRuntimeSceneServices::ResolveManagedEntity(const std::uint64_t world,
+                                                             const AssetId entity) const noexcept
+    {
+        if (world == 0 || !entity)
+            return {};
+        const auto scene = ManagedRuntimeSceneForWorld(world, entity);
+        const auto resolved = scene ? scene->FindEntity(EntityId(entity)) : Entity{};
+        return resolved && resolved.World() == world ? resolved : Entity{};
+    }
+
+    Entity ResolveManagedServiceEntity(IScriptRuntimeServices* services, const std::uint64_t world,
+                                       const AssetId entity) noexcept
+    {
+        const auto* sceneServices = dynamic_cast<const ManagedRuntimeSceneServices*>(services);
+        return sceneServices ? sceneServices->ResolveManagedEntity(world, entity) : Entity{};
+    }
+
     class ManagedMaterialParameterStore::Impl final
     {
       public:

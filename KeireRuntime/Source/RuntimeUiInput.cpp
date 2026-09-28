@@ -243,6 +243,29 @@ namespace KeireRuntime
     }
 
     Keire::Ref<Keire::ScenePresentationRuntime>
+    FocusedRuntimeUiPresentation(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                                 const Keire::Ref<Keire::ScenePresentationRuntime>& fallback)
+    {
+        const auto active = world ? Keire::Internal::ActiveRuntimePresentation(world) : fallback;
+        if (active && active->FocusedUiEntity())
+            return active;
+        if (!world)
+            return {};
+        const auto sessions = world->Sessions();
+        for (auto current = sessions.rbegin(); current != sessions.rend(); ++current)
+        {
+            const auto presentation = (*current)->Presentation();
+            const auto scene = (*current)->RuntimeScene();
+            if (!presentation || !scene)
+                continue;
+            const auto focused = presentation->FocusedUiEntity();
+            if (focused && world->IsPersistent(scene->FindEntity(focused)))
+                return presentation;
+        }
+        return {};
+    }
+
+    Keire::Ref<Keire::ScenePresentationRuntime>
     ProcessRuntimeUiEventStack(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
                                const Keire::Ref<Keire::ScenePresentationRuntime>& fallback, const SDL_Event& event,
                                const float scaleX, const float scaleY, RuntimeUiPointerState& pointer)
@@ -260,9 +283,7 @@ namespace KeireRuntime
                                    event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
         if (keyboardEvent)
         {
-            const auto focusedActive = active && active->FocusedUiEntity()
-                                           ? active
-                                           : Keire::Ref<Keire::ScenePresentationRuntime>{};
+            const auto focusedActive = FocusedRuntimeUiPresentation(world, fallback);
             (void)ProcessRuntimeUiEvent(focusedActive, event, scaleX, scaleY, pointer);
             return focusedActive;
         }

@@ -166,6 +166,7 @@ namespace Keire::Ui
     {
         std::string SourcePath;
         BindingMode Mode = BindingMode::OneWay;
+        // Empty values defer this update and preserve the target, including pending OneTime bindings.
         std::function<std::any()> Read;
         std::function<void(const std::any&)> Write;
         std::function<bool(VisualElement&, std::string_view, const std::any&, std::string&)> Apply;

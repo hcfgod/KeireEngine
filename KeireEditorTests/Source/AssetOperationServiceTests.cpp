@@ -1,12 +1,15 @@
 #include "Keire/Assets/AssetPipeline.h"
 #include "Keire/Assets/BuiltinAssetRegistry.h"
+#include "Keire/Assets/RenderingAssets.h"
 #include "Keire/Project/SharedShaderLibrary.h"
+#include "Keire/Rendering/ShaderGraph.h"
 #include "KeireClient/Editor/AssetOperationService.h"
 
 #include <doctest/doctest.h>
 
 #include <KeireEditorTests/EditorTestSupport.h>
 
+#include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -17,6 +20,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -113,7 +117,7 @@ namespace
                 repositoryRoot = parent;
             }
 
-            const auto configurationOutput = executable.parent_path().parent_path().filename().string();
+            const auto configurationOutput = builtWorker.parent_path().parent_path().filename().string();
             const auto separator = configurationOutput.find("-windows-");
             if (separator == std::string::npos)
                 throw std::runtime_error("Could not identify the asset-worker test configuration.");
@@ -138,6 +142,13 @@ namespace
                                               (releaseRuntime ? "Release" : "Debug") / "install/bin";
                 for (const auto* runtime : RuntimeFiles)
                     CopyRegularFile(runtimeDirectory / runtime, m_StagingRoot / runtime);
+                const auto compilerDirectory = repositoryRoot / "Build/Tools/ShaderCompiler";
+                if (std::filesystem::is_regular_file(compilerDirectory / "KeireShaderCompiler.exe"))
+                {
+                    constexpr std::array CompilerFiles{"KeireShaderCompiler.exe", "dxcompiler.dll", "dxil.dll"};
+                    for (const auto* file : CompilerFiles)
+                        CopyRegularFile(compilerDirectory / file, m_StagingRoot / file);
+                }
                 m_Executable = m_StagingRoot / builtWorker.filename();
             }
             catch (...)
@@ -226,6 +237,8 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         INFO(completion->Result.Diagnostic);
         CHECK(completion->Result.Success);
         CHECK(std::filesystem::is_regular_file(completion->SourceIndexPath));
+        const auto initialIndex = location / "initial-source-index.json";
+        std::filesystem::copy_file(completion->SourceIndexPath, initialIndex);
         CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Shaders/StaleAuxiliary.hlsl"));
         CHECK_FALSE(std::filesystem::exists(interrupted / "create-auxiliary.journal"));
 
@@ -262,6 +275,9 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Scenes/WorkerCreated.keirescene"));
         CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Shaders/WorkerAuxiliary.hlsl"));
 
+        // Startup warmup may target a shader installed after the last published index.
+        std::filesystem::copy_file(initialIndex, completion->SourceIndexPath,
+                                   std::filesystem::copy_options::overwrite_existing);
         operations.QueueAssetImport(created->Result.CreatedAsset, KeireEditor::AssetOperationPriority::ExplicitAction,
                                     {.Reason = "isolated-worker-targeted-test"});
         const auto targetedDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
@@ -280,6 +296,7 @@ TEST_CASE("Asset operation service runs the isolated worker and publishes a sour
         CHECK(targeted->WorkerOutput.find("kind=import-assets") != std::string::npos);
         CHECK(targeted->WorkerOutput.find("reason='isolated-worker-targeted-test'") != std::string::npos);
         CHECK(targeted->WorkerOutput.find("targets=1") != std::string::npos);
+        CHECK(targeted->WorkerOutput.find("rescanning before retry") != std::string::npos);
 
         operations.QueueLightingBake(created->Result.CreatedAsset, true,
                                      {.Reason = "isolated-worker-lighting-publication-test"});
@@ -627,6 +644,76 @@ TEST_CASE("Asset operation service coalesces material refresh generations before
     std::filesystem::remove_all(location, cleanupError);
 }
 
+TEST_CASE("Material creation uses the warmed source index and rejects offline conflicts")
+{
+    const auto location =
+        std::filesystem::temp_directory_path() / ("Keire-Material-Worker-" + Keire::AssetId::Generate().ToString());
+    struct Cleanup
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{location};
+    std::filesystem::create_directories(location);
+    auto project =
+        Keire::Project::Create({.Location = location, .Name = "Materials", .Template = Keire::ProjectTemplate::Empty});
+    const AssetWorkerTestRuntime worker(
+        KeireEditor::AssetOperationService::ResolveWorkerExecutable(KeireEditorTests::ExecutablePath));
+    KeireEditor::AssetOperationService operations(worker.Executable(), project->Root());
+    const auto finish = [&]
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::minutes(2);
+        while (operations.Busy() && std::chrono::steady_clock::now() < deadline)
+        {
+            operations.Update();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        operations.Update();
+        auto result = operations.TakeCompletion();
+        REQUIRE(result);
+        return *result;
+    };
+    operations.QueueCreateAsset("Warm.keireshadergraph",
+                                Keire::ShaderGraphAsset::EncodeSource(Keire::CreateDefaultShaderGraph()), {}, {});
+    const auto warmed = finish();
+    INFO(warmed.Result.Diagnostic);
+    REQUIRE(warmed.Result.Success);
+    REQUIRE(warmed.Result.CreatedAsset);
+    Keire::MaterialAuthoringDefinition material;
+    material.SchemaVersion = 5;
+    material.Shader = {Keire::MaterialShaderSourceKind::ShaderGraph, warmed.Result.CreatedAsset};
+    const auto bytes = Keire::MaterialAsset::EncodeAuthoringSource(material);
+    Keire::Detail::WriteTextFileAtomically(project->Root() / "Assets/Unrelated.cs", "// discover on normal refresh\n");
+    operations.QueueCreateAsset("Created.keirematerial", bytes, {}, {});
+    const auto created = finish();
+    INFO(created.Result.Diagnostic);
+    REQUIRE(created.Result.Success);
+    REQUIRE(created.Result.CreatedAsset);
+    CHECK_FALSE(std::filesystem::exists(project->Root() / "Assets/Unrelated.cs.keiremeta"));
+    const auto catalog = Keire::Detail::LoadCatalog(created.Result.Import.CatalogPath);
+    CHECK(std::ranges::find(catalog.Entries, warmed.Result.CreatedAsset, &Keire::Detail::CatalogEntry::Id) !=
+          catalog.Entries.end());
+    CHECK(std::ranges::find(catalog.Entries, created.Result.CreatedAsset, &Keire::Detail::CatalogEntry::Id) !=
+          catalog.Entries.end());
+
+    // A new file absent from the published index must never be overwritten by queued creation.
+    const auto occupied = project->Root() / "Assets/Occupied.keirematerial";
+    Keire::Detail::WriteTextFileAtomically(occupied, "external unsaved work");
+    operations.QueueCreateAsset("Occupied.keirematerial", bytes, {}, {});
+    CHECK_FALSE(finish().Result.Success);
+    CHECK(Keire::Detail::ReadTextFile(occupied, 1024) == "external unsaved work");
+
+    // Dependency edits after warmup must still be validated, rather than trusting cached cooked data.
+    Keire::Detail::WriteTextFileAtomically(project->Root() / "Assets/Warm.keireshadergraph", "invalid graph");
+    operations.QueueCreateAsset("Invalid.keirematerial", bytes, {}, {});
+    CHECK_FALSE(finish().Result.Success);
+    CHECK(std::filesystem::is_regular_file(project->Root() / "Assets/Created.keirematerial"));
+    operations.Shutdown();
+}
+
 TEST_CASE("Asset worker timing benchmark" * doctest::skip())
 {
     const auto location = std::filesystem::absolute(std::filesystem::path("Temp") /
@@ -643,8 +730,19 @@ TEST_CASE("Asset worker timing benchmark" * doctest::skip())
     std::filesystem::create_directories(location);
     auto project =
         Keire::Project::Create({.Location = location, .Name = "Timing", .Template = Keire::ProjectTemplate::Empty});
+#if defined(_WIN32)
+    char* environmentValue = nullptr;
+    std::size_t environmentLength = 0;
+    REQUIRE(_dupenv_s(&environmentValue, &environmentLength, "KEIRE_BENCHMARK_ASSET_WORKER") == 0);
+    const std::unique_ptr<char, decltype(&std::free)> environmentOwner(environmentValue, &std::free);
+    const auto* benchmarkWorker = environmentOwner.get();
+#else
+    const auto* benchmarkWorker = std::getenv("KEIRE_BENCHMARK_ASSET_WORKER");
+#endif
     const AssetWorkerTestRuntime worker(
-        KeireEditor::AssetOperationService::ResolveWorkerExecutable(KeireEditorTests::ExecutablePath));
+        benchmarkWorker && *benchmarkWorker
+            ? std::filesystem::path(benchmarkWorker)
+            : KeireEditor::AssetOperationService::ResolveWorkerExecutable(KeireEditorTests::ExecutablePath));
     for (int i = 0; i < 200; ++i)
         Keire::Detail::WriteTextFileAtomically(project->Root() / "Assets" / ("Seed" + std::to_string(i) + ".cs"),
                                                "// asset benchmark source\n" + std::string(2048, ' '));
@@ -662,6 +760,12 @@ TEST_CASE("Asset worker timing benchmark" * doctest::skip())
         REQUIRE(result);
         INFO(result->Result.Diagnostic);
         REQUIRE(result->Result.Success);
+        const auto timing = result->WorkerOutput.find("Asset worker timing:");
+        REQUIRE(timing != std::string::npos);
+        CHECK(result->WorkerOutput.find("index_publish_ms=", timing) != std::string::npos);
+        CHECK(result->WorkerOutput.find("cooking_ms=", timing) != std::string::npos);
+        std::cout << result->WorkerOutput.substr(timing, result->WorkerOutput.find('\n', timing) - timing) << '\n';
+        return result->Result.CreatedAsset;
     };
     operations.QueueImport(KeireEditor::AssetOperationPriority::ExplicitAction);
     finish();
@@ -691,5 +795,40 @@ TEST_CASE("Asset worker timing benchmark" * doctest::skip())
     std::ranges::sort(creation);
     std::ranges::sort(importing);
     std::cout << "ASSET_TIMING creation_median_ms=" << creation[2] << " import20_median_ms=" << importing[2] << '\n';
+    const auto graphStart = std::chrono::steady_clock::now();
+    operations.QueueCreateAsset("Benchmark.keireshadergraph",
+                                Keire::ShaderGraphAsset::EncodeSource(Keire::CreateDefaultShaderGraph()), {}, {});
+    const auto shader = finish();
+    REQUIRE(shader);
+    std::cout << "ASSET_TIMING cold_graph_ms="
+              << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - graphStart).count()
+              << '\n';
+    Keire::MaterialAuthoringDefinition material;
+    material.SchemaVersion = 5;
+    material.Shader = {Keire::MaterialShaderSourceKind::ShaderGraph, shader};
+    std::vector<double> materials;
+    for (int sample = 0; sample < 5; ++sample)
+    {
+        const auto started = std::chrono::steady_clock::now();
+        operations.QueueCreateAsset("Material" + std::to_string(sample) + ".keirematerial",
+                                    Keire::MaterialAsset::EncodeAuthoringSource(material), {}, {});
+        REQUIRE(finish());
+        materials.push_back(
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+    }
+    std::ranges::sort(materials);
+    std::cout << "ASSET_TIMING warm_material_median_ms=" << materials[2] << '\n';
+    const auto indexPath = project->Root() / "Library/AssetCache/Runtime/source-index.json";
+    const auto openStarted = std::chrono::steady_clock::now();
+    auto indexed = Keire::Detail::AssetDatabaseWorkerAccess::CreateFromSourceIndex(
+        {.ProjectRoot = project->Root(), .Importers = Keire::CreateBuiltinAssetImporters()}, indexPath);
+    const auto opened = std::chrono::steady_clock::now();
+    const auto indexedCount = indexed->Records().size();
+    CHECK(indexed->Refresh() == indexedCount);
+    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*indexed, indexPath);
+    std::cout << "ASSET_TIMING driver_index_open_ms="
+              << std::chrono::duration<double, std::milli>(opened - openStarted).count()
+              << " driver_redundant_refresh_publish_ms="
+              << std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - opened).count() << '\n';
     operations.Shutdown();
 }

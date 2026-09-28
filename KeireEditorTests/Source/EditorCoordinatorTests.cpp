@@ -420,6 +420,7 @@ TEST_CASE("managed-runtime coordinator schedules builds and tears down phased st
         .ReportBuildError = [&](std::string message) { errors.push_back(std::move(message)); },
         .DetachRuntimeServices = [&] { ++detaches; },
         .ResetRuntimeInput = [&] { ++resets; },
+        .IsBuildActive = [] { return false; },
     });
     const auto callback = coordinator.CaptureCallbackToken();
     REQUIRE(callback.Current());
@@ -452,6 +453,115 @@ TEST_CASE("managed-runtime coordinator schedules builds and tears down phased st
     CHECK(coordinator.ShutdownComplete());
     CHECK_FALSE(callback.Current());
     CHECK_THROWS_AS(coordinator.Update(0.0), std::logic_error);
+}
+
+TEST_CASE("managed-runtime coordinator coalesces edits without restarting an active build")
+{
+    unsigned starts = 0;
+    unsigned polls = 0;
+    bool active = true;
+    KeireEditor::EditorManagedRuntimeCoordinator coordinator({
+        .StartBuild =
+            [&]
+        {
+            ++starts;
+            active = true;
+        },
+        .PollBuild = [&] { ++polls; },
+        .ReportBuildError = [](std::string) { FAIL("Unexpected build error"); },
+        .DetachRuntimeServices = [] {},
+        .ResetRuntimeInput = [] {},
+        .IsBuildActive = [&] { return active; },
+    });
+    for (unsigned edit = 0; edit < 10; ++edit)
+    {
+        coordinator.ScheduleBuild(0.0);
+        coordinator.Update(0.1);
+        CHECK(coordinator.HasPendingBuild());
+    }
+    CHECK(starts == 0);
+    CHECK(polls == 10);
+    active = false;
+    coordinator.Update(0.0);
+    CHECK(starts == 1);
+    CHECK_FALSE(coordinator.HasPendingBuild());
+    coordinator.Update(0.1);
+    CHECK(starts == 1);
+    coordinator.ScheduleBuild(0.0);
+    coordinator.Shutdown();
+    CHECK_FALSE(coordinator.HasPendingBuild());
+}
+
+TEST_CASE("managed-runtime coordinator ignores duplicate script contents without hiding edits")
+{
+    unsigned builds = 0;
+    KeireEditor::EditorManagedRuntimeCoordinator coordinator({
+        .StartBuild = [&] { ++builds; },
+        .PollBuild = [] {},
+        .ReportBuildError = [](std::string) { FAIL("Unexpected build error"); },
+        .DetachRuntimeServices = [] {},
+        .ResetRuntimeInput = [] {},
+        .IsBuildActive = [] { return false; },
+    });
+    const auto root =
+        std::filesystem::temp_directory_path() / ("KeireScriptNotifications-" + Keire::AssetId::Generate().ToString());
+    std::filesystem::create_directories(root);
+    struct Cleanup
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } cleanup{root};
+    const auto source = root / "Game.cs";
+    const auto notify = [&]
+    {
+        if (coordinator.ObserveSourceChange(source))
+            coordinator.ScheduleBuild(0.0);
+        coordinator.Update(0.0);
+    };
+    std::ofstream(source) << "first";
+    notify();
+    CHECK(builds == 1);
+    notify();
+    CHECK(builds == 1);
+    const auto originalTime = std::filesystem::last_write_time(source);
+    std::ofstream(source) << "other";
+    std::filesystem::last_write_time(source, originalTime);
+    notify();
+    CHECK(builds == 2);
+    std::filesystem::remove(source);
+    notify();
+    CHECK(builds == 3);
+    notify();
+    CHECK(builds == 3);
+    std::ofstream(source) << "other";
+    notify();
+    CHECK(builds == 4);
+    // A failed read never poisons the next notification or suppresses the compiler's diagnostic.
+    CHECK(coordinator.ObserveSourceChange(root));
+    CHECK(coordinator.ObserveSourceChange(root));
+    coordinator.ScheduleBuild(0.0);
+    coordinator.Update(0.0);
+    CHECK(builds == 5);
+    bool rejected = false;
+    std::thread worker(
+        [&]
+        {
+            try
+            {
+                (void)coordinator.ObserveSourceChange(source);
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
+        });
+    worker.join();
+    CHECK(rejected);
+    CHECK_FALSE(coordinator.ObserveSourceChange(source));
 }
 
 TEST_CASE("play-mode coordinator preserves transition order and invalidates late callbacks")
@@ -569,6 +679,7 @@ TEST_CASE("extracted runtime coordinators reject off-owner updates before callba
         .ReportBuildError = [](std::string) {},
         .DetachRuntimeServices = [] {},
         .ResetRuntimeInput = [] {},
+        .IsBuildActive = [] { return false; },
     });
     KeireEditor::EditorPlayModeCoordinator play({
         .ProcessSceneTransition = [&] { ++callbacks; },

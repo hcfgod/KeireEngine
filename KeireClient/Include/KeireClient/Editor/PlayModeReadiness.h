@@ -15,10 +15,17 @@ namespace KeireEditor
 
     [[nodiscard]] constexpr PlayModeReadiness
     EvaluatePlayModeReadiness(const bool requiresManagedRuntime, const bool runtimeHostAvailable,
-                              const Keire::ManagedBuildState buildState,
-                              const Keire::ManagedReloadState reloadState) noexcept
+                              const Keire::ManagedBuildState buildState, const Keire::ManagedReloadState reloadState,
+                              const bool latestBuildReloadRequested = true) noexcept
     {
-        if (!requiresManagedRuntime || reloadState == Keire::ManagedReloadState::Active)
+        if (!requiresManagedRuntime)
+            return PlayModeReadiness::Ready;
+        if (buildState == Keire::ManagedBuildState::Generating || buildState == Keire::ManagedBuildState::Compiling ||
+            buildState == Keire::ManagedBuildState::Publishing)
+            return PlayModeReadiness::WaitingForManagedRuntime;
+        if (buildState == Keire::ManagedBuildState::Succeeded && !latestBuildReloadRequested)
+            return PlayModeReadiness::WaitingForManagedRuntime;
+        if (reloadState == Keire::ManagedReloadState::Active)
             return PlayModeReadiness::Ready;
         if (!runtimeHostAvailable || buildState == Keire::ManagedBuildState::Failed ||
             buildState == Keire::ManagedBuildState::Cancelled || reloadState == Keire::ManagedReloadState::Failed ||

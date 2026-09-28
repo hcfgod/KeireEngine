@@ -217,8 +217,29 @@ public readonly record struct RenderEnvironmentSettings
     public float DirectionalShadowSplitLambda { get; init; }
 }
 
+/// <summary>Requested runtime lighting preset. Hardware feature fallback remains automatic.</summary>
+public enum LightingQuality : byte
+{
+    Quality,
+    Balanced,
+    Performance,
+    DirectEnvironment
+}
+
 public static class RenderSettings
 {
+    /// <summary>Sets Irradyn with Deferred Hybrid, or direct/environment lighting with Forward+.
+    /// Other environment settings are preserved; this does not write project settings.</summary>
+    public static LightingQuality LightingQuality
+    {
+        get => NativeWorld.GetLightingQuality();
+        set
+        {
+            if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+            NativeWorld.SetLightingQuality(value);
+        }
+    }
+
     public static RenderEnvironmentSettings Current
     {
         get => NativeWorld.GetRenderEnvironment();

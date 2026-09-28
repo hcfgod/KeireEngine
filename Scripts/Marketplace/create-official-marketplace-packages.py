@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build and inspect the five deterministic first-party Kéire Marketplace packages."""
+"""Build and inspect the deterministic first-party Kéire Marketplace packages."""
 
 from __future__ import annotations
 
@@ -42,6 +42,15 @@ class PackageDefinition:
 
 
 PACKAGES = (
+    PackageDefinition(
+        "first-person-controller",
+        "com.keire.official.first-person-controller",
+        "First Person Controller",
+        "Drop-in FPS player with camera, collision movement, sprint, jump, keyboard/mouse and gamepad input.",
+        "assetImport",
+        ("Assets/FirstPersonController",),
+        ("Assets/FirstPersonController/FirstPersonPlayer.keireprefab", "Assets/FirstPersonController/README.md"),
+    ),
     PackageDefinition(
         "keire-sandbox-content-pack",
         "com.keire.official.sandbox-content",
@@ -355,7 +364,7 @@ def create_package(
     project: pathlib.Path,
     output_root: pathlib.Path,
     asset_tool: pathlib.Path,
-    tracked_files: set[pathlib.Path],
+    tracked_files: set[pathlib.Path] | None,
     definition: PackageDefinition,
 ) -> dict[str, object]:
     destination = output_root / definition.slug
@@ -433,6 +442,8 @@ def parse_arguments() -> argparse.Namespace:
     repository = pathlib.Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--asset-tool", type=pathlib.Path)
+    parser.add_argument("--package", choices=[definition.slug for definition in PACKAGES])
+    parser.add_argument("--include-untracked", action="store_true", help="Include new source files in selected roots for local unsigned preview builds.")
     parser.add_argument(
         "--project", type=pathlib.Path, default=repository / "Samples" / "KeireSandbox"
     )
@@ -454,7 +465,7 @@ def main() -> int:
         if arguments.asset_tool
         else locate_asset_tool(repository)
     )
-    tracked_files = tracked_project_files(repository, project)
+    tracked_files = None if arguments.include_untracked else tracked_project_files(repository, project)
     if output.exists():
         raise FileExistsError(
             f"Refusing to replace existing official release set: {output}"
@@ -466,7 +477,7 @@ def main() -> int:
             create_package(
                 repository, project, output, asset_tool, tracked_files, definition
             )
-            for definition in PACKAGES
+            for definition in PACKAGES if arguments.package is None or definition.slug == arguments.package
         ]
         index = {
             "artifacts": artifacts,

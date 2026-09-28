@@ -1306,6 +1306,10 @@ namespace Keire
                     }
                     laneDefines.emplace_back(*passLane.Define, "1");
                 }
+                // At most three formats are accepted. Join all six stage jobs before advancing the pass,
+                // retaining the staged source and define storage even when a compiler fails.
+                std::vector<std::pair<std::future<std::vector<std::byte>>, std::future<std::vector<std::byte>>>> stages;
+                stages.reserve(specification.Formats.size());
                 for (const auto format : specification.Formats)
                 {
                     const auto name = format == ShaderBinaryFormat::Dxil    ? std::string_view("DXIL")
@@ -1316,28 +1320,24 @@ namespace Keire
                     const auto vertexPath = temporary.Path() / ("vertex-" + stem + extension);
                     const auto fragmentPath = temporary.Path() / ("fragment-" + stem + extension);
                     auto vertex = std::async(std::launch::async,
-                                             [&]
+                                             [&, name, vertexPath]
                                              {
                                                  return Compile(compiler, source, name, "vertex",
                                                                 definition.VertexEntry, vertexPath, stagedIncludeRoots,
                                                                 laneDefines, specification, temporary.Path());
                                              });
-                    std::vector<std::byte> fragment;
-                    std::exception_ptr fragmentFailure;
-                    try
-                    {
-                        fragment = Compile(compiler, source, name, "fragment", definition.FragmentEntry, fragmentPath,
+                    auto fragment = std::async(
+                        std::launch::async,
+                        [&, name, fragmentPath]
+                        {
+                            return Compile(compiler, source, name, "fragment", definition.FragmentEntry, fragmentPath,
                                            stagedIncludeRoots, laneDefines, specification, temporary.Path());
-                    }
-                    catch (...)
-                    {
-                        fragmentFailure = std::current_exception();
-                    }
-                    auto vertexBytes = vertex.get();
-                    if (fragmentFailure)
-                        std::rethrow_exception(fragmentFailure);
-                    definition.Variants.push_back({format, std::move(vertexBytes), std::move(fragment), passLane.Role});
+                        });
+                    stages.emplace_back(std::move(vertex), std::move(fragment));
                 }
+                for (std::size_t index = 0; index < stages.size(); ++index)
+                    definition.Variants.push_back({specification.Formats[index], stages[index].first.get(),
+                                                   stages[index].second.get(), passLane.Role});
             }
 
             const auto findSpirv = [&definition](const std::string_view role)

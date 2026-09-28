@@ -1,4 +1,5 @@
 #include "Keire/Core.h"
+#include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
 
@@ -147,4 +148,21 @@ TEST_CASE("Prefab composition resolves variants, nesting, mappings, and cycles d
     assets.emplace(cycleAId, Keire::CreateRef<Keire::PrefabAsset>(cycleA));
     assets.emplace(cycleBId, Keire::CreateRef<Keire::PrefabAsset>(cycleB));
     CHECK_THROWS_AS((void)Keire::ComposePrefab(cycleAId, resolver), std::invalid_argument);
+}
+
+TEST_CASE("first person package prefab and input survive native decoding")
+{
+    const auto root = std::filesystem::path("Samples/KeireSandbox/Assets/FirstPersonController");
+    const auto prefab = Keire::PrefabAsset::Decode(Bytes(KeireTests::ReadFile(root / "FirstPersonPlayer.keireprefab")));
+    const auto& objects = prefab->Definition().Template.Objects;
+    REQUIRE(objects.size() == 2);
+    CHECK(objects[1].Parent == objects[0].Id);
+    CHECK(objects[0].Components.size() == 2);
+    CHECK(objects[1].Components.size() == 4);
+    const auto input =
+        Keire::InputActionAsset::Decode(Bytes(KeireTests::ReadFile(root / "FirstPersonInput.keireinput")));
+    REQUIRE(input);
+    const auto assembly =
+        Keire::ManagedAssemblyAsset::Decode(Bytes(KeireTests::ReadFile(root / "FirstPerson.keireasm")));
+    CHECK(assembly->Definition().Name == "KeireFirstPerson");
 }

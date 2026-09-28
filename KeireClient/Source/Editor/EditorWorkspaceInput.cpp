@@ -1028,6 +1028,14 @@ Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ManagedRuntimeScene(const Keire::
     return session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
 }
 
+Keire::Ref<Keire::Scene> EditorWorkspaceLayer::ManagedRuntimeSceneForWorld(const std::uint64_t world,
+                                                                           const Keire::AssetId entity) const noexcept
+{
+    const auto session =
+        m_PlayRuntimeWorld ? m_PlayRuntimeWorld->SessionForWorld(world) : ManagedRuntimeSession(entity);
+    return session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
+}
+
 Keire::Ref<Keire::AssetSystem> EditorWorkspaceLayer::ManagedRuntimeAssets() const noexcept { return Owner().Assets(); }
 
 std::optional<Keire::ManagedRaycastHit>

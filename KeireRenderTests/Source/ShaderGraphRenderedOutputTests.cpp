@@ -6,6 +6,7 @@
 #include "Keire/Rendering/MaterialGraph.h"
 #include "Keire/Rendering/ShaderGraph.h"
 #include "Keire/Scenes/Scene.h"
+#include "Keire/Ui/UiFontAssets.h"
 #include "Keire/Vfx/VfxSystem.h"
 #include "KeireInternal/RenderInternal.h"
 
@@ -122,7 +123,8 @@ namespace
     {
       public:
         explicit LiveShaderGraphFixture(const Keire::ShaderGraphTarget target = Keire::ShaderGraphTarget::Material,
-                                        const std::optional<Keire::ShaderGraphTemplate> preset = {})
+                                        const std::optional<Keire::ShaderGraphTemplate> preset = {},
+                                        const bool animatedUi = false)
             : Root(std::filesystem::temp_directory_path() /
                    ("Keire-LiveShaderGraphTests-" +
                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))),
@@ -147,13 +149,33 @@ namespace
                 parameter.Value = Keire::Color{0.0F, 1.0F, 0.0F, 1.0F};
                 graph.Nodes.push_back(std::move(parameter));
                 const auto output = std::ranges::find(graph.Nodes.back().Pins, "Value", &Keire::ShaderGraphPin::Name);
-                const auto input =
-                    std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::ShaderGraphPin::Name);
+                const auto input = std::ranges::find(graph.Nodes.front().Pins,
+                                                     Target == Keire::ShaderGraphTarget::Ui ? "Color" : "BaseColor",
+                                                     &Keire::ShaderGraphPin::Name);
                 if (output == graph.Nodes.back().Pins.end() || input == graph.Nodes.front().Pins.end())
                     throw std::logic_error("The default Shader Graph does not expose a BaseColor input.");
                 graph.Connections.push_back({Keire::AssetId::Generate(),
                                              {graph.Nodes.back().Id, output->Id},
                                              {graph.Nodes.front().Id, input->Id}});
+            }
+            if (animatedUi)
+            {
+                auto time = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Time);
+                auto fraction = Keire::CreateShaderGraphNode(Keire::ShaderGraphNodeKind::Fraction);
+                const auto seconds = std::ranges::find(time.Pins, "Seconds", &Keire::ShaderGraphPin::Name);
+                const auto value = std::ranges::find(fraction.Pins, "Value", &Keire::ShaderGraphPin::Name);
+                const auto result = std::ranges::find(fraction.Pins, "Result", &Keire::ShaderGraphPin::Name);
+                const auto opacity =
+                    std::ranges::find(graph.Nodes.front().Pins, "Opacity", &Keire::ShaderGraphPin::Name);
+                if (seconds == time.Pins.end() || value == fraction.Pins.end() || result == fraction.Pins.end() ||
+                    opacity == graph.Nodes.front().Pins.end())
+                    throw std::logic_error("UI animation test pins are unavailable.");
+                graph.Connections.push_back(
+                    {Keire::AssetId::Generate(), {time.Id, seconds->Id}, {fraction.Id, value->Id}});
+                graph.Connections.push_back(
+                    {Keire::AssetId::Generate(), {fraction.Id, result->Id}, {graph.Nodes.front().Id, opacity->Id}});
+                graph.Nodes.push_back(std::move(time));
+                graph.Nodes.push_back(std::move(fraction));
             }
             Graph = Database->CreateAsset("Live.keireshadergraph", graphImporter,
                                           Keire::ShaderGraphAsset::EncodeSource(graph));
@@ -190,7 +212,9 @@ namespace
             parameter.Value = Keire::Color{1.0F, 0.0F, 0.0F, 1.0F};
             graph.Nodes.push_back(std::move(parameter));
             const auto output = std::ranges::find(graph.Nodes.back().Pins, "Value", &Keire::ShaderGraphPin::Name);
-            const auto input = std::ranges::find(graph.Nodes.front().Pins, "BaseColor", &Keire::ShaderGraphPin::Name);
+            const auto input = std::ranges::find(graph.Nodes.front().Pins,
+                                                 Target == Keire::ShaderGraphTarget::Ui ? "Color" : "BaseColor",
+                                                 &Keire::ShaderGraphPin::Name);
             if (output == graph.Nodes.back().Pins.end() || input == graph.Nodes.front().Pins.end())
                 return false;
             graph.Connections.push_back(
@@ -271,6 +295,193 @@ namespace
         std::vector<std::uint8_t> Baseline;
         std::vector<std::uint8_t> Effect;
         std::vector<std::uint8_t> Cleared;
+    };
+
+    struct UiPreviewResults final
+    {
+        std::vector<std::uint8_t> CustomFont;
+        std::vector<std::uint8_t> ZoomedFont;
+        std::vector<std::uint8_t> RestoredFont;
+        std::vector<std::uint8_t> FallbackFont;
+        std::vector<std::uint8_t> Material;
+        std::vector<std::uint8_t> RevisedMaterial;
+        bool RevisionPublished = false;
+        int MinimumGreen = 255;
+        int MaximumGreen = 0;
+        bool Paused = false;
+    };
+
+    class UiPreviewCaptureLayer final : public Keire::Layer
+    {
+      public:
+        UiPreviewCaptureLayer(LiveShaderGraphFixture& fixture, std::shared_ptr<UiPreviewResults> results,
+                              const bool animated = false)
+            : Layer("UI asset preview"), m_Fixture(fixture), m_Results(std::move(results)), m_Animated(animated)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            if (m_Animated)
+                Owner().GetTime().SetPaused(true);
+            m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                     Keire::SceneAsset::EmptyDefinition("UI asset preview"),
+                                                     Keire::ComponentRegistry::CreateDefault());
+            m_View = Owner().Renderer()->CreateView({.Name = "UI preview",
+                                                     .Width = SurfaceSize,
+                                                     .Height = SurfaceSize,
+                                                     .ClearColor = {0, 0, 0, 1},
+                                                     .SampleCount = Keire::RenderSampleCount::One});
+            auto camera = m_View->Camera();
+            camera.ClearColor = {0, 0, 0, 1};
+            m_View->SetCamera(camera);
+            const auto assets = Owner().Assets();
+            const auto face = Keire::AssetId::Generate();
+            const auto family = Keire::AssetId::Generate();
+            const auto image = Keire::AssetId::Generate();
+            REQUIRE(assets->PublishDevelopmentAsset(
+                face, Keire::CreateRef<Keire::UiFontFaceAsset>(ReadAssetBytes(
+                          std::filesystem::current_path() / "KeireHubContent/Fonts/Inter-Variable.ttf"))));
+            Keire::UiFontFamilyDefinition font;
+            font.Name = "Preview font";
+            font.Faces.push_back({.Face = face});
+            REQUIRE(assets->PublishDevelopmentAsset(family, Keire::CreateRef<Keire::UiFontFamilyAsset>(font)));
+            Keire::TextureMipLevel pixels{
+                .Width = 1, .Height = 1, .Pixels = {std::byte{0}, std::byte{0}, std::byte{255}, std::byte{255}}};
+            REQUIRE(assets->PublishDevelopmentAsset(
+                image, Keire::CreateRef<Keire::Texture2DAsset>(Keire::TextureImportSettings{},
+                                                               std::vector<Keire::TextureMipLevel>{pixels})));
+            m_Tree = Keire::CreateRef<Keire::RuntimeUiTree>();
+            const auto root = m_Tree->Create(Keire::RuntimeUiElementType::Panel);
+            Keire::RuntimeUiCanvasSettings canvas;
+            canvas.ReferenceWidth = SurfaceSize;
+            canvas.ReferenceHeight = SurfaceSize;
+            REQUIRE(m_Tree->SetRootCanvasSettings(root, canvas));
+            Keire::RuntimeUiStyle rootStyle;
+            rootStyle.Width = SurfaceSize;
+            rootStyle.Height = SurfaceSize;
+            rootStyle.Background = m_Animated ? Keire::Color{1, 1, 1, 1} : Keire::Color{0, 0, 0, 1};
+            REQUIRE(m_Tree->SetStyle(root, rootStyle));
+            const auto picture = m_Tree->Create(Keire::RuntimeUiElementType::Image, root);
+            Keire::RuntimeUiStyle pictureStyle;
+            pictureStyle.Width = SurfaceSize;
+            pictureStyle.Height = 40;
+            pictureStyle.CornerRadius = 12;
+            REQUIRE(m_Tree->SetStyle(picture, pictureStyle));
+            REQUIRE(m_Tree->SetContent(picture, {.Image = image}));
+            m_Label = m_Tree->Create(Keire::RuntimeUiElementType::Text, root);
+            m_TextStyle.Width = SurfaceSize;
+            m_TextStyle.Height = 50;
+            m_TextStyle.FontSize = 24;
+            m_TextStyle.FontFamily = family;
+            m_TextStyle.Foreground = {1, 1, 1, 1};
+            REQUIRE(m_Tree->SetStyle(m_Label, m_TextStyle));
+            REQUIRE(m_Tree->SetContent(m_Label, {.Text = "Wi AV"}));
+        }
+
+        void OnDetach() noexcept override
+        {
+            if (m_Scene)
+                m_Scene->Close();
+            m_Tree.Reset();
+            m_View.Reset();
+            m_Scene.Reset();
+        }
+
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (++m_Frame > (m_Animated ? 1200U : 160U))
+            {
+                Owner().RequestExit();
+                return;
+            }
+            if (m_Frame < m_StageFrame + 8)
+                return;
+            auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+            if (pixels.empty())
+                return;
+            if (m_Animated)
+            {
+                m_Results->Paused = Owner().GetTime().Paused();
+                int green = 0;
+                for (std::size_t index = 0; index + 3 < pixels.size(); index += 4)
+                {
+                    if (pixels[index + 1] > pixels[index] + 20 && pixels[index + 1] > pixels[index + 2] + 20)
+                        green = std::max(green, static_cast<int>(pixels[index + 1]));
+                }
+                if (green == 0)
+                    return;
+                m_Results->MinimumGreen = std::min(m_Results->MinimumGreen, green);
+                m_Results->MaximumGreen = std::max(m_Results->MaximumGreen, green);
+                if (m_Results->MaximumGreen - m_Results->MinimumGreen > 48)
+                    Owner().RequestExit();
+                return;
+            }
+            if (m_Stage == 0 && ContainsDominantChannel(pixels, 2))
+            {
+                m_Results->CustomFont = std::move(pixels);
+            }
+            else if (m_Stage == 1 && pixels.size() == SurfaceSize * SurfaceSize * 9U * 4U)
+                m_Results->ZoomedFont = std::move(pixels);
+            else if (m_Stage == 2 && pixels.size() == SurfaceSize * SurfaceSize * 4U)
+            {
+                m_Results->RestoredFont = std::move(pixels);
+                m_TextStyle.FontFamily = {};
+                REQUIRE(m_Tree->SetStyle(m_Label, m_TextStyle));
+            }
+            else if (m_Stage == 3 && pixels != m_Results->RestoredFont)
+                m_Results->FallbackFont = std::move(pixels);
+            else if (m_Stage == 4 && ContainsDominantChannel(pixels, 1))
+            {
+                m_Results->Material = std::move(pixels);
+                m_Results->RevisionPublished = m_Fixture.PublishRedRevision(Owner());
+            }
+            else if (m_Stage == 5 && ContainsDominantChannel(pixels, 0))
+            {
+                m_Results->RevisedMaterial = std::move(pixels);
+                Owner().RequestExit();
+            }
+            else
+                return;
+            ++m_Stage;
+            m_StageFrame = m_Frame;
+        }
+
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            // Builder zoom changes target pixels without changing the authored canvas or glyph layout.
+            const auto rasterSize = !m_Animated && m_Stage == 1 ? SurfaceSize * 3U : SurfaceSize;
+            m_View->Surface()->RequestSize(rasterSize, rasterSize);
+            // Builder submits its preview during OnUi, after gameplay scene submissions.
+            auto environment = ShaderBindingTestEnvironment();
+            environment.RequestedAntiAliasing = Keire::RenderAntiAliasingMode::None;
+            Keire::SceneRenderRequest request{m_Scene, m_View, false, environment};
+            request.DrawSceneContributions = false;
+            Owner().Renderer()->Submit(std::move(request));
+            m_Tree->Layout(SurfaceSize, SurfaceSize);
+            Owner().Renderer()->SubmitRuntimeUiTarget(
+                {.Tree = m_Tree,
+                 .Target = Keire::RuntimeUiRenderTarget::CameraOverlay,
+                 .View = m_View,
+                 .Viewport = {SurfaceSize, SurfaceSize},
+                 .Material = m_Animated || m_Stage >= 4 ? m_Fixture.Material : Keire::AssetId{}});
+            if (auto window = ui.BeginWindow("UI preview"); window)
+                ui.Image(m_View->Surface(), {SurfaceSize, SurfaceSize});
+        }
+
+      private:
+        LiveShaderGraphFixture& m_Fixture;
+        std::shared_ptr<UiPreviewResults> m_Results;
+        Keire::Ref<Keire::Scene> m_Scene;
+        Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::RuntimeUiTree> m_Tree;
+        Keire::RuntimeUiElementId m_Label;
+        Keire::RuntimeUiStyle m_TextStyle;
+        unsigned m_Frame = 0;
+        unsigned m_StageFrame = 0;
+        unsigned m_Stage = 0;
+        bool m_Animated = false;
     };
 
     class FullscreenCaptureLayer final : public Keire::Layer
@@ -787,6 +998,62 @@ TEST_CASE("live Shader Graph shader and parameter revisions update assigned scen
     REQUIRE_FALSE(results->Revised.empty());
     CHECK(ContainsDominantChannel(results->Initial, 1));
     CHECK(ContainsDominantChannel(results->Revised, 0));
+}
+
+TEST_CASE("editor UI surface previews render custom fonts images and live UI materials")
+{
+    LiveShaderGraphFixture assets(Keire::ShaderGraphTarget::Ui);
+    const auto results = std::make_shared<UiPreviewResults>();
+    auto specification = RenderTestSpecification();
+    specification.Ui.Mode = Keire::UiMode::Rendered;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<UiPreviewCaptureLayer>(assets, results));
+        REQUIRE(application.Run() == 0);
+    }
+    REQUIRE(results->CustomFont.size() == SurfaceSize * SurfaceSize * 4U);
+    REQUIRE(results->FallbackFont.size() == results->CustomFont.size());
+    CHECK(ContainsDominantChannel(results->CustomFont, 2));
+    // This point is inside the rounded corner, not its antialias fringe. Coarse corner alpha interpolation fades it.
+    const auto cornerInterior = (5U * SurfaceSize + 5U) * 4U;
+    CHECK(results->CustomFont[cornerInterior + 2U] > 230U);
+    CHECK(results->CustomFont != results->FallbackFont);
+    REQUIRE(results->ZoomedFont.size() == SurfaceSize * SurfaceSize * 9U * 4U);
+    REQUIRE(results->RestoredFont.size() == results->CustomFont.size());
+    const auto brightPixels = [](const std::vector<std::uint8_t>& pixels)
+    {
+        std::size_t count = 0;
+        for (std::size_t index = 0; index + 3 < pixels.size(); index += 4)
+            if (pixels[index] > 200U && pixels[index + 1U] > 200U && pixels[index + 2U] > 200U)
+                ++count;
+        return count;
+    };
+    CHECK(brightPixels(results->CustomFont) > 10U);
+    CHECK(brightPixels(results->ZoomedFont) > brightPixels(results->CustomFont) * 4U);
+    CHECK(brightPixels(results->RestoredFont) > 10U);
+    CHECK(ContainsDominantChannel(results->Material, 1));
+    CHECK(results->RevisionPublished);
+    CHECK(ContainsDominantChannel(results->RevisedMaterial, 0));
+}
+
+TEST_CASE("UI material animation advances while simulation is paused")
+{
+    LiveShaderGraphFixture assets(Keire::ShaderGraphTarget::Ui, {}, true);
+    const auto results = std::make_shared<UiPreviewResults>();
+    auto specification = RenderTestSpecification();
+    specification.Ui.Mode = Keire::UiMode::Rendered;
+    specification.Assets.Mode = Keire::AssetMode::Development;
+    specification.Assets.DevelopmentCatalog = assets.Catalog;
+    {
+        Keire::Application application(std::move(specification));
+        (void)application.PushLayer(std::make_unique<UiPreviewCaptureLayer>(assets, results, true));
+        REQUIRE(application.Run() == 0);
+        CHECK(results->Paused);
+    }
+    INFO("Animated UI green range: ", results->MinimumGreen, "..", results->MaximumGreen);
+    CHECK(results->MaximumGreen - results->MinimumGreen > 48);
 }
 
 TEST_CASE("authored VFX shaders render and hot reload on CPU and GPU billboards and ribbons")

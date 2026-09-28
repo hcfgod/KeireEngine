@@ -19,7 +19,7 @@ validated workflow, and a validated preview is not equivalent to a production-pr
 Version 0.4.4 is the current source and Windows publication target. Its validation is tracked separately from this
 review's immutable 0.4.2 sequence-17 evidence; no 0.4.2 Windows or Linux artifact is relabeled as the new release.
 
-As of September 19, 2026, the publication inventory contains 99 guides and progress records, including 13 material/shader
+As of September 25, 2026, the publication inventory contains 100 guides and progress records, including 13 material/shader
 records previously absent from the site inventory. This documentation repair does not change the historical readiness
 scores or establish the remaining implementation and validation gates as complete.
 
@@ -65,8 +65,31 @@ document.
 
 The review found and corrected preview differences in panel geometry and fallback-font measurements. Builder now
 uses the runtime panel and fallback-glyph geometry, including gradients, transforms, clipping, and shadows.
-Custom font assets, image assets, and shader-driven UI still require Game view for final visual acceptance:
-Builder uses editor-font previews for custom fonts, placeholders for images, and does not evaluate UI materials.
+The rendered Builder preview now uses the runtime GPU UI path for custom font assets, image assets, and UI materials.
+Its Preview Material selector is local to the preview; scene UI Document material assignment remains explicit.
+Headless or unavailable-renderer previews retain image placeholders and editor text for custom fonts, with a diagnostic.
+UI shader Time and Delta Time use the application-owned unscaled clock, including while simulation is paused.
+
+Subsequent user screenshots exposed quality defects that preview/runtime parity alone did not detect. Builder rulers
+overlaid the document, its preview texture stopped growing with zoom, and coarse rounded-corner coverage faded opaque
+bar interiors. The source fixes reserve ruler gutters, size the preview raster to its displayed canvas up to 4096 pixels
+per axis, and refine corner coverage. Custom-font atlas padding also preserves white RGB at zero alpha to avoid dark
+filtered edges. A further softness report exposed Game view compositing overlays into an automatically reduced
+scene surface (the QA project permits 67% scale). Game and standalone runtime now bypass reduced render scale when
+those overlays are submitted; Builder also accounts for window display DPI. This fallback costs native-resolution
+scene rendering while overlay UI is present. The rebuilt Debug editor was checked through native controls in Game
+Edit/Play, pane resizing, and Builder wheel zoom from 100% to 152% and back. Custom Inter text remained sharper and
+selection outlines stayed aligned. The corresponding focused Core/Editor run passed 133 cases; UI GPU checks passed
+on Direct3D 12 and Vulkan, including font-atlas growth and return to the original viewport size. AddressSanitizer
+passed 102 cases and 4,791 assertions. This covers the recorded QA document and workflows, not every release target.
+
+The subsequent Builder code review corrected unrelated-field writeback in the Inspector, draft synchronization after
+history/selection changes, and hierarchy traversal after reparenting. It also added searchable hierarchy/library lists,
+a template asset picker, and compact preview controls with scrollable options. The final Debug Core run passed 103
+cases and 4,851 assertions; the same focused run passed under AddressSanitizer. Builder tests passed 34 cases and 657
+assertions. UI GPU checks passed two cases and 36 assertions on each of Direct3D 12 and Vulkan. The editor and runtime
+were rebuilt. Formatting, source budgets, and documentation source validation passed. These layout changes have code
+and automated coverage; a new native visual acceptance pass was not performed while the desktop was in use elsewhere.
 
 Native material creation completed in approximately 129 ms after shader preparation. A roughness override persisted
 after import and reselection. Changing camera vignette strength updated the image and persisted the override.

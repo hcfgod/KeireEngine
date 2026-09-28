@@ -47,6 +47,13 @@ namespace KeireEditor
         }
     }
 
+    bool SaveEditorSessionViewPreference(const std::filesystem::path& path, const bool maximizeGameOnPlay) noexcept
+    {
+        auto state = LoadEditorSessionState(path);
+        state.MaximizeGameOnPlay = maximizeGameOnPlay;
+        return SaveEditorSessionState(path, state);
+    }
+
     bool SaveEditorSessionState(const std::filesystem::path& path, const EditorSessionState& state) noexcept
     {
         if (path.empty())

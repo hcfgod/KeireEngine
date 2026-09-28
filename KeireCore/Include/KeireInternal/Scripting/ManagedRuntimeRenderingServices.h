@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/ECS/Entity.h"
 #include "Keire/Scripting/ScriptSystem.h"
 
 #include <map>
@@ -39,6 +40,8 @@ namespace Keire::Detail
     {
       public:
         ~ManagedRuntimeSceneServices() override = default;
+
+        [[nodiscard]] Entity ResolveManagedEntity(std::uint64_t world, AssetId entity) const noexcept;
 
         [[nodiscard]] std::optional<float>
         ReadManagedRenderingScalar(AssetId entity, ManagedRenderingComponent component,
@@ -93,9 +96,16 @@ namespace Keire::Detail
                                                                    bool active) noexcept override;
 
       protected:
+        [[nodiscard]] virtual Ref<Scene> ManagedRuntimeSceneForWorld(std::uint64_t, AssetId entity) const noexcept
+        {
+            return ManagedRuntimeScene(entity);
+        }
         [[nodiscard]] virtual Ref<Scene> ManagedRuntimeScene(AssetId entity = {}) const noexcept = 0;
         [[nodiscard]] virtual Ref<AssetSystem> ManagedRuntimeAssets() const noexcept = 0;
     };
+
+    [[nodiscard]] Entity ResolveManagedServiceEntity(IScriptRuntimeServices* services, std::uint64_t world,
+                                                     AssetId entity) noexcept;
 
     [[nodiscard]] std::optional<float> ReadManagedRenderingScalar(const Ref<Scene>& scene, AssetId entity,
                                                                   ManagedRenderingComponent component,

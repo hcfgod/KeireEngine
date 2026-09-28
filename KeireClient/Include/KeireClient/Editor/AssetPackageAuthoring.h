@@ -26,6 +26,7 @@ namespace KeireEditor
         std::string DisplayName;
         std::string Summary;
         std::string MinimumEngineVersion;
+        std::string MaximumEngineVersion;
     };
 
     struct AssetPackageAuthoringRequest

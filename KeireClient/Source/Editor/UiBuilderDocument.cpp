@@ -799,6 +799,7 @@ namespace KeireEditor
                      settings.CanvasSettings());
 
         UiBuilderRetainedPreview result;
+        result.Runtime = runtime;
         result.Statistics = tree->Statistics();
         for (const auto& command : tree->DrawCommands())
         {

@@ -2,7 +2,6 @@
 
 #include "Keire/Assets/BuiltinAssetRegistry.h"
 #include "Keire/Project/SharedShaderLibrary.h"
-#include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
@@ -40,7 +39,6 @@
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
-#include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
@@ -1030,10 +1028,8 @@ void EditorWorkspaceLayer::QueueMaterialCreation(const std::filesystem::path& de
     const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
     if (lit == library.Shaders.end())
         throw std::runtime_error("The pinned shared shader library has no Kéire/Lit shader.");
-    (void)m_AssetDatabase->Refresh();
-    Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*m_AssetDatabase,
-                                                                 m_AssetDatabase->Specification().ProjectRoot /
-                                                                     "Library/AssetCache/Runtime/source-index.json");
+    // Successful warmup already published the shader dependency. The worker validates current
+    // source bytes and destination conflicts without blocking the editor on a project-wide scan.
     Keire::MaterialAuthoringDefinition definition;
     definition.SchemaVersion = 5;
     definition.Shader = {Keire::MaterialShaderSourceKind::ShaderGraph, lit->Id};

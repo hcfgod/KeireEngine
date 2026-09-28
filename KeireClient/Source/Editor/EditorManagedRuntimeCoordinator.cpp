@@ -1,6 +1,9 @@
 #include "KeireClient/Editor/EditorManagedRuntimeCoordinator.h"
+#include "KeireInternal/Assets/AssetInternal.h"
+#include "KeireInternal/FileSystem.h"
 
 #include <cmath>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -10,13 +13,39 @@ namespace KeireEditor
         : m_Dependencies(std::move(dependencies))
     {
         if (!m_Dependencies.StartBuild || !m_Dependencies.PollBuild || !m_Dependencies.ReportBuildError ||
-            !m_Dependencies.DetachRuntimeServices || !m_Dependencies.ResetRuntimeInput)
+            !m_Dependencies.DetachRuntimeServices || !m_Dependencies.ResetRuntimeInput || !m_Dependencies.IsBuildActive)
         {
             throw std::invalid_argument("Managed-runtime coordinator dependencies must be callable.");
         }
     }
 
     EditorManagedRuntimeCoordinator::~EditorManagedRuntimeCoordinator() noexcept { Shutdown(); }
+
+    bool EditorManagedRuntimeCoordinator::ObserveSourceChange(const std::filesystem::path& source)
+    {
+        m_Lifetime.RequireOwnerThread("ObserveSourceChange");
+        const auto path = source.lexically_normal();
+        std::string digest;
+        try
+        {
+            if (std::filesystem::exists(path))
+            {
+                // Bound notification work; oversized or temporarily unreadable sources still request a normal build.
+                const auto bytes = Keire::Detail::ReadTextFile(path, std::size_t{16} << 20U);
+                digest = Keire::Detail::DigestToString(Keire::Detail::Sha256(std::as_bytes(std::span(bytes))));
+            }
+        }
+        catch (const std::exception&)
+        {
+            m_ObservedSources.erase(path);
+            return true;
+        }
+        const auto previous = m_ObservedSources.find(path);
+        if (previous != m_ObservedSources.end() && previous->second == digest)
+            return false;
+        m_ObservedSources.insert_or_assign(path, std::move(digest));
+        return true;
+    }
 
     void EditorManagedRuntimeCoordinator::ScheduleBuild(const double delaySeconds)
     {
@@ -36,7 +65,7 @@ namespace KeireEditor
         if (m_ScheduledBuildDelaySeconds >= 0.0)
         {
             m_BuildDelayElapsedSeconds += unscaledDeltaSeconds;
-            if (m_BuildDelayElapsedSeconds >= m_ScheduledBuildDelaySeconds)
+            if (m_BuildDelayElapsedSeconds >= m_ScheduledBuildDelaySeconds && !m_Dependencies.IsBuildActive())
             {
                 m_ScheduledBuildDelaySeconds = -1.0;
                 m_BuildDelayElapsedSeconds = 0.0;

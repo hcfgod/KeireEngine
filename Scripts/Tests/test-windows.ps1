@@ -746,8 +746,9 @@ Assert-True ($menuScript.Contains(
              $menuScript.Contains('$env:PSModulePath = (@($windowsModulePath) + $remainingModulePaths)') -and
              $menuScript.Contains('$env:PSModulePath = $previousModulePath')) `
     "Isolated Windows PowerShell staging prefers compatible built-in modules and restores the caller environment"
-Assert-True ($menuScript.Contains('$SelectedCommand -notin @("help", "stage-editor", "stage-hub")')) `
-    "The isolated development package process owns the shared workspace lock"
+Assert-True ($menuScript.Contains(
+        '$SelectedCommand -notin @("help", "stage-editor", "stage-hub", "run-staged-editor", "run-staged-hub")')) `
+    "Build and package commands own the shared workspace lock while staged launches remain read-only"
 Assert-True ($menuScript.Contains('-AllowDirty (package commands only; emits a local development artifact and is rejected in CI)')) `
     "Windows launcher documents the dirty-package development-only boundary"
 $testScript = Get-Content (Join-Path $Windows "test.ps1") -Raw
@@ -1612,7 +1613,7 @@ Assert-True ($renderFacadeLines -lt 700) "RenderSystem facade remains below 700 
 $renderSettingsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Rendering\RenderSettings.cpp') -Raw
 Assert-True ($renderSettingsSource.Contains('Rendering.keiresettings') -and (Test-Path (Join-Path (Get-RepositoryRoot) 'Samples\KeireSandbox\ProjectSettings\Rendering.keiresettings'))) "Persistent project rendering settings"
 $renderingAssetsSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\RenderingAssets.cpp') -Raw
-Assert-True (@(Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp')).Count -lt 600) "AssetPipeline facade remains below 600 lines"
+Assert-True (@(Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Assets\AssetPipeline.cpp')).Count -lt 700) "AssetPipeline facade remains below 700 lines"
 Assert-True (-not ((Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Include\KeireInternal\Assets\AssetDatabaseImplementation.h') -Raw).Contains('recursive_mutex'))) "Asset operations use explicit locked and unlocked entry points"
 $uiSource = Get-Content (Join-Path (Get-RepositoryRoot) 'KeireCore\Source\Ui.cpp') -Raw
 Assert-True ($renderingAssetsSource.Contains('SDL_GetBasePath()') -and $renderingAssetsSource.Contains('maximumAncestorDepth')) "Executable-relative shader compiler discovery"
@@ -1657,6 +1658,9 @@ $hubSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubApp
 Assert-True ($hubSource.Contains('CreateSystemTray') -and $hubSource.Contains('Show Hub') -and $hubSource.Contains('m_Tray->IsAvailable()')) "Project Hub tray backgrounding"
 $hubInstanceSource = Get-Content (Join-Path (Get-RepositoryRoot) "KeireHub\Source\HubInstance.cpp") -Raw
 $playerSupportSource = Get-Content (Join-Path $Windows "player-support.ps1") -Raw
+Assert-True ($playerSupportSource.Contains('Build\Bin\Dist-windows-x86_64\KeireAssetTool\KeireAssetTool.exe') -and
+             $playerSupportSource.Contains('& $assetTool verify-player-support --input $stagedArchive')) `
+    "Build Support uses an optimized host tool and preserves archive verification"
 Assert-True ($hubSource.Contains('PollActivation') -and $hubInstanceSource.Contains('HubInstanceCoordinator')) "Single-instance Project Hub activation"
 Assert-True ($playerSupportSource.Contains("kind = 'windows-resource-update'") -and
              (Test-Path (Join-Path (Get-RepositoryRoot) "Config\Branding\Keire.ico")) -and

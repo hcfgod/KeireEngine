@@ -1105,6 +1105,40 @@ TEST_CASE("Scene import discovers deterministic authored and managed asset depen
     CHECK(std::ranges::find(first.AssetDependencies, ignoredEntity) == first.AssetDependencies.end());
 }
 
+TEST_CASE("Scene and prefab imports retain tagged managed assets in direct fields collections and graphs")
+{
+    const auto direct = Keire::AssetId(0x1100000000004000ULL, 1);
+    const auto nested = Keire::AssetId(0x1100000000004000ULL, 2);
+    const auto ignored = Keire::AssetId(0x1100000000004000ULL, 3);
+    const auto tagged = [](const Keire::AssetId id)
+    {
+        return R"({"$ref":"asset","asset":{"High":)" + std::to_string(id.High()) + R"(,"Low":)" +
+               std::to_string(id.Low()) + R"(},"type":"Keire.UI.PanelSettings, Keire.Managed"})";
+    };
+    const auto state = R"({"Version":4,"Fields":[{"Name":"Scale","Type":"Keire.UI.PanelSettings","Value":)" +
+                       tagged(direct) + R"(},{"Name":"Nested","Type":"Game.Container","Value":{"items":[null,)" +
+                       tagged(nested) +
+                       R"(]}},{"Name":"Entity","Type":"Keire.Entity","Value":{"$ref":"entity","entity":)" +
+                       ManagedReference(ignored) + R"(}}],"ReferenceGraph":{"nested":)" + tagged(direct) + "}}";
+    auto definition = Keire::SceneAsset::EmptyDefinition("Tagged managed references");
+    Keire::SceneObjectDefinition object;
+    object.Id = Keire::AssetId(0x1200000000004000ULL, 1);
+    object.Name = "Owner";
+    object.Components.push_back({Keire::ComponentTypeId(Keire::AssetId(0x1300000000004000ULL, 1)), 1, true,
+                                 "{\"managedState\":" + JsonString(state) + "}"});
+    definition.Objects.push_back(object);
+    const std::vector expected{direct, nested};
+    const auto importer = Keire::CreateSceneAssetImporter();
+    CHECK(importer.ContextualImport({}, Keire::SceneAsset::Encode(definition)).AssetDependencies == expected);
+    const Keire::PrefabDefinition prefab{.Template = definition};
+    CHECK(
+        Keire::CreatePrefabAssetImporter().ContextualImport({}, Keire::PrefabAsset::Encode(prefab)).AssetDependencies ==
+        expected);
+    definition.Objects[0].Components[0].Data =
+        "{\"managedState\":" + JsonString(R"({"Fields":[],"nested":{"$ref":"asset"}})") + "}";
+    CHECK_THROWS_AS(importer.ContextualImport({}, Keire::SceneAsset::Encode(definition)), std::invalid_argument);
+}
+
 TEST_CASE("Scene and prefab reimport retain UI materials and all camera effect dependencies")
 {
     const auto visualTree = Keire::AssetId::Parse("10000000-0000-4000-8000-000000000020");
@@ -1134,11 +1168,11 @@ TEST_CASE("Scene and prefab reimport retain UI materials and all camera effect d
     const auto second = importer.ContextualImport({}, Keire::SceneAsset::Encode(definition));
     CHECK(first.AssetDependencies == expected);
     CHECK(second.AssetDependencies == expected);
-    CHECK(importer.Version == 9);
+    CHECK(importer.Version == 10);
     Keire::PrefabDefinition prefab;
     prefab.Template = definition;
     const auto prefabImporter = Keire::CreatePrefabAssetImporter();
-    CHECK(prefabImporter.Version == 2);
+    CHECK(prefabImporter.Version == 3);
     CHECK(prefabImporter.ContextualImport({}, Keire::PrefabAsset::Encode(prefab)).AssetDependencies == expected);
 }
 

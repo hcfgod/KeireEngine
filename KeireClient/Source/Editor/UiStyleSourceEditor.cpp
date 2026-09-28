@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/UiStyleSourceEditor.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <ranges>
 #include <stdexcept>
@@ -20,6 +21,29 @@ namespace KeireEditor
             std::ranges::transform(value, value.begin(), [](const unsigned char character)
                                    { return static_cast<char>(std::tolower(character)); });
             return value;
+        }
+
+        [[nodiscard]] int MatchScore(const std::string_view candidate, const std::string_view prefix)
+        {
+            if (prefix.empty())
+                return 0;
+            const auto value = Lower(std::string(candidate));
+            const auto query = Lower(std::string(prefix));
+            if (value.starts_with(query))
+                return static_cast<int>(value.size() - query.size());
+            if (const auto offset = value.find(query); offset != std::string::npos)
+                return 100 + static_cast<int>(offset);
+            std::size_t cursor = 0;
+            int gaps = 0;
+            for (const auto character : query)
+            {
+                const auto match = value.find(character, cursor);
+                if (match == std::string::npos)
+                    return -1;
+                gaps += static_cast<int>(match - cursor);
+                cursor = match + 1U;
+            }
+            return 200 + gaps;
         }
 
         [[nodiscard]] std::string DescriptorDocumentation(const Keire::UiStylePropertyDescriptor& descriptor)
@@ -80,32 +104,56 @@ namespace KeireEditor
             return std::nullopt;
         const auto cursor = std::min(offset, m_Source.size() - 1U);
         const auto value = m_Source[cursor];
-        const bool forward = value == '{' || value == '(' || value == '[';
-        if (!forward && value != '}' && value != ')' && value != ']')
+        if (value != '{' && value != '(' && value != '[' && value != '}' && value != ')' && value != ']')
             return std::nullopt;
         const char open = value == '{' || value == '}' ? '{' : value == '(' || value == ')' ? '(' : '[';
         const char close = open == '{' ? '}' : open == '(' ? ')' : ']';
-        std::size_t depth = 0;
-        if (forward)
+        std::vector<std::size_t> openings;
+        char quote = 0;
+        bool escaped = false;
+        bool comment = false;
+        for (std::size_t index = 0; index < m_Source.size(); ++index)
         {
-            for (std::size_t index = cursor; index < m_Source.size(); ++index)
+            if (comment)
             {
-                if (m_Source[index] == open)
-                    ++depth;
-                else if (m_Source[index] == close && --depth == 0U)
-                    return index;
+                if (index + 1U < m_Source.size() && m_Source[index] == '*' && m_Source[index + 1U] == '/')
+                {
+                    comment = false;
+                    ++index;
+                }
+                continue;
             }
-        }
-        else
-        {
-            for (std::size_t index = cursor + 1U; index-- > 0U;)
+            if (quote != 0)
             {
-                if (m_Source[index] == close)
-                    ++depth;
-                else if (m_Source[index] == open && --depth == 0U)
+                if (escaped)
+                    escaped = false;
+                else if (m_Source[index] == '\\')
+                    escaped = true;
+                else if (m_Source[index] == quote)
+                    quote = 0;
+                continue;
+            }
+            if (index + 1U < m_Source.size() && m_Source[index] == '/' && m_Source[index + 1U] == '*')
+            {
+                comment = true;
+                ++index;
+                continue;
+            }
+            if (m_Source[index] == '"' || m_Source[index] == '\'')
+            {
+                quote = m_Source[index];
+                continue;
+            }
+            if (m_Source[index] == open)
+                openings.push_back(index);
+            else if (m_Source[index] == close && !openings.empty())
+            {
+                const auto matching = openings.back();
+                openings.pop_back();
+                if (matching == cursor)
                     return index;
-                if (index == 0U)
-                    break;
+                if (index == cursor)
+                    return matching;
             }
         }
         return std::nullopt;
@@ -138,66 +186,100 @@ namespace KeireEditor
         while (begin > 0U && IdentifierCharacter(m_Source[begin - 1U]))
             --begin;
 
-        const auto declarationStart = cursor == 0U ? std::string::npos : m_Source.find_last_of("{;", cursor - 1U);
-        if (declarationStart != std::string::npos)
+        auto prefix = std::string_view(m_Source).substr(begin, cursor - begin);
+        std::size_t blockDepth = 0;
+        for (const auto& token : m_Tokens)
         {
-            const auto separator = m_Source.find(':', declarationStart + 1U);
-            if (separator != std::string::npos && separator < cursor)
+            if (token.Offset >= cursor || token.Kind != UiStyleSourceTokenKind::Punctuation)
+                continue;
+            if (m_Source[token.Offset] == '{')
+                ++blockDepth;
+            else if (m_Source[token.Offset] == '}' && blockDepth > 0U)
+                --blockDepth;
+        }
+
+        std::vector<std::pair<int, UiStyleSourceCompletion>> ranked;
+        const auto append =
+            [&](std::string_view label, std::string insertion, std::string documentation, const int priority = 0)
+        {
+            if (const auto score = MatchScore(label, prefix); score >= 0)
+                ranked.push_back(
+                    {priority + score, {std::string(label), std::move(insertion), std::move(documentation)}});
+        };
+
+        if (blockDepth == 0U)
+        {
+            constexpr std::array selectors{
+                std::string_view("VisualElement"), std::string_view("Label"),       std::string_view("Image"),
+                std::string_view("Button"),        std::string_view("TextField"),   std::string_view("Toggle"),
+                std::string_view("Slider"),        std::string_view("ProgressBar"), std::string_view("ScrollView"),
+                std::string_view("ListView"),      std::string_view("TreeView"),    std::string_view("DropdownField"),
+                std::string_view("Foldout"),       std::string_view("TabView"),     std::string_view("Toolbar"),
+            };
+            for (const auto selector : selectors)
+                append(selector, std::string(selector), "Kéire retained-UI element selector.");
+            for (const std::string_view selector : {":hover", ":active", ":focus", ":disabled", ":checked", ":root"})
+                append(selector, std::string(selector), "UI selector pseudo-state.");
+        }
+        else
+        {
+            auto declarationStart = std::string::npos;
+            auto separator = std::string::npos;
+            for (const auto& token : m_Tokens)
+            {
+                if (token.Offset >= cursor)
+                    continue;
+                const auto character = m_Source[token.Offset];
+                if (token.Kind == UiStyleSourceTokenKind::Punctuation && (character == '{' || character == ';'))
+                {
+                    declarationStart = token.Offset;
+                    separator = std::string::npos;
+                }
+                else if (character == ':' && declarationStart != std::string::npos && separator == std::string::npos)
+                    separator = token.Offset;
+            }
+            const bool valueContext = separator != std::string::npos && separator < cursor;
+            if (valueContext)
             {
                 const auto property =
                     Trim(std::string_view(m_Source).substr(declarationStart + 1U, separator - declarationStart - 1U));
                 const auto* descriptor = Keire::FindUiStylePropertyDescriptor(property);
                 if (descriptor && descriptor->ValueKind == Keire::UiStyleValueKind::Keyword)
                 {
-                    const auto prefix = Lower(m_Source.substr(begin, cursor - begin));
-                    std::vector<UiStyleSourceCompletion> result;
                     for (const auto keyword : Keywords(descriptor->Keywords))
-                    {
-                        if (!prefix.empty() && !Lower(std::string(keyword)).starts_with(prefix))
-                            continue;
-                        result.push_back({std::string(keyword), std::string(keyword),
-                                          "Valid value for `" + std::string(descriptor->Name) + "`."});
-                        if (result.size() >= maximum)
-                            break;
-                    }
-                    return result;
+                        append(keyword, std::string(keyword),
+                               "Valid value for `" + std::string(descriptor->Name) + "`.", -50);
+                }
+            }
+            if (!valueContext)
+            {
+                for (const auto& descriptor : Keire::UiStylePropertyDescriptors())
+                    append(descriptor.Name, std::string(descriptor.Name) + ": ", DescriptorDocumentation(descriptor));
+            }
+            else
+            {
+                for (const auto& token : m_Tokens)
+                {
+                    if (token.Kind != UiStyleSourceTokenKind::Variable)
+                        continue;
+                    const auto variable = std::string_view(m_Source).substr(token.Offset, token.Length);
+                    const bool insideVar = begin >= 4U && std::string_view(m_Source).substr(begin - 4U, 4U) == "var(";
+                    append(variable, insideVar ? std::string(variable) : "var(" + std::string(variable) + ")",
+                           "Design token resolved from this style sheet.", -25);
                 }
             }
         }
 
-        if (begin > 0U && m_Source[begin - 1U] == ':')
-            --begin;
-        const auto prefix = Lower(m_Source.substr(begin, cursor - begin));
+        std::ranges::sort(
+            ranked, [](const auto& left, const auto& right)
+            { return left.first != right.first ? left.first < right.first : left.second.Label < right.second.Label; });
         std::vector<UiStyleSourceCompletion> result;
-        for (const auto& descriptor : Keire::UiStylePropertyDescriptors())
+        for (auto& [score, completion] : ranked)
         {
-            if (!prefix.empty() && !Lower(std::string(descriptor.Name)).starts_with(prefix))
+            (void)score;
+            if (std::ranges::find(result, completion.Label, &UiStyleSourceCompletion::Label) != result.end())
                 continue;
-            result.push_back({std::string(descriptor.Name), std::string(descriptor.Name) + ": ",
-                              DescriptorDocumentation(descriptor)});
-            if (result.size() >= maximum)
-                return result;
-        }
-        for (const std::string_view selector : {":hover", ":active", ":focus", ":disabled", ":checked", ":root"})
-        {
-            if (!prefix.empty() && !Lower(std::string(selector)).starts_with(prefix))
-                continue;
-            result.push_back({std::string(selector), std::string(selector), "UI selector pseudo-state."});
-            if (result.size() >= maximum)
-                break;
-        }
-        for (const auto& token : m_Tokens)
-        {
-            if (token.Kind != UiStyleSourceTokenKind::Variable)
-                continue;
-            const auto variable = std::string_view(m_Source).substr(token.Offset, token.Length);
-            if ((!prefix.empty() && !Lower(std::string(variable)).starts_with(prefix)) ||
-                std::ranges::find(result, variable, &UiStyleSourceCompletion::Label) != result.end())
-            {
-                continue;
-            }
-            result.push_back({std::string(variable), std::string(variable),
-                              "Design token. Use var(" + std::string(variable) + ") in a property value."});
+            result.push_back(std::move(completion));
             if (result.size() >= maximum)
                 break;
         }
@@ -267,18 +349,31 @@ namespace KeireEditor
         while (begin <= m_Source.size())
         {
             const auto end = m_Source.find('\n', begin);
+            const auto lineEnd = end == std::string::npos ? m_Source.size() : end;
             const auto line = Trim(std::string_view(m_Source).substr(
                 begin, end == std::string::npos ? m_Source.size() - begin : end - begin));
-            if (!line.empty() && (line.starts_with('}') || line.starts_with("@media") && line.ends_with('}')))
-                indentation = indentation == 0U ? 0U : indentation - 1U;
+            std::size_t opens = 0U;
+            std::size_t closes = 0U;
+            for (const auto& token : m_Tokens)
+            {
+                if (token.Offset < begin || token.Offset >= lineEnd ||
+                    token.Kind != UiStyleSourceTokenKind::Punctuation)
+                    continue;
+                if (m_Source[token.Offset] == '{')
+                    ++opens;
+                else if (m_Source[token.Offset] == '}')
+                    ++closes;
+            }
+            const bool leadingClose = !line.empty() && line.front() == '}';
+            const auto lineIndentation = leadingClose && indentation > 0U ? indentation - 1U : indentation;
             if (!line.empty())
-                result.append(indentation * 2U, ' ');
+                result.append(lineIndentation * 2U, ' ');
             result += line;
             if (end == std::string::npos)
                 break;
             result += '\n';
-            if (!line.empty() && line.ends_with('{'))
-                ++indentation;
+            indentation += opens;
+            indentation = closes >= indentation ? 0U : indentation - closes;
             begin = end + 1U;
         }
         if (result == m_Source)

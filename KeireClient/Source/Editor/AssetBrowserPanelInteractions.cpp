@@ -226,6 +226,8 @@ namespace KeireEditor
             (void)ui.InputText("Version", PendingPackageDraft.Version);
             (void)ui.InputText("Publisher ID", PendingPackageDraft.PublisherId);
             (void)ui.InputText("Minimum Kéire version", PendingPackageDraft.MinimumEngineVersion);
+            (void)ui.InputText("Maximum Kéire version (optional)", PendingPackageDraft.MaximumEngineVersion);
+            ui.Text("Keep the package ID and asset metadata unchanged when releasing an update.");
             (void)ui.InputText("Summary", PendingPackageDraft.Summary);
             const bool complete = !PendingPackageDraft.DisplayName.empty() && !PendingPackageDraft.PackageId.empty() &&
                                   !PendingPackageDraft.Version.empty() && !PendingPackageDraft.PublisherId.empty() &&

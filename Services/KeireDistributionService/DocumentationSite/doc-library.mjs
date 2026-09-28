@@ -88,6 +88,7 @@ export const docGroups = [
     group("Production and release", "approve-check", [
         "Profiling.md",
         "PerformanceGates.md",
+        "EditorWorkflowPerformance.md",
         "TestingAndRelease.md",
         "PackageArchives.md",
         "AssetPackages.md",
@@ -245,6 +246,7 @@ export const docAuthorities = {
     "ManagedScripting.md": ["KeireCore/Include/Keire/Scripting/ScriptSystem.h", "KeireCore/Source/Scripting"],
     "Profiling.md": ["KeireCore/Include/Keire/Diagnostics/Profiler.h", "KeireManaged/Profiler.cs"],
     "PerformanceGates.md": ["Config/PerformanceGates.json", "Scripts/Performance/validate_capture.py"],
+    "EditorWorkflowPerformance.md": ["KeireEditorTests/Source/AssetOperationServiceTests.cpp", "Scripts/Windows/player-support.ps1"],
     "TestingAndRelease.md": ["Scripts/Tests", "Scripts/Windows/validate-production.ps1", "Scripts/Unix/validate-production.sh"],
     "PackageArchives.md": ["KeireHubRuntime/Include/KeireHubRuntime/PackageArchive.h", "KeireHubPackagePublisher/Source/Main.cpp"],
     "AssetPackages.md": ["KeireCore/Include/Keire/Assets/AssetPackage.h", "KeireCore/Include/Keire/Project/ProjectPackageManager.h"],

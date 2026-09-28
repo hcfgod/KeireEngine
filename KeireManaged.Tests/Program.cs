@@ -816,6 +816,16 @@ static unsafe void ManagedWorldContract()
                     load.Scene.Id == NativeWorldFixture.ReplacementHandle,
                "A committed native scene transition must publish a successful terminal operation.");
 
+        foreach (Keire.LightingQuality preset in Enum.GetValues<Keire.LightingQuality>())
+        {
+            Keire.RenderSettings.LightingQuality = preset;
+            Assert(Keire.RenderSettings.LightingQuality == preset, "Lighting presets must round-trip through native services.");
+        }
+        AssertThrows<ArgumentOutOfRangeException>(() => Keire.RenderSettings.LightingQuality = (Keire.LightingQuality)255,
+            "Invalid lighting presets must be rejected before native dispatch.");
+        Assert(Keire.RenderSettings.LightingQuality == Keire.LightingQuality.DirectEnvironment,
+            "Invalid lighting presets must preserve the native selection.");
+
         Keire.RenderEnvironmentSettings environment = Keire.RenderSettings.Current;
         Assert(MathF.Abs(environment.Exposure - 1.25f) < 0.0001f && environment.SkyVisible,
                "Render settings must read the current native environment transaction.");
@@ -1513,6 +1523,8 @@ file static unsafe class NativeWorldFixture
         Keire.NativeWorld.QueryEntityNamesIcall = &QueryEntityNames;
         Keire.NativeWorld.QueryEntityTagsIcall = &QueryEntityTags;
         Keire.NativeWorld.QueryEntityComponentsIcall = &QueryEntityComponents;
+        Keire.NativeWorld.GetLightingQualityIcall = &GetLightingQuality;
+        Keire.NativeWorld.SetLightingQualityIcall = &SetLightingQuality;
         Keire.NativeWorld.GetRenderEnvironmentIcall = &GetRenderEnvironment;
         Keire.NativeWorld.SetRenderEnvironmentIcall = &SetRenderEnvironment;
     }
@@ -1538,6 +1550,8 @@ file static unsafe class NativeWorldFixture
         Keire.NativeWorld.QueryEntityNamesIcall = null;
         Keire.NativeWorld.QueryEntityTagsIcall = null;
         Keire.NativeWorld.QueryEntityComponentsIcall = null;
+        Keire.NativeWorld.GetLightingQualityIcall = null;
+        Keire.NativeWorld.SetLightingQualityIcall = null;
         Keire.NativeWorld.GetRenderEnvironmentIcall = null;
         Keire.NativeWorld.SetRenderEnvironmentIcall = null;
     }
@@ -1706,6 +1720,17 @@ file static unsafe class NativeWorldFixture
         for (int index = 0; index < bytes.Length; ++index)
             destination[index] = bytes[index];
         return bytes.Length;
+    }
+
+    private static byte s_lightingQuality;
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static int GetLightingQuality() => s_lightingQuality;
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetLightingQuality(byte value)
+    {
+        if (value > 3) return 0;
+        s_lightingQuality = value;
+        return 1;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]

@@ -1,3 +1,4 @@
+#include "KeireInternal/Scripting/ManagedRuntimeRenderingServices.h"
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
 #include <algorithm>
@@ -10,6 +11,10 @@ namespace Keire
         if (!CurrentRuntime)
             return {};
         const AssetId id(high, low);
+        // A loaded scene can contain only native components while the calling behaviour lives in a persistent scene.
+        if (const auto entity =
+                Detail::ResolveManagedServiceEntity(CurrentRuntime->Specification.RuntimeServices, world, id))
+            return entity;
         const auto found = std::ranges::find_if(CurrentRuntime->Instances, [world](const auto& entry)
                                                 { return entry.second.World == world && entry.second.NativeEntity; });
         return found == CurrentRuntime->Instances.end() ? Entity{} : found->second.NativeEntity.Resolve(EntityId(id));

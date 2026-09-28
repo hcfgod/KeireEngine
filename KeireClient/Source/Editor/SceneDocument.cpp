@@ -1006,12 +1006,11 @@ namespace KeireEditor
 
     bool SceneDocument::WriteRecovery()
     {
-        if (!m_Scene || !m_Scene->Dirty() || m_RecoveryPath.empty())
+        if (!m_Scene || !m_Scene->Dirty() || m_RecoveryPath.empty() || m_RecoveryAvailable)
             return false;
         const auto bytes = Keire::SceneAsset::Encode(m_Scene->Snapshot());
         const std::string contents(reinterpret_cast<const char*>(bytes.data()), bytes.size());
         Keire::Detail::WriteTextFileAtomically(m_RecoveryPath, contents);
-        m_RecoveryAvailable = true;
         m_RecoverySeconds = 0.0;
         return true;
     }

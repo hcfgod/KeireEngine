@@ -108,7 +108,12 @@ source files that it actually read changed. Runtime-only references do not inval
 Material Graph save recompile that graph and its actual dependents without invoking
 unrelated graph, shader, model, texture, or audio importers. Targeted editor requests compute the reverse dependency
 closure, cook only those source records and generated subassets, and merge the new entries with unchanged entries from
-the last-good development catalog. Unchanged content-addressed packs are reused in place while the complete merged
+the last-good development catalog. Targeted batches index source owners, including generated subassets, rather than
+repeatedly scanning every source for each identity. Small requests use a bounded number of direct lookups before
+building an index, avoiding index construction for ordinary single-asset edits. These indexes are local to the import snapshot; source ordering
+and duplicate-owner coalescing remain unchanged. Metadata refresh builds its subasset index only when needed.
+Full imports move the owned source snapshot into their work list instead of making a second complete copy.
+Unchanged content-addressed packs are reused in place while the complete merged
 catalog is validated and published atomically. `PollChangedAssets()` uses file signatures and a
 250 ms default stability window; hashing and import happen only after a stable change. The editor remounts the published
 catalog and requests last-good reloads

@@ -298,3 +298,12 @@ TEST_CASE("asset-package deterministic mutation corpus fails safely without part
         }
     }
 }
+
+TEST_CASE("asset-package manifests reject C# without executable code declarations")
+{
+    auto manifest =
+        MinimalManifestWithFiles({{.Path = "Assets/Player.cs", .SizeBytes = 1, .Sha256 = std::string(64, 'a')}});
+    CHECK_THROWS_AS(Keire::ValidateAssetPackageManifest(manifest), std::invalid_argument);
+    manifest.Files.front().Path = "Assets/Player.CS";
+    CHECK_THROWS_AS(Keire::ValidateAssetPackageManifest(manifest), std::invalid_argument);
+}

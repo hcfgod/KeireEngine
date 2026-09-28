@@ -158,6 +158,15 @@ namespace Keire
                     DeferredUiEvents.push_back(event);
                     throw;
                 }
+                if (event.Type == RuntimeUiEventType::Submit && !defaultPrevented)
+                {
+                    if (const auto state = UiTree->State(event.Target);
+                        state && state->Visible && state->Enabled && state->Interactable &&
+                        (state->Type == RuntimeUiElementType::Button || state->Type == RuntimeUiElementType::Toggle))
+                    {
+                        (void)UiTree->DispatchEvent({.Type = RuntimeUiEventType::Click, .Target = event.Target});
+                    }
+                }
                 if (event.Type == RuntimeUiEventType::Click && !defaultPrevented)
                 {
                     if (const auto state = UiTree->State(event.Target);

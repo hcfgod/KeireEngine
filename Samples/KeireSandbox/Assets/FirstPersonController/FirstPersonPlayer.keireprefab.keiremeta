@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "id": "dee90926-f845-55dc-b1eb-2d25337ef076",
+  "type": "4b454952-4550-5245-4641-424153535401",
+  "importer": "Keire.Prefab",
+  "importerVersion": 1,
+  "dependencies": [
+    "22c1a688-4618-524c-a28d-e70b940f4942",
+    "0895d959-76b9-5237-80a1-f9b3d6ef090e",
+    "f7837bdf-0423-55fd-a147-a19bd4a027ae"
+  ],
+  "subAssets": []
+}

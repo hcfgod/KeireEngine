@@ -724,10 +724,8 @@ void EditorWorkspaceLayer::QueueDefaultLitWarmup()
         const auto lit = std::ranges::find(library.Shaders, "Kéire/Lit", &Keire::SharedShaderEntry::Name);
         if (lit == library.Shaders.end())
             throw std::runtime_error("The pinned shared shader library has no Kéire/Lit shader.");
-        (void)m_AssetDatabase->Refresh();
-        Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(
-            *m_AssetDatabase, projectRoot / "Library/AssetCache/Runtime/source-index.json");
-        RefreshAssetBrowserRecords();
+        // The worker refreshes the target and rescans if the shared shader is absent from the index.
+        // Completion publishes the new index back to the editor without a blocking startup scan here.
         m_AssetOperations->QueueAssetImport(lit->Id, KeireEditor::AssetOperationPriority::AutomaticRefresh,
                                             {.Reason = "default-lit-warmup", .DefaultLitWarmup = true});
         queuedWarmup = true;
@@ -804,7 +802,9 @@ void EditorWorkspaceLayer::PollAssetHotReload()
                                                                  : std::filesystem::path{};
             KEIRE_CLIENT_INFO("[Asset Hot Reload] Change detected: asset={} path='{}' indexed={}.", id.ToString(),
                               Keire::Detail::PathToUtf8(path), record.has_value());
-            if (path.extension() == ".cs" || path.extension() == ".keireasm")
+            if ((path.extension() == ".cs" &&
+                 m_ManagedRuntimeCoordinator->ObserveSourceChange(Owner().GetProject()->Root() / "Assets" / path)) ||
+                path.extension() == ".keireasm")
                 m_ManagedRuntimeCoordinator->ScheduleBuild(0.1);
             if (path.extension() != ".cs")
             {
@@ -1108,6 +1108,9 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                     createdRecord && (createdRecord->RelativePath.extension() == ".cs" ||
                                       createdRecord->RelativePath.extension() == ".keireasm"))
                 {
+                    if (createdRecord->RelativePath.extension() == ".cs")
+                        (void)m_ManagedRuntimeCoordinator->ObserveSourceChange(Owner().GetProject()->Root() / "Assets" /
+                                                                               createdRecord->RelativePath);
                     m_ManagedRuntimeCoordinator->ScheduleBuild(0.1);
                 }
                 if (completion->Context.GraphFunctionExtraction)

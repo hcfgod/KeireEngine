@@ -36,7 +36,9 @@ manifest, create an archive, inspect trusted metadata, and extract exact bytes t
 
 In the Editor Asset Browser, select one or more assets and use **Create Asset Package...** from the context menu. The
 same command on a folder includes every asset below that folder. The authoring dialog controls the display name,
-package/publisher identifiers, semantic version, summary, and minimum Kéire version. Referenced dependencies are
+package/publisher identifiers, semantic version, summary, minimum Kéire version, and an optional maximum supported version. Keep the package ID and asset
+metadata stable across releases. C# exports must include their `.keireasm` definitions; the exporter records their
+runtime, Editor, or test scopes. Referenced dependencies are
 included automatically so the result remains self-contained. The Editor snapshots the asset inventory, stages source
 files and `.keiremeta` sidecars under the project `Library` directory, writes the archive in the background, and never
 overwrites an existing destination.
@@ -63,7 +65,7 @@ The first package operation creates two source-controlled project files:
 | `Packages/packages-lock.keirejson` | Exact versions, archive size and SHA-256, source, dependency graph, signature key, and embedded state. |
 
 Projects without these files remain valid. The first successful package publication raises `minimumEngineVersion` to
-0.3.1 in the same transaction, ensuring an older Editor refuses the project safely instead of ignoring mounted content.
+0.4.4 in the same transaction, ensuring an older Editor refuses the project safely instead of ignoring mounted content.
 
 `ProjectPackageManager` performs compatible dependency-closure resolution, reports missing or incompatible dependencies,
 rejects cycles and package conflicts, verifies trusted catalog size/hash/signature data, and extracts immutable content
@@ -145,7 +147,7 @@ new staging directory directly beneath an existing authorized parent. Automation
 expected archive size and SHA-256; marketplace artifacts also require either a verified embedded archive signature or
 a verified external publication envelope from an approved signature key.
 
-Kéire's five first-party launch products are prepared with
+Kéire's six first-party products are prepared with
 `python Scripts/Marketplace/create-official-marketplace-packages.py`. The builder copies only reviewed Sandbox source
 roots, proves that selected asset dependencies remain closed, explicitly declares managed assemblies, rejects links and
 nonportable paths, refuses to overwrite an output release set, and inspects every generated archive through the
@@ -177,3 +179,41 @@ completed its staging and recovery gates.
 
 See [Package Archives](PackageArchives.md) for Editor distribution packages and [Asset Pipeline](AssetPipeline.md) for
 asset import, cache, and cooking behavior.
+
+
+## Engine upgrades and package updates
+
+Schema-2 project lockfiles and import receipts retain the package manifest, including its declared engine bounds,
+platform requirements, and managed API version. Schema-1 records still load; Package Manager identifies their
+compatibility as unknown until reinstallation or reimport. New operations require Editor 0.4.4 or later.
+
+Package Manager displays imported assets alongside registry packages and opens when a compatibility notice needs
+attention. Out-of-range packages identify the need to update the package or use a supported Editor. A changed or
+unspecified managed API version prompts a script rebuild; it is advisory rather than an assumption that all engine
+updates break C#. Compatibility declarations do not guarantee that arbitrary future API changes will work.
+Registry mounts recheck declared compatibility and immutable cached file hashes. Embedded files remain editable.
+
+Updates compares installed versions with the signed-in Hub library using semantic version ordering. It distinguishes
+embedded copies and downloads that are not ready, and does not claim that an unsynchronized library proves everything
+is up to date. Both local and Marketplace asset imports show a review before applying changes. Partial imports retain
+ownership history for earlier files so later removal does not abandon them. Files removed by an upstream release are
+retained until package removal; modified or shared local files are preserved. Import rollback and startup recovery
+include the receipt and project descriptor alongside asset files. Archives and local files are rechecked before writes.
+
+## First Person Controller
+
+The `com.keire.official.first-person-controller` package contains a ready-to-place player prefab, collision motor,
+primary camera, audio listener, C# behaviour, and independent input actions. It supports walking, sprinting, grounded
+jumping, mouse look, gamepad look, cursor release, and Inspector settings. See its
+[setup guide](../Samples/KeireSandbox/Assets/FirstPersonController/README.md).
+
+Build only this unsigned package with:
+
+```sh
+python Scripts/Marketplace/create-official-marketplace-packages.py --package first-person-controller
+```
+
+For local previews before new source files are tracked, add `--include-untracked` and a fresh `--output-directory`.
+That option includes files under the selected source roots and does not sign or publish anything. Production builds
+use tracked sources by default. Upload the resulting archive through the Publisher portal; isolated validation,
+moderation, and signed publication remain required before a release is visible in the asset store.

@@ -573,6 +573,22 @@ TEST_CASE("Shader Graph generated HLSL compiles through the production shader im
     CHECK_FALSE(shader->Definition().MaximumWorldPositionDisplacementRadius);
     CHECK(imported.Diagnostics.empty());
 
+    // All compiler jobs must finish before failed imports release their staged files.
+    WriteText(source, compilation.Variants.front().Hlsl + "\n#error intentional_parallel_compile_failure\n");
+    CHECK_THROWS_AS(importer.ContextualImport(context, ReadBytes(manifest)), std::runtime_error);
+    WriteText(source, compilation.Variants.front().Hlsl);
+    const auto recovered = Keire::ShaderAsset::Decode(importer.ContextualImport(context, ReadBytes(manifest)).Bytes);
+    REQUIRE(recovered->Definition().Variants.size() == shader->Definition().Variants.size());
+    for (std::size_t index = 0; index < shader->Definition().Variants.size(); ++index)
+    {
+        const auto& before = shader->Definition().Variants[index];
+        const auto& after = recovered->Definition().Variants[index];
+        CHECK(after.Format == before.Format);
+        CHECK(after.PassRole == before.PassRole);
+        CHECK_FALSE(after.Vertex.empty());
+        CHECK_FALSE(after.Fragment.empty());
+    }
+
     auto unlitOptions = options;
     unlitOptions.GeneratedSource = "Assets/Generated/ShaderGraphUnlitTest.hlsl";
     const auto unlitCompilation =

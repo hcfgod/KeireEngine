@@ -5,10 +5,22 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <utility>
 
 namespace Keire::Internal
 {
+    [[nodiscard]] inline float
+    NativePixelScaleForRuntimeUi(const float renderScale, const std::span<const RuntimeUiRenderSubmission> submissions,
+                                 const bool screenOverlayUsesSurface) noexcept
+    {
+        for (const auto& submission : submissions)
+            if (submission.Target == RuntimeUiRenderTarget::CameraOverlay ||
+                (screenOverlayUsesSurface && submission.Target == RuntimeUiRenderTarget::ScreenOverlay))
+                return 1.0F;
+        return renderScale;
+    }
+
     class DynamicResolutionController final
     {
       public:

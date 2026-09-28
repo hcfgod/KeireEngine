@@ -12,6 +12,10 @@ for game and tool content authored by a project.
   pseudo-state selectors participate in a deterministic specificity cascade.
 - `.keireuipanel` stores scaling and output policy: screen overlay, camera overlay, render texture, or world surface.
 
+Visual-tree source follows XML quoting and naming rules. Escape reserved attribute text such as `<` with `&lt;`;
+standard named and numeric XML entities are decoded, while DTD, CDATA, and custom processing instructions are rejected.
+This keeps imported UI documents deterministic and makes malformed authoring input fail before runtime publication.
+
 Double-click a `.keireui` file to open the dockable UI Builder. The Builder owns its own hierarchy, control library,
 preview, Inspector, stylesheet and selector list, binding view, and source previews. Builder edits use the document
 undo stack and are not written until the document is saved.
@@ -20,6 +24,11 @@ Add a `UIDocument` component to a scene entity and assign both the visual-tree a
 panel sorting orders are added together. Later documents draw above earlier documents; pointer input is offered in the
 reverse order until handled.
 
+In the packaged player, keyboard/gamepad navigation and text input use the focused active-scene UI. If the active
+scene has no focused UI, focus on a persistent root retained with `DontDestroyOnLoad` remains usable after a scene
+replacement. Unfocused additive scenes do not steal this input. Button handlers that poll events should consume both
+`ClickedThisFrame` (pointer activation) and `SubmittedThisFrame` (keyboard/gamepad activation).
+
 The component's optional **UI Material** field applies a UI-target shader material to the rendered document.
 Create a UI Shader Graph, use **Material from Shader**, then assign its compiled material in the Inspector.
 `UIDocument.Material` exposes the same reference to C#; `UiDocumentComponent::SetMaterial` is the C++ API.
@@ -27,8 +36,10 @@ Clearing it restores standard UI rendering without rebuilding the document or lo
 An unavailable or incompatible material uses standard UI rendering and reports a diagnostic; a failed reload
 retains the last usable shader when one exists. Scene and prefab cooking retain the assigned material dependencies.
 Materials apply to screen overlays, camera overlays, render textures, and world surfaces. Game-view and player
-overlays execute in the camera GPU pass, before the camera's After UI effect. UI Builder remains an
-authoring preview; verify the GPU shader in the scene or player.
+overlays execute in the camera GPU pass, before the camera's After UI effect. UI Builder also renders its retained
+document through the runtime GPU UI compositor when a graphics renderer is active. Its **Preview Material** picker
+selects a temporary preview material; it does not edit the scene component's **UI Material** field or the saved visual
+tree. Assign the material on the scene's `UIDocument` to use it in Game view or Play Mode.
 
 ## UI Builder Workflow
 
@@ -36,19 +47,40 @@ Create a UI Document from the Project panel, then assign imported `.keirestyle` 
 A `.keireui` document opens with these working authoring surfaces:
 
 - Hierarchy multi-selection, drag-and-drop reparenting, copy/paste with regenerated stable IDs and names, and one
-  undoable transaction per accepted edit.
+  undoable transaction per accepted edit. Search by name, type, class, or displayed text; ancestors remain visible
+  so matching elements retain their hierarchy context. Clear search to restore the full list. Paste inserts into the
+  selected container, or the nearest container parent when a leaf control is selected.
 - A control library containing the built-in controls and the custom controls explicitly registered by the active
   last-good managed generation. Click inserts a visible, sized control beside the current non-container selection or
   inside the selected container; drag a control onto the canvas to place and size it directly.
+  Use the Library search to find built-in and registered controls by name.
+  Under **Templates and slots**, choose a `.keireui` asset with the searchable **Template** picker (or drop the asset
+  onto it), then click **+ Template Instance**. Template creation no longer requires copying an asset ID.
 - Inspector editing for names, reusable classes, inline properties, templates, slots, and one-way, two-way, or one-time
   binding declarations.
+  Only the property being edited changes. Classes apply to all selected elements when explicitly edited; name and
+  text apply to the primary selection. Undo/redo refreshes the Inspector without requiring reselection.
 - Linked stylesheet management plus selector/declaration add, edit, and remove operations. Create a **UI Style Sheet**
   from the Project panel, then link it with the typed searchable asset picker or by dragging the asset onto that picker.
   Style edits have their own undo/redo history and explicit Save/Reload boundary. Select **Styles** for the visual
   three-pane Style Studio; see [Visual Style Studio](../UiStyleStudio.md) for responsive rules, design tokens, source
   drafts, font families, and v1/v2 migration.
-- A retained-tree preview with resolution presets or a custom size, landscape/portrait orientation, **Match Game
-  View**, DPI/reference scaling, safe-area visualization, zoom/pan, rulers, guides, and live pseudo-state toggles.
+- A retained-tree GPU preview with resolution presets or a custom size, landscape/portrait orientation, **Match Game
+  View**, DPI/reference scaling, safe-area visualization, zoom/pan, rulers, guides, live pseudo-state toggles, and an
+  optional preview-only UI material. The rendered surface follows the displayed canvas size, including zoom and
+  window display scaling, up to 4096 pixels per axis. Below that limit, the canvas origin and extent align to physical
+  pixels to avoid filtering the rendered UI a second time. Rulers occupy separate gutters outside the document. Use
+  the mouse wheel to zoom and middle- or right-drag to pan.
+
+The compact preview toolbar keeps the resolution preset and Fit/zoom controls visible. Open **Preview options** for
+orientation, **Match Game View**, scaling, safe area, rulers, guides, pseudo-states, and **Preview Material**. The options
+panel scrolls independently so these controls do not push the canvas out of view. **Fit** resets both zoom and pan.
+
+Game view and the standalone player keep views containing camera-overlay UI at native pixel resolution. Game view
+also applies this to screen-overlay UI composited into its preview. These overlays currently share the scene render
+surface, so their presence prevents that entire view from using a reduced render scale, including automatic dynamic
+resolution. This preserves UI clarity at a potential scene-rendering performance cost; it is not a separate UI
+upscaling pass. World-space UI and render-texture UI do not force this fallback.
 
 The top **Debug** mode opens the Debugger in the tools pane directly; **Design** returns to the hierarchy and Inspector,
 and **Styles** opens the Style Studio panes.
@@ -56,14 +88,19 @@ The top toolbar acts on the open style sheet in **Styles** mode: Save persists i
 and Revert reloads it from disk after a warning. In other modes it acts on the UI document. The status beside the title
 shows which source has unsaved changes.
 
-The preview draws fallback-font text from the runtime glyph atlas and transformed glyph geometry, including wrapping,
-truncation, alignment, shadows, and clipping. Authored custom font families still use the Editor font preview and
-should be checked in Game view. Use **Match Game View** when comparing placement
-at the same viewport size; it copies the Game view's logical layout dimensions, independent of display DPI and render
-resolution scaling.
+With GPU rendering available, the preview submits the retained runtime tree, including referenced image textures and
+custom font-family assets, to the same compositor used by runtime UI. Font families/faces, images, and the selected UI
+material resolve through high-priority asynchronous asset requests; unresolved assets can temporarily display runtime
+fallback output. A selected material whose shader is not a UI target remains on standard UI rendering and shows a
+diagnostic. If the renderer is disabled or GPU preview fails, the Builder reports that state and falls back to editor
+drawing; image controls use placeholders and custom-font text uses the editor text path in that fallback. Use
+**Match Game View** to compare placement at the same viewport size; it copies the Game view's logical layout dimensions,
+independent of display DPI and render-resolution scaling.
 The selected-element outline follows a uniform `border-radius`, so selection does not square off a rounded control.
 Builder panel fills, borders, shadows, gradients, per-corner radii, and visual transforms use the runtime quad geometry.
-Image textures, custom font rasterization, and material shaders still need Game view for an exact visual check.
+The GPU preview also renders image textures, custom font rasterization, and the selected UI material. Check Game view or
+Play Mode to validate a material assigned to the scene document and to see it in its actual camera or presentation
+context.
 
 New documents open on a 1920x1080 authoring canvas when they do not reference Panel Settings. Clicking a library
 control places it near the active parent center; dragging honors the drop point and keeps the complete control inside
@@ -161,7 +198,11 @@ Pointer, keyboard, focus, submit, and `ChangeEvent<T>` values derive from `Event
 stop immediate propagation, or prevent the control's default action. Pointer capture and focus are panel-owned and are
 released when a document, panel, scene, or device generation is retired.
 
-`PreventDefault` currently suppresses click activation, including the built-in toggle mutation. Focus assignment and
+Keyboard/gamepad Submit on a focused button or toggle produces its normal Click action. Text fields retain Submit
+without a synthetic Click. Preventing Submit suppresses that click; preventing Click still suppresses the toggle mutation.
+Set initial menu focus explicitly with `RuntimeVisualElement.Focus()` after resolving a live document element.
+
+`PreventDefault` suppresses click activation, including the built-in toggle mutation. Focus assignment and
 text-field editing are committed by the lower-level input owner before their notification callbacks run, so those
 notifications can stop further propagation but cannot roll the already-applied value back in this release.
 
@@ -199,6 +240,11 @@ attach a Behaviour to the entity holding its UIDocument. During a gameplay callb
 UIDocument document = Entity.GetComponent<UIDocument>()!;
 document.SetBindingValue("Player.Health", 75.0f);
 ```
+
+Values may be supplied sequentially before or after presentation. Unsupplied paths retain their authored target
+values while other bindings update. A OneTime binding remains pending until its first supplied value. Native
+binding sources express a pending value by returning an empty `std::any` from `Read`; invalid nonempty values
+still produce binding diagnostics.
 
 `SetBindingValue` accepts `float`, `bool`, or `string`. Paths are explicit keys: `Player.Health` does not search for
 a managed object named Player. Publish updated values when gameplay state changes. Values supplied before the first
@@ -288,10 +334,12 @@ CPU data, so a pre-loss texture or render-target handle cannot be consumed by th
 
 Imported `.ttf`, `.otf`, and `.ttc` faces and `.keirefont` families use FreeType, HarfBuzz, FriBidi, and libunibreak
 for rasterization, shaping, bidirectional ordering, and Unicode line breaking. Font/layout caches are bounded and
-generation keyed; the printable-ASCII atlas remains the deterministic fallback when no family is assigned or a face is
-unavailable. A font family evaluates its ordered fallback families when the primary face has missing glyphs, choosing
-the single face that provides the best complete-command coverage. Per-glyph mixed-face runs, multi-page glyph-atlas
-packing, localization-database authoring, color emoji, and platform screen-reader adapters remain follow-up work.
+generation keyed; the Latin-1 atlas remains the deterministic fallback when no family is assigned or a face is
+unavailable. Ordered fallback faces are selected per glyph run, and each face uses at most eight atlas pages.
+Localization-database authoring, color emoji, and platform screen-reader adapters remain follow-up work.
+Camera-overlay custom fonts choose bounded 48, 96, 192, or 384-pixel atlas sizes from their displayed text size,
+including the preview surface scale and control transform. Atlas growth preserves logical layout metrics. Very large
+zoom levels can still magnify the maximum-size glyphs, and atlas capacity can require a lower resolution.
 Images use individual immutable frame leases rather than a shared image atlas, so the Debugger reports image-atlas
 occupancy as zero.
 
@@ -312,3 +360,10 @@ automatic converter or permanent dual runtime.
 
 Persistent `KeireEvent` fields and cooperative `Cursor.RequestVisible()` / `Cursor.RequestCapture()` tokens remain
 general scripting APIs and may be used by UI Toolkit controllers exactly as they are used by gameplay systems.
+
+### Managed control edge cases
+
+`TextField` normalizes null to empty before applying `MaxLength`. `Slider` clamps after step snapping, including
+reversed ranges. `ListView` treats negative `Overscan` as zero and clamps viewport bounds without integer overflow.
+Calling `VisualElement.Add` with an existing child moves it to the end; `Insert` uses the insertion slot in the
+original child order and adjusts that slot when removing the same child from an earlier position.

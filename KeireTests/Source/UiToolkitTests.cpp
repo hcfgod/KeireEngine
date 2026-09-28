@@ -9,7 +9,10 @@
 #include "KeireInternal/Ui/RuntimeUiTextInternal.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -139,6 +142,35 @@ TEST_CASE("UI visual tree source and cooked codecs are deterministic")
     CHECK(imported.AssetDependencies == definition.StyleSheets);
 }
 
+TEST_CASE("UI visual tree source accepts UTF-8 BOM quoted greater-than signs and numeric entities")
+{
+    const std::string source = "\xEF\xBB\xBF"
+                               R"xml(<?xml version="1.0" encoding="utf-8"?>
+<ui schemaVersion="1" name="FriendlySource">
+  <Label id="20000000-0000-4000-8000-000000000004" name="status" text="Continue >&#10;Ready"/>
+</ui>)xml";
+    const auto definition = Keire::UiVisualTreeAsset::ParseSource(AsBytes(source));
+    CHECK(definition.Root.Attributes.front().Value == "Continue >\nReady");
+
+    const std::string invalid = R"xml(<ui schemaVersion="1" name="InvalidEntity">
+  <Label text="&#xD800;"/>
+</ui>)xml";
+    CHECK_THROWS_WITH_AS((void)Keire::UiVisualTreeAsset::ParseSource(AsBytes(invalid)),
+                         doctest::Contains("invalid numeric XML entity"), std::runtime_error);
+
+    const std::array invalidSources{
+        std::string_view("<ui schemaVersion=\"1\" name=\"BadName\"><1Label/></ui>"),
+        std::string_view("<ui schemaVersion=\"1\" name=\"BadComment\"><!-- bad -- comment --><Label/></ui>"),
+        std::string_view("<ui schemaVersion=\"1\" name=\"BadValue\"><Label text=\"a < b\"/></ui>"),
+        std::string_view("<ui schemaVersion=\"1\" name=\"NoDtd\"><![CDATA[text]]><Label/></ui>"),
+    };
+    for (const auto malformed : invalidSources)
+    {
+        CAPTURE(malformed);
+        CHECK_THROWS_AS((void)Keire::UiVisualTreeAsset::ParseSource(AsBytes(malformed)), std::runtime_error);
+    }
+}
+
 TEST_CASE("UI visual tree source generates stable element IDs when authors omit them")
 {
     constexpr std::string_view automaticIdSource = R"xml(<?xml version="1.0" encoding="utf-8"?>
@@ -188,6 +220,47 @@ TEST_CASE("UI stylesheet parses selectors and round trips authoring source")
     CHECK(Keire::UiStyleSheetAsset::Decode(cooked)->Definition() == definition);
     const auto source = Keire::UiStyleSheetAsset::EncodeSource(definition);
     CHECK(Keire::UiStyleSheetAsset::ParseSource(source) == definition);
+}
+
+TEST_CASE("UI style sources preserve quoted delimiters comments and inline declarations")
+{
+    constexpr std::string_view styleSource = R"css(@keire-style 2;
+
+:root {
+  --message: "Ready; status: {ok} /* literal text */";
+  --nested: custom("a;b:c", fallback(value;still));
+  --quoted-asset: "asset(not-an-asset-id)";
+}
+)css";
+    const auto definition = Keire::UiStyleSheetAsset::ParseSource(AsBytes(styleSource));
+    REQUIRE(definition.Rules.size() == 1U);
+    REQUIRE(definition.Rules.front().Properties.size() == 3U);
+    CHECK(definition.Rules.front().Properties[0].Value == "\"Ready; status: {ok} /* literal text */\"");
+    CHECK(definition.Rules.front().Properties[1].Value == "custom(\"a;b:c\", fallback(value;still))");
+
+    const auto importer = Keire::CreateUiStyleSheetAssetImporter();
+    REQUIRE(importer.ContextualImport);
+    CHECK(importer.ContextualImport({}, AsBytes(styleSource)).AssetDependencies.empty());
+
+    constexpr std::string_view documentSource = R"xml(<ui schemaVersion="1" name="InlineDelimiters">
+  <Label style="--message: &quot;Ready; status: ok&quot;; width: 10px;"/>
+</ui>)xml";
+    const auto document = Keire::UiVisualTreeAsset::ParseSource(AsBytes(documentSource));
+    REQUIRE(document.Root.InlineStyles.size() == 2U);
+    CHECK(document.Root.InlineStyles.front().Value == "\"Ready; status: ok\"");
+    CHECK(document.Root.InlineStyles.back().Name == "width");
+}
+
+TEST_CASE("UI stylesheet structural errors identify the authored rule")
+{
+    constexpr std::string_view invalid = R"css(@keire-style 2;
+
+Button.primary {
+  --message: custom(value;
+}
+)css";
+    CHECK_THROWS_WITH_AS((void)Keire::UiStyleSheetAsset::ParseSource(AsBytes(invalid)),
+                         doctest::Contains("line 3, column 1"), std::runtime_error);
 }
 
 TEST_CASE("UI stylesheet root tokens match only the visual document root")
@@ -464,8 +537,34 @@ TEST_CASE("Runtime UI text shaping is Unicode aware bounded and generation cache
     CHECK(atlas->Generation == 99U);
     CHECK(atlas->Glyphs.size() >= glyphs.size());
     CHECK_FALSE(atlas->Pixels.empty());
+    REQUIRE(atlas->Pixels.size() >= 4U);
+    CHECK(atlas->Pixels[0] == std::byte{0xff});
+    CHECK(atlas->Pixels[1] == std::byte{0xff});
+    CHECK(atlas->Pixels[2] == std::byte{0xff});
+    CHECK(atlas->Pixels[3] == std::byte{0});
     for (const auto glyph : glyphs)
         CHECK(Keire::RenderBackend::FindRuntimeUiGlyph(*atlas, glyph) != nullptr);
+
+    CHECK(Keire::RenderBackend::RuntimeUiCustomFontRasterBucket(48.0F) == 48U);
+    CHECK(Keire::RenderBackend::RuntimeUiCustomFontRasterBucket(72.0F) == 96U);
+    CHECK(Keire::RenderBackend::RuntimeUiCustomFontRasterBucket(192.0F) == 192U);
+    CHECK(Keire::RenderBackend::RuntimeUiCustomFontRasterBucket(384.1F) == 384U);
+    const auto sharper = Keire::RenderBackend::BuildRuntimeUiGlyphAtlas(font, 0U, glyphs, 100U, 96U);
+    REQUIRE(sharper);
+    CHECK(sharper->Generation == 100U);
+    CHECK(atlas->Generation == 99U);
+    for (const auto glyph : glyphs)
+    {
+        const auto* originalMetric = Keire::RenderBackend::FindRuntimeUiGlyph(*atlas, glyph);
+        const auto* sharperMetric = Keire::RenderBackend::FindRuntimeUiGlyph(*sharper, glyph);
+        REQUIRE(originalMetric);
+        REQUIRE(sharperMetric);
+        CHECK(std::abs(originalMetric->Width - sharperMetric->Width) <= 1.0F);
+        CHECK(std::abs(originalMetric->Height - sharperMetric->Height) <= 1.0F);
+        CHECK(std::abs(originalMetric->Advance - sharperMetric->Advance) <= 1.0F);
+    }
+    CHECK_THROWS_AS((void)Keire::RenderBackend::BuildRuntimeUiGlyphAtlas(font, 0U, glyphs, 101U, 144U),
+                    std::invalid_argument);
 
     Keire::Detail::RuntimeUiTextLayoutCache cache(2U, 256U);
     const auto first = cache.Resolve(shaped);
@@ -475,6 +574,91 @@ TEST_CASE("Runtime UI text shaping is Unicode aware bounded and generation cache
     CHECK(cache.Statistics().Misses == 1U);
     cache.InvalidateFontGeneration(43U);
     CHECK(cache.Statistics().Entries == 0U);
+}
+
+TEST_CASE("Runtime UI custom font atlases reject glyphs taller than a page before copying pixels")
+{
+    const auto fontPath = std::filesystem::current_path() / "KeireHubContent" / "Fonts" / "Inter-Variable.ttf";
+    std::ifstream stream(fontPath, std::ios::binary);
+    const std::vector<char> source((std::istreambuf_iterator<char>(stream)), std::istreambuf_iterator<char>());
+    REQUIRE(source.size() >= 12U);
+    std::vector<std::byte> font(source.size());
+    (void)std::memcpy(font.data(), source.data(), source.size());
+    const auto readBigEndian = [&font](const std::size_t offset, const std::size_t size)
+    {
+        REQUIRE(offset + size <= font.size());
+        std::uint32_t result = 0;
+        for (std::size_t index = 0; index < size; ++index)
+            result = (result << 8U) | std::to_integer<std::uint32_t>(font[offset + index]);
+        return result;
+    };
+    const auto tableOffset = [&readBigEndian](const std::uint32_t tag)
+    {
+        const auto tableCount = readBigEndian(4U, 2U);
+        for (std::size_t index = 0; index < tableCount; ++index)
+        {
+            const auto record = 12U + index * 16U;
+            if (readBigEndian(record, 4U) == tag)
+                return readBigEndian(record + 8U, 4U);
+        }
+        FAIL("Required TrueType fixture table is missing.");
+        return 0U;
+    };
+    Keire::Detail::RuntimeUiTextLayoutRequest request;
+    request.FontBytes = font;
+    request.FontGeneration = 1U;
+    request.Text = "l";
+    request.FontSize = 12.0F;
+    request.AvailableWidth = 1000.0F;
+    const auto layout = Keire::Detail::BuildRuntimeUiTextLayout(request);
+    REQUIRE(layout.Glyphs.size() == 1U);
+    const std::array glyphs{layout.Glyphs.front().Glyph};
+    const auto head = tableOffset(0x68656164U);
+    const auto locations = tableOffset(0x6c6f6361U);
+    const auto outlines = tableOffset(0x676c7966U);
+    const bool longOffsets = readBigEndian(head + 50U, 2U) != 0U;
+    const auto offsetSize = longOffsets ? 4U : 2U;
+    const auto offsetScale = longOffsets ? 1U : 2U;
+    const auto glyphStart = outlines + readBigEndian(locations + glyphs.front() * offsetSize, offsetSize) * offsetScale;
+    const auto glyphEnd =
+        outlines + readBigEndian(locations + (glyphs.front() + 1U) * offsetSize, offsetSize) * offsetScale;
+    // Replace only this outline with a narrow 100 x 15,000 unit rectangle, retaining valid font-wide metrics.
+    const std::array<std::uint8_t, 22> tallOutline{
+        0,   1,   0,  0,  0,  0,  0,  100, 58, 152, // One contour and its bounding box.
+        0,   3,   0,  0,  49, 51, 17, 35,           // Last point, no hints, on-curve points with compressed deltas.
+        100, 100, 58, 152};                         // Nonzero X deltas: +100, -100; Y delta: +15,000.
+    REQUIRE(glyphStart + tallOutline.size() <= glyphEnd);
+    REQUIRE(glyphEnd <= font.size());
+    std::fill(font.begin() + glyphStart, font.begin() + glyphEnd, std::byte{});
+    for (std::size_t index = 0; index < tallOutline.size(); ++index)
+        font[glyphStart + index] = static_cast<std::byte>(tallOutline[index]);
+    CHECK_THROWS_WITH_AS((void)Keire::RenderBackend::BuildRuntimeUiGlyphAtlas(font, 0U, glyphs, 1U, 384U),
+                         doctest::Contains("page height"), std::length_error);
+    const auto smaller = Keire::RenderBackend::BuildRuntimeUiGlyphAtlas(font, 0U, glyphs, 2U, 48U);
+    REQUIRE(smaller);
+    CHECK(Keire::RenderBackend::FindRuntimeUiGlyph(*smaller, glyphs.front()) != nullptr);
+    CHECK(smaller->Pixels.size() == static_cast<std::size_t>(smaller->Width) * smaller->Height * 4U);
+}
+
+TEST_CASE("Runtime UI wrapping excludes break opportunities beyond the available width")
+{
+    Keire::Detail::RuntimeUiTextLayoutRequest request;
+    request.Text = "Double-click this document to open UI Builder.";
+    request.FontSize = 24.0F;
+    request.AvailableWidth = 380.0F;
+    const auto layout = Keire::Detail::BuildRuntimeUiTextLayout(request);
+    REQUIRE(layout.Lines.size() > 1U);
+    for (const auto& line : layout.Lines)
+        CHECK(line.Width <= request.AvailableWidth);
+
+    request.Text = "AA AA AA";
+    const auto advance = Keire::RenderBackend::RuntimeUiFallbackGlyph('A').Advance * 2.0F;
+    request.AvailableWidth = advance * 2.0F + 0.25F;
+    const auto boundary = Keire::Detail::BuildRuntimeUiTextLayout(request);
+    REQUIRE(boundary.Lines.size() > 1U);
+    for (const auto& line : boundary.Lines)
+        CHECK(line.Width <= request.AvailableWidth);
+    CHECK(boundary.Glyphs.size() == request.Text.size());
 }
 
 TEST_CASE("Runtime UI fallback text uses atlas advances for glyph placement and wrapping")
@@ -561,6 +745,9 @@ TEST_CASE("Runtime UI text uses per-glyph fallback faces and bounded multi-page 
         mappedGlyphs += pages[pageIndex]->ShapedGlyphs.size();
     }
     CHECK(mappedGlyphs > 1000U);
+    CHECK_THROWS_AS((void)Keire::RenderBackend::BuildRuntimeUiGlyphAtlasPages(inter, 0U, glyphs, 304U, 384U),
+                    std::length_error);
+    CHECK(pages.front()->Generation == 303U);
     CHECK_THROWS_WITH_AS((void)Keire::RenderBackend::BuildRuntimeUiGlyphAtlas(inter, 0U, glyphs, 303U),
                          doctest::Contains("multiple atlas pages"), std::length_error);
 }

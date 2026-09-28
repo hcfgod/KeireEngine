@@ -40,7 +40,7 @@ namespace Keire
         constexpr std::size_t MaximumComponentDataBytes = 4ULL * 1024ULL * 1024U;
         constexpr std::size_t MaximumHierarchyDepth = 512;
         constexpr std::size_t MaximumNameBytes = 256;
-        constexpr std::uint32_t SceneAssetImporterVersion = 9;
+        constexpr std::uint32_t SceneAssetImporterVersion = 10;
 
         [[nodiscard]] std::string_view LegacyUiComponentName(const ComponentTypeId type) noexcept
         {
@@ -189,6 +189,34 @@ namespace Keire
             }
         }
 
+        void CollectTaggedManagedAssetDependencies(const Json& value, std::set<AssetId>& dependencies)
+        {
+            if (value.is_array())
+            {
+                for (const auto& element : value)
+                    CollectTaggedManagedAssetDependencies(element, dependencies);
+                return;
+            }
+            if (!value.is_object())
+                return;
+            if (const auto* tag = FindMember(value, "$ref"); tag && tag->is_string())
+            {
+                if (tag->get_ref<const std::string&>() == "asset")
+                {
+                    const auto* asset = FindMember(value, "asset");
+                    const auto id = asset ? ManagedAssetReferenceId(*asset) : std::nullopt;
+                    if (!id)
+                        throw std::invalid_argument("Tagged managed asset reference is missing its stable ID.");
+                    InsertDependency(dependencies, *id);
+                    return;
+                }
+                if (tag->get_ref<const std::string&>() == "entity" || tag->get_ref<const std::string&>() == "component")
+                    return;
+            }
+            for (const auto& member : value)
+                CollectTaggedManagedAssetDependencies(member, dependencies);
+        }
+
         void CollectManagedStateDependencies(const AssetImportContext& context, const Json& data,
                                              std::set<AssetId>& dependencies)
         {
@@ -199,6 +227,8 @@ namespace Keire
                 throw std::invalid_argument("Managed component state must be text.");
 
             const auto document = Json::parse(serializedState->get_ref<const std::string&>());
+            // Current managed serialization tags direct assets inside fields, collections, and reference graphs.
+            CollectTaggedManagedAssetDependencies(document, dependencies);
             const auto* fields = FindMember(document, "Fields", "fields");
             if (!fields || !fields->is_array())
                 throw std::invalid_argument("Managed component state fields must be an array.");

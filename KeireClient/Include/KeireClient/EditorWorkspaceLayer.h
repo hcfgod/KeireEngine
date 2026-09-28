@@ -190,6 +190,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] Keire::Ref<Keire::AssetDatabase> SceneViewportAssetDatabase() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> SceneViewportAssetSystem() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::RenderSystem> SceneViewportRenderer() const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::RenderSystem> UiBuilderRenderer() const noexcept override;
+    [[nodiscard]] float UiBuilderDisplayScale() const noexcept override;
     [[nodiscard]] const Keire::RenderEnvironmentSettings& SceneViewportSettings() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::WindowSystem> SceneViewportWindows() const noexcept override;
     [[nodiscard]] Keire::WindowId SceneViewportWindow() const noexcept override;
@@ -735,6 +737,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                                                                             std::string_view path) noexcept override;
     [[nodiscard]] bool ClearManagedUiDocumentBindingSource(Keire::AssetId document) noexcept override;
     [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId entity = {}) const noexcept override;
+    [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeSceneForWorld(std::uint64_t world,
+                                                                       Keire::AssetId entity) const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override;
     [[nodiscard]] Keire::Ref<Keire::SceneRuntimeSession>
     ManagedRuntimeSession(Keire::AssetId entity = {}) const noexcept;

@@ -243,6 +243,7 @@ namespace Keire::RenderBackend
         ~RenderFramePacket();
 
         std::uint64_t Id = 0;
+        Vector2 UiMaterialTime;
         std::uint32_t DeviceGeneration = 0;
         std::uint32_t FrameSlot = (std::numeric_limits<std::uint32_t>::max)();
         std::vector<QueuedSceneRequest> Requests;

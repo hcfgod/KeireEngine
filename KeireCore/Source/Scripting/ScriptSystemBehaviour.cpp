@@ -342,6 +342,7 @@ namespace Keire
             return;
         m_Impl->ComponentCallbacks.reset();
         m_Impl->StopWorker();
+        m_Impl->CompilerServer.Stop();
         if (m_Impl->WorkScope)
         {
             m_Impl->WorkScope->Cancel();

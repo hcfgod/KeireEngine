@@ -544,7 +544,9 @@ namespace Keire
         if (const auto existing = m_Impl->States.find(id); existing != m_Impl->States.end())
         {
             if (existing->second->Type() != type)
-                throw std::invalid_argument("Asset was requested through a handle with a different type.");
+                throw std::invalid_argument("Asset " + id.ToString() + " was requested as type " + type.ToString() +
+                                            " but an existing handle uses type " + existing->second->Type().ToString() +
+                                            ".");
             return existing->second;
         }
 

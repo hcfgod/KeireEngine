@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 namespace Keire
 {
@@ -49,9 +52,7 @@ namespace Keire
         auto updated = database.m_Impl->ImportStatuses;
         for (const auto& status : statuses)
         {
-            if (!status.Id || status.State > AssetImportState::Failed ||
-                std::ranges::find(database.m_Impl->Records, status.Id, &AssetSourceRecord::Id) ==
-                    database.m_Impl->Records.end())
+            if (!status.Id || status.State > AssetImportState::Failed || !database.m_Impl->IdIndex.contains(status.Id))
                 throw std::invalid_argument("Asset worker import status does not match the current source index.");
             updated.insert_or_assign(status.Id, status);
         }
@@ -91,11 +92,7 @@ namespace Keire
         database.m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
         database.m_Impl->RequestChangeMonitorDigestVerification();
         std::erase_if(database.m_Impl->ImportStatuses,
-                      [&database](const auto& entry)
-                      {
-                          return std::ranges::find(database.m_Impl->Records, entry.first, &AssetSourceRecord::Id) ==
-                                 database.m_Impl->Records.end();
-                      });
+                      [&database](const auto& entry) { return !database.m_Impl->IdIndex.contains(entry.first); });
         return database.m_Impl->Records.size();
     }
 
@@ -151,7 +148,8 @@ namespace Keire
             if (previous == m_Impl->IdIndex.end())
                 continue;
             const auto& imported = m_Impl->Records[previous->second];
-            if (record.Importer != imported.Importer || record.ImporterVersion != imported.ImporterVersion)
+            if (record.Importer != imported.Importer || record.ImporterVersion != imported.ImporterVersion ||
+                record.MetadataDigest != imported.MetadataDigest)
                 continue;
             record.Dependencies = imported.Dependencies;
             record.SourceDependencies = imported.SourceDependencies;
@@ -163,29 +161,44 @@ namespace Keire
         m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);
         m_Impl->RequestChangeMonitorScan();
         std::erase_if(m_Impl->ImportStatuses,
-                      [this](const auto& entry)
-                      {
-                          return std::ranges::find(m_Impl->Records, entry.first, &AssetSourceRecord::Id) ==
-                                 m_Impl->Records.end();
-                      });
+                      [this](const auto& entry) { return !m_Impl->IdIndex.contains(entry.first); });
         return m_Impl->Records.size();
     }
 
     void AssetDatabase::RefreshAssetsUnlocked(const std::span<const AssetId> assets)
     {
-        const auto records = Records();
         std::vector<AssetSourceRecord> owners;
         owners.reserve(assets.size());
-        for (const auto asset : assets)
         {
-            const auto owner = std::ranges::find_if(
-                records, [asset](const AssetSourceRecord& record)
-                { return record.Id == asset || std::ranges::find(record.SubAssets, asset) != record.SubAssets.end(); });
-            if (owner == records.end())
-                throw std::invalid_argument("Targeted asset import identity is not in the source database: " +
-                                            asset.ToString());
-            if (std::ranges::find(owners, owner->Id, &AssetSourceRecord::Id) == owners.end())
-                owners.push_back(*owner);
+            std::scoped_lock lock(m_Impl->Mutex);
+            std::unordered_set<AssetId> selected;
+            selected.reserve(assets.size());
+            std::unordered_map<AssetId, std::size_t> subAssetOwners;
+            bool indexedSubAssets = false;
+            for (const auto asset : assets)
+            {
+                const auto primary = m_Impl->IdIndex.find(asset);
+                auto owner = m_Impl->Records.end();
+                if (primary != m_Impl->IdIndex.end())
+                    owner = m_Impl->Records.begin() + primary->second;
+                else
+                {
+                    if (!indexedSubAssets)
+                    {
+                        for (std::size_t index = 0; index < m_Impl->Records.size(); ++index)
+                            for (const auto child : m_Impl->Records[index].SubAssets)
+                                subAssetOwners.try_emplace(child, index);
+                        indexedSubAssets = true;
+                    }
+                    if (const auto child = subAssetOwners.find(asset); child != subAssetOwners.end())
+                        owner = m_Impl->Records.begin() + child->second;
+                }
+                if (owner == m_Impl->Records.end())
+                    throw std::invalid_argument("Targeted asset import identity is not in the source database: " +
+                                                asset.ToString());
+                if (selected.insert(owner->Id).second)
+                    owners.push_back(*owner);
+            }
         }
 
         for (const auto& previous : owners)
@@ -196,7 +209,8 @@ namespace Keire
                              true, m_Impl->InferImporter(source));
             if (refreshed.Id != previous.Id)
                 throw std::runtime_error("Targeted source refresh changed the stable asset identity.");
-            if (refreshed.Importer == previous.Importer && refreshed.ImporterVersion == previous.ImporterVersion)
+            if (refreshed.Importer == previous.Importer && refreshed.ImporterVersion == previous.ImporterVersion &&
+                refreshed.MetadataDigest == previous.MetadataDigest)
             {
                 refreshed.Dependencies = previous.Dependencies;
                 refreshed.SourceDependencies = previous.SourceDependencies;
@@ -345,25 +359,18 @@ namespace Keire
             (void)RefreshUnlocked();
         else
             RefreshAssetsUnlocked(assets);
-        const auto allRecords = Records();
-        auto records = allRecords;
+        auto allRecords = Records();
+        auto records = assets.empty() ? std::move(allRecords) : std::vector<AssetSourceRecord>{};
         std::vector<AssetId> sourceAssets;
         std::vector<AssetId> replacedAssets;
         std::unordered_set<AssetId> selected;
         std::unordered_set<AssetId> availableAssets;
-        if (!assets.empty())
+        std::unordered_map<AssetId, std::size_t> sourceOwners;
+        // Small interactive requests avoid constructing an index; large dependency expansions remain bounded.
+        std::size_t ownerLookups = assets.size() >= 32 ? 32 : 0;
+        const auto findSourceOwner = [&](const AssetId asset) -> const AssetSourceRecord*
         {
-            const auto previousCatalog = m_Impl->CacheRoot / "Runtime" / "catalog.json";
-            if (!std::filesystem::is_regular_file(previousCatalog))
-                return ImportAssetsUnlocked({}, policy, cancellation, std::move(progress), refreshSources);
-
-            for (const auto& entry : Detail::LoadCatalog(previousCatalog).Entries)
-                availableAssets.insert(entry.Id);
-            std::unordered_set<std::string> affectedSources;
-            const auto sourcePrefix = std::filesystem::relative(m_Impl->SourceRoot, m_Impl->Specification.ProjectRoot);
-            const auto addAffectedSource = [&affectedSources, &sourcePrefix](const AssetSourceRecord& record)
-            { affectedSources.insert((sourcePrefix / record.RelativePath).lexically_normal().generic_string()); };
-            for (const auto asset : assets)
+            if (ownerLookups++ < 32)
             {
                 const auto owner =
                     std::ranges::find_if(allRecords,
@@ -372,32 +379,60 @@ namespace Keire
                                              return record.Id == asset || std::ranges::find(record.SubAssets, asset) !=
                                                                               record.SubAssets.end();
                                          });
-                if (owner == allRecords.end())
-                    throw std::invalid_argument("Targeted asset import identity is not in the source database: " +
-                                                asset.ToString());
-                selected.insert(owner->Id);
-                addAffectedSource(*owner);
+                return owner == allRecords.end() ? nullptr : &*owner;
             }
-            bool expanded = true;
-            while (expanded)
+            if (sourceOwners.empty())
             {
-                expanded = false;
-                for (const auto& record : allRecords)
+                sourceOwners.reserve(allRecords.size());
+                for (std::size_t index = 0; index < allRecords.size(); ++index)
                 {
-                    if (selected.contains(record.Id) ||
-                        std::ranges::none_of(record.SourceDependencies,
-                                             [&affectedSources](const AssetSourceDependency& dependency)
-                                             {
-                                                 return affectedSources.contains(
-                                                     dependency.RelativePath.lexically_normal().generic_string());
-                                             }))
-                        continue;
-                    selected.insert(record.Id);
-                    addAffectedSource(record);
-                    expanded = true;
+                    sourceOwners.try_emplace(allRecords[index].Id, index);
+                    for (const auto child : allRecords[index].SubAssets)
+                        sourceOwners.try_emplace(child, index);
                 }
             }
-            records.clear();
+            const auto owner = sourceOwners.find(asset);
+            return owner == sourceOwners.end() ? nullptr : &allRecords[owner->second];
+        };
+        if (!assets.empty())
+        {
+            const auto previousCatalog = m_Impl->CacheRoot / "Runtime" / "catalog.json";
+            if (!std::filesystem::is_regular_file(previousCatalog))
+                return ImportAssetsUnlocked({}, policy, cancellation, std::move(progress), refreshSources);
+
+            for (const auto& entry : Detail::LoadCatalog(previousCatalog).Entries)
+                availableAssets.insert(entry.Id);
+            std::unordered_map<std::string, std::vector<std::size_t>> dependents;
+            for (std::size_t index = 0; index < allRecords.size(); ++index)
+            {
+                for (const auto& dependency : allRecords[index].SourceDependencies)
+                    dependents[dependency.RelativePath.lexically_normal().generic_string()].push_back(index);
+            }
+            std::vector<std::string> affectedSources;
+            const auto sourcePrefix = std::filesystem::relative(m_Impl->SourceRoot, m_Impl->Specification.ProjectRoot);
+            const auto addAffectedSource = [&affectedSources, &sourcePrefix](const AssetSourceRecord& record)
+            { affectedSources.push_back((sourcePrefix / record.RelativePath).lexically_normal().generic_string()); };
+            for (const auto asset : assets)
+            {
+                const auto* owner = findSourceOwner(asset);
+                if (!owner)
+                    throw std::invalid_argument("Targeted asset import identity is not in the source database: " +
+                                                asset.ToString());
+                if (selected.insert(owner->Id).second)
+                    addAffectedSource(*owner);
+            }
+            for (std::size_t next = 0; next < affectedSources.size(); ++next)
+            {
+                const auto found = dependents.find(affectedSources[next]);
+                if (found == dependents.end())
+                    continue;
+                for (const auto index : found->second)
+                {
+                    const auto& record = allRecords[index];
+                    if (selected.insert(record.Id).second)
+                        addAffectedSource(record);
+                }
+            }
             for (const auto& record : allRecords)
             {
                 if (!selected.contains(record.Id))
@@ -447,9 +482,10 @@ namespace Keire
                     LogImportDiagnostic(record, diagnostic);
                 {
                     std::scoped_lock lock(m_Impl->Mutex);
-                    const auto stored = std::ranges::find(m_Impl->Records, record.Id, &AssetSourceRecord::Id);
-                    if (stored != m_Impl->Records.end())
+                    const auto storedIndex = m_Impl->IdIndex.find(record.Id);
+                    if (storedIndex != m_Impl->IdIndex.end())
                     {
+                        auto* stored = &m_Impl->Records[storedIndex->second];
                         stored->SourceDependencies = imported.SourceDependencies;
                         stored->Metadata = imported.Metadata;
                         stored->Type = effectiveType;
@@ -488,20 +524,17 @@ namespace Keire
                         {
                             if (availableAssets.contains(dependency))
                                 continue;
-                            const auto owner = std::ranges::find_if(
-                                allRecords,
-                                [dependency](const AssetSourceRecord& source)
-                                {
-                                    return source.Id == dependency ||
-                                           std::ranges::find(source.SubAssets, dependency) != source.SubAssets.end();
-                                });
-                            if (owner == allRecords.end() || !selected.insert(owner->Id).second)
+                            const auto* owner = findSourceOwner(dependency);
+                            if (!owner)
                                 continue;
-                            records.push_back(*owner);
-                            sourceAssets.push_back(owner->Id);
-                            replacedAssets.push_back(owner->Id);
-                            replacedAssets.insert(replacedAssets.end(), owner->SubAssets.begin(),
-                                                  owner->SubAssets.end());
+                            const auto& source = *owner;
+                            if (!selected.insert(source.Id).second)
+                                continue;
+                            records.push_back(source);
+                            sourceAssets.push_back(source.Id);
+                            replacedAssets.push_back(source.Id);
+                            replacedAssets.insert(replacedAssets.end(), source.SubAssets.begin(),
+                                                  source.SubAssets.end());
                         }
                     };
                     includeDependencies(record.Dependencies);

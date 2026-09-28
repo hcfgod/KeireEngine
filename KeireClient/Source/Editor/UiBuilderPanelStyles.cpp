@@ -1381,6 +1381,7 @@ namespace KeireEditor
         (void)ui.InputCodeEditor("CSS style source", m_StyleSourceDraft, m_StyleSourceEditorState,
                                  Keire::UiSize{0.0F, editorHeight});
         const auto sourceState = ui.LastItemState();
+        const auto sourceRect = ui.LastItemRect();
         if (ui.Splitter(Keire::UiAxis::Vertical, "UiStyleSourceHeight", editorHeight, detailsHeight, 180.0F, 90.0F))
             m_StyleSourceEditorHeight = editorHeight;
         m_StyleSourceEditor.SetCursor(m_StyleSourceEditorState.CursorOffset);
@@ -1404,33 +1405,80 @@ namespace KeireEditor
         {
             ui.TextColoredWrapped(theme.MutedText, *documentation);
         }
-        if (sourceState.Active)
+        auto completions = m_StyleSourceEditor.Completions(m_StyleSourceEditor.Cursor(), 12U);
+        if (m_StyleCompletionCursor != m_StyleSourceEditor.Cursor())
         {
-            const auto completions = m_StyleSourceEditor.Completions(m_StyleSourceEditor.Cursor(), 8U);
-            if (!completions.empty())
+            m_StyleCompletionCursor = m_StyleSourceEditor.Cursor();
+            m_StyleCompletionSelection = 0;
+        }
+        if (!completions.empty())
+            m_StyleCompletionSelection = std::min(m_StyleCompletionSelection, completions.size() - 1U);
+
+        const auto applyCompletion = [&](const UiStyleSourceCompletion& completion)
+        {
+            if (!m_StyleSourceEditor.ApplyCompletion(m_StyleSourceEditor.Cursor(), completion))
+                return false;
+            m_StyleSourceDraft = m_StyleSourceEditor.Source();
+            m_StyleSourceEditorState.CursorOffset = m_StyleSourceEditor.Cursor();
+            m_StyleSourceEditorState.SelectionBegin = m_StyleSourceEditor.Cursor();
+            m_StyleSourceEditorState.SelectionEnd = m_StyleSourceEditor.Cursor();
+            m_StyleSourceEditorState.RequestCursor = true;
+            m_StyleCompletionCursor = m_StyleSourceEditor.Cursor();
+            (void)styleDocument.ApplySourceDraft(m_StyleSourceDraft);
+            m_StyleSourceGeneration = styleDocument.Generation();
+            return true;
+        };
+
+        bool completionApplied = false;
+        if (sourceState.Active && !completions.empty())
+        {
+            if (ui.KeyPressed(Keire::UiKey::Down))
+                m_StyleCompletionSelection = (m_StyleCompletionSelection + 1U) % completions.size();
+            if (ui.KeyPressed(Keire::UiKey::Up))
+                m_StyleCompletionSelection =
+                    (m_StyleCompletionSelection + completions.size() - 1U) % completions.size();
+            if (ui.KeyPressed(Keire::UiKey::Tab) || ui.KeyPressed(Keire::UiKey::Enter))
+                completionApplied = applyCompletion(completions[m_StyleCompletionSelection]);
+            if (!completionApplied)
+                ui.OpenPopup("UiStyleSourceCompletions");
+        }
+
+        constexpr Keire::UiSize completionSize{440.0F, 250.0F};
+        auto completionPosition =
+            Keire::UiPosition{m_StyleSourceEditorState.CaretScreenPosition.X,
+                              m_StyleSourceEditorState.CaretScreenPosition.Y + m_StyleSourceEditorState.CaretHeight};
+        completionPosition.X = std::clamp(completionPosition.X, sourceRect.Minimum.X,
+                                          std::max(sourceRect.Minimum.X, sourceRect.Maximum.X - completionSize.Width));
+        if (completionPosition.Y + completionSize.Height > sourceRect.Maximum.Y)
+            completionPosition.Y =
+                std::max(sourceRect.Minimum.Y, m_StyleSourceEditorState.CaretScreenPosition.Y - completionSize.Height);
+        ui.SetNextWindowPosition(completionPosition, false);
+        ui.SetNextWindowSize(completionSize, false);
+        if (auto suggestions =
+                ui.BeginPopup("UiStyleSourceCompletions",
+                              {.NoResize = true, .NoMove = true, .NoSavedSettings = true, .NoFocusOnAppearing = true});
+            suggestions)
+        {
+            if (completionApplied || completions.empty())
             {
-                if (auto suggestions = ui.BeginChild("UiStyleSourceCompletions", {0.0F, 120.0F}, true); suggestions)
+                ui.CloseCurrentPopup();
+            }
+            else
+            {
+                for (std::size_t index = 0; index < completions.size(); ++index)
                 {
-                    ui.TextColored(theme.Accent, "COMPLETION");
-                    for (const auto& completion : completions)
+                    const auto& completion = completions[index];
+                    if (ui.Selectable(completion.Label + "##UiStyleCompletion" + completion.Insertion,
+                                      index == m_StyleCompletionSelection))
                     {
-                        if (ui.Selectable(completion.Label + "##UiStyleCompletion" + completion.Insertion))
-                        {
-                            if (m_StyleSourceEditor.ApplyCompletion(m_StyleSourceEditor.Cursor(), completion))
-                            {
-                                m_StyleSourceDraft = m_StyleSourceEditor.Source();
-                                m_StyleSourceEditorState.CursorOffset = m_StyleSourceEditor.Cursor();
-                                m_StyleSourceEditorState.SelectionBegin = m_StyleSourceEditor.Cursor();
-                                m_StyleSourceEditorState.SelectionEnd = m_StyleSourceEditor.Cursor();
-                                m_StyleSourceEditorState.RequestCursor = true;
-                                (void)styleDocument.ApplySourceDraft(m_StyleSourceDraft);
-                                m_StyleSourceGeneration = styleDocument.Generation();
-                            }
-                        }
-                        if (ui.LastItemState().Hovered)
-                            ui.SetTooltip(completion.Documentation);
+                        m_StyleCompletionSelection = index;
+                        (void)applyCompletion(completion);
+                        ui.CloseCurrentPopup();
                     }
                 }
+                ui.Separator();
+                ui.TextColoredWrapped(theme.MutedText, completions[m_StyleCompletionSelection].Documentation);
+                ui.TextColored(theme.MutedText, "Up/Down to navigate  |  Tab/Enter to accept  |  Esc to close");
             }
         }
         const bool parseNow = m_StyleSourceParsePending && (sourceState.DeactivatedAfterEdit ||

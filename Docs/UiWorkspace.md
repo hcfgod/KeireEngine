@@ -187,3 +187,13 @@ be active.
 The workspace does not expose Dear ImGui types, renderer resources, SDL events, native handles, or JSON objects. It
 does not enable multi-viewports, create an input-routing policy, serialize engine scenes, discover assets, or define a
 plug-in system. Those systems require their own ownership and lifecycle designs.
+
+
+Text padding applies to the control content rectangle used for alignment and wrapping. Container padding spaces its children; control padding spaces its own text. Insets scale with the panel, automatic sizing includes them, and rotating an inset label retains the original element pivot. If padding consumes the entire content rectangle, no text is emitted.
+
+### Small runtime UI text
+
+UI font atlases include three filtered smaller levels with glyph padding, reducing missing strokes when a panel is
+scaled down. This applies to the embedded fallback font and imported font faces. Extremely small text still loses
+readability because the display has too few pixels: validate menus at their smallest supported viewport, use a
+comfortable physical text size, and provide text scaling. Do not use a tiny Game view as the final legibility target.

@@ -27,8 +27,8 @@ def require(condition: bool, message: str) -> None:
 definitions = module.PACKAGES
 require(module.VERSION == "0.4.4", "Official packages must follow the current project version.")
 require(
-    len(definitions) == 5,
-    "The official release set must contain exactly five launch products.",
+    len(definitions) == 6,
+    "The official release set must contain six first-party products.",
 )
 require(
     len({definition.slug for definition in definitions}) == len(definitions),
@@ -54,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
         payload = temporary_root / definition.slug
         payload.mkdir()
         for source in definition.sources:
-            module.copy_source(project, source, payload, tracked_files)
+            module.copy_source(project, source, payload, None if definition.slug == "first-person-controller" else tracked_files)
         (payload / "LICENSE.txt").write_bytes((ROOT / "LICENSE.txt").read_bytes())
         manifest = module.create_manifest(definition, payload)
         require(manifest["files"], f"{definition.slug} has no file inventory.")
@@ -73,6 +73,17 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
             all((payload / entry).is_file() for entry in manifest["entryPoints"]),
             f"{definition.slug} declares a missing entry point.",
         )
+        if definition.slug == "first-person-controller":
+            import json
+            prefab = json.loads((payload / definition.entry_points[0]).read_text(encoding="utf-8"))
+            body, camera = prefab["entities"]
+            require(camera["parent"] == body["id"], "FPS camera must remain parented to its motor.")
+            require(any(c["type"] == "4b454952-4543-4841-5241-435445520001" for c in body["components"]), "FPS prefab needs a character motor.")
+            require(any(c["type"] == "d7e0f0a1-bfe2-46d2-bc47-4083f77a8100" for c in camera["components"]), "FPS prefab needs the packaged behaviour.")
+            input_asset = json.loads((payload / "Assets/FirstPersonController/FirstPersonInput.keireinput").read_text(encoding="utf-8"))
+            actions = {a["name"]: a["id"] for a in input_asset["actionMaps"][0]["actions"]}
+            require(set(actions) == {"Move", "Look", "GamepadLook", "Jump", "Sprint", "Escape"}, "FPS input actions must match the controller.")
+            require(actions["Look"] != actions["GamepadLook"], "Mouse delta and stick rate must stay separate.")
         csharp = list(payload.rglob("*.cs"))
         require(
             bool(csharp) == bool(manifest["managedAssemblies"]),
@@ -106,5 +117,5 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
     )
 
 print(
-    "Official marketplace package selection validation passed for five deterministic products."
+    "Official marketplace package selection validation passed for six deterministic products."
 )

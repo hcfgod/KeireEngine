@@ -1,3 +1,5 @@
+#include "Keire/Log.h"
+#include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/Scripting/ScriptSystemInternal.h"
 
 namespace Keire
@@ -122,34 +124,62 @@ namespace Keire
                                            std::filesystem::copy_options::overwrite_existing);
             }
 
+            const auto references = OutputRoot / "Intermediate" / "ManagedReferences";
+            const auto retainReference = [&references](const std::filesystem::path& source)
+            {
+                const auto bytes = Detail::ReadTextFile(source, std::size_t{64} << 20U);
+                const auto destination = references / source.filename();
+                (void)Detail::WriteFileAtomicallyIfChanged(destination, std::as_bytes(std::span(bytes)));
+                return destination;
+            };
+            const auto compilerApi = retainReference(generationManagedApi);
+            const auto compilerEditorApi =
+                ManagedEditorApi.empty() ? std::filesystem::path{} : retainReference(generationManagedEditorApi);
+            const auto compilerGenerator =
+                ManagedGenerator.empty() ? std::filesystem::path{} : retainReference(generationManagedGenerator);
+
             std::map<AssetId, std::string> names;
             for (const auto& assembly : request.Assemblies)
                 names.emplace(assembly.Asset, assembly.Definition.Name);
+            std::string buildIdentity = request.Configuration;
             for (const auto& assembly : request.Assemblies)
-                WriteText(
-                    projectDirectory / (assembly.Definition.Name + ".csproj"),
-                    GenerateProject(assembly, names, ProjectRoot, projectDirectory, generationManagedApi, {},
-                                    ManagedEditorApi.empty() ? std::filesystem::path{} : generationManagedEditorApi,
-                                    ManagedGenerator.empty() ? std::filesystem::path{} : generationManagedGenerator,
-                                    assembly.Definition.Classification == ManagedAssemblyClassification::Editor,
-                                    "net10.0", "14.0"));
-
+            {
+                const auto text = GenerateProject(
+                    assembly, names, ProjectRoot, projectDirectory, compilerApi, {}, compilerEditorApi,
+                    compilerGenerator, assembly.Definition.Classification == ManagedAssemblyClassification::Editor,
+                    "net10.0", "14.0");
+                WriteText(projectDirectory / (assembly.Definition.Name + ".csproj"), text);
+                buildIdentity += std::to_string(text.size()) + ":" + text;
+            }
             const auto aggregatorPath = projectDirectory / "Keire.Managed.Build.csproj";
-            WriteText(aggregatorPath, GenerateManagedBuildAggregator(request));
+            const auto aggregator = GenerateManagedBuildAggregator(request);
+            WriteText(aggregatorPath, aggregator);
+            buildIdentity += aggregator;
+            // Keep compiler outputs stable, but isolate different assembly graphs to exclude stale removed DLLs.
+            const auto compilerOutput = OutputRoot / "Intermediate" / "Compiled" /
+                                        Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(buildIdentity))));
             if (cancellation.stop_requested())
                 throw ManagedBuildState::Cancelled;
 
             SetState(ManagedBuildState::Compiling);
+            const auto prepared = std::chrono::steady_clock::now();
+            const bool sharedCompiler = CompilerServer.Prepare(
+                Dotnet, projectDirectory / (request.Assemblies.front().Definition.Name + ".csproj"), projectDirectory,
+                cancellation);
+            if (cancellation.stop_requested())
+                throw ManagedBuildState::Cancelled;
+            const auto compilerReady = std::chrono::steady_clock::now();
             const std::vector<std::string> arguments{"build",
                                                      PathText(aggregatorPath),
                                                      "--configuration",
                                                      request.Configuration,
                                                      "--nologo",
-                                                     "--disable-build-servers",
                                                      "/nodeReuse:false",
                                                      "--output",
-                                                     PathText(staging / "Assemblies"),
-                                                     "--property:UseSharedCompilation=false"};
+                                                     PathText(compilerOutput),
+                                                     sharedCompiler ? "--property:UseSharedCompilation=true"
+                                                                    : "--property:UseSharedCompilation=false",
+                                                     "--property:SharedCompilationId=" + CompilerServer.PipeName()};
             auto process = Detail::ChildProcess::Start(Dotnet, arguments, staging);
             while (!process.Poll())
             {
@@ -182,11 +212,15 @@ namespace Keire
             }
 
             SetState(ManagedBuildState::Publishing);
+            const auto compiled = std::chrono::steady_clock::now();
             {
                 std::scoped_lock lock(Mutex);
                 if (cancellation.stop_requested() || Status.Operation != operation)
                     throw ManagedBuildState::Cancelled;
             }
+            std::filesystem::copy(compilerOutput, staging / "Assemblies", std::filesystem::copy_options::recursive);
+            if (cancellation.stop_requested())
+                throw ManagedBuildState::Cancelled;
             const auto& active = staging;
             Detail::WriteTextFileAtomically(OutputRoot / "active-generation.json",
                                             "{\"generation\":" + std::to_string(operation.Value()) +
@@ -205,15 +239,31 @@ namespace Keire
                 Status.State = ManagedBuildState::Succeeded;
             }
             StatusChanged.notify_all();
+            const auto milliseconds = [](const auto duration)
+            { return std::chrono::duration<double, std::milli>(duration).count(); };
+            try
+            {
+                KEIRE_CORE_INFO("Managed build timing: preparation_ms={:.2f}, compiler_setup_ms={:.2f}, "
+                                "build_ms={:.2f}, publication_ms={:.2f}.",
+                                milliseconds(prepared - started), milliseconds(compilerReady - prepared),
+                                milliseconds(compiled - compilerReady),
+                                milliseconds(std::chrono::steady_clock::now() - compiled));
+            }
+            catch (...)
+            {
+                // Timing diagnostics cannot invalidate an already published generation.
+            }
         }
         catch (const ManagedBuildState state)
         {
+            CompilerServer.Stop();
             std::error_code error;
             std::filesystem::remove_all(staging, error);
             SetState(state);
         }
         catch (const std::exception& exception)
         {
+            CompilerServer.Stop();
             std::error_code error;
             std::filesystem::remove_all(staging, error);
             {
@@ -455,6 +505,8 @@ namespace Keire
         if (state == ManagedBuildState::Generating || state == ManagedBuildState::Compiling ||
             state == ManagedBuildState::Publishing)
             throw std::logic_error("The managed SDK cannot be changed while a script build is active.");
+        m_Impl->StopWorker();
+        m_Impl->CompilerServer.Stop();
         m_Impl->Specification.SdkSelection = selection;
         m_Impl->Specification.DotnetExecutable = std::move(customExecutable);
         m_Impl->Dotnet.clear();

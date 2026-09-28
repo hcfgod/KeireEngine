@@ -449,7 +449,9 @@ namespace Keire
                 return {};
             if (!value.is_object())
                 throw std::invalid_argument("Managed data asset reference must be an object or null.");
-            const auto* nested = FindMember(value, "Id", "id");
+            const auto* nested = FindMember(value, "asset", "asset");
+            if (!nested)
+                nested = FindMember(value, "Id", "id");
             const auto& id = nested ? *nested : value;
             if (!id.is_object())
                 throw std::invalid_argument("Managed data asset reference ID must be an object.");

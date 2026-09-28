@@ -1130,7 +1130,7 @@ namespace Keire::RenderBackend
         void CollectCompletedFrames(bool waitForAny);
         void PublishGpuOcclusionReadbackStatistics();
         void PrepareFrameForExecution(const std::shared_ptr<RenderFramePacket>& frame);
-        void BeginFrame();
+        void BeginFrame(Vector2 uiMaterialTime = {});
         void CancelFrame() noexcept;
         void QueueUiTextureRetirements(std::span<const std::uintptr_t> logicalTextureIds);
         void Submit(SceneRenderRequest request);

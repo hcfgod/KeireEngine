@@ -198,6 +198,10 @@ namespace Keire
         std::vector<Highlight> Highlights;
         float ScrollX = 0.0F;
         float ScrollY = 0.0F;
+        UiPosition CaretScreenPosition;
+        float CaretHeight = 0.0F;
+        bool Active = false;
+        bool SubmitRequested = false;
         bool RequestCursor = false;
     };
 
@@ -339,6 +343,7 @@ namespace Keire
         bool NoSavedSettings = false;
         bool NoScrollbar = false;
         bool NoScrollWithMouse = false;
+        bool NoFocusOnAppearing = false;
         // Reserve width for responsive content even when it currently fits vertically.
         bool AlwaysVerticalScrollbar = false;
     };
@@ -593,7 +598,7 @@ namespace Keire
         [[nodiscard]] UiComboScope BeginCombo(std::string_view label, std::string_view preview);
         [[nodiscard]] UiPopupScope BeginPopupModal(std::string_view id, bool* open = nullptr,
                                                    UiWindowOptions options = {}, bool autoResize = true);
-        [[nodiscard]] UiPopupScope BeginPopup(std::string_view id);
+        [[nodiscard]] UiPopupScope BeginPopup(std::string_view id, UiWindowOptions options = {});
         [[nodiscard]] UiPopupScope BeginItemContextMenu(std::string_view id = {});
         [[nodiscard]] UiPopupScope BeginWindowContextMenu(std::string_view id = {});
         [[nodiscard]] UiTableScope BeginTable(std::string_view id, std::size_t columns, UiTableOptions options = {});

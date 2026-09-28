@@ -24,8 +24,9 @@ namespace
         Keire::ScenePresentationUiDocumentElement Slider;
     };
 
-    [[nodiscard]] PresentationButton CreatePresentationButton(const Keire::Ref<Keire::AssetSystem>& assets,
-                                                              const std::string_view name)
+    [[nodiscard]] PresentationButton
+    CreatePresentationButton(const Keire::Ref<Keire::AssetSystem>& assets, const std::string_view name,
+                             const Keire::UiVisualElementType type = Keire::UiVisualElementType::Button)
     {
         const std::string label(name);
         const auto visualTree = Keire::AssetId::Generate();
@@ -35,7 +36,7 @@ namespace
         definition.Root.InlineStyles = {{"width", "200"}, {"height", "100"}};
         Keire::UiVisualElementDefinition buttonDefinition;
         buttonDefinition.StableId = Keire::AssetId::Generate();
-        buttonDefinition.Type = Keire::UiVisualElementType::Button;
+        buttonDefinition.Type = type;
         buttonDefinition.Name = "action";
         buttonDefinition.Attributes = {{"text", label}};
         buttonDefinition.InlineStyles = {{"width", "100"}, {"height", "50"}};
@@ -171,6 +172,59 @@ TEST_CASE("Editor keyboard routing selects only an active presentation with reta
     CHECK_FALSE(KeireEditor::SelectRuntimeUiKeyboardPresentation(active.Presentation));
     active.Session->Stop();
     active.Session->EditScene()->Close();
+    assets->Close();
+}
+
+TEST_CASE("Scene UI keyboard submit activates buttons and toggles unless prevented")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.Decoders.push_back(Keire::CreateUiVisualTreeAssetDecoder());
+    specification.Decoders.push_back(Keire::CreateUiPanelSettingsAssetDecoder());
+    const auto assets = Keire::CreateRef<Keire::AssetSystem>(std::move(specification));
+    for (const auto type : {Keire::UiVisualElementType::Button, Keire::UiVisualElementType::Toggle,
+                            Keire::UiVisualElementType::TextField})
+    {
+        const auto fixture = CreatePresentationButton(assets, "Keyboard activation", type);
+        const auto presentation = fixture.Presentation;
+        REQUIRE(presentation->Ui()->SetFocus(fixture.Button));
+        const auto document = presentation->FocusedUiEntity();
+        const auto element = presentation->FindUiDocumentElement(document, "action");
+        REQUIRE(element);
+        const auto visual = presentation->UiDocumentVisualElement(document, element->StableId);
+        REQUIRE(visual);
+        int clicks = 0;
+        bool prevent = false;
+        (void)visual->RegisterCallback<Keire::Ui::ClickEvent>([&](Keire::Ui::ClickEvent&) { ++clicks; });
+        (void)visual->RegisterCallback<Keire::Ui::SubmitEvent>(
+            [&](Keire::Ui::SubmitEvent& event)
+            {
+                if (prevent)
+                    event.PreventDefault();
+            });
+        const bool activates = type != Keire::UiVisualElementType::TextField;
+        presentation->Navigate(Keire::RuntimeUiNavigation::Accept);
+        CHECK(clicks == (activates ? 1 : 0));
+        CHECK(presentation->ConsumeUiDocumentElementEvent(document, element->DocumentGeneration, element->Element,
+                                                          Keire::RuntimeUiEventType::Click) == activates);
+        CHECK_FALSE(presentation->ConsumeUiDocumentElementEvent(document, element->DocumentGeneration, element->Element,
+                                                                Keire::RuntimeUiEventType::Click));
+        if (type == Keire::UiVisualElementType::Toggle)
+            CHECK(presentation
+                      ->ReadUiDocumentElementFlag(document, element->DocumentGeneration, element->Element,
+                                                  Keire::ScenePresentationUiDocumentFlag::Checked)
+                      .value_or(false));
+        prevent = true;
+        presentation->Navigate(Keire::RuntimeUiNavigation::Accept);
+        CHECK(clicks == (activates ? 1 : 0));
+        prevent = false;
+        REQUIRE(presentation->SetUiDocumentElementFlag(document, element->DocumentGeneration, element->Element,
+                                                       Keire::ScenePresentationUiDocumentFlag::Interactable, false));
+        presentation->Navigate(Keire::RuntimeUiNavigation::Accept);
+        CHECK(clicks == (activates ? 1 : 0));
+        fixture.Session->Stop();
+        fixture.Session->EditScene()->Close();
+    }
     assets->Close();
 }
 

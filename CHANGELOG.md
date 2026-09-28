@@ -1,9 +1,148 @@
 # Changelog
 
+### Asset packaging improvements
+
+- Preserve compatibility manifests in project package locks and import receipts, with legacy-record diagnostics and
+  engine-upgrade notices; verify immutable registry content when mounting.
+- Show imported assets and actual Hub-library update candidates; review local imports before applying changes.
+- Roll back receipts and project metadata with imported files, preserve ownership across partial imports, and compare
+  prerelease/build versions correctly.
+- Export managed assembly declarations and optional maximum engine versions; reject undeclared C# payloads.
+- Add the First Person Controller prefab, input actions, managed behaviour, and reproducible Marketplace package builder.
+
+
 All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
 versions.
 
 ## Unreleased
+
+- UI Builder source completion now opens beside the caret with contextual fuzzy ranking, keyboard navigation,
+  documentation, and Ctrl+Enter apply instead of resizing a panel below the editor. Markup completion prioritizes
+  relevant attributes and values, while style completion understands selectors, properties, values, and variables.
+- UI visual-tree parsing accepts UTF-8 BOMs, numeric XML entities, and quoted greater-than signs. Progress bars render
+  as full-width non-interactive fills instead of inset sliders, and rounded borders preserve independent corner radii.
+- UI Toolkit source parsing now keeps semicolons, colons, braces, comment markers, and asset-like text inside quoted
+  style values intact; nested function values and inline styles use the same rules. Malformed style rules report their
+  authored line and column, XML rejects invalid names/declarations/comments, and visual property edits preserve these
+  advanced declarations instead of selecting the wrong source span.
+- Editing a selected UI Document's visual-tree or panel asset no longer reopens a UI Builder window the user closed.
+- Oversized floating editor panels are constrained to the current viewport when restored on a smaller monitor or
+  window, keeping their controls and resize handles reachable.
+
+- Runtime UI font atlases use padded, coverage-filtered mip levels to reduce lost strokes when text is scaled down.
+- Keyboard/gamepad Submit activates focused UI Document buttons and toggles through their normal click path;
+  prevented submits and disabled controls do not activate.
+
+- The Animator Controller opens at a usable initial size so its state graph and inspector are visible without
+  first resizing the window; saved workspace sizing still takes precedence.
+
+- Editor shutdown preserves the last opened scene while saving Play view preferences, so reopening a project
+  restores the working scene instead of falling back to its startup scene.
+
+- UI text wrapping no longer selects a break beyond the available width, preventing centered labels from clipping
+  their leading glyph when a space overflows the line.
+
+- Scene autosaves no longer show a misleading recovery warning during normal editing. Unresolved snapshots found
+  when opening a scene are preserved until restored, discarded, or replaced by an explicit scene save.
+
+- Hub project lists say "Compatible editor needed" when no usable matching editor is available, including
+  installations needing repair or registration refresh, rather than implying an engine upgrade is always needed.
+
+- Targeted import batches index primary/subasset owners instead of repeatedly scanning all sources, including
+  metadata refresh and missing-dependency expansion. Full imports move their owned source snapshot instead of
+  duplicating it; import ordering, validation, and transactional publication remain unchanged.
+
+- Managed API freshness scans avoid resolving already-enumerated source paths again, reducing script-build
+  preparation overhead while retaining source enumeration and file metadata checks.
+
+- Duplicate C# change notifications no longer schedule another build for identical source contents; real edits,
+  deletion/recreation, unreadable sources, and manual builds remain supported. Managed build traversal starts from
+  assembly graph roots, preserving SDK dependency restore/build while avoiding redundant dependency entry points.
+  Core logs now separate managed preparation, compiler setup, build, and publication timings.
+
+- Script builds reuse an isolated, owned Roslyn compiler between edits and stop it on cancellation, SDK changes,
+  and shutdown. Build orchestration no longer compiles an empty wrapper assembly. Runtime generations and failed-build
+  recovery remain transactional; MSBuild node reuse stays disabled. The editor coalesces edits during compilation
+  without blocking to cancel the active build, and queued Play waits for the latest requested generation.
+  An active last-good runtime no longer bypasses an in-flight replacement when starting Play; successful builds also
+  wait for their matching reload request before entry.
+
+- Targeted imports traverse source dependents once instead of repeatedly scanning the complete source list;
+  dependency cycles and diamonds remain deduplicated in stable source order. Import result updates reuse the
+  existing ID index, and targeted imports avoid a redundant full-record copy.
+
+- Asset-worker status reconciliation and stale-status cleanup reuse the database ID index instead of repeatedly
+  searching every source record. Indexed targeted refresh snapshots only requested owners and deduplicates them,
+  preserving generated sub-asset fallback and validation before refresh begins.
+
+- Material creation queues immediately after shader warmup without a redundant editor-thread project scan;
+  the isolated worker still validates current dependencies and destination conflicts.
+- Player Build Support packaging uses the optimized Dist host asset tool on Windows, Linux, and macOS while
+  retaining compression settings and archive integrity verification.
+
+- Default Lit startup warmup delegates source reconciliation to the asset worker instead of rescanning the project
+  synchronously on the editor thread; missing indexed targets retain the worker's rescan fallback.
+
+- Graphics shader import compiles independent binary formats concurrently within each pass, bounded to six stage
+  jobs, preserving variant order and joining outstanding work before staged-source cleanup on failure.
+
+- Asset-worker logs distinguish setup and operation durations and report whether the published source index was used.
+
+- Script builds reuse stable API references and compiler output paths while publishing independent runtime
+  generations; assembly graph changes use isolated output directories to prevent stale removed DLLs.
+
+- Script build project generation preserves timestamps for unchanged generated files and publishes edits atomically,
+  avoiding unnecessary filesystem writes and incremental-build invalidation.
+
+- Managed UI controls safely normalize null length-limited text, constrain stepped sliders to their range, avoid
+  list viewport arithmetic overflow, and allow existing children to be moved to the end of their parent.
+
+- Runtime UI text honors authored padding for positioning, alignment, and wrapping while preserving rotated element
+  pivots. Automatic text sizing includes padding instead of collapsing to the inset alone.
+
+- Asset refresh accepts dependency and subasset metadata published by external import workers, preventing stale
+  dependencies from breaking player builds after a model's material sections change.
+
+- UI Document bindings accept values supplied incrementally after presentation. Unavailable binding values retain
+  authored properties and pending OneTime bindings until the value arrives.
+
+- Entity duplication and individual object snapshots serialize only the requested objects, avoiding repeated
+  whole-scene serialization when creating gameplay pools.
+
+- Managed entity handles resolve native components in loaded scenes even when the only Behaviour lives in a
+  persistent scene. Resolution preserves world identity and rejects unloaded or destroyed entities.
+
+- Interactive input rebinding skips scalar controls for whole Axis2D bindings and vector controls for buttons,
+  preserving scalar composite parts and allowing D-pad vectors to be captured reliably.
+
+- Managed `RenderSettings.LightingQuality` switches Irradyn Quality/Balanced/Performance or direct/environment
+  lighting during Play and packaged gameplay. Environment edits preserve unexposed rendering settings.
+
+- Packaged keyboard, gamepad, and text input follows focused persistent UI after scene replacement when the active
+  scene has no focused UI. Active-scene focus retains priority.
+- UI Builder adds searchable hierarchy and control lists, clearer workspace tabs, and compact preview controls with
+  scrollable Preview options. Paste uses a selected container or the nearest container parent.
+- UI Builder Inspector edits preserve unrelated properties and each selected element's classes, refresh after
+  undo/redo, and immediately follow a changed selection. Reparenting no longer traverses invalidated hierarchy rows.
+- Oversized custom-font glyphs reject atlas packing before pixel writes and can retry at a smaller raster size.
+
+- Custom UI font rasterization follows displayed camera-overlay text size in bounded resolution steps, reducing
+  enlarged-text blur without changing authored layout metrics.
+
+- Views containing camera-overlay UI render at native pixel resolution instead of enlarging a reduced-resolution UI
+  image. Because scene and overlay share a surface, reduced render scale is bypassed for the whole affected view.
+- UI Builder preview raster sizes now include the window display scale, and preview placement aligns to physical
+  pixels to avoid extra filtering during fractional zoom and pan below the surface size limit.
+
+- Custom UI font atlases use transparent white padding to prevent dark fringes when glyph edges are filtered.
+- Rounded runtime UI bars, panels, and images use denser corner coverage so opaque corners do not fade across large
+  triangles in Game view or UI Builder.
+
+- UI Builder rulers now occupy gutters outside the rendered canvas, and zoomed previews render at their displayed
+  pixel size up to the GPU surface limit, so rulers no longer hide controls and zoom avoids enlarging the old preview.
+
+- Retiring a render surface no longer waits for queued GPU work, preventing editor UI freezes when a rendered preview
+  closes or reopens; render-thread callbacks can safely dispatch nested renderer work.
 
 - UI bindings preserve programmatic control and source changes across frame synchronization, and scene shutdown
   releases values written by script shutdown callbacks.
@@ -15,6 +154,10 @@ versions.
 
 - UI Builder now draws panel gradients, borders, shadows, rounded corners, and visual transforms from the same quad
   geometry used in Game view, and draws fallback-font text from the same transformed glyph geometry and atlas.
+- UI Builder's rendered canvas now uses the runtime GPU UI compositor for images and custom fonts, with a separate
+  preview-only UI material picker; GPU-unavailable fallback output reports its reduced rendering path.
+- Runtime UI materials now receive application unscaled Time and Delta Time for each render frame, so shader animation
+  continues while gameplay simulation is paused.
 - UI Builder's top Debug mode now opens the Debugger pane directly, including in compact layouts.
 - UI Builder's top Save, Revert, Undo, and Redo controls now follow the open style sheet in Styles mode.
 - UI Builder selection outlines now follow a control's rounded corners instead of making selected rounded controls

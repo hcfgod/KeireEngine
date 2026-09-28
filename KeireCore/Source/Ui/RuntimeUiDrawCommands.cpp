@@ -42,6 +42,15 @@ namespace Keire::Detail
             command.TransformScale = state.Style.TransformScale;
             command.RotationDegrees = state.Style.RotationDegrees;
             command.TransformOrigin = state.Style.TransformOrigin;
+            if (text)
+            {
+                // Text uses the padded content box, but rotates around the element's original pivot.
+                command.TransformOrigin = {
+                    (state.Rect.X + state.Rect.Width * state.Style.TransformOrigin.X - command.Rect.X) /
+                        command.Rect.Width,
+                    (state.Rect.Y + state.Rect.Height * state.Style.TransformOrigin.Y - command.Rect.Y) /
+                        command.Rect.Height};
+            }
             output.push_back(std::move(command));
         };
 
@@ -90,13 +99,15 @@ namespace Keire::Detail
                   .ImagePosition = state.Style.BackgroundPosition});
         }
 
-        if (state.Type == RuntimeUiElementType::Slider)
+        if (state.Type == RuntimeUiElementType::Slider || state.Type == RuntimeUiElementType::ProgressBar)
         {
             const float range = state.Control.Maximum - state.Control.Minimum;
             const float normalized =
                 range > 0.0F ? std::clamp((state.Control.Value - state.Control.Minimum) / range, 0.0F, 1.0F) : 0.0F;
             const float position = state.Control.Reversed ? 1.0F - normalized : normalized;
-            const float inset = std::min(6.0F * scale, std::min(state.Rect.Width, state.Rect.Height) * 0.25F);
+            const bool progressBar = state.Type == RuntimeUiElementType::ProgressBar;
+            const float inset =
+                progressBar ? 0.0F : std::min(6.0F * scale, std::min(state.Rect.Width, state.Rect.Height) * 0.25F);
             RuntimeUiRect fill = state.Rect;
             RuntimeUiRect handle = state.Rect;
             if (state.Control.Vertical)
@@ -128,12 +139,15 @@ namespace Keire::Detail
                   .ClipRect = state.ClipRect,
                   .ColorValue = ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
                   .CornerRadius = state.Style.CornerRadius * scale});
-            emit({.Type = RuntimeUiDrawType::Quad,
-                  .Element = element,
-                  .Rect = handle,
-                  .ClipRect = state.ClipRect,
-                  .ColorValue = ApplyRuntimeUiOpacity(Color{0.94F, 0.98F, 1.0F, 1.0F}, state.Style.Opacity),
-                  .CornerRadius = state.Style.CornerRadius * scale});
+            if (!progressBar)
+            {
+                emit({.Type = RuntimeUiDrawType::Quad,
+                      .Element = element,
+                      .Rect = handle,
+                      .ClipRect = state.ClipRect,
+                      .ColorValue = ApplyRuntimeUiOpacity(Color{0.94F, 0.98F, 1.0F, 1.0F}, state.Style.Opacity),
+                      .CornerRadius = state.Style.CornerRadius * scale});
+            }
         }
         else if (state.Type == RuntimeUiElementType::Toggle && state.Control.Checked)
         {
@@ -206,9 +220,15 @@ namespace Keire::Detail
         }
         if (!state.Content.Text.empty())
         {
+            const RuntimeUiRect textRect{
+                state.Rect.X + state.Style.Padding.Left * scale, state.Rect.Y + state.Style.Padding.Top * scale,
+                std::max(0.0F, state.Rect.Width - (state.Style.Padding.Left + state.Style.Padding.Right) * scale),
+                std::max(0.0F, state.Rect.Height - (state.Style.Padding.Top + state.Style.Padding.Bottom) * scale)};
+            if (textRect.Empty())
+                return;
             emit({.Type = RuntimeUiDrawType::Text,
                   .Element = element,
-                  .Rect = state.Rect,
+                  .Rect = textRect,
                   .ClipRect = state.ClipRect,
                   .ColorValue = ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
                   .Asset = state.Content.Font ? state.Content.Font : state.Style.FontFamily,

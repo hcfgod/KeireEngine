@@ -454,7 +454,7 @@ namespace
             if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
                 throw std::runtime_error("Startup scene runtime failed: " + m_Runtime->Diagnostic().Message);
             m_AdditiveValidation.Update(Owner(), world, static_cast<float>(width), static_cast<float>(height));
-            const auto activePresentation = Keire::Internal::ActiveRuntimePresentation(world);
+            const auto activePresentation = KeireRuntime::FocusedRuntimeUiPresentation(world);
             KeireRuntime::SynchronizeRuntimeUiTextInput(activePresentation, Owner().Windows(), Owner().MainWindow());
             const auto selected = Keire::Internal::SelectRuntimeRenderSession(world);
             auto environment = RenderEnvironment();
@@ -462,11 +462,6 @@ namespace
                                      selected.Camera->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
             const auto featureSelection =
                 Keire::ResolveRenderFeatureSelection(environment, Owner().Renderer()->FeatureCapabilities());
-            const float renderScale =
-                m_DynamicResolution.Update(environment, featureSelection, Owner().Renderer()->Statistics());
-            const auto [renderWidth, renderHeight] = Keire::Internal::ScaledRenderSurfaceExtent(
-                static_cast<float>(width), static_cast<float>(height), 1.0F, renderScale);
-            m_View->Surface()->RequestSize(renderWidth, renderHeight);
             Keire::RenderCamera camera;
             if (selected.Camera)
             {
@@ -479,6 +474,18 @@ namespace
                 camera.FullscreenEffects = selected.Camera->Camera->FullscreenEffects();
             }
             m_View->SetCamera(camera);
+            float renderScale =
+                m_DynamicResolution.Update(environment, featureSelection, Owner().Renderer()->Statistics());
+            for (const auto& session : world->Sessions())
+                if (const auto presentation =
+                        session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
+                {
+                    const auto submissions = presentation->UiRenderSubmissions(m_View);
+                    renderScale = Keire::Internal::NativePixelScaleForRuntimeUi(renderScale, submissions, true);
+                }
+            const auto [renderWidth, renderHeight] = Keire::Internal::ScaledRenderSurfaceExtent(
+                static_cast<float>(width), static_cast<float>(height), 1.0F, renderScale);
+            m_View->Surface()->RequestSize(renderWidth, renderHeight);
             KeireRuntime::SubmitRuntimeWorldRendering(Owner().Renderer(), world, m_View, environment,
                                                       MaterialParameters(), selected.Session,
                                                       selected.Camera.has_value());
@@ -968,6 +975,13 @@ namespace
         ManagedRuntimeScene(const Keire::AssetId entity = {}) const noexcept override
         {
             return RuntimeSceneFor(entity);
+        }
+
+        [[nodiscard]] Keire::Ref<Keire::Scene> ManagedRuntimeSceneForWorld(const std::uint64_t world,
+                                                                           const Keire::AssetId) const noexcept override
+        {
+            const auto session = RuntimeSessionForWorld(world);
+            return session ? session->RuntimeScene() : Keire::Ref<Keire::Scene>{};
         }
 
       private:

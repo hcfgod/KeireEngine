@@ -20,9 +20,7 @@ namespace Keire::Detail
             [[nodiscard]] std::any Read(const std::string_view path) const override
             {
                 const auto found = m_Values.find(path);
-                if (found == m_Values.end())
-                    throw std::invalid_argument("UI binding path has no supplied value.");
-                return found->second;
+                return found == m_Values.end() ? std::any{} : found->second;
             }
 
             void Write(const std::string_view path, const std::any& value) override

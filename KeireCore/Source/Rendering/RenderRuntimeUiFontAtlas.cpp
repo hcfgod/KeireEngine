@@ -4,6 +4,7 @@
 #include FT_FREETYPE_H
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -16,7 +17,6 @@ namespace Keire::RenderBackend
 {
     namespace
     {
-        constexpr float RasterizedFontSize = 48.0F;
         constexpr std::uint32_t CustomAtlasWidth = 1024U;
         constexpr std::uint32_t MaximumCustomAtlasHeight = 2048U;
         constexpr std::size_t MaximumCustomGlyphs = 4096U;
@@ -64,11 +64,43 @@ namespace Keire::RenderBackend
 
     } // namespace
 
+    std::vector<RuntimeUiFontMip> BuildRuntimeUiFontMips(const RuntimeUiGlyphAtlasCpuData& atlas)
+    {
+        if (!std::has_single_bit(atlas.Width) || !std::has_single_bit(atlas.Height) || atlas.Width > 16'384U ||
+            atlas.Height > 16'384U || atlas.Pixels.size() != static_cast<std::size_t>(atlas.Width) * atlas.Height * 4U)
+            throw std::invalid_argument("Runtime UI font mip source dimensions are invalid.");
+        std::vector<RuntimeUiFontMip> levels{{atlas.Width, atlas.Height, atlas.Pixels}};
+        // Stop at 1/8 resolution: the atlas gutter isolates adjacent glyphs through this footprint.
+        while (levels.size() < 4U && levels.back().Width > 1U && levels.back().Height > 1U)
+        {
+            const auto& previous = levels.back();
+            RuntimeUiFontMip mip{previous.Width / 2U, previous.Height / 2U, {}};
+            mip.Pixels.assign(static_cast<std::size_t>(mip.Width) * mip.Height * 4U, std::byte{0xff});
+            for (std::uint32_t y = 0; y < mip.Height; ++y)
+                for (std::uint32_t x = 0; x < mip.Width; ++x)
+                {
+                    std::uint32_t alpha = 0;
+                    for (std::uint32_t row = 0; row < 2U; ++row)
+                        for (std::uint32_t column = 0; column < 2U; ++column)
+                            alpha += std::to_integer<std::uint32_t>(
+                                previous.Pixels[((static_cast<std::size_t>(y) * 2U + row) * previous.Width + x * 2U +
+                                                 column) *
+                                                    4U +
+                                                3U]);
+                    mip.Pixels[(static_cast<std::size_t>(y) * mip.Width + x) * 4U + 3U] =
+                        static_cast<std::byte>((alpha + 2U) / 4U);
+                }
+            levels.push_back(std::move(mip));
+        }
+        return levels;
+    }
+
     std::shared_ptr<const RuntimeUiGlyphAtlasCpuData>
     BuildRuntimeUiGlyphAtlas(const std::span<const std::byte> fontBytes, const std::uint32_t collectionIndex,
-                             const std::span<const std::uint32_t> glyphs, const std::uint64_t generation)
+                             const std::span<const std::uint32_t> glyphs, const std::uint64_t generation,
+                             const std::uint32_t rasterSize)
     {
-        auto pages = BuildRuntimeUiGlyphAtlasPages(fontBytes, collectionIndex, glyphs, generation);
+        auto pages = BuildRuntimeUiGlyphAtlasPages(fontBytes, collectionIndex, glyphs, generation, rasterSize);
         if (pages.size() != 1U)
         {
             throw std::length_error(
@@ -79,9 +111,11 @@ namespace Keire::RenderBackend
 
     std::vector<std::shared_ptr<const RuntimeUiGlyphAtlasCpuData>>
     BuildRuntimeUiGlyphAtlasPages(const std::span<const std::byte> fontBytes, const std::uint32_t collectionIndex,
-                                  const std::span<const std::uint32_t> glyphs, const std::uint64_t generation)
+                                  const std::span<const std::uint32_t> glyphs, const std::uint64_t generation,
+                                  const std::uint32_t rasterSize)
     {
-        if (fontBytes.empty() || glyphs.empty() || glyphs.size() > MaximumCustomGlyphs || generation == 0)
+        if (fontBytes.empty() || glyphs.empty() || glyphs.size() > MaximumCustomGlyphs || generation == 0 ||
+            (rasterSize != 48U && rasterSize != 96U && rasterSize != 192U && rasterSize != 384U))
             throw std::invalid_argument("Runtime UI custom font atlas request is empty or exceeds its bounds.");
         FreeTypeContext freeType;
         if (FT_Init_FreeType(&freeType.Library) != 0 ||
@@ -91,8 +125,10 @@ namespace Keire::RenderBackend
         {
             throw std::runtime_error("FreeType could not open the runtime UI font atlas face.");
         }
-        if (FT_Set_Pixel_Sizes(freeType.Face, 0, static_cast<FT_UInt>(RasterizedFontSize)) != 0)
+        if (FT_Set_Pixel_Sizes(freeType.Face, 0, static_cast<FT_UInt>(rasterSize)) != 0)
             throw std::runtime_error("FreeType could not select the runtime UI atlas raster size.");
+        const float metricScale =
+            static_cast<float>(RuntimeUiCustomFontBaseRasterSize) / static_cast<float>(rasterSize);
 
         std::vector<std::uint32_t> unique(glyphs.begin(), glyphs.end());
         std::ranges::sort(unique);
@@ -136,23 +172,25 @@ namespace Keire::RenderBackend
 
         struct PageCursor final
         {
-            std::uint32_t X = 1U;
-            std::uint32_t Y = 1U;
+            std::uint32_t X = RuntimeUiFontAtlasPadding;
+            std::uint32_t Y = RuntimeUiFontAtlasPadding;
             std::uint32_t RowHeight = 0U;
         };
         std::vector<PageCursor> cursors(1U);
         for (auto& glyph : rasterized)
         {
-            if (glyph.Width + 2U > CustomAtlasWidth)
+            if (glyph.Width + 2U * RuntimeUiFontAtlasPadding > CustomAtlasWidth)
                 throw std::length_error("A runtime UI glyph exceeds the atlas page width.");
+            if (glyph.Height + 2U * RuntimeUiFontAtlasPadding > MaximumCustomAtlasHeight)
+                throw std::length_error("A runtime UI glyph exceeds the atlas page height.");
             auto* cursor = &cursors.back();
-            if (cursor->X + glyph.Width + 1U > CustomAtlasWidth)
+            if (cursor->X + glyph.Width + RuntimeUiFontAtlasPadding > CustomAtlasWidth)
             {
-                cursor->X = 1U;
-                cursor->Y += cursor->RowHeight + 1U;
+                cursor->X = RuntimeUiFontAtlasPadding;
+                cursor->Y += cursor->RowHeight + RuntimeUiFontAtlasPadding;
                 cursor->RowHeight = 0U;
             }
-            if (cursor->Y + glyph.Height + 1U > MaximumCustomAtlasHeight)
+            if (cursor->Y + glyph.Height + RuntimeUiFontAtlasPadding > MaximumCustomAtlasHeight)
             {
                 if (cursors.size() >= MaximumCustomAtlasPages)
                     throw std::length_error("Runtime UI glyphs exceed the bounded eight-page atlas budget.");
@@ -162,7 +200,7 @@ namespace Keire::RenderBackend
             glyph.X = cursor->X;
             glyph.Y = cursor->Y;
             glyph.PageIndex = static_cast<std::uint16_t>(cursors.size() - 1U);
-            cursor->X += glyph.Width + 1U;
+            cursor->X += glyph.Width + RuntimeUiFontAtlasPadding;
             cursor->RowHeight = std::max(cursor->RowHeight, glyph.Height);
         }
         if (rasterized.empty())
@@ -175,10 +213,14 @@ namespace Keire::RenderBackend
             const auto& cursor = cursors[pageIndex];
             auto page = std::make_shared<RuntimeUiGlyphAtlasCpuData>();
             page->Width = CustomAtlasWidth;
-            page->Height = std::min(MaximumCustomAtlasHeight, NextPowerOfTwo(cursor.Y + cursor.RowHeight + 1U));
+            page->Height = std::min(MaximumCustomAtlasHeight,
+                                    NextPowerOfTwo(cursor.Y + cursor.RowHeight + RuntimeUiFontAtlasPadding));
             page->PageIndex = static_cast<std::uint16_t>(pageIndex);
             page->Generation = generation;
             page->Pixels.assign(static_cast<std::size_t>(page->Width) * page->Height * 4U, std::byte{});
+            // Straight-alpha filtering must interpolate coverage, not darken glyph edges into black padding.
+            for (std::size_t pixel = 0; pixel < page->Pixels.size(); pixel += 4U)
+                std::fill_n(page->Pixels.begin() + static_cast<std::ptrdiff_t>(pixel), 3U, std::byte{0xff});
             mutablePages.push_back(std::move(page));
         }
         for (const auto& glyph : rasterized)
@@ -202,10 +244,11 @@ namespace Keire::RenderBackend
                                   static_cast<float>(glyph.Y) / static_cast<float>(page.Height)},
                     .UvMaximum = {static_cast<float>(glyph.X + glyph.Width) / static_cast<float>(page.Width),
                                   static_cast<float>(glyph.Y + glyph.Height) / static_cast<float>(page.Height)},
-                    .Offset = {static_cast<float>(glyph.Left), -static_cast<float>(glyph.Top)},
-                    .Width = static_cast<float>(glyph.Width),
-                    .Height = static_cast<float>(glyph.Height),
-                    .Advance = glyph.Advance});
+                    .Offset = {static_cast<float>(glyph.Left) * metricScale,
+                               -static_cast<float>(glyph.Top) * metricScale},
+                    .Width = static_cast<float>(glyph.Width) * metricScale,
+                    .Height = static_cast<float>(glyph.Height) * metricScale,
+                    .Advance = glyph.Advance * metricScale});
         }
         std::vector<std::shared_ptr<const RuntimeUiGlyphAtlasCpuData>> result;
         result.reserve(mutablePages.size());

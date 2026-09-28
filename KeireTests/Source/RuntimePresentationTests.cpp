@@ -1296,8 +1296,16 @@ TEST_CASE("managed scene UI binding values survive presentation and support two-
     REQUIRE(component);
     component->SetVisualTree(documentId);
     auto presentation = Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+    SUBCASE("values arrive before presentation") {}
+    SUBCASE("values arrive after the document is presented")
+    {
+        presentation->Synchronize(scene, 320.0F, 180.0F, true);
+        presentation->AdvanceUi(0.0F);
+    }
     REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Name", std::string("Ada")));
+    CHECK_NOTHROW(presentation->AdvanceUi(0.0F));
     REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Health", 42.0F));
+    CHECK_NOTHROW(presentation->AdvanceUi(0.0F));
     REQUIRE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "Player.Ready", true));
     CHECK_FALSE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), "", 1.0F));
     CHECK_FALSE(presentation->SetManagedUiDocumentBindingValue(entity.Id(), " \t", 1.0F));

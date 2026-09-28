@@ -77,8 +77,11 @@ public sealed class TextField : BaseField<string>
     [UxmlAttribute] public bool Multiline { get; set; }
     [UxmlAttribute] public bool IsPasswordField { get; set; }
     [UxmlAttribute] public int MaxLength { get; set; }
-    protected override string Normalize(string value) =>
-        MaxLength > 0 && value.Length > MaxLength ? value[..MaxLength] : value ?? string.Empty;
+    protected override string Normalize(string value)
+    {
+        value ??= string.Empty;
+        return MaxLength > 0 && value.Length > MaxLength ? value[..MaxLength] : value;
+    }
 }
 
 [UxmlElement]
@@ -99,7 +102,7 @@ public sealed class Slider : BaseField<float>
         float result = Math.Clamp(value, Math.Min(LowValue, HighValue), Math.Max(LowValue, HighValue));
         if (Step > 0.0f)
             result = LowValue + MathF.Round((result - LowValue) / Step) * Step;
-        return result;
+        return Math.Clamp(result, Math.Min(LowValue, HighValue), Math.Max(LowValue, HighValue));
     }
 }
 
@@ -170,8 +173,9 @@ public class ListView : ScrollView, ICollectionVirtualizationController
     {
         Clear();
         _realized.Clear();
-        int start = Math.Clamp(_firstVisible - Overscan, 0, _itemsSource.Count);
-        int end = Math.Clamp(_firstVisible + _visibleCount + Overscan, start, _itemsSource.Count);
+        long overscan = Math.Max(0, Overscan);
+        int start = (int)Math.Clamp((long)_firstVisible - overscan, 0, _itemsSource.Count);
+        int end = (int)Math.Clamp((long)_firstVisible + _visibleCount + overscan, start, _itemsSource.Count);
         for (int index = start; index < end; ++index)
         {
             VisualElement item = MakeItem() ?? throw new InvalidOperationException("ListView.MakeItem returned null.");

@@ -460,7 +460,10 @@ namespace Keire
                 if (!ExitRequested() && !nowSuspended && m_Impl->Renderer)
                 {
                     ProfileScope beginRender(m_Impl->ProfilerService, ProfileCategory::Rendering, "Render begin");
-                    RenderSystemInternalAccess::BeginFrame(*m_Impl->Renderer);
+                    RenderSystemInternalAccess::BeginFrame(
+                        *m_Impl->Renderer,
+                        {static_cast<float>(m_Impl->Clock->UnscaledTime().Seconds()),
+                         static_cast<float>(std::clamp(m_Impl->Clock->UnscaledDeltaTime().Seconds(), 0.0, 1.0))});
                     renderFrame = true;
                 }
 

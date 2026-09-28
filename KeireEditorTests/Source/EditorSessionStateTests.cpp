@@ -39,6 +39,28 @@ TEST_CASE("Editor session state round trips the last scene and Play Mode view pr
     CHECK(KeireEditor::LoadEditorSessionState(path) == state);
 }
 
+TEST_CASE("Editor session preference updates preserve the last scene after document closure")
+{
+    TemporaryDirectory directory;
+    const auto path = directory.Path / "EditorSession.state";
+    REQUIRE(KeireEditor::SaveEditorSessionViewPreference(path, true));
+    CHECK_FALSE(KeireEditor::LoadEditorSessionState(path).LastScene);
+    CHECK(KeireEditor::LoadEditorSessionState(path).MaximizeGameOnPlay);
+
+    const auto scene = Keire::AssetId::Parse("60000000-0000-4000-8000-000000000006");
+    REQUIRE(KeireEditor::SaveEditorSessionState(path, {.LastScene = scene}));
+    for (const bool maximize : {true, false, true})
+    {
+        REQUIRE(KeireEditor::SaveEditorSessionViewPreference(path, maximize));
+        const auto state = KeireEditor::LoadEditorSessionState(path);
+        CHECK(state.LastScene == scene);
+        CHECK(state.MaximizeGameOnPlay == maximize);
+    }
+    CHECK_FALSE(KeireEditor::SaveEditorSessionViewPreference({}, true));
+    CHECK_FALSE(KeireEditor::SaveEditorSessionViewPreference(path / "blocked.state", true));
+    CHECK(KeireEditor::LoadEditorSessionState(path).LastScene == scene);
+}
+
 TEST_CASE("Editor session state migrates the original scene-only format")
 {
     TemporaryDirectory directory;

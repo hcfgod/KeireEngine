@@ -9,6 +9,7 @@
 #include "KeireClient/Editor/UiStyleTokenRefactor.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -38,6 +39,8 @@ namespace KeireEditor
         [[nodiscard]] virtual UiBuilderDocument& UiBuilderState() noexcept = 0;
         [[nodiscard]] virtual const Keire::UiThemeDefinition& UiBuilderTheme() const noexcept = 0;
         [[nodiscard]] virtual Keire::Ref<Keire::AssetSystem> UiBuilderAssets() const noexcept = 0;
+        [[nodiscard]] virtual Keire::Ref<Keire::RenderSystem> UiBuilderRenderer() const noexcept { return {}; }
+        [[nodiscard]] virtual float UiBuilderDisplayScale() const noexcept { return 1.0F; }
         [[nodiscard]] virtual std::span<const Keire::AssetSourceRecord> UiBuilderAssetRecords() const noexcept = 0;
         virtual void RevealUiBuilderAsset(Keire::AssetId asset) = 0;
         [[nodiscard]] virtual std::optional<Keire::UiSize> UiBuilderGameViewSize() const noexcept = 0;
@@ -61,6 +64,19 @@ namespace KeireEditor
     };
 
     [[nodiscard]] std::string_view UiBuilderElementTypeName(Keire::UiVisualElementType type) noexcept;
+
+    struct UiBuilderHierarchyRow final
+    {
+        const Keire::UiVisualElementDefinition* Element = nullptr;
+        Keire::AssetId Parent;
+        std::size_t ChildIndex = 0;
+        std::size_t Depth = 0;
+    };
+
+    [[nodiscard]] bool UiBuilderSearchMatches(std::string_view value, std::string_view query) noexcept;
+    /// Rows borrow the definition and become invalid after any document edit. Search retains ancestors of matches.
+    [[nodiscard]] std::vector<UiBuilderHierarchyRow>
+    BuildUiBuilderHierarchyRows(const Keire::UiVisualElementDefinition& root, std::string_view query);
 
     class UiBuilderPanel final
     {
@@ -104,12 +120,16 @@ namespace KeireEditor
         void DrawDebugger(Keire::UiFrame& ui);
         void DrawSource(Keire::UiFrame& ui);
         void RefreshPreviewSnapshot();
+        [[nodiscard]] bool DrawGpuPreview(Keire::UiFrame& ui, const UiBuilderRetainedPreview& preview,
+                                          Keire::UiItemRect canvas);
         void RefreshDebuggerSnapshot();
         [[nodiscard]] Keire::RuntimeUiRect CanvasParentBounds(Keire::AssetId parent) const noexcept;
 
         IUiBuilderController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_DraftElement;
+        Keire::AssetId m_DraftAsset;
+        std::uint64_t m_DraftGeneration = 0;
         Keire::AssetId m_SourceAsset;
         std::uint64_t m_SourceGeneration = 0;
         Keire::AssetId m_DebugAsset;
@@ -124,7 +144,13 @@ namespace KeireEditor
         Keire::AssetId m_PreviewSelection;
         std::uint64_t m_PreviewGeneration = 0;
         std::optional<UiBuilderRetainedPreview> m_PreviewSnapshot;
+        std::optional<UiBuilderRetainedPreview> m_GesturePreviewSnapshot;
         Keire::Ref<Keire::UiImage> m_FallbackFontAtlasImage;
+        Keire::Ref<Keire::RenderSystem> m_PreviewRenderer;
+        Keire::Ref<Keire::RenderView> m_PreviewRenderView;
+        Keire::Ref<Keire::Scene> m_PreviewRenderScene;
+        AssetPicker m_PreviewMaterialPicker;
+        Keire::AssetId m_PreviewMaterial;
         std::vector<const Keire::UiStyleSheetAsset*> m_PreviewStyleSheets;
         std::vector<const Keire::UiVisualTreeAsset*> m_PreviewTemplates;
         UiBuilderPreviewSettings m_PreviewSettings;
@@ -154,6 +180,8 @@ namespace KeireEditor
         std::string m_StyleSourceDraft;
         UiStyleSourceEditor m_StyleSourceEditor;
         Keire::UiCodeEditorState m_StyleSourceEditorState;
+        std::size_t m_StyleCompletionSelection = 0;
+        std::size_t m_StyleCompletionCursor = 0;
         std::string m_StyleSourceFind;
         std::string m_StyleSourceReplace;
         std::vector<UiStyleSourceMatch> m_StyleSourceMatches;
@@ -174,7 +202,8 @@ namespace KeireEditor
         bool m_StyleEditInline = false;
         std::string m_TemplateDraft;
         std::string m_SlotDraft;
-        std::string m_NewTemplateDraft;
+        AssetPicker m_NewTemplatePicker;
+        Keire::AssetId m_NewTemplateAsset;
         std::string m_NewSlotDraft = "content";
         std::string m_BindingPropertyDraft;
         std::string m_BindingPathDraft;
@@ -183,7 +212,11 @@ namespace KeireEditor
         std::string m_SourceDiagnostic;
         UiMarkupSourceEditor m_SourceEditor;
         Keire::UiCodeEditorState m_SourceEditorState;
+        std::size_t m_SourceCompletionSelection = 0;
+        std::size_t m_SourceCompletionCursor = 0;
         std::string m_Message;
+        std::string m_HierarchySearch;
+        std::string m_LibrarySearch;
         UiBuilderClipboard m_Clipboard;
         CanvasGestureState m_CanvasGesture;
         UiBuilderWorkspaceMode m_WorkspaceMode = UiBuilderWorkspaceMode::Design;

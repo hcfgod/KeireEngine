@@ -2,16 +2,62 @@
 #include "KeireClient/Editor/MaterialGraphDocument.h"
 #include "KeireClient/Editor/NamedAssetCreation.h"
 #include "KeireClient/Editor/ShaderGraphPanelLayout.h"
+#include "KeireClient/Editor/UiBuilderDocument.h"
+#include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <ranges>
 #include <span>
 #include <string>
+
+TEST_CASE("UI Builder hierarchy search preserves ancestors and original sibling drop indices")
+{
+    Keire::UiVisualElementDefinition root;
+    root.StableId = Keire::AssetId::Generate();
+    root.Name = "menu";
+    Keire::UiVisualElementDefinition hidden;
+    hidden.StableId = Keire::AssetId::Generate();
+    hidden.Name = "background";
+    Keire::UiVisualElementDefinition panel;
+    panel.StableId = Keire::AssetId::Generate();
+    panel.Name = "actions";
+    Keire::UiVisualElementDefinition button;
+    button.StableId = Keire::AssetId::Generate();
+    button.Type = Keire::UiVisualElementType::Button;
+    button.Name = "start";
+    button.Classes = {"primary"};
+    button.Attributes = {{"text", "Start Game"}};
+    panel.Children.push_back(button);
+    root.Children = {hidden, panel};
+
+    const auto all = KeireEditor::BuildUiBuilderHierarchyRows(root, "");
+    REQUIRE(all.size() == 4);
+    CHECK(all[1].Element->StableId == hidden.StableId);
+    for (const auto query : {"START", "button", "PRIMARY", "game"})
+    {
+        const auto matches = KeireEditor::BuildUiBuilderHierarchyRows(root, query);
+        REQUIRE(matches.size() == 3);
+        CHECK(matches[0].Element == &root);
+        CHECK(matches[1].Element->StableId == panel.StableId);
+        CHECK(matches[1].ChildIndex == 1);
+        CHECK(matches[1].Parent == root.StableId);
+        CHECK(matches[2].Element->StableId == button.StableId);
+        CHECK(matches[2].Parent == panel.StableId);
+        CHECK(matches[2].ChildIndex == 0);
+        CHECK(matches[2].Depth == 2);
+    }
+    CHECK(KeireEditor::BuildUiBuilderHierarchyRows(root, "missing").empty());
+    CHECK(KeireEditor::UiBuilderSearchMatches("Progress Bar", "BAR"));
+    CHECK_FALSE(KeireEditor::UiBuilderSearchMatches("", "button"));
+    CHECK(root.Children.size() == 2); // Filtering never edits the document or its selection.
+}
 
 TEST_CASE("Shader Graph panes fit narrow docks and reserve preview space only when it fits")
 {
@@ -36,6 +82,71 @@ TEST_CASE("Shader Graph panes fit narrow docks and reserve preview space only wh
         CHECK(hidden.PreviewWidth == 0.0F);
     }
     CHECK(KeireEditor::ResolveShaderGraphPaneLayout(0.0F, true).CanvasWidth == 1.0F);
+}
+
+TEST_CASE("UI Builder rulers reserve canvas gutters and zoom retains displayed raster detail")
+{
+    KeireEditor::UiBuilderPreviewSettings settings;
+    const Keire::UiItemRect viewport{{10.0F, 20.0F}, {610.0F, 380.0F}};
+    const auto placement = KeireEditor::ResolveUiBuilderPreviewPlacement(settings, viewport);
+    CHECK(placement.Canvas.Minimum.X >= viewport.Minimum.X + KeireEditor::UiBuilderPreviewRulerWidth);
+    CHECK(placement.Canvas.Minimum.Y >= viewport.Minimum.Y + KeireEditor::UiBuilderPreviewRulerHeight);
+    CHECK(placement.Canvas.Size().Width < viewport.Size().Width);
+
+    settings.Zoom = 2.0F;
+    const auto zoomed = KeireEditor::ResolveUiBuilderPreviewPlacement(settings, viewport);
+    CHECK(zoomed.Canvas.Size().Width > viewport.Size().Width);
+    const auto raster = KeireEditor::ResolveUiBuilderPreviewRenderSize(zoomed.Canvas.Size());
+    CHECK(raster[0] == static_cast<std::uint32_t>(std::lround(zoomed.Canvas.Size().Width)));
+    CHECK(raster[1] == static_cast<std::uint32_t>(std::lround(zoomed.Canvas.Size().Height)));
+    const std::array<std::uint32_t, 2> oneAndQuarter{125U, 63U};
+    const std::array<std::uint32_t, 2> oneAndHalf{150U, 75U};
+    CHECK(KeireEditor::ResolveUiBuilderPreviewRenderSize({100.0F, 50.0F}, 1.25F) == oneAndQuarter);
+    CHECK(KeireEditor::ResolveUiBuilderPreviewRenderSize({100.0F, 50.0F}, 1.5F) == oneAndHalf);
+
+    settings.ShowRulers = false;
+    settings.Zoom = 1.0F;
+    const auto withoutRulers = KeireEditor::ResolveUiBuilderPreviewPlacement(settings, viewport);
+    CHECK(withoutRulers.Canvas.Size().Width > placement.Canvas.Size().Width);
+    const std::array<std::uint32_t, 2> maximumRaster{4096U, 4096U};
+    CHECK(KeireEditor::ResolveUiBuilderPreviewRenderSize({8192.0F, 8192.0F}) == maximumRaster);
+}
+
+TEST_CASE("UI Builder GPU preview placement aligns image pixels and authored coordinates at fractional DPI")
+{
+    KeireEditor::UiBuilderPreviewSettings settings;
+    settings.Pan = {0.37F, -0.29F};
+    const Keire::UiItemRect viewport{{10.37F, 20.19F}, {610.37F, 380.19F}};
+    for (const float dpi : {1.0F, 1.25F, 1.5F})
+    {
+        for (const float zoom : {0.75F, 1.0F, 2.0F})
+        {
+            settings.Zoom = zoom;
+            const auto placement = KeireEditor::ResolveUiBuilderPreviewPlacement(settings, viewport, dpi);
+            const auto size = placement.Canvas.Size();
+            const auto raster = KeireEditor::ResolveUiBuilderPreviewRenderSize(size, dpi);
+            CHECK(std::abs(placement.Canvas.Minimum.X * dpi - std::round(placement.Canvas.Minimum.X * dpi)) < 0.001F);
+            CHECK(std::abs(placement.Canvas.Minimum.Y * dpi - std::round(placement.Canvas.Minimum.Y * dpi)) < 0.001F);
+            CHECK(std::abs(size.Width * dpi - static_cast<float>(raster[0])) < 0.001F);
+            CHECK(std::abs(size.Height * dpi - static_cast<float>(raster[1])) < 0.001F);
+
+            const Keire::Vector2 authored{361.0F, 163.0F};
+            const Keire::Vector2 displayed{placement.Canvas.Minimum.X + authored.X * placement.RasterScale.X,
+                                           placement.Canvas.Minimum.Y + authored.Y * placement.RasterScale.Y};
+            CHECK(std::abs((displayed.X - placement.Canvas.Minimum.X) / placement.RasterScale.X - authored.X) < 0.001F);
+            CHECK(std::abs((displayed.Y - placement.Canvas.Minimum.Y) / placement.RasterScale.Y - authored.Y) < 0.001F);
+            CHECK(std::abs(placement.RasterScale.X * static_cast<float>(settings.Width) - size.Width) < 0.001F);
+            CHECK(std::abs(placement.RasterScale.Y * static_cast<float>(settings.Height) - size.Height) < 0.001F);
+        }
+    }
+
+    settings.Zoom = 4.0F;
+    const auto capped = KeireEditor::ResolveUiBuilderPreviewPlacement(settings, viewport, 4.0F);
+    const auto cappedSize = capped.Canvas.Size();
+    const auto cappedRaster = KeireEditor::ResolveUiBuilderPreviewRenderSize(cappedSize, 4.0F);
+    CHECK(cappedRaster[0] == 4096U);
+    CHECK(std::abs(capped.Canvas.Minimum.X * 4.0F - std::round(capped.Canvas.Minimum.X * 4.0F)) < 0.001F);
+    CHECK(std::abs(cappedSize.Width * 4.0F - std::round(cappedSize.Width * 4.0F)) < 0.001F);
 }
 
 TEST_CASE("asset browser displays and searches Unicode filenames as UTF-8")

@@ -44,7 +44,8 @@ namespace Keire
         Slider,
         Toggle,
         InputField,
-        ScrollView
+        ScrollView,
+        ProgressBar
     };
 
     enum class RuntimeUiDirtyReason : std::uint16_t

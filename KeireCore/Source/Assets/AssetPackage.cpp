@@ -651,6 +651,11 @@ namespace Keire
         }
 
         std::set<std::string> assemblyNames;
+        if (manifest.ManagedAssemblies.empty() &&
+            std::ranges::any_of(manifest.Files,
+                                [](const auto& file) { return CaseFolded(file.Path.extension()) == ".cs"; }))
+            throw std::invalid_argument(
+                "Packages containing C# must declare a managed assembly. Include its .keireasm asset when exporting.");
         for (const auto& assembly : manifest.ManagedAssemblies)
         {
             if (!IsSafeToken(assembly.Name) || !assemblyNames.emplace(assembly.Name).second ||

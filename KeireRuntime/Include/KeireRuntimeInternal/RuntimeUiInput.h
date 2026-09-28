@@ -28,6 +28,10 @@ namespace KeireRuntime
         std::array<Keire::Ref<Keire::ScenePresentationRuntime>, 3> PointerCaptures;
     };
 
+    [[nodiscard]] Keire::Ref<Keire::ScenePresentationRuntime>
+    FocusedRuntimeUiPresentation(const Keire::Ref<Keire::SceneRuntimeWorld>& world,
+                                 const Keire::Ref<Keire::ScenePresentationRuntime>& fallback = {});
+
     [[nodiscard]] bool ProcessRuntimeUiEvent(const Keire::Ref<Keire::ScenePresentationRuntime>& presentation,
                                              const SDL_Event& event, float scaleX, float scaleY,
                                              RuntimeUiPointerState& pointer);

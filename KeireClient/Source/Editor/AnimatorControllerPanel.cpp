@@ -73,6 +73,7 @@ namespace KeireEditor
 
     void AnimatorControllerPanel::Draw(Keire::UiFrame& ui)
     {
+        ui.SetNextWindowSize({1040.0F, 640.0F});
         auto panel = ui.BeginPanel(m_Registration);
         if (!panel)
         {

@@ -498,6 +498,8 @@ namespace Keire::Ui
                 currentProperty = property;
                 auto& entry = m_Bindings.at(property);
                 auto value = entry.Binding.Read();
+                if (!value.has_value())
+                    continue;
                 auto snapshot =
                     entry.Binding.Capture ? entry.Binding.Capture(*this, property) : CaptureBoundProperty(property);
                 applied.push_back({property, &entry, std::move(snapshot)});
@@ -1083,8 +1085,9 @@ namespace Keire::Detail
         case UiVisualElementType::Toggle:
             return RuntimeUiElementType::Toggle;
         case UiVisualElementType::Slider:
-        case UiVisualElementType::ProgressBar:
             return RuntimeUiElementType::Slider;
+        case UiVisualElementType::ProgressBar:
+            return RuntimeUiElementType::ProgressBar;
         case UiVisualElementType::ScrollView:
         case UiVisualElementType::ListView:
         case UiVisualElementType::TreeView:
@@ -1151,8 +1154,10 @@ namespace Keire::Detail
             return RuntimeUiElementType::InputField;
         if (dynamic_cast<const Ui::Toggle*>(&element))
             return RuntimeUiElementType::Toggle;
-        if (dynamic_cast<const Ui::Slider*>(&element) || dynamic_cast<const Ui::ProgressBar*>(&element))
+        if (dynamic_cast<const Ui::Slider*>(&element))
             return RuntimeUiElementType::Slider;
+        if (dynamic_cast<const Ui::ProgressBar*>(&element))
+            return RuntimeUiElementType::ProgressBar;
         if (dynamic_cast<const Ui::ListView*>(&element) || dynamic_cast<const Ui::ScrollView*>(&element))
             return RuntimeUiElementType::ScrollView;
         if (dynamic_cast<const Ui::Image*>(&element))

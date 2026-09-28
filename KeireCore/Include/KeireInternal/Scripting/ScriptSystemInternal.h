@@ -689,6 +689,7 @@ namespace Keire
         std::filesystem::path ProjectRoot;
         std::filesystem::path OutputRoot;
         std::filesystem::path Dotnet;
+        Detail::ManagedCompilerServer CompilerServer;
         std::filesystem::path ManagedApi;
         std::filesystem::path ManagedEditorApi;
         std::filesystem::path ManagedGenerator;

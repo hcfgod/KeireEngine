@@ -27,7 +27,7 @@ namespace Keire
     {
         using Json = nlohmann::json;
         constexpr std::size_t MaximumProjectPackageDocumentBytes = 16ULL * 1024ULL * 1024U;
-        constexpr std::string_view PackageMinimumEngineVersion = "0.3.1";
+        constexpr std::string_view PackageMinimumEngineVersion = "0.4.4";
 
         struct SemanticVersion final
         {
@@ -50,7 +50,27 @@ namespace Keire
                     return std::strong_ordering::greater;
                 if (other.Suffix.empty())
                     return std::strong_ordering::less;
-                return Suffix <=> other.Suffix;
+                std::string_view left = Suffix;
+                std::string_view right = other.Suffix;
+                while (!left.empty() && !right.empty())
+                {
+                    const auto l = left.substr(0, left.find('.'));
+                    const auto r = right.substr(0, right.find('.'));
+                    const auto numeric = [](std::string_view part)
+                    { return std::ranges::all_of(part, [](char c) { return c >= '0' && c <= '9'; }); };
+                    const bool ln = numeric(l), rn = numeric(r);
+                    if (ln != rn)
+                        return ln ? std::strong_ordering::less : std::strong_ordering::greater;
+                    if (ln && l.size() != r.size())
+                        return l.size() <=> r.size();
+                    if (const auto comparison = l <=> r; comparison != 0)
+                        return comparison;
+                    left = l.size() == left.size() ? std::string_view{} : left.substr(l.size() + 1);
+                    right = r.size() == right.size() ? std::string_view{} : right.substr(r.size() + 1);
+                }
+                return left.empty() == right.empty() ? std::strong_ordering::equal
+                       : left.empty()                ? std::strong_ordering::less
+                                                     : std::strong_ordering::greater;
             }
 
             [[nodiscard]] bool operator==(const SemanticVersion& other) const noexcept
@@ -89,14 +109,38 @@ namespace Keire
                     throw std::invalid_argument("Package version is not Semantic Version 2.0.0.");
                 begin = end == std::string_view::npos ? core.size() : end + 1;
             }
-            if (suffixBegin != std::string_view::npos)
+            const auto buildBegin = value.find('+');
+            const auto validateIdentifiers = [](std::string_view text, bool prerelease)
             {
-                const auto suffix = value.substr(suffixBegin + 1);
-                if (suffix.empty() ||
-                    !std::ranges::all_of(suffix, [](const unsigned char character)
-                                         { return std::isalnum(character) || character == '.' || character == '-'; }))
-                    throw std::invalid_argument("Package version suffix is invalid.");
-                result.Suffix = std::string(value.substr(suffixBegin));
+                while (true)
+                {
+                    const auto end = text.find('.');
+                    const auto part = text.substr(0, end);
+                    if (part.empty() || !std::ranges::all_of(part,
+                                                             [](unsigned char c)
+                                                             {
+                                                                 return (c >= 'a' && c <= 'z') ||
+                                                                        (c >= 'A' && c <= 'Z') ||
+                                                                        (c >= '0' && c <= '9') || c == '-';
+                                                             }))
+                        throw std::invalid_argument("Package version suffix is invalid.");
+                    if (prerelease && part.size() > 1 && part.front() == '0' &&
+                        std::ranges::all_of(part, [](char c) { return c >= '0' && c <= '9'; }))
+                        throw std::invalid_argument("Numeric prerelease identifiers cannot have leading zeroes.");
+                    if (end == std::string_view::npos)
+                        break;
+                    text.remove_prefix(end + 1);
+                }
+            };
+            if (buildBegin != std::string_view::npos)
+                validateIdentifiers(value.substr(buildBegin + 1), false);
+            if (suffixBegin != std::string_view::npos && value[suffixBegin] == '-')
+            {
+                const auto suffix =
+                    value.substr(suffixBegin + 1, buildBegin == std::string_view::npos ? value.size() - suffixBegin - 1
+                                                                                       : buildBegin - suffixBegin - 1);
+                validateIdentifiers(suffix, true);
+                result.Suffix = suffix;
             }
             return result;
         }
@@ -181,7 +225,7 @@ namespace Keire
 
         [[nodiscard]] ProjectPackageLock NormalizeLock(ProjectPackageLock lock)
         {
-            if (lock.SchemaVersion != ProjectPackageLock::CurrentSchemaVersion)
+            if (lock.SchemaVersion != 1U && lock.SchemaVersion != ProjectPackageLock::CurrentSchemaVersion)
                 throw std::invalid_argument("Project package lock schema is unsupported.");
             std::ranges::sort(lock.Packages, {}, &ProjectPackageLockEntry::PackageId);
             std::string previous;
@@ -194,6 +238,14 @@ namespace Keire
                     package.InstallKind != AssetPackageInstallKind::Registry ||
                     (!previous.empty() && previous >= package.PackageId))
                     throw std::invalid_argument("Project package lock entry is invalid or noncanonical.");
+                if (package.Manifest)
+                {
+                    ValidateAssetPackageManifest(*package.Manifest);
+                    if (package.Manifest->PackageId != package.PackageId ||
+                        package.Manifest->Version != package.Version ||
+                        package.Manifest->InstallKind != package.InstallKind)
+                        throw std::invalid_argument("Locked package manifest identity does not match its entry.");
+                }
                 package.Dependencies = NormalizeDependencies(std::move(package.Dependencies));
                 previous = package.PackageId;
             }
@@ -524,8 +576,14 @@ namespace Keire
                                 {"installKind", InstallKindText(package.InstallKind)},
                                 {"embedded", package.Embedded},
                                 {"dependencies", EncodeDependencies(package.Dependencies)}});
+            if (lock.SchemaVersion >= 2U)
+                packages.back()["manifest"] =
+                    package.Manifest ? Json::parse(EncodeAssetPackageManifest(*package.Manifest)) : Json(nullptr);
         }
-        return Json{{"schemaVersion", lock.SchemaVersion}, {"packages", std::move(packages)}}.dump(2) + '\n';
+        auto document = Json{{"schemaVersion", lock.SchemaVersion}, {"packages", std::move(packages)}}.dump(2) + '\n';
+        if (document.size() > MaximumProjectPackageDocumentBytes)
+            throw std::invalid_argument("Project package lock exceeds the supported size.");
+        return document;
     }
 
     ProjectPackageLock DecodeProjectPackageLock(const std::string_view document)
@@ -539,9 +597,12 @@ namespace Keire
         result.SchemaVersion = root.at("schemaVersion").get<std::uint32_t>();
         for (const auto& value : root.at("packages"))
         {
-            if (!value.is_object() || value.size() != 9 || !value.at("dependencies").is_array())
+            if (!value.is_object() || value.size() != (result.SchemaVersion >= 2U ? 10U : 9U) ||
+                !value.at("dependencies").is_array())
                 throw std::invalid_argument("Project package lock entry shape is invalid.");
             ProjectPackageLockEntry package;
+            if (result.SchemaVersion >= 2U && !value.at("manifest").is_null())
+                package.Manifest = DecodeAssetPackageManifest(value.at("manifest").dump());
             package.PackageId = value.at("packageId").get<std::string>();
             package.Version = value.at("version").get<std::string>();
             package.ArchiveSha256 = value.at("archiveSha256").get<std::string>();
@@ -595,7 +656,7 @@ namespace Keire
         }
         if (range.find(' ') == std::string_view::npos && !range.starts_with('>') && !range.starts_with('<') &&
             !range.starts_with('='))
-            return versionText == range;
+            return version == ParseSemanticVersion(range);
 
         while (!range.empty())
         {
@@ -740,7 +801,8 @@ namespace Keire
                                                          : metadata.Manifest.SignatureKeyId,
                                    .InstallKind = AssetPackageInstallKind::Registry,
                                    .Dependencies = metadata.Manifest.Dependencies,
-                                   .Embedded = existing != resolved.end() && existing->second.Embedded};
+                                   .Embedded = existing != resolved.end() && existing->second.Embedded,
+                                   .Manifest = metadata.Manifest};
         }
 
         std::set<std::string> reachable;
@@ -795,6 +857,7 @@ namespace Keire
         if (!plan.Conflicts.empty())
             return plan;
 
+        plan.Lock.SchemaVersion = ProjectPackageLock::CurrentSchemaVersion;
         plan.Lock.Packages.clear();
         for (const auto& packageId : reachable)
             plan.Lock.Packages.push_back(resolved.at(packageId));
@@ -958,6 +1021,32 @@ namespace Keire
         return lock;
     }
 
+    std::vector<std::string> ProjectPackageManager::CompatibilityDiagnostics() const
+    {
+        std::scoped_lock operation(m_Impl->OperationMutex);
+        std::vector<std::string> result;
+        for (const auto& package : ReadLock(LockPath(m_Impl->Specification.ProjectRoot)).Packages)
+        {
+            if (!package.Manifest)
+                result.push_back(
+                    package.PackageId +
+                    ": compatibility is unknown for this older installation. Reinstall to record compatibility.");
+            else
+            {
+                ProjectPackageConflict conflict;
+                if (!Compatible(*package.Manifest, m_Impl->Specification, conflict))
+                    result.push_back(package.PackageId + ": " + conflict.Message +
+                                     " Update this package or use a supported Editor version.");
+                else if (!package.Manifest->ManagedAssemblies.empty() &&
+                         package.Manifest->Compatibility.ManagedApiVersion != m_Impl->Specification.EngineVersion)
+                    result.push_back(package.PackageId +
+                                     ": C# targets a different or unspecified managed API version. Rebuild scripts and "
+                                     "update the package if compilation fails.");
+            }
+        }
+        return result;
+    }
+
     std::vector<ProjectPackageMount> ProjectPackageManager::Mounts() const
     {
         std::scoped_lock operation(m_Impl->OperationMutex);
@@ -969,6 +1058,15 @@ namespace Keire
                                                : CacheContentRoot(m_Impl->Specification, package.ArchiveSha256);
             if (!std::filesystem::is_directory(root))
                 throw std::runtime_error("Resolved package content is missing: " + package.PackageId);
+            if (package.Manifest)
+            {
+                ProjectPackageConflict conflict;
+                if (!Compatible(*package.Manifest, m_Impl->Specification, conflict))
+                    throw std::runtime_error(package.PackageId + ": " + conflict.Message +
+                                             " Update this package or use a supported Editor version.");
+                if (!package.Embedded)
+                    ValidateCachedContent(*package.Manifest, root);
+            }
             result.push_back({.PackageId = package.PackageId,
                               .Version = package.Version,
                               .Root = root,

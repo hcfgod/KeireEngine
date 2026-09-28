@@ -369,8 +369,8 @@ case "$(uname -m)" in
     arm64|aarch64) host_architecture=ARM64 ;;
     *) printf 'Unsupported host architecture.\n' >&2; exit 2 ;;
 esac
-"$repository_root/Scripts/project.sh" build --generator ninja --configuration Debug --architecture "$host_architecture" --toolset "$toolset" --target KeireAssetTool
-asset_tool="$repository_root/Build/Bin/Debug-$system-$host_architecture/KeireAssetTool/KeireAssetTool"
+"$repository_root/Scripts/project.sh" build --generator ninja --configuration Dist --architecture "$host_architecture" --toolset "$toolset" --target KeireAssetTool
+asset_tool="$repository_root/Build/Bin/Dist-$system-$host_architecture/KeireAssetTool/KeireAssetTool"
 metadata="$($asset_tool describe-player-support-host)"
 
 for configuration in Debug Release Dist; do

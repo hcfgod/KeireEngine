@@ -668,8 +668,8 @@ namespace KeireEditor
                     panelSettings = Keire::UiPanelSettingsDefinition{};
                 selectedUiDocumentRoute = ResolveSceneUiDocumentAuthoringRoute(*uiDocument, panelSettings);
 
-                const bool routeChanged = m_RoutedUiDocument != selected ||
-                                          m_RoutedUiVisualTree != uiDocument->VisualTree() ||
+                const bool selectedDocumentChanged = m_RoutedUiDocument != selected;
+                const bool routeChanged = selectedDocumentChanged || m_RoutedUiVisualTree != uiDocument->VisualTree() ||
                                           m_RoutedUiPanelSettings != uiDocument->PanelSettings() ||
                                           m_RoutedUiDocumentRoute != selectedUiDocumentRoute;
                 if (selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::None)
@@ -685,7 +685,8 @@ namespace KeireEditor
                     m_RoutedUiVisualTree = uiDocument->VisualTree();
                     m_RoutedUiPanelSettings = uiDocument->PanelSettings();
                     m_RoutedUiDocumentRoute = selectedUiDocumentRoute;
-                    if (selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::FocusUiBuilder && openUiDocument)
+                    if (selectedDocumentChanged &&
+                        selectedUiDocumentRoute == SceneUiDocumentAuthoringRoute::FocusUiBuilder && openUiDocument)
                         openUiDocument(uiDocument->VisualTree());
                 }
 

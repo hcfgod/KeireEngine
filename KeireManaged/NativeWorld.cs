@@ -121,6 +121,8 @@ internal static unsafe class NativeWorld
         QueryEntityTagsIcall;
     internal static delegate* unmanaged<ulong, ulong, byte, ulong, int, NativeEntityHandle*, int, int>
         QueryEntityComponentsIcall;
+    internal static delegate* unmanaged<int> GetLightingQualityIcall;
+    internal static delegate* unmanaged<byte, byte> SetLightingQualityIcall;
     internal static delegate* unmanaged<NativeRenderEnvironment*, byte> GetRenderEnvironmentIcall;
     internal static delegate* unmanaged<NativeRenderEnvironment*, byte> SetRenderEnvironmentIcall;
 #pragma warning restore CS0649
@@ -346,6 +348,21 @@ internal static unsafe class NativeWorld
         for (int index = 0; index < native.Length; ++index)
             result[index] = native[index].Value;
         return result;
+    }
+
+    internal static LightingQuality GetLightingQuality()
+    {
+        if (GetLightingQualityIcall == null) throw Unbound();
+        int value = GetLightingQualityIcall();
+        if (value is < 0 or > 3) throw new InvalidOperationException("Runtime lighting quality is unavailable.");
+        return (LightingQuality)value;
+    }
+
+    internal static void SetLightingQuality(LightingQuality value)
+    {
+        if (SetLightingQualityIcall == null) throw Unbound();
+        if (SetLightingQualityIcall((byte)value) == 0)
+            throw new InvalidOperationException("The native runtime rejected the lighting preset.");
     }
 
     internal static RenderEnvironmentSettings GetRenderEnvironment()

@@ -899,7 +899,10 @@ namespace Keire
         return renderer.m_Impl->State->SkinningOutputBuilds;
     }
 
-    void RenderSystemInternalAccess::BeginFrame(RenderSystem& renderer) { renderer.m_Impl->State->BeginFrame(); }
+    void RenderSystemInternalAccess::BeginFrame(RenderSystem& renderer, const Vector2 uiMaterialTime)
+    {
+        renderer.m_Impl->State->BeginFrame(uiMaterialTime);
+    }
     void RenderSystemInternalAccess::CancelFrame(RenderSystem& renderer) noexcept
     {
         renderer.m_Impl->State->CancelFrame();

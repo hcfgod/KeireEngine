@@ -20,6 +20,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] std::shared_ptr<const RuntimeUiGlyphAtlasCpuData> BuildFallbackAtlas()
         {
             ImFontAtlas source;
+            source.TexGlyphPadding = static_cast<int>(RuntimeUiFontAtlasPadding);
             source.Flags |= ImFontAtlasFlags_NoMouseCursors | ImFontAtlasFlags_NoBakedLines;
 
             constexpr std::array<ImWchar, 3> ranges{RuntimeUiFirstFallbackGlyph, RuntimeUiLastFallbackGlyph, 0};

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <functional>
 #include <memory>
 #include <stdexcept>
@@ -104,11 +105,11 @@ namespace KeireEditor
                                                 const std::size_t end) noexcept
         {
             std::size_t depth = 0;
-            bool quoted = false;
             char quote = 0;
+            bool escaped = false;
             for (std::size_t cursor = open; cursor < end; ++cursor)
             {
-                if (!quoted && cursor + 1 < end && source[cursor] == '/' && source[cursor + 1] == '*')
+                if (quote == 0 && cursor + 1 < end && source[cursor] == '/' && source[cursor + 1] == '*')
                 {
                     const auto close = source.find("*/", cursor + 2);
                     if (close == std::string_view::npos)
@@ -116,22 +117,24 @@ namespace KeireEditor
                     cursor = close + 1;
                     continue;
                 }
-                if (source[cursor] == '"' || source[cursor] == '\'')
+                if (quote != 0)
                 {
-                    if (!quoted)
-                    {
-                        quoted = true;
-                        quote = source[cursor];
-                    }
-                    else if (source[cursor] == quote && (cursor == 0 || source[cursor - 1] != '\\'))
-                        quoted = false;
+                    if (escaped)
+                        escaped = false;
+                    else if (source[cursor] == '\\')
+                        escaped = true;
+                    else if (source[cursor] == quote)
+                        quote = 0;
                     continue;
                 }
-                if (quoted)
+                if (source[cursor] == '"' || source[cursor] == '\'')
+                {
+                    quote = source[cursor];
                     continue;
+                }
                 if (source[cursor] == '{')
                     ++depth;
-                else if (source[cursor] == '}' && --depth == 0)
+                else if (source[cursor] == '}' && depth > 0U && --depth == 0U)
                     return cursor;
             }
             return std::string_view::npos;
@@ -144,9 +147,43 @@ namespace KeireEditor
             std::size_t cursor = begin;
             while ((cursor = SkipTrivia(source, cursor, end)) < end)
             {
-                const auto semicolon = source.find(';', cursor);
-                const auto declarationEnd = semicolon == std::string_view::npos || semicolon > end ? end : semicolon;
-                const auto colon = source.find(':', cursor);
+                auto colon = std::string_view::npos;
+                auto declarationEnd = end;
+                std::size_t parenthesisDepth = 0U;
+                char quote = 0;
+                bool escaped = false;
+                for (auto index = cursor; index < end; ++index)
+                {
+                    const auto character = source[index];
+                    if (quote != 0)
+                    {
+                        if (escaped)
+                            escaped = false;
+                        else if (character == '\\')
+                            escaped = true;
+                        else if (character == quote)
+                            quote = 0;
+                        continue;
+                    }
+                    if (character == '"' || character == '\'')
+                        quote = character;
+                    else if (index + 1U < end && character == '/' && source[index + 1U] == '*')
+                    {
+                        const auto close = source.find("*/", index + 2U);
+                        index = close == std::string_view::npos || close >= end ? end - 1U : close + 1U;
+                    }
+                    else if (character == '(')
+                        ++parenthesisDepth;
+                    else if (character == ')' && parenthesisDepth > 0U)
+                        --parenthesisDepth;
+                    else if (character == ':' && parenthesisDepth == 0U && colon == std::string_view::npos)
+                        colon = index;
+                    else if (character == ';' && parenthesisDepth == 0U)
+                    {
+                        declarationEnd = index;
+                        break;
+                    }
+                }
                 if (colon == std::string_view::npos || colon >= declarationEnd)
                     break;
                 auto nameEnd = colon;
@@ -159,8 +196,8 @@ namespace KeireEditor
                 while (valueEnd > valueBegin && std::isspace(static_cast<unsigned char>(source[valueEnd - 1])))
                     --valueEnd;
                 result.push_back({std::string(source.substr(cursor, nameEnd - cursor)), cursor, valueBegin, valueEnd,
-                                  declarationEnd + (semicolon == declarationEnd ? 1 : 0)});
-                cursor = declarationEnd + (semicolon == declarationEnd ? 1 : 0);
+                                  declarationEnd + (declarationEnd < end ? 1U : 0U)});
+                cursor = declarationEnd + (declarationEnd < end ? 1U : 0U);
             }
             return result;
         }
@@ -857,6 +894,29 @@ namespace KeireEditor
     UiBuilderStyleSourceDiagnostic UiBuilderStyleSheetDocument::Diagnose(const std::string_view source,
                                                                          const std::string_view message) noexcept
     {
+        constexpr std::string_view prefix = "UI stylesheet line ";
+        constexpr std::string_view columnMarker = ", column ";
+        if (message.starts_with(prefix))
+        {
+            const auto columnBegin = message.find(columnMarker, prefix.size());
+            const auto messageBegin =
+                columnBegin == std::string_view::npos ? std::string_view::npos : message.find(": ", columnBegin);
+            std::size_t line = 0U;
+            std::size_t column = 0U;
+            if (columnBegin != std::string_view::npos && messageBegin != std::string_view::npos)
+            {
+                const auto [lineEnd, lineError] =
+                    std::from_chars(message.data() + prefix.size(), message.data() + columnBegin, line);
+                const auto columnValueBegin = columnBegin + columnMarker.size();
+                const auto [columnEnd, columnError] =
+                    std::from_chars(message.data() + columnValueBegin, message.data() + messageBegin, column);
+                if (lineError == std::errc{} && columnError == std::errc{} && lineEnd == message.data() + columnBegin &&
+                    columnEnd == message.data() + messageBegin && line > 0U && column > 0U)
+                {
+                    return {.Line = line, .Column = column, .Message = std::string(message.substr(messageBegin + 2U))};
+                }
+            }
+        }
         std::size_t offset = source.find_last_not_of(" \t\r\n");
         if (offset == std::string_view::npos)
             offset = 0;

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
@@ -84,6 +85,48 @@ namespace Keire::RenderBackend
         }
     } // namespace
 
+    void RenderSharedState::BeginFrame(const Vector2 uiMaterialTime)
+    {
+        RequireOwner("BeginFrame");
+        RethrowTerminalFailure();
+        if (FrameActive)
+            throw std::logic_error("A render frame is already active.");
+        if (!std::isfinite(uiMaterialTime.X) || !std::isfinite(uiMaterialTime.Y) || uiMaterialTime.X < 0.0F ||
+            uiMaterialTime.Y < 0.0F || uiMaterialTime.Y > 1.0F)
+            throw std::invalid_argument(
+                "Runtime UI material time must be finite and non-negative with delta at most one second.");
+        FrameActive = true;
+        PendingUiMaterialTime = uiMaterialTime;
+        PendingSceneRequests.clear();
+        PendingRuntimeUiSubmissions.clear();
+        PendingUiSurfaceTextureBindings.clear();
+        CaptureRequests.clear();
+        CaptureRuntimeUiCommands.clear();
+        CaptureFrameStartedAt = std::chrono::steady_clock::now();
+        CaptureFrameId = NextFrameId++;
+        const auto retireStaleMotion = [this](auto& history)
+        {
+            constexpr std::uint64_t retentionFrames = 2U;
+            std::erase_if(history,
+                          [this](const auto& entry)
+                          {
+                              return CaptureFrameId > entry.second.Frame &&
+                                     CaptureFrameId - entry.second.Frame > retentionFrames;
+                          });
+        };
+        retireStaleMotion(MotionHistory);
+        retireStaleMotion(CameraMotionHistory);
+        retireStaleMotion(SkinMotionHistory);
+        CaptureStatistics = {};
+        CaptureStatistics.Frame = CaptureFrameId;
+        CaptureStatistics.AllowedFramesInFlight = Specification.MaximumFramesInFlight;
+        const auto& frameGraph =
+            DeferredCapability.load(std::memory_order_acquire) ? DeferredSceneFrameGraph : SceneFrameGraph;
+        CaptureStatistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(frameGraph.Compiled.Order.size());
+        CaptureStatistics.TransientResourceAllocations =
+            static_cast<std::uint32_t>(frameGraph.Compiled.TransientAllocations.size());
+    }
+
     void RenderSharedState::EndFrame(ImDrawData* drawData)
     {
         RequireOwner("EndFrame");
@@ -108,6 +151,7 @@ namespace Keire::RenderBackend
         }
         auto frame = std::make_shared<RenderFramePacket>();
         frame->Id = CaptureFrameId;
+        frame->UiMaterialTime = PendingUiMaterialTime;
         frame->Timeline.OwnerUpdateMilliseconds =
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - CaptureFrameStartedAt).count();
         try

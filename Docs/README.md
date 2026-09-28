@@ -37,7 +37,7 @@ structural and API drift; they do not establish that every prose claim or UI wor
 
 ## Complete Guide Library
 
-All 99 published guides and progress records are listed below in the same groups used by the documentation website.
+All 100 published guides and progress records are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -146,6 +146,7 @@ All 99 published guides and progress records are listed below in the same groups
 | --- | --- |
 | [Profiling](Profiling.md) | Native/managed markers, frame captures, counters, export, editor tooling, and ownership. |
 | [Performance Gates](PerformanceGates.md) | Reference hardware, capture provenance, CPU/GPU requirements, budgets, and automated validation. |
+| [Editor Workflow Performance](EditorWorkflowPerformance.md) | Measured editor latency, verified optimizations, limitations, and workflow testing checklist. |
 | [Testing and Release](TestingAndRelease.md) | Test matrix, sanitizers, smoke modes, regression scripts, packages, and final handoff checks. |
 | [Package Archives](PackageArchives.md) | Deterministic archives, manifest validation, extraction safety, package identities, and publisher workflows. |
 | [Asset Packages and Project Package Manager](AssetPackages.md) | Deterministic project-content packages, registry mounts, selective imports, executable-code consent, and recovery. |

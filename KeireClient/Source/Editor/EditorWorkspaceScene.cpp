@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/EditorManagedRuntimeCoordinator.h"
 #include "KeireClient/Editor/EditorRuntimeUiInput.h"
 #include "KeireClient/Editor/EditorSmokePlayValidation.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
@@ -30,6 +31,7 @@
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 #include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 
 #include <algorithm>
@@ -41,6 +43,7 @@
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -607,11 +610,13 @@ void EditorWorkspaceLayer::BeginPlayMode()
         return;
     const bool requiresManagedRuntime = ProjectRequiresManagedRuntime();
     const auto scripts = Owner().Scripts();
+    const auto build = scripts ? scripts->BuildStatus() : Keire::ManagedBuildStatus{};
     const auto readiness = KeireEditor::EvaluatePlayModeReadiness(
-        requiresManagedRuntime, scripts && scripts->RuntimeHostAvailable(),
-        scripts ? scripts->BuildStatus().State : Keire::ManagedBuildState::Idle,
-        scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle);
-    if (readiness == KeireEditor::PlayModeReadiness::WaitingForManagedRuntime)
+        requiresManagedRuntime, scripts && scripts->RuntimeHostAvailable(), build.State,
+        scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle,
+        !build.Operation || build.Operation == m_LastManagedReload);
+    if ((m_ManagedRuntimeCoordinator && m_ManagedRuntimeCoordinator->HasPendingBuild()) ||
+        readiness == KeireEditor::PlayModeReadiness::WaitingForManagedRuntime)
     {
         m_PlayStartPending = true;
         m_SceneDocument->SetStatus("Play queued while the gameplay script generation becomes ready.");
@@ -732,11 +737,14 @@ void EditorWorkspaceLayer::ContinuePendingPlayMode()
 {
     if (!m_PlayStartPending || m_SceneDocument->PlaySession() || !m_SceneDocument->EditingScene())
         return;
+    if (m_ManagedRuntimeCoordinator && m_ManagedRuntimeCoordinator->HasPendingBuild())
+        return;
     const auto scripts = Owner().Scripts();
+    const auto build = scripts ? scripts->BuildStatus() : Keire::ManagedBuildStatus{};
     const auto readiness = KeireEditor::EvaluatePlayModeReadiness(
-        true, scripts && scripts->RuntimeHostAvailable(),
-        scripts ? scripts->BuildStatus().State : Keire::ManagedBuildState::Idle,
-        scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle);
+        true, scripts && scripts->RuntimeHostAvailable(), build.State,
+        scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle,
+        !build.Operation || build.Operation == m_LastManagedReload);
     if (readiness == KeireEditor::PlayModeReadiness::WaitingForManagedRuntime)
         return;
     m_PlayStartPending = false;
@@ -1360,17 +1368,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             previewSize.Width = std::min(available.Width, available.Height * requestedAspect);
             previewSize.Height = previewSize.Width / requestedAspect;
         }
-        auto environment = SceneViewportSettings();
-        environment.SkyVisible =
-            selected && environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
-        const auto featureSelection =
-            Keire::ResolveRenderFeatureSelection(environment, Owner().Renderer()->FeatureCapabilities());
-        const float effectiveRenderScale =
-            m_GameDynamicResolution.Update(environment, featureSelection, Owner().Renderer()->Statistics());
-        const auto size = PrepareRenderSurface(m_GameRenderView, previewSize, Owner().MainWindow()->DisplayScale(),
-                                               effectiveRenderScale);
-        m_GameLogicalViewportSize = size;
-        const float aspect = size.Width / std::max(size.Height, 1.0F);
+        const float aspect = previewSize.Width / std::max(previewSize.Height, 1.0F);
         Keire::RenderCamera camera;
         if (selected)
         {
@@ -1382,6 +1380,52 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
             camera.FullscreenEffects = selected->Camera->FullscreenEffects();
         }
         m_GameRenderView->SetCamera(camera);
+
+        std::vector<Keire::Ref<Keire::ScenePresentationRuntime>> presentations;
+        if (playActive)
+        {
+            if (m_PlayRuntimeWorld)
+            {
+                m_PlayRuntimeWorld->SetPresentationViewport(previewSize.Width, previewSize.Height);
+                for (const auto& session : m_PlayRuntimeWorld->Sessions())
+                    if (const auto presentation =
+                            session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
+                        presentations.push_back(presentation);
+            }
+        }
+        else
+        {
+            if (!m_GameEditPresentation)
+                if (const auto assets = SceneViewportAssetSystem())
+                    m_GameEditPresentation =
+                        Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
+            if (m_GameEditPresentation)
+            {
+                m_GameEditPresentation->Synchronize(scene, previewSize.Width, previewSize.Height, false);
+                m_GameEditPresentation->AdvanceUi(
+                    static_cast<float>(std::max(Owner().GetTime().UnscaledDeltaTime().Seconds(), 0.0)));
+                presentations.push_back(m_GameEditPresentation);
+            }
+        }
+        std::vector<Keire::RuntimeUiRenderSubmission> uiSubmissions;
+        if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game))
+            for (const auto& presentation : presentations)
+            {
+                auto additions = presentation->UiRenderSubmissions(m_GameRenderView);
+                uiSubmissions.insert(uiSubmissions.end(), std::make_move_iterator(additions.begin()),
+                                     std::make_move_iterator(additions.end()));
+            }
+        auto environment = SceneViewportSettings();
+        environment.SkyVisible =
+            selected && environment.SkyVisible && selected->Camera->ClearMode() == Keire::CameraClearMode::Skybox;
+        const auto featureSelection =
+            Keire::ResolveRenderFeatureSelection(environment, Owner().Renderer()->FeatureCapabilities());
+        const float effectiveRenderScale = Keire::Internal::NativePixelScaleForRuntimeUi(
+            m_GameDynamicResolution.Update(environment, featureSelection, Owner().Renderer()->Statistics()),
+            uiSubmissions, true);
+        const auto size = PrepareRenderSurface(m_GameRenderView, previewSize, Owner().MainWindow()->DisplayScale(),
+                                               effectiveRenderScale);
+        m_GameLogicalViewportSize = size;
         m_GameRenderView->Surface()->RequestSampleCount(Keire::ResolveRenderSurfaceSampleCount(featureSelection));
         const auto& materialTime = Owner().GetTime();
         std::optional<Keire::SceneRenderRequest> renderRequest =
@@ -1402,7 +1446,6 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         const auto imageRect = ui.LastItemRect();
         m_GameViewportRect = imageRect;
 
-        std::vector<Keire::Ref<Keire::ScenePresentationRuntime>> presentations;
         if (playActive && m_GameViewportCaptureSuspended && imageState.Hovered && ui.PointerState().LeftPressed)
             m_GameViewportCaptureSuspended = false;
         const auto mainWindow = Owner().MainWindow();
@@ -1413,47 +1456,11 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         // production focus contract intact while allowing --smoke-play to exercise the real SDL/ImGui pointer path in
         // packaged builds, where renderer fault-injection hooks remain disabled.
         SetGameViewportInputActive(productionInputActive || static_cast<bool>(m_SmokePlayValidation));
-        if (playActive)
+        for (auto& submission : uiSubmissions)
         {
-            if (m_PlayRuntimeWorld)
-            {
-                m_PlayRuntimeWorld->SetPresentationViewport(size.Width, size.Height);
-                for (const auto& session : m_PlayRuntimeWorld->Sessions())
-                    if (const auto presentation =
-                            session ? session->Presentation() : Keire::Ref<Keire::ScenePresentationRuntime>{})
-                        presentations.push_back(presentation);
-            }
-        }
-        else
-        {
-            if (!m_GameEditPresentation)
-            {
-                if (const auto assets = SceneViewportAssetSystem())
-                {
-                    m_GameEditPresentation =
-                        Keire::CreateRef<Keire::ScenePresentationRuntime>(assets, Keire::Ref<Keire::AudioSystem>{});
-                }
-            }
-            if (m_GameEditPresentation)
-            {
-                m_GameEditPresentation->Synchronize(scene, size.Width, size.Height, false);
-                m_GameEditPresentation->AdvanceUi(
-                    static_cast<float>(std::max(Owner().GetTime().UnscaledDeltaTime().Seconds(), 0.0)));
-                presentations.push_back(m_GameEditPresentation);
-            }
-        }
-
-        if (KeireEditor::CompositesRuntimeGameUi(KeireEditor::EditorViewportTarget::Game))
-        {
-            for (const auto& presentation : presentations)
-            {
-                for (auto submission : presentation->UiRenderSubmissions(m_GameRenderView))
-                {
-                    if (submission.Target == Keire::RuntimeUiRenderTarget::ScreenOverlay)
-                        submission.Target = Keire::RuntimeUiRenderTarget::CameraOverlay;
-                    Owner().Renderer()->SubmitRuntimeUiTarget(std::move(submission));
-                }
-            }
+            if (submission.Target == Keire::RuntimeUiRenderTarget::ScreenOverlay)
+                submission.Target = Keire::RuntimeUiRenderTarget::CameraOverlay;
+            Owner().Renderer()->SubmitRuntimeUiTarget(std::move(submission));
         }
         const auto runtimeUiRouting =
             KeireEditor::ResolveRuntimeGameUiRouting(playActive, !presentations.empty(), m_GameViewportInputActive);

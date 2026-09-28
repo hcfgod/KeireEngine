@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <map>
@@ -147,6 +148,7 @@ namespace
             std::cout << "KeireAssetWorker --request <path> --progress <path> --result <path> --cancel <path>\n";
             return 0;
         }
+        const auto workerStarted = std::chrono::steady_clock::now();
         std::filesystem::path resultPath;
         Keire::Detail::AssetWorkerResult result;
         try
@@ -223,10 +225,25 @@ namespace
                 }
                 database = Keire::CreateRef<Keire::AssetDatabase>(std::move(databaseSpecification));
             }
+            const auto databaseReady = std::chrono::steady_clock::now();
+            auto phaseStarted = databaseReady;
+            auto currentPhase = Keire::AssetOperationPhase::Preflight;
+            std::map<Keire::AssetOperationPhase, double> phaseMilliseconds;
+            const auto finishPhase = [&](const auto now)
+            {
+                phaseMilliseconds[currentPhase] +=
+                    std::chrono::duration<double, std::milli>(now - phaseStarted).count();
+                phaseStarted = now;
+            };
             bool progressWarningEmitted = false;
             Keire::Detail::AssetWorkerProgressThrottle progressThrottle;
             const auto progress = [&](const Keire::AssetOperationProgress& value)
             {
+                if (value.Phase != currentPhase)
+                {
+                    finishPhase(std::chrono::steady_clock::now());
+                    currentPhase = value.Phase;
+                }
                 if (std::filesystem::exists(commandLine.Cancel))
                     throw Keire::AssetOperationCancelled();
                 if (!progressThrottle.ShouldPublish(value, Keire::Detail::AssetWorkerProgressThrottle::Clock::now()))
@@ -490,6 +507,8 @@ namespace
                 break;
             }
             }
+            const auto sourceIndexStarted = std::chrono::steady_clock::now();
+            finishPhase(sourceIndexStarted);
             Keire::Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(*database, request.SourceIndexPath);
             std::cout << "Asset worker completed " << Keire::Detail::AssetWorkerOperationName(request.Kind)
                       << ": imported-statuses=" << result.Import.Statuses.size() << '\n';
@@ -498,6 +517,18 @@ namespace
                 std::cout << "Asset worker targeted closure: requested=" << request.ImportAssets.size()
                           << " imported-statuses=" << result.Import.Statuses.size() << '\n';
             }
+            const auto operationFinished = std::chrono::steady_clock::now();
+            std::cout << "Asset worker timing: setup_ms="
+                      << std::chrono::duration<double, std::milli>(databaseReady - workerStarted).count()
+                      << " operation_ms="
+                      << std::chrono::duration<double, std::milli>(operationFinished - databaseReady).count()
+                      << " source_index=" << loadedSourceIndex << " index_publish_ms="
+                      << std::chrono::duration<double, std::milli>(operationFinished - sourceIndexStarted).count();
+            constexpr std::array phaseNames{"scanning", "preflight",  "staging",  "importing",
+                                            "cooking",  "publishing", "rollback", "completed"};
+            for (const auto& [phase, elapsed] : phaseMilliseconds)
+                std::cout << ' ' << phaseNames.at(static_cast<std::size_t>(phase)) << "_ms=" << elapsed;
+            std::cout << '\n';
             result.Success = true;
             Keire::Detail::WriteAssetWorkerResult(commandLine.Result, result);
             std::cout << "Asset operation " << request.OperationId << " completed.\n";

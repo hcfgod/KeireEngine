@@ -324,43 +324,6 @@ namespace Keire::RenderBackend
         PublishGpuOcclusionReadbackStatistics();
     }
 
-    void RenderSharedState::BeginFrame()
-    {
-        RequireOwner("BeginFrame");
-        RethrowTerminalFailure();
-        if (FrameActive)
-            throw std::logic_error("A render frame is already active.");
-        FrameActive = true;
-        PendingSceneRequests.clear();
-        PendingRuntimeUiSubmissions.clear();
-        PendingUiSurfaceTextureBindings.clear();
-        CaptureRequests.clear();
-        CaptureRuntimeUiCommands.clear();
-        CaptureFrameStartedAt = std::chrono::steady_clock::now();
-        CaptureFrameId = NextFrameId++;
-        const auto retireStaleMotion = [this](auto& history)
-        {
-            constexpr std::uint64_t retentionFrames = 2U;
-            std::erase_if(history,
-                          [this](const auto& entry)
-                          {
-                              return CaptureFrameId > entry.second.Frame &&
-                                     CaptureFrameId - entry.second.Frame > retentionFrames;
-                          });
-        };
-        retireStaleMotion(MotionHistory);
-        retireStaleMotion(CameraMotionHistory);
-        retireStaleMotion(SkinMotionHistory);
-        CaptureStatistics = {};
-        CaptureStatistics.Frame = CaptureFrameId;
-        CaptureStatistics.AllowedFramesInFlight = Specification.MaximumFramesInFlight;
-        const auto& frameGraph =
-            DeferredCapability.load(std::memory_order_acquire) ? DeferredSceneFrameGraph : SceneFrameGraph;
-        CaptureStatistics.PlannedFrameGraphPasses = static_cast<std::uint32_t>(frameGraph.Compiled.Order.size());
-        CaptureStatistics.TransientResourceAllocations =
-            static_cast<std::uint32_t>(frameGraph.Compiled.TransientAllocations.size());
-    }
-
     void RenderSharedState::PrepareFrameForExecution(const std::shared_ptr<RenderFramePacket>& frame)
     {
         Statistics = frame->CapturedStatistics;

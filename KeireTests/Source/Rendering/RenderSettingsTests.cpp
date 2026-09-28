@@ -1,13 +1,16 @@
 #include "Keire/Rendering/RenderSystem.h"
 #include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 #include "KeireInternal/Rendering/GlobalIlluminationPolicyInternal.h"
+#include "KeireInternal/Rendering/ManagedLightingQualityInternal.h"
 #include "KeireInternal/Rendering/TemporalAntiAliasingInternal.h"
 
 #include <doctest/doctest.h>
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <span>
 
 namespace
 {
@@ -391,6 +394,26 @@ TEST_CASE("render surface scaling preserves presentation size while bounding int
           std::pair<std::uint32_t, std::uint32_t>{16'384U, 16'384U});
 }
 
+TEST_CASE("camera UI keeps a dynamically scaled surface at native pixel resolution")
+{
+    std::array<Keire::RuntimeUiRenderSubmission, 1> panels{};
+    constexpr float reducedScale = 0.67F;
+    CHECK(Keire::Internal::NativePixelScaleForRuntimeUi(
+              reducedScale, std::span<const Keire::RuntimeUiRenderSubmission>{}, true) == reducedScale);
+    panels[0].Target = Keire::RuntimeUiRenderTarget::RenderTexture;
+    CHECK(Keire::Internal::NativePixelScaleForRuntimeUi(reducedScale, panels, true) == reducedScale);
+    panels[0].Target = Keire::RuntimeUiRenderTarget::WorldSurface;
+    CHECK(Keire::Internal::NativePixelScaleForRuntimeUi(reducedScale, panels, true) == reducedScale);
+    panels[0].Target = Keire::RuntimeUiRenderTarget::ScreenOverlay;
+    CHECK(Keire::Internal::NativePixelScaleForRuntimeUi(reducedScale, panels, false) == reducedScale);
+    CHECK(Keire::Internal::NativePixelScaleForRuntimeUi(reducedScale, panels, true) == 1.0F);
+    panels[0].Target = Keire::RuntimeUiRenderTarget::CameraOverlay;
+    CHECK(Keire::Internal::NativePixelScaleForRuntimeUi(reducedScale, panels, false) == 1.0F);
+    CHECK(Keire::Internal::ScaledRenderSurfaceExtent(
+              800.0F, 450.0F, 1.5F, Keire::Internal::NativePixelScaleForRuntimeUi(reducedScale, panels, true)) ==
+          std::pair<std::uint32_t, std::uint32_t>{1200U, 675U});
+}
+
 TEST_CASE("effective anti-aliasing selects the render-surface sample contract")
 {
     Keire::RenderFeatureSelection selection;
@@ -405,4 +428,28 @@ TEST_CASE("effective anti-aliasing selects the render-surface sample contract")
     CHECK(Keire::ResolveRenderSurfaceSampleCount(selection) == Keire::RenderSampleCount::Two);
     selection.EffectiveAntiAliasing = Keire::RenderAntiAliasingMode::Msaa4;
     CHECK(Keire::ResolveRenderSurfaceSampleCount(selection) == Keire::RenderSampleCount::Four);
+}
+
+TEST_CASE("managed lighting quality presets preserve environment and reject invalid values atomically")
+{
+    Keire::RenderEnvironmentSettings initial;
+    initial.Exposure = 1.7F;
+    initial.RenderScale = 0.8F;
+    initial.DirectionalShadowResolution = 4096;
+    for (std::uint8_t preset = 0; preset != 4; ++preset)
+    {
+        auto actual = initial;
+        REQUIRE(Keire::Detail::ApplyManagedLightingQuality(actual, preset));
+        auto expected = initial;
+        expected.RequestedRenderPath = preset == 3 ? Keire::RenderPath::ForwardPlus : Keire::RenderPath::DeferredHybrid;
+        expected.RequestedGlobalIllumination =
+            preset == 3 ? Keire::GlobalIlluminationMode::Disabled : Keire::GlobalIlluminationMode::Irradyn;
+        if (preset != 3)
+            expected.RequestedIrradynQuality = static_cast<Keire::IrradynQuality>(2 - preset);
+        CHECK(actual == expected);
+        CHECK_NOTHROW(Keire::ValidateRenderEnvironmentSettings(actual));
+    }
+    auto unchanged = initial;
+    CHECK_FALSE(Keire::Detail::ApplyManagedLightingQuality(unchanged, 255));
+    CHECK(unchanged == initial);
 }

@@ -24,6 +24,8 @@ namespace Keire::Detail
             flags |= ImGuiWindowFlags_NoScrollbar;
         if (options.NoScrollWithMouse)
             flags |= ImGuiWindowFlags_NoScrollWithMouse;
+        if (options.NoFocusOnAppearing)
+            flags |= ImGuiWindowFlags_NoFocusOnAppearing;
         if (options.AlwaysVerticalScrollbar)
             flags |= ImGuiWindowFlags_AlwaysVerticalScrollbar;
         return flags;

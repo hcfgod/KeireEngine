@@ -2,6 +2,8 @@
 
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 
+#include "Keire/BuildInfo.h"
+#include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
@@ -171,6 +173,8 @@ namespace KeireEditor
         manifest.Summary = request.Draft.Summary;
         manifest.InstallKind = Keire::AssetPackageInstallKind::AssetImport;
         manifest.Compatibility.MinimumEngineVersion = request.Draft.MinimumEngineVersion;
+        if (!request.Draft.MaximumEngineVersion.empty())
+            manifest.Compatibility.MaximumEngineVersion = request.Draft.MaximumEngineVersion;
 
         for (const auto& record : selected)
         {
@@ -185,6 +189,22 @@ namespace KeireEditor
 
             const auto packagedSource = sourceDirectory / record.RelativePath;
             const auto packagedMetadata = sourceDirectory / metadata.lexically_relative(sourceRoot);
+            if (source.extension() == ".keireasm")
+            {
+                const auto document = Keire::Detail::ReadTextFile(source, 1024U * 1024U);
+                const auto assembly =
+                    Keire::ManagedAssemblyAsset::Decode(std::as_bytes(std::span(document.data(), document.size())));
+                const auto& definition = assembly->Definition();
+                manifest.ManagedAssemblies.push_back(
+                    {.Name = definition.Name,
+                     .DefinitionPath = packagedSource,
+                     .Scope = definition.Classification == Keire::ManagedAssemblyClassification::Runtime
+                                  ? Keire::AssetPackageManagedAssemblyScope::Runtime
+                              : definition.Classification == Keire::ManagedAssemblyClassification::Editor
+                                  ? Keire::AssetPackageManagedAssemblyScope::Editor
+                                  : Keire::AssetPackageManagedAssemblyScope::Test});
+                manifest.Compatibility.ManagedApiVersion = Keire::GetBuildInfo().Version;
+            }
             CopyPayloadFile(source, staging.Path() / packagedSource);
             CopyPayloadFile(metadata, staging.Path() / packagedMetadata);
             auto dependencies = record.Dependencies;

@@ -502,6 +502,8 @@ public class VisualElement
             throw new InvalidOperationException("A visual tree cannot contain a hierarchy cycle.");
         if ((uint)index > (uint)_children.Count)
             throw new ArgumentOutOfRangeException(nameof(index));
+        if (ReferenceEquals(child.Parent, this) && _children.IndexOf(child) < index)
+            --index;
         child.RemoveFromHierarchy();
         child.Parent = this;
         _children.Insert(index, child);

@@ -340,6 +340,7 @@ namespace Keire
       public:
         ~UiDocumentBindingSource() noexcept override = default;
 
+        // Return an empty any while a path is not available; authored target values remain unchanged.
         [[nodiscard]] virtual std::any Read(std::string_view path) const = 0;
         virtual void Write(std::string_view path, const std::any& value);
     };

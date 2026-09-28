@@ -198,6 +198,14 @@ std::unique_ptr<KeireEditor::EditorManagedRuntimeCoordinator> EditorWorkspaceLay
         },
         .ReportShutdownFailure = [](const std::string_view operation, const std::exception_ptr& failure)
         { ReportCoordinatorShutdownFailure("Managed runtime", operation, failure); },
+        .IsBuildActive =
+            [this]
+        {
+            const auto scripts = Owner().Scripts();
+            const auto state = scripts ? scripts->BuildStatus().State : Keire::ManagedBuildState::Idle;
+            return state == Keire::ManagedBuildState::Generating || state == Keire::ManagedBuildState::Compiling ||
+                   state == Keire::ManagedBuildState::Publishing;
+        },
     });
 }
 

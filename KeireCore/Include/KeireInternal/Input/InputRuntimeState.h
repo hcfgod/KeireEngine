@@ -951,14 +951,20 @@ namespace Keire::Detail
                 Contains(rebind->Options.ExcludedControls, event.Path) ||
                 event.Value.Magnitude() < rebind->Options.MagnitudeThreshold)
                 return;
+            const auto context = rebind->Context.Lock();
+            const auto* target = context ? context->FindBinding(rebind->Targets[rebind->TargetIndex]) : nullptr;
+            const auto* action = target ? context->FindAction(target->Action) : nullptr;
+            if (!action)
+                return;
+            // Composite parts accept scalar controls; a full vector binding must ignore preceding button events
+            // (for example the scalar D-pad direction queued immediately before the aggregate D-pad vector).
+            const bool vectorTarget = action->ValueType == InputValueType::Axis2D && target->CompositePart.empty();
+            if (vectorTarget != (event.Value.Type == InputValueType::Axis2D))
+                return;
             rebind->Candidate = event.Path;
             rebind->CandidateDevice = event.Type;
             rebind->Status = RebindStatus::Candidate;
-            if (const auto context = rebind->Context.Lock())
             {
-                const auto* target = context->FindBinding(rebind->Targets[rebind->TargetIndex]);
-                if (!target)
-                    return;
                 for (const auto& map : context->Definition.ActionMaps)
                 {
                     if (std::ranges::none_of(map.Bindings, [&](const auto& value) { return value.Id == target->Id; }))

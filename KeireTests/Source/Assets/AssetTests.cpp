@@ -31,6 +31,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #if defined(_WIN32)
@@ -329,6 +330,246 @@ TEST_CASE("Asset worker protocol and published source index round trip without r
     CHECK(restoredResult.Success);
     CHECK(restoredResult.CreatedAsset == id);
     CHECK(restoredResult.LightingCacheHit);
+}
+
+TEST_CASE("Targeted import expands source dependency cycles and diamonds once in stable order")
+{
+    TemporaryAssetProject project;
+    for (const auto name : {"A", "B", "C", "D", "Unrelated"})
+        project.Write(std::string(name) + ".chain", name);
+    std::unordered_map<std::string, int> calls;
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.SourceDependencyClosure";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".chain"};
+    importer.ContextualImport =
+        [&calls](const Keire::AssetImportContext& context, const std::span<const std::byte> bytes)
+    {
+        const auto name = context.RelativePath.stem().string();
+        ++calls[name];
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        const auto read = [&](const std::string_view dependency)
+        {
+            const auto source = context.ReadProjectFile("Assets/" + std::string(dependency) + ".chain");
+            output.Bytes.insert(output.Bytes.end(), source.begin(), source.end());
+        };
+        if (name == "A")
+            read("C");
+        if (name == "B")
+            read("A");
+        if (name == "C")
+            read("B");
+        if (name == "D")
+        {
+            read("B");
+            read("C");
+        }
+        const auto child = context.ResolveSubAssetId("child");
+        output.SubAssets.push_back({child, Keire::TextAsset::StaticType(), "child", "Child", output.Bytes});
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    REQUIRE(database->ImportAll().Imported == 5);
+    const auto a = database->Find("A.chain");
+    const auto c = database->Find("C.chain");
+    REQUIRE(a);
+    REQUIRE(c);
+    REQUIRE(c->SubAssets.size() == 1);
+    std::vector<Keire::AssetId> expected;
+    for (const auto& record : database->Records())
+        if (record.RelativePath != "Unrelated.chain")
+            expected.push_back(record.Id);
+    calls.clear();
+    project.Write("A.chain", "changed");
+    const std::array targets{c->SubAssets.front(), a->Id, c->Id, a->Id};
+    const auto result = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+        *database, targets, Keire::AssetImportPolicy::FailFast);
+    REQUIRE(result.Statuses.size() == 4);
+    std::vector<Keire::AssetId> actual;
+    for (const auto& status : result.Statuses)
+        actual.push_back(status.Id);
+    CHECK(actual == expected);
+    for (const auto name : {"A", "B", "C", "D"})
+        CHECK(calls[name] <= 1);
+    CHECK(calls["A"] == 1);
+    CHECK(calls["B"] == 1);
+    CHECK(calls["Unrelated"] == 0);
+    Keire::AssetCooker::Validate(result.CatalogPath);
+}
+
+TEST_CASE("Targeted subasset batches refresh each owner once in source order")
+{
+    TemporaryAssetProject project;
+    for (int index = 0; index < 40; ++index)
+        project.Write(std::to_string(index) + ".owned", "source");
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.BatchOwners";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".owned"};
+    importer.ContextualImport = [](const Keire::AssetImportContext& context, const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        output.SubAssets.push_back(
+            {context.ResolveSubAssetId("child"), Keire::TextAsset::StaticType(), "child", "Child", output.Bytes});
+        return output;
+    };
+    auto database = Keire::CreateRef<Keire::AssetDatabase>(
+        Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root, .Importers = {importer}});
+    REQUIRE(database->ImportAll().Imported == 40);
+    const auto records = database->Records();
+    std::vector<Keire::AssetId> targets;
+    for (auto iterator = records.rbegin(); iterator != records.rend(); ++iterator)
+    {
+        REQUIRE(iterator->SubAssets.size() == 1);
+        targets.push_back(iterator->SubAssets.front());
+        targets.push_back(iterator->Id);
+        targets.push_back(iterator->SubAssets.front());
+    }
+    const auto result = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+        *database, targets, Keire::AssetImportPolicy::FailFast);
+    REQUIRE(result.Statuses.size() == records.size());
+    for (std::size_t index = 0; index < records.size(); ++index)
+        CHECK(result.Statuses[index].Id == records[index].Id);
+    CHECK(result.Imported + result.CacheHits == 40);
+    Keire::AssetCooker::Validate(result.CatalogPath);
+}
+
+TEST_CASE("Asset owner lookup scaling benchmark" * doctest::skip())
+{
+    // Isolate selection cost from filesystem/importer work; this is not end-to-end import latency.
+    std::vector<Keire::AssetSourceRecord> records;
+    std::vector<Keire::AssetId> targets;
+    for (std::uint64_t index = 1; index <= 10000; ++index)
+    {
+        Keire::AssetSourceRecord record;
+        record.Id = Keire::AssetId(1, index);
+        record.SubAssets.push_back(Keire::AssetId(2, index));
+        record.RelativePath = "Models/" + std::to_string(index) + ".model";
+        records.push_back(std::move(record));
+        if (index % 5 == 0)
+            targets.push_back(Keire::AssetId(index % 2 == 0 ? 1 : 2, index));
+    }
+    std::vector<double> linearTimes;
+    std::vector<double> indexedTimes;
+    for (int repeat = 0; repeat < 5; ++repeat)
+    {
+        std::vector<std::size_t> linear;
+        const auto started = std::chrono::steady_clock::now();
+        for (const auto target : targets)
+        {
+            const auto owner = std::ranges::find_if(
+                records,
+                [target](const auto& record)
+                {
+                    return record.Id == target || std::ranges::find(record.SubAssets, target) != record.SubAssets.end();
+                });
+            linear.push_back(static_cast<std::size_t>(owner - records.begin()));
+        }
+        const auto selected = std::chrono::steady_clock::now();
+        std::unordered_map<Keire::AssetId, std::size_t> owners;
+        owners.reserve(records.size());
+        for (std::size_t index = 0; index < records.size(); ++index)
+        {
+            owners.try_emplace(records[index].Id, index);
+            for (const auto child : records[index].SubAssets)
+                owners.try_emplace(child, index);
+        }
+        std::vector<std::size_t> indexed;
+        for (const auto target : targets)
+            indexed.push_back(owners.at(target));
+        const auto finished = std::chrono::steady_clock::now();
+        CHECK(indexed == linear);
+        linearTimes.push_back(std::chrono::duration<double, std::milli>(selected - started).count());
+        indexedTimes.push_back(std::chrono::duration<double, std::milli>(finished - selected).count());
+    }
+    std::ranges::sort(linearTimes);
+    std::ranges::sort(indexedTimes);
+    MESSAGE("10000-source / 2000-target lookup median: linear=", linearTimes[2],
+            " ms, index construction and lookup=", indexedTimes[2], " ms");
+}
+
+TEST_CASE("Worker status reconciliation scaling benchmark" * doctest::skip())
+{
+    TemporaryAssetProject project;
+    for (int index = 0; index < 2000; ++index)
+        project.Write(std::to_string(index) + ".bin", "benchmark");
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    const auto records = database->Records();
+    REQUIRE(records.size() == 2000);
+    std::vector<Keire::AssetImportStatus> statuses;
+    std::unordered_map<Keire::AssetId, Keire::AssetImportStatus> previous;
+    for (const auto& record : records)
+    {
+        statuses.push_back({.Id = record.Id, .State = Keire::AssetImportState::Imported});
+        previous.emplace(record.Id, statuses.back());
+    }
+    Keire::Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(*database, statuses);
+    double linearMilliseconds = 0;
+    double indexedMilliseconds = 0;
+    for (int repeat = 0; repeat < 5; ++repeat)
+    {
+        const auto start = std::chrono::steady_clock::now();
+        auto updated = previous;
+        for (const auto& status : statuses)
+        {
+            if (!status.Id || status.State > Keire::AssetImportState::Failed ||
+                std::ranges::find(records, status.Id, &Keire::AssetSourceRecord::Id) == records.end())
+                throw std::invalid_argument("Invalid benchmark status");
+            updated.insert_or_assign(status.Id, status);
+        }
+        previous.swap(updated);
+        const auto middle = std::chrono::steady_clock::now();
+        Keire::Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(*database, statuses);
+        const auto end = std::chrono::steady_clock::now();
+        linearMilliseconds += std::chrono::duration<double, std::milli>(middle - start).count();
+        indexedMilliseconds += std::chrono::duration<double, std::milli>(end - middle).count();
+    }
+    MESSAGE("2000-asset reconciliation average: old linear strategy=" << linearMilliseconds / 5 << " ms, indexed="
+                                                                      << indexedMilliseconds / 5 << " ms");
+    CHECK(database->ImportStatus(records.back().Id).State == previous.at(records.back().Id).State);
+}
+
+TEST_CASE("Worker status updates validate atomically and prune removed indexed sources")
+{
+    TemporaryAssetProject project;
+    project.Write("First.bin", "first");
+    project.Write("Second.bin", "second");
+    auto database =
+        Keire::CreateRef<Keire::AssetDatabase>(Keire::AssetDatabaseSpecification{.ProjectRoot = project.Root});
+    const auto first = database->Find("First.bin");
+    const auto second = database->Find("Second.bin");
+    REQUIRE(first);
+    REQUIRE(second);
+    const std::array statuses{Keire::AssetImportStatus{.Id = first->Id, .State = Keire::AssetImportState::Failed},
+                              Keire::AssetImportStatus{.Id = second->Id, .State = Keire::AssetImportState::Failed}};
+    Keire::Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(*database, statuses);
+    CHECK(database->ImportStatus(first->Id).State == Keire::AssetImportState::Failed);
+    auto invalid = statuses;
+    invalid[0].State = Keire::AssetImportState{};
+    invalid[1].Id = Keire::AssetId::Generate();
+    CHECK_THROWS_AS(Keire::Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(*database, invalid),
+                    std::invalid_argument);
+    CHECK(database->ImportStatus(first->Id).State == Keire::AssetImportState::Failed);
+    invalid[1] = statuses[1];
+    invalid[1].State = static_cast<Keire::AssetImportState>(255);
+    CHECK_THROWS_AS(Keire::Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(*database, invalid),
+                    std::invalid_argument);
+    CHECK(database->ImportStatus(first->Id).State == Keire::AssetImportState::Failed);
+
+    const auto index = project.Root / "Library/status-index.json";
+    const std::array retained{*first};
+    Keire::Detail::WriteAssetSourceIndex(index, retained);
+    CHECK(Keire::Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(*database, index) == 1);
+    CHECK(database->ImportStatus(first->Id).State == Keire::AssetImportState::Failed);
+    CHECK(database->ImportStatus(second->Id).State == Keire::AssetImportState{});
+    std::filesystem::remove(project.Root / "Assets/First.bin");
+    std::filesystem::remove(project.Root / "Assets/First.bin.keiremeta");
+    (void)database->Refresh();
+    CHECK(database->ImportStatus(first->Id).State == Keire::AssetImportState{});
 }
 
 TEST_CASE("Indexed targeted import rescans when a requested source is newer than the published index")
@@ -1511,6 +1752,66 @@ TEST_CASE("Dependency-free importers restore unchanged cached output without rer
     CHECK(importCalls.load() == 1);
 }
 
+TEST_CASE("Asset refresh respects dependency replacement published by another importer")
+{
+    TemporaryAssetProject project;
+    project.Write("Guardian.refreshgraph", "old");
+    Keire::AssetImporterRegistration importer;
+    importer.Name = "Test.RefreshGraph";
+    importer.Type = Keire::TextAsset::StaticType();
+    importer.Extensions = {".refreshgraph"};
+    importer.ContextualImport = [](const Keire::AssetImportContext& context, const std::span<const std::byte> bytes)
+    {
+        Keire::AssetImportOutput output;
+        output.Bytes.assign(bytes.begin(), bytes.end());
+        const std::string key(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const auto child = context.ResolveSubAssetId(key);
+        output.SubAssets.push_back({child, Keire::TextAsset::StaticType(), key, key, output.Bytes});
+        output.AssetDependencies.push_back(child);
+        (void)context.ReadProjectFile("Assets/Guardian.refreshgraph");
+        return output;
+    };
+    const Keire::AssetDatabaseSpecification specification{.ProjectRoot = project.Root, .Importers = {importer}};
+    auto parent = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    REQUIRE(parent->ImportAll().Imported == 1);
+    const auto original = parent->Find("Guardian.refreshgraph");
+    REQUIRE(original);
+    REQUIRE(original->Dependencies.size() == 1);
+    REQUIRE_FALSE(original->SourceDependencies.empty());
+
+    // An unchanged metadata file must retain source dependencies held only in memory.
+    REQUIRE(parent->Refresh() == 1);
+    const auto unchanged = parent->Find(original->Id);
+    REQUIRE(unchanged);
+    CHECK(unchanged->Dependencies == original->Dependencies);
+    REQUIRE(unchanged->SourceDependencies.size() == original->SourceDependencies.size());
+    CHECK(unchanged->SourceDependencies.front().Digest == original->SourceDependencies.front().Digest);
+
+    project.Write("Guardian.refreshgraph", "replacement");
+    auto worker = Keire::CreateRef<Keire::AssetDatabase>(specification);
+    REQUIRE(worker->ImportAll().Imported == 1);
+    const auto published = worker->Find(original->Id);
+    REQUIRE(published);
+    REQUIRE(published->Dependencies != original->Dependencies);
+    REQUIRE(parent->Refresh() == 1);
+    const auto refreshed = parent->Find(original->Id);
+    REQUIRE(refreshed);
+    CHECK(refreshed->MetadataDigest == published->MetadataDigest);
+    CHECK(refreshed->Dependencies == published->Dependencies);
+    CHECK(refreshed->SubAssets == published->SubAssets);
+    CHECK(refreshed->SourceDependencies.empty());
+
+    Keire::AssetBuildProfile profile;
+    profile.Roots = {original->Id};
+    const auto cooked = Keire::AssetCooker::Cook(*parent, profile, project.Root / "CookedRefresh");
+    Keire::AssetCooker::Validate(cooked.CatalogPath);
+    const auto catalog = Keire::Detail::LoadCatalog(cooked.CatalogPath);
+    CHECK(std::ranges::none_of(catalog.Entries,
+                               [&](const auto& entry) { return entry.Id == original->Dependencies.front(); }));
+    CHECK(std::ranges::any_of(catalog.Entries,
+                              [&](const auto& entry) { return entry.Id == published->Dependencies.front(); }));
+}
+
 TEST_CASE("Fresh asset workers restore complete graph outputs and reimport only dependency-affected assets")
 {
     TemporaryAssetProject project;
@@ -2056,6 +2357,18 @@ TEST_CASE("Generated subassets keep stable identities and are published with the
     CHECK(child);
     Keire::AssetCooker::Validate(firstImport.CatalogPath);
 
+    const std::array invalidTargets{parent, Keire::AssetId::Generate()};
+    CHECK_THROWS_AS((void)Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+                        *database, invalidTargets, Keire::AssetImportPolicy::FailFast),
+                    std::invalid_argument);
+    CHECK(database->Find(parent)->SourceDigest == firstRecord->SourceDigest);
+    // Primary and generated identities that share an owner refresh/import that source once.
+    const std::array duplicateTargets{child, parent, child, parent};
+    const auto targeted = Keire::Detail::AssetDatabaseWorkerAccess::ImportAssetsFromSourceIndex(
+        *database, duplicateTargets, Keire::AssetImportPolicy::FailFast);
+    CHECK(targeted.Imported + targeted.CacheHits == 1);
+    CHECK(database->Find(parent)->SubAssets == firstRecord->SubAssets);
+
     Keire::AssetSystemSpecification assetsSpecification;
     assetsSpecification.Mode = Keire::AssetMode::Development;
     assetsSpecification.DevelopmentCatalog = firstImport.CatalogPath;
@@ -2440,6 +2753,20 @@ TEST_CASE("Missing assets become explicit failures while retaining typed default
     CHECK(missing.State() == Keire::AssetState::Failed);
     CHECK(missing.UsingFallback());
     CHECK_THROWS_AS((void)missing.Require(), Keire::AssetLoadError);
+    try
+    {
+        (void)assets->Load<Keire::BinaryAsset>(missing.Id());
+        FAIL("A conflicting handle type must be rejected.");
+    }
+    catch (const std::invalid_argument& error)
+    {
+        const std::string diagnostic = error.what();
+        CHECK(diagnostic.find(missing.Id().ToString()) != std::string::npos);
+        CHECK(diagnostic.find("requested as type") != std::string::npos);
+        CHECK(diagnostic.find("existing handle uses type") != std::string::npos);
+    }
+    CHECK(missing.State() == Keire::AssetState::Failed);
+    CHECK(missing.Get()->Text().empty());
     assets->Close();
 }
 

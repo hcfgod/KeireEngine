@@ -23,6 +23,9 @@ namespace Keire::RenderBackend
         std::vector<std::uint32_t> Glyphs;
         std::vector<std::shared_ptr<const RuntimeUiGlyphAtlasCpuData>> AtlasPages;
         std::size_t AtlasGlyphRequestCount = 0;
+        std::uint32_t RasterSize = RuntimeUiCustomFontBaseRasterSize;
+        std::uint32_t RequestedRasterSize = RuntimeUiCustomFontBaseRasterSize;
+        std::uint32_t MaximumSupportedRasterSize = 384U;
         std::uint64_t FamilyRevision = 0;
         std::uint64_t FaceRevision = 0;
         std::uint64_t LastUsedFrame = 0;

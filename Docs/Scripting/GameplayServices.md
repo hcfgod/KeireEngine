@@ -498,3 +498,22 @@ Vector normalization returns zero for a near-zero vector. `Vector3.Lerp` clamps 
 `Keire.Managed` stops at reusable engine capabilities. Weapons, damage, ballistics, recoil, inventory, and combat HUD
 policy belong to each game's C# assembly. The [game-owned weapon example](../WeaponAuthoring.md) shows how the Sandbox
 composes Input, Physics, Audio, VFX, animation, transforms, assets, and runtime UI from an ordinary `Behaviour`.
+
+## Runtime lighting quality
+
+`RenderSettings.LightingQuality` selects a requested rendering preset in Editor Play and packaged players:
+
+```csharp
+RenderSettings.LightingQuality = LightingQuality.Quality;
+RenderSettings.LightingQuality = LightingQuality.Balanced;
+RenderSettings.LightingQuality = LightingQuality.Performance;
+RenderSettings.LightingQuality = LightingQuality.DirectEnvironment;
+```
+
+The first three request Deferred Hybrid with Irradyn at the corresponding quality. DirectEnvironment requests
+Forward+ and disables global illumination; authored direct lights, ambient light, environment maps and shadows
+remain unchanged. Other anti-aliasing, resolution, exposure and shadow settings are preserved. These presets
+do not rewrite project settings; save the player's selection through PlayerPreferences and apply it on startup.
+The getter reports the requested preset, not GPU capability resolution. Non-Irradyn GI configurations report
+DirectEnvironment; the renderer retains its existing capability-based fallback rules. Invalid enum values are
+rejected without a native mutation. An unavailable runtime service throws InvalidOperationException.

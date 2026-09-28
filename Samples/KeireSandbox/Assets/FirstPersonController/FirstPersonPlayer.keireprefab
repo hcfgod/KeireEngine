@@ -1,0 +1,128 @@
+{
+  "prefabSchemaVersion": 1,
+  "basePrefab": null,
+  "schemaVersion": 3,
+  "name": "FirstPersonPlayer",
+  "entities": [
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              1,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "height": 1.7999999523162842,
+            "layer": 1,
+            "mask": 4294967295,
+            "maximumSlope": 50.0,
+            "radius": 0.3499999940395355,
+            "runtimeId": "c81313eb-6230-5786-8a32-3c03689163dd",
+            "skinWidth": 0.03999999910593033,
+            "stepHeight": 0.3499999940395355
+          },
+          "enabled": true,
+          "type": "4b454952-4543-4841-5241-435445520001",
+          "version": 2
+        }
+      ],
+      "id": "8934b1b7-0fda-590b-b69a-c6d14c3f2c5c",
+      "layer": 0,
+      "name": "First Person Player",
+      "parent": null
+    },
+    {
+      "active": true,
+      "components": [
+        {
+          "data": {
+            "position": [
+              0,
+              0.65,
+              0
+            ],
+            "rotation": [
+              0,
+              0,
+              0,
+              1
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "enabled": true,
+          "type": "4b454952-4554-5241-4e53-464f524d0001",
+          "version": 1
+        },
+        {
+          "data": {
+            "clearColor": [
+              0.1791045069694519,
+              0.1791045069694519,
+              0.1791045069694519,
+              1.0
+            ],
+            "clearMode": 0,
+            "farPlane": 1000.0,
+            "fieldOfView": 75,
+            "nearPlane": 0.05,
+            "orthographicSize": 10.0,
+            "primary": true,
+            "priority": 0,
+            "projection": 0
+          },
+          "enabled": true,
+          "type": "4b454952-4543-414d-4552-410000000001",
+          "version": 1
+        },
+        {
+          "data": {
+            "gain": 1.0,
+            "primary": true
+          },
+          "enabled": true,
+          "type": "4b454952-4541-5544-494f-4c4953540001",
+          "version": 1
+        },
+        {
+          "type": "d7e0f0a1-bfe2-46d2-bc47-4083f77a8100",
+          "version": 1,
+          "enabled": true,
+          "data": {
+            "_inputActions": "22c1a688-4618-524c-a28d-e70b940f4942",
+            "managedState": "{\"fields\":[],\"version\":1}"
+          }
+        }
+      ],
+      "id": "e44ce77d-1bae-501a-a6b4-f571977179fb",
+      "layer": 0,
+      "name": "First Person Camera",
+      "parent": "8934b1b7-0fda-590b-b69a-c6d14c3f2c5c"
+    }
+  ],
+  "prefabInstances": [],
+  "prefabOverrides": []
+}

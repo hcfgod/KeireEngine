@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/EditorPanels.h"
 #include "KeireClient/Editor/UiBuilderDocument.h"
+#include "KeireClient/Editor/UiBuilderInspector.h"
 #include "KeireClient/Editor/UiBuilderLiveDraft.h"
 #include "KeireClient/Editor/UiBuilderPanel.h"
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
@@ -68,6 +69,79 @@ TEST_CASE("UI Builder toolbar actions follow an open Styles document")
     CHECK_FALSE(UiBuilderToolbarUsesStyleSheet(UiBuilderWorkspaceMode::Styles, false));
     CHECK_FALSE(UiBuilderToolbarUsesStyleSheet(UiBuilderWorkspaceMode::Design, true));
     CHECK_FALSE(UiBuilderToolbarUsesStyleSheet(UiBuilderWorkspaceMode::Debug, true));
+}
+
+TEST_CASE("UI Builder inspector changes only edited properties and explicit multi-selection classes")
+{
+    auto definition = TestDocument();
+    auto& title = definition.Root.Children.front();
+    title.Classes = {"title-style"};
+    title.InlineStyles = {{"font-size", "24px"}};
+    const auto primary = title.StableId;
+    const std::array selected{definition.Root.StableId, primary};
+
+    KeireEditor::UiBuilderInspectorEdit textEdit;
+    textEdit.Text = "Continue";
+    const auto edited = KeireEditor::ApplyUiBuilderInspectorEdit(definition, primary, selected, textEdit);
+    CHECK(edited.Root.Classes == definition.Root.Classes);
+    CHECK(edited.Root.Children.front().Classes == title.Classes);
+    CHECK(edited.Root.Children.front().InlineStyles.front().Value == "24px");
+    CHECK(edited.Root.Children.front().Name == "title");
+    CHECK(edited.Root.Children.front().Attributes.front().Value == "Continue");
+    CHECK(definition.Root.Children.front().Attributes.front().Value == "Ready");
+
+    KeireEditor::UiBuilderInspectorEdit classesEdit;
+    classesEdit.Classes = std::vector<std::string>{"shared"};
+    const auto styled = KeireEditor::ApplyUiBuilderInspectorEdit(edited, primary, selected, classesEdit);
+    CHECK(styled.Root.Classes == *classesEdit.Classes);
+    CHECK(styled.Root.Children.front().Classes == *classesEdit.Classes);
+    CHECK(styled.Root.Children.front().Attributes.front().Value == "Continue");
+
+    KeireEditor::UiBuilderInspectorEdit clearText;
+    clearText.Text = "";
+    CHECK(KeireEditor::ApplyUiBuilderInspectorEdit(styled, primary, selected, clearText)
+              .Root.Children.front()
+              .Attributes.empty());
+    CHECK_THROWS_AS((void)KeireEditor::ApplyUiBuilderInspectorEdit(definition, {}, selected, textEdit),
+                    std::invalid_argument);
+    KeireEditor::UiBuilderInspectorEdit invalidTemplate;
+    invalidTemplate.Template = Keire::AssetId{};
+    CHECK_THROWS_AS((void)KeireEditor::ApplyUiBuilderInspectorEdit(definition, primary, selected, invalidTemplate),
+                    std::invalid_argument);
+}
+
+TEST_CASE("UI Builder inspector edits after global undo preserve restored properties")
+{
+    const auto original = TestDocument();
+    auto undoService = Keire::CreateRef<Keire::UndoService>();
+    auto undo = undoService->CreateContext({.Name = "UI Builder inspector"});
+    KeireEditor::UiBuilderDocument document;
+    document.Open(Keire::AssetId::Generate(), original, 1, "Unused.keireui", undo);
+    const auto primary = original.Root.Children.front().StableId;
+    document.Select(primary);
+
+    KeireEditor::UiBuilderInspectorEdit rename;
+    rename.Name = "renamed";
+    REQUIRE(document.Edit("Rename UI element", KeireEditor::ApplyUiBuilderInspectorEdit(
+                                                   document.Definition(), primary, document.Selections(), rename)));
+    const auto editedGeneration = document.Generation();
+    REQUIRE(undo->Undo());
+    CHECK(document.Selection() == primary);
+    CHECK(document.Generation() != editedGeneration);
+    REQUIRE(document.Find(primary));
+    CHECK(document.Find(primary)->Name == "title");
+
+    KeireEditor::UiBuilderInspectorEdit text;
+    text.Text = "After undo";
+    REQUIRE(document.Edit("Edit UI text", KeireEditor::ApplyUiBuilderInspectorEdit(document.Definition(), primary,
+                                                                                   document.Selections(), text)));
+    CHECK(document.Find(primary)->Name == "title");
+    CHECK(document.Find(primary)->Attributes.front().Value == "After undo");
+    REQUIRE(undo->Undo());
+    CHECK(document.Find(primary)->Attributes.front().Value == "Ready");
+    REQUIRE(undo->Redo());
+    CHECK(document.Find(primary)->Name == "title");
+    CHECK(document.Find(primary)->Attributes.front().Value == "After undo");
 }
 
 TEST_CASE("UI Builder canvas gestures stay parent bounded and transform live preview geometry")
@@ -276,6 +350,11 @@ TEST_CASE("UI Builder empty canvas placement is visible and exact geometry survi
     settings.ScaleMode = Keire::RuntimeUiScaleMode::ConstantPixels;
     const auto first = KeireEditor::BuildUiBuilderRetainedPreview(document.Definition(), label, settings);
     const auto second = KeireEditor::BuildUiBuilderRetainedPreview(document.Definition(), label, settings);
+    REQUIRE(first.Runtime);
+    REQUIRE(first.Runtime->Tree()->State(first.Runtime->Root()));
+    const auto retainedElement = first.Runtime->Find(label);
+    REQUIRE(retainedElement);
+    REQUIRE(first.Runtime->Tree()->State(*retainedElement));
     REQUIRE(first.SelectedState);
     REQUIRE(second.SelectedState);
     CHECK(first.SelectedState->Rect.X == doctest::Approx(transformed.X));
@@ -1251,6 +1330,7 @@ TEST_CASE("UI Builder style drafts preserve comments and keep the last valid pre
 /* Brand controls are shared with the pause menu. */
 .primary {
   /* Keep this comment beside the authored value. */
+  --message: "Ready; status: {ok}";
   color: #ffffffff;
 }
 )css";
@@ -1264,6 +1344,7 @@ TEST_CASE("UI Builder style drafts preserve comments and keep the last valid pre
     REQUIRE(document.SetProperty(0, "color", "#3366ccff"));
     CHECK(document.SourceText().find("Brand controls") != std::string::npos);
     CHECK(document.SourceText().find("Keep this comment") != std::string::npos);
+    CHECK(document.SourceText().find("--message: \"Ready; status: {ok}\";") != std::string::npos);
     CHECK(document.SourceText().find("color: #3366ccff") != std::string::npos);
     REQUIRE(document.SetSelector(0, "Button.primary:hover"));
     CHECK(document.SourceText().find("Button.primary:hover") != std::string::npos);
@@ -1298,6 +1379,12 @@ TEST_CASE("UI Builder style drafts preserve comments and keep the last valid pre
     CHECK(Keire::Detail::ReadTextFile(conflictCopy, Keire::MaximumUiDocumentBytes).find("Button.primary:hover") !=
           std::string::npos);
     CHECK_THROWS_WITH_AS(document.SaveAs(conflictCopy), doctest::Contains("will not overwrite"), std::invalid_argument);
+
+    REQUIRE(document.ApplySourceDraft("@keire-style 2;\n\nButton {\n  unsupported-property: value;\n}\n"));
+    REQUIRE(document.SourceDiagnostic());
+    CHECK(document.SourceDiagnostic()->Line == 3U);
+    CHECK(document.SourceDiagnostic()->Column == 1U);
+    CHECK(document.SourceDiagnostic()->Message.find("unsupported property") != std::string::npos);
 
     document.Close();
     undoService->Close();
@@ -1368,6 +1455,34 @@ opac
     REQUIRE(left != alignmentCompletions.end());
     REQUIRE(editor.ApplyCompletion(alignmentOffset, *left));
     CHECK(editor.Source().find("text-align:left;") != std::string::npos);
+
+    editor.SetSource("@keire-style 2;\nButton { bgc }\n");
+    const auto fuzzyOffset = editor.Source().find("bgc") + 3U;
+    const auto fuzzyCompletions = editor.Completions(fuzzyOffset);
+    CHECK(std::ranges::find(fuzzyCompletions, "background-color", &KeireEditor::UiStyleSourceCompletion::Label) !=
+          fuzzyCompletions.end());
+
+    editor.SetSource("@keire-style 2;\n:root { --brand: #ffffffff; }\nButton { color: --br; }\n");
+    const auto variableOffset = editor.Source().find("--br;") + 4U;
+    const auto variableCompletions = editor.Completions(variableOffset);
+    const auto brand = std::ranges::find(variableCompletions, "--brand", &KeireEditor::UiStyleSourceCompletion::Label);
+    REQUIRE(brand != variableCompletions.end());
+    REQUIRE(editor.ApplyCompletion(variableOffset, *brand));
+    CHECK(editor.Source().find("color: var(--brand);") != std::string::npos);
+
+    editor.SetSource(R"css(@keire-style 2;
+Button {
+--message: "literal { value; }";
+/* A comment with a } brace. */
+width: 10px;
+}
+)css");
+    const auto outerBrace = editor.Source().find('{');
+    REQUIRE(editor.MatchingBrace(outerBrace));
+    CHECK(*editor.MatchingBrace(outerBrace) == editor.Source().rfind('}'));
+    REQUIRE(editor.Format());
+    CHECK(editor.Source().find("  --message: \"literal { value; }\";") != std::string::npos);
+    CHECK(editor.Source().find("  width: 10px;") != std::string::npos);
 }
 
 TEST_CASE("UI markup source editor provides syntax tokens documentation and completion")
@@ -1399,6 +1514,22 @@ TEST_CASE("UI markup source editor provides syntax tokens documentation and comp
     const auto classOffset = editor.Source().find("class");
     REQUIRE(editor.HoverDocumentation(classOffset));
     CHECK(editor.HoverDocumentation(classOffset)->find("style classes") != std::string::npos);
+
+    editor.SetSource("<ProgressBar va");
+    const auto relevant = editor.Completions(editor.Source().size());
+    REQUIRE_FALSE(relevant.empty());
+    CHECK(relevant.front().Label == "value");
+
+    editor.SetSource("<Toggle checked=\"tr\"");
+    const auto booleanOffset = editor.Source().find("tr") + 2U;
+    const auto booleans = editor.Completions(booleanOffset);
+    REQUIRE_FALSE(booleans.empty());
+    CHECK(booleans.front().Label == "true");
+
+    editor.SetSource("<Label class=\"title\" cl");
+    const auto duplicateAttribute = editor.Completions(editor.Source().size());
+    CHECK(std::ranges::find(duplicateAttribute, "class", &KeireEditor::UiMarkupSourceCompletion::Label) ==
+          duplicateAttribute.end());
 }
 
 TEST_CASE("UI token refactors preview every source and reject stale previews before applying")

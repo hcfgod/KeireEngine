@@ -78,7 +78,9 @@ namespace Keire
         {
             if (value.is_null())
                 return {};
-            const auto* nested = Member(value, "Id", "id");
+            const auto* nested = Member(value, "asset", "asset");
+            if (!nested)
+                nested = Member(value, "Id", "id");
             const auto& id = nested && nested->is_object() ? *nested : value;
             if (!id.is_object())
                 throw std::invalid_argument("Managed asset-reference data is not an object.");
@@ -382,7 +384,9 @@ namespace Keire
             case ManagedAssetPropertyKind::AssetReference:
             {
                 const auto asset = std::get<AssetId>(value.Value);
-                return {{"Id", {{"High", asset.High()}, {"Low", asset.Low()}}}};
+                return {{"$ref", "asset"},
+                        {"asset", {{"High", asset.High()}, {"Low", asset.Low()}}},
+                        {"type", property.ManagedTypeName}};
             }
             case ManagedAssetPropertyKind::SerializableObject:
             {

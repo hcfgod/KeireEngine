@@ -1,4 +1,5 @@
 #include "KeireInternal/Scripting/ManagedRuntimeWorld.h"
+#include "KeireInternal/Rendering/ManagedLightingQualityInternal.h"
 
 #if defined(_MSC_VER)
 #pragma warning(push)
@@ -370,20 +371,41 @@ namespace Keire::Detail
                     .DirectionalShadowSplitLambda = value.DirectionalShadowSplitLambda};
         }
 
-        [[nodiscard]] RenderEnvironmentSettings FromNative(const NativeRenderEnvironment& value) noexcept
+        [[nodiscard]] RenderEnvironmentSettings FromNative(const NativeRenderEnvironment& value,
+                                                           RenderEnvironmentSettings current) noexcept
         {
-            return {.AmbientColor = value.AmbientColor,
-                    .AmbientIntensity = value.AmbientIntensity,
-                    .Exposure = value.Exposure,
-                    .Environment = AssetId(value.EnvironmentHigh, value.EnvironmentLow),
-                    .EnvironmentRotationDegrees = value.EnvironmentRotationDegrees,
-                    .EnvironmentDiffuseIntensity = value.EnvironmentDiffuseIntensity,
-                    .EnvironmentSpecularIntensity = value.EnvironmentSpecularIntensity,
-                    .SkyVisible = value.SkyVisible != 0,
-                    .DirectionalShadowDistance = value.DirectionalShadowDistance,
-                    .DirectionalShadowCascadeCount = value.DirectionalShadowCascadeCount,
-                    .DirectionalShadowResolution = value.DirectionalShadowResolution,
-                    .DirectionalShadowSplitLambda = value.DirectionalShadowSplitLambda};
+            current.AmbientColor = value.AmbientColor;
+            current.AmbientIntensity = value.AmbientIntensity;
+            current.Exposure = value.Exposure;
+            current.Environment = AssetId(value.EnvironmentHigh, value.EnvironmentLow);
+            current.EnvironmentRotationDegrees = value.EnvironmentRotationDegrees;
+            current.EnvironmentDiffuseIntensity = value.EnvironmentDiffuseIntensity;
+            current.EnvironmentSpecularIntensity = value.EnvironmentSpecularIntensity;
+            current.SkyVisible = value.SkyVisible != 0;
+            current.DirectionalShadowDistance = value.DirectionalShadowDistance;
+            current.DirectionalShadowCascadeCount = value.DirectionalShadowCascadeCount;
+            current.DirectionalShadowResolution = value.DirectionalShadowResolution;
+            current.DirectionalShadowSplitLambda = value.DirectionalShadowSplitLambda;
+            return current;
+        }
+
+        [[nodiscard]] int GetLightingQuality() noexcept
+        {
+            const auto current = ActiveServices ? ActiveServices->ManagedRenderEnvironment() : std::nullopt;
+            if (!current)
+                return -1;
+            return current->RequestedGlobalIllumination == GlobalIlluminationMode::Irradyn
+                       ? 2 - static_cast<int>(current->RequestedIrradynQuality)
+                       : 3;
+        }
+
+        [[nodiscard]] std::uint8_t SetLightingQuality(const std::uint8_t preset) noexcept
+        {
+            auto current = ActiveServices ? ActiveServices->ManagedRenderEnvironment() : std::nullopt;
+            return current && ApplyManagedLightingQuality(*current, preset) &&
+                           ActiveServices->SetManagedRenderEnvironment(*current)
+                       ? 1
+                       : 0;
         }
 
         [[nodiscard]] std::uint8_t GetRenderEnvironment(NativeRenderEnvironment* destination) noexcept
@@ -401,7 +423,8 @@ namespace Keire::Detail
         {
             if (!ActiveServices || !value)
                 return 0;
-            return ActiveServices->SetManagedRenderEnvironment(FromNative(*value)) ? 1 : 0;
+            const auto current = ActiveServices->ManagedRenderEnvironment();
+            return current && ActiveServices->SetManagedRenderEnvironment(FromNative(*value, *current)) ? 1 : 0;
         }
     } // namespace
 
@@ -445,6 +468,10 @@ namespace Keire::Detail
                                  reinterpret_cast<void*>(&QueryEntityTags));
         assembly.AddInternalCall("Keire.NativeWorld", "QueryEntityComponentsIcall",
                                  reinterpret_cast<void*>(&QueryEntityComponents));
+        assembly.AddInternalCall("Keire.NativeWorld", "GetLightingQualityIcall",
+                                 reinterpret_cast<void*>(&GetLightingQuality));
+        assembly.AddInternalCall("Keire.NativeWorld", "SetLightingQualityIcall",
+                                 reinterpret_cast<void*>(&SetLightingQuality));
         assembly.AddInternalCall("Keire.NativeWorld", "GetRenderEnvironmentIcall",
                                  reinterpret_cast<void*>(&GetRenderEnvironment));
         assembly.AddInternalCall("Keire.NativeWorld", "SetRenderEnvironmentIcall",

@@ -612,6 +612,8 @@ namespace
         bool OpposingDpadCanceled = false;
         bool RemainingDpadDirectionRestored = false;
         bool StickButtonWorked = false;
+        bool VectorRebindSkippedButton = false;
+        bool ButtonRebindSkippedVector = false;
     };
 
     class GamepadInputLayer final : public Keire::Layer
@@ -685,7 +687,29 @@ namespace
                 PushButton(SDL_GAMEPAD_BUTTON_LEFT_STICK, false);
                 return;
             }
-            m_Result->RemainingDpadDirectionRestored = m_Dpad.Value().AsAxis2D().Y > 0.9F;
+            if (m_Frame == 3)
+            {
+                m_Result->RemainingDpadDirectionRestored = m_Dpad.Value().AsAxis2D().Y > 0.9F;
+                m_Rebind = Owner().Input()->BeginInteractiveRebind(
+                    m_Context, Keire::AssetId::Parse("3086c5ae-b065-4d9e-bcf1-cf022498f401"));
+                PushButton(SDL_GAMEPAD_BUTTON_SOUTH, true);
+                PushButton(SDL_GAMEPAD_BUTTON_DPAD_RIGHT, true);
+                return;
+            }
+            if (m_Frame == 4)
+            {
+                m_Result->VectorRebindSkippedButton = m_Rebind->Status() == Keire::RebindStatus::Candidate &&
+                                                      m_Rebind->CandidatePath() == "<Gamepad>/dpad";
+                m_Rebind->Cancel();
+                m_Rebind = Owner().Input()->BeginInteractiveRebind(
+                    m_Context, Keire::AssetId::Parse("18cd817e-9f31-4cd6-a7c5-aacdb0bb6403"));
+                PushAxis(SDL_GAMEPAD_AXIS_RIGHTX, 28000);
+                PushButton(SDL_GAMEPAD_BUTTON_NORTH, true);
+                return;
+            }
+            m_Result->ButtonRebindSkippedVector = m_Rebind->Status() == Keire::RebindStatus::Candidate &&
+                                                  m_Rebind->CandidatePath() == "<Gamepad>/buttonNorth";
+            m_Rebind->Cancel();
             Owner().RequestExit();
         }
 
@@ -717,6 +741,7 @@ namespace
         Keire::Ref<Keire::InputActionContext> m_Context;
         Keire::InputActionHandle m_Stick;
         Keire::InputActionHandle m_Dpad;
+        Keire::Ref<Keire::InteractiveRebindOperation> m_Rebind;
         Keire::InputActionHandle m_Click;
         Keire::AssetId m_StickAction = Keire::AssetId::Parse("942b94c3-aa3d-475d-bd0a-6967dcc7f401");
         Keire::AssetId m_DpadAction = Keire::AssetId::Parse("dc22428d-ae41-4ba5-98ff-f13dc520a402");
@@ -1124,6 +1149,8 @@ TEST_CASE("Input combines same-frame gamepad axes and preserves opposing D-pad s
     CHECK(result->OpposingDpadCanceled);
     CHECK(result->RemainingDpadDirectionRestored);
     CHECK(result->StickButtonWorked);
+    CHECK(result->VectorRebindSkippedButton);
+    CHECK(result->ButtonRebindSkippedVector);
 }
 
 TEST_CASE("Application rejects enabled input without assets")

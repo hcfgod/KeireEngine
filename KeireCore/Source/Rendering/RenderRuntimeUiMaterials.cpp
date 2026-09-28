@@ -122,8 +122,9 @@ namespace Keire::RenderBackend
             scene.DirectionalDirectionExposure.W = 1.0F;
             scene.SurfaceParameters = {material->Definition().Surface.AlphaCutoff,
                                        static_cast<float>(material->Definition().Surface.AlphaMode), 0.0F, 0.0F};
-            scene.FrameParameters.X = time.X;
-            scene.FrameParameters.Y = time.Y;
+            const auto materialTime = fullscreen ? time : (ActiveFrame ? ActiveFrame->UiMaterialTime : Vector2{});
+            scene.FrameParameters.X = materialTime.X;
+            scene.FrameParameters.Y = materialTime.Y;
             scene.FrameParameters.Z = static_cast<float>(Statistics.Frame);
             SDL_BindGPUGraphicsPipeline(pass, pipeline->Handle);
             SDL_PushGPUFragmentUniformData(commands, 0, &scene, sizeof(scene));

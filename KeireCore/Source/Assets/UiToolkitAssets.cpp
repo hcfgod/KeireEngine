@@ -36,7 +36,10 @@ namespace Keire
 
         [[nodiscard]] std::string_view Text(const std::span<const std::byte> bytes)
         {
-            return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
+            auto result = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+            if (result.starts_with("\xEF\xBB\xBF"))
+                result.remove_prefix(3U);
+            return result;
         }
 
         [[nodiscard]] std::vector<std::byte> Bytes(const std::string_view text)
@@ -62,28 +65,119 @@ namespace Keire
             return std::string(value.substr(first, last - first + 1));
         }
 
-        [[nodiscard]] std::string DecodeXml(std::string value)
+        void AppendUtf8(std::string& output, const std::uint32_t codePoint)
         {
-            const std::pair<std::string_view, std::string_view> entities[] = {
-                {"&quot;", "\""}, {"&apos;", "'"}, {"&lt;", "<"}, {"&gt;", ">"}, {"&amp;", "&"}};
-            for (std::size_t entityOffset = value.find('&'); entityOffset != std::string::npos;
-                 entityOffset = value.find('&', entityOffset + 1))
+            if (codePoint <= 0x7FU)
             {
-                if (!std::ranges::any_of(
-                        entities, [&](const auto& entity)
-                        { return std::string_view(value).substr(entityOffset).starts_with(entity.first); }))
-                    throw std::runtime_error("UI document contains an unsupported XML entity.");
+                output += static_cast<char>(codePoint);
+                return;
             }
-            for (const auto& [encoded, decoded] : entities)
+            if (codePoint <= 0x7FFU)
             {
-                std::size_t offset = 0;
-                while ((offset = value.find(encoded, offset)) != std::string::npos)
+                output += static_cast<char>(0xC0U | codePoint >> 6U);
+                output += static_cast<char>(0x80U | codePoint & 0x3FU);
+                return;
+            }
+            if (codePoint <= 0xFFFFU)
+            {
+                output += static_cast<char>(0xE0U | codePoint >> 12U);
+                output += static_cast<char>(0x80U | codePoint >> 6U & 0x3FU);
+                output += static_cast<char>(0x80U | codePoint & 0x3FU);
+                return;
+            }
+            output += static_cast<char>(0xF0U | codePoint >> 18U);
+            output += static_cast<char>(0x80U | codePoint >> 12U & 0x3FU);
+            output += static_cast<char>(0x80U | codePoint >> 6U & 0x3FU);
+            output += static_cast<char>(0x80U | codePoint & 0x3FU);
+        }
+
+        [[nodiscard]] std::string DecodeXml(const std::string_view value)
+        {
+            constexpr std::array<std::pair<std::string_view, std::string_view>, 5> namedEntities{{
+                {"quot", "\""},
+                {"apos", "'"},
+                {"lt", "<"},
+                {"gt", ">"},
+                {"amp", "&"},
+            }};
+            std::string result;
+            result.reserve(value.size());
+            for (std::size_t cursor = 0; cursor < value.size();)
+            {
+                if (value[cursor] != '&')
                 {
-                    value.replace(offset, encoded.size(), decoded);
-                    offset += decoded.size();
+                    result += value[cursor++];
+                    continue;
                 }
+                const auto semicolon = value.find(';', cursor + 1U);
+                if (semicolon == std::string_view::npos)
+                    throw std::runtime_error("UI document contains an unterminated XML entity.");
+                const auto entity = value.substr(cursor + 1U, semicolon - cursor - 1U);
+                const auto named =
+                    std::ranges::find_if(namedEntities, [entity](const auto& value) { return value.first == entity; });
+                if (named != namedEntities.end())
+                {
+                    result += named->second;
+                }
+                else if (entity.starts_with('#'))
+                {
+                    const bool hexadecimal = entity.size() > 2U && (entity[1] == 'x' || entity[1] == 'X');
+                    const auto digits = entity.substr(hexadecimal ? 2U : 1U);
+                    std::uint32_t codePoint = 0;
+                    const auto [end, error] =
+                        std::from_chars(digits.data(), digits.data() + digits.size(), codePoint, hexadecimal ? 16 : 10);
+                    const bool validXmlCharacter = codePoint == 0x9U || codePoint == 0xAU || codePoint == 0xDU ||
+                                                   (codePoint >= 0x20U && codePoint <= 0xD7FFU) ||
+                                                   (codePoint >= 0xE000U && codePoint <= 0xFFFDU) ||
+                                                   (codePoint >= 0x10000U && codePoint <= 0x10FFFFU);
+                    if (digits.empty() || error != std::errc{} || end != digits.data() + digits.size() ||
+                        !validXmlCharacter)
+                    {
+                        throw std::runtime_error("UI document contains an invalid numeric XML entity.");
+                    }
+                    AppendUtf8(result, codePoint);
+                }
+                else
+                {
+                    throw std::runtime_error("UI document contains an unsupported XML entity.");
+                }
+                cursor = semicolon + 1U;
             }
-            return value;
+            return result;
+        }
+
+        [[nodiscard]] std::size_t FindXmlTagEnd(const std::string_view source, const std::size_t begin) noexcept
+        {
+            char quote = 0;
+            for (auto cursor = begin; cursor < source.size(); ++cursor)
+            {
+                if (quote != 0)
+                {
+                    if (source[cursor] == quote)
+                        quote = 0;
+                    continue;
+                }
+                if (source[cursor] == '\'' || source[cursor] == '"')
+                    quote = source[cursor];
+                else if (source[cursor] == '>')
+                    return cursor;
+            }
+            return std::string_view::npos;
+        }
+
+        [[nodiscard]] bool ValidXmlName(const std::string_view value) noexcept
+        {
+            if (value.empty())
+                return false;
+            const auto first = static_cast<unsigned char>(value.front());
+            if (std::isalpha(first) == 0 && value.front() != '_' && value.front() != ':')
+                return false;
+            return std::ranges::all_of(value.substr(1U),
+                                       [](const unsigned char character)
+                                       {
+                                           return std::isalnum(character) != 0 || character == '_' ||
+                                                  character == ':' || character == '-' || character == '.';
+                                       });
         }
 
         [[nodiscard]] std::vector<XmlTag> ParseXmlTags(const std::string_view source)
@@ -106,6 +200,8 @@ namespace Keire
                     const auto close = source.find("-->", open + 4);
                     if (close == std::string_view::npos)
                         throw std::runtime_error("UI document contains an unterminated comment.");
+                    if (source.substr(open + 4U, close - open - 4U).find("--") != std::string_view::npos)
+                        throw std::runtime_error("UI document comments cannot contain '--'.");
                     cursor = close + 3;
                     continue;
                 }
@@ -114,10 +210,16 @@ namespace Keire
                     const auto close = source.find("?>", open + 2);
                     if (close == std::string_view::npos)
                         throw std::runtime_error("UI document contains an unterminated declaration.");
+                    if (!result.empty() || !Trim(source.substr(0, open)).empty() ||
+                        source.substr(open, 5U) != "<?xml" || open + 5U >= source.size() ||
+                        std::isspace(static_cast<unsigned char>(source[open + 5U])) == 0)
+                        throw std::runtime_error("UI document contains an unsupported processing instruction.");
                     cursor = close + 2;
                     continue;
                 }
-                const auto close = source.find('>', open + 1);
+                if (source.substr(open, 2) == "<!")
+                    throw std::runtime_error("UI documents do not support DTD or CDATA declarations.");
+                const auto close = FindXmlTagEnd(source, open + 1U);
                 if (close == std::string_view::npos)
                     throw std::runtime_error("UI document contains an unterminated tag.");
                 auto body = Trim(source.substr(open + 1, close - open - 1));
@@ -136,8 +238,8 @@ namespace Keire
                 }
                 const auto nameEnd = body.find_first_of(" \t\r\n");
                 tag.Name = body.substr(0, nameEnd);
-                if (tag.Name.empty())
-                    throw std::runtime_error("UI document contains a tag without a name.");
+                if (!ValidXmlName(tag.Name))
+                    throw std::runtime_error("UI document contains an invalid tag name.");
                 if (tag.Closing)
                 {
                     if (nameEnd != std::string::npos)
@@ -156,7 +258,7 @@ namespace Keire
                             throw std::runtime_error("UI document attribute is missing '='.");
                         const auto name =
                             Trim(std::string_view(body).substr(attributeCursor, equals - attributeCursor));
-                        if (name.empty() || name.find_first_of(" \t\r\n\"'<>") != std::string::npos)
+                        if (!ValidXmlName(name))
                             throw std::runtime_error("UI document contains an invalid attribute name.");
                         const auto quotePosition = body.find_first_not_of(" \t\r\n", equals + 1);
                         if (quotePosition == std::string::npos ||
@@ -166,6 +268,9 @@ namespace Keire
                         const auto valueEnd = body.find(quote, quotePosition + 1);
                         if (valueEnd == std::string::npos)
                             throw std::runtime_error("UI document contains an unterminated attribute.");
+                        if (body.substr(quotePosition + 1U, valueEnd - quotePosition - 1U).find('<') !=
+                            std::string_view::npos)
+                            throw std::runtime_error("UI document attribute values must escape '<' as '&lt;'.");
                         if (std::ranges::find(tag.Attributes, name, &UiNamedValue::Name) != tag.Attributes.end())
                             throw std::runtime_error("UI document contains a duplicate attribute.");
                         tag.Attributes.push_back(
@@ -311,30 +416,107 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] std::vector<UiNamedValue> ParseDeclarations(const std::string_view value)
+        [[nodiscard]] std::string StyleSourceMessage(std::string_view source, std::size_t offset,
+                                                     std::string_view message);
+
+        [[nodiscard]] std::string RemoveStyleComments(const std::string_view source)
         {
-            std::vector<UiNamedValue> result;
-            std::size_t cursor = 0;
-            while (cursor < value.size())
+            std::string result(source);
+            char quote = 0;
+            bool escaped = false;
+            for (std::size_t cursor = 0; cursor < source.size(); ++cursor)
             {
-                const auto end = value.find(';', cursor);
-                const auto declaration = Trim(value.substr(cursor, end - cursor));
+                const auto character = source[cursor];
+                if (quote != 0)
+                {
+                    if (escaped)
+                        escaped = false;
+                    else if (character == '\\')
+                        escaped = true;
+                    else if (character == quote)
+                        quote = 0;
+                    continue;
+                }
+                if (character == '"' || character == '\'')
+                {
+                    quote = character;
+                    continue;
+                }
+                if (character != '/' || cursor + 1U >= source.size() || source[cursor + 1U] != '*')
+                    continue;
+                const auto close = source.find("*/", cursor + 2U);
+                if (close == std::string_view::npos)
+                    throw std::runtime_error(
+                        StyleSourceMessage(source, cursor, "UI style source contains an unterminated comment."));
+                for (auto index = cursor; index < close + 2U; ++index)
+                    if (result[index] != '\r' && result[index] != '\n')
+                        result[index] = ' ';
+                cursor = close + 1U;
+            }
+            return result;
+        }
+
+        [[nodiscard]] std::vector<UiNamedValue> ParseDeclarations(const std::string_view source)
+        {
+            const auto value = RemoveStyleComments(source);
+            std::vector<UiNamedValue> result;
+            std::size_t begin = 0;
+            std::size_t colon = std::string_view::npos;
+            std::size_t parenthesisDepth = 0;
+            char quote = 0;
+            bool escaped = false;
+            const auto append = [&](const std::size_t end)
+            {
+                const auto declaration = Trim(std::string_view(value).substr(begin, end - begin));
                 if (!declaration.empty())
                 {
-                    const auto colon = declaration.find(':');
-                    if (colon == std::string::npos)
+                    if (colon == std::string_view::npos || colon >= end)
                         throw std::runtime_error("UI style declaration is missing ':'.");
-                    auto name = Trim(std::string_view(declaration).substr(0, colon));
-                    auto propertyValue = Trim(std::string_view(declaration).substr(colon + 1));
+                    auto name = Trim(std::string_view(value).substr(begin, colon - begin));
+                    auto propertyValue = Trim(std::string_view(value).substr(colon + 1U, end - colon - 1U));
                     if (name.empty() || propertyValue.empty() ||
                         std::ranges::find(result, name, &UiNamedValue::Name) != result.end())
                         throw std::runtime_error("UI style declaration is empty or duplicated.");
                     result.push_back({std::move(name), std::move(propertyValue)});
                 }
-                if (end == std::string_view::npos)
-                    break;
-                cursor = end + 1;
+            };
+            for (std::size_t cursor = 0; cursor < value.size(); ++cursor)
+            {
+                const auto character = value[cursor];
+                if (quote != 0)
+                {
+                    if (escaped)
+                        escaped = false;
+                    else if (character == '\\')
+                        escaped = true;
+                    else if (character == quote)
+                        quote = 0;
+                    continue;
+                }
+                if (character == '"' || character == '\'')
+                    quote = character;
+                else if (character == '(')
+                    ++parenthesisDepth;
+                else if (character == ')')
+                {
+                    if (parenthesisDepth == 0U)
+                        throw std::runtime_error("UI style declaration contains an unmatched ')'.");
+                    --parenthesisDepth;
+                }
+                else if (character == ':' && parenthesisDepth == 0U && colon == std::string_view::npos)
+                    colon = cursor;
+                else if (character == ';' && parenthesisDepth == 0U)
+                {
+                    append(cursor);
+                    begin = cursor + 1U;
+                    colon = std::string_view::npos;
+                }
             }
+            if (quote != 0)
+                throw std::runtime_error("UI style declaration contains an unterminated string.");
+            if (parenthesisDepth != 0U)
+                throw std::runtime_error("UI style declaration contains an unterminated function.");
+            append(value.size());
             return result;
         }
 
@@ -648,26 +830,29 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] std::string RemoveCssComments(const std::string_view source)
+        [[nodiscard]] std::string StyleSourceMessage(const std::string_view source, const std::size_t offset,
+                                                     const std::string_view message)
         {
-            std::string result;
-            result.reserve(source.size());
-            std::size_t cursor = 0;
-            while (cursor < source.size())
+            std::size_t line = 1U;
+            std::size_t column = 1U;
+            for (std::size_t cursor = 0; cursor < std::min(offset, source.size()); ++cursor)
             {
-                const auto open = source.find("/*", cursor);
-                if (open == std::string_view::npos)
+                if (source[cursor] == '\n')
                 {
-                    result.append(source.substr(cursor));
-                    break;
+                    ++line;
+                    column = 1U;
                 }
-                result.append(source.substr(cursor, open - cursor));
-                const auto close = source.find("*/", open + 2);
-                if (close == std::string_view::npos)
-                    throw std::runtime_error("UI stylesheet contains an unterminated comment.");
-                cursor = close + 2;
+                else
+                    ++column;
             }
-            return result;
+            return "UI stylesheet line " + std::to_string(line) + ", column " + std::to_string(column) + ": " +
+                   std::string(message);
+        }
+
+        [[noreturn]] void ThrowStyleSourceError(const std::string_view source, const std::size_t offset,
+                                                const std::string_view message)
+        {
+            throw std::runtime_error(StyleSourceMessage(source, offset, message));
         }
 
         [[nodiscard]] Json EncodeSelectorPart(const UiStyleSelectorPart& part)
@@ -969,9 +1154,28 @@ namespace Keire
             {
                 for (const auto& property : rule.Properties)
                 {
-                    std::size_t cursor = 0;
-                    while ((cursor = property.Value.find("asset(", cursor)) != std::string::npos)
+                    char quote = 0;
+                    bool escaped = false;
+                    for (std::size_t cursor = 0; cursor < property.Value.size(); ++cursor)
                     {
+                        const auto character = property.Value[cursor];
+                        if (quote != 0)
+                        {
+                            if (escaped)
+                                escaped = false;
+                            else if (character == '\\')
+                                escaped = true;
+                            else if (character == quote)
+                                quote = 0;
+                            continue;
+                        }
+                        if (character == '"' || character == '\'')
+                        {
+                            quote = character;
+                            continue;
+                        }
+                        if (!std::string_view(property.Value).substr(cursor).starts_with("asset("))
+                            continue;
                         const auto close = property.Value.find(')', cursor + 6);
                         if (close == std::string::npos)
                             throw std::runtime_error("UI stylesheet asset reference is missing ')'.");
@@ -981,7 +1185,7 @@ namespace Keire
                         if (!asset)
                             throw std::runtime_error("UI stylesheet asset reference requires a non-zero asset ID.");
                         result.push_back(asset);
-                        cursor = close + 1;
+                        cursor = close;
                     }
                 }
             }
@@ -1066,7 +1270,8 @@ namespace Keire
     {
         if (bytes.size() > MaximumUiDocumentBytes)
             throw std::runtime_error("UI document exceeds the 16 MiB safety limit.");
-        const auto tags = ParseXmlTags(Text(bytes));
+        const auto source = Text(bytes);
+        const auto tags = ParseXmlTags(source);
         if (tags.size() < 3 || tags.front().Name != "ui" || tags.front().Closing || tags.front().SelfClosing)
             throw std::runtime_error("UI document must have a non-empty <ui> root.");
         const auto* schema = Attribute(tags.front(), "schemaVersion");
@@ -1078,13 +1283,13 @@ namespace Keire
         std::size_t cursor = 1;
         while (cursor < tags.size() && !tags[cursor].Closing && tags[cursor].Name == "style")
         {
-            const auto* source = Attribute(tags[cursor], "src");
-            if (!tags[cursor].SelfClosing || source == nullptr)
+            const auto* styleSource = Attribute(tags[cursor], "src");
+            if (!tags[cursor].SelfClosing || styleSource == nullptr)
                 throw std::runtime_error("UI document style references must be self-closing and have a source.");
-            result.StyleSheets.push_back(AssetId::Parse(*source));
+            result.StyleSheets.push_back(AssetId::Parse(*styleSource));
             ++cursor;
         }
-        const auto documentDigest = Detail::Sha256(bytes);
+        const auto documentDigest = Detail::Sha256(std::as_bytes(std::span(source)));
         std::size_t elementOrdinal = 0;
         result.Root = ParseElement(tags, cursor, 1, documentDigest, elementOrdinal);
         if (cursor >= tags.size() || !tags[cursor].Closing || tags[cursor].Name != "ui" || cursor + 1 != tags.size())
@@ -1243,7 +1448,7 @@ namespace Keire
     {
         if (bytes.size() > MaximumUiDocumentBytes)
             throw std::runtime_error("UI stylesheet exceeds the 16 MiB safety limit.");
-        auto source = RemoveCssComments(Text(bytes));
+        auto source = RemoveStyleComments(Text(bytes));
         const auto first = source.find_first_not_of(" \t\r\n");
         UiStyleSheetDefinition result;
         constexpr std::string_view HeaderPrefix = "@keire-style ";
@@ -1264,14 +1469,56 @@ namespace Keire
         const auto matchingBrace = [&source](const std::size_t open, const std::size_t end)
         {
             std::size_t depth = 0;
+            char quote = 0;
+            bool escaped = false;
             for (std::size_t cursor = open; cursor < end; ++cursor)
             {
-                if (source[cursor] == '{')
+                const auto character = source[cursor];
+                if (quote != 0)
+                {
+                    if (escaped)
+                        escaped = false;
+                    else if (character == '\\')
+                        escaped = true;
+                    else if (character == quote)
+                        quote = 0;
+                    continue;
+                }
+                if (character == '"' || character == '\'')
+                {
+                    quote = character;
+                    continue;
+                }
+                if (character == '{')
                     ++depth;
-                else if (source[cursor] == '}' && --depth == 0)
+                else if (character == '}' && depth > 0U && --depth == 0U)
                     return cursor;
             }
             return std::string::npos;
+        };
+        const auto containsOpeningBrace = [&source](const std::size_t begin, const std::size_t end)
+        {
+            char quote = 0;
+            bool escaped = false;
+            for (auto cursor = begin; cursor < end; ++cursor)
+            {
+                const auto character = source[cursor];
+                if (quote != 0)
+                {
+                    if (escaped)
+                        escaped = false;
+                    else if (character == '\\')
+                        escaped = true;
+                    else if (character == quote)
+                        quote = 0;
+                    continue;
+                }
+                if (character == '"' || character == '\'')
+                    quote = character;
+                else if (character == '{')
+                    return true;
+            }
+            return false;
         };
         std::function<void(std::size_t, std::size_t, std::optional<UiStyleMediaCondition>)> parseBlock;
         parseBlock =
@@ -1286,31 +1533,56 @@ namespace Keire
                 if (open == std::string::npos || open >= end)
                 {
                     if (!Trim(std::string_view(source).substr(cursor, end - cursor)).empty())
-                        throw std::runtime_error("UI stylesheet contains text outside a rule.");
+                        ThrowStyleSourceError(source, cursor, "UI stylesheet contains text outside a rule.");
                     break;
                 }
                 const auto close = matchingBrace(open, end);
                 if (close == std::string::npos)
-                    throw std::runtime_error("UI stylesheet contains an unterminated rule or media block.");
+                    ThrowStyleSourceError(source, open, "UI stylesheet contains an unterminated rule or media block.");
                 const auto heading = Trim(std::string_view(source).substr(cursor, open - cursor));
                 if (std::string_view(heading).starts_with("@media"))
                 {
                     if (result.SchemaVersion < 2)
-                        throw std::runtime_error("Responsive @media rules require '@keire-style 2;'.");
+                        ThrowStyleSourceError(source, cursor, "Responsive @media rules require '@keire-style 2;'.");
                     if (inheritedMedia)
-                        throw std::runtime_error("UI stylesheet media blocks cannot be nested.");
+                        ThrowStyleSourceError(source, cursor, "UI stylesheet media blocks cannot be nested.");
                     const auto conditionText =
                         Trim(std::string_view(heading).substr(std::string_view("@media").size()));
-                    parseBlock(open + 1, close, ParseMediaCondition(conditionText));
+                    try
+                    {
+                        parseBlock(open + 1, close, ParseMediaCondition(conditionText));
+                    }
+                    catch (const std::runtime_error& error)
+                    {
+                        if (std::string_view(error.what()).starts_with("UI stylesheet line "))
+                            throw;
+                        ThrowStyleSourceError(source, cursor, error.what());
+                    }
                 }
                 else
                 {
-                    if (source.find('{', open + 1) < close)
-                        throw std::runtime_error("UI stylesheet rules cannot contain nested blocks.");
-                    auto rule = ParseSelector(heading);
-                    rule.Properties = ParseDeclarations(std::string_view(source).substr(open + 1, close - open - 1));
-                    rule.Media = inheritedMedia;
-                    result.Rules.push_back(std::move(rule));
+                    if (containsOpeningBrace(open + 1U, close))
+                        ThrowStyleSourceError(source, open + 1U, "UI stylesheet rules cannot contain nested blocks.");
+                    try
+                    {
+                        auto rule = ParseSelector(heading);
+                        rule.Properties =
+                            ParseDeclarations(std::string_view(source).substr(open + 1, close - open - 1));
+                        if (rule.Properties.empty())
+                            throw std::runtime_error("UI stylesheet rules require at least one declaration.");
+                        for (const auto& property : rule.Properties)
+                            ValidateUiStylePropertyValue(property.Name, property.Value, result.SchemaVersion);
+                        rule.Media = inheritedMedia;
+                        result.Rules.push_back(std::move(rule));
+                    }
+                    catch (const std::runtime_error& error)
+                    {
+                        ThrowStyleSourceError(source, cursor, error.what());
+                    }
+                    catch (const std::invalid_argument& error)
+                    {
+                        throw std::invalid_argument(StyleSourceMessage(source, cursor, error.what()));
+                    }
                 }
                 cursor = close + 1;
             }

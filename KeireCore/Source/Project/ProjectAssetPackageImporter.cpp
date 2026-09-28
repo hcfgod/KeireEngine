@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <exception>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -24,7 +25,7 @@ namespace Keire
     namespace
     {
         using Json = nlohmann::json;
-        constexpr std::string_view PackageMinimumEngineVersion = "0.3.1";
+        constexpr std::string_view PackageMinimumEngineVersion = "0.4.4";
         constexpr std::size_t MaximumReceiptBytes = 16ULL * 1024ULL * 1024U;
 
         [[nodiscard]] std::string PathText(const std::filesystem::path& path)
@@ -90,7 +91,8 @@ namespace Keire
 
         [[nodiscard]] ProjectAssetImportReceipt NormalizeReceipt(ProjectAssetImportReceipt receipt)
         {
-            if (receipt.SchemaVersion != ProjectAssetImportReceipt::CurrentSchemaVersion ||
+            if ((receipt.SchemaVersion != 1U &&
+                 receipt.SchemaVersion != ProjectAssetImportReceipt::CurrentSchemaVersion) ||
                 !IsPackageId(receipt.PackageId) || receipt.Version.empty() || receipt.ArchiveSha256.size() != 64U)
             {
                 throw std::invalid_argument("Project asset import receipt is invalid.");
@@ -99,6 +101,13 @@ namespace Keire
                 (!receipt.ExecutableCodeApproved && !receipt.ExecutableCodeFingerprint.empty()))
             {
                 throw std::invalid_argument("Project asset import executable-code receipt is invalid.");
+            }
+            if (receipt.Manifest)
+            {
+                ValidateAssetPackageManifest(*receipt.Manifest);
+                if (receipt.Manifest->PackageId != receipt.PackageId || receipt.Manifest->Version != receipt.Version ||
+                    receipt.Manifest->InstallKind != AssetPackageInstallKind::AssetImport)
+                    throw std::invalid_argument("Import receipt manifest does not match its package identity.");
             }
             std::ranges::sort(receipt.Entries, {}, [](const auto& entry) { return PathText(entry.ProjectPath); });
             std::string previous;
@@ -124,15 +133,27 @@ namespace Keire
                                    {"packageSha256", entry.PackageSha256},
                                    {"owned", entry.Owned}});
             }
-            return {{"schemaVersion", receipt.SchemaVersion},
-                    {"packageId", receipt.PackageId},
-                    {"version", receipt.Version},
-                    {"archiveSha256", receipt.ArchiveSha256},
-                    {"executableCodeFingerprint", receipt.ExecutableCodeFingerprint.empty()
-                                                      ? Json(nullptr)
-                                                      : Json(receipt.ExecutableCodeFingerprint)},
-                    {"executableCodeApproved", receipt.ExecutableCodeApproved},
-                    {"entries", std::move(entries)}};
+            Json result{{"schemaVersion", receipt.SchemaVersion},
+                        {"packageId", receipt.PackageId},
+                        {"version", receipt.Version},
+                        {"archiveSha256", receipt.ArchiveSha256},
+                        {"executableCodeFingerprint", receipt.ExecutableCodeFingerprint.empty()
+                                                          ? Json(nullptr)
+                                                          : Json(receipt.ExecutableCodeFingerprint)},
+                        {"executableCodeApproved", receipt.ExecutableCodeApproved},
+                        {"entries", std::move(entries)}};
+            if (receipt.SchemaVersion >= 2U)
+                result["manifest"] =
+                    receipt.Manifest ? Json::parse(EncodeAssetPackageManifest(*receipt.Manifest)) : Json(nullptr);
+            return result;
+        }
+
+        [[nodiscard]] bool IsCSharpSource(const std::filesystem::path& path)
+        {
+            auto extension = path.extension().string();
+            std::ranges::transform(extension, extension.begin(),
+                                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            return extension == ".cs";
         }
 
         [[nodiscard]] std::string ExecutableCodeFingerprint(const AssetPackageManifest& manifest)
@@ -147,7 +168,7 @@ namespace Keire
             }
             for (const auto& file : manifest.Files)
             {
-                if (file.Path.extension() == ".cs" ||
+                if (IsCSharpSource(file.Path) ||
                     std::ranges::any_of(manifest.ManagedAssemblies,
                                         [&](const auto& assembly) { return assembly.DefinitionPath == file.Path; }))
                 {
@@ -277,14 +298,18 @@ namespace Keire
 
     std::string EncodeProjectAssetImportReceipt(const ProjectAssetImportReceipt& receipt)
     {
-        return ReceiptJson(NormalizeReceipt(receipt)).dump(2) + '\n';
+        auto document = ReceiptJson(NormalizeReceipt(receipt)).dump(2) + '\n';
+        if (document.size() > MaximumReceiptBytes)
+            throw std::invalid_argument("Project asset import receipt exceeds the supported size.");
+        return document;
     }
 
     ProjectAssetImportReceipt DecodeProjectAssetImportReceipt(const std::string_view document)
     {
         const auto json = Json::parse(document);
-        if (!json.is_object() || json.size() != 7U || !json.contains("schemaVersion") || !json.contains("packageId") ||
-            !json.contains("version") || !json.contains("archiveSha256") || !json.contains("entries") ||
+        if (!json.is_object() || (json.size() != (json.value("schemaVersion", 0U) == 2U ? 8U : 7U)) ||
+            !json.contains("schemaVersion") || !json.contains("packageId") || !json.contains("version") ||
+            !json.contains("archiveSha256") || !json.contains("entries") ||
             !json.contains("executableCodeFingerprint") || !json.contains("executableCodeApproved") ||
             !json.at("entries").is_array())
         {
@@ -297,6 +322,8 @@ namespace Keire
                                          .ExecutableCodeApproved = json.at("executableCodeApproved").get<bool>()};
         if (!json.at("executableCodeFingerprint").is_null())
             result.ExecutableCodeFingerprint = json.at("executableCodeFingerprint").get<std::string>();
+        if (result.SchemaVersion >= 2U && !json.at("manifest").is_null())
+            result.Manifest = DecodeAssetPackageManifest(json.at("manifest").dump());
         for (const auto& entry : json.at("entries"))
         {
             if (!entry.is_object() || entry.size() != 3U)
@@ -329,6 +356,41 @@ namespace Keire
     {
         std::scoped_lock lock(m_Impl->Mutex);
         return m_Impl->LoadReceipt(packageId);
+    }
+
+    std::vector<ProjectAssetImportReceipt> ProjectAssetPackageImporter::Receipts() const
+    {
+        std::scoped_lock lock(m_Impl->Mutex);
+        std::vector<ProjectAssetImportReceipt> result;
+        const auto root = m_Impl->Specification.ProjectRoot / "ProjectSettings" / "Packages" / "Imported";
+        if (!std::filesystem::exists(root))
+            return result;
+        for (const auto& entry : std::filesystem::directory_iterator(root))
+        {
+            if (entry.is_regular_file() && entry.path().extension() == ".keireimport")
+            {
+                auto receipt = DecodeProjectAssetImportReceipt(Detail::ReadTextFile(entry.path(), MaximumReceiptBytes));
+                if (entry.path() != ReceiptPath(m_Impl->Specification.ProjectRoot, receipt.PackageId))
+                    throw std::runtime_error("Import receipt filename does not match its package identity.");
+                result.push_back(std::move(receipt));
+            }
+        }
+        std::ranges::sort(result, {}, &ProjectAssetImportReceipt::PackageId);
+        return result;
+    }
+
+    std::string ProjectAssetPackageImporter::CompatibilityDiagnostic(const ProjectAssetImportReceipt& receipt) const
+    {
+        if (!receipt.Manifest)
+            return "Compatibility is unknown for this older import. Reimport its package to record compatibility.";
+        std::string reason;
+        if (!Compatible(*receipt.Manifest, m_Impl->Specification, reason))
+            return reason + " Update this package or open the project with a supported Editor version.";
+        if (!receipt.Manifest->ManagedAssemblies.empty() &&
+            receipt.Manifest->Compatibility.ManagedApiVersion != m_Impl->Specification.EngineVersion)
+            return "This package contains C# built for a different or unspecified managed API version. Rebuild scripts "
+                   "in this Editor; update the package if compilation fails.";
+        return {};
     }
 
     ProjectAssetImportPlan ProjectAssetPackageImporter::Preflight(const ProjectAssetImportRequest& request) const
@@ -419,7 +481,7 @@ namespace Keire
             for (const auto& assembly : manifest.ManagedAssemblies)
                 includedFiles.insert(PathText(assembly.DefinitionPath));
             for (const auto& file : manifest.Files)
-                if (file.Path.extension() == ".cs")
+                if (IsCSharpSource(file.Path))
                     includedFiles.insert(PathText(file.Path));
         }
 
@@ -446,6 +508,8 @@ namespace Keire
                 entry.Disposition = ProjectAssetImportDisposition::Install;
             else if (entry.LocalSha256 == entry.IncomingSha256)
                 entry.Disposition = ProjectAssetImportDisposition::ReuseIdentical;
+            else if (resolution == ProjectAssetImportResolution::KeepLocal)
+                entry.Disposition = ProjectAssetImportDisposition::KeepLocal;
             else if (resolution == ProjectAssetImportResolution::Replace ||
                      (prior != previousEntries.end() && entry.LocalSha256 == prior->second.PackageSha256))
                 entry.Disposition = ProjectAssetImportDisposition::Replace;
@@ -518,7 +582,8 @@ namespace Keire
                           .Version = manifest.Version,
                           .ArchiveSha256 = plan.Package.ArchiveSha256,
                           .ExecutableCodeFingerprint = ExecutableCodeFingerprint(manifest),
-                          .ExecutableCodeApproved = !manifest.ManagedAssemblies.empty()};
+                          .ExecutableCodeApproved = !manifest.ManagedAssemblies.empty(),
+                          .Manifest = manifest};
         const auto previous = m_Impl->LoadReceipt(manifest.PackageId);
         std::unordered_map<std::string, ProjectAssetImportReceiptEntry> priorEntries;
         if (previous)
@@ -534,8 +599,8 @@ namespace Keire
                  .AllowedStagingParent = transaction,
                  .StagingRoot = extraction,
                  .Verification = {.RequireSignature = request.RequireMarketplaceSignature,
-                                  .ExpectedArchiveSizeBytes = request.ExpectedArchiveSizeBytes,
-                                  .ExpectedArchiveSha256 = request.ExpectedArchiveSha256,
+                                  .ExpectedArchiveSizeBytes = plan.Package.ArchiveSizeBytes,
+                                  .ExpectedArchiveSha256 = plan.Package.ArchiveSha256,
                                   .VerifySignature = m_Impl->Specification.VerifyMarketplaceSignature}}));
 
             for (std::size_t index = 0; index < plan.Entries.size(); ++index)
@@ -543,6 +608,9 @@ namespace Keire
                 const auto& entry = plan.Entries[index];
                 const auto destination = Confined(m_Impl->Specification.ProjectRoot, entry.ProjectPath);
                 const bool existed = std::filesystem::is_regular_file(destination);
+                if ((existed ? HashFile(destination) : std::string{}) != entry.LocalSha256)
+                    throw std::runtime_error(
+                        "Project files changed during import. Review the package again before importing.");
                 if (existed && (entry.Disposition == ProjectAssetImportDisposition::Install ||
                                 entry.Disposition == ProjectAssetImportDisposition::Replace))
                 {
@@ -555,6 +623,18 @@ namespace Keire
                      {"mutated", entry.Disposition == ProjectAssetImportDisposition::Install ||
                                      entry.Disposition == ProjectAssetImportDisposition::Replace},
                      {"backup", existed ? std::to_string(index) : std::string{}}});
+            }
+            for (const auto& path : {std::filesystem::path("ProjectSettings/Project.keireproject"),
+                                     ReceiptPath(m_Impl->Specification.ProjectRoot, manifest.PackageId)
+                                         .lexically_relative(m_Impl->Specification.ProjectRoot)})
+            {
+                const auto destination = Confined(m_Impl->Specification.ProjectRoot, path);
+                const bool existed = std::filesystem::is_regular_file(destination);
+                const auto backup = std::to_string(journal["entries"].size());
+                if (existed)
+                    Detail::WriteFileAtomically(transaction / "before" / backup, ReadBytes(destination));
+                journal["entries"].push_back(
+                    {{"path", PathText(path)}, {"existed", existed}, {"mutated", true}, {"backup", backup}});
             }
             Detail::WriteTextFileAtomically(journalPath, journal.dump(2) + '\n');
             journal["state"] = "publishing";
@@ -591,11 +671,18 @@ namespace Keire
                 m_Impl->Report(ProjectAssetImportState::Publishing, operationId, manifest.PackageId, entry.ProjectPath,
                                index + 1U, plan.Entries.size());
             }
+            std::set<std::string> updatedPaths;
+            for (const auto& entry : result.Receipt.Entries)
+                updatedPaths.insert(PathText(entry.ProjectPath));
+            for (const auto& [path, entry] : priorEntries)
+                if (!updatedPaths.contains(path))
+                    result.Receipt.Entries.push_back(entry);
             RaiseMinimumEngineVersion(m_Impl->Specification.ProjectRoot);
             Detail::WriteTextFileAtomically(ReceiptPath(m_Impl->Specification.ProjectRoot, manifest.PackageId),
                                             EncodeProjectAssetImportReceipt(result.Receipt));
             journal["state"] = "committed";
             Detail::WriteTextFileAtomically(journalPath, journal.dump(2) + '\n');
+            publicationStarted = false;
             RemoveNoThrow(transaction);
             m_Impl->Report(ProjectAssetImportState::Completed, operationId, manifest.PackageId, {}, plan.Entries.size(),
                            plan.Entries.size(), "Asset package import completed.");
@@ -605,24 +692,47 @@ namespace Keire
         {
             if (publicationStarted)
             {
-                m_Impl->Report(ProjectAssetImportState::RollingBack, operationId, manifest.PackageId);
-                for (std::size_t index = plan.Entries.size(); index > 0U; --index)
+                const auto failure = std::current_exception();
+                try
                 {
-                    const auto& entry = plan.Entries[index - 1U];
-                    if (entry.Disposition != ProjectAssetImportDisposition::Install &&
-                        entry.Disposition != ProjectAssetImportDisposition::Replace)
-                        continue;
-                    const auto destination = Confined(m_Impl->Specification.ProjectRoot, entry.ProjectPath);
-                    const auto backup = transaction / "before" / Detail::PathFromUtf8(std::to_string(index - 1U));
-                    if (std::filesystem::is_regular_file(backup))
-                        Detail::WriteFileAtomically(destination, ReadBytes(backup));
-                    else
-                        RemoveNoThrow(destination);
+                    m_Impl->Report(ProjectAssetImportState::RollingBack, operationId, manifest.PackageId);
+                }
+                catch (...)
+                {
+                    // Reporting cannot prevent rollback or replace the original failure.
+                }
+                try
+                {
+                    for (const auto& entry : journal["entries"] | std::views::reverse)
+                    {
+                        if (!entry.at("mutated").get<bool>())
+                            continue;
+                        const auto destination = Confined(m_Impl->Specification.ProjectRoot,
+                                                          Detail::PathFromUtf8(entry.at("path").get<std::string>()));
+                        if (entry.at("existed").get<bool>())
+                            Detail::WriteFileAtomically(
+                                destination, ReadBytes(transaction / "before" / entry.at("backup").get<std::string>()));
+                        else
+                            std::filesystem::remove(destination);
+                    }
+                }
+                catch (...)
+                {
+                    // Preserve the journal for startup recovery if rollback itself fails.
+                    std::rethrow_exception(failure);
                 }
             }
             RemoveNoThrow(transaction);
-            m_Impl->Report(ProjectAssetImportState::Failed, operationId, manifest.PackageId);
-            throw;
+            const auto failure = std::current_exception();
+            try
+            {
+                m_Impl->Report(ProjectAssetImportState::Failed, operationId, manifest.PackageId);
+            }
+            catch (...)
+            {
+                // A reporting failure must not replace the original import failure.
+            }
+            std::rethrow_exception(failure);
         }
     }
 

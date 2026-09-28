@@ -635,6 +635,7 @@ namespace Keire::RenderBackend
                             HandleRenderThreadFailure(std::current_exception());
                         }
                     }
+                    CollectRetiredSurfaceEpochs();
                 }
             });
     }
@@ -654,7 +655,7 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::DispatchRender(const std::function<void()>& work)
     {
-        if (!RenderThread.joinable())
+        if (!RenderThread.joinable() || std::this_thread::get_id() == RenderThread.get_id())
         {
             work();
             return;
@@ -845,14 +846,9 @@ namespace Keire::RenderBackend
                 found->Current = false;
             }
         }
-        try
-        {
-            DispatchRender([self = shared_from_this()] { self->CollectRetiredSurfaceEpochs(); });
-        }
-        catch (...)
-        {
-            surface->Owner.reset();
-        }
+        // The render loop collects after each task and idle poll; a destructor must not wait for queued GPU work.
+        if (!RenderThread.joinable())
+            CollectRetiredSurfaceEpochs();
     }
 
     void RenderSharedState::CollectRetiredSurfaceEpochs() noexcept

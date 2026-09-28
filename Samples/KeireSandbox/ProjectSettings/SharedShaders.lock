@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "shaders": [
+    {
+      "id": "88a528e6-5d5c-8730-2782-05e8406f6bfe",
+      "name": "Kéire/Lit",
+      "path": "Keire/SharedShaders/1.0.0/Lit.keireshadergraph",
+      "sha256": "a3ab5fe6adad4a3915d82a973566fd98cab7617878baf30f1d9a276496975e02"
+    },
+    {
+      "id": "518d9125-130c-9a59-e824-d6d6f5cec997",
+      "name": "Kéire/Unlit",
+      "path": "Keire/SharedShaders/1.0.0/Unlit.keireshadergraph",
+      "sha256": "99a06e012c33f9042faa43c986e00f8001e13ed485b1a3da0282791611a5c31f"
+    },
+    {
+      "id": "836d5ff5-5fc9-3672-d46f-d331f2339541",
+      "name": "Kéire/UI",
+      "path": "Keire/SharedShaders/1.0.0/UI.keireshadergraph",
+      "sha256": "d8dbd978155ca724e234ab77d661f13b73d2d0756f8bd4c17011e64654938d6e"
+    },
+    {
+      "id": "6629bd3a-6e88-c94b-c2a4-75ea5ea7da63",
+      "name": "Kéire/Fullscreen",
+      "path": "Keire/SharedShaders/1.0.0/Fullscreen.keireshadergraph",
+      "sha256": "1ef46059c7f695dc1e7735749fe924668c00032842fe16a58918f34b542715a1"
+    },
+    {
+      "id": "ecac5f6d-97b4-9479-1717-cc238bf6f31f",
+      "name": "Kéire/VFX",
+      "path": "Keire/SharedShaders/1.0.0/VFX.keireshadergraph",
+      "sha256": "0f450adb2241f2f6b31427566303125056c3f3921ec959968eec07207a960694"
+    },
+    {
+      "id": "9b1c3952-111a-5171-151e-ea44d8015ebc",
+      "name": "Kéire/CustomGraphics",
+      "path": "Keire/SharedShaders/1.0.0/CustomGraphics.keireshadergraph",
+      "sha256": "8f6e1a200219d267088fd39814ff82ff194ec2a9e30737a7cff21c70cf91f718"
+    }
+  ],
+  "version": "1.0.0"
+}

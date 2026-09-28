@@ -85,3 +85,7 @@ contains no SDL window or mouse types.
 Text entry/IME, touch, pen, sensors, generic joysticks, XR, advanced trigger/adaptive haptics, networking, and generated
 C++ wrappers are outside this milestone. Source assets currently accept the built-in
 Press, Tap, Hold, MultiTap, Deadzone, Scale, Invert, and Normalize behaviors.
+
+### Rebinding value compatibility
+
+Interactive capture filters by the target action before exposing a candidate. A whole `Axis2D` binding accepts vector controls (sticks, D-pad, mouse delta); button and scalar composite-part bindings accept scalar controls. Escape still cancels capture before this filtering. Applications may further restrict devices and reserve controls for emergency navigation.

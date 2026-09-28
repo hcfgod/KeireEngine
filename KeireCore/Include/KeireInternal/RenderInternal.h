@@ -189,7 +189,7 @@ namespace Keire
         [[nodiscard]] static std::uint64_t MaterialDependencyCheckCount(const RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t SkinningStaticBuildCount(const RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t SkinningOutputBuildCount(const RenderSystem& renderer) noexcept;
-        static void BeginFrame(RenderSystem& renderer);
+        static void BeginFrame(RenderSystem& renderer, Vector2 uiMaterialTime = {});
         static void CancelFrame(RenderSystem& renderer) noexcept;
         static void EndFrame(RenderSystem& renderer, ImDrawData* drawData);
     };

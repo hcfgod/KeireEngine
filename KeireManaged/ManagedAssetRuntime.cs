@@ -556,6 +556,21 @@ internal static class ManagedAssetRuntimeSelfTests
         const ulong generation = ulong.MaxValue - 1;
         var id = new AssetId(0x6b656972652d4077, 0x8000000000001001);
         var reference = (SelfTestAsset)Asset.FromId(typeof(SelfTestAsset), id)!;
+        foreach (string encoded in new[]
+        {
+            $"{{\"$ref\":\"asset\",\"asset\":{{\"High\":{id.High},\"Low\":{id.Low}}}}}",
+            $"{{\"Id\":{{\"High\":{id.High},\"Low\":{id.Low}}}}}",
+            $"{{\"High\":{id.High},\"Low\":{id.Low}}}"
+        })
+        {
+            var restored = System.Text.Json.JsonSerializer.Deserialize<SelfTestAsset>(
+                encoded, ManagedStateSerializer.SerializerOptions);
+            if (restored?.Id != id)
+                throw new InvalidOperationException("Managed canonical or legacy asset reference lost its identity.");
+            string roundTrip = System.Text.Json.JsonSerializer.Serialize(restored, ManagedStateSerializer.SerializerOptions);
+            if (!roundTrip.Contains("\"$ref\":\"asset\"", StringComparison.Ordinal))
+                throw new InvalidOperationException("Managed asset references must write canonical tagged identities.");
+        }
         var release = new TaskCompletionSource<ScriptableObject?>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         int providerCalls = 0;

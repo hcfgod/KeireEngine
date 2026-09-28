@@ -20,6 +20,18 @@ internal static class UiToolkitTests
         Check(ReferenceEquals(panel.Parent, root) && ReferenceEquals(button.Parent, panel),
               "Rejected hierarchy mutations must preserve the previous tree.");
 
+        var reorder = new Keire.UI.VisualElement();
+        var first = new Keire.UI.Label("first");
+        var second = new Keire.UI.Label("second");
+        reorder.Add(first);
+        reorder.Add(second);
+        reorder.Add(first);
+        Check(reorder.Children.SequenceEqual(new Keire.UI.VisualElement[] { second, first }),
+              "Adding an existing child must move it to the end without invalidating its parent.");
+        reorder.Insert(0, first);
+        Check(ReferenceEquals(reorder.Children[0], first) && ReferenceEquals(first.Parent, reorder),
+              "Moving a child earlier must preserve tree ownership.");
+
         var propagation = new List<string>();
         root.RegisterCallback<Keire.UI.ClickEvent>(_ => propagation.Add("root-trickle"),
                                                    Keire.UI.TrickleDown.TrickleDown);
@@ -77,6 +89,25 @@ internal static class UiToolkitTests
         list.SetViewport(500, 20);
         Check(list.RealizedItems.Count == 24 && list.Children.Count == 24,
               "Virtualized lists must realize only visible items plus bounded overscan.");
+
+        list.SetViewport(int.MaxValue, int.MaxValue);
+        Check(list.RealizedItems.Count == 0, "Viewport arithmetic must not overflow into unrelated list items.");
+        list.Overscan = -10;
+        list.SetViewport(0, 2);
+        Check(list.RealizedItems.Count == 2, "Negative overscan must not hide visible list items.");
+
+        var field = new Keire.UI.TextField { MaxLength = 3 };
+        field.Value = null!;
+        Check(field.Value == string.Empty, "Length-limited text fields must normalize null safely.");
+        field.Value = "abcdef";
+        Check(field.Value == "abc", "Text fields must still enforce their length limit.");
+        var slider = new Keire.UI.Slider { LowValue = 0, HighValue = 10, Step = 6 };
+        slider.Value = 10;
+        Check(slider.Value == 10, "Step snapping must remain within the slider range.");
+        slider.LowValue = 10;
+        slider.HighValue = 0;
+        slider.Value = 0;
+        Check(slider.Value == 0, "Reversed slider ranges must also constrain snapped values.");
 
         Keire.UI.UxmlElementDescriptor descriptor = Keire.UI.UxmlElementRegistry.Register<StatusBadge>();
         Check(descriptor.Name == "StatusBadge" &&

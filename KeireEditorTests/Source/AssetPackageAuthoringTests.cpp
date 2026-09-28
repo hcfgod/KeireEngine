@@ -150,3 +150,22 @@ TEST_CASE("asset-package identifiers are portable and stable")
           "com.keire.assets.stylized-forest-materials");
     CHECK(KeireEditor::SuggestedAssetPackageIdentifier("   ") == "com.keire.assets.package");
 }
+
+TEST_CASE("asset-package authoring records engine bounds and managed assembly scope")
+{
+    PackageFixture fixture;
+    const auto script = fixture.Add("Scripts/Player.cs", "class Player {} ");
+    const auto assembly = fixture.Add(
+        "Scripts/Player.keireasm",
+        R"({"schemaVersion":1,"name":"Player","rootNamespace":"Player","classification":"runtime","sourceRoots":["Assets/Scripts"],"references":[]})");
+    auto draft = fixture.Draft();
+    draft.MaximumEngineVersion = "0.4.4";
+    const auto package = KeireEditor::CreateAssetPackageArchive({.ProjectRoot = fixture.Root,
+                                                                 .Output = fixture.Root / "Player.keireassetpackage",
+                                                                 .Selection = {.Folder = "Scripts"},
+                                                                 .Draft = draft,
+                                                                 .Records = {script, assembly}});
+    CHECK(package.Manifest.Compatibility.MaximumEngineVersion == "0.4.4");
+    REQUIRE(package.Manifest.ManagedAssemblies.size() == 1);
+    CHECK(package.Manifest.ManagedAssemblies.front().Scope == Keire::AssetPackageManagedAssemblyScope::Runtime);
+}

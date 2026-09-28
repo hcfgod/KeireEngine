@@ -141,7 +141,9 @@ internal static class ManagedStateSerializer
                 return null;
             using JsonDocument document = JsonDocument.ParseValue(ref reader);
             JsonElement root = document.RootElement;
-            JsonElement id = root.TryGetProperty("asset", out JsonElement asset) ? asset : root;
+            JsonElement id = root.TryGetProperty("asset", out JsonElement asset) ? asset
+                : root.TryGetProperty("Id", out JsonElement legacy) ? legacy
+                : root.TryGetProperty("id", out JsonElement lowerLegacy) ? lowerLegacy : root;
             ulong high = id.TryGetProperty("High", out JsonElement oldHigh) ? oldHigh.GetUInt64()
                 : id.TryGetProperty("high", out JsonElement highValue) ? highValue.GetUInt64() : 0;
             ulong low = id.TryGetProperty("Low", out JsonElement oldLow) ? oldLow.GetUInt64()

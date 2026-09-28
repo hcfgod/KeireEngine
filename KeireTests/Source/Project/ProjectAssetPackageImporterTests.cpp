@@ -157,7 +157,7 @@ TEST_CASE("asset package import resolves selected asset dependencies and writes 
     CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets" / "Unrelated.txt"));
     CHECK(std::filesystem::is_regular_file(
         Keire::ProjectAssetPackageImporter::ReceiptPath(fixture.Project->Root(), package.Manifest.PackageId)));
-    CHECK(Keire::Project::InspectMetadata(fixture.Project->Root()).MinimumEngineVersion == "0.3.1");
+    CHECK(Keire::Project::InspectMetadata(fixture.Project->Root()).MinimumEngineVersion == "0.4.4");
 }
 
 TEST_CASE("asset package update keeps local edits only after an explicit three-way conflict decision")
@@ -225,4 +225,70 @@ TEST_CASE("asset package executable code requires consent again only when its fi
     CHECK(
         std::ranges::any_of(changedPlan.Conflicts, [](const auto& conflict)
                             { return conflict.Kind == Keire::ProjectAssetImportConflictKind::ExecutableCodeConsent; }));
+}
+
+TEST_CASE("asset package receipts retain compatibility across editor upgrades and recognize legacy imports")
+{
+    ProjectAssetImportFixture fixture;
+    auto importer = fixture.Importer();
+    const auto package = fixture.CreatePackage("1.0.0", "primary", "dependency");
+    auto receipt = importer.Import(fixture.Request(package)).Receipt;
+    REQUIRE(receipt.Manifest.has_value());
+    CHECK(importer.Receipts().size() == 1);
+    CHECK(importer.CompatibilityDiagnostic(receipt).empty());
+    receipt.Manifest->Compatibility.MaximumEngineVersion = "0.3.1";
+    Keire::ProjectAssetPackageImporter upgraded({.ProjectRoot = fixture.Project->Root(),
+                                                 .EngineVersion = "0.4.4",
+                                                 .Platform = "windows",
+                                                 .Architecture = "x86_64",
+                                                 .RendererCapabilities = {"pbr"}});
+    CHECK(upgraded.CompatibilityDiagnostic(receipt).find("Update this package") != std::string::npos);
+    receipt.SchemaVersion = 1;
+    receipt.Manifest.reset();
+    const auto legacy = Keire::DecodeProjectAssetImportReceipt(Keire::EncodeProjectAssetImportReceipt(receipt));
+    CHECK_FALSE(legacy.Manifest.has_value());
+    CHECK(upgraded.CompatibilityDiagnostic(legacy).find("unknown") != std::string::npos);
+}
+
+TEST_CASE("asset package partial updates retain ownership of previously imported files")
+{
+    ProjectAssetImportFixture fixture;
+    auto importer = fixture.Importer();
+    const auto first = fixture.CreatePackage("1.0.0", "primary", "dependency");
+    auto request = fixture.Request(first);
+    request.SelectedAssets.clear();
+    static_cast<void>(importer.Import(request));
+    const auto second = fixture.CreatePackage("1.1.0", "new primary", "dependency");
+    const auto updated = importer.Import(fixture.Request(second));
+    CHECK(updated.Receipt.Entries.size() == 6);
+    static_cast<void>(importer.Remove(second.Manifest.PackageId));
+    CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/Unrelated.txt"));
+}
+
+TEST_CASE("asset package failed publication restores project bookkeeping and previous files")
+{
+    ProjectAssetImportFixture fixture;
+    const auto package = fixture.CreatePackage("1.0.0", "primary", "dependency");
+    const auto descriptor = fixture.Project->Root() / "ProjectSettings/Project.keireproject";
+    const auto before = KeireTests::ReadFile(descriptor);
+    Keire::ProjectAssetPackageImporter importer({.ProjectRoot = fixture.Project->Root(),
+                                                 .EngineVersion = "0.4.4",
+                                                 .Platform = "windows",
+                                                 .Architecture = "x86_64",
+                                                 .RendererCapabilities = {"pbr"},
+                                                 .VerifyMarketplaceSignature = [](auto&&...) { return true; },
+                                                 .Events =
+                                                     [&](const Keire::ProjectAssetImportEvent& event)
+                                                 {
+                                                     if (event.State == Keire::ProjectAssetImportState::Publishing)
+                                                     {
+                                                         ProjectAssetImportFixture::Write(descriptor,
+                                                                                          "invalid project descriptor");
+                                                         throw std::runtime_error("injected publication failure");
+                                                     }
+                                                 }});
+    CHECK_THROWS(importer.Import(fixture.Request(package)));
+    CHECK(KeireTests::ReadFile(descriptor) == before);
+    CHECK_FALSE(importer.Receipt(package.Manifest.PackageId).has_value());
+    CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/Primary.txt"));
 }

@@ -93,15 +93,13 @@ namespace Keire::Detail
             const auto textWidth = static_cast<float>(state.Content.Text.size()) * style.FontSize * 0.55F * scale;
             if (width <= 0.0F)
             {
-                width = childrenWidth + (style.Padding.Left + style.Padding.Right) * scale;
-                if (width <= 0.0F && !state.Content.Text.empty())
-                    width = textWidth + 16.0F * scale;
+                const float intrinsicText = state.Content.Text.empty() ? 0.0F : textWidth + 16.0F * scale;
+                width = std::max(childrenWidth, intrinsicText) + (style.Padding.Left + style.Padding.Right) * scale;
             }
             if (height <= 0.0F)
             {
-                height = childrenHeight + (style.Padding.Top + style.Padding.Bottom) * scale;
-                if (height <= 0.0F && !state.Content.Text.empty())
-                    height = fontHeight + 8.0F * scale;
+                const float intrinsicText = state.Content.Text.empty() ? 0.0F : fontHeight + 8.0F * scale;
+                height = std::max(childrenHeight, intrinsicText) + (style.Padding.Top + style.Padding.Bottom) * scale;
             }
         }
 

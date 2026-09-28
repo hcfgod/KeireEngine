@@ -31,6 +31,7 @@ namespace
         bool EnvironmentValidationCompleted = false;
         bool AdditiveSceneValidationCompleted = false;
         bool SurfaceSampleValidationCompleted = false;
+        bool UiMaterialTimeValidationCompleted = false;
     };
 
     [[nodiscard]] std::vector<std::pair<std::string_view, Keire::RenderEnvironmentSettings>> InvalidEnvironments()
@@ -87,6 +88,19 @@ namespace
       protected:
         void OnAttach() override
         {
+            auto renderer = Owner().Renderer();
+            CHECK_THROWS_AS(Keire::RenderSystemInternalAccess::BeginFrame(
+                                *renderer, {std::numeric_limits<float>::quiet_NaN(), 0.0F}),
+                            std::invalid_argument);
+            CHECK_THROWS_AS(Keire::RenderSystemInternalAccess::BeginFrame(*renderer, {-1.0F, 0.0F}),
+                            std::invalid_argument);
+            CHECK_THROWS_AS(Keire::RenderSystemInternalAccess::BeginFrame(*renderer, {1.0F, 1.01F}),
+                            std::invalid_argument);
+            CHECK_NOTHROW(Keire::RenderSystemInternalAccess::BeginFrame(*renderer, {2.0F, 0.25F}));
+            CHECK_THROWS_AS(Keire::RenderSystemInternalAccess::BeginFrame(*renderer, {3.0F, 0.25F}), std::logic_error);
+            Keire::RenderSystemInternalAccess::CancelFrame(*renderer);
+            m_Probe.UiMaterialTimeValidationCompleted = true;
+
             m_Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
                                                      Keire::SceneAsset::EmptyDefinition("Public render contract"));
             m_AdditionalScene = Keire::CreateRef<Keire::Scene>(
@@ -213,4 +227,5 @@ TEST_CASE("Public render camera and environment contracts reject invalid values 
     CHECK(probe.EnvironmentValidationCompleted);
     CHECK(probe.AdditiveSceneValidationCompleted);
     CHECK(probe.SurfaceSampleValidationCompleted);
+    CHECK(probe.UiMaterialTimeValidationCompleted);
 }

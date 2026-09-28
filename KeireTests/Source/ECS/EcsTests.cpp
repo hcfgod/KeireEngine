@@ -248,6 +248,49 @@ TEST_CASE("unchanged local transforms do not dirty their scene")
     CHECK_FALSE(scene->Dirty());
 }
 
+TEST_CASE("entity duplication serializes only its subtree and preserves hierarchy")
+{
+    const auto calls = std::make_shared<std::vector<std::string>>();
+    auto registry = Keire::ComponentRegistry::CreateDefault();
+    auto registration = MakeProbeRegistration(calls);
+    std::size_t serializations = 0;
+    registration.Serialize = [&](const Keire::Component&)
+    {
+        ++serializations;
+        return Keire::ComponentPropertyBag{};
+    };
+    registry->Register(std::move(registration));
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition(), registry);
+    auto outside = scene->CreateEntity("Outside");
+    REQUIRE(outside.AddComponent(LifecycleProbeComponent::StaticType()));
+    auto root = scene->CreateEntity("Pool seed", outside);
+    auto child = scene->CreateEntity("Child", root);
+    REQUIRE(root.AddComponent(LifecycleProbeComponent::StaticType()));
+    REQUIRE(child.AddComponent(LifecycleProbeComponent::StaticType()));
+    root.GetComponent<Keire::TransformComponent>()->SetLocalPosition({1, 2, 3});
+    child.GetComponent<Keire::TransformComponent>()->SetLocalPosition({4, 5, 6});
+    root.SetActive(false);
+    serializations = 0;
+    auto clone = root.Clone();
+    REQUIRE(clone);
+    CHECK(serializations == 2);
+    CHECK(clone.Id() != root.Id());
+    CHECK(clone.Parent() == outside);
+    CHECK_FALSE(clone.ActiveSelf());
+    CHECK(clone.GetComponent<Keire::TransformComponent>()->WorldPosition() ==
+          root.GetComponent<Keire::TransformComponent>()->WorldPosition());
+    REQUIRE(clone.Children().size() == 1);
+    const auto clonedChild = clone.Children().front();
+    CHECK(clonedChild.Id() != child.Id());
+    CHECK(clonedChild.Parent() == clone);
+    CHECK(clonedChild.GetComponent<Keire::TransformComponent>()->LocalPosition() == Keire::Vector3{4, 5, 6});
+    serializations = 0;
+    REQUIRE(scene->Find(root.Id().Value()).Snapshot());
+    CHECK(serializations == 1);
+    scene->Close();
+}
+
 TEST_CASE("Entity tags and scene queries stay indexed deterministic and serialized")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());

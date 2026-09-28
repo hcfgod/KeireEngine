@@ -161,6 +161,24 @@ TEST_CASE("Binding updates roll back every earlier target mutation and publish e
                          std::invalid_argument);
 }
 
+TEST_CASE("Pending binding values preserve authored state without consuming OneTime")
+{
+    auto label = Keire::CreateRef<Keire::Ui::Label>("authored");
+    std::any pending;
+    label->SetBinding(
+        "text", {.SourcePath = "model.text", .Mode = Keire::Ui::BindingMode::OneTime, .Read = [&] { return pending; }});
+    label->SetBinding("name", {.SourcePath = "model.name", .Read = [] { return std::any(std::string("ready")); }});
+    CHECK_NOTHROW(label->UpdateBindings());
+    CHECK(label->Text() == "authored");
+    CHECK(label->Name() == "ready");
+    pending = std::string("arrived");
+    label->UpdateBindings();
+    CHECK(label->Text() == "arrived");
+    pending = std::string("later");
+    label->UpdateBindings();
+    CHECK(label->Text() == "arrived");
+}
+
 TEST_CASE("Two-way control binding failures preserve the last valid value")
 {
     auto toggle = Keire::CreateRef<Keire::Ui::Toggle>();

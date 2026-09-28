@@ -90,6 +90,8 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ThumbnailService.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/ThumbnailArtwork.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderDocument.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderInspector.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderNavigation.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderLiveDraft.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiBuilderStyleSheetDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/UiMarkupSourceEditor.cpp",

@@ -64,7 +64,7 @@ diagnostics, yield/await, cancellation, and disposal.
 
 ## Scenes And Prefabs
 
-`Scene`, `SceneAsset`, `SceneManager`, `SceneLoadOperation`, `SceneLoadMode`, `SceneQuery`, `RenderSettings`, and
+`Scene`, `SceneAsset`, `SceneManager`, `SceneLoadOperation`, `SceneLoadMode`, `SceneQuery`, `RenderSettings`, `LightingQuality`, and
 `Prefab`. `Instantiate(Prefab, ...)` and `Prefab.Instantiate(...)` return the root `Entity`.
 
 ## Materials

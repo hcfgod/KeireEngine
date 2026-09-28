@@ -91,6 +91,11 @@ Visual and source edits modify the same in-memory draft. Source parsing is debou
 development-only asset revision so UI Builder, Game View, and Play Mode update without writing the source file. An
 invalid candidate reports a line and column, disables Save, and leaves the last valid preview active.
 
+Quoted values may contain semicolons, colons, braces, `/*` text, and `asset(...)` text without being split or treated
+as syntax. Function values may nest parentheses. Comments outside strings remain trivia, and inline styles use the
+same declaration rules as `.keirestyle` files. Structural diagnostics identify the affected authored rule; fixing the
+draft republishes it through the normal debounced preview path.
+
 Source provides line/column and syntax-token status, property and pseudo-state completion sourced from the runtime
 property registry, click-to-insert suggestions, matching-brace locations, property hover documentation, rule
 navigation, case-aware find/replace, and deterministic formatting. Tabs are retained as editor input rather than

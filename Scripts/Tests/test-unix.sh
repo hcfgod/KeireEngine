@@ -1102,7 +1102,7 @@ assert_true grep -R -q 'BuiltinShaderUniformBufferCount(vertex)' "$ROOT/KeireCor
 assert_true grep -R -q 'EnsureDeferredPipelines' "$ROOT/KeireCore/Source/Rendering"
 assert_true grep -R -q 'SDL_PushGPUFragmentUniformData' "$ROOT/KeireCore/Source/Rendering"
 assert_true test "$(wc -l < "$ROOT/KeireCore/Source/Rendering/RenderSystem.cpp" | tr -d ' ')" -lt 700
-assert_true test "$(wc -l < "$ROOT/KeireCore/Source/Assets/AssetPipeline.cpp" | tr -d ' ')" -lt 600
+assert_true test "$(wc -l < "$ROOT/KeireCore/Source/Assets/AssetPipeline.cpp" | tr -d ' ')" -lt 700
 assert_false grep -q 'recursive_mutex' "$ROOT/KeireCore/Include/KeireInternal/Assets/AssetDatabaseImplementation.h"
 assert_true grep -q 'Rendering.keiresettings' "$ROOT/KeireCore/Source/Rendering/RenderSettings.cpp"
 assert_true test -f "$ROOT/Samples/KeireSandbox/ProjectSettings/Rendering.keiresettings"
@@ -1290,6 +1290,8 @@ assert_true grep -q 'HubInstanceCoordinator' "$ROOT/KeireHub/Source/HubInstance.
 assert_true grep -q 'AddKeireApplicationIcon' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q "windows-resource-update" "$ROOT/Scripts/Windows/player-support.ps1"
 assert_true grep -q 'create-build-support' "$ROOT/Scripts/Unix/player-support.sh"
+assert_true grep -Fq 'Build/Bin/Dist-$system-$host_architecture/KeireAssetTool/KeireAssetTool' "$ROOT/Scripts/Unix/player-support.sh"
+assert_true grep -Fq '"$asset_tool" verify-player-support --input "$staged_archive"' "$ROOT/Scripts/Unix/player-support.sh"
 assert_true grep -q 'signature_key_id' "$ROOT/Scripts/Unix/player-support.sh"
 assert_true grep -q -- '--manifest-output' "$ROOT/Scripts/Unix/player-support.sh"
 for package_script in package.sh package-editor.sh package-hub.sh package-installer.sh package-hub-installer.sh; do

@@ -580,11 +580,6 @@ namespace Keire::Detail
             }
             const bool breakable = glyph.Cluster < breaks.size() && (breaks[glyph.Cluster] == LINEBREAK_ALLOWBREAK ||
                                                                      breaks[glyph.Cluster] == LINEBREAK_MUSTBREAK);
-            if (breakable)
-            {
-                lastBreak = index + 1U;
-                widthAtBreak = lineWidth + glyph.Advance;
-            }
             if (lineWidth + glyph.Advance > available && index > lineFirst)
             {
                 const auto end = lastBreak && *lastBreak > lineFirst ? *lastBreak : index;
@@ -596,6 +591,12 @@ namespace Keire::Detail
                     lineWidth += result.Glyphs[replay].Advance;
             }
             lineWidth += glyph.Advance;
+            // A break after this glyph belongs to the new line when the glyph overflowed the previous one.
+            if (breakable)
+            {
+                lastBreak = index + 1U;
+                widthAtBreak = lineWidth;
+            }
         }
         if (lineFirst <= result.Glyphs.size())
             commitLine(result.Glyphs.size(), lineWidth);
