@@ -1874,7 +1874,10 @@ crosses the scripting boundary.
 
 Character Controllers and dynamic rigid bodies retain previous/current authoritative world samples after physics.
 Render updates interpolate a separate Transform presentation matrix; collision, scripts, and gameplay queries never
-read it implicitly. Child presentation composes the interpolated parent with the current local transform, keeping a
+read it implicitly. Dynamic rigid bodies interpolate the full pose. Character Controllers interpolate only world
+translation; their presentation matrix retains the current gameplay rotation and scale, so render-frame body yaw and
+child-camera pitch share the same timing. A presentation reset invalidates old samples immediately, including frames
+without a fixed tick. Child presentation composes the interpolated parent with the current local transform, keeping a
 camera target and skinned visual synchronized. Teleports explicitly reset interpolation, while body recreation, scene
 replacement, and Play initialization snap both samples. This bounded serial state belongs to `SceneRuntimeSession` and
 does not introduce a job-system or physics ownership dependency into Transform.

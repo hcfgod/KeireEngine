@@ -44,6 +44,8 @@ namespace Keire
         [[nodiscard]] std::vector<Entity> Children() const;
         void SetParent(Entity parent = {}, bool preserveWorldTransform = true);
         void SetRuntimePresentationWorldMatrix(Matrix4 value);
+        // Interpolate character translation while retaining current gameplay rotation and scale.
+        void SetRuntimePresentationWorldPosition(Vector3 value);
         void ResetPresentationInterpolation() noexcept;
         void Reset();
 
@@ -54,6 +56,7 @@ namespace Keire
         Vector3 m_LocalScale{1.0F, 1.0F, 1.0F};
         Matrix4 m_PresentationWorldMatrix;
         bool m_HasPresentationWorldMatrix = false;
+        bool m_PresentationPositionOnly = false;
         std::uint64_t m_PresentationResetRevision = 0;
     };
 

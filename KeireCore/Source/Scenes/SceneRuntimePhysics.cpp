@@ -555,6 +555,18 @@ namespace Keire
             const auto rigidBody = entity.GetComponent<RigidBodyComponent>();
             if (!character && (!rigidBody || rigidBody->Motion() != PhysicsMotionType::Dynamic))
                 continue;
+            // A teleport must remain immediate even if no fixed tick has captured it yet.
+            if (state.PresentationResetRevision != transform->PresentationResetRevision())
+                continue;
+            if (character)
+            {
+                const auto& previous = state.PreviousPresentationWorld.Elements;
+                const auto& current = state.CurrentPresentationWorld.Elements;
+                transform->SetRuntimePresentationWorldPosition({previous[12] + (current[12] - previous[12]) * amount,
+                                                                previous[13] + (current[13] - previous[13]) * amount,
+                                                                previous[14] + (current[14] - previous[14]) * amount});
+                continue;
+            }
             Vector3 previousPosition;
             Vector3 previousScale;
             Quaternion previousRotation;

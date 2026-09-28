@@ -179,6 +179,13 @@ public sealed class FirstPersonController : Behaviour
         if (input.JumpPressed)
             _motion.QueueJump(_jumpBufferTime);
         var look = FirstPersonLook.Step(_pitch, input.MouseDelta, input.LookStick, MathF.Max(0, Time.DeltaTime), LookSettings);
+        ApplyLook(look);
+    }
+
+    private void ApplyLook(FirstPersonLookStep look)
+    {
+        // Body yaw defines walking direction. Pitch belongs only to the child camera;
+        // both are applied every render frame while the engine interpolates collision-resolved position.
         _motor.Entity.Transform.Rotate(Quaternion.Euler(0, look.YawDelta));
         _pitch = look.Pitch;
         Entity.Transform.LocalRotation = Quaternion.Euler(_pitch, 0);

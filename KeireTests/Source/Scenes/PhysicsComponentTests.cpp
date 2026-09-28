@@ -179,3 +179,55 @@ TEST_CASE("character landing preserves fall distance and allows grounded walking
     physics->Close();
     scene->Close();
 }
+
+TEST_CASE("character presentation keeps current body yaw and camera pitch between physics ticks")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto player = scene->CreateEntity("Player");
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.35F, 1.8F, 0.35F, 0.04F);
+    auto camera = scene->CreateEntity("Camera", player);
+    camera.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.65F, 0.0F});
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    const auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    const auto body = runtimePlayer.GetComponent<Keire::TransformComponent>();
+    const auto head = session->RuntimeScene()->FindEntity(camera.Id()).GetComponent<Keire::TransformComponent>();
+    session->FixedUpdate(1.0F / 60.0F);
+    const auto previous = body->WorldPosition();
+    REQUIRE(motor->QueueDesiredMovement({0.0F, 0.0F, 0.2F}));
+    session->FixedUpdate(1.0F / 60.0F);
+    const auto current = body->WorldPosition();
+    REQUIRE(current.Z > previous.Z);
+    for (const float alpha : {0.0F, 0.25F, 0.5F, 1.0F})
+    {
+        session->Update(1.0F / 144.0F, alpha);
+        // Look input arrives after interpolation has been installed, without another physics tick.
+        body->SetLocalEulerAngles({0.0F, 35.0F + alpha * 20.0F, 0.0F});
+        head->SetLocalEulerAngles({-30.0F + alpha * 10.0F, 0.0F, 0.0F});
+        const auto actualBody = body->WorldMatrix();
+        const auto renderedBody = body->PresentationWorldMatrix();
+        const auto actualHead = head->WorldMatrix();
+        const auto renderedHead = head->PresentationWorldMatrix();
+        for (int index = 0; index < 12; ++index)
+        {
+            CHECK(renderedBody.Elements[index] == doctest::Approx(actualBody.Elements[index]));
+            CHECK(renderedHead.Elements[index] == doctest::Approx(actualHead.Elements[index]));
+        }
+        CHECK(body->PresentationWorldPosition().Z == doctest::Approx(previous.Z + (current.Z - previous.Z) * alpha));
+        CHECK(head->PresentationWorldPosition().Y == doctest::Approx(body->PresentationWorldPosition().Y + 0.65F));
+        CHECK(body->WorldPosition().Z == doctest::Approx(current.Z));
+    }
+    body->SetWorldPosition({10.0F, 3.0F, 5.0F});
+    body->ResetPresentationInterpolation();
+    session->Update(1.0F / 144.0F, 0.0F);
+    CHECK(body->PresentationWorldPosition().X == doctest::Approx(10.0F));
+    CHECK(head->PresentationWorldPosition().Y == doctest::Approx(3.65F));
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}

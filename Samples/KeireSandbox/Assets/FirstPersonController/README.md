@@ -75,3 +75,10 @@ or replace the old player instance with the updated prefab. Keep any values you 
 The package records the engine release it was built against; check Package Manager compatibility notices after an engine upgrade.
 Existing scenes retain their original speed and look settings. A versioned migration supplies defaults for the new movement
 fields when loading older controller data; newly instantiated prefabs serialize every tuning value explicitly.
+
+### Camera and body timing
+
+Horizontal look rotates the player body, so walking follows its heading. Vertical look rotates only the child camera,
+with configurable pitch limits. Keep the character body upright and attach camera effects beneath it. Look runs each
+render frame; the engine interpolates the collision-resolved body position without delaying its latest rotation.
+Do not add a second position interpolator to this camera. `FixedUpdate` remains responsible for movement and collisions.

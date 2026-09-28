@@ -93,7 +93,14 @@ namespace Keire
     Matrix4 TransformComponent::PresentationWorldMatrix() const
     {
         if (m_HasPresentationWorldMatrix)
-            return m_PresentationWorldMatrix;
+        {
+            if (!m_PresentationPositionOnly)
+                return m_PresentationWorldMatrix;
+            auto current = WorldMatrix();
+            for (int axis = 12; axis < 15; ++axis)
+                current.Elements[axis] = m_PresentationWorldMatrix.Elements[axis];
+            return current;
+        }
         const auto parent = Parent();
         const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
         return parentTransform ? Math::Multiply(parentTransform->PresentationWorldMatrix(), LocalMatrix())
@@ -177,6 +184,18 @@ namespace Keire
             throw std::invalid_argument("Transform presentation matrix must be finite.");
         m_PresentationWorldMatrix = value;
         m_HasPresentationWorldMatrix = true;
+        m_PresentationPositionOnly = false;
+    }
+
+    void TransformComponent::SetRuntimePresentationWorldPosition(const Vector3 value)
+    {
+        if (!Math::IsFinite(value))
+            throw std::invalid_argument("Transform presentation position must be finite.");
+        m_PresentationWorldMatrix.Elements[12] = value.X;
+        m_PresentationWorldMatrix.Elements[13] = value.Y;
+        m_PresentationWorldMatrix.Elements[14] = value.Z;
+        m_HasPresentationWorldMatrix = true;
+        m_PresentationPositionOnly = true;
     }
 
     void TransformComponent::ResetPresentationInterpolation() noexcept

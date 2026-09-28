@@ -16,6 +16,9 @@ versions.
 
 ## Unreleased
 
+- Keep FPS body yaw and child-camera pitch responsive between physics ticks while interpolating character translation;
+  prevent stale physics samples from overriding a presentation reset before the next tick.
+
 - Correct website material-authoring terminology and distinguish marketplace outages from an empty public catalog;
   clarify free asset browsing and sign-in requirements without implying paid checkout is available.
 

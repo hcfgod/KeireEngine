@@ -626,6 +626,9 @@ Submit then activates buttons and toggles through the same click path used by po
 
 Asset packages now retain compatibility records across Editor upgrades. **Window → Package Manager** shows imported
 assets, compatibility notices, and updates from the synchronized Hub library. Local imports have a review step.
+FPS look rotates the body horizontally and the child camera vertically each render frame; character presentation
+interpolates translation independently to keep camera look responsive between physics ticks.
+
 The [First Person Controller](Samples/KeireSandbox/Assets/FirstPersonController/README.md) includes a configured player
 prefab and input bindings; see [Asset Packages](Docs/AssetPackages.md) for building its Marketplace archive.
 Default mouse look follows mouse direction; enable **Invert Y** on the camera child to reverse vertical look.

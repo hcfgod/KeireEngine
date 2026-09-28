@@ -362,6 +362,28 @@ TEST_CASE("Presentation transforms interpolate roots while children preserve the
     CHECK(childTransform->PresentationWorldPosition().X == doctest::Approx(5.0F));
 }
 
+TEST_CASE("position presentation overrides retain live orientation and reject invalid input atomically")
+{
+    Keire::TransformComponent transform;
+    transform.SetLocalPosition({3.0F, 4.0F, 5.0F});
+    transform.SetRuntimePresentationWorldPosition({1.0F, 2.0F, 3.0F});
+    transform.SetLocalEulerAngles({0.0F, 45.0F, 0.0F});
+    transform.SetLocalScale({2.0F, 3.0F, 4.0F});
+    const auto actual = transform.WorldMatrix();
+    const auto presented = transform.PresentationWorldMatrix();
+    for (int index = 0; index < 12; ++index)
+        CHECK(presented.Elements[index] == doctest::Approx(actual.Elements[index]));
+    CHECK_THROWS_AS(transform.SetRuntimePresentationWorldPosition({std::numeric_limits<float>::infinity(), 0, 0}),
+                    std::invalid_argument);
+    CHECK(transform.PresentationWorldPosition().X == doctest::Approx(1.0F));
+    transform.SetRuntimePresentationWorldMatrix(Keire::Math::ComposeTransform({}, {}, {1.0F, 1.0F, 1.0F}));
+    transform.SetLocalEulerAngles({0.0F, 60.0F, 0.0F});
+    CHECK(transform.PresentationWorldMatrix().Elements[0] == doctest::Approx(1.0F));
+    transform.SetRuntimePresentationWorldPosition({1.0F, 2.0F, 3.0F});
+    transform.ResetPresentationInterpolation();
+    CHECK(transform.PresentationWorldPosition().X == doctest::Approx(3.0F));
+}
+
 TEST_CASE("Hierarchy snapshots omit component payload serialization")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
