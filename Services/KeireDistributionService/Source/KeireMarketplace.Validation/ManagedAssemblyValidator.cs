@@ -54,6 +54,9 @@ internal static partial class ManagedAssemblyValidator
 
         FileInfo managedApi = new(Path.GetFullPath(managedApiPath));
         FileSystemSafety.RejectLink(managedApi);
+        string apiDirectory = managedApi.DirectoryName!;
+        string generatorPath = Path.Combine(apiDirectory, "Keire.Managed.Generators.dll");
+        string editorApiPath = Path.Combine(apiDirectory, "Keire.Editor.Managed.dll");
         List<ValidatedAssembly> assemblies = [];
         Dictionary<string, string> assetByDefinition = new(StringComparer.Ordinal);
         foreach (PackageAsset asset in manifest.Assets)
@@ -134,12 +137,19 @@ internal static partial class ManagedAssemblyValidator
         string fingerprint = await ComputeCodeFingerprintAsync(stagingRoot, assemblies, cancellationToken);
         try
         {
+            RequireTrustedCompanion(generatorPath);
+            if (assemblies.Any(assembly => assembly.Definition.Classification == "editor"))
+            {
+                RequireTrustedCompanion(editorApiPath);
+            }
             await CompileAsync(
                 stagingRoot,
                 buildRoot,
                 assemblies,
                 Path.GetFullPath(dotnetPath),
                 managedApi.FullName,
+                editorApiPath,
+                generatorPath,
                 cancellationToken);
         }
         catch (Exception exception) when (exception is InvalidDataException or IOException or TimeoutException)
@@ -151,6 +161,16 @@ internal static partial class ManagedAssemblyValidator
             diagnostics.Count == 0 ? ValidationStatuses.Passed : ValidationStatuses.Failed,
             fingerprint,
             diagnostics);
+    }
+
+    private static void RequireTrustedCompanion(string path)
+    {
+        FileInfo file = new(path);
+        if (!file.Exists)
+        {
+            throw new InvalidDataException($"The validator toolchain is missing {file.Name}; install the matching engine managed bundle.");
+        }
+        FileSystemSafety.RejectLink(file);
     }
 
     private static void ValidateDefinition(PackageManagedAssembly declared, ManagedAssemblyDefinitionDocument definition)
@@ -203,7 +223,7 @@ internal static partial class ManagedAssemblyValidator
         if ((definition.Packages?.Count ?? 0) != 0)
         {
             throw new InvalidDataException(
-                "Marketplace managed assemblies may not restore publisher-selected NuGet packages in validator 0.4.2.");
+                "Marketplace managed assemblies may not restore publisher-selected NuGet packages under the offline policy.");
         }
 
         if (definition.AllowUnsafe == true)
@@ -356,6 +376,8 @@ internal static partial class ManagedAssemblyValidator
         IReadOnlyList<ValidatedAssembly> assemblies,
         string dotnetPath,
         string managedApiPath,
+        string editorApiPath,
+        string generatorPath,
         CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(buildRoot);
@@ -389,7 +411,7 @@ internal static partial class ManagedAssemblyValidator
             StringComparer.Ordinal);
         foreach (ValidatedAssembly assembly in assemblies)
         {
-            string project = CreateProject(stagingRoot, assembly, assemblies, projects, managedApiPath, emptyFeed);
+            string project = CreateProject(stagingRoot, assembly, assemblies, projects, managedApiPath, editorApiPath, generatorPath, emptyFeed);
             await File.WriteAllTextAsync(projects[assembly.AssetId], project, new UTF8Encoding(false), cancellationToken);
         }
 
@@ -447,6 +469,8 @@ internal static partial class ManagedAssemblyValidator
         IReadOnlyList<ValidatedAssembly> assemblies,
         IReadOnlyDictionary<string, string> projects,
         string managedApiPath,
+        string editorApiPath,
+        string generatorPath,
         string emptyFeed)
     {
         StringBuilder project = new();
@@ -463,7 +487,8 @@ internal static partial class ManagedAssemblyValidator
         project.AppendLine("    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>");
         project.AppendLine("    <ImportDirectoryBuildProps>false</ImportDirectoryBuildProps>");
         project.AppendLine("    <ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>");
-        project.AppendLine("    <RunAnalyzers>false</RunAnalyzers>");
+        // Only the engine-owned generator is included. Publisher analyzers and build files remain forbidden.
+        project.AppendLine("    <RunAnalyzers>true</RunAnalyzers>");
         project.AppendLine("    <EnableNETAnalyzers>false</EnableNETAnalyzers>");
         project.AppendLine("    <RestoreAdditionalProjectSources></RestoreAdditionalProjectSources>");
         project.AppendLine($"    <RestoreSources>{Xml(emptyFeed)}</RestoreSources>");
@@ -485,6 +510,14 @@ internal static partial class ManagedAssemblyValidator
         project.AppendLine($"      <HintPath>{Xml(managedApiPath)}</HintPath>");
         project.AppendLine("      <Private>false</Private>");
         project.AppendLine("    </Reference>");
+        if (assembly.Definition.Classification == "editor")
+        {
+            project.AppendLine("    <Reference Include=\"Keire.Editor.Managed\">");
+            project.AppendLine($"      <HintPath>{Xml(editorApiPath)}</HintPath>");
+            project.AppendLine("      <Private>false</Private>");
+            project.AppendLine("    </Reference>");
+        }
+        project.AppendLine($"    <Analyzer Include=\"{Xml(generatorPath)}\" />");
         project.AppendLine("  </ItemGroup>");
         if (assembly.References.Count != 0)
         {

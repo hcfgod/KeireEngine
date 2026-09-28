@@ -1680,6 +1680,9 @@ audit evidence. New packages are uploaded exactly once to a private immutable ob
 has no network namespace; it signs a canonical attestation binding upload, version, bucket, path, package digest,
 manifest digest, scan results, and a separately hashed bounded evidence document. Staff receive only a short-lived URL
 for that sanitized evidence, and the browser verifies its size and SHA-256 before rendering the manifest inventory.
+Managed compilation references the deployed engine bundle outside the untrusted payload: runtime API for every
+assembly, editor API only for editor-classified assemblies, and the engine-owned native-service source generator.
+No publisher build imports, analyzers, native binaries, or NuGet restore sources enter that compiler environment.
 
 Administrator approval stops at `approved_pending_signature` and atomically creates one durable publication job. A
 separate least-privileged online signer authenticates with a dedicated scoped queue secret, receives only approved

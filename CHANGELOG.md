@@ -16,6 +16,9 @@ versions.
 
 ## Unreleased
 
+- Align Marketplace managed compilation with the engine/editor API bundle and trusted native-service generator;
+  preserve runtime/editor isolation and diagnose incomplete validator deployments.
+
 - UI Builder source completion now opens beside the caret with contextual fuzzy ranking, keyboard navigation,
   documentation, and Ctrl+Enter apply instead of resizing a panel below the editor. Markup completion prioritizes
   relevant attributes and values, while style completion understands selectors, properties, values, and variables.

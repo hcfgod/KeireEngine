@@ -31,6 +31,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+foreach ($companion in @("Keire.Editor.Managed.dll", "Keire.Managed.Generators.dll")) {
+    $companionPath = Join-Path (Split-Path -Parent $ManagedApi) $companion
+    if (-not (Test-Path -LiteralPath $companionPath -PathType Leaf)) {
+        throw "The matching engine managed bundle is incomplete: $companionPath"
+    }
+}
+
 Add-Type -AssemblyName System.Security
 
 foreach ($path in @($Validator, $AssetTool, $MalwareScanner, $Dotnet, $ManagedApi, $ProtectedAttestationKey)) {

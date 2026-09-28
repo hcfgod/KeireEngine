@@ -165,7 +165,12 @@ leased object. It verifies the object's exact size and digest while downloading 
 private directory. It never invokes package code. The offline worker uses the Core
 parser through `KéireAssetTool`, rejects links, executable modes, native signatures, scripts, publisher MSBuild files,
 malware, and secret indicators, then compiles only explicitly declared C# from validator-generated projects. Those
-projects pin the SDK, clear NuGet sources, disable analyzers and source generators, and ignore publisher build imports.
+projects pin the SDK, clear NuGet sources, and ignore publisher build imports. Deploy the current engine's
+`KéireAssetTool` together with its managed bundle: `Keire.Managed.dll`, `Keire.Editor.Managed.dll`, and
+`Keire.Managed.Generators.dll`. The worker references the editor API only for editor assemblies and runs only the
+engine-owned generator; publisher analyzers and generators remain forbidden. Update this bundle with engine releases,
+then rerun the validator compiler tests before switching the production worker. A missing companion fails closed with
+a toolchain diagnostic rather than silently omitting engine features.
 The worker must run behind OS-enforced outbound denial; its environment marker is an additional launch assertion, not
 a substitute for that sandbox.
 

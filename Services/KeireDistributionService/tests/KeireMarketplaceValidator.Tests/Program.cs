@@ -20,6 +20,7 @@ internal static class Program
             ("native payload policy fails closed", NativePayloadPolicyFailsClosedAsync),
             ("managed NuGet references are rejected offline", ManagedPackagesAreRejectedAsync),
             ("managed sources compile from generated offline projects", ManagedSourcesCompileOfflineAsync),
+            ("editor API and engine generator match the editor compiler", () => ManagedSourcesCompileOfflineAsync(true)),
             ("malware rejection stops before extraction", MalwareRejectionStopsExtractionAsync),
             ("validation failures remove private staging", ValidationFailureRemovesStagingAsync),
             ("broker keeps its scoped secret out of Supabase API auth", BrokerUsesScopedSecretHeaderAsync),
@@ -123,23 +124,40 @@ internal static class Program
         Assert.Contains("MANAGED_DEFINITION_INVALID", result.Diagnostics, "The NuGet policy failure was not diagnosed.");
     }
 
-    private static async Task ManagedSourcesCompileOfflineAsync()
+    private static Task ManagedSourcesCompileOfflineAsync() => ManagedSourcesCompileOfflineAsync(false);
+
+    private static async Task ManagedSourcesCompileOfflineAsync(bool editor)
     {
         using TemporaryDirectory fixture = new();
+        string stagingRoot = Path.Combine(fixture.Path, "payload");
         string definitionPath = "Assets/Scripts/Game.keireasm";
         string sourcePath = "Assets/Scripts/Runtime/Game.cs";
-        Directory.CreateDirectory(Path.Combine(fixture.Path, "Assets", "Scripts", "Runtime"));
+        Directory.CreateDirectory(Path.Combine(stagingRoot, "Assets", "Scripts", "Runtime"));
         await File.WriteAllTextAsync(
-            Path.Combine(fixture.Path, sourcePath.Replace('/', Path.DirectorySeparatorChar)),
-            "namespace Game; public sealed class GameRoot {}\n");
-        await File.WriteAllTextAsync(
-            Path.Combine(fixture.Path, definitionPath.Replace('/', Path.DirectorySeparatorChar)),
+            Path.Combine(stagingRoot, sourcePath.Replace('/', Path.DirectorySeparatorChar)),
             """
+            using Keire;
+            namespace Game;
+            [NativeServiceContract("73616e64-626f-4078-8000-00000000f701")]
+            public interface IProbe
+            {
+                [NativeMethod("73616e64-626f-4078-8000-00000000f702")]
+                int Add(int left, int right);
+            }
+            public static class GameRoot
+            {
+                public static Guid ServiceId => IProbeNative.ServiceId;
+                public static Type[] CurrentRuntimeApi => [typeof(InputActionAsset), typeof(CharacterController), typeof(InputActionContext)];
+            }
+            """ + (editor ? "\npublic sealed class ToolsWindow : Keire.Editor.EditorWindow {}\n" : ""));
+        await File.WriteAllTextAsync(
+            Path.Combine(stagingRoot, definitionPath.Replace('/', Path.DirectorySeparatorChar)),
+            $$"""
             {
               "schemaVersion": 2,
               "name": "Gameplay",
               "rootNamespace": "Game",
-              "classification": "runtime",
+              "classification": "{{(editor ? "editor" : "runtime")}}",
               "sourceRoots": ["Assets/Scripts/Runtime"],
               "references": [],
               "packages": [],
@@ -160,7 +178,7 @@ internal static class Program
         {
             Name = "Gameplay",
             Definition = definitionPath,
-            Scope = "runtime",
+            Scope = editor ? "editor" : "runtime",
         });
         string repositoryRoot = FindRepositoryRoot();
         string dotnet = Path.Combine(
@@ -171,7 +189,7 @@ internal static class Program
             OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
         string managedApi = Path.Combine(repositoryRoot, "Build", "Managed", "Keire.Managed.dll");
         ManagedValidationResult result = await ManagedAssemblyValidator.ValidateAsync(
-            fixture.Path,
+            stagingRoot,
             Path.Combine(fixture.Path, "build"),
             manifest,
             dotnet,
@@ -184,12 +202,35 @@ internal static class Program
                  {
                      "<ImportDirectoryBuildProps>false</ImportDirectoryBuildProps>",
                      "<ImportDirectoryBuildTargets>false</ImportDirectoryBuildTargets>",
-                     "<RunAnalyzers>false</RunAnalyzers>",
+                     "<RunAnalyzers>true</RunAnalyzers>",
+                     "Keire.Managed.Generators.dll",
                      "<RestoreSources>",
                  })
         {
             Assert.True(generatedProject.Contains(contract, StringComparison.Ordinal),
                 $"The generated managed project is missing policy contract '{contract}'.");
+        }
+        Assert.Equal(editor, generatedProject.Contains("<Reference Include=\"Keire.Editor.Managed\">", StringComparison.Ordinal),
+            "The editor reference must be restricted to editor assemblies.");
+        string incompleteBundle = Path.Combine(fixture.Path, "incomplete-api");
+        Directory.CreateDirectory(incompleteBundle);
+        string incompleteApi = Path.Combine(incompleteBundle, "Keire.Managed.dll");
+        File.Copy(managedApi, incompleteApi);
+        ManagedValidationResult incomplete = await ManagedAssemblyValidator.ValidateAsync(
+            stagingRoot, Path.Combine(fixture.Path, "incomplete-build"), manifest, dotnet, incompleteApi, default);
+        Assert.Equal(ValidationStatuses.Failed, incomplete.Status, "An incomplete engine API bundle was accepted.");
+        Assert.True(incomplete.Diagnostics.Any(diagnostic => diagnostic.Message.Contains("Keire.Managed.Generators.dll", StringComparison.Ordinal)),
+            "The missing engine generator was not identified.");
+        if (editor)
+        {
+            string definitionFile = Path.Combine(stagingRoot, definitionPath.Replace('/', Path.DirectorySeparatorChar));
+            string definition = await File.ReadAllTextAsync(definitionFile);
+            await File.WriteAllTextAsync(definitionFile, definition.Replace("\"classification\": \"editor\"", "\"classification\": \"runtime\""));
+            manifest.ManagedAssemblies[0] = new PackageManagedAssembly { Name = "Gameplay", Definition = definitionPath, Scope = "runtime" };
+            ManagedValidationResult rejected = await ManagedAssemblyValidator.ValidateAsync(
+                stagingRoot, Path.Combine(fixture.Path, "runtime-build"), manifest, dotnet, managedApi, default);
+            Assert.Equal(ValidationStatuses.Failed, rejected.Status, "Runtime assemblies gained access to editor APIs.");
+            Assert.Contains("MANAGED_COMPILATION_FAILED", rejected.Diagnostics, "Runtime/editor rejection did not reach the compiler.");
         }
     }
 

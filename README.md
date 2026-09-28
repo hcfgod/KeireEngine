@@ -444,7 +444,8 @@ Manager** surface. **Open in Editor** links use the registered `keirehub` protoc
 and download bridge. The Editor receives only an atomic token-free catalog/library/cache snapshot with the public
 signed publication proof, independently verifies that proof against the packaged rotating trust bundle, and rechecks
 the exact archive bytes before changing project files. Publishers upload each immutable archive once. A network-isolated
-validator produces bounded review evidence and signs its exact package/evidence identity; administrators inspect that
+validator uses the matching engine asset tool, runtime/editor APIs, and engine-owned source generator. It produces
+bounded review evidence and signs its exact package/evidence identity; administrators inspect that
 sanitized evidence without needing the publisher's archive. Approval atomically queues a least-privileged signer that
 receives metadata only, verifies the validator attestation, and signs the existing object for publication. Browser OAuth
 sessions rotate through the public-client
