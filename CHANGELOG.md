@@ -1,5 +1,8 @@
 # Changelog
 
+- CPU dual-quaternion skinning converts bone matrices once per pose evaluation instead of once per vertex influence,
+  reducing repeated work when rendering animated characters and IK previews.
+
 - Animator Inspector keeps runtime warnings in a fixed-height status area so transient grounding diagnostics no longer
   move controls; editor clip and controller previews have independent 0.1×–3× playback speed and play at 1× when the
   selected Animator Speed is zero.

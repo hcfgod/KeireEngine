@@ -147,7 +147,7 @@ namespace Keire
         }
 
         void SkinDualQuaternion(const MeshVertex& source, const SkinVertexInfluence8& influence,
-                                const std::span<const Matrix4> palette, MeshVertex& destination)
+                                const std::span<const DualQuaternion> palette, MeshVertex& destination)
         {
             Quaternion blendedReal{0.0F, 0.0F, 0.0F, 0.0F};
             Quaternion blendedDual{0.0F, 0.0F, 0.0F, 0.0F};
@@ -158,7 +158,7 @@ namespace Keire
             {
                 if (!ValidInfluence(influence, index, palette.size()))
                     continue;
-                auto dualQuaternion = ToDualQuaternion(palette[influence.Bones[index]]);
+                const auto& dualQuaternion = palette[influence.Bones[index]];
                 if (!hasReference)
                 {
                     reference = dualQuaternion.Real;
@@ -327,12 +327,21 @@ namespace Keire
         if (palette.empty() && !source.empty())
             throw std::invalid_argument("Skinning requires a non-empty matrix palette.");
 
+        // Bone transforms are shared by every influenced vertex in this skinning invocation.
+        std::vector<DualQuaternion> dualQuaternionPalette;
+        if (method == SkinningMethod::DualQuaternion && !source.empty())
+        {
+            dualQuaternionPalette.reserve(palette.size());
+            for (const auto& matrix : palette)
+                dualQuaternionPalette.push_back(ToDualQuaternion(matrix));
+        }
+
         for (std::size_t index = 0; index < source.size(); ++index)
         {
             if (influences[index].Count > influences[index].Bones.size())
                 throw std::invalid_argument("A skin influence count exceeds the supported maximum.");
             if (method == SkinningMethod::DualQuaternion)
-                SkinDualQuaternion(source[index], influences[index], palette, destination[index]);
+                SkinDualQuaternion(source[index], influences[index], dualQuaternionPalette, destination[index]);
             else
                 SkinLinearBlend(source[index], influences[index], palette, destination[index]);
         }

@@ -354,6 +354,8 @@ Linear-blend skinning uses an SDL_GPU compute skin cache where compute is suppor
 uploaded once per asset revision, and per-entity deformation buffers are retained in a frames-in-flight ring; animation
 playback uploads only the current bone palette in steady state. Dual-quaternion skinning and unsupported compute devices
 use the deterministic CPU path. The deformed stream is reused by scene, depth, and shadow passes during the frame.
+The CPU dual-quaternion path converts each bone matrix once per skinning call, sharing the converted palette across
+vertices while rebuilding it for each pose.
 Import settings determine whether four or eight influences are retained; weights are sorted,
 bounded, and normalized deterministically.
 

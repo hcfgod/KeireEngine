@@ -50,6 +50,48 @@ TEST_CASE("CPU skinning validates cardinality and preserves vertices without val
         std::invalid_argument);
 }
 
+TEST_CASE("Dual quaternion skinning shares bones across vertices and refreshes each pose")
+{
+    const Keire::MeshVertex vertex{{1.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {}, {}, {1.0F, 0.0F, 0.0F, -1.0F}};
+    const std::vector<Keire::MeshVertex> source(32, vertex);
+    std::vector<Keire::MeshVertex> destination(source.size());
+    std::array<Keire::Matrix4, 8> palette;
+    Keire::SkinVertexInfluence8 influence;
+    influence.Count = 8;
+    for (std::size_t index = 0; index < palette.size(); ++index)
+    {
+        palette[index] = Keire::Math::ComposeTransform({static_cast<float>(index), 2.0F, -1.0F},
+                                                       {0.0F, 0.0F, 0.70710678F, 0.70710678F}, {1.0F, 1.0F, 1.0F});
+        influence.Bones[index] = static_cast<std::uint16_t>(index);
+        influence.Weights[index] = 0.125F;
+    }
+    std::vector<Keire::SkinVertexInfluence8> influences(source.size(), influence);
+    Keire::SkinMeshCpu(source, influences, palette, Keire::SkinningMethod::DualQuaternion, destination);
+    for (const auto& result : destination)
+    {
+        CHECK(result.Position.X == doctest::Approx(3.5F));
+        CHECK(result.Position.Y == doctest::Approx(3.0F));
+        CHECK(result.Position.Z == doctest::Approx(-1.0F));
+        CHECK(result.Normal.X == doctest::Approx(-1.0F));
+        CHECK(result.Tangent.Y == doctest::Approx(1.0F));
+        CHECK(result.Tangent.W == -1.0F);
+    }
+    palette.fill(Keire::Math::ComposeTransform({10.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}));
+    influences.front().Weights.fill(0.0F);
+    influences.front().Weights[0] = std::numeric_limits<float>::quiet_NaN();
+    influences.front().Weights[1] = -1.0F;
+    influences.front().Weights[2] = 1.0F;
+    influences.front().Bones[2] = 8;
+    Keire::SkinMeshCpu(source, influences, palette, Keire::SkinningMethod::DualQuaternion, destination);
+    CHECK(destination.front().Position == vertex.Position);
+    CHECK(destination.back().Position.X == doctest::Approx(11.0F));
+    CHECK(destination.back().Normal == vertex.Normal);
+    CHECK(destination.back().Tangent == vertex.Tangent);
+    influences.back().Count = 9;
+    CHECK_THROWS_AS(Keire::SkinMeshCpu(source, influences, palette, Keire::SkinningMethod::DualQuaternion, destination),
+                    std::invalid_argument);
+}
+
 TEST_CASE("Bind-space influence bounds produce conservative linear-blend current-pose bounds")
 {
     const std::array vertices{Keire::MeshVertex{{0.0F, 0.0F, 0.0F}}, Keire::MeshVertex{{2.0F, 1.0F, 0.0F}},
