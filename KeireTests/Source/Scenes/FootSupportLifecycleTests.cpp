@@ -255,3 +255,27 @@ TEST_CASE("Planted feet follow static support transform rebuilds without losing 
         CHECK(actual.Z == doctest::Approx(expected.Z).epsilon(0.005));
     }
 }
+
+TEST_CASE("Animator grounding diagnostics clear after repair or disabling the failed pass")
+{
+    for (const bool disable : {false, true})
+    {
+        CAPTURE(disable);
+        SupportFixture fixture;
+        auto settings = fixture.Animator->FootGrounding();
+        settings.LeftFoot = "UnavailableFoot";
+        fixture.Animator->SetFootGrounding(settings);
+        fixture.Tick();
+        CHECK(fixture.Animator->RuntimeDiagnostic().find("unavailable skeleton bones") != std::string::npos);
+        fixture.Tick();
+        CHECK_FALSE(fixture.Animator->RuntimeDiagnostic().empty());
+        if (disable)
+            settings.Enabled = false;
+        else
+            settings.LeftFoot = "LeftFoot";
+        fixture.Animator->SetFootGrounding(settings);
+        fixture.Tick();
+        CHECK(fixture.Animator->RuntimeDiagnostic().empty());
+        CHECK(fixture.FootY() == doctest::Approx(disable ? 0.0F : .05F).epsilon(.005));
+    }
+}

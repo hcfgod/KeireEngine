@@ -431,3 +431,6 @@ Two-bone and FABRIK solves are transactional: a rejected request or invalid pose
 Root-motion extraction retains the skeleton root's bind rotation and translation in the rendered pose.
 This preserves imported axis corrections and model origins; initial movement is measured relative to
 the bind translation, and subsequent movement uses consecutive sampled root positions.
+
+Animator runtime diagnostics refresh on each evaluation. Correcting a missing bone or disabling the
+failing grounding pass clears its warning on the next update; unresolved failures remain visible.

@@ -94,6 +94,8 @@
 
 ### Regression harness portability and source organization
 
+- Animator warnings clear after the failing IK/grounding setup is repaired or disabled, while active failures remain visible.
+
 - Root-motion extraction preserves imported root bind orientation and origin, preventing sideways characters and spurious initial movement from model offsets.
 
 - Split UI widgets, stylesheet parsing, editor stylesheet controls, and asset streaming tests to meet source-file budgets.

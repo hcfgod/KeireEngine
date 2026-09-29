@@ -508,6 +508,8 @@ namespace Keire
             auto& state = Animators[entity.Id()];
             if (!state)
                 state = std::make_unique<AnimationRuntimeState>();
+            // Diagnostics describe this evaluation, so repaired settings must not retain an old failure.
+            animator->SetRuntimeDiagnostic({});
             if (animator->PoseSource() == AnimatorPoseSource::ProceduralHumanoid)
             {
                 if (entity.ActiveInHierarchy() && animator->Enabled())

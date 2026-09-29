@@ -702,3 +702,5 @@ to test normal graph playback.
 
 Imported animated models retain their root bind orientation and origin during root-motion playback,
 including models with an authored axis correction. No compensating entity rotation is required.
+
+Animator warnings reflect the current evaluated setup and clear when the reported problem is resolved.
