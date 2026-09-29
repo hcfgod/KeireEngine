@@ -225,6 +225,19 @@ TEST_CASE("GPU skinning output ownership includes persistent palette uploads")
     CHECK_FALSE(output.Empty());
 }
 
+TEST_CASE("CPU skinning staging storage participates in output ownership")
+{
+    Keire::RenderBackend::GpuSkinOutputResources output;
+    CHECK(output.Empty());
+    output.CpuTransfer = reinterpret_cast<SDL_GPUTransferBuffer*>(std::uintptr_t{1});
+    CHECK_FALSE(output.Empty());
+    output.CpuTransfer = nullptr;
+    output.CpuTransferBytes = 288;
+    CHECK_FALSE(output.Empty());
+    output.CpuTransferBytes = 0;
+    CHECK(output.Empty());
+}
+
 TEST_CASE("GPU skinning only reuses a submitted previous pose from another output slot")
 {
     using Keire::RenderBackend::CanReusePreviousSkinOutput;

@@ -1,5 +1,8 @@
 # Changelog
 
+- CPU skinning reuses per-character vertex and upload buffers after warm-up, reducing allocation overhead in
+  dual-quaternion animation and IK previews while retaining separate current/previous poses for motion vectors.
+
 - Release and Profile builds explicitly enable speed optimization; MSVC now receives `/O2` instead of the
   preference-only `/Ot`, avoiding unoptimized animation and rendering work in Release editor builds.
 

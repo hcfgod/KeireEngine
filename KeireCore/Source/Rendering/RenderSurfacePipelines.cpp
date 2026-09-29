@@ -403,6 +403,8 @@ namespace Keire::RenderBackend
                             SDL_ReleaseGPUBuffer(Device, palette.Buffer);
                         palette = {};
                     };
+                    if (output.CpuTransfer)
+                        SDL_ReleaseGPUTransferBuffer(Device, output.CpuTransfer);
                     releasePalette(output.PreviousPalette);
                     releasePalette(output.Palette);
                     if (output.PreviousBuiltinVertices)

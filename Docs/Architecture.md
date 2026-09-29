@@ -391,6 +391,11 @@ surfaces keep those single-sample data passes, then shade final geometry through
 subpass and resolve before Irradyn. Unsupported hardware or missing resources retains Forward+ without changing
 project intent.
 
+CPU skinning owns retained current/previous asset and built-in vertex streams plus one staging buffer per
+skin instance, surface, and submission-ring slot. Uploads cycle bound SDL storage to protect pending consumers.
+Slot creation rolls back partial allocations; skin dependency replacement and instance eviction use the existing
+fence-retirement path, including staging storage. CPU outputs never enter the frame-transient buffer list.
+
 Immutable scene capture owns temporal transform and skin-palette history rather than mutating ECS presentation state.
 History is keyed
 by scene, entity, surface ID, and surface epoch, advances only for accepted consecutive frame IDs, and is retired after

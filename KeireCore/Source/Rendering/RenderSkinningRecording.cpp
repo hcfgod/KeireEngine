@@ -423,28 +423,19 @@ namespace Keire::RenderBackend
                 };
                 if (!validDeformation(deformed) || !validDeformation(previousDeformed))
                     continue;
-                const auto makeBuiltinVertices = [](const std::span<const MeshVertex> vertices)
-                {
-                    std::vector<RenderVertex> result;
-                    result.reserve(vertices.size());
-                    for (const auto& vertex : vertices)
-                    {
-                        result.push_back({vertex.Position,
-                                          {vertex.VertexColor.Red, vertex.VertexColor.Green, vertex.VertexColor.Blue},
-                                          vertex.Normal});
-                    }
-                    return result;
-                };
-                const auto builtinVertices = makeBuiltinVertices(deformed);
-                const auto previousBuiltinVertices = makeBuiltinVertices(previousDeformed);
-                item.SkinnedAssetVertices = UploadMeshVertexBuffer(commands, deformed);
-                FrameTransientBuffers.push_back(item.SkinnedAssetVertices);
-                item.SkinnedBuiltinVertices = UploadVertexBuffer(commands, builtinVertices);
-                FrameTransientBuffers.push_back(item.SkinnedBuiltinVertices);
-                item.PreviousSkinnedAssetVertices = UploadMeshVertexBuffer(commands, previousDeformed);
-                FrameTransientBuffers.push_back(item.PreviousSkinnedAssetVertices);
-                item.PreviousSkinnedBuiltinVertices = UploadVertexBuffer(commands, previousBuiltinVertices);
-                FrameTransientBuffers.push_back(item.PreviousSkinnedBuiltinVertices);
+                const GpuSkinInstanceKey instanceKey{item.Scene ? item.Scene : packet.Scene, item.Entity, surface};
+                auto [instanceIterator, instanceInserted] = cache.Resources.Instances.try_emplace(instanceKey);
+                auto& instance = instanceIterator->second;
+                if (instanceInserted)
+                    instance.Outputs.resize(Specification.MaximumFramesInFlight);
+                instance.LastPreparedFrame = Statistics.Frame;
+                const auto slot = SkinningOutputSlot(ActiveGpuSubmissionSerial, Specification.MaximumFramesInFlight);
+                auto& output = instance.Outputs[slot];
+                UploadCpuSkinning(commands, output, deformed, previousDeformed);
+                item.SkinnedAssetVertices = output.AssetVertices;
+                item.SkinnedBuiltinVertices = output.BuiltinVertices;
+                item.PreviousSkinnedAssetVertices = output.PreviousAssetVertices;
+                item.PreviousSkinnedBuiltinVertices = output.PreviousBuiltinVertices;
                 commitCurrentPoseBounds();
                 continue;
             }

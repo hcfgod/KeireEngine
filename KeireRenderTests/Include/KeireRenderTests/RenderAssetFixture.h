@@ -55,7 +55,8 @@ namespace KeireRenderTests::Detail
                                     const bool includeProceduralVertexOffset = false,
                                     const bool parameterDrivenVertexOffset = false,
                                     const bool includeTransparentShaderGraph = false,
-                                    const bool includeOcclusionStressMesh = false)
+                                    const bool includeOcclusionStressMesh = false,
+                                    const Keire::SkinningMethod skinning = Keire::SkinningMethod::LinearBlend)
             : Root(std::filesystem::temp_directory_path() /
                    ("Keire-RenderAssetTests-" +
                     std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())))
@@ -97,9 +98,8 @@ namespace KeireRenderTests::Detail
                 influence.Weights[0] = 1.0F;
                 influence.Count = 1;
             }
-            Skin = Database->CreateAsset(
-                "Triangle.keireskin", skinImporter,
-                Keire::SkinnedMeshAsset::Encode(Mesh, Skeleton, skinInfluences, Keire::SkinningMethod::LinearBlend));
+            Skin = Database->CreateAsset("Triangle.keireskin", skinImporter,
+                                         Keire::SkinnedMeshAsset::Encode(Mesh, Skeleton, skinInfluences, skinning));
             const auto builtInCube = Keire::MeshAsset::Cube();
             CubeMesh = Database->CreateAsset("Cube.keiremesh", meshImporter,
                                              Keire::MeshAsset::Encode(builtInCube->Vertices(), builtInCube->Indices()));

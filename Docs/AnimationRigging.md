@@ -355,7 +355,9 @@ uploaded once per asset revision, and per-entity deformation buffers are retaine
 playback uploads only the current bone palette in steady state. Dual-quaternion skinning and unsupported compute devices
 use the deterministic CPU path. The deformed stream is reused by scene, depth, and shadow passes during the frame.
 The CPU dual-quaternion path converts each bone matrix once per skinning call, sharing the converted palette across
-vertices while rebuilding it for each pose.
+vertices while rebuilding it for each pose. CPU outputs and a combined upload buffer are retained per character,
+viewport, and frame-in-flight slot. Current and previous poses remain separate for motion vectors; mesh or skin
+reimport retires the old buffers through the renderer fence queue.
 Import settings determine whether four or eight influences are retained; weights are sorted,
 bounded, and normalized deterministically.
 

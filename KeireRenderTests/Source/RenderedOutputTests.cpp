@@ -2147,7 +2147,10 @@ TEST_CASE("procedural vertex displacement graphs create a graphics pipeline with
 
 TEST_CASE("skinned asset vertices follow bounded palette deformation")
 {
-    RenderAssetFixture assets;
+    auto skinning = Keire::SkinningMethod::LinearBlend;
+    SUBCASE("linear blend compute outputs") {}
+    SUBCASE("dual quaternion CPU outputs") { skinning = Keire::SkinningMethod::DualQuaternion; }
+    RenderAssetFixture assets(false, false, false, false, false, skinning);
     const auto results = std::make_shared<CaptureResults>();
     auto specification = RenderTestSpecification();
     specification.Assets.Mode = Keire::AssetMode::Development;

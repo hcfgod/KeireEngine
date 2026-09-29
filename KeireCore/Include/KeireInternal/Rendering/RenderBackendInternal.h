@@ -388,7 +388,6 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* Buffer = nullptr;
         SDL_GPUTransferBuffer* Transfer = nullptr;
         std::uint32_t Bytes = 0;
-
         [[nodiscard]] bool Empty() const noexcept { return !Buffer && !Transfer && Bytes == 0; }
     };
 
@@ -398,14 +397,15 @@ namespace Keire::RenderBackend
         SDL_GPUBuffer* BuiltinVertices = nullptr;
         SDL_GPUBuffer* PreviousAssetVertices = nullptr;
         SDL_GPUBuffer* PreviousBuiltinVertices = nullptr;
+        SDL_GPUTransferBuffer* CpuTransfer = nullptr;
+        std::uint32_t CpuTransferBytes = 0;
         GpuSkinPaletteResources Palette;
         GpuSkinPaletteResources PreviousPalette;
         std::uint64_t PoseGeneration = 0;
-
         [[nodiscard]] bool Empty() const noexcept
         {
             return !AssetVertices && !BuiltinVertices && !PreviousAssetVertices && !PreviousBuiltinVertices &&
-                   Palette.Empty() && PreviousPalette.Empty();
+                   !CpuTransfer && CpuTransferBytes == 0 && Palette.Empty() && PreviousPalette.Empty();
         }
     };
 
@@ -426,7 +426,6 @@ namespace Keire::RenderBackend
         return hasPublishedOutput && publishedOutputSlot != currentOutputSlot && publishedPoseGeneration != 0 &&
                publishedPoseGeneration == requestedPoseGeneration;
     }
-
     struct PendingGpuSkinOutputPublication final
     {
         GpuSkinInstanceResources* Instance = nullptr;
@@ -442,7 +441,6 @@ namespace Keire::RenderBackend
         std::uint32_t MaximumBoneIndex = 0;
         std::uint32_t MaximumInfluences = 0;
         bool Valid = false;
-
         [[nodiscard]] bool Empty() const noexcept
         {
             if (Influences)
@@ -1165,6 +1163,8 @@ namespace Keire::RenderBackend
         void CompileGpuVfxPipelines();
         void ReleaseGpuVfxPipelines() noexcept;
         void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet, std::uint64_t surface);
+        void UploadCpuSkinning(SDL_GPUCommandBuffer* commands, GpuSkinOutputResources& output,
+                               std::span<const MeshVertex> current, std::span<const MeshVertex> previous);
         [[nodiscard]] bool EnsureGpuVfxPipelines(bool requireStripPipelines);
         void PrepareGpuVfx(SDL_GPUCommandBuffer* commands, const VfxRenderSnapshot& snapshot,
                            const RenderSurfaceState& surface);
