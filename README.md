@@ -6,7 +6,8 @@
 **Build worlds. Keep control.**
 
 Baked animation clips open an internal preview: double-click a `.keireanim`, select an animated scene object, and
-play or scrub without changing its controller. See [animation workflows](Docs/AnimationRigging.md).
+play or scrub without changing its controller. Preview Speed defaults to 1× independently of the object's Animator
+Speed. See [animation workflows](Docs/AnimationRigging.md).
 
 UI button and label text respects authored padding in runtime draw commands, including scaled and rotated elements.
 Use padding on controls for text clearance and on their containers for spacing around child controls.

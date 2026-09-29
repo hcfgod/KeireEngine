@@ -14,6 +14,7 @@
 #include <doctest/doctest.h>
 
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -122,14 +123,27 @@ TEST_CASE("Animator preview keeps authored skeleton settings and clears rejected
     preview.Synchronize(document, controller, assets);
     CHECK(preview.Diagnostic == "Assign this controller to the selected Animator before previewing it.");
     CHECK(animator->SkinPalette().empty());
-    const auto clipPreviewSnapshot = Keire::SceneAsset::Encode(scene->Snapshot());
     controller.ReplaceDefinition(graph, true);
     KeireEditor::AnimatorControllerDocument clipPreview;
     clipPreview.Open(clipId, graph, {}, {});
+    animator->SetSpeed(0.0F);
+    const auto clipPreviewSnapshot = Keire::SceneAsset::Encode(scene->Snapshot());
+    preview.PlaybackSpeed = 1.0F;
     preview.Restart();
+    preview.LastTick -= std::chrono::milliseconds(100);
     preview.Tick(true, document, clipPreview, assets, true);
     CHECK(preview.Diagnostic.empty());
     CHECK_FALSE(animator->SkinPalette().empty());
+    const float normalPreviewTime = preview.NormalizedTime;
+    CHECK(normalPreviewTime > 0.05F);
+    CHECK(animator->Speed() == 0.0F);
+    CHECK(Keire::SceneAsset::Encode(scene->Snapshot()) == clipPreviewSnapshot);
+    preview.PlaybackSpeed = 2.0F;
+    preview.Restart();
+    preview.LastTick -= std::chrono::milliseconds(100);
+    preview.Tick(true, document, clipPreview, assets, true);
+    CHECK(preview.NormalizedTime > normalPreviewTime + 0.05F);
+    CHECK(Keire::SceneAsset::Encode(scene->Snapshot()) == clipPreviewSnapshot);
     preview.Seek(0.5F);
     preview.Tick(true, document, clipPreview, assets, true);
     CHECK(Keire::SceneAsset::Encode(scene->Snapshot()) == clipPreviewSnapshot);
@@ -374,7 +388,7 @@ namespace
             for (const float width : std::array{150.0F, 220.0F, 360.0F})
             {
                 const auto label = "Inspector " + std::to_string(width);
-                ui.SetNextWindowSize({width, 350.0F}, false);
+                ui.SetNextWindowSize({width, 700.0F}, false);
                 if (auto window = ui.BeginWindow(label); window)
                 {
                     std::string name = "Long scene Caf\xc3\xa9.keirescene";
@@ -390,17 +404,26 @@ namespace
                     for (const auto source :
                          {Keire::AnimatorPoseSource::AnimationGraph, Keire::AnimatorPoseSource::ProceduralHumanoid})
                     {
+                        auto sourceId =
+                            ui.PushId(source == Keire::AnimatorPoseSource::AnimationGraph ? "graph" : "procedural");
                         animator->SetPoseSource(source);
                         animator->SetRuntimeDiagnostic("Left arm IK could not resolve a contiguous upper-arm, "
                                                        "lower-arm, and hand chain.");
                         const auto before = ui.CursorPosition();
-                        KeireEditor::DrawAnimatorInspectorDiagnostic(ui, *animator, {1.0F, 0.5F, 0.0F, 1.0F});
-                        CHECK(ui.CursorPosition().Y > before.Y);
+                        {
+                            auto id = ui.PushId("warning");
+                            KeireEditor::DrawAnimatorInspectorDiagnostic(ui, *animator, {1.0F, 0.5F, 0.0F, 1.0F});
+                        }
+                        const float warningHeight = ui.CursorPosition().Y - before.Y;
+                        CHECK(warningHeight > 0.0F);
                         CHECK(ui.LastItemRect().Maximum.X <= bounds.Maximum.X);
                         animator->SetRuntimeDiagnostic({});
                         const auto cleared = ui.CursorPosition();
-                        KeireEditor::DrawAnimatorInspectorDiagnostic(ui, *animator, {1.0F, 0.5F, 0.0F, 1.0F});
-                        CHECK(ui.CursorPosition().Y == cleared.Y);
+                        {
+                            auto id = ui.PushId("clear");
+                            KeireEditor::DrawAnimatorInspectorDiagnostic(ui, *animator, {1.0F, 0.5F, 0.0F, 1.0F});
+                        }
+                        CHECK(ui.CursorPosition().Y - cleared.Y == doctest::Approx(warningHeight));
                     }
                     m_Drawn = true;
                 }

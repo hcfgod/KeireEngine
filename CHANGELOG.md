@@ -1,5 +1,9 @@
 # Changelog
 
+- Animator Inspector keeps runtime warnings in a fixed-height status area so transient grounding diagnostics no longer
+  move controls; editor clip and controller previews have independent 0.1×–3× playback speed and play at 1× when the
+  selected Animator Speed is zero.
+
 - Existing foot locks now respect changed grounding masks, collider layers and masks, and project collision-matrix exclusions; eligible restored supports can be planted again.
 
 - Foot planting releases scene supports when their collider is disabled, removed, made a trigger, or deactivated, and reacquires restored surfaces.

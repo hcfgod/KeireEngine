@@ -1006,6 +1006,9 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     const auto collider = registration->Type == Keire::ColliderComponent::StaticType()
                                               ? Keire::DynamicRefCast<Keire::ColliderComponent>(component)
                                               : Keire::Ref<Keire::ColliderComponent>{};
+                    const auto animator = registration->Type == Keire::AnimatorComponent::StaticType()
+                                              ? Keire::DynamicRefCast<Keire::AnimatorComponent>(component)
+                                              : Keire::Ref<Keire::AnimatorComponent>{};
                     const auto explicitMixer = audioSource  ? audioSource->Mixer()
                                                : reverbZone ? reverbZone->Mixer()
                                                             : Keire::AssetId{};
@@ -1061,8 +1064,12 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 registration->Type == Keire::AudioReverbZoneComponent::StaticType()
                             ? 72.0F
                             : 0.0F;
-                    const float proceduralDiagnosticsHeight =
-                        registration->Type == Keire::AnimatorComponent::StaticType() ? 138.0F : 0.0F;
+                    const float animatorDiagnosticsHeight =
+                        registration->Type == Keire::AnimatorComponent::StaticType()
+                            ? (animator && animator->PoseSource() == Keire::AnimatorPoseSource::ProceduralHumanoid
+                                   ? 196.0F
+                                   : 58.0F)
+                            : 0.0F;
                     const float uiDocumentActionsHeight = UiDocumentInspectorActionsHeight(component);
                     const float cardHeight =
                         expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
@@ -1070,7 +1077,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                         static_cast<float>(groupRows + headerRows) * 22.0F +
                                                         static_cast<float>(additionalTextRows) * 20.0F +
                                                         vfxInspectorHeight + audioSetupHeight +
-                                                        proceduralDiagnosticsHeight + uiDocumentActionsHeight)
+                                                        animatorDiagnosticsHeight + uiDocumentActionsHeight)
                                  : 38.0F;
                     if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
                     {

@@ -218,6 +218,8 @@ namespace KeireEditor
                            std::string(playMode ? "Live target: " : "Preview target: ") + playbackEntity.Name());
         if (!playMode)
         {
+            ui.TextColored(theme.MutedText, "Preview speed is independent of the selected Animator Speed.");
+            (void)ui.SliderFloat("Preview Speed", m_Preview->PlaybackSpeed, 0.1F, 3.0F);
             const bool canPreview = controllerMatches && playbackAnimator->SkinnedMesh() && assets;
             if (auto disabled = ui.BeginDisabled(!canPreview); disabled)
             {

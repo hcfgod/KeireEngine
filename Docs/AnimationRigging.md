@@ -96,6 +96,10 @@ names; the timeline uses the available panel width. Closing the panel or stoppin
 temporary pose. Clips from another skeleton use the existing automatic retargeting rules; bake explicit mappings in
 Rigging Studio when automatic matching is insufficient.
 
+**Preview Speed** starts at 1× and controls only editor preview playback, even when the selected object's Animator
+Speed is zero. Runtime playback still follows the object's Animator Speed. The Animator Inspector keeps a fixed runtime
+status area so changing grounding or IK warnings do not move controls while they are being adjusted.
+
 Create an **Animator Controller** in the Project panel and double-click it. Drag clips, Animation Sources, or animated
 models into the graph; container assets expand their generated clip subassets into states using authored clip names.
 Older clips without names use numbered model names; duplicate state names receive a numeric suffix. Create parameters, layers,

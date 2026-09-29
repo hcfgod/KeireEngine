@@ -19,6 +19,7 @@ namespace KeireEditor
         ui.TextColoredWrapped(theme.Accent, "ANIMATION CLIP PREVIEW");
         ui.TextWrapped(Keire::Detail::PathToUtf8(clip.SourcePath()));
         ui.TextWrapped("Select a scene entity with an Animator and skinned mesh, then press Play. "
+                       "Preview speed is independent of the entity's Animator Speed. "
                        "Preview does not change its assigned controller or save changes to the clip.");
         const auto session = sceneDocument.PlaySession();
         const bool running = session && session->State() != Keire::ScenePlayState::Stopped;
@@ -48,6 +49,7 @@ namespace KeireEditor
             ui.SetNextItemWidth(width);
             if (ui.SliderFloat("##Timeline", timeline, 0.0F, 1.0F))
                 preview.Seek(timeline);
+            (void)ui.SliderFloat("Preview Speed", preview.PlaybackSpeed, 0.1F, 3.0F);
         }
         if (!preview.Diagnostic.empty())
             ui.TextColoredWrapped(theme.Warning, preview.Diagnostic);

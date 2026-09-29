@@ -38,6 +38,7 @@ namespace KeireEditor
         bool RestartRequested = true;
         std::optional<float> SeekRequested;
         float NormalizedTime = 0.0F;
+        float PlaybackSpeed = 1.0F;
         std::chrono::steady_clock::time_point LastTick;
         Keire::Ref<Keire::Scene> Scene;
         Keire::EntityId Entity;
@@ -443,7 +444,7 @@ namespace KeireEditor
             }
             else if (Playing)
             {
-                sample = Instance->Update(deltaSeconds * std::max(animator->Speed(), 0.0F));
+                sample = Instance->Update(deltaSeconds * PlaybackSpeed);
                 sampled = true;
             }
             if (!sampled)
