@@ -332,6 +332,7 @@ namespace
 
     [[nodiscard]] ManagedCookBuild BuildManagedAssemblies(const Keire::AssetDatabase& database,
                                                           const Keire::Project& project, const std::string& profile,
+                                                          const Keire::AssetTargetPlatform target,
                                                           const std::filesystem::path& executable,
                                                           const bool discoverManagedTypes,
                                                           std::vector<Keire::ManagedServiceDescriptor> nativeServices)
@@ -343,17 +344,32 @@ namespace
                 continue;
             const auto assembly =
                 Keire::ManagedAssemblyAsset::Decode(ReadBytes(project.Root() / "Assets" / record.RelativePath));
-            if (assembly->Definition().Classification != Keire::ManagedAssemblyClassification::Runtime)
-                continue;
-            request.Assemblies.push_back({record.Id, assembly->Definition()});
+            request.Assemblies.push_back(
+                {record.Id, assembly->Definition(), std::filesystem::path("Assets") / record.RelativePath});
         }
-        if (request.Assemblies.empty())
+        Keire::ManagedAssemblyBuildContext context;
+        context.IsEditor = false;
+        switch (target)
+        {
+        case Keire::AssetTargetPlatform::Host:
+            break;
+        case Keire::AssetTargetPlatform::Windows:
+            context.Platform = "Windows";
+            break;
+        case Keire::AssetTargetPlatform::Linux:
+            context.Platform = "Linux";
+            break;
+        case Keire::AssetTargetPlatform::MacOS:
+            context.Platform = "macOS";
+            break;
+        }
+        request.Assemblies = Keire::ResolveProjectManagedAssemblies(project.Root(), request.Assemblies, context);
+        if (std::ranges::all_of(
+                request.Assemblies, [](const auto& assembly)
+                { return assembly.SourceFiles && assembly.SourceFiles->empty() && assembly.PrecompiledFiles.empty(); }))
             return {};
         ManagedCookBuild result;
         result.Scripting = true;
-        result.AssemblyNames.reserve(request.Assemblies.size());
-        for (const auto& assembly : request.Assemblies)
-            result.AssemblyNames.push_back(assembly.Definition.Name);
 
         Keire::ScriptSystemSpecification specification;
         specification.Mode = Keire::ScriptMode::Enabled;
@@ -392,18 +408,13 @@ namespace
             throw std::runtime_error("Managed gameplay build failed: " + detail);
         }
         result.AssemblyDirectory = status.ActiveAssemblyDirectory;
+        for (const auto& assembly : status.RuntimeAssemblies)
+            result.AssemblyNames.push_back(assembly.stem().string());
         if (discoverManagedTypes)
         {
             Keire::ManagedReloadRequest reload;
             reload.ManagedApiAssembly = status.ManagedApiAssembly;
-            for (const auto& name : result.AssemblyNames)
-            {
-                const auto assembly = status.ActiveAssemblyDirectory / (name + ".dll");
-                if (!std::filesystem::is_regular_file(assembly))
-                    throw std::runtime_error("Managed gameplay build did not publish " + name + ".dll.");
-                reload.Assemblies.push_back(assembly);
-            }
-            std::ranges::sort(reload.Assemblies);
+            reload.Assemblies = status.RuntimeAssemblies;
             if (!scripts->PrepareReload(std::move(reload)))
                 throw std::runtime_error("Managed gameplay type discovery failed: " +
                                          scripts->ReloadStatus().Diagnostic);
@@ -1248,8 +1259,9 @@ namespace
                     const bool containsManagedData =
                         std::ranges::any_of(database->Records(), [](const Keire::AssetSourceRecord& record)
                                             { return record.Type == Keire::ManagedDataAsset::StaticType(); });
-                    const auto managed = BuildManagedAssemblies(*database, *project, cookProfile.Name, executable,
-                                                                containsManagedData, modules->ManagedServices());
+                    const auto managed =
+                        BuildManagedAssemblies(*database, *project, cookProfile.Name, cookProfile.Target, executable,
+                                               containsManagedData, modules->ManagedServices());
                     if (containsManagedData)
                     {
                         cookProfile.ManagedTypeDiscoveryComplete = true;
@@ -1322,9 +1334,9 @@ namespace
                 const bool containsManagedData =
                     std::ranges::any_of(database->Records(), [](const Keire::AssetSourceRecord& record)
                                         { return record.Type == Keire::ManagedDataAsset::StaticType(); });
-                const auto managed = BuildManagedAssemblies(*database, *project, commandLine.Profile.Name, executable,
-                                                            commandLine.Profile.Strict && containsManagedData,
-                                                            modules->ManagedServices());
+                const auto managed = BuildManagedAssemblies(
+                    *database, *project, commandLine.Profile.Name, commandLine.Profile.Target, executable,
+                    commandLine.Profile.Strict && containsManagedData, modules->ManagedServices());
                 if (commandLine.Profile.Strict && containsManagedData)
                 {
                     commandLine.Profile.ManagedTypeDiscoveryComplete = true;

@@ -853,6 +853,9 @@ namespace Keire
         std::uint64_t Generation = 0;
         std::chrono::milliseconds Elapsed{};
         std::vector<std::string> ChangedAssemblies;
+        // Published graph order, dependencies first; belongs to this successful generation.
+        std::vector<std::filesystem::path> RuntimeAssemblies;
+        std::vector<std::filesystem::path> EditorAssemblies;
     };
 
     struct ManagedIdeWorkspace

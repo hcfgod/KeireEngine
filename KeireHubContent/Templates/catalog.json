@@ -48,9 +48,29 @@
       "compatibleEditors": ">=0.1.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 21203,
+      "estimatedSizeBytes": 20798,
       "payloadRoot": "Payloads/Starter3D",
       "payloadFiles": [
+        {
+          "path": "Assets/Scenes/StarterScene.keirescene",
+          "sizeBytes": 4934,
+          "sha256": "baca0a7f1993881e828cd1b65b276200ac2a4eeb9830f1f2027b698a1ee06c87"
+        },
+        {
+          "path": "Assets/Scenes/StarterScene.keirescene.keiremeta",
+          "sizeBytes": 551,
+          "sha256": "fc1be03217728ec60dc8c0e1bfc93cbd773a0f750b1fbbbed32daf082432a18c"
+        },
+        {
+          "path": "Assets/Scripts/StarterUi.cs",
+          "sizeBytes": 1999,
+          "sha256": "b4a40cff21d7a0c24587abf895fcdf540c86a00db7abcf2beb0c11b3e75cf89b"
+        },
+        {
+          "path": "Assets/Scripts/StarterUi.cs.keiremeta",
+          "sizeBytes": 216,
+          "sha256": "e4cfcf7cc9bdff08db048fd1932eebc6d6feaa86a52e81ec6a03554614c2f456"
+        },
         {
           "path": "Assets/Shaders/DefaultUnlit.keireshader",
           "sizeBytes": 1062,
@@ -65,36 +85,6 @@
           "path": "Assets/Shaders/StarterUnlit.hlsl",
           "sizeBytes": 1433,
           "sha256": "32820edbe40282cb64133f2a737b259021bf3543569a06c1347aad71469528d0"
-        },
-        {
-          "path": "Assets/Scenes/StarterScene.keirescene",
-          "sizeBytes": 4934,
-          "sha256": "baca0a7f1993881e828cd1b65b276200ac2a4eeb9830f1f2027b698a1ee06c87"
-        },
-        {
-          "path": "Assets/Scenes/StarterScene.keirescene.keiremeta",
-          "sizeBytes": 551,
-          "sha256": "fc1be03217728ec60dc8c0e1bfc93cbd773a0f750b1fbbbed32daf082432a18c"
-        },
-        {
-          "path": "Assets/Scripts/Gameplay.keireasm",
-          "sizeBytes": 178,
-          "sha256": "fb90647b4d3651ea9e2c3d14956fc887f93c9cda923b4382114a064012923ed1"
-        },
-        {
-          "path": "Assets/Scripts/Gameplay.keireasm.keiremeta",
-          "sizeBytes": 227,
-          "sha256": "48ed9330a2366bf5303c38f9d9327e62e563c3c278ed12dcca58929199fcb3a2"
-        },
-        {
-          "path": "Assets/Scripts/Runtime/StarterUi.cs",
-          "sizeBytes": 1999,
-          "sha256": "b4a40cff21d7a0c24587abf895fcdf540c86a00db7abcf2beb0c11b3e75cf89b"
-        },
-        {
-          "path": "Assets/Scripts/Runtime/StarterUi.cs.keiremeta",
-          "sizeBytes": 216,
-          "sha256": "e4cfcf7cc9bdff08db048fd1932eebc6d6feaa86a52e81ec6a03554614c2f456"
         },
         {
           "path": "Assets/UI/ScreenOverlay.keireuipanel",
@@ -204,7 +194,7 @@
         "Assets/Shaders/DefaultUnlit.keireshader",
         "Assets/Shaders/StarterUnlit.hlsl",
         "Assets/Scenes/StarterScene.keirescene",
-        "Assets/Scripts/Runtime/StarterUi.cs",
+        "Assets/Scripts/StarterUi.cs",
         "Assets/UI/StarterHud.keireui",
         "Assets/UI/StarterBindingExample.keireui",
         "Assets/UI/StarterRenderTexture.keireui",
@@ -234,7 +224,7 @@
       "compatibleEditors": ">=0.3.0 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25133210,
+      "estimatedSizeBytes": 25133510,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -564,8 +554,8 @@
         },
         {
           "path": "Assets/FirstPersonController/README.md",
-          "sizeBytes": 6079,
-          "sha256": "a504eab5487aa1e7ccd237ac409e4e05ea23aa1a9b16efd0ab35704ce70c6a37"
+          "sizeBytes": 6401,
+          "sha256": "5a2e6b75a152459a27b7cdd04721d6b84f65330f50406c5ab498e89ceb3f791b"
         },
         {
           "path": "Assets/FirstPersonController/README.md.keiremeta",
@@ -574,8 +564,8 @@
         },
         {
           "path": "Assets/FirstPersonController/Runtime/FirstPersonController.cs",
-          "sizeBytes": 10309,
-          "sha256": "a4aa3aff04fc42d6f21fb2d49202c35d0764f7942e30e15914bd2a325644e3da"
+          "sizeBytes": 10707,
+          "sha256": "e82227d436fa92ae63d06ff267472d7989394de4999441c5463603129b7e461f"
         },
         {
           "path": "Assets/FirstPersonController/Runtime/FirstPersonController.cs.keiremeta",
@@ -813,102 +803,92 @@
           "sha256": "1c1d4f306b645c125e252221661a2e392e5ce6dafb1c83b8b3b6552a70871e62"
         },
         {
-          "path": "Assets/Scripts/Gameplay.keireasm",
-          "sizeBytes": 193,
-          "sha256": "dd125866fc4e1777e1756729d06cb39b01e82b5c9765d4a2e254cd7ba9e2cb3b"
-        },
-        {
-          "path": "Assets/Scripts/Gameplay.keireasm.keiremeta",
-          "sizeBytes": 227,
-          "sha256": "a78a2a869402011dfa2f6d0e7e21e7b30470c77a8adb2cfec5901f7f47dde485"
-        },
-        {
-          "path": "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs",
+          "path": "Assets/Scripts/Examples/ShowcaseOrbit.cs",
           "sizeBytes": 1435,
           "sha256": "5c2ca468d77aa750171647694f0bda8c27c25145ca219928cb695258fbd40694"
         },
         {
-          "path": "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs.keiremeta",
+          "path": "Assets/Scripts/Examples/ShowcaseOrbit.cs.keiremeta",
           "sizeBytes": 216,
           "sha256": "2cd59e9000b38eb53609deda59799ae4c3c4ee719d80f9557e04605d4fcd725b"
         },
         {
-          "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs",
+          "path": "Assets/Scripts/FirstPersonCamera.cs",
           "sizeBytes": 17304,
           "sha256": "a78bd7bb38240946fe9d87d30ca4bdbfae74d42d99a7ea8cd7da4ded8dd9cf4a"
         },
         {
-          "path": "Assets/Scripts/Runtime/FirstPersonCamera.cs.keiremeta",
+          "path": "Assets/Scripts/FirstPersonCamera.cs.keiremeta",
           "sizeBytes": 218,
           "sha256": "25fbf387c34d6841d9dac3d46efa8328b4a8b135866e064b361118caec5085a3"
         },
         {
-          "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs",
+          "path": "Assets/Scripts/FpsVfxShowcase.cs",
           "sizeBytes": 4342,
           "sha256": "688dcca75287b5af4c06871f97800ae266e5b2c480bd11349147746176234e22"
         },
         {
-          "path": "Assets/Scripts/Runtime/FpsVfxShowcase.cs.keiremeta",
+          "path": "Assets/Scripts/FpsVfxShowcase.cs.keiremeta",
           "sizeBytes": 216,
           "sha256": "27ab65118c26ded1dff2abfa6f736c9599b3f188f46228bcd108967e2be62c9a"
         },
         {
-          "path": "Assets/Scripts/Runtime/HealthTarget.cs",
+          "path": "Assets/Scripts/HealthTarget.cs",
           "sizeBytes": 1229,
           "sha256": "af3d7d1e2a05dd3ef9d19505df284c97053aa09a49ea62bf20dbb33ec445e2a5"
         },
         {
-          "path": "Assets/Scripts/Runtime/HealthTarget.cs.keiremeta",
+          "path": "Assets/Scripts/HealthTarget.cs.keiremeta",
           "sizeBytes": 216,
           "sha256": "4d471f643b3ac27561838b0440c72d48b56a1d2de177b99d3066553a4f49b5c1"
         },
         {
-          "path": "Assets/Scripts/Runtime/NavPatrolAgent.cs",
+          "path": "Assets/Scripts/NavPatrolAgent.cs",
           "sizeBytes": 1191,
           "sha256": "9dc409b19993a85c5c8207588cd313c42f68c19217c9bf705f4a5752bea41fb3"
         },
         {
-          "path": "Assets/Scripts/Runtime/NavPatrolAgent.cs.keiremeta",
+          "path": "Assets/Scripts/NavPatrolAgent.cs.keiremeta",
           "sizeBytes": 218,
           "sha256": "e771c7d336c0c34e2036bf25f3609235f981e39a48ec880a12bb52819e167293"
         },
         {
-          "path": "Assets/Scripts/Runtime/ThirdPersonController.cs",
+          "path": "Assets/Scripts/ThirdPersonController.cs",
           "sizeBytes": 3356,
           "sha256": "548fd2d9a665f0f5443b068861c24fa2e064e099f37abf616fe41c495b49b041"
         },
         {
-          "path": "Assets/Scripts/Runtime/ThirdPersonController.cs.keiremeta",
+          "path": "Assets/Scripts/ThirdPersonController.cs.keiremeta",
           "sizeBytes": 218,
           "sha256": "8ca18ec118a74477d2b80aefd0afe5f647a05ecba9710704160dcbd80ba31e8c"
         },
         {
-          "path": "Assets/Scripts/Runtime/UIController.cs",
+          "path": "Assets/Scripts/UIController.cs",
           "sizeBytes": 4044,
           "sha256": "444373d6c41a8c9f9cac9d06e190b621235a4e4a3caf9a449e325b500d2cd25d"
         },
         {
-          "path": "Assets/Scripts/Runtime/UIController.cs.keiremeta",
+          "path": "Assets/Scripts/UIController.cs.keiremeta",
           "sizeBytes": 216,
           "sha256": "a14e636c2c7388870f051704381b53ec78a2f9b6269086e9b712324b350ddf0d"
         },
         {
-          "path": "Assets/Scripts/Runtime/WeaponController.cs",
+          "path": "Assets/Scripts/WeaponController.cs",
           "sizeBytes": 8783,
           "sha256": "293848f0b1143923ebcfa9ecbab4c9a5312416849d19074c57023ab08ab23f1a"
         },
         {
-          "path": "Assets/Scripts/Runtime/WeaponController.cs.keiremeta",
+          "path": "Assets/Scripts/WeaponController.cs.keiremeta",
           "sizeBytes": 216,
           "sha256": "35ca1bf2e9193cb4ccdc7831a833a88bb133410eba6bd8a670d0da0e3ae485db"
         },
         {
-          "path": "Assets/Scripts/Runtime/WeaponGameplay.cs",
+          "path": "Assets/Scripts/WeaponGameplay.cs",
           "sizeBytes": 28462,
           "sha256": "ca5c4ca1c1a9b55a66d948065c2d4e732bed08b48cb52ce5f82fedf840369cd8"
         },
         {
-          "path": "Assets/Scripts/Runtime/WeaponGameplay.cs.keiremeta",
+          "path": "Assets/Scripts/WeaponGameplay.cs.keiremeta",
           "sizeBytes": 216,
           "sha256": "562468627d0f5790f7b11f23ae29614857e47b8981c2758a388ddae906cc3719"
         },
@@ -1169,7 +1149,7 @@
         "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_01_StudioPaint.keireshadergraph",
         "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_01_StudioPaint.keirematerial",
         "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_12_IridescentShield.keireshadergraph",
-        "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs",
+        "Assets/Scripts/Examples/ShowcaseOrbit.cs",
         "Assets/Vfx/ArcaneNova.keirevfx"
       ],
       "requiredPackages": [],

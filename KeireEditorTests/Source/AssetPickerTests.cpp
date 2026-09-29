@@ -1,10 +1,65 @@
 #include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClientInternal/Editor/AssetPickerLabels.h"
 
 #include <doctest/doctest.h>
 
 #include <array>
 #include <optional>
 #include <string>
+
+TEST_CASE("Asset picker compact labels keep generated actions before their source path")
+{
+    const auto walk = KeireEditor::Detail::MakeAssetPickerLabels("Models/Creatures/Fox.glb", "Walk");
+    const auto run = KeireEditor::Detail::MakeAssetPickerLabels("Models/Creatures/Fox.glb", "Run");
+    CHECK(walk.Preview == "Walk (Fox.glb)");
+    CHECK(run.Preview == "Run (Fox.glb)");
+    CHECK(walk.Full == "Models/Creatures/Fox.glb / Walk");
+    const auto duplicate = KeireEditor::Detail::MakeAssetPickerLabels("Archive/Fox.glb", "Walk");
+    CHECK(duplicate.Preview == walk.Preview);
+    CHECK(duplicate.Full != walk.Full);
+    const auto baked = KeireEditor::Detail::MakeAssetPickerLabels("Animations/Fox Retargeted.keireanim");
+    CHECK(baked.Preview == "Fox Retargeted.keireanim");
+    CHECK(baked.Full == "Animations/Fox Retargeted.keireanim");
+    const auto unnamed = KeireEditor::Detail::MakeAssetPickerLabels("Fox.glb", "Animation Clip");
+    CHECK(unnamed.Preview == "Animation Clip (Fox.glb)");
+}
+
+TEST_CASE("Animation asset pickers resolve imported clips without accepting their model or skeleton")
+{
+    Keire::AssetSourceRecord model;
+    model.Id = Keire::AssetId::Generate();
+    model.Type = Keire::MeshAsset::StaticType();
+    model.RelativePath = "Models/Fox.glb";
+    const auto walk = Keire::AssetId::Generate();
+    const auto run = Keire::AssetId::Generate();
+    const auto skeleton = Keire::AssetId::Generate();
+    model.SubAssets = {walk, run, skeleton};
+    Keire::AssetSourceRecord baked;
+    baked.Id = Keire::AssetId::Generate();
+    baked.Type = Keire::AnimationClipAsset::StaticType();
+    baked.RelativePath = "Animations/Fox Retargeted.keireanim";
+    const std::array records{model, baked};
+    KeireEditor::AssetPickerOptions options;
+    options.Label = "Animation Clip";
+    options.ExpectedType = Keire::AnimationClipAsset::StaticType();
+    options.ResolveType = [=](Keire::AssetId id) -> std::optional<Keire::AssetTypeId>
+    {
+        if (id == walk || id == run)
+            return Keire::AnimationClipAsset::StaticType();
+        if (id == skeleton)
+            return Keire::SkeletonAsset::StaticType();
+        return std::nullopt;
+    };
+    options.ResolveDisplayName = [=](Keire::AssetId id) { return id == walk ? "Walk" : "Run"; };
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, walk, options) == walk);
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, run, options) == run);
+    CHECK(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, baked.Id, options) == baked.Id);
+    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, model.Id, options));
+    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, skeleton, options));
+    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, Keire::AssetId::Generate(), options));
+    options.ExpectedType = Keire::AvatarMaskAsset::StaticType();
+    CHECK_FALSE(KeireEditor::AssetPicker::ResolveCompatibleAsset(records, walk, options));
+}
 
 TEST_CASE("Asset picker filters environment textures without exposing raw asset IDs")
 {

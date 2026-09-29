@@ -255,7 +255,7 @@ When a change appears not to run:
 | --- | --- | --- |
 | Cannot convert `AudioClip` to `AssetId` | An advanced interop API expects an ID | Pass the direct clip to gameplay APIs, or `.Id` only to the interop API |
 | Asset field is unassigned | The Inspector reference is empty or missing | Check for `null` or assign a compatible asset |
-| Script is absent from Add Component | File is outside a source root, build failed, or type shape is invalid | Check `.keireasm`, diagnostics, filename/type match, and stable ID |
+| Script is absent from Add Component | File is outside Assets/custom source roots, build failed, or type shape is invalid | Check `.keireasm`, diagnostics, filename/type match, and stable ID |
 | Saved code is not running | Candidate did not publish | Fix build, discovery, or migration diagnostics; last-good code remains active |
 | Values reset after reload | Field is neither serialized nor `[HotReloadState]` | Add the attribute matching the intended persistence |
 | Duplicate callbacks after reload | Runtime event was rebound without being removed | Unbind in `OnDisable` and `OnBeforeReload`; make binding idempotent |

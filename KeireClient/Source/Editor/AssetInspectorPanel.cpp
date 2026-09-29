@@ -6,6 +6,7 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
+#include "KeireClient/Editor/ManagedAssemblyInspectorPanel.h"
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialGraphCreationPicker.h"
@@ -17,6 +18,7 @@
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Rendering/ShaderGraph.h"
+#include "KeireInternal/Assets/AssetImportDrafts.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <algorithm>
@@ -104,7 +106,8 @@ namespace
 
 KeireEditor::AssetInspectorPanel::AssetInspectorPanel(IInspectorController& controller)
     : m_Controller(controller), m_AssetPicker(std::make_unique<AssetPicker>()),
-      m_ManagedDataInspector(std::make_unique<ManagedDataInspectorPanel>(controller))
+      m_ManagedDataInspector(std::make_unique<ManagedDataInspectorPanel>(controller)),
+      m_ManagedAssemblyInspector(std::make_unique<ManagedAssemblyInspectorPanel>(controller))
 {
 }
 
@@ -125,6 +128,7 @@ void KeireEditor::AssetInspectorPanel::ClearState() noexcept
     m_MaterialParameterCollectionDirty = false;
     m_ProceduralMotionProfileDirty = false;
     m_ManagedDataInspector->Clear();
+    m_ManagedAssemblyInspector->Clear();
 }
 
 void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId selectedAsset, const bool pinned)
@@ -170,6 +174,15 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         m_MaterialParameterCollectionDirty = false;
         m_ProceduralMotionProfileDirty = false;
     }
+
+    const auto currentImportSettings = importer && importer->Name == record->Importer
+                                           ? EditableImportSettings(*importer, record->ImportSettings)
+                                           : Keire::AssetImportSettings{};
+    const bool importConflict = Keire::Internal::SynchronizeImportSettingsDraft(
+        currentImportSettings, m_OriginalImportSettings, m_ImportSettings);
+    if (importConflict)
+        ui.TextColored(theme.Warning, "Import settings changed elsewhere. Apply replaces them with this draft; Revert "
+                                      "loads the current settings.");
 
     const auto projectRoot = database->Specification().ProjectRoot;
     if (!m_Thumbnails || m_PreviewProjectRoot != projectRoot)
@@ -286,9 +299,16 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!changed); disabled)
             if (ui.Button("Revert Import Settings"))
-                m_ImportSettings = m_OriginalImportSettings;
+            {
+                m_OriginalImportSettings = currentImportSettings;
+                m_ImportSettings = currentImportSettings;
+            }
     }
-    if (record->RelativePath.extension() == ".keireinput")
+    if (record->RelativePath.extension() == ".keireasm" || record->RelativePath.extension() == ".asmref")
+    {
+        m_ManagedAssemblyInspector->Draw(ui, *record);
+    }
+    else if (record->RelativePath.extension() == ".keireinput")
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "INPUT ACTION ASSET");

@@ -605,6 +605,14 @@ function Get-ProjectConfig {
         HUB_TARGET = "FixtureHub"
     }
 }
+function Enter-KeireWorkspaceLock {
+    $global:FixtureWorkspaceLocked = $true
+    return [pscustomobject]@{ Acquired = $true }
+}
+function Exit-KeireWorkspaceLock {
+    if ($global:FixtureNativeLocked) { throw "Workspace lock released before native build lock." }
+    $global:FixtureWorkspaceLocked = $false
+}
 function Get-NativeArchitecture { return "x86_64" }
 function Normalize-Architecture([string]$Architecture) { return "x86_64" }
 function Resolve-WindowsToolset { return "msc" }
@@ -641,11 +649,14 @@ function Get-NinjaExecutable { return (Get-Command ninja.cmd).Source }
 '@ | Set-Content (Join-Path $fixtureWindows "common.ps1") -Encoding UTF8
     @'
 function Enter-GeneratedContentLock {
+    if (-not $global:FixtureWorkspaceLocked) { throw "Native build lock acquired before workspace lock." }
+    $global:FixtureNativeLocked = $true
     return [Threading.Mutex]::new($false)
 }
 function Exit-GeneratedContentLock {
     param([Threading.Mutex]$Mutex)
     $Mutex.Dispose()
+    $global:FixtureNativeLocked = $false
 }
 '@ | Set-Content (Join-Path $fixtureWindows "generated-content-cache.ps1") -Encoding UTF8
     @'

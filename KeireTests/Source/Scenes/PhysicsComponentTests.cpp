@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 #include "KeireInternal/Scenes/CharacterGrounding.h"
+#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 
 #include <doctest/doctest.h>
 
@@ -186,6 +187,7 @@ TEST_CASE("character presentation keeps current body yaw and camera pitch betwee
     auto player = scene->CreateEntity("Player");
     player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.35F, 1.8F, 0.35F, 0.04F);
     auto camera = scene->CreateEntity("Camera", player);
+    (void)camera.AddComponent<Keire::CameraComponent>();
     camera.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.65F, 0.0F});
     Keire::PhysicsSystemSpecification specification;
     specification.Mode = Keire::PhysicsMode::Enabled;
@@ -213,6 +215,12 @@ TEST_CASE("character presentation keeps current body yaw and camera pitch betwee
         const auto renderedBody = body->PresentationWorldMatrix();
         const auto actualHead = head->WorldMatrix();
         const auto renderedHead = head->PresentationWorldMatrix();
+        const auto cameraSettings =
+            session->RuntimeScene()->FindEntity(camera.Id()).GetComponent<Keire::CameraComponent>();
+        const auto editorCamera = Keire::Internal::BuildPresentedSceneCamera(*cameraSettings, *head, 16.0F / 9.0F);
+        const auto editorCameraWorld = Keire::Math::Inverse(editorCamera.View);
+        for (int index = 0; index < 16; ++index)
+            CHECK(editorCameraWorld.Elements[index] == doctest::Approx(renderedHead.Elements[index]).epsilon(0.0001));
         for (int index = 0; index < 12; ++index)
         {
             CHECK(renderedBody.Elements[index] == doctest::Approx(actualBody.Elements[index]));
@@ -227,6 +235,50 @@ TEST_CASE("character presentation keeps current body yaw and camera pitch betwee
     session->Update(1.0F / 144.0F, 0.0F);
     CHECK(body->PresentationWorldPosition().X == doctest::Approx(10.0F));
     CHECK(head->PresentationWorldPosition().Y == doctest::Approx(3.65F));
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("turning a character preserves its collision body across physics ticks")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto player = scene->CreateEntity("Player");
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.35F, 1.8F, 0.35F, 0.04F);
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    const auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    const auto body = runtimePlayer.GetComponent<Keire::TransformComponent>();
+    session->FixedUpdate(1.0F / 60.0F);
+    const auto generation = motor->RuntimeState().Generation;
+    REQUIRE(generation != 0U);
+    for (int tick = 1; tick <= 360; ++tick)
+    {
+        body->SetLocalEulerAngles({0.0F, static_cast<float>(tick) * 0.37F, 0.0F});
+        REQUIRE(motor->QueueDesiredMovement({0.0F, 0.0F, 0.002F}));
+        session->FixedUpdate(1.0F / 60.0F);
+        CAPTURE(tick);
+        REQUIRE(motor->RuntimeState().Generation == generation);
+        CHECK(body->WorldPosition().Z == doctest::Approx(static_cast<float>(tick) * 0.002F).epsilon(0.001));
+    }
+    // Sub-tolerance edits must accumulate against the installed shape, not be forgotten each tick.
+    for (int tick = 1; tick <= 100; ++tick)
+    {
+        const float scale = 1.0F + static_cast<float>(tick) * 0.0000001F;
+        body->SetLocalScale({scale, scale, scale});
+        session->FixedUpdate(1.0F / 60.0F);
+    }
+    CHECK(motor->RuntimeState().Generation > generation);
+    const auto resizedGeneration = motor->RuntimeState().Generation;
+    // Actual authored resizes still rebuild the shape.
+    body->SetLocalScale({1.1F, 1.1F, 1.1F});
+    session->FixedUpdate(1.0F / 60.0F);
+    CHECK(motor->RuntimeState().Generation > resizedGeneration);
     session->Stop();
     physics->Close();
     scene->Close();

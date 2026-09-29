@@ -10,65 +10,62 @@ A scripting project needs:
 
 - a project opened in Kéire Editor;
 - a .NET 10 SDK available to the editor for project compilation;
-- at least one `.keireasm` managed assembly definition;
-- C# files located under one of that assembly's `sourceRoots`.
+- C# files anywhere under `Assets`.
 
 Packaged games carry the runtime needed to execute already-cooked assemblies. Developing or changing scripts still
 requires the SDK.
 
-## Recommended Layout
+## Organize Scripts Freely
 
-Keep runtime, editor, and test code in separate source roots:
+New projects do not create an assembly asset or require a `Runtime` folder. Unclaimed scripts compile into the built-in
+`Assembly-CSharp` assembly. Unclaimed scripts below a folder named `Editor` compile into `Assembly-CSharp-Editor`
+and can use the editor API. Folder names do not determine C# namespaces.
 
-```text
-Assets/
-  Scripts/
-    Runtime/
-      Gameplay.keireasm
-      PlayerController.cs
-      PauseMenu.cs
-    Editor/
-      Gameplay.Editor.keireasm
-    Tests/
-      Gameplay.Tests.keireasm
-```
+Create a **Managed Assembly** in the Project panel only when you need a custom boundary. Its folder and subfolders
+belong to that assembly, except where another definition introduces a nested boundary. Creating an assembly does not
+create a script. Inside a custom assembly, its explicit classification applies even to nested `Editor` folders.
 
-An assembly definition may sit elsewhere, but every source root is project-relative and cannot escape the project.
-The editor can create a starter assembly and script from the Project panel.
+For example, `Assets/Characters/Player.cs` needs no assembly asset. Adding `Assets/Characters/Characters.keireasm`
+moves that folder's scripts into the custom assembly; adding a nested definition splits that subtree out again.
 
 ## Assembly Definitions
 
-Schema version 2 is the current format:
+Schema version 4 is the current format; versions 1 through 3 remain readable:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 4,
   "name": "MyGame",
   "rootNamespace": "MyGame",
   "classification": "runtime",
-  "sourceRoots": [
-    "Assets/Scripts/Runtime"
-  ],
+  "sourceRoots": [],
   "references": [],
   "packages": [],
   "defineSymbols": [
     "MY_GAME"
   ],
+  "autoReferenced": true,
   "allowUnsafe": false
 }
 ```
 
 | Property | Meaning |
 | --- | --- |
-| `schemaVersion` | `2` for packages, define symbols, and unsafe-code policy; schema 1 remains readable |
+| `schemaVersion` | `4` adds platform filters, constraints, version defines, and DLL reference controls |
 | `name` | Unique C# assembly name |
 | `rootNamespace` | Default namespace used by generated scripts and IDE projects |
 | `classification` | `runtime`, `editor`, or `tests` |
-| `sourceRoots` | Unique project-relative directories containing the assembly's C# sources |
+| `sourceRoots` | Empty or omitted uses the definition folder; explicit project-relative roots remain supported |
+| `autoReferenced` | Whether predefined assemblies reference this custom assembly (default true) |
 | `references` | Asset IDs of other `.keireasm` definitions |
 | `packages` | NuGet package name and exact, non-floating version pairs |
 | `defineSymbols` | Unique valid C# preprocessor identifiers |
 | `allowUnsafe` | Whether gameplay code in this assembly may compile unsafe blocks |
+
+A custom assembly must explicitly reference another custom assembly before using its public classes, interfaces,
+generic types, or methods. Predefined assemblies automatically reference eligible custom assemblies. Custom assemblies
+cannot reference predefined assemblies; put shared types in a custom assembly when both need them. Tests are never
+automatically referenced. Cycles and ambiguous folder ownership are errors.
 
 Reference rules are deliberate:
 
@@ -78,6 +75,49 @@ Reference rules are deliberate:
 
 Duplicate names, missing references, invalid classification edges, and cycles fail graph validation before compilation.
 Package versions must be exact; ranges, wildcards, and floating versions are rejected.
+
+### Inspector And Assembly References
+
+Select a `.keireasm` asset to edit its name, namespace, classification, references, platform filters, symbols, constraints,
+version defines, and DLL controls in the Inspector. **Apply Assembly Settings** validates and saves the changes, then
+requests a build; **Revert Assembly Settings** reloads the source. Apply rejects external edits made since the draft loaded.
+
+Use **Create > Assembly Reference** to add an `.asmref` asset, then choose its target assembly in the Inspector. Its folder
+and descendants join that assembly, with nested definitions/references establishing closer boundaries. A folder may hold
+one definition or reference. References cannot target predefined assemblies or other references. JSON accepts an assembly
+name or `"GUID:<asset-id>"`; the Inspector writes IDs so renames preserve the connection.
+
+### Conditional Assemblies And DLL References
+
+| Property | Meaning |
+| --- | --- |
+| `includePlatforms` / `excludePlatforms` | Mutually exclusive lists of `Windows`, `Linux`, `macOS`, or `Editor`; empty means all |
+| `defineConstraints` | Every row must match; a row supports `SYMBOL`, `!SYMBOL`, and `A || B` alternatives |
+| `versionDefines` | `{ "resource": "Example.Package", "expression": "[1.2,2.0)", "define": "HAS_PACKAGE" }` entries |
+| `overrideReferences` | When false, reference managed DLLs found under Assets automatically |
+| `precompiledReferences` | With overrides enabled, explicit project-relative DLL paths such as `Assets/Plugins/Utility.dll` |
+
+Version expressions use semantic version ordering, including prereleases. A bare version is a minimum, `[1.2.3]` is exact,
+`[1,2)` includes the lower bound and excludes the upper bound, and `(,2]` or `[1,)` permits an unbounded side. An empty
+expression matches any installed version. Resources include `Keire`, locked project packages, and the assembly's exact
+NuGet packages. A missing resource supplies no define. Version defines are local to the declaring assembly and participate
+in its constraints. Define symbols also include `KEIRE_EDITOR` in editor builds and the selected `KEIRE_WINDOWS`,
+`KEIRE_LINUX`, or `KEIRE_MACOS` platform symbol.
+
+The native `ManagedAssemblyBuildContext` selects a target platform, editor/player mode, global symbols, and resource
+versions for `ResolveProjectManagedAssemblies`. Its default selects the host platform in editor mode. The Editor and IDE use the active player profile target;
+player cooking resolves again for that target in player mode. An assembly included
+only on `Editor` is classified as editor code. Excluded assemblies retain ownership of their scripts, so excluded scripts
+never fall into a predefined assembly. Active custom references to excluded assemblies are errors.
+
+DLLs are identified by their CLR header; native DLLs are not automatic managed references. Explicit references must point
+to managed DLLs inside Assets. Duplicate DLL names and names shadowing project or engine assemblies are rejected. Referenced
+DLLs are copied to the published generation and included in input digests so edits invalidate build results. Generated IDE
+projects use the same resolved symbols and DLL references as compilation.
+
+These settings follow [Unity's assembly definition model](https://docs.unity3d.com/6000.0/Documentation/Manual/class-AssemblyDefinitionImporter.html).
+Kéire retains its own managed API and `.keireasm` format; Unity scripts and `.asmdef` files are not directly interchangeable.
+Unity's no-engine-references option and legacy first-pass special-folder assemblies are not implemented.
 
 ## Create A Behaviour
 
@@ -115,7 +155,7 @@ keep them stable after the script has been attached or serialized.
 
 ## Build And Attach
 
-The editor watches `.cs` and `.keireasm` files. After the newest change settles, it:
+The editor watches `.cs`, `.keireasm`, `.asmref`, and precompiled `.dll` files. After the newest change settles, it:
 
 1. validates the assembly graph;
 2. generates SDK-style projects targeting .NET 10 and C# 14;
@@ -158,8 +198,8 @@ the attachment after the type becomes available.
 
 ## IDE Projects
 
-Opening a C# source from the editor regenerates a project-root solution and one SDK-style project per `.keireasm`.
-These files provide IntelliSense and navigation. The `.keireasm` graph remains authoritative; editing only a generated
+Opening a C# source from the editor regenerates a project-root solution and one SDK-style project per predefined or custom assembly.
+These files provide IntelliSense and navigation. The resolved assembly graph remains authoritative; editing only a generated
 project does not change a runtime build.
 
 The editor's Visual Studio authoring façade may use a compatibility target for design-time support. Runtime gameplay
@@ -188,7 +228,7 @@ managed build diagnostics before assuming a save was loaded.
 
 ## First-Script Checklist
 
-- The script is below a declared `sourceRoots` path.
+- The script is under `Assets`, or under a legacy custom assembly source root.
 - The class derives from `Behaviour`.
 - The class is public, non-abstract, and has the same name as the file.
 - The namespace matches the project convention.

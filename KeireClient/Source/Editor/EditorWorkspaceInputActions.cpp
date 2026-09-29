@@ -59,15 +59,7 @@ std::filesystem::path EditorWorkspaceLayer::GenerateInputActionsWrapper(const st
         throw std::logic_error("Open an input action asset before generating its C# wrapper.");
     const auto source =
         KeireEditor::GenerateInputActionsCSharp(m_InputActionsDocument->Definition(), className, nameSpace);
-    std::vector<KeireEditor::ManagedScriptAssemblyCandidate> assemblies;
-    for (const auto& record : m_AssetDatabase->Records())
-    {
-        if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
-            continue;
-        const auto assembly = Keire::ManagedAssemblyAsset::Decode(
-            KeireEditor::Detail::ReadBytes(project->Root() / "Assets" / record.RelativePath));
-        assemblies.push_back({record.Id, assembly->Definition()});
-    }
+    const auto assemblies = KeireEditor::ReadManagedScriptAssemblies(project->Root(), m_AssetDatabase->Records());
     const auto generatedFolder = std::filesystem::path("Scripts") / "Generated";
     const auto placement = KeireEditor::ResolveManagedScriptPlacement(assemblies, generatedFolder);
     const auto relative =

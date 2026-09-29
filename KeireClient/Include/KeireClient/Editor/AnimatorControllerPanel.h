@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -11,6 +13,7 @@ namespace KeireEditor
 {
     class AnimatorControllerDocument;
     class SceneDocument;
+    struct AnimatorControllerPreviewState;
 
     class IAnimatorControllerPanelController
     {
@@ -39,15 +42,17 @@ namespace KeireEditor
         void Draw(Keire::UiFrame& ui);
         void SetMessage(std::string message) { m_Message = std::move(message); }
         void ResetTransientState() noexcept;
+        void OpenClip(Keire::AssetId clip, std::string name);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
-        struct PreviewState;
-
         IAnimatorControllerPanelController& m_Controller;
         StableNodeGraphCanvas m_GraphCanvas;
+        AssetPicker m_AddAnimationPicker;
+        std::map<std::string, AssetPicker> m_AssetPickers;
         Keire::UiPanelRegistration m_Registration;
-        std::unique_ptr<PreviewState> m_Preview;
+        std::unique_ptr<AnimatorControllerPreviewState> m_Preview;
+        std::unique_ptr<AnimatorControllerDocument> m_ClipPreviewDocument;
         std::optional<NodeGraphContextRequest> m_GraphContext;
         std::string m_SelectedTransition;
         std::string m_GraphLayer;

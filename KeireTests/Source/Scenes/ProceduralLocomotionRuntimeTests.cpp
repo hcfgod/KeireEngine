@@ -122,16 +122,23 @@ namespace
             REQUIRE(m_RuntimeController);
 
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            float settlingVelocity = 0.0F;
             while ((m_RuntimeAnimator->SkinPalette().empty() || !m_RuntimeController->Grounded() ||
                     m_RuntimeAnimator->ProceduralState().State == Keire::ProceduralMotionState::Landing) &&
                    std::chrono::steady_clock::now() < deadline)
             {
-                Tick({}, {0.0F, 0.0F, 1.0F});
+                // Character controllers consume requested movement; they do not integrate gravity themselves.
+                // Reach the floor instead of depending on a ground probe to classify an airborne capsule as grounded.
+                settlingVelocity =
+                    m_RuntimeController->Grounded() ? 0.0F : settlingVelocity - 9.81F * FixedDeltaSeconds;
+                Tick({0.0F, settlingVelocity * FixedDeltaSeconds, 0.0F}, {0.0F, 0.0F, 1.0F});
                 (void)m_Assets->PumpCompletions();
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             REQUIRE_FALSE(m_RuntimeAnimator->SkinPalette().empty());
             REQUIRE(m_RuntimeController->Grounded());
+            CHECK(m_RuntimeCharacter.GetComponent<Keire::TransformComponent>()->LocalPosition().Y ==
+                  doctest::Approx(0.9F).epsilon(0.005));
             REQUIRE(m_RuntimeAnimator->ProceduralState().State == Keire::ProceduralMotionState::Idle);
         }
 

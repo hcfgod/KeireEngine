@@ -920,13 +920,22 @@ namespace Keire::Detail
     }
 
     [[nodiscard]] ComponentPropertyBag ProjectManagedState(const std::string& state,
-                                                           const std::vector<ComponentProperty>& properties)
+                                                           const std::vector<ComponentProperty>& properties,
+                                                           const ComponentPropertyBag* defaults)
     {
         ComponentPropertyBag result{{"managedState", state}};
         auto document = nlohmann::json::parse(state);
         for (const auto& property : properties)
         {
             const auto* value = ManagedStateValue(document, property);
+            if (!value && defaults && property.Kind != ComponentPropertyKind::ManagedReferenceGraph)
+            {
+                if (const auto initial = defaults->find(property.Key); initial != defaults->end())
+                {
+                    result.emplace(property.Key, initial->second);
+                    continue;
+                }
+            }
             auto projected = DefaultManagedPropertyValue(property.Kind, property.ReferenceKind);
             if (property.Kind == ComponentPropertyKind::ManagedReferenceGraph)
             {

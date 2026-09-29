@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClientInternal/Editor/AssetPickerLabels.h"
 
 #include <algorithm>
 #include <cctype>
@@ -50,6 +51,7 @@ namespace
         Keire::AssetId DropAlias;
         std::string DisplayLabel;
         std::string SelectionLabel;
+        std::string PreviewLabel;
     };
 
     [[nodiscard]] std::string GeneratedAssetLabel(const Keire::AssetTypeId type)
@@ -124,15 +126,16 @@ namespace
             for (const auto& mesh : Keire::BuiltinMeshCatalog())
             {
                 const auto label = "Built-in / " + std::string(mesh.Name);
-                result.push_back({mesh.Id, {}, label, label + "##" + mesh.Id.ToString()});
+                result.push_back({mesh.Id, {}, label, label + "##" + mesh.Id.ToString(), label});
             }
         }
         for (const auto& record : records)
         {
             if (AcceptsCandidate(record, record.Id, record.Type, options))
             {
-                auto label = record.RelativePath.generic_string();
-                result.push_back({record.Id, {}, label, label + "##" + record.Id.ToString()});
+                const auto labels = KeireEditor::Detail::MakeAssetPickerLabels(record.RelativePath);
+                result.push_back(
+                    {record.Id, {}, labels.Full, labels.Full + "##" + record.Id.ToString(), labels.Preview});
             }
             if (!options.ResolveType)
             {
@@ -145,13 +148,16 @@ namespace
                     continue;
                 if (record.Type == Keire::ShaderGraphAsset::StaticType() && *type == Keire::MaterialAsset::StaticType())
                     continue;
-                auto label = record.RelativePath.generic_string() + " / " + GeneratedAssetLabel(*type);
+                auto name = options.ResolveDisplayName ? options.ResolveDisplayName(subAsset) : std::string{};
+                const auto labels = KeireEditor::Detail::MakeAssetPickerLabels(
+                    record.RelativePath, name.empty() ? GeneratedAssetLabel(*type) : name);
                 const auto materialSource = record.Type == Keire::MaterialGraphAsset::StaticType() ||
                                             record.Type == Keire::MaterialInstanceAsset::StaticType() ||
                                             record.Type == Keire::ShaderGraphInstanceAsset::StaticType();
                 const auto dropAlias =
                     materialSource && *type == Keire::MaterialAsset::StaticType() ? record.Id : Keire::AssetId{};
-                result.push_back({subAsset, dropAlias, label, label + "##" + subAsset.ToString()});
+                result.push_back(
+                    {subAsset, dropAlias, labels.Full, labels.Full + "##" + subAsset.ToString(), labels.Preview});
             }
         }
         return result;
@@ -201,7 +207,7 @@ namespace KeireEditor
         const auto selected = std::ranges::find(candidates, value, &AssetPickerCandidate::Id);
         const bool selectedCompatible = selected != candidates.end();
         const std::string preview = !value               ? std::string(options.EmptyLabel)
-                                    : selectedCompatible ? selected->DisplayLabel
+                                    : selectedCompatible ? selected->PreviewLabel
                                                          : "Missing or incompatible asset";
         bool changed = false;
         {
@@ -237,6 +243,8 @@ namespace KeireEditor
                                              : "No assets match this search.");
             }
 
+            if (selectedCompatible)
+                ui.SetTooltip(selected->DisplayLabel);
             if (auto target = ui.BeginDragTarget(); target)
             {
                 std::vector<std::byte> payload;

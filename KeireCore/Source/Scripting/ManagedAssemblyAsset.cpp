@@ -1,4 +1,5 @@
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
+#include "KeireInternal/Scripting/ManagedAssemblyPolicies.h"
 
 #include <nlohmann/json.hpp>
 
@@ -119,7 +120,7 @@ namespace Keire
         definition.Name = document.at("name").get<std::string>();
         definition.RootNamespace = document.value("rootNamespace", definition.Name);
         definition.Classification = ParseClassification(document.value("classification", "runtime"));
-        for (const auto& root : document.at("sourceRoots"))
+        for (const auto& root : document.value("sourceRoots", Json::array()))
             definition.SourceRoots.emplace_back(root.get<std::string>());
         for (const auto& reference : document.value("references", Json::array()))
             definition.References.push_back(AssetId::Parse(reference.get<std::string>()));
@@ -131,6 +132,17 @@ namespace Keire
             definition.DefineSymbols = document.value("defineSymbols", std::vector<std::string>{});
             definition.AllowUnsafe = document.value("allowUnsafe", false);
         }
+        definition.AutoReferenced = document.value("autoReferenced", true);
+        definition.IncludePlatforms = document.value("includePlatforms", std::vector<std::string>{});
+        definition.ExcludePlatforms = document.value("excludePlatforms", std::vector<std::string>{});
+        definition.DefineConstraints = document.value("defineConstraints", std::vector<std::string>{});
+        definition.OverrideReferences = document.value("overrideReferences", false);
+        for (const auto& path : document.value("precompiledReferences", Json::array()))
+            definition.PrecompiledReferences.emplace_back(path.get<std::string>());
+        for (const auto& item : document.value("versionDefines", Json::array()))
+            definition.VersionDefines.push_back({item.at("resource").get<std::string>(),
+                                                 item.at("expression").get<std::string>(),
+                                                 item.at("define").get<std::string>()});
         Validate(definition);
         return CreateRef<ManagedAssemblyAsset>(std::move(definition));
     }
@@ -148,6 +160,8 @@ namespace Keire
             document["sourceRoots"].push_back(PathText(root));
         for (const auto reference : definition.References)
             document["references"].push_back(reference.ToString());
+        if (definition.SchemaVersion >= 3)
+            document["autoReferenced"] = definition.AutoReferenced;
         if (definition.SchemaVersion >= 2)
         {
             document["packages"] = Json::array();
@@ -155,6 +169,20 @@ namespace Keire
                 document["packages"].push_back({{"name", package.Name}, {"version", package.Version}});
             document["defineSymbols"] = definition.DefineSymbols;
             document["allowUnsafe"] = definition.AllowUnsafe;
+        }
+        if (definition.SchemaVersion >= 4)
+        {
+            document["includePlatforms"] = definition.IncludePlatforms;
+            document["excludePlatforms"] = definition.ExcludePlatforms;
+            document["defineConstraints"] = definition.DefineConstraints;
+            document["overrideReferences"] = definition.OverrideReferences;
+            document["precompiledReferences"] = Json::array();
+            for (const auto& path : definition.PrecompiledReferences)
+                document["precompiledReferences"].push_back(PathText(path));
+            document["versionDefines"] = Json::array();
+            for (const auto& item : definition.VersionDefines)
+                document["versionDefines"].push_back(
+                    {{"resource", item.Resource}, {"expression", item.Expression}, {"define", item.Define}});
         }
         const auto text = document.dump(2) + '\n';
         std::vector<std::byte> bytes(text.size());
@@ -164,14 +192,19 @@ namespace Keire
 
     void ManagedAssemblyAsset::Validate(const ManagedAssemblyDefinition& definition)
     {
-        if (definition.SchemaVersion != 1 && definition.SchemaVersion != ManagedAssemblySchemaVersion)
+        if (definition.SchemaVersion < 1 || definition.SchemaVersion > ManagedAssemblySchemaVersion)
             throw std::invalid_argument("Managed assembly definition uses an unsupported schema version.");
-        if (!IsIdentifier(definition.Name, false) || !IsIdentifier(definition.RootNamespace, true))
+        Detail::ValidateManagedAssemblyPolicies(definition);
+        auto identifier = definition.Name;
+        std::ranges::replace(identifier, '-', '_');
+        if (!IsIdentifier(identifier, true) || !IsIdentifier(definition.RootNamespace, true))
             throw std::invalid_argument("Managed assembly name or root namespace is not a valid C# identifier.");
-        if (definition.SourceRoots.empty() || definition.SourceRoots.size() > 64 ||
+        if ((definition.SourceRoots.empty() && definition.SchemaVersion < 3) || definition.SourceRoots.size() > 64 ||
             definition.References.size() > 256 || definition.Packages.size() > 256 ||
             definition.DefineSymbols.size() > 256)
             throw std::invalid_argument("Managed assembly source-root or reference count is invalid.");
+        if (definition.SchemaVersion < 3 && !definition.AutoReferenced)
+            throw std::invalid_argument("Auto Referenced requires managed assembly schema version 3.");
         if (definition.SchemaVersion == 1 &&
             (!definition.Packages.empty() || !definition.DefineSymbols.empty() || definition.AllowUnsafe))
             throw std::invalid_argument("Managed assembly schema version 1 cannot contain schema version 2 settings.");
@@ -218,7 +251,10 @@ namespace Keire
             if (!assembly.Asset || !definitions.emplace(assembly.Asset, &assembly.Definition).second)
                 throw std::invalid_argument("Managed assembly graph contains a missing or duplicate asset ID.");
             ManagedAssemblyAsset::Validate(assembly.Definition);
-            if (!names.insert(assembly.Definition.Name).second)
+            auto foldedName = assembly.Definition.Name;
+            std::ranges::transform(foldedName, foldedName.begin(), [](const unsigned char character)
+                                   { return static_cast<char>(std::tolower(character)); });
+            if (!names.insert(foldedName).second)
                 throw std::invalid_argument("Managed assembly names must be unique.");
         }
 
@@ -262,7 +298,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.ManagedAssembly";
-        result.Version = 2;
+        result.Version = 4;
         result.Type = ManagedAssemblyAsset::StaticType();
         result.Extensions = {".keireasm"};
         result.ContextualImport = [](const AssetImportContext&, const std::span<const std::byte> bytes)

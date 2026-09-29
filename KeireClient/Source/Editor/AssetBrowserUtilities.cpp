@@ -1,4 +1,6 @@
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
+#include "Keire/Scripting/ManagedAssemblyReferenceAsset.h"
+#include "KeireInternal/FileSystem.h"
 
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 
@@ -354,7 +356,7 @@ namespace KeireEditor
             return "Managed Data";
         if (extension == ".keireprefab")
             return "Prefab";
-        if (extension == ".keireasm")
+        if (extension == ".keireasm" || extension == ".asmref")
             return "Managed Assembly";
         if (extension == ".cs")
             return "C# Script";
@@ -372,6 +374,8 @@ namespace KeireEditor
             return AssetBrowserOpenAction::InputActions;
         if (extension == ".keireanimgraph")
             return AssetBrowserOpenAction::AnimationGraph;
+        if (extension == ".keireanim")
+            return AssetBrowserOpenAction::AnimationClip;
         if (extension == ".keiremixer")
             return AssetBrowserOpenAction::AudioMixer;
         if (extension == ".keirevfx")
@@ -448,6 +452,47 @@ namespace KeireEditor
         return result;
     }
 
+    std::vector<ManagedScriptAssemblyCandidate>
+    ReadManagedScriptAssemblies(const std::filesystem::path& projectRoot,
+                                const std::span<const Keire::AssetSourceRecord> records)
+    {
+        std::vector<ManagedScriptAssemblyCandidate> result;
+        const auto read = [&](const auto& record)
+        { return Keire::Detail::ReadTextFile(projectRoot / "Assets" / record.RelativePath, 1024U * 1024U); };
+        for (const auto& record : records)
+        {
+            if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
+                continue;
+            const auto text = read(record);
+            auto definition = Keire::ManagedAssemblyAsset::Decode(std::as_bytes(std::span(text)))->Definition();
+            if (definition.SourceRoots.empty())
+                definition.SourceRoots = {std::filesystem::path("Assets") / record.RelativePath.parent_path()};
+            result.push_back({record.Id, std::move(definition)});
+        }
+        for (const auto& record : records)
+        {
+            if (record.Type != Keire::ManagedAssemblyReferenceAsset::StaticType())
+                continue;
+            const auto text = read(record);
+            const auto reference =
+                Keire::ManagedAssemblyReferenceAsset::Decode(std::as_bytes(std::span(text)))->Reference();
+            const auto target =
+                std::ranges::find_if(result,
+                                     [&](const auto& assembly)
+                                     {
+                                         return reference.starts_with("GUID:")
+                                                    ? assembly.Asset == Keire::AssetId::Parse(reference.substr(5))
+                                                    : assembly.Definition.Name == reference;
+                                     });
+            if (target == result.end())
+                throw std::invalid_argument(
+                    "Select a valid target for the assembly reference before creating scripts.");
+            target->Definition.SourceRoots.push_back(std::filesystem::path("Assets") /
+                                                     record.RelativePath.parent_path());
+        }
+        return result;
+    }
+
     ManagedScriptPlacement
     ResolveManagedScriptPlacement(const std::span<const ManagedScriptAssemblyCandidate> assemblies,
                                   const std::filesystem::path& selectedAssetFolder)
@@ -460,18 +505,11 @@ namespace KeireEditor
         const auto selectedRoot = (std::filesystem::path("Assets") / normalizedFolder).lexically_normal();
         const ManagedScriptAssemblyCandidate* covering = nullptr;
         std::size_t coveringLength = 0;
-        const ManagedScriptAssemblyCandidate* descendant = nullptr;
-        std::filesystem::path descendantRoot;
-        const ManagedScriptAssemblyCandidate* runtime = nullptr;
         for (const auto& candidate : assemblies)
         {
             if (!candidate.Asset)
                 throw std::invalid_argument("Managed script placement requires valid assembly identities.");
             Keire::ManagedAssemblyAsset::Validate(candidate.Definition);
-            if (candidate.Definition.Classification == Keire::ManagedAssemblyClassification::Runtime &&
-                (!runtime || std::tie(candidate.Definition.Name, candidate.Asset) <
-                                 std::tie(runtime->Definition.Name, runtime->Asset)))
-                runtime = &candidate;
             for (const auto& root : candidate.Definition.SourceRoots)
             {
                 const auto normalizedRoot = root.lexically_normal();
@@ -485,22 +523,12 @@ namespace KeireEditor
                         coveringLength = length;
                     }
                 }
-                else if (SameOrChild(selectedRoot, normalizedRoot) &&
-                         (!descendant || normalizedRoot.generic_string() < descendantRoot.generic_string() ||
-                          (normalizedRoot == descendantRoot && candidate.Asset < descendant->Asset)))
-                {
-                    descendant = &candidate;
-                    descendantRoot = normalizedRoot;
-                }
             }
         }
 
         if (covering)
             return {covering->Asset, covering->Definition.RootNamespace, {}};
-        const auto* selected = descendant ? descendant : runtime;
-        if (!selected)
-            throw std::runtime_error("Create a runtime .keireasm asset before creating a C# script.");
-        return {selected->Asset, selected->Definition.RootNamespace, selectedRoot};
+        return {{}, "Game", {}};
     }
 
     std::string BuildManagedScriptSource(const ManagedScriptTemplateKind kind, const std::string_view rootNamespace,

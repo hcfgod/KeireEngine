@@ -157,6 +157,11 @@ namespace KeireEditor
                                                                  std::span<const std::byte> bytes) = 0;
         virtual void PersistInspectorProceduralMotionProfile(Keire::AssetId asset,
                                                              std::span<const std::byte> bytes) = 0;
+        virtual void PersistInspectorManagedAssembly(Keire::AssetId, std::span<const std::byte>,
+                                                     std::span<const std::byte>)
+        {
+            throw std::logic_error("Managed assembly persistence is unavailable.");
+        }
         virtual void ApplyInspectorImportSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) = 0;
         virtual void ImportInspectorAssets() = 0;
         virtual void PreviewInspectorManagedData(Keire::AssetId asset,
@@ -270,6 +275,8 @@ namespace KeireEditor
         std::string m_Search;
     };
 
+    class ManagedAssemblyInspectorPanel;
+
     class AssetInspectorPanel final
     {
       public:
@@ -282,6 +289,7 @@ namespace KeireEditor
         IInspectorController& m_Controller;
         std::unique_ptr<AssetPicker> m_AssetPicker;
         std::unique_ptr<ManagedDataInspectorPanel> m_ManagedDataInspector;
+        std::unique_ptr<ManagedAssemblyInspectorPanel> m_ManagedAssemblyInspector;
         std::unique_ptr<ThumbnailService> m_Thumbnails;
         Keire::Ref<Keire::UiImage> m_PreviewImage;
         Keire::AssetId m_EditingAsset;

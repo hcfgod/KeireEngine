@@ -1,7 +1,9 @@
 #include "KeireClient/Editor/ManagedRuntimeSessionResolver.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClient/Editor/ScenePlayChanges.h"
 
 #include "Keire/Assets/AssetSystem.h"
+#include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scenes/SceneRuntimeWorld.h"
@@ -9,10 +11,49 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
+
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+TEST_CASE("Play change review distinguishes left and right arm IK from component enabled")
+{
+    const auto asset = Keire::AssetId::Generate();
+    const auto editing = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("IK review"));
+    auto entity = editing->CreateEntity("Character");
+    const auto authored = entity.AddComponent<Keire::AnimatorComponent>();
+    const auto runtime = Keire::CreateRef<Keire::Scene>(asset, editing->Snapshot());
+    const auto animator = runtime->FindEntity(entity.Id()).GetComponent<Keire::AnimatorComponent>();
+    auto left = animator->LeftArmIk();
+    left.Enabled = true;
+    animator->SetLeftArmIk(left);
+    auto right = animator->RightArmIk();
+    right.Enabled = true;
+    animator->SetRightArmIk(right);
+    animator->SetEnabled(false);
+    KeireEditor::ScenePlayChangeSet changes(editing, runtime);
+    REQUIRE(changes.Changes().size() == 3);
+    const auto findLabel = [&](const std::string& label)
+    { return std::ranges::find(changes.Changes(), label, &KeireEditor::ScenePlayChange::Label); };
+    CHECK(findLabel("Enabled") != changes.Changes().end());
+    CHECK(findLabel("Left Arm IK / Enabled") != changes.Changes().end());
+    const auto rightChange = findLabel("Right Arm IK / Enabled");
+    REQUIRE(rightChange != changes.Changes().end());
+    CHECK(rightChange->Property == "rightArmIkEnabled");
+    changes.SetSelected(rightChange->Id, true);
+    const auto restored = Keire::CreateRef<Keire::Scene>(asset, changes.BuildAppliedDefinition());
+    const auto kept = restored->FindEntity(entity.Id()).GetComponent<Keire::AnimatorComponent>();
+    REQUIRE(kept);
+    CHECK(kept->RightArmIk().Enabled);
+    CHECK_FALSE(kept->LeftArmIk().Enabled);
+    CHECK(kept->Enabled());
+    CHECK_FALSE(authored->RightArmIk().Enabled);
+    restored->Close();
+    runtime->Close();
+    editing->Close();
+}
 
 namespace
 {

@@ -100,6 +100,25 @@ TEST_CASE("Rig inference recognizes quadruped legs and tail without changing ske
                               [](const Keire::RigChainDefinition& chain) { return chain.Name == "Right Rear Leg"; }));
 }
 
+TEST_CASE("Quadruped rig inference maps DCC arms and numbered rear legs")
+{
+    const Keire::SkeletonAsset skeleton(
+        {Bone("Root", -1), Bone("b_LeftUpperArm_09", 0), Bone("b_LeftForeArm_010", 1), Bone("b_LeftHand_011", 2),
+         Bone("b_RightUpperArm_06", 0), Bone("b_RightForeArm_07", 4), Bone("b_RightHand_08", 5),
+         Bone("b_LeftLeg01_015", 0), Bone("b_LeftLeg02_016", 7), Bone("b_LeftFoot01_017", 8),
+         Bone("b_LeftFoot02_018", 9), Bone("b_RightLeg01_019", 0), Bone("b_RightLeg02_020", 11),
+         Bone("b_RightFoot01_021", 12)});
+    const auto rig = Keire::InferRigDefinition(skeleton, Keire::RigProfileType::Quadruped);
+    REQUIRE(rig.Chains.size() == 4);
+    REQUIRE(FindSemantic(rig, Keire::RigBoneSemantic::LeftRearUpperLeg));
+    CHECK(FindSemantic(rig, Keire::RigBoneSemantic::LeftRearUpperLeg)->Name == "b_LeftLeg01_015");
+    REQUIRE(FindSemantic(rig, Keire::RigBoneSemantic::LeftRearFoot));
+    CHECK(FindSemantic(rig, Keire::RigBoneSemantic::LeftRearFoot)->Name == "b_LeftFoot01_017");
+    REQUIRE(FindSemantic(rig, Keire::RigBoneSemantic::RightFrontLowerLeg));
+    CHECK(FindSemantic(rig, Keire::RigBoneSemantic::RightFrontLowerLeg)->Name == "b_RightForeArm_07");
+    CHECK(rig.Bones[10].Semantic == Keire::RigBoneSemantic::None);
+}
+
 TEST_CASE("Rig inference recognizes non-Mixamo anatomical and DCC side conventions")
 {
     const Keire::SkeletonAsset skeleton({Bone("Root", -1), Bone("Pelvis", 0), Bone("Bip01 L Femur", 1),
@@ -150,4 +169,22 @@ TEST_CASE("Rig inference rejects unsupported influence counts")
     CHECK_THROWS_AS(static_cast<void>(Keire::InferRigDefinition(skeleton, Keire::RigProfileType::Humanoid,
                                                                 Keire::SkinningMethod::LinearBlend, 6)),
                     std::invalid_argument);
+}
+
+TEST_CASE("Custom rig inference preserves authored bones without humanoid guesses")
+{
+    const Keire::SkeletonAsset skeleton(
+        {Bone("Root", -1), Bone("Hips", 0), Bone("LeftArm", 1), Bone("LeftForeArm", 2), Bone("LeftHand", 3)});
+    const auto rig = Keire::InferRigDefinition(skeleton, Keire::RigProfileType::Custom);
+    CHECK(rig.Profile == Keire::RigProfileType::Custom);
+    CHECK(rig.Chains.empty());
+    REQUIRE(rig.Bones.size() == skeleton.Bones().size());
+    for (std::size_t index = 0; index < rig.Bones.size(); ++index)
+    {
+        CHECK(rig.Bones[index].Name == skeleton.Bones()[index].Name);
+        CHECK(rig.Bones[index].Parent == skeleton.Bones()[index].Parent);
+        CHECK(rig.Bones[index].BindPose == skeleton.Bones()[index].BindPose);
+        CHECK(rig.Bones[index].Semantic == Keire::RigBoneSemantic::None);
+    }
+    CHECK_NOTHROW(Keire::ValidateRigDefinition(rig));
 }

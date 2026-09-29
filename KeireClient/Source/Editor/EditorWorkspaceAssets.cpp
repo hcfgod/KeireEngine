@@ -479,6 +479,14 @@ void EditorWorkspaceLayer::OpenAssetBrowserInputActions(const Keire::AssetId ass
 
 void EditorWorkspaceLayer::OpenAssetBrowserAnimationGraph(const Keire::AssetId asset) { OpenAnimationGraph(asset); }
 
+void EditorWorkspaceLayer::OpenAssetBrowserAnimationClip(const Keire::AssetId asset)
+{
+    const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+    if (!record || record->Type != Keire::AnimationClipAsset::StaticType())
+        throw std::invalid_argument("Select an imported animation clip to preview it.");
+    m_AnimatorControllerPanel->OpenClip(asset, record->RelativePath.filename().string());
+}
+
 void EditorWorkspaceLayer::OpenAssetBrowserAudioMixer(const Keire::AssetId asset) { OpenAudioMixer(asset); }
 
 void EditorWorkspaceLayer::OpenAssetBrowserVfxEffect(const Keire::AssetId asset) { OpenVfxEffect(asset); }
@@ -804,7 +812,7 @@ void EditorWorkspaceLayer::PollAssetHotReload()
                               Keire::Detail::PathToUtf8(path), record.has_value());
             if ((path.extension() == ".cs" &&
                  m_ManagedRuntimeCoordinator->ObserveSourceChange(Owner().GetProject()->Root() / "Assets" / path)) ||
-                path.extension() == ".keireasm")
+                path.extension() == ".keireasm" || path.extension() == ".asmref" || path.extension() == ".dll")
                 m_ManagedRuntimeCoordinator->ScheduleBuild(0.1);
             if (path.extension() != ".cs")
             {

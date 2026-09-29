@@ -315,6 +315,7 @@ namespace Keire
             throw std::runtime_error("Coral could not initialize the bundled .NET 10 runtime host (status " +
                                      std::to_string(static_cast<int>(status)) + ").");
         RuntimeInitialized = true;
+        Detail::PreserveManagedHostLibrary();
     }
 
     void ScriptSystem::Impl::Unload(std::unique_ptr<Coral::AssemblyLoadContext>& context) noexcept

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/RiggingStudioValidation.h"
+#include "KeireInternal/Assets/AssetImportDrafts.h"
 
 #include <optional>
 #include <span>
@@ -40,7 +42,7 @@ namespace KeireEditor
         Keire::UiPanelRegistration m_Registration;
         Keire::AssetId m_DraftAsset;
         Keire::AssetId m_LockedAsset;
-        Keire::AssetImportSettings m_Draft;
+        Keire::Internal::AssetImportDrafts m_Drafts;
         Keire::AssetId m_SourceClip;
         Keire::Ref<const Keire::AnimationClipAsset> m_DiagnosticSourceClip;
         Keire::Ref<const Keire::SkeletonAsset> m_DiagnosticSourceSkeleton;
@@ -48,8 +50,12 @@ namespace KeireEditor
         Keire::Ref<const Keire::SkeletonAsset> m_DiagnosticTargetSkeleton;
         Keire::Ref<const Keire::RigDefinitionAsset> m_DiagnosticTargetRig;
         std::optional<Keire::AnimationRetargetDiagnostics> m_RetargetDiagnostics;
+        RetargetMappingDraft m_MappingDraft;
+        std::string m_MappingMessage;
+        bool m_MappingMessageError = false;
         std::string m_RetargetName = "RetargetedClip";
-        bool m_Dirty = false;
         std::string m_Message;
+        bool m_MessageError = false;
+        bool m_ReviewedPartialMapping = false;
     };
 } // namespace KeireEditor

@@ -83,6 +83,7 @@
 #include "Keire/Scenes/SceneRuntimeWorld.h"
 #include "Keire/Scenes/SceneSystem.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
+#include "Keire/Scripting/ManagedAssemblyReferenceAsset.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 #include "Keire/Scripting/ScriptSystem.h"
 #include "Keire/StableHandle.h"

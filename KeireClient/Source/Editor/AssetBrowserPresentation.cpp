@@ -32,6 +32,8 @@ namespace KeireEditor::Detail
             return controller.CreateAssetBrowserScript(name);
         case NamedAssetCreationKind::ScriptableObjectScript:
             return controller.CreateAssetBrowserScriptableObjectScript(name);
+        case NamedAssetCreationKind::ManagedAssemblyReference:
+            return controller.CreateAssetBrowserManagedAssemblyReference(name);
         case NamedAssetCreationKind::ManagedAssembly:
             return controller.CreateAssetBrowserManagedAssembly(name);
         case NamedAssetCreationKind::ManagedData:

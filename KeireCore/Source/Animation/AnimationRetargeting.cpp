@@ -55,10 +55,9 @@ namespace Keire
             return result;
         }
 
-        [[nodiscard]] std::uint32_t
-        LogicalBone(const SkeletonAsset& skeleton,
-                    const std::unordered_map<std::string_view, std::uint32_t>& bonesByName,
-                    const std::uint32_t bone)
+        [[nodiscard]] std::uint32_t LogicalBone(const SkeletonAsset& skeleton,
+                                                const std::unordered_map<std::string_view, std::uint32_t>& bonesByName,
+                                                const std::uint32_t bone)
         {
             const auto& name = skeleton.Bones()[bone].Name;
             if (!IsFbxHelper(name))
@@ -92,8 +91,7 @@ namespace Keire
 
         [[nodiscard]] float LogicalTranslationScale(const SkeletonAsset& sourceSkeleton,
                                                     const std::span<const Matrix4> sourceBindModels,
-                                                    const std::uint32_t sourceBone,
-                                                    const SkeletonAsset& targetSkeleton,
+                                                    const std::uint32_t sourceBone, const SkeletonAsset& targetSkeleton,
                                                     const std::span<const Matrix4> targetBindModels,
                                                     const std::uint32_t targetBone)
         {
@@ -103,10 +101,10 @@ namespace Keire
             Vector3 targetTranslation;
             Quaternion targetRotation;
             Vector3 targetScale;
-            const auto sourceRelative = RelativeTransform(sourceBindModels, LogicalParent(sourceSkeleton, sourceBone),
-                                                          sourceBone);
-            const auto targetRelative = RelativeTransform(targetBindModels, LogicalParent(targetSkeleton, targetBone),
-                                                          targetBone);
+            const auto sourceRelative =
+                RelativeTransform(sourceBindModels, LogicalParent(sourceSkeleton, sourceBone), sourceBone);
+            const auto targetRelative =
+                RelativeTransform(targetBindModels, LogicalParent(targetSkeleton, targetBone), targetBone);
             if (!Math::DecomposeTransform(sourceRelative, sourceTranslation, sourceRotation, sourceScale) ||
                 !Math::DecomposeTransform(targetRelative, targetTranslation, targetRotation, targetScale))
             {
@@ -131,8 +129,8 @@ namespace Keire
             if (const auto exactLogical = targetByName.find(logicalName); exactLogical != targetByName.end())
             {
                 result.TargetLogicalBone = exactLogical->second;
-                result.Match = IsFbxHelper(sourceName) ? AnimationRetargetMatch::Hierarchy
-                                                       : AnimationRetargetMatch::ExactName;
+                result.Match =
+                    IsFbxHelper(sourceName) ? AnimationRetargetMatch::Hierarchy : AnimationRetargetMatch::ExactName;
                 return result;
             }
             if (const auto exact = targetByName.find(sourceName); exact != targetByName.end())
@@ -158,6 +156,8 @@ namespace Keire
         {
             switch (match)
             {
+            case AnimationRetargetMatch::Manual:
+                return 4;
             case AnimationRetargetMatch::ExactName:
                 return 3;
             case AnimationRetargetMatch::Hierarchy:
@@ -217,6 +217,15 @@ namespace Keire
                                                               const SkeletonAsset& targetSkeleton,
                                                               const RigDefinition& targetRig)
     {
+        return DiagnoseAnimationRetargeting(sourceSkeleton, sourceRig, sourceClip, targetSkeleton, targetRig, {});
+    }
+
+    AnimationRetargetDiagnostics
+    DiagnoseAnimationRetargeting(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
+                                 const AnimationClipAsset& sourceClip, const SkeletonAsset& targetSkeleton,
+                                 const RigDefinition& targetRig,
+                                 const std::span<const AnimationRetargetOverride> overrides)
+    {
         ValidateRigDefinition(sourceRig);
         ValidateRigDefinition(targetRig);
         if (sourceSkeleton.Bones().size() != sourceRig.Bones.size() ||
@@ -227,6 +236,22 @@ namespace Keire
 
         const auto sourceByName = BoneIndicesByName(sourceSkeleton);
         const auto targetByName = BoneIndicesByName(targetSkeleton);
+        std::unordered_map<std::uint32_t, std::uint32_t> manualTargets;
+        for (const auto& binding : overrides)
+        {
+            const auto source = sourceByName.find(binding.SourceBone);
+            const auto target = targetByName.find(binding.TargetBone);
+            if (source == sourceByName.end() || target == targetByName.end())
+                throw std::invalid_argument("Retarget override references an unknown source or target bone: '" +
+                                            binding.SourceBone + "' -> '" + binding.TargetBone + "'.");
+            const auto logicalSource = LogicalBone(sourceSkeleton, sourceByName, source->second);
+            const auto logicalTarget = LogicalBone(targetSkeleton, targetByName, target->second);
+            if (manualTargets.contains(logicalSource) ||
+                std::ranges::any_of(manualTargets,
+                                    [logicalTarget](const auto& entry) { return entry.second == logicalTarget; }))
+                throw std::invalid_argument("Retarget overrides must assign each source and target bone only once.");
+            manualTargets.emplace(logicalSource, logicalTarget);
+        }
         std::unordered_map<RigBoneSemantic, std::uint32_t> targetBySemantic;
         for (std::uint32_t index = 0; index < targetRig.Bones.size(); ++index)
             if (targetRig.Bones[index].Semantic != RigBoneSemantic::None)
@@ -261,8 +286,13 @@ namespace Keire
             }
 
             mapping.SourceName = sourceSkeleton.Bones()[sourceTrack.Bone].Name;
-            const auto resolution = ResolveTrack(sourceSkeleton, sourceRig, sourceByName, sourceTrack, targetSkeleton,
-                                                 targetByName, targetBySemantic);
+            auto resolution = ResolveTrack(sourceSkeleton, sourceRig, sourceByName, sourceTrack, targetSkeleton,
+                                           targetByName, targetBySemantic);
+            if (const auto manual = manualTargets.find(resolution.SourceLogicalBone); manual != manualTargets.end())
+            {
+                resolution.TargetLogicalBone = manual->second;
+                resolution.Match = AnimationRetargetMatch::Manual;
+            }
             sourceLogicalBones.push_back(resolution.SourceLogicalBone);
             mapping.Semantic = sourceRig.Bones[resolution.SourceLogicalBone].Semantic;
             mapping.Match = resolution.Match;
@@ -277,9 +307,9 @@ namespace Keire
 
             mapping.TargetBone = resolution.TargetLogicalBone;
             mapping.TargetName = targetSkeleton.Bones()[*resolution.TargetLogicalBone].Name;
-            mapping.TranslationScale = LogicalTranslationScale(
-                sourceSkeleton, sourceBindModels, resolution.SourceLogicalBone, targetSkeleton, targetBindModels,
-                *resolution.TargetLogicalBone);
+            mapping.TranslationScale =
+                LogicalTranslationScale(sourceSkeleton, sourceBindModels, resolution.SourceLogicalBone, targetSkeleton,
+                                        targetBindModels, *resolution.TargetLogicalBone);
             const auto& sourceBind = sourceSkeleton.Bones()[sourceTrack.Bone].BindPose;
             for (const auto& key : sourceTrack.Keys)
             {
@@ -296,8 +326,8 @@ namespace Keire
             }
 
             const auto priority = MatchPriority(mapping.Match);
-            if (const auto accepted = acceptedTargets.find(*mapping.TargetBone); accepted != acceptedTargets.end() &&
-                accepted->second.Source != resolution.SourceLogicalBone)
+            if (const auto accepted = acceptedTargets.find(*mapping.TargetBone);
+                accepted != acceptedTargets.end() && accepted->second.Source != resolution.SourceLogicalBone)
             {
                 if (priority > accepted->second.Priority)
                 {
@@ -321,7 +351,7 @@ namespace Keire
                 result.Messages.push_back({RigDiagnosticSeverity::Warning, "KEIRERETARGET0003",
                                            "Multiple source bone groups resolve to target bone '" +
                                                targetSkeleton.Bones()[*resolution.TargetLogicalBone].Name +
-                                               "'; the strongest hierarchy match takes priority.",
+                                               "'; the strongest mapping takes priority.",
                                            mapping.Semantic});
             }
             else
@@ -341,6 +371,7 @@ namespace Keire
             result.ExactNameMatchCount += mapping.Match == AnimationRetargetMatch::ExactName ? 1U : 0U;
             result.HierarchyMatchCount += mapping.Match == AnimationRetargetMatch::Hierarchy ? 1U : 0U;
             result.SemanticMatchCount += mapping.Match == AnimationRetargetMatch::Semantic ? 1U : 0U;
+            result.ManualMatchCount += mapping.Match == AnimationRetargetMatch::Manual ? 1U : 0U;
         }
         if (usedHierarchyMapping)
         {
@@ -368,8 +399,18 @@ namespace Keire
                                          const AnimationClipAsset& sourceClip, const AssetId targetSkeletonId,
                                          const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig)
     {
+        return RetargetAnimationClipWithDiagnostics(sourceSkeleton, sourceRig, sourceClip, targetSkeletonId,
+                                                    targetSkeleton, targetRig, {});
+    }
+
+    AnimationRetargetResult
+    RetargetAnimationClipWithDiagnostics(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
+                                         const AnimationClipAsset& sourceClip, const AssetId targetSkeletonId,
+                                         const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig,
+                                         const std::span<const AnimationRetargetOverride> overrides)
+    {
         auto diagnostics =
-            DiagnoseAnimationRetargeting(sourceSkeleton, sourceRig, sourceClip, targetSkeleton, targetRig);
+            DiagnoseAnimationRetargeting(sourceSkeleton, sourceRig, sourceClip, targetSkeleton, targetRig, overrides);
         if (!diagnostics.Compatible())
             throw std::invalid_argument("Retargeting found no compatible semantic bone tracks.");
 
@@ -442,20 +483,21 @@ namespace Keire
                     if (!Math::DecomposeTransform(sourceDelta, deltaTranslation, deltaRotation, deltaScale))
                         throw std::runtime_error("Animation retargeting produced a non-decomposable source delta.");
                     deltaTranslation = RiggingDetail::Multiply(deltaTranslation, entry.TranslationScale);
-                    sourceDelta = Math::ComposeTransform(deltaTranslation, deltaRotation, SafeRelativeScale(deltaScale));
+                    sourceDelta =
+                        Math::ComposeTransform(deltaTranslation, deltaRotation, SafeRelativeScale(deltaScale));
 
                     const auto targetBindRelative = RelativeTransform(targetBindModels, targetParent, entry.Target);
                     const auto desiredRelative = Math::Multiply(targetBindRelative, sourceDelta);
-                    const auto desiredModel = targetParent < 0
-                                                  ? desiredRelative
-                                                  : Math::Multiply(targetModels[static_cast<std::size_t>(targetParent)],
-                                                                   desiredRelative);
+                    const auto desiredModel =
+                        targetParent < 0
+                            ? desiredRelative
+                            : Math::Multiply(targetModels[static_cast<std::size_t>(targetParent)], desiredRelative);
                     const auto immediateParent = targetSkeleton.Bones()[target].Parent;
-                    const auto local = immediateParent < 0
-                                           ? desiredModel
-                                           : Math::Multiply(
-                                                 Math::Inverse(targetModels[static_cast<std::size_t>(immediateParent)]),
-                                                 desiredModel);
+                    const auto local =
+                        immediateParent < 0
+                            ? desiredModel
+                            : Math::Multiply(Math::Inverse(targetModels[static_cast<std::size_t>(immediateParent)]),
+                                             desiredModel);
                     if (!Math::DecomposeTransform(local, targetPose[target].Translation, targetPose[target].Rotation,
                                                   targetPose[target].Scale))
                     {
@@ -467,9 +509,8 @@ namespace Keire
                 const auto& pose = targetPose[target];
                 const auto local = Math::ComposeTransform(pose.Translation, pose.Rotation, pose.Scale);
                 const auto parent = targetSkeleton.Bones()[target].Parent;
-                targetModels[target] = parent < 0
-                                           ? local
-                                           : Math::Multiply(targetModels[static_cast<std::size_t>(parent)], local);
+                targetModels[target] =
+                    parent < 0 ? local : Math::Multiply(targetModels[static_cast<std::size_t>(parent)], local);
             }
         }
 
@@ -483,10 +524,8 @@ namespace Keire
     }
 
     Ref<AnimationClipAsset> RetargetAnimationClip(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
-                                                  const AnimationClipAsset& sourceClip,
-                                                  const AssetId targetSkeletonId,
-                                                  const SkeletonAsset& targetSkeleton,
-                                                  const RigDefinition& targetRig)
+                                                  const AnimationClipAsset& sourceClip, const AssetId targetSkeletonId,
+                                                  const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig)
     {
         return RetargetAnimationClipWithDiagnostics(sourceSkeleton, sourceRig, sourceClip, targetSkeletonId,
                                                     targetSkeleton, targetRig)

@@ -268,6 +268,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool CreateAssetBrowserScript(std::string_view name) override;
     bool CreateAssetBrowserScriptableObjectScript(std::string_view name) override;
     bool CreateAssetBrowserManagedAssembly(std::string_view name) override;
+    bool CreateAssetBrowserManagedAssemblyReference(std::string_view name) override;
     bool CreateAssetBrowserManagedData(Keire::ManagedTypeId type, std::string_view name) override;
     bool CreateAssetBrowserAudioMixer(std::string_view name) override;
     bool CreateAssetBrowserPhysicsMaterial(std::string_view name) override;
@@ -293,6 +294,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
                             std::string name, bool revealResult) override;
     void OpenAssetBrowserInputActions(Keire::AssetId asset) override;
     void OpenAssetBrowserAnimationGraph(Keire::AssetId asset) override;
+    void OpenAssetBrowserAnimationClip(Keire::AssetId asset) override;
     void OpenAssetBrowserAudioMixer(Keire::AssetId asset) override;
     void OpenAssetBrowserVfxEffect(Keire::AssetId asset) override;
     void OpenAssetBrowserUiDocument(Keire::AssetId asset) override;
@@ -369,6 +371,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void FinishInspectorMaterialInstanceEdit() override;
     void PersistInspectorMaterialParameterCollection(Keire::AssetId asset, std::span<const std::byte> bytes) override;
     void PersistInspectorProceduralMotionProfile(Keire::AssetId asset, std::span<const std::byte> bytes) override;
+    void PersistInspectorManagedAssembly(Keire::AssetId asset, std::span<const std::byte> bytes,
+                                         std::span<const std::byte> expected) override;
     void ApplyInspectorImportSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) override;
     void ImportInspectorAssets() override;
     void PreviewInspectorManagedData(Keire::AssetId asset, const Keire::ManagedDataDefinition& definition) override;

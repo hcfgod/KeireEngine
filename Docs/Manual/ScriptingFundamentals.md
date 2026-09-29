@@ -4,21 +4,23 @@ Kéire's managed API is intentionally familiar to Unity users: gameplay types de
 components, fields appear in the Inspector, and callbacks cover frame, fixed-step, collision, animation, enable, and
 teardown phases. The implementation uses validated value handles rather than exposing native pointers.
 
-## Create A Managed Assembly
+## Create A Script
 
-Use the Project panel to create a **Managed Assembly** and a **C# Script** below one of its source roots. A minimal
-runtime assembly definition is:
+Create a **C# Script** anywhere under `Assets`; the built-in `Assembly-CSharp` compiles it automatically.
+For an optional custom boundary, create a **Managed Assembly** in the folder that should own those scripts. A minimal
+custom runtime assembly definition is:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "name": "MyGame",
   "rootNamespace": "MyGame",
   "classification": "runtime",
-  "sourceRoots": ["Assets/Scripts/Runtime"],
+  "sourceRoots": [],
   "references": [],
   "packages": [],
   "defineSymbols": [],
+  "autoReferenced": true,
   "allowUnsafe": false
 }
 ```
@@ -28,7 +30,7 @@ only complete immutable generations. A failed candidate never replaces the last 
 
 ## A Complete Behaviour
 
-Save this as `Mover.cs` below the assembly's runtime source root. The stable IDs are persistence identities: generate
+Save this as `Mover.cs` anywhere under `Assets` outside an Editor folder. The stable IDs are persistence identities: generate
 new UUIDs for your own types and fields, then keep them unchanged.
 
 ```csharp

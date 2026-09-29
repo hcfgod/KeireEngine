@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -13,24 +14,32 @@ namespace Keire
     namespace
     {
         [[nodiscard]] std::string AssemblySourceDigest(const std::filesystem::path& projectRoot,
-                                                       const ManagedAssemblyDefinition& assembly)
+                                                       const ManagedAssemblyGraphEntry& assembly)
         {
             std::vector<std::filesystem::path> sources;
-            for (const auto& root : assembly.SourceRoots)
+            if (assembly.SourceFiles)
             {
-                const auto directory = projectRoot / root;
-                if (!std::filesystem::exists(directory))
-                    continue;
-                for (const auto& entry : std::filesystem::recursive_directory_iterator(directory))
-                    if (entry.is_regular_file() && entry.path().extension() == ".cs")
-                        sources.push_back(entry.path());
+                for (const auto& source : *assembly.SourceFiles)
+                    sources.push_back(projectRoot / source);
             }
+            else
+                for (const auto& root : assembly.Definition.SourceRoots)
+                {
+                    const auto directory = projectRoot / root;
+                    if (!std::filesystem::exists(directory))
+                        continue;
+                    for (const auto& entry : std::filesystem::recursive_directory_iterator(directory))
+                        if (entry.is_regular_file() && entry.path().extension() == ".cs")
+                            sources.push_back(entry.path());
+                }
+            for (const auto& dll : assembly.PrecompiledFiles)
+                sources.push_back(projectRoot / dll);
             std::ranges::sort(sources);
             std::string identity;
             for (const auto& source : sources)
             {
                 const auto path = source.lexically_relative(projectRoot).generic_u8string();
-                const auto bytes = Detail::ReadTextFile(source, std::size_t{16} << 20U);
+                const auto bytes = Detail::ReadTextFile(source, std::size_t{64} << 20U);
                 identity += std::to_string(path.size()) + ":";
                 identity.append(reinterpret_cast<const char*>(path.data()), path.size());
                 identity += Detail::DigestToString(Detail::Sha256(std::as_bytes(std::span(bytes))));
@@ -186,8 +195,7 @@ namespace Keire
                 // Package updates and source restores can preserve old timestamps. Changing the project when source
                 // bytes change prevents MSBuild from silently reusing the previous assembly in that case.
                 WriteText(projectDirectory / (assembly.Definition.Name + ".csproj"),
-                          text + "<!-- Keire source digest: " + AssemblySourceDigest(ProjectRoot, assembly.Definition) +
-                              " -->\n");
+                          text + "<!-- Keire source digest: " + AssemblySourceDigest(ProjectRoot, assembly) + " -->\n");
                 buildIdentity += std::to_string(text.size()) + ":" + text;
             }
             const auto aggregatorPath = projectDirectory / "Keire.Managed.Build.csproj";
@@ -261,6 +269,37 @@ namespace Keire
             if (cancellation.stop_requested())
                 throw ManagedBuildState::Cancelled;
             const auto& active = staging;
+            std::vector<std::filesystem::path> runtimeAssemblies;
+            std::vector<std::filesystem::path> editorAssemblies;
+            std::set<std::filesystem::path> runtimePlugins, editorPlugins;
+            for (const auto& assembly : request.Assemblies)
+                for (const auto& plugin : assembly.PrecompiledFiles)
+                {
+                    const auto path = active / "Assemblies" / plugin.filename();
+                    if (assembly.Definition.Classification == ManagedAssemblyClassification::Runtime)
+                        runtimePlugins.insert(path);
+                    else if (assembly.Definition.Classification == ManagedAssemblyClassification::Editor)
+                        editorPlugins.insert(path);
+                }
+            runtimeAssemblies.assign(runtimePlugins.begin(), runtimePlugins.end());
+            for (const auto& plugin : editorPlugins)
+                if (!runtimePlugins.contains(plugin))
+                    editorAssemblies.push_back(plugin);
+            std::set<AssetId> visited;
+            const auto appendAssembly = [&](const auto& self, const ManagedAssemblyGraphEntry& assembly) -> void
+            {
+                if (!visited.insert(assembly.Asset).second)
+                    return;
+                for (const auto reference : assembly.Definition.References)
+                    self(self, *std::ranges::find(request.Assemblies, reference, &ManagedAssemblyGraphEntry::Asset));
+                const auto path = active / "Assemblies" / (assembly.Definition.Name + ".dll");
+                if (assembly.Definition.Classification == ManagedAssemblyClassification::Runtime)
+                    runtimeAssemblies.push_back(path);
+                else if (assembly.Definition.Classification == ManagedAssemblyClassification::Editor)
+                    editorAssemblies.push_back(path);
+            };
+            for (const auto& assembly : request.Assemblies)
+                appendAssembly(appendAssembly, assembly);
             Detail::WriteTextFileAtomically(OutputRoot / "active-generation.json",
                                             "{\"generation\":" + std::to_string(operation.Value()) +
                                                 ",\"directory\":\"" +
@@ -273,6 +312,8 @@ namespace Keire
                 Status.ManagedEditorApiAssembly =
                     ManagedEditorApi.empty() ? std::filesystem::path{} : generationManagedEditorApi;
                 Status.Generation = operation.Value();
+                Status.RuntimeAssemblies = std::move(runtimeAssemblies);
+                Status.EditorAssemblies = std::move(editorAssemblies);
                 Status.Elapsed =
                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
                 Status.State = ManagedBuildState::Succeeded;

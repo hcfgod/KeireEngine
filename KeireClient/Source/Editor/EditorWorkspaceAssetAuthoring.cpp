@@ -244,10 +244,17 @@ void EditorWorkspaceLayer::GenerateManagedIdeWorkspace()
             continue;
         const auto assembly =
             Keire::ManagedAssemblyAsset::Decode(ReadBytes(projectRoot / "Assets" / record.RelativePath));
-        request.Assemblies.push_back({record.Id, assembly->Definition()});
+        request.Assemblies.push_back(
+            {record.Id, assembly->Definition(), std::filesystem::path("Assets") / record.RelativePath});
     }
-    if (request.Assemblies.empty())
-        throw std::runtime_error("Create a managed assembly before opening a C# project.");
+    Keire::ManagedAssemblyBuildContext context;
+    const auto profiles =
+        m_PlayerBuildSettingsLoaded ? m_PlayerBuildProfiles : Keire::LoadPlayerBuildProfiles(projectRoot);
+    const auto target = Keire::FindPlayerBuildProfile(profiles, profiles.ActiveProfile).Platform;
+    context.Platform = target == Keire::PlayerPlatform::Windows ? "Windows"
+                       : target == Keire::PlayerPlatform::Linux ? "Linux"
+                                                                : "macOS";
+    request.Assemblies = Keire::ResolveProjectManagedAssemblies(projectRoot, request.Assemblies, context);
     const auto workspace = scripts->GenerateIdeWorkspace(request, projectRoot.filename().string());
     m_AssetStatus = "Generated Visual Studio workspace " + workspace.Solution.filename().string() + ".";
 }
@@ -280,16 +287,8 @@ bool EditorWorkspaceLayer::CreateCSharpScript(const std::string_view name, const
         if (m_AssetOperations->Busy())
             (void)m_AssetOperations->PreemptBackgroundImports();
         const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
-        std::vector<KeireEditor::ManagedScriptAssemblyCandidate> assemblies;
-        const auto projectRoot = Owner().GetProject()->Root();
-        for (const auto& record : m_AssetDatabase->Records())
-        {
-            if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
-                continue;
-            const auto assembly =
-                Keire::ManagedAssemblyAsset::Decode(ReadBytes(projectRoot / "Assets" / record.RelativePath));
-            assemblies.push_back({record.Id, assembly->Definition()});
-        }
+        const auto assemblies =
+            KeireEditor::ReadManagedScriptAssemblies(Owner().GetProject()->Root(), m_AssetDatabase->Records());
         const auto placement = KeireEditor::ResolveManagedScriptPlacement(assemblies, directory);
 
         const auto destination = directory / (std::string(name) + ".cs");

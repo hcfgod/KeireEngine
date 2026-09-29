@@ -7,7 +7,9 @@
 #include "KeireClient/Editor/SceneGizmoController.h"
 #include "KeireClient/Editor/ScenePicker.h"
 #include "KeireClient/Editor/SceneViewportLayout.h"
+#include "KeireClientInternal/Editor/ScenePoseBounds.h"
 #include "KeireInternal/EditorCameraController.h"
+#include "KeireInternal/Scenes/SceneRuntimeRenderingInternal.h"
 
 #include <algorithm>
 #include <cmath>
@@ -156,6 +158,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     const auto assetSystem = m_Controller.SceneViewportAssetSystem();
     const KeireEditor::MeshBoundsResolver resolveMeshBounds = [assetSystem](const Keire::AssetId mesh)
     { return ResolveImportedMeshBounds(assetSystem, mesh); };
+    const KeireEditor::PoseBoundsResolver resolvePoseBounds = [assetSystem](const Keire::Entity& entity)
+    { return ResolveScenePoseBounds(assetSystem, entity); };
     const auto renderer = m_Controller.SceneViewportRenderer();
     const auto activeScene = document.ActiveScene();
     if (ui.WindowFocused())
@@ -334,8 +338,9 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                     if (!activeScene || !activeScene->IsOpen())
                         throw std::runtime_error("Create or open a scene before dropping meshes or materials.");
                     const auto hit = KeireEditor::PickSceneEntity(activeScene, imageRect, ui.PointerState().Position,
-                                                                  camera, resolveMeshBounds);
+                                                                  camera, resolveMeshBounds, resolvePoseBounds);
                     m_Controller.RouteSceneViewportAsset(record->Type, asset, hit, ui.PointerState().Position);
+                    m_Registration.RequestFocus();
                 }
             }
             catch (const std::exception& error)
@@ -446,13 +451,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                 Keire::ResolveRenderSurfaceSampleCount(featureSelection));
             (void)PrepareRenderSurface(m_CameraPreviewView, {previewWidth, previewHeight},
                                        m_Controller.SceneViewportDisplayScale(), effectiveRenderScale);
-            Keire::RenderCamera previewCamera;
-            previewCamera.View = Keire::Math::Inverse(sceneCamera->Transform->WorldMatrix());
-            previewCamera.Projection = sceneCamera->Camera->ProjectionMatrix(previewAspect);
-            previewCamera.ClearColor = sceneCamera->Camera->ClearColor();
-            previewCamera.NearPlane = sceneCamera->Camera->NearPlane();
-            previewCamera.FarPlane = sceneCamera->Camera->FarPlane();
-            previewCamera.FullscreenEffects = sceneCamera->Camera->FullscreenEffects();
+            const auto previewCamera = Keire::Internal::BuildPresentedSceneCamera(
+                *sceneCamera->Camera, *sceneCamera->Transform, previewAspect);
             m_CameraPreviewView->SetCamera(previewCamera);
             Keire::SceneRenderRequest renderRequest{renderScene, m_CameraPreviewView, false, environment};
             const auto& materialTime = m_Controller.SceneViewportTime();
@@ -566,7 +566,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             ui, renderScene, Keire::EntityId(document.Selection()), camera, imageRect, allowManipulation,
             pointerBlocked, [this](const std::string_view name) { m_Controller.RecordSceneViewportUndo(name); },
             resolveMeshBounds, selections, m_UiPresentation.Get(), resolveUiPanelSettings,
-            [this](const Keire::AssetId asset) { m_Controller.OpenSceneViewportUiDocument(asset); });
+            [this](const Keire::AssetId asset) { m_Controller.OpenSceneViewportUiDocument(asset); }, resolvePoseBounds);
         if (gizmo.SelectionActivated)
             m_Controller.SelectSceneViewportEntity(gizmo.Selection.Value(), ui.ControlDown());
         if (imageState.Hovered && !pointerBlocked && pointer.LeftPressed)
@@ -605,8 +605,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                 {
                     if (m_BoxSelectionAdditive)
                         document.SetSelections(m_BoxSelectionBase);
-                    const auto entities = KeireEditor::SelectSceneEntitiesInRectangle(renderScene, imageRect, selection,
-                                                                                      camera, resolveMeshBounds);
+                    const auto entities = KeireEditor::SelectSceneEntitiesInRectangle(
+                        renderScene, imageRect, selection, camera, resolveMeshBounds, resolvePoseBounds);
                     m_Controller.SetSceneViewportSelection(entities, m_BoxSelectionAdditive);
                 }
                 m_BoxSelecting = false;
@@ -628,6 +628,8 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
     const auto assets = m_Controller.SceneViewportAssetSystem();
     const KeireEditor::MeshBoundsResolver resolveMeshBounds = [assets](const Keire::AssetId mesh)
     { return ResolveImportedMeshBounds(assets, mesh); };
+    const KeireEditor::PoseBoundsResolver resolvePoseBounds = [assets](const Keire::Entity& entity)
+    { return ResolveScenePoseBounds(assets, entity); };
     const auto pointer = ui.PointerState();
     const bool viewportHovered = imageState.Hovered;
     const bool navigationRegion = viewportHovered || m_Camera->Capturing();
@@ -653,7 +655,8 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
             m_Camera->SetLockedEntity({});
         else
         {
-            const auto bounds = KeireEditor::CalculateSceneEntityBounds(selectedEntities, resolveMeshBounds);
+            const auto bounds =
+                KeireEditor::CalculateSceneEntityBounds(selectedEntities, resolveMeshBounds, resolvePoseBounds);
             if (bounds.Valid)
             {
                 const auto viewportSize = m_ViewportRect.Size();
@@ -683,7 +686,8 @@ void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Kei
                 m_Camera->ApplyFocusShortcut(selectedIds, m_Controller.SceneViewportTime().RealtimeSinceStartup());
             if (action == KeireEditor::SceneFocusShortcutAction::Frame)
             {
-                const auto bounds = KeireEditor::CalculateSceneEntityBounds(selectedEntities, resolveMeshBounds);
+                const auto bounds =
+                    KeireEditor::CalculateSceneEntityBounds(selectedEntities, resolveMeshBounds, resolvePoseBounds);
                 if (bounds.Valid)
                 {
                     const auto viewportSize = m_ViewportRect.Size();

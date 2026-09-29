@@ -1,7 +1,9 @@
 #include "KeireClient/Editor/AnimatorControllerPanel.h"
 
+#include "KeireClientInternal/Editor/AnimatorClipCreation.h"
 #include "KeireClientInternal/Editor/AnimatorControllerPanelModelInternal.h"
 #include "KeireClientInternal/Editor/AnimatorControllerPreviewInternal.h"
+#include "KeireClientInternal/Editor/StandaloneClipPreview.h"
 
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/AssetBrowserPanel.h"
@@ -46,7 +48,7 @@ namespace KeireEditor
     using AnimatorControllerPanelInternal::UniqueName;
 
     AnimatorControllerPanel::AnimatorControllerPanel(IAnimatorControllerPanelController& controller) noexcept
-        : m_Controller(controller), m_Preview(std::make_unique<PreviewState>())
+        : m_Controller(controller), m_Preview(std::make_unique<AnimatorControllerPreviewState>())
     {
     }
 
@@ -60,6 +62,9 @@ namespace KeireEditor
     void AnimatorControllerPanel::ResetTransientState() noexcept
     {
         m_Preview->Stop();
+        m_ClipPreviewDocument.reset();
+        m_AddAnimationPicker.Clear();
+        m_AssetPickers.clear();
         m_GraphCanvas.CancelInteractions();
         m_GraphCanvas.Select(std::nullopt);
         m_GraphCanvas.SelectConnection(std::nullopt);
@@ -71,21 +76,41 @@ namespace KeireEditor
         m_FocusGraph = true;
     }
 
+    void AnimatorControllerPanel::OpenClip(const Keire::AssetId clip, std::string name)
+    {
+        Keire::AnimationGraphDefinition graph;
+        std::string layer;
+        (void)AddAnimatorClipState(graph, layer, {}, clip, name);
+        auto preview = std::make_unique<AnimatorControllerDocument>();
+        preview->Open(clip, std::move(graph), {}, std::move(name));
+        m_Preview->Stop();
+        m_ClipPreviewDocument = std::move(preview);
+        m_Registration.SetVisible(true);
+        m_Registration.RequestFocus();
+    }
+
     void AnimatorControllerPanel::Draw(Keire::UiFrame& ui)
     {
         ui.SetNextWindowSize({1040.0F, 640.0F});
         auto panel = ui.BeginPanel(m_Registration);
-        if (!panel)
-        {
-            m_Preview->Stop();
-            return;
-        }
-
         auto& document = m_Controller.AnimatorControllerState();
+        auto& sceneDocument = m_Controller.AnimatorControllerSceneDocument();
+        const auto assets = m_Controller.AnimatorControllerAssets();
+        // Collapsed and inactive dock tabs still own their preview; closing the panel releases it.
+        m_Preview->Tick(m_Registration.Visible(), sceneDocument,
+                        m_ClipPreviewDocument ? *m_ClipPreviewDocument : document, assets,
+                        static_cast<bool>(m_ClipPreviewDocument));
+        if (!panel)
+            return;
+
         const auto& theme = m_Controller.AnimatorControllerTheme();
         const auto database = m_Controller.AnimatorControllerDatabase();
-        const auto assets = m_Controller.AnimatorControllerAssets();
-        auto& sceneDocument = m_Controller.AnimatorControllerSceneDocument();
+        if (m_ClipPreviewDocument)
+        {
+            if (DrawStandaloneClipPreview(ui, theme, sceneDocument, *m_ClipPreviewDocument, *m_Preview))
+                m_ClipPreviewDocument.reset();
+            return;
+        }
         if (ui.WindowFocused())
             m_Controller.ActivateAnimatorControllerHistory();
         if (!document.Asset())
@@ -168,21 +193,6 @@ namespace KeireEditor
 
         const bool playMode =
             sceneDocument.PlaySession() && sceneDocument.PlaySession()->State() != Keire::ScenePlayState::Stopped;
-        if (playMode)
-            m_Preview->Stop();
-        else if (m_Preview->Active)
-        {
-            try
-            {
-                m_Preview->Synchronize(sceneDocument, document, assets);
-            }
-            catch (const std::exception& error)
-            {
-                m_Preview->Playing = false;
-                m_Preview->Diagnostic = error.what();
-            }
-        }
-
         const auto playbackScene = sceneDocument.ActiveScene();
         const auto playbackEntity = playbackScene && sceneDocument.Selection()
                                         ? playbackScene->FindEntity(Keire::EntityId(sceneDocument.Selection()))
@@ -225,12 +235,40 @@ namespace KeireEditor
                 ui.SameLine();
                 if (ui.Button("Stop"))
                     m_Preview->Stop();
+                ui.SameLine();
+                if (ui.Button("Preview Graph"))
+                {
+                    m_Preview->PreviewLayer.clear();
+                    m_Preview->PreviewStateId.clear();
+                    m_Preview->Restart();
+                }
+                ui.SameLine();
+                if (auto selectionDisabled = ui.BeginDisabled(
+                        !HasPreviewState(document.Definition(), document.SelectedLayer(), document.SelectedState()));
+                    selectionDisabled)
+                {
+                    if (ui.Button("Preview Selected"))
+                    {
+                        m_Preview->PreviewLayer = document.SelectedLayer();
+                        m_Preview->PreviewStateId = document.SelectedState();
+                        m_Preview->Restart();
+                    }
+                }
             }
         }
 
         const Keire::AnimatorLayerDebugState* primaryPlayback = nullptr;
         if (playbackSnapshot && !playbackSnapshot->Layers.empty())
+        {
             primaryPlayback = &playbackSnapshot->Layers.front();
+            if (!playMode && !m_Preview->PreviewLayer.empty())
+            {
+                const auto layer = std::ranges::find(playbackSnapshot->Layers, m_Preview->PreviewLayer,
+                                                     &Keire::AnimatorLayerDebugState::Id);
+                if (layer != playbackSnapshot->Layers.end())
+                    primaryPlayback = &*layer;
+            }
+        }
         const float progress =
             primaryPlayback ? TimelineFraction(primaryPlayback->NormalizedTime) : m_Preview->NormalizedTime;
         const std::string stateName =
@@ -507,6 +545,46 @@ namespace KeireEditor
 
         if (auto stateMachine = ui.BeginChild("AnimatorStateMachine", {graphWidth, 0.0F}, true); stateMachine)
         {
+            if (database)
+            {
+                Keire::AssetId clip;
+                AssetPickerOptions options;
+                options.Label = "Add Animation";
+                options.EmptyLabel = "Choose an animation to add";
+                options.ExpectedType = Keire::AnimationClipAsset::StaticType();
+                options.AllowNone = false;
+                if (assets)
+                {
+                    options.ResolveType = [assets](Keire::AssetId id) { return assets->TryGetType(id); };
+                    options.ResolveDisplayName = [assets](Keire::AssetId id)
+                    {
+                        const auto metadata = assets->TryGetMetadata(id);
+                        return metadata ? metadata->DisplayName : std::string{};
+                    };
+                }
+                if (m_AddAnimationPicker.Draw(ui, database->Records(), clip, options))
+                {
+                    try
+                    {
+                        const auto record = database->Find(clip);
+                        const auto name = record ? record->RelativePath.stem().string()
+                                                 : (options.ResolveDisplayName ? options.ResolveDisplayName(clip) : "");
+                        selectedState = AddAnimatorClipState(graph, selectedLayer, m_GraphSubgraph, clip, name);
+                        selectedParameter.clear();
+                        m_FocusGraph = true;
+                        m_Message =
+                            "Added animation state. Select its scene object and choose Preview Selected to test it.";
+                        markChanged("Add Animator State");
+                    }
+                    catch (const std::exception& error)
+                    {
+                        m_Message = error.what();
+                        m_Controller.ReportAnimatorControllerError(m_Message);
+                    }
+                }
+                if (!m_AddAnimationPicker.Diagnostic().empty())
+                    ui.TextColored(theme.Error, m_AddAnimationPicker.Diagnostic());
+            }
             ui.TextColored(theme.Accent, "STATE MACHINE");
             ui.SameLine();
             auto* layer = FindLayer(graph, selectedLayer);
@@ -543,9 +621,8 @@ namespace KeireEditor
                 {
                     for (std::size_t index = 0; index < visibleStates.size(); ++index)
                     {
-                        const auto row = index / 3U;
-                        visibleStates[index]->EditorPosition = {static_cast<float>(index % 3U) * 190.0F,
-                                                                static_cast<float>(row) * 104.0F};
+                        visibleStates[index]->EditorPosition =
+                            AnimatorControllerPanelInternal::StateGridPosition(index);
                     }
                     m_FocusGraph = true;
                     markChanged("Auto Layout Animator States");
@@ -597,7 +674,7 @@ namespace KeireEditor
                         .Id = AnimatorCanvasId(state.Id, 0x414e494d4e4f4445ULL),
                         .Label = state.Name,
                         .Position = DisplayPosition(state, index),
-                        .Size = {214.0F, 86.0F},
+                        .Size = AnimatorControllerPanelInternal::StateNodeSize,
                         .Color = active  ? Keire::UiColor{0.08F, 0.48F, 0.33F, 1.0F}
                                  : entry ? Keire::UiColor{0.10F, 0.40F, 0.30F, 1.0F}
                                          : Keire::UiColor{0.10F, 0.32F, 0.52F, 1.0F},
@@ -726,7 +803,7 @@ namespace KeireEditor
             if (!layer)
             {
                 ui.DrawOverlayText({canvas.Minimum.X + 24.0F, canvas.Minimum.Y + 24.0F}, theme.MutedText,
-                                   "Create a layer, then drag animation clips here.");
+                                   "Drop clips or an animated model here to create states and a base layer.");
             }
             if (graphResult.ActivatedNode)
             {
@@ -821,7 +898,8 @@ namespace KeireEditor
                 else if (m_GraphContext->Kind == NodeGraphContextTargetKind::Background)
                 {
                     ui.TextColored(theme.Accent, "STATE MACHINE");
-                    ui.TextColored(theme.MutedText, "Drop animation clips to create states.");
+                    ui.TextColored(theme.MutedText,
+                                   "Drop clips, animation sources, or animated models to create states.");
                     ui.Separator();
                     if (ui.MenuItem("Frame All States"))
                         m_GraphCanvas.Focus(graphNodes, canvas.Size());
@@ -932,7 +1010,11 @@ namespace KeireEditor
                             if (!record)
                             {
                                 if (assets && assets->TryGetType(dropped) == Keire::AnimationClipAsset::StaticType())
-                                    appendClip(dropped, "Animation");
+                                {
+                                    const auto metadata = assets->TryGetMetadata(dropped);
+                                    appendClip(dropped, AnimatorControllerPanelInternal::ImportedClipStateName(
+                                                            metadata ? metadata->DisplayName : "", "Animation", 1));
+                                }
                                 continue;
                             }
                             if (record->Type != Keire::AnimationSourceAsset::StaticType() &&
@@ -948,9 +1030,10 @@ namespace KeireEditor
                                     continue;
                                 }
                                 ++generatedClip;
-                                auto name = record->RelativePath.stem().string();
-                                if (generatedClip > 1)
-                                    name += " " + std::to_string(generatedClip);
+                                const auto metadata = assets->TryGetMetadata(subAsset);
+                                auto name = AnimatorControllerPanelInternal::ImportedClipStateName(
+                                    metadata ? metadata->DisplayName : "", record->RelativePath.stem().string(),
+                                    generatedClip);
                                 appendClip(subAsset, std::move(name));
                             }
                         }
@@ -979,9 +1062,8 @@ namespace KeireEditor
                             state.Clip = clip.Id;
                             state.Motion.Clip = clip.Id;
                             state.SubgraphId = m_GraphSubgraph;
-                            state.EditorPosition = {
-                                graphResult.PointerGraphPosition.X + static_cast<float>(added) * 36.0F,
-                                graphResult.PointerGraphPosition.Y + static_cast<float>(added) * 28.0F};
+                            state.EditorPosition = FindFreeAnimatorStatePosition(*layer, m_GraphSubgraph, added,
+                                                                                 graphResult.PointerGraphPosition);
                             selectedState = state.Id;
                             if (entryStateId && entryStateId->empty())
                                 *entryStateId = state.Id;
@@ -1079,11 +1161,12 @@ namespace KeireEditor
                         layer->DefaultWeight = static_cast<float>(weight);
                         markChanged("Edit Animator Layer Weight");
                     }
-                    if (EditAssetReference(ui, "Avatar Mask", layer->AvatarMask, Keire::AvatarMaskAsset::StaticType(),
-                                           database, m_Message))
+                    if (EditAssetReference(ui, m_AssetPickers[layer->Id], "Avatar Mask", layer->AvatarMask,
+                                           Keire::AvatarMaskAsset::StaticType(), database, assets, m_Message))
                         markChanged("Assign Animator Avatar Mask");
                     if (layer->States.empty())
-                        ui.TextColored(theme.MutedText, "Drag animation clips onto the state machine.");
+                        ui.TextWrapped("Drag clips, animation sources, or animated models from the Project panel onto "
+                                       "the state machine. Models add one state per imported clip.");
                 }
                 else
                 {
@@ -1140,8 +1223,8 @@ namespace KeireEditor
                     }
                     if (state->Motion.Type == Keire::AnimationMotionType::Clip)
                     {
-                        if (EditAssetReference(ui, "Animation Clip", state->Motion.Clip,
-                                               Keire::AnimationClipAsset::StaticType(), database, m_Message))
+                        if (EditAssetReference(ui, m_AssetPickers[state->Id], "Animation Clip", state->Motion.Clip,
+                                               Keire::AnimationClipAsset::StaticType(), database, assets, m_Message))
                         {
                             state->Clip = state->Motion.Clip;
                             markChanged("Assign Animator State Clip");
@@ -1183,8 +1266,9 @@ namespace KeireEditor
                         for (auto& child : state->Motion.Children)
                         {
                             auto id = ui.PushId(child.Id);
-                            if (EditAssetReference(ui, "Clip", child.Clip, Keire::AnimationClipAsset::StaticType(),
-                                                   database, m_Message))
+                            if (EditAssetReference(ui, m_AssetPickers[child.Id], "Clip", child.Clip,
+                                                   Keire::AnimationClipAsset::StaticType(), database, assets,
+                                                   m_Message))
                                 markChanged("Assign Animator Blend Clip");
                             double childSpeed = child.Speed;
                             if (ui.DragScalar("Speed", childSpeed, 0.01))

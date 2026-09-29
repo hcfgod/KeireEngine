@@ -625,7 +625,8 @@ namespace KeireEditor
         const Keire::RenderCamera& camera, const Keire::UiItemRect viewport, const bool allowManipulation,
         const bool pointerBlocked, const BeginUndo& beginUndo, const MeshBoundsResolver& resolveMeshBounds,
         const std::span<const Keire::AssetId> selections, const Keire::ScenePresentationRuntime* presentation,
-        const UiPanelSettingsResolver& resolveUiPanelSettings, const OpenUiDocument& openUiDocument)
+        const UiPanelSettingsResolver& resolveUiPanelSettings, const OpenUiDocument& openUiDocument,
+        const PoseBoundsResolver& resolvePoseBounds)
     {
         if (!scene || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
             return {selected};
@@ -971,7 +972,8 @@ namespace KeireEditor
         {
             if (selectionRequested && !selectionActivated && !pointerConsumed)
             {
-                selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds);
+                selected =
+                    PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds, resolvePoseBounds);
                 selectionActivated = true;
             }
             return {selected, selectionActivated, pointerConsumed};
@@ -1168,7 +1170,8 @@ namespace KeireEditor
         {
             if (selectionRequested && !selectionActivated && !pointerConsumed)
             {
-                selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds);
+                selected =
+                    PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds, resolvePoseBounds);
                 selectionActivated = true;
             }
             return {selected, selectionActivated, pointerConsumed || m_ColliderDrag.Handle != ColliderHandle::None};
@@ -1178,7 +1181,8 @@ namespace KeireEditor
         {
             if (selectionRequested && !selectionActivated)
             {
-                selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds);
+                selected =
+                    PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds, resolvePoseBounds);
                 selectionActivated = true;
             }
             return {selected, selectionActivated, pointerConsumed};
@@ -1189,7 +1193,8 @@ namespace KeireEditor
         {
             if (selectionRequested && !selectionActivated)
             {
-                selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds);
+                selected =
+                    PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds, resolvePoseBounds);
                 selectionActivated = true;
             }
             return {selected, selectionActivated, pointerConsumed};
@@ -1304,7 +1309,7 @@ namespace KeireEditor
 
         if (selectionRequested && !selectionActivated && !pointerConsumed)
         {
-            selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds);
+            selected = PickSceneEntity(scene, viewport, pointer.Position, camera, resolveMeshBounds, resolvePoseBounds);
             selectionActivated = true;
         }
 

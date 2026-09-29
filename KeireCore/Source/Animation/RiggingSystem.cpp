@@ -384,10 +384,45 @@ namespace Keire
             const auto side = DetectBoneSide(name);
             if (side == BoneSide::None)
                 return RigBoneSemantic::None;
-            const auto front = ContainsAny(name, {"front", "fore"});
-            const auto rear = ContainsAny(name, {"rear", "hind", "back"});
+            const auto front = Contains(name, "front") || (Contains(name, "fore") && !Contains(name, "forearm"));
+            const auto rear = ContainsAny(name, {"rear", "hind", "back"}) && !Contains(name, "forearm");
             if (!front && !rear)
-                return RigBoneSemantic::None;
+            {
+                // DCC quadrupeds often name their front limbs arms and their rear
+                // limbs legs. Keep these aliases specific to the quadruped profile.
+                const auto common = ClassifyHumanoidBone(name, assigned);
+                switch (common)
+                {
+                case RigBoneSemantic::LeftUpperArm:
+                    return RigBoneSemantic::LeftFrontUpperLeg;
+                case RigBoneSemantic::RightUpperArm:
+                    return RigBoneSemantic::RightFrontUpperLeg;
+                case RigBoneSemantic::LeftLowerArm:
+                    return RigBoneSemantic::LeftFrontLowerLeg;
+                case RigBoneSemantic::RightLowerArm:
+                    return RigBoneSemantic::RightFrontLowerLeg;
+                case RigBoneSemantic::LeftHand:
+                    return RigBoneSemantic::LeftFrontFoot;
+                case RigBoneSemantic::RightHand:
+                    return RigBoneSemantic::RightFrontFoot;
+                case RigBoneSemantic::LeftUpperLeg:
+                    return RigBoneSemantic::LeftRearUpperLeg;
+                case RigBoneSemantic::RightUpperLeg:
+                    return RigBoneSemantic::RightRearUpperLeg;
+                case RigBoneSemantic::LeftFoot:
+                    return RigBoneSemantic::LeftRearFoot;
+                case RigBoneSemantic::RightFoot:
+                    return RigBoneSemantic::RightRearFoot;
+                case RigBoneSemantic::LeftLowerLeg:
+                    return Contains(name, "leg01") ? RigBoneSemantic::LeftRearUpperLeg
+                                                   : RigBoneSemantic::LeftRearLowerLeg;
+                case RigBoneSemantic::RightLowerLeg:
+                    return Contains(name, "leg01") ? RigBoneSemantic::RightRearUpperLeg
+                                                   : RigBoneSemantic::RightRearLowerLeg;
+                default:
+                    return RigBoneSemantic::None;
+                }
+            }
 
             const auto foot = ContainsAny(name, {"foot", "paw", "hoof", "ankle"});
             const auto lower = ContainsAny(name, {"lower", "calf", "shin", "foreleg", "metacarp", "metatars"});
@@ -657,6 +692,13 @@ namespace Keire
         result.Bones.reserve(skeleton.Bones().size());
         for (const auto& bone : skeleton.Bones())
             result.Bones.push_back({RigBoneSemantic::None, bone.Name, bone.Parent, bone.BindPose, false});
+
+        // Custom creatures retain their authored hierarchy without humanoid naming heuristics.
+        if (profile == RigProfileType::Custom)
+        {
+            ValidateRigDefinition(result);
+            return result;
+        }
 
         std::unordered_set<RigBoneSemantic> assigned;
         const auto inferPass = [&](const bool helpers)
@@ -979,7 +1021,6 @@ namespace Keire
         }
         return result;
     }
-
 
     AssetImporterRegistration CreateRigDefinitionAssetImporter()
     {

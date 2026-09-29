@@ -78,13 +78,17 @@ namespace KeireEditor
         }
 
         [[nodiscard]] Keire::MeshBounds BoundsForEntity(const Keire::Entity& entity,
-                                                        const MeshBoundsResolver& resolveMeshBounds)
+                                                        const MeshBoundsResolver& resolveMeshBounds,
+                                                        const PoseBoundsResolver& resolvePoseBounds = {})
         {
             constexpr Keire::MeshBounds transformBounds{{-0.15F, -0.15F, -0.15F}, {0.15F, 0.15F, 0.15F}};
             constexpr Keire::MeshBounds defaultMeshBounds{{-0.5F, -0.5F, -0.5F}, {0.5F, 0.5F, 0.5F}};
             const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
             if (!renderer || !renderer->Enabled() || !renderer->Visible())
                 return transformBounds;
+            if (resolvePoseBounds)
+                if (const auto posed = resolvePoseBounds(entity))
+                    return *posed;
             if (resolveMeshBounds && renderer->Mesh())
                 if (const auto resolved = resolveMeshBounds(renderer->Mesh()))
                     return *resolved;
@@ -109,13 +113,13 @@ namespace KeireEditor
         }
 
         void IncludeEntity(SceneEntityBounds& bounds, const Keire::Entity& entity,
-                           const MeshBoundsResolver& resolveMeshBounds)
+                           const MeshBoundsResolver& resolveMeshBounds, const PoseBoundsResolver& resolvePoseBounds)
         {
             if (!entity || !entity.ActiveInHierarchy())
                 return;
             if (const auto transform = entity.GetComponent<Keire::TransformComponent>())
             {
-                const auto local = BoundsForEntity(entity, resolveMeshBounds);
+                const auto local = BoundsForEntity(entity, resolveMeshBounds, resolvePoseBounds);
                 const auto world = transform->WorldMatrix();
                 for (int corner = 0; corner < 8; ++corner)
                 {
@@ -126,7 +130,7 @@ namespace KeireEditor
                 }
             }
             for (const auto& child : entity.Children())
-                IncludeEntity(bounds, child, resolveMeshBounds);
+                IncludeEntity(bounds, child, resolveMeshBounds, resolvePoseBounds);
         }
     } // namespace
 
@@ -171,29 +175,33 @@ namespace KeireEditor
         const float x = Maximum.X - center.X;
         const float y = Maximum.Y - center.Y;
         const float z = Maximum.Z - center.Z;
-        return std::max(std::sqrt(x * x + y * y + z * z), 0.25F);
+        const float radius = std::sqrt(x * x + y * y + z * z);
+        return radius > 0.0F ? radius : 0.25F;
     }
 
     SceneEntityBounds CalculateSceneEntityBounds(const Keire::Entity& entity,
-                                                 const MeshBoundsResolver& resolveMeshBounds)
+                                                 const MeshBoundsResolver& resolveMeshBounds,
+                                                 const PoseBoundsResolver& resolvePoseBounds)
     {
         SceneEntityBounds bounds;
-        IncludeEntity(bounds, entity, resolveMeshBounds);
+        IncludeEntity(bounds, entity, resolveMeshBounds, resolvePoseBounds);
         return bounds;
     }
 
     SceneEntityBounds CalculateSceneEntityBounds(const std::span<const Keire::Entity> entities,
-                                                 const MeshBoundsResolver& resolveMeshBounds)
+                                                 const MeshBoundsResolver& resolveMeshBounds,
+                                                 const PoseBoundsResolver& resolvePoseBounds)
     {
         SceneEntityBounds bounds;
         for (const auto& entity : entities)
-            IncludeEntity(bounds, entity, resolveMeshBounds);
+            IncludeEntity(bounds, entity, resolveMeshBounds, resolvePoseBounds);
         return bounds;
     }
 
     Keire::EntityId PickSceneEntity(const Keire::Ref<Keire::Scene>& scene, const Keire::UiItemRect viewport,
                                     const Keire::UiPosition pointer, const Keire::RenderCamera& camera,
-                                    const MeshBoundsResolver& resolveMeshBounds)
+                                    const MeshBoundsResolver& resolveMeshBounds,
+                                    const PoseBoundsResolver& resolvePoseBounds)
     {
         if (!scene || !scene->IsOpen() || !viewport.Contains(pointer))
             return {};
@@ -219,7 +227,7 @@ namespace KeireEditor
 
             const auto renderer = entity.GetComponent<Keire::MeshRendererComponent>();
             const bool hasMesh = renderer && renderer->Enabled() && renderer->Visible();
-            const auto bounds = BoundsForEntity(entity, resolveMeshBounds);
+            const auto bounds = BoundsForEntity(entity, resolveMeshBounds, resolvePoseBounds);
             const auto distance = IntersectBounds(transform->WorldMatrix(), bounds, nearPoint, direction);
             if (!distance)
                 continue;
@@ -239,7 +247,8 @@ namespace KeireEditor
                                                                 const Keire::UiItemRect viewport,
                                                                 Keire::UiItemRect selection,
                                                                 const Keire::RenderCamera& camera,
-                                                                const MeshBoundsResolver& resolveMeshBounds)
+                                                                const MeshBoundsResolver& resolveMeshBounds,
+                                                                const PoseBoundsResolver& resolvePoseBounds)
     {
         std::vector<Keire::EntityId> selected;
         if (!scene || !scene->IsOpen() || viewport.Size().Width <= 1.0F || viewport.Size().Height <= 1.0F)
@@ -254,7 +263,7 @@ namespace KeireEditor
             const auto transform = entity.GetComponent<Keire::TransformComponent>();
             if (!transform || !entity.ActiveInHierarchy())
                 continue;
-            const auto bounds = BoundsForEntity(entity, resolveMeshBounds);
+            const auto bounds = BoundsForEntity(entity, resolveMeshBounds, resolvePoseBounds);
             Keire::UiItemRect projected{{std::numeric_limits<float>::max(), std::numeric_limits<float>::max()},
                                         {std::numeric_limits<float>::lowest(), std::numeric_limits<float>::lowest()}};
             bool visible = false;

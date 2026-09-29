@@ -5,12 +5,11 @@
 
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
-#include "KeireClient/Editor/ConsolePanel.h"
-#include "KeireClient/Editor/DiagnosticsPanel.h"
 #include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorDocumentWorkspaceCoordinator.h"
-#include "KeireClient/Editor/ExternalAssetImportController.h"
+#include "KeireClient/Editor/ImportedModelAnimation.h"
+#include "KeireClient/Editor/ImportedModelCreation.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
 #include "KeireClient/Editor/MaterialDocument.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
@@ -715,6 +714,8 @@ bool EditorWorkspaceLayer::ProjectRequiresManagedRuntime() const noexcept
         return false;
     for (const auto& record : m_AssetDatabase->Records())
     {
+        if (record.RelativePath.extension() == ".cs")
+            return true;
         if (record.Type != Keire::ManagedAssemblyAsset::StaticType())
             continue;
         try
@@ -1155,18 +1156,25 @@ void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset, K
     if (!record)
         throw std::runtime_error("The dropped mesh no longer exists in the project database.");
 
+    const auto assets = Owner().Assets();
+    const auto animation = assets ? KeireEditor::ImportedModelAnimation::Resolve(record->SubAssets, *assets)
+                                  : KeireEditor::ImportedModelAnimation{};
+
+    const auto history = m_SceneDocument->History();
+    auto transaction = history && history->IsOpen() ? history->BeginTransaction("Create Mesh Entity") : nullptr;
     RecordSceneUndo("Create Mesh Entity");
-    const auto entity = m_SceneDocument->CreateEntity(record->RelativePath.stem().string(), {},
-                                                      Keire::MeshRendererComponent::StaticType());
-    const KeireEditor::SceneDocument::TransformValues transform{.Position = position};
-    m_SceneDocument->SetTransform(entity, transform);
-    m_SceneDocument->SetComponentProperty(entity, Keire::MeshRendererComponent::StaticType(), "mesh", asset);
+    const auto entity = KeireEditor::CreateImportedModel(*m_SceneDocument, record->RelativePath.stem().string(), asset,
+                                                         position, animation);
+    if (transaction)
+        transaction->Commit();
+    ActivateSceneViewportHistory();
     m_SceneDocument->Select(entity.Value());
     if (m_SceneDocument->PlaySession())
         m_PlayEditorTouchedEntities.insert(entity.Value());
     m_SelectedAsset = {};
-    m_SceneDocument->SetStatus("Created " + scene->FindEntity(entity).Name() + " from " +
-                               record->RelativePath.filename().string() + ".");
+    m_SceneDocument->SetStatus(
+        "Created " + scene->FindEntity(entity).Name() + " from " + record->RelativePath.filename().string() + "." +
+        (animation.Skin ? " Imported rig assigned. Create or assign an Animator Controller to play clips." : ""));
 }
 
 void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset)
@@ -1373,12 +1381,7 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         Keire::RenderCamera camera;
         if (selected)
         {
-            camera.View = Keire::Math::Inverse(selected->Transform->WorldMatrix());
-            camera.Projection = selected->Camera->ProjectionMatrix(aspect);
-            camera.ClearColor = selected->Camera->ClearColor();
-            camera.NearPlane = selected->Camera->NearPlane();
-            camera.FarPlane = selected->Camera->FarPlane();
-            camera.FullscreenEffects = selected->Camera->FullscreenEffects();
+            camera = Keire::Internal::BuildPresentedSceneCamera(*selected->Camera, *selected->Transform, aspect);
         }
         m_GameRenderView->SetCamera(camera);
 

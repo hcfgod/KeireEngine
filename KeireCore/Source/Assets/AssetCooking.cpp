@@ -264,6 +264,7 @@ namespace Keire
                 generated.Bytes = subAsset.Bytes;
                 generated.AssetDependencies = subAsset.AssetDependencies;
                 generated.Metadata = subAsset.Metadata;
+                generated.Metadata.DisplayName = subAsset.Name;
                 prepared.push_back(
                     {subAsset.Id, subAsset.Type, nullptr, std::move(generated), subAsset.AssetDependencies});
             }

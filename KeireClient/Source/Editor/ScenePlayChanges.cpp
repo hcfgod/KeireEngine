@@ -486,7 +486,8 @@ namespace KeireEditor
                      .Property = property.Key,
                      .EntityName = object.Name,
                      .ComponentName = registration->Name,
-                     .Label = property.DisplayName,
+                     .Label =
+                         property.Group.empty() ? property.DisplayName : property.Group + " / " + property.DisplayName,
                      .Before = DisplayValue(beforeValue->second),
                      .After = DisplayValue(afterValue->second)},
                     afterValue->second);

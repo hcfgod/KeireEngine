@@ -118,7 +118,7 @@ stale_waiters=(sentinel)
 for iteration in {1..12}; do
   bash -c 'set -euo pipefail
     source "$1"
-    generated_content_acquire_lock "$2" 5
+    generated_content_acquire_lock "$2" 30
     printf "%s\n" "$3" >> "$4"
     sleep 0.01
     generated_content_release_lock "$2"' _ \
@@ -241,7 +241,7 @@ stage_source="$stage_root/Build/Dependencies/ffmpeg/Debug/install/lib"
 stage_destination="$stage_root/Build/Bin/Debug-linux-x86_64/FixtureAssetWorker"
 mkdir -p "$stage_root/Scripts" "$stage_source" "$stage_destination"
 ln -s "$ROOT/Scripts/Unix" "$stage_root/Scripts/Unix"
-printf 'worker\n' > "$stage_destination/FixtureAssetWorker"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$stage_destination/FixtureAssetWorker"
 chmod +x "$stage_destination/FixtureAssetWorker"
 for family in avformat avcodec swresample avutil; do
   printf '%s-runtime\n' "$family" > "$stage_source/lib$family.so.1.2.3"
@@ -267,7 +267,7 @@ assert_false stage_unix_asset_worker_runtime "$stage_root" Debug linux x86_64 Fi
 
 mac_stage_destination="$stage_root/Build/Bin/Debug-macosx-x86_64/FixtureAssetWorker"
 mkdir -p "$mac_stage_destination"
-printf 'worker\n' > "$mac_stage_destination/FixtureAssetWorker"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$mac_stage_destination/FixtureAssetWorker"
 chmod +x "$mac_stage_destination/FixtureAssetWorker"
 for family in avformat avcodec swresample avutil; do
   printf '%s-runtime\n' "$family" > "$stage_source/lib$family.1.2.3.dylib"

@@ -33,7 +33,7 @@ while IFS= read -r path; do
 done < <(hub_package_required_paths Hub Core)
 rm -rf "$stage/content"
 mkdir -p "$stage/content"
-cp -R "$ROOT/KeireHubContent/." "$stage/content/"
+python3 "$ROOT/Scripts/Tests/copy-hub-content-fixture.py" "$ROOT/KeireHubContent" "$stage/content"
 rm -rf "$stage/Docs" "$stage/Samples"
 copy_tracked_tree "$ROOT" Docs "$stage/Docs"
 copy_tracked_tree "$ROOT" Samples/KeireSandbox "$stage/Samples/KeireSandbox"

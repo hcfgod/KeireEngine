@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <exception>
 #include <ranges>
 #include <stdexcept>
 #include <system_error>
@@ -372,8 +373,24 @@ namespace KeireEditor
         if (!scene || (parent && !parentEntity))
             throw std::invalid_argument("Cannot create an entity outside the active scene.");
         auto created = scene->CreateEntity(std::move(name), parentEntity);
-        if (component)
-            (void)created.AddComponent(component);
+        try
+        {
+            if (component)
+                (void)created.AddComponent(component);
+        }
+        catch (...)
+        {
+            const auto failure = std::current_exception();
+            try
+            {
+                (void)scene->DestroyEntity(created.Id());
+            }
+            catch (...)
+            {
+                // Teardown callbacks must not replace the component setup failure.
+            }
+            std::rethrow_exception(failure);
+        }
         return created.Id();
     }
 

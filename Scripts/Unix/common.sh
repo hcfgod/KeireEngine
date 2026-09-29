@@ -484,6 +484,7 @@ dotnet_apphost_pack_metadata() {
 import sys
 import xml.etree.ElementTree as ET
 
+sys.stdout.reconfigure(newline="\n")
 
 def local_name(tag):
     return tag.rsplit("}", 1)[-1]
@@ -699,8 +700,16 @@ copy_tracked_tree() {
 
 is_generated_package_path() {
     local path="/${1//\\//}/" name
-    path="$(printf '%s' "$path" | sed -E 's#^/include/[^/]+/Build/#/include/PublicApi/#')"
-    path="$(printf '%s' "$path" | sed -E 's#^/bin/Managed/Dotnet/#/bundled-dotnet/#; s#/bundled-dotnet/(.*)/Build/#/bundled-dotnet/\1/DotnetBuild/#')"
+    # Avoid launching two sed processes per package entry, especially costly under Git Bash.
+    if [[ "$path" =~ ^/include/[^/]+/Build/ ]]; then
+        path="/include/PublicApi/${path#"${BASH_REMATCH[0]}"}"
+    fi
+    if [[ "$path" == /bin/Managed/Dotnet/* ]]; then
+        path="/bundled-dotnet/${path#/bin/Managed/Dotnet/}"
+    fi
+    if [[ "$path" =~ /bundled-dotnet/.*/Build/ ]]; then
+        path="${path%/Build/*}/DotnetBuild/${path##*/Build/}"
+    fi
     [[ "$path" =~ /(Library|Logs|Build|Temp|SceneRecovery|Recovery)/ ]] && return 0
     name="${path%/}"; name="${name##*/}"
     [[ "$name" =~ (^|[._-])[Rr][Ee][Cc][Oo][Vv][Ee][Rr][Yy]([._-]|$) || "$name" =~ \.[Tt][Mm][Pp]$ ]]
@@ -761,8 +770,7 @@ hub_content_required_paths() {
       "content/Templates/Payloads/Starter3D/Assets/Shaders/StarterUnlit.hlsl"
       "content/Templates/Payloads/Starter3D/ProjectSettings/Rendering.keiresettings"
       "content/Templates/Payloads/Sandbox/README.md"
-      "content/Templates/Payloads/Sandbox/Assets/Scripts/Gameplay.keireasm"
-      "content/Templates/Payloads/Sandbox/Assets/Scripts/Runtime/FirstPersonCamera.cs"
+      "content/Templates/Payloads/Sandbox/Assets/Scripts/FirstPersonCamera.cs"
       "content/Templates/Payloads/Sandbox/ProjectSettings/Scripting.keiresettings"
       "content/Templates/Thumbnails/empty.png" "content/Templates/Thumbnails/starter-3d.png"
       "content/Templates/Thumbnails/sandbox.png"

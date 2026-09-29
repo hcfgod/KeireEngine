@@ -5,6 +5,7 @@
 #include <array>
 #include <compare>
 #include <optional>
+#include <string>
 
 namespace Keire
 {
@@ -19,6 +20,7 @@ namespace Keire
     struct AssetDerivedMetadata
     {
         std::optional<AssetBounds> LocalBounds;
+        std::string DisplayName;
 
         auto operator<=>(const AssetDerivedMetadata&) const noexcept = default;
     };

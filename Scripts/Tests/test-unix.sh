@@ -13,6 +13,18 @@ if [[ "$(uname -s)" == Darwin ]]; then
   fi
 fi
 suite=all
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    # Lock fixtures need dangling links; MSYS links work without Windows symlink privileges.
+    export MSYS="${MSYS:+$MSYS }winsymlinks:sys"
+    # Windows can expose a Store placeholder as python3 even when Python is installed as python.
+    if ! command python3 -c 'import sys; assert sys.version_info.major == 3' >/dev/null 2>&1; then
+      command python -c 'import sys; assert sys.version_info.major == 3'
+      python3() { command python "$@"; }
+      export -f python3
+    fi
+    ;;
+esac
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --suite) suite="${2:?--suite requires fast, integration, or all}"; shift 2 ;;
@@ -38,6 +50,14 @@ sha256_file() {
 
 load_project_config "$ROOT"
 if [[ $run_fast -eq 1 ]]; then
+assert_false is_generated_package_path 'include/Keire/Build/PlayerBuild.h'
+assert_true is_generated_package_path 'include/Keire/Build/Library/cache.bin'
+assert_false is_generated_package_path 'bin/Managed/Dotnet/sdk/10.0/Build/tasks.dll'
+assert_false is_generated_package_path 'bin\Managed\Dotnet\sdk\10.0\Build\tasks.dll'
+assert_true is_generated_package_path 'bin/Managed/Dotnet/sdk/10.0/Library/cache.bin'
+assert_true is_generated_package_path 'Assets/Build/generated.bin'
+assert_true is_generated_package_path 'Assets/scene.Recovery.json'
+assert_false is_generated_package_path 'Assets/Rebuild/level.bin'
 cxx20_probe_fixture="$(mktemp -d)"
 cxx20_probe_compiler="$cxx20_probe_fixture/clang++"
 cxx20_probe_arguments="$cxx20_probe_fixture/arguments"
@@ -100,9 +120,23 @@ assert_true grep -F -q 'cannot request authorization without an interactive term
   "$homebrew_installer_fixture/diagnostic"
 unset KEIRE_HOMEBREW_TEST_OUTPUT
 rm -rf "$homebrew_installer_fixture"
+create_directory_alias() {
+  local target="${1:?alias target is required}"
+  local alias="${2:?alias path is required}"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      # Git Bash's default ln -s copies directories when native symlinks are unavailable.
+      # A junction preserves real directory identity and -L detection without elevated privileges.
+      MSYS_NO_PATHCONV=1 cmd.exe /c mklink /J "$(cygpath -w "$alias")" "$(cygpath -w "$target")" >/dev/null
+      ;;
+    *) ln -s "$target" "$alias" ;;
+  esac
+  [[ -L "$alias" ]] || { printf 'Directory alias is not a link: %s\n' "$alias" >&2; return 1; }
+}
+
 dotnet_listing_fixture="$(mktemp -d)"
 mkdir -p "$dotnet_listing_fixture/installation/sdk" "$dotnet_listing_fixture/unrelated/sdk"
-ln -s "$dotnet_listing_fixture/installation" "$dotnet_listing_fixture/path-alias"
+create_directory_alias "$dotnet_listing_fixture/installation" "$dotnet_listing_fixture/path-alias"
 printf '%s\n' '#!/usr/bin/env bash' 'set -euo pipefail' \
   'case "${1:-}" in' \
   "  --list-sdks) printf '%s\\n' '10.0.302 [$dotnet_listing_fixture/path-alias/sdk]' ;;" \
@@ -276,7 +310,7 @@ touch "$binary_output_fixture/Build/Bin/Debug-linux-x86_64/sentinel"
 rm -f "$binary_identity_stamp"
 invalidate_incompatible_binary_outputs "$binary_output_fixture" linux x86_64 gcc "$binary_identity_stamp"
 assert_false test -e "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
-ln -s "$binary_output_external" "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
+create_directory_alias "$binary_output_external" "$binary_output_fixture/Build/Bin/Debug-linux-x86_64"
 printf 'ninja|x86_64|clang|off|0|fingerprint\n' > "$binary_identity_stamp"
 set +e
 invalidate_incompatible_binary_outputs "$binary_output_fixture" linux x86_64 gcc \
@@ -347,7 +381,7 @@ workspace_lock_release
 workspace_lock_external="$(mktemp -d)"
 rmdir "$workspace_lock_fixture/.locks"
 touch "$workspace_lock_external/sentinel"
-ln -s "$workspace_lock_external" "$workspace_lock_fixture/.locks"
+create_directory_alias "$workspace_lock_external" "$workspace_lock_fixture/.locks"
 set +e
 workspace_lock_acquire "$workspace_lock_fixture" redirected '.locks/redirected.lock' >/dev/null 2>&1
 workspace_lock_redirected_status=$?
@@ -374,7 +408,7 @@ git -C "$locked_source_fixture" -c user.name=fixture -c user.email=fixture@examp
 locked_source_commit="$(git -C "$locked_source_fixture" rev-parse HEAD)"
 locked_git_source_validate "$locked_source_fixture" "$locked_source_commit" fixture
 locked_source_link="$locked_source_fixture-link"
-ln -s "$locked_source_fixture" "$locked_source_link"
+create_directory_alias "$locked_source_fixture" "$locked_source_link"
 set +e
 locked_git_source_validate "$locked_source_link" "$locked_source_commit" fixture >/dev/null 2>&1
 locked_source_link_status=$?
@@ -535,6 +569,7 @@ mkdir -p "$launcher_fixture/Scripts/Unix" "$launcher_fixture/Scripts/Linux" \
   "$launcher_fixture/Scripts/Mac"
 cp "$ROOT/Scripts/project.sh" "$launcher_fixture/Scripts/project.sh"
 cat > "$launcher_fixture/Scripts/Unix/common.sh" <<'EOF'
+uname() { printf '%s\n' Linux; }
 native_architecture() { printf '%s' x86_64; }
 normalize_architecture() { printf '%s' "$1"; }
 load_project_config() { PROJECT_IDENTIFIER=ExitFixture; CLIENT_TARGET=Client; }
@@ -930,19 +965,29 @@ assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-skinning.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-vfx.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-occlusion.sh"
 assert_true grep -F -q 'for (field =' "$ROOT/Scripts/Unix/builtin-spatial-selection.sh"
-while IFS= read -r source_file; do
-  if grep -E -q 'std::ranges::(all_of|any_of|none_of|find|find_if|sort|stable_sort|count|count_if|equal|transform|for_each|min_element|max_element|clamp)' "$source_file"; then
-    assert_true grep -F -q '#include <algorithm>' "$source_file"
-  fi
-  if grep -E -q 'std::(memcpy|memmove|memset|memcmp|strlen|strcmp|strchr|strerror)' "$source_file"; then
-    assert_true grep -F -q '#include <cstring>' "$source_file"
-  fi
-  if grep -E -q 'std::(round|floor|ceil|trunc|sqrt|pow|sin|cos|tan|asin|acos|atan|atan2|abs|fabs|fmod|isfinite|isnan|isinf|exp|log|log2|log10)[[:space:]]*\(' "$source_file"; then
-    assert_true grep -F -q '#include <cmath>' "$source_file"
-  fi
-done < <(find "$ROOT/AssetTool" "$ROOT/KeireAssetWorker" "$ROOT/KeireClient" "$ROOT/KeireCore" \
-  "$ROOT/KeireEditorTests" "$ROOT/KeireHub" "$ROOT/KeireHubRuntime" "$ROOT/KeireHubTests" \
-  "$ROOT/KeireHubWorker" "$ROOT/KeireRuntime" "$ROOT/KeireTests" -type f \( -name '*.cpp' -o -name '*.h' \))
+# Keep the same include contracts without thousands of process launches under Git Bash.
+python3 - "$ROOT" <<'PY'
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+directories = ('AssetTool KeireAssetWorker KeireClient KeireCore KeireEditorTests KeireHub '
+               'KeireHubRuntime KeireHubTests KeireHubWorker KeireRuntime KeireTests').split()
+rules = (
+    (r'std::ranges::(all_of|any_of|none_of|find|find_if|sort|stable_sort|count|count_if|equal|transform|for_each|min_element|max_element|clamp)', 'algorithm'),
+    (r'std::(memcpy|memmove|memset|memcmp|strlen|strcmp|strchr|strerror)', 'cstring'),
+    (r'std::(round|floor|ceil|trunc|sqrt|pow|sin|cos|tan|asin|acos|atan|atan2|abs|fabs|fmod|isfinite|isnan|isinf|exp|log|log2|log10)\s*\(', 'cmath'),
+)
+for directory in directories:
+    for source in sorted((root / directory).rglob('*')):
+        if source.suffix not in ('.cpp', '.h') or not source.is_file():
+            continue
+        text = source.read_text(encoding='utf-8')
+        for pattern, header in rules:
+            if re.search(pattern, text) and f'#include <{header}>' not in text:
+                raise SystemExit(f'Missing explicit <{header}> include: {source}')
+PY
 assert_true grep -q 'libsodium.*configure' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -q 'LIBSODIUM_COMMIT' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q 'generated_content_copy_file_if_changed "$sodium_runtime" "$target_directory/libsodium.so" "$ROOT"' "$ROOT/Scripts/Linux/build.sh"
@@ -1502,9 +1547,9 @@ assert_true grep -Fq 'build_scenes_source="$ROOT/Samples/KeireSandbox/ProjectSet
   "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq 'cp "$build_scenes_source" "$build_scenes_destination"' "$ROOT/Scripts/Unix/package.sh"
 assert_true grep -Fq '[[ -f "$build_scenes_destination" ]]' "$ROOT/Scripts/Unix/package.sh"
-assert_true grep -Fq -- '"--validate-additive-runtime", $runtimeValidationOutput' \
+assert_true perl -0ne 'exit 0 if /"--validate-additive-runtime",\s*`?\s*\$runtimeValidationOutput/; exit 1' \
   "$ROOT/Scripts/Windows/package.ps1"
-assert_true grep -Fq -- '"--content", $runtimeContent, "--headless"' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '"--content", $runtimeExecutionContent, "--headless"' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq 'inputHandledByActiveTopmostPresentation' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$runtimeValidation.renderMode -ne "rendered"' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$runtimeValidation.renderedWindowLoop' "$ROOT/Scripts/Windows/package.ps1"
@@ -1547,7 +1592,8 @@ assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.vfxVisibility.maskedDra
   "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq '$editorPlayValidation.gpuOcclusion.vfxVisibility.maskConsumed' \
   "$ROOT/Scripts/Windows/package.ps1"
-assert_true grep -Fq -- '-SmokePlay -SmokeOutput $editorPlayValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '-SmokePlay -ProjectPath $editorPlayValidationProject' "$ROOT/Scripts/Windows/package.ps1"
+assert_true grep -Fq -- '-SmokeOutput $editorPlayValidationOutput' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq -- '-SmokeTimeoutSeconds 300' "$ROOT/Scripts/Windows/package.ps1"
 assert_true grep -Fq -- '"--project", $smokeProjectPath, "--smoke-play"' "$ROOT/Scripts/Windows/run.ps1"
 assert_true grep -Fq -- '"--smoke-play-output", $SmokeOutput' "$ROOT/Scripts/Windows/run.ps1"

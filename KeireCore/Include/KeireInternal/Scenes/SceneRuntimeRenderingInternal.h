@@ -14,6 +14,19 @@
 
 namespace Keire::Internal
 {
+    [[nodiscard]] inline RenderCamera BuildPresentedSceneCamera(const CameraComponent& camera,
+                                                                const TransformComponent& transform, float aspect)
+    {
+        RenderCamera result;
+        result.View = Math::Inverse(transform.PresentationWorldMatrix());
+        result.Projection = camera.ProjectionMatrix(aspect);
+        result.ClearColor = camera.ClearColor();
+        result.NearPlane = camera.NearPlane();
+        result.FarPlane = camera.FarPlane();
+        result.FullscreenEffects = camera.FullscreenEffects();
+        return result;
+    }
+
     struct RuntimeSceneCamera final
     {
         Entity Entity;

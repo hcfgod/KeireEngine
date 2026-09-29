@@ -23,9 +23,15 @@ namespace Keire::Detail
 
     [[nodiscard]] inline ImportOutputCacheJson EncodeDerivedMetadata(const AssetDerivedMetadata& metadata)
     {
-        if (!metadata.LocalBounds)
-            return nullptr;
-        return {{"minimum", metadata.LocalBounds->Minimum}, {"maximum", metadata.LocalBounds->Maximum}};
+        ImportOutputCacheJson result = ImportOutputCacheJson::object();
+        if (metadata.LocalBounds)
+        {
+            result["minimum"] = metadata.LocalBounds->Minimum;
+            result["maximum"] = metadata.LocalBounds->Maximum;
+        }
+        if (!metadata.DisplayName.empty())
+            result["displayName"] = metadata.DisplayName;
+        return result;
     }
 
     [[nodiscard]] inline AssetDerivedMetadata DecodeDerivedMetadata(const ImportOutputCacheJson& value)
@@ -33,8 +39,10 @@ namespace Keire::Detail
         AssetDerivedMetadata metadata;
         if (!value.is_null())
         {
-            metadata.LocalBounds = AssetBounds{value.at("minimum").get<std::array<float, 3>>(),
-                                               value.at("maximum").get<std::array<float, 3>>()};
+            if (value.contains("minimum"))
+                metadata.LocalBounds = AssetBounds{value.at("minimum").get<std::array<float, 3>>(),
+                                                   value.at("maximum").get<std::array<float, 3>>()};
+            metadata.DisplayName = value.value("displayName", std::string{});
         }
         return metadata;
     }

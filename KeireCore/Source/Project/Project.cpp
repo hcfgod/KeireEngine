@@ -634,16 +634,9 @@ namespace Keire
                 if (!inputDefinition.ActionMaps.empty())
                     descriptor.DefaultInputMap = inputDefinition.ActionMaps.front().Id;
 
-                ManagedAssemblyDefinition gameplayAssembly;
-                gameplayAssembly.Name = "Gameplay";
-                gameplayAssembly.RootNamespace = "Game";
-                gameplayAssembly.SourceRoots = {"Assets/Scripts/Runtime"};
-                const auto assemblyBytes = ManagedAssemblyAsset::Encode(gameplayAssembly);
-                (void)database->CreateAsset("Scripts/Gameplay.keireasm", CreateManagedAssemblyAssetImporter(),
-                                            assemblyBytes);
-                std::filesystem::create_directories(root / "Assets/Scripts/Runtime");
+                std::filesystem::create_directories(root / "Assets/Scripts");
                 Detail::WriteTextFileAtomically(
-                    root / "Assets/Scripts/Runtime/GameRoot.cs",
+                    root / "Assets/Scripts/GameRoot.cs",
                     "using Keire;\n\nnamespace Game;\n\npublic sealed class GameRoot : Behaviour\n{\n"
                     "    protected override void Start() => Log.Info(\"Gameplay assembly loaded.\");\n}\n");
                 Detail::WriteStarterProjectUiScript(root);

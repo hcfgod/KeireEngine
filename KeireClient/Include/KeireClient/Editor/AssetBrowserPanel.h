@@ -44,6 +44,7 @@ namespace KeireEditor
         virtual bool CreateAssetBrowserScript(std::string_view name) = 0;
         virtual bool CreateAssetBrowserScriptableObjectScript(std::string_view name) = 0;
         virtual bool CreateAssetBrowserManagedAssembly(std::string_view name) = 0;
+        virtual bool CreateAssetBrowserManagedAssemblyReference(std::string_view) { return false; }
         virtual bool CreateAssetBrowserManagedData(Keire::ManagedTypeId type, std::string_view name) = 0;
         virtual bool CreateAssetBrowserAudioMixer(std::string_view name) = 0;
         virtual bool CreateAssetBrowserPhysicsMaterial(std::string_view name) = 0;
@@ -69,6 +70,10 @@ namespace KeireEditor
                                         bool revealResult = false) = 0;
         virtual void OpenAssetBrowserInputActions(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserAnimationGraph(Keire::AssetId asset) = 0;
+        virtual void OpenAssetBrowserAnimationClip(Keire::AssetId)
+        {
+            ReportAssetBrowserError("Animation clip preview is unavailable in this workspace.");
+        }
         virtual void OpenAssetBrowserAudioMixer(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserVfxEffect(Keire::AssetId asset) = 0;
         virtual void OpenAssetBrowserUiDocument(Keire::AssetId asset) = 0;

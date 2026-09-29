@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace Keire
 {
@@ -16,11 +17,22 @@ namespace Keire
     bool SceneRuntimeSession::Impl::SamePhysicsDefinition(const PhysicsBodyDefinition& first,
                                                           const PhysicsBodyDefinition& second) noexcept
     {
+        // Shape dimensions derived from a rotated world matrix can vary by a few float ULPs.
+        // Those round-off differences must not destroy/recreate a live body and discard its contacts.
+        const auto sameDimension = [](const float left, const float right)
+        {
+            return std::abs(left - right) <=
+                   std::max(std::abs(left), std::abs(right)) * std::numeric_limits<float>::epsilon() * 8.0F;
+        };
+        const bool shapeSizeMatches = sameDimension(first.HalfExtent.X, second.HalfExtent.X) &&
+                                      sameDimension(first.HalfExtent.Y, second.HalfExtent.Y) &&
+                                      sameDimension(first.HalfExtent.Z, second.HalfExtent.Z) &&
+                                      sameDimension(first.Radius, second.Radius) &&
+                                      sameDimension(first.Height, second.Height);
         const bool transformMatches = first.Motion != PhysicsMotionType::Static ||
                                       (first.Position == second.Position && first.Rotation == second.Rotation);
         return transformMatches && first.Motion == second.Motion && first.Shape == second.Shape &&
-               first.LinearVelocity == second.LinearVelocity && first.HalfExtent == second.HalfExtent &&
-               first.Radius == second.Radius && first.Height == second.Height && first.Mass == second.Mass &&
+               first.LinearVelocity == second.LinearVelocity && shapeSizeMatches && first.Mass == second.Mass &&
                first.Layer == second.Layer && first.Mask == second.Mask && first.Trigger == second.Trigger &&
                first.Continuous == second.Continuous && first.UseGravity == second.UseGravity &&
                first.Friction == second.Friction && first.Restitution == second.Restitution &&
@@ -189,6 +201,7 @@ namespace Keire
                 if (state.Body)
                     PhysicsWorldService->DestroyBody(state.Body);
                 state.Body = PhysicsWorldService->CreateBody(*definition);
+                state.Definition = *definition;
                 state.CharacterRequestedVerticalDisplacement = 0.0F;
                 state.CharacterMissedWalkableFrames = 0;
                 ++state.Generation;
@@ -201,7 +214,10 @@ namespace Keire
                 if (definition->UseGravity != state.Definition.UseGravity)
                     PhysicsWorldService->SetGravityEnabled(state.Body, definition->UseGravity);
             }
-            state.Definition = *definition;
+            // Keep the installed shape dimensions as the comparison baseline. Tiny authored scale increments
+            // must eventually rebuild once their cumulative change exceeds the round-off tolerance.
+            state.Definition.Position = definition->Position;
+            state.Definition.Rotation = definition->Rotation;
             state.HasDefinition = true;
         }
         for (auto iterator = PhysicsBodies.begin(); iterator != PhysicsBodies.end();)

@@ -331,6 +331,6 @@ public sealed class StarterWorldUiController : Behaviour
     }
 }
 )";
-        WriteTextFileAtomically(projectRoot / "Assets/Scripts/Runtime/StarterUi.cs", source);
+        WriteTextFileAtomically(projectRoot / "Assets/Scripts/StarterUi.cs", source);
     }
 } // namespace Keire::Detail

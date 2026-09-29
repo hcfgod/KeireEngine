@@ -35,7 +35,13 @@ export KEIRE_PLAYER_SUPPORT_LICENSE_SOURCE="$license_source"
 
 write_fixture() {
     mkdir -p "$(dirname "$source_root/$1")"
-    printf fixture > "$source_root/$1"
+    case "${1##*/}" in
+        KeireRuntime|createdump)
+            # MSYS infers executable bits from file content rather than Unix chmod metadata.
+            printf '%s\n' '#!/usr/bin/env sh' 'exit 0' > "$source_root/$1"
+            ;;
+        *) printf fixture > "$source_root/$1" ;;
+    esac
 }
 for file in KeireRuntime Managed/Coral.Managed.dll Managed/Coral.Managed.deps.json \
     Managed/Coral.Managed.runtimeconfig.json Managed/Keire.Managed.dll \
@@ -110,6 +116,16 @@ if KEIRE_PLAYER_SUPPORT_RUNTIME_SOURCE="$source_root" \
 fi
 grep -q 'regular non-symbolic file' "$fixture/error"
 printf restored > "$license_source/Build/Dependencies/coral/LICENSE"
+
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        if ! python3 -c 'import fcntl' >/dev/null 2>&1; then
+            printf 'Unix Player Support runtime closure tests passed.\n'
+            printf 'POSIX publication locking tests skipped: Windows Python has no fcntl; run these on Linux/macOS.\n'
+            exit 0
+        fi
+        ;;
+esac
 
 publication="$fixture/publication"
 printf first > "$fixture/first.keireplayersupport"

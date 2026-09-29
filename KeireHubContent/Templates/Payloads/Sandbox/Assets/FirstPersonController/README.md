@@ -13,6 +13,9 @@ Keep the player upright with unit scale. The capsule centre starts one metre abo
 - Escape / gamepad Start: release or recapture the cursor.
 
 Select the camera child to edit walking speed, sprint multiplier, jump height, gravity, sensitivity, and invert Y.
+Under **Camera Look**, increase **Mouse Sensitivity** for faster turning (for example, 0.24 instead of 0.12).
+Mouse rotation applies immediately without a smoothing filter. **Gamepad Look Speed** controls stick turning in degrees
+per second. Physics interpolation smooths translation independently of these look controls.
 Edit FirstPersonInput to rebind controls. UI can request cursor visibility with the engine Cursor API; this suspends player input.
 Movement uses the engine collision controller and fixed simulation time. Camera pitch is limited to avoid flipping.
 Only use one active player with this input context at a time. This starter does not include networking, weapons, crouching, or animations.

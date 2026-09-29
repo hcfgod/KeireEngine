@@ -6,6 +6,7 @@
 #include "Keire/Rendering/MaterialGraph.h"
 #include "KeireTests/TestSupport.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <ranges>

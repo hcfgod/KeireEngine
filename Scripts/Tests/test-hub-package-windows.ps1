@@ -67,8 +67,12 @@ try {
     }
     Remove-Item -LiteralPath (Join-Path $stage "content") -Recurse -Force
     New-Item -ItemType Directory -Force (Join-Path $stage "content") | Out-Null
-    Get-ChildItem -LiteralPath (Join-Path (Get-RepositoryRoot) "KeireHubContent") -Force |
-        Copy-Item -Destination (Join-Path $stage "content") -Recurse
+    $python = Get-PythonInvocation
+    $pythonPrefix = @($python.PrefixArguments)
+    Invoke-CheckedWindowsCommand {
+        & $python.Executable @pythonPrefix (Join-Path $PSScriptRoot "copy-hub-content-fixture.py") `
+            (Join-Path (Get-RepositoryRoot) "KeireHubContent") (Join-Path $stage "content")
+    } "Hub content fixture copy"
     Remove-Item -LiteralPath (Join-Path $stage "Docs"), (Join-Path $stage "Samples") `
         -Recurse -Force -ErrorAction SilentlyContinue
     Copy-WindowsTrackedTree (Get-RepositoryRoot) "Docs" (Join-Path $stage "Docs")

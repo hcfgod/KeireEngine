@@ -1,7 +1,11 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
+#include "KeireInternal/Scenes/AnimationNamedIkGoals.h"
+
 #include <algorithm>
 #include <cmath>
+#include <exception>
+#include <optional>
 
 namespace Keire
 {
@@ -476,56 +480,18 @@ namespace Keire
         if (animator.IkGoals().empty())
             return {};
 
-        Matrix4 worldToModel;
-        bool hasWorldToModel = false;
+        std::optional<Matrix4> worldToModel;
         if (const auto transform = entity.GetComponent<TransformComponent>())
         {
             try
             {
                 worldToModel = Math::Inverse(transform->WorldMatrix());
-                hasWorldToModel = true;
             }
             catch (const std::exception&)
             {
             }
         }
-
-        for (const auto& goal : animator.IkGoals())
-        {
-            std::vector<std::uint32_t> chain;
-            chain.reserve(goal.Bones.size());
-            for (const auto& name : goal.Bones)
-            {
-                const auto found = indices.find(name);
-                if (found == indices.end())
-                    return "IK goal '" + goal.Name + "' references missing bone '" + name + "'.";
-                chain.push_back(found->second);
-            }
-
-            auto target = goal.Target;
-            auto pole = goal.Pole;
-            if (goal.Space == AnimatorIkSpace::World)
-            {
-                if (!hasWorldToModel)
-                    return "IK goal '" + goal.Name + "' could not resolve the Animator world transform.";
-                target = Math::TransformPoint(worldToModel, target);
-                pole = Math::TransformPoint(worldToModel, pole);
-            }
-
-            bool solved = false;
-            if (goal.Solver == AnimatorIkSolver::TwoBone && chain.size() == 3)
-            {
-                solved = SolveTwoBoneIk(skeleton, localPose, {chain[0], chain[1], chain[2], target, pole, goal.Weight});
-            }
-            else if (goal.Solver == AnimatorIkSolver::Fabrik)
-            {
-                solved = SolveFabrikIk(skeleton, localPose,
-                                       {std::move(chain), target, goal.MaximumIterations, goal.Tolerance, goal.Weight});
-            }
-            if (!solved)
-                return "IK goal '" + goal.Name + "' does not describe a valid contiguous skeleton chain.";
-        }
-        return {};
+        return Detail::ApplyNamedAnimationIkGoals(skeleton, animator.IkGoals(), localPose, indices, worldToModel);
     }
 
     void SceneRuntimeSession::Impl::SynchronizeAnimation(const float deltaSeconds)

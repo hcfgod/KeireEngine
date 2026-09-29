@@ -130,15 +130,14 @@ namespace KeireEditor
 
         [[nodiscard]] Keire::UiItemRect DrawOverlayToolbar(Keire::UiFrame& ui, Keire::UiItemRect viewport,
                                                            std::uint32_t occlusionPyramidMipCount = 0);
-        [[nodiscard]] SceneGizmoResult UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene,
-                                                     Keire::EntityId selected, const Keire::RenderCamera& camera,
-                                                     Keire::UiItemRect viewport, bool allowManipulation,
-                                                     bool pointerBlocked, const BeginUndo& beginUndo,
-                                                     const MeshBoundsResolver& resolveMeshBounds = {},
-                                                     std::span<const Keire::AssetId> selections = {},
-                                                     const Keire::ScenePresentationRuntime* presentation = nullptr,
-                                                     const UiPanelSettingsResolver& resolveUiPanelSettings = {},
-                                                     const OpenUiDocument& openUiDocument = {});
+        [[nodiscard]] SceneGizmoResult
+        UpdateAndDraw(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene, Keire::EntityId selected,
+                      const Keire::RenderCamera& camera, Keire::UiItemRect viewport, bool allowManipulation,
+                      bool pointerBlocked, const BeginUndo& beginUndo, const MeshBoundsResolver& resolveMeshBounds = {},
+                      std::span<const Keire::AssetId> selections = {},
+                      const Keire::ScenePresentationRuntime* presentation = nullptr,
+                      const UiPanelSettingsResolver& resolveUiPanelSettings = {},
+                      const OpenUiDocument& openUiDocument = {}, const PoseBoundsResolver& resolvePoseBounds = {});
 
         void Load(const std::filesystem::path& projectRoot);
         void Save(const std::filesystem::path& projectRoot) const noexcept;

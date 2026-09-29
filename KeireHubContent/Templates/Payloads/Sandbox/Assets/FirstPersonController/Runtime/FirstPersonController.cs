@@ -17,13 +17,16 @@ public sealed class FirstPersonController : Behaviour
     [SerializeField, StableFieldId("d7e0f0a1-bfe2-46d2-bc47-4083f77a8105"), Range(0.1, 60)]
     private float _gravity = 24.0f;
     [SerializeField, StableFieldId("d7e0f0a1-bfe2-46d2-bc47-4083f77a8106"), Range(0.01, 2)]
+    [Header("Camera Look"), Tooltip("Degrees per mouse pixel. Increase for faster turning. Mouse look is direct and has no smoothing delay.")]
     private float _mouseSensitivity = 0.12f;
     [SerializeField, StableFieldId("d7e0f0a1-bfe2-46d2-bc47-4083f77a8107"), Range(1, 360)]
+    [Tooltip("Maximum gamepad turning speed in degrees per second. Independent of mouse sensitivity.")]
     private float _gamepadLookSpeed = 150.0f;
     [SerializeField, StableFieldId("d7e0f0a1-bfe2-46d2-bc47-4083f77a8108")]
     private bool _invertY = false;
 
     [SerializeField, StableFieldId("d7e0f0a1-bfe2-46d2-bc47-4083f77a8109"), Range(0, 200)]
+    [Header("Movement Response"), Tooltip("Acceleration in metres per second squared. Zero applies walking speed immediately.")]
     private float _acceleration = 35f;
     [SerializeField, StableFieldId("d7e0f0a1-bfe2-46d2-bc47-4083f77a810a"), Range(0, 200)]
     private float _deceleration = 45f;
@@ -41,6 +44,7 @@ public sealed class FirstPersonController : Behaviour
     private float _maximumPitch = 89f;
 
     [SerializeField, StableFieldId("d7e0f0a1-bfe2-46d2-bc47-4083f77a8111")]
+    [HideInInspector]
     private int _configurationVersion = 1;
     [HotReloadState] private FirstPersonMotorState _motionState;
     [HotReloadState] private float _pitch;

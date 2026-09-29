@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -18,6 +19,27 @@ namespace KeireEditor::AnimatorControllerPanelInternal
     inline constexpr std::array<std::string_view, 3> MotionTypeNames{"Clip", "1D Blend Tree", "2D Blend Tree"};
     inline constexpr std::array<std::string_view, 2> LayerModeNames{"Override", "Additive"};
     inline constexpr std::array<std::string_view, 4> ComparisonNames{"Greater", "Less", "Equal", "Not Equal"};
+
+    inline constexpr Keire::Vector2 StateNodeSize{214.0F, 86.0F};
+
+    [[nodiscard]] inline Keire::Vector2 StateGridPosition(const std::size_t index,
+                                                          const Keire::Vector2 origin = {}) noexcept
+    {
+        return {origin.X + static_cast<float>(index % 3U) * (StateNodeSize.X + 36.0F),
+                origin.Y + static_cast<float>(index / 3U) * (StateNodeSize.Y + 34.0F)};
+    }
+
+    [[nodiscard]] inline std::string ImportedClipStateName(const std::string_view authoredName,
+                                                           const std::string_view sourceName,
+                                                           const std::size_t clipOrdinal)
+    {
+        if (!authoredName.empty())
+            return std::string(authoredName);
+        std::string name(sourceName.empty() ? "Animation" : sourceName);
+        if (clipOrdinal > 1)
+            name += " " + std::to_string(clipOrdinal);
+        return name;
+    }
 
     template <typename Range, typename Projection>
     [[nodiscard]] std::string UniqueName(const Range& values, const std::string& base, Projection projection)
@@ -42,11 +64,17 @@ namespace KeireEditor::AnimatorControllerPanelInternal
                                                              std::string_view id);
     [[nodiscard]] bool DrawEnumCombo(Keire::UiFrame& ui, std::string_view label, std::uint8_t& value,
                                      std::span<const std::string_view> names);
-    [[nodiscard]] bool EditAssetReference(Keire::UiFrame& ui, std::string_view label, Keire::AssetId& asset,
-                                          Keire::AssetTypeId expectedType,
-                                          const Keire::Ref<Keire::AssetDatabase>& database, std::string& message);
-    [[nodiscard]] Keire::Vector2 DisplayPosition(const Keire::AnimationStateDefinition& state,
-                                                 std::size_t index) noexcept;
+    [[nodiscard]] bool EditAssetReference(Keire::UiFrame& ui, AssetPicker& picker, std::string_view label,
+                                          Keire::AssetId& asset, Keire::AssetTypeId expectedType,
+                                          const Keire::Ref<Keire::AssetDatabase>& database,
+                                          const Keire::Ref<Keire::AssetSystem>& assets, std::string& message);
+    [[nodiscard]] inline Keire::Vector2 DisplayPosition(const Keire::AnimationStateDefinition& state,
+                                                        const std::size_t index) noexcept
+    {
+        if (std::abs(state.EditorPosition.X) > 0.001F || std::abs(state.EditorPosition.Y) > 0.001F || index == 0)
+            return state.EditorPosition;
+        return StateGridPosition(index);
+    }
     void RemoveParameterReferences(Keire::AnimationGraphDefinition& graph, std::string_view parameter);
     void RemoveStateReferences(Keire::AnimationLayerDefinition& layer, std::string_view state);
     void RepairEntryStates(Keire::AnimationLayerDefinition& layer);

@@ -87,7 +87,7 @@ except Exception as error:
 PY
 cat > "$fixture/rclone" <<EOF
 #!/usr/bin/env bash
-exec python3 "$fixture/fake-rclone.py" "\$@"
+python3 "$fixture/fake-rclone.py" "\$@"
 EOF
 cat > "$fixture/publisher" <<'EOF'
 #!/usr/bin/env bash

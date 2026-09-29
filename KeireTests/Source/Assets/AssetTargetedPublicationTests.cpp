@@ -5,6 +5,7 @@
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 
+#include <algorithm>
 #include <array>
 #include <filesystem>
 #include <fstream>

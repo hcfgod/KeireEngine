@@ -15,6 +15,7 @@ namespace KeireEditor
         Script,
         ScriptableObjectScript,
         ManagedAssembly,
+        ManagedAssemblyReference,
         ManagedData,
         AudioMixer,
         PhysicsMaterial,

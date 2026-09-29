@@ -40,13 +40,12 @@ references. The graph validator rejects duplicate names, missing references, and
 
 `KeireManaged/Keire.Managed.csproj` builds the `Keire.Managed` API assembly. It provides `Behaviour`, stable handles,
 supported math/asset references, serialization and migration attributes, collision/trigger/animation/reload hooks,
-and the Time, Input, Physics, Navigation, Animator, Audio, Prefab, Debug, and Log façades. Starter projects receive a
-runtime `Gameplay.keireasm` definition and an initial `GameRoot.cs` script.
-The Project panel creates managed assembly definitions with a transactional starter source and creates C# Behaviour
-scripts only beneath declared source roots. Script and assembly sources open in a configured external editor or the
-operating-system default application.
+and the Time, Input, Physics, Navigation, Animator, Audio, Prefab, Debug, and Log façades. Starter projects receive
+ordinary scripts under `Assets/Scripts`, compiled by the built-in `Assembly-CSharp` assembly. No assembly asset is required.
+The Project panel can create an optional folder-based managed assembly, or a C# script anywhere under Assets.
+Script and assembly sources open in a configured external editor or the operating-system default application.
 Before a C# source opens, the editor regenerates a project-root Visual Studio solution and one SDK-style project per
-`.keireasm`. The first Windows open loads that solution normally and then runs Visual Studio's `File.OpenFile` command
+resolved assembly. The first Windows open loads that solution normally and then runs Visual Studio's `File.OpenFile` command
 for the requested script. Later opens target the running Visual Studio instance that has that exact solution loaded,
 instead of opening an isolated source file or relying on the most-recent IDE window. The generated projects are
 authoring artifacts; managed builds continue to regenerate and compile from the canonical assembly definitions.
@@ -57,6 +56,8 @@ atomically publishes `Library/ScriptAssemblies/Active` only after a successful b
 leaves the previous active directory untouched.
 
 The application-owned Coral fork discovers hostfxr through nethost and accepts an explicit bundled .NET root.
+On Windows, the initialized host library remains loaded until process exit so closing and reopening a script system
+does not reset host initialization beneath the still-running CLR. Gameplay contexts still unload during shutdown.
 Reload creates a candidate collectible context, loads `Keire.Managed` and gameplay DLLs, validates the Behaviour type
 registry, instantiates stable-ID script components through the normal scene lifecycle, migrates live Behaviour objects
 through the before/after reload hooks, retains the reload request's migration payload, and swaps only after preparation

@@ -9,4 +9,5 @@
 namespace Keire::Detail
 {
     [[nodiscard]] Coral::HostSettings CreateCoralHostSettings(std::string coralDirectory);
-}
+    void PreserveManagedHostLibrary();
+} // namespace Keire::Detail

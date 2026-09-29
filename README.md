@@ -5,6 +5,9 @@
 
 **Build worlds. Keep control.**
 
+Baked animation clips open an internal preview: double-click a `.keireanim`, select an animated scene object, and
+play or scrub without changing its controller. See [animation workflows](Docs/AnimationRigging.md).
+
 UI button and label text respects authored padding in runtime draw commands, including scaled and rotated elements.
 Use padding on controls for text clearance and on their containers for spacing around child controls.
 For C# control normalization, list bounds, and child reordering, see [managed control edge cases](Docs/Scripting/UiAndEvents.md#managed-control-edge-cases).
@@ -127,6 +130,9 @@ Kéire already includes substantial, integrated engine and authoring foundations
 - Versioned scenes, entities, components, prefabs, selection-preserving undo/redo, hierarchy and Inspector editing,
   last-scene restoration, recovery, and Play Mode. Reopening a project restores its last opened scene;
   closing the editor preserves that choice independently of its Play view preferences.
+  The Game view and camera preview use interpolated physics presentation while retaining current FPS look rotation.
+  Interactive editor presentation requests Mailbox mode for responsive, tear-free updates (VSync fallback where
+  unsupported); automated smoke runs remain unthrottled.
 - Stable asset identities, metadata sidecars, dependency tracking, deterministic imports, asynchronous runtime loading,
   hot reload, cooked packs, native player packaging, deterministic `.keireassetpackage` archives, transactional
   project package resolution, Asset Browser package export for selections and folders, selective asset imports,
@@ -379,15 +385,20 @@ including edits to shared HLSL includes; unchanged shader output keeps its times
 
 ## C# Gameplay Scripting
 
-Managed gameplay targets .NET 10 and C# 14. A project declares source roots through `.keireasm` assets; successful
-generations publish assemblies for editor discovery and player builds. Gameplay types inherit from `Keire.Behaviour`,
+Managed gameplay targets .NET 10 and C# 14. Scripts anywhere under `Assets` compile into the built-in
+`Assembly-CSharp` assembly unless a custom `.keireasm` owns their folder. Successful generations publish assemblies
+for editor discovery and player builds. Gameplay types inherit from `Keire.Behaviour`,
 use stable component and field identities, and access runtime systems through canonical entity, component, and asset objects.
 Runtime assemblies may also publish versioned custom value converters/migrations, application-owned runtime services,
 and generated stable source-module bindings. Editor assemblies use the separately packaged `Keire.Editor.Managed.dll`
 for retained property drawers and inspectors, scripted importers, windows/tools, and transactional build hooks; neither
 the Editor API nor Editor assemblies enter cooked players.
-Scripts may live anywhere under `Assets`; script creation and generated Input Actions wrappers extend the selected
-runtime assembly's source roots when their folder is not already covered.
+New projects need no assembly asset or `Runtime` folder. Create a Managed Assembly only when you want a custom
+boundary: it owns its folder and descendants, excluding nested custom assemblies. Unclaimed `Editor` folders compile
+into `Assembly-CSharp-Editor`. Optional `.asmref` assets assign other folders to an existing custom assembly. The assembly
+Inspector edits references, platform filters, define constraints, version defines, and managed DLL overrides.
+Custom assemblies reference one another by asset ID; predefined assemblies automatically
+reference custom assemblies with `autoReferenced` enabled. Script creation never expands another assembly's roots.
 Camera, Mesh Renderer, and typed light components expose live presentation state, while bounded material property blocks
 override Material/Shader Graph properties per renderer without mutating shared asset definitions.
 Native presentation assets are direct `Asset` objects. Scripts may pass those objects directly to Audio, VFX,
@@ -556,6 +567,11 @@ bash Scripts/project.sh test --generator ninja --configuration Debug --toolset c
 bash Scripts/Tests/test-unix.sh
 ```
 
+On Windows, the Unix regression harness can also run under Git Bash with an installed Python 3 interpreter. Its directory
+alias fixtures use Windows junctions, and it falls back to `python` when `python3` is a Windows Store placeholder. This
+checks shell-script behavior; POSIX publication-lock tests explicitly skip when Python lacks `fcntl`. Native Linux and
+macOS builds and those locking tests still require those platforms.
+
 First-party C++ uses the repository `.clang-format`. Script, packaging, managed, website, and documentation changes
 have focused regression entry points documented in [Testing and Release](Docs/TestingAndRelease.md).
 
@@ -637,3 +653,44 @@ Character collision fixes require restarting into the updated editor; importing 
 Claim free assets on their Marketplace page, choose **Open in Editor**, then review and import them in
 **Package Manager > My Assets**. Hub sign-in is separate from the website. Paid assets show **Purchasing coming soon**;
 checkout is not enabled and no payment is taken. Missing offers show **Currently unavailable**, not **Free**.
+
+Use **Window → Rigging Studio** to choose an imported model, select its semantic mapping profile, and review its
+generated skeleton and named animation clips. For custom creatures, choose **Custom / imported names** to preserve
+authored bone names without humanoid mapping. Apply or revert pending settings before retargeting. Partial mappings
+require review of omitted tracks; failed imports show their diagnostics and preserve the last good preview. See
+[Animation and Rigging](Docs/AnimationRigging.md) for custom creatures, IK and retargeting limitations.
+Use **Animation Retargeting → Edit bone mappings** to repair unmatched tracks by choosing target bones explicitly.
+Overrides apply to the current source/target selection; the baked clip stores the resulting animation.
+Asset refreshes preserve those mapping drafts and validate them again against reloaded rigs.
+Use **Save Mapping** to retain the manual bone pairs in the project's `Config/RetargetMappings` folder.
+Saving rejects stale bone names and preserves the previous preset until those pairs are repaired.
+
+**Load Saved Mapping** reuses them for another clip from the same source and target skeletons, including after restart;
+it replaces current manual edits only after validation succeeds.
+C# IK setters report invalid arguments by parameter before changing goals; clear a behaviour's persistent goals in
+`OnDisable` when they should stop with that behaviour.
+FABRIK at zero weight leaves the authored pose unchanged, allowing a goal to fade out without altering bone rotations.
+Straight chains can bend toward closer collinear targets using a deterministic initial bend in the root's frame.
+Editor clip and bone dropdowns reveal the current selection when opened without preventing manual scrolling.
+Custom foot-grounding callers can disable individual contacts with zero weight without affecting pelvis support or
+reach diagnostics. Disabling every contact preserves the pose; invalid inputs still fail without modifying it.
+Partial contact weights fade pelvis support, and `PelvisWeight` scales translation and tilt together.
+Fast panel drags retain their final position even when pointer movement and release arrive between rendered frames.
+Select a small imported creature and press F over Scene to inspect it at its authored scale without enlarging the model.
+Framing and follow selection use the current animated pose while previewing; stopping preview restores bind-pose framing.
+Click selection, box selection, and material drop targeting also use the previewed pose bounds.
+Animation fields show the action name first; hover the selected value to see its full source path.
+Single-frame imported actions remain available as constant-pose clips lasting 1/30 second; import diagnostics explain this duration.
+Successful model drops focus Scene so Ctrl+Z immediately undoes placement without another click.
+Newly dropped models use a neutral white renderer tint to preserve imported material colors; existing scene tints remain authored values.
+Drag a skinned model into the Scene to assign its imported skeleton, skin, and rig automatically. Create or assign
+an Animator Controller on the resulting Animator to play the imported or retargeted clips.
+Failed placement removes the partial object; successful placement activates scene undo immediately.
+The controller's searchable **Add Animation** picker creates states from baked clips or named imported actions.
+New clip states and model-drop states avoid existing displayed nodes, including nodes moved manually, without rearranging your graph.
+Clip and avatar-mask fields also use searchable asset names rather than requiring asset IDs.
+Animation preview leaves authored Animator references unchanged and clears stale poses if the target becomes invalid.
+Collapsing the Animator Controller or switching dock tabs keeps its Edit Mode preview running so the model stays
+visible in the scene. Closing the controller, closing its document, or entering Play Mode stops the preview.
+Use **Preview Selected** in the controller to test an action without changing its entry state, or **Preview Graph**
+to test normal graph playback.

@@ -36,7 +36,7 @@ while IFS= read -r path; do
 done < <(editor_package_required_paths Client Hub Core Core)
 rm -rf "$stage/content"
 mkdir -p "$stage/content"
-cp -R "$ROOT/KeireHubContent/." "$stage/content/"
+python3 "$ROOT/Scripts/Tests/copy-hub-content-fixture.py" "$ROOT/KeireHubContent" "$stage/content"
 for path in bin/Client bin/CoreHubWorker bin/CoreAssetTool bin/CoreAssetWorker bin/CoreRuntime \
   bin/KeireShaderCompiler \
   bin/Managed/Dotnet/dotnet launch-editor.sh; do
@@ -96,7 +96,7 @@ printf '%s\n' tampered >> "$stage/content/Templates/Payloads/Empty/README.md"
 assert_false python3 "${manifest_arguments[@]}"
 rm -rf "$stage/content"
 mkdir -p "$stage/content"
-cp -R "$ROOT/KeireHubContent/." "$stage/content/"
+python3 "$ROOT/Scripts/Tests/copy-hub-content-fixture.py" "$ROOT/KeireHubContent" "$stage/content"
 python3 "${manifest_arguments[@]}"
 
 assert_true validate_editor_package_stage "$stage" Client Hub Core Core Linux

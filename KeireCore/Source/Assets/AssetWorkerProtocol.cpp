@@ -137,6 +137,7 @@ namespace Keire::Detail
                     {"subAssets", std::move(subAssets)},
                     {"sourceDependencies", std::move(sourceDependencies)},
                     {"bounds", std::move(bounds)},
+                    {"displayName", record.Metadata.DisplayName},
                     {"settings", EncodeSettings(record.ImportSettings)}};
         }
 
@@ -164,6 +165,7 @@ namespace Keire::Detail
                 record.Metadata.LocalBounds = AssetBounds{bounds.at("minimum").get<std::array<float, 3>>(),
                                                           bounds.at("maximum").get<std::array<float, 3>>()};
             record.ImportSettings = DecodeSettings(value.value("settings", Json::object()));
+            record.Metadata.DisplayName = value.value("displayName", std::string{});
             return record;
         }
 

@@ -14,6 +14,7 @@
 #include "Keire/Scenes/PrefabAsset.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
+#include "Keire/Scripting/ManagedAssemblyReferenceAsset.h"
 #include "Keire/Scripting/ManagedDataAsset.h"
 #include "Keire/Ui/UiFontAssets.h"
 #include "Keire/Ui/UiToolkit.h"
@@ -36,6 +37,7 @@ namespace Keire
         result.emplace_back(CreateSceneAssetImporter());
         result.emplace_back(CreatePrefabAssetImporter());
         result.emplace_back(CreateManagedAssemblyAssetImporter());
+        result.emplace_back(CreateManagedAssemblyReferenceAssetImporter());
         result.emplace_back(CreateShaderAssetImporter());
         result.emplace_back(CreateMaterialAssetImporter());
         result.emplace_back(CreateMaterialGraphAssetImporter());
@@ -109,6 +111,7 @@ namespace Keire
         result.emplace_back(CreateProceduralMotionProfileAssetDecoder());
         result.emplace_back(CreatePrefabAssetDecoder());
         result.emplace_back(CreateManagedAssemblyAssetDecoder());
+        result.emplace_back(CreateManagedAssemblyReferenceAssetDecoder());
         result.emplace_back(CreateAudioMixerAssetDecoder());
         result.emplace_back(CreatePhysicsMaterialAssetDecoder());
         result.emplace_back(CreateManagedDataAssetDecoder());

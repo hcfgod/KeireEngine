@@ -19,6 +19,7 @@ namespace KeireEditor
         std::span<const Keire::ManagedAssetTypeDescriptor> ManagedTypes;
         std::function<bool(const Keire::AssetSourceRecord&)> Filter;
         std::function<std::optional<Keire::AssetTypeId>(Keire::AssetId)> ResolveType;
+        std::function<std::string(Keire::AssetId)> ResolveDisplayName;
         std::function<std::optional<Keire::ManagedTypeId>(Keire::AssetId)> ResolveManagedType;
         std::function<void(Keire::AssetId)> Reveal;
         bool AllowNone = true;

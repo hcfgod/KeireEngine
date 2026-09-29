@@ -712,7 +712,9 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(std::filesystem::exists(created->Root() / "Assets/UI/WorldSurface.keireuipanel"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterRenderTexture.keireui"));
     CHECK(std::filesystem::exists(created->Root() / "Assets/UI/StarterRenderTexture.keireuipanel"));
-    CHECK(std::filesystem::exists(created->Root() / "Assets/Scripts/Runtime/StarterUi.cs"));
+    CHECK(std::filesystem::exists(created->Root() / "Assets/Scripts/StarterUi.cs"));
+    CHECK_FALSE(std::filesystem::exists(created->Root() / "Assets/Scripts/Runtime"));
+    CHECK_FALSE(std::filesystem::exists(created->Root() / "Assets/Scripts/Gameplay.keireasm"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Project.keireproject"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Rendering.keiresettings"));
     CHECK(std::filesystem::exists(created->Root() / "ProjectSettings/Scripting.keiresettings"));

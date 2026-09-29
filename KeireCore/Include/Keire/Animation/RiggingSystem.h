@@ -154,7 +154,14 @@ namespace Keire
         ExactName,
         Semantic,
         TargetConflict,
-        Hierarchy
+        Hierarchy,
+        Manual
+    };
+
+    struct AnimationRetargetOverride
+    {
+        std::string SourceBone;
+        std::string TargetBone;
     };
 
     struct AnimationRetargetBoneMapping
@@ -177,6 +184,7 @@ namespace Keire
         std::size_t ExactNameMatchCount = 0;
         std::size_t HierarchyMatchCount = 0;
         std::size_t SemanticMatchCount = 0;
+        std::size_t ManualMatchCount = 0;
         bool RootMotionMapped = true;
         std::vector<AnimationRetargetBoneMapping> Mappings;
         std::vector<RigDiagnostic> Messages;
@@ -219,6 +227,7 @@ namespace Keire
         Vector3 Position;
         Vector3 Normal{0.0F, 1.0F, 0.0F};
         Vector3 Pole{0.0F, 0.0F, 1.0F};
+        // Zero-weight contacts are validated but do not contribute support or reach diagnostics.
         float Weight = 1.0F;
         float RotationWeight = 1.0F;
         std::optional<std::uint32_t> Toe;
@@ -290,10 +299,20 @@ namespace Keire
     [[nodiscard]] KEIRE_API AnimationRetargetResult RetargetAnimationClipWithDiagnostics(
         const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig, const AnimationClipAsset& sourceClip,
         AssetId targetSkeletonId, const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig);
+    // Named overrides take priority over automatic matching. Unknown names and duplicate logical bindings are rejected.
+    [[nodiscard]] KEIRE_API AnimationRetargetDiagnostics
+    DiagnoseAnimationRetargeting(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
+                                 const AnimationClipAsset& sourceClip, const SkeletonAsset& targetSkeleton,
+                                 const RigDefinition& targetRig, std::span<const AnimationRetargetOverride> overrides);
+    [[nodiscard]] KEIRE_API AnimationRetargetResult RetargetAnimationClipWithDiagnostics(
+        const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig, const AnimationClipAsset& sourceClip,
+        AssetId targetSkeletonId, const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig,
+        std::span<const AnimationRetargetOverride> overrides);
     [[nodiscard]] KEIRE_API Ref<AnimationClipAsset>
     RetargetAnimationClip(const SkeletonAsset& sourceSkeleton, const RigDefinition& sourceRig,
                           const AnimationClipAsset& sourceClip, AssetId targetSkeletonId,
                           const SkeletonAsset& targetSkeleton, const RigDefinition& targetRig);
+    // IK solvers preserve the entire input pose on failure; successful results contain only finite transforms.
     [[nodiscard]] KEIRE_API bool SolveTwoBoneIk(const SkeletonAsset& skeleton, std::span<BoneTransform> localPose,
                                                 const TwoBoneIkRequest& request);
     [[nodiscard]] KEIRE_API bool SolveFabrikIk(const SkeletonAsset& skeleton, std::span<BoneTransform> localPose,

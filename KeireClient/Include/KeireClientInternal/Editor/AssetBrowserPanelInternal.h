@@ -270,6 +270,9 @@ namespace KeireEditor
                 case AssetBrowserOpenAction::AnimationGraph:
                     editor.OpenAssetBrowserAnimationGraph(record.Id);
                     break;
+                case AssetBrowserOpenAction::AnimationClip:
+                    editor.OpenAssetBrowserAnimationClip(record.Id);
+                    break;
                 case AssetBrowserOpenAction::AudioMixer:
                     editor.OpenAssetBrowserAudioMixer(record.Id);
                     break;
@@ -423,6 +426,8 @@ namespace KeireEditor
                 RequestNamedCreate(NamedCreateKind::Script, "NewBehaviour");
             if (ui.MenuItem("C# ScriptableObject Class"))
                 RequestNamedCreate(NamedCreateKind::ScriptableObjectScript, "NewScriptableObject");
+            if (ui.MenuItem("Assembly Reference"))
+                RequestNamedCreate(NamedCreateKind::ManagedAssemblyReference, "AssemblyReference");
             if (ui.MenuItem("Managed Assembly"))
                 RequestNamedCreate(NamedCreateKind::ManagedAssembly, "Gameplay");
             if (ui.MenuItem("Audio Mixer"))

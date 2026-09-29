@@ -1,6 +1,8 @@
 #include "KeireClient/Editor/RiggingStudioPanel.h"
 
+#include "KeireClient/Editor/RiggingStudioValidation.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
+#include "KeireClientInternal/Editor/RetargetMappingActions.h"
 
 #include <algorithm>
 #include <array>
@@ -11,6 +13,31 @@ namespace KeireEditor
 {
     namespace
     {
+        [[nodiscard]] std::string_view RigOptionLabel(const std::string_view value) noexcept
+        {
+            constexpr std::pair<std::string_view, std::string_view> labels[]{
+                {"embedded", "Keep imported skeleton"},
+                {"generate", "Generate a skeleton"},
+                {"none", "None"},
+                {"humanoid", "Humanoid"},
+                {"biped", "Biped"},
+                {"quadruped", "Quadruped"},
+                {"custom", "Custom / imported names"},
+                {"linearBlend", "Linear blend"},
+                {"dualQuaternion", "Dual quaternion"},
+                {"light", "Light"},
+                {"balanced", "Balanced"},
+                {"aggressive", "Aggressive"},
+                {"rootMotion", "Extract root motion"},
+                {"authored", "Keep authored motion"},
+                {"inPlaceHorizontal", "In place (horizontal)"},
+                {"inPlace", "In place (all axes)"}};
+            for (const auto& [key, label] : labels)
+                if (key == value)
+                    return label;
+            return value;
+        }
+
         [[nodiscard]] bool IsModelRecord(const Keire::AssetSourceRecord& record) noexcept
         {
             return record.Importer == "Keire.Mesh" || record.Importer == "Keire.Model";
@@ -108,6 +135,8 @@ namespace KeireEditor
                 return "target conflict";
             case Keire::AnimationRetargetMatch::Hierarchy:
                 return "hierarchy";
+            case Keire::AnimationRetargetMatch::Manual:
+                return "manual";
             }
             return "unknown";
         }
@@ -141,15 +170,8 @@ namespace KeireEditor
             {
                 m_LockedAsset = {};
                 model = selectedModel;
-                if (!model && !selectedAsset && ui.WindowFocused() && m_DraftAsset)
+                if (!model && m_DraftAsset)
                     model = FindModelRecord(records, m_DraftAsset);
-                if (!model && !ui.WindowFocused())
-                {
-                    m_DraftAsset = {};
-                    m_Draft.clear();
-                    m_Dirty = false;
-                    m_Message.clear();
-                }
             }
             const auto& theme = m_Controller.RiggingStudioTheme();
             ui.TextColored(theme.Accent, "RIGGING STUDIO");
@@ -158,22 +180,40 @@ namespace KeireEditor
                 ui.SameLine();
                 ui.TextColored(theme.MutedText, "PINNED");
             }
-            ui.TextColored(theme.MutedText,
-                           "Generate, validate, and publish a deterministic runtime skeleton and skin cache.");
+            ui.TextColored(theme.MutedText, "Choose a model, configure its rig, then review animation compatibility.");
             ui.Separator();
+            if (auto picker = ui.BeginCombo("Model", model ? model->RelativePath.generic_string() : "Choose a model");
+                picker)
+            {
+                for (const auto& candidate : records)
+                {
+                    if (!IsModelRecord(candidate))
+                        continue;
+                    auto id = ui.PushId(candidate.Id.ToString());
+                    if (ui.Selectable(candidate.RelativePath.generic_string(), model && model->Id == candidate.Id))
+                    {
+                        m_Controller.RevealRiggingStudioAsset(candidate.Id);
+                        model = &candidate;
+                        if (m_Registration.Locked())
+                            m_LockedAsset = candidate.Id;
+                    }
+                }
+            }
             if (!model)
             {
-                ui.TextColored(theme.Warning, "Select an imported model or one of its generated rig assets.");
-                ui.Text("Supported profiles: humanoid, biped, quadruped, and authored custom rigs.");
+                ui.Text("Import an FBX, glTF, or GLB model into the Project panel, then choose it above.");
+                ui.TextColored(theme.MutedText,
+                               "Keep an existing skeleton, or generate a humanoid, biped, or quadruped rig.");
+                ui.TextColored(theme.MutedText, "For spiders and other custom creatures, import an authored skeleton.");
                 return;
             }
 
             if (m_DraftAsset != model->Id)
             {
                 m_DraftAsset = model->Id;
-                m_Draft = model->ImportSettings;
-                m_Dirty = false;
                 m_Message.clear();
+                m_MessageError = false;
+                m_ReviewedPartialMapping = false;
                 m_RetargetDiagnostics.reset();
                 m_DiagnosticSourceClip = {};
                 m_DiagnosticSourceSkeleton = {};
@@ -181,111 +221,137 @@ namespace KeireEditor
                 m_DiagnosticTargetSkeleton = {};
                 m_DiagnosticTargetRig = {};
             }
+            auto& draft = m_Drafts.Select(model->Id, model->ImportSettings);
+            auto& draftValues = draft.Values;
+            auto& draftDirty = draft.Dirty;
+            bool importFailed = false;
+            if (const auto database = m_Controller.RiggingStudioDatabase())
+            {
+                const auto status = database->ImportStatus(model->Id);
+                importFailed = status.State == Keire::AssetImportState::Failed;
+                if (importFailed)
+                {
+                    ui.TextColoredWrapped(theme.Error,
+                                          "Import failed. The preview may show the last good result. Correct the "
+                                          "source or settings, then regenerate before baking.");
+                    for (const auto& diagnostic : status.Diagnostics)
+                        ui.TextColoredWrapped(
+                            diagnostic.Severity == Keire::AssetDiagnosticSeverity::Error ? theme.Error : theme.Warning,
+                            diagnostic.Message);
+                }
+            }
 
             ui.Text(model->RelativePath.generic_string());
-            ui.TextColored(theme.MutedText, "Stable model ID  " + model->Id.ToString());
+            if (draftDirty)
+                ui.TextColored(theme.Warning, "Unapplied changes — retained while you inspect other models.");
+            if (draftDirty && draft.Baseline != model->ImportSettings)
+                ui.TextColoredWrapped(theme.Warning, "Import settings changed elsewhere. Apply replaces them with this "
+                                                     "draft; Revert loads the current settings.");
             ui.Separator();
 
-            auto rigSource = ReadChoice(m_Draft, "rigSource", "embedded");
+            auto rigSource = ReadChoice(draftValues, "rigSource", "embedded");
             constexpr std::array RigSources{"embedded", "generate", "none"};
-            if (auto combo = ui.BeginCombo("Rig Source", rigSource); combo)
+            if (auto combo = ui.BeginCombo("Rig Source", RigOptionLabel(rigSource)); combo)
             {
                 for (const auto value : RigSources)
                 {
-                    if (ui.Selectable(value, rigSource == value))
+                    if (ui.Selectable(RigOptionLabel(value), rigSource == value))
                     {
                         rigSource = value;
-                        m_Draft["rigSource"] = rigSource;
-                        m_Dirty = true;
+                        draftValues["rigSource"] = rigSource;
+                        draftDirty = true;
                     }
                 }
             }
 
-            if (rigSource == "generate")
+            if (rigSource != "none")
             {
-                auto profile = ReadChoice(m_Draft, "rigProfile", "humanoid");
-                constexpr std::array Profiles{"humanoid", "biped", "quadruped"};
-                if (auto combo = ui.BeginCombo("Profile", profile); combo)
+                auto profile = ReadChoice(draftValues, "rigProfile", "humanoid");
+                constexpr std::array Profiles{"humanoid", "biped", "quadruped", "custom"};
+                if (auto combo = ui.BeginCombo("Mapping Profile", RigOptionLabel(profile)); combo)
                 {
                     for (const auto value : Profiles)
                     {
-                        if (ui.Selectable(value, profile == value))
+                        if (ui.Selectable(RigOptionLabel(value), profile == value))
                         {
                             profile = value;
-                            m_Draft["rigProfile"] = profile;
-                            m_Dirty = true;
+                            draftValues["rigProfile"] = profile;
+                            draftDirty = true;
                         }
                     }
                 }
 
-                auto influences = ReadChoice(m_Draft, "maximumInfluences", "4");
-                if (auto combo = ui.BeginCombo("Maximum Influences", influences); combo)
+                auto influences = ReadChoice(draftValues, "maximumInfluences", "4");
+                if (auto combo = ui.BeginCombo("Maximum Influences", RigOptionLabel(influences)); combo)
                 {
                     for (const auto value : {"4", "8"})
                     {
-                        if (ui.Selectable(value, influences == value))
+                        if (ui.Selectable(RigOptionLabel(value), influences == value))
                         {
                             influences = value;
-                            m_Draft["maximumInfluences"] = influences;
-                            m_Dirty = true;
+                            draftValues["maximumInfluences"] = influences;
+                            draftDirty = true;
                         }
                     }
                 }
 
-                auto method = ReadChoice(m_Draft, "skinningMethod", "linearBlend");
-                if (auto combo = ui.BeginCombo("Skinning", method); combo)
+                auto method = ReadChoice(draftValues, "skinningMethod", "linearBlend");
+                if (auto combo = ui.BeginCombo("Skinning", RigOptionLabel(method)); combo)
                 {
                     for (const auto value : {"linearBlend", "dualQuaternion"})
                     {
-                        if (ui.Selectable(value, method == value))
+                        if (ui.Selectable(RigOptionLabel(value), method == value))
                         {
                             method = value;
-                            m_Draft["skinningMethod"] = method;
-                            m_Dirty = true;
+                            draftValues["skinningMethod"] = method;
+                            draftDirty = true;
                         }
                     }
                 }
                 ui.TextColored(theme.MutedText,
                                "Linear blend uses the GPU skin cache. Dual quaternion preserves twisting volume.");
             }
-            else if (rigSource == "embedded")
+            if (rigSource == "embedded")
             {
                 ui.TextColored(theme.MutedText,
                                "The imported hierarchy, bind pose, weights, and clips remain authoritative.");
+                ui.TextColoredWrapped(
+                    theme.MutedText,
+                    "Mapping profiles suggest semantic roles; they do not convert a custom creature into a humanoid.");
             }
-            else
+            else if (rigSource == "none")
             {
                 ui.TextColored(theme.Warning, "Rigging is disabled; this model imports as static geometry.");
             }
 
             if (rigSource != "none")
             {
-                auto compression = ReadChoice(m_Draft, "animationCompression", "balanced");
-                if (auto combo = ui.BeginCombo("Animation Compression", compression); combo)
+                auto compression = ReadChoice(draftValues, "animationCompression", "balanced");
+                if (auto combo = ui.BeginCombo("Animation Compression", RigOptionLabel(compression)); combo)
                 {
                     for (const auto value : {"none", "light", "balanced", "aggressive"})
                     {
-                        if (ui.Selectable(value, compression == value))
+                        if (ui.Selectable(RigOptionLabel(value), compression == value))
                         {
                             compression = value;
-                            m_Draft["animationCompression"] = compression;
-                            m_Dirty = true;
+                            draftValues["animationCompression"] = compression;
+                            draftDirty = true;
                         }
                     }
                 }
                 ui.TextColored(theme.MutedText,
                                "Balanced preserves millimeter-scale translation and quarter-degree rotation error.");
 
-                auto motion = ReadChoice(m_Draft, "animationMotion", "rootMotion");
-                if (auto combo = ui.BeginCombo("Animation Motion", motion); combo)
+                auto motion = ReadChoice(draftValues, "animationMotion", "rootMotion");
+                if (auto combo = ui.BeginCombo("Animation Motion", RigOptionLabel(motion)); combo)
                 {
                     for (const auto value : {"rootMotion", "authored", "inPlaceHorizontal", "inPlace"})
                     {
-                        if (ui.Selectable(value, motion == value))
+                        if (ui.Selectable(RigOptionLabel(value), motion == value))
                         {
                             motion = value;
-                            m_Draft["animationMotion"] = motion;
-                            m_Dirty = true;
+                            draftValues["animationMotion"] = motion;
+                            draftDirty = true;
                         }
                     }
                 }
@@ -293,30 +359,43 @@ namespace KeireEditor
                                "In-place modes lock semantic pelvis/root translation for scripted controllers.");
             }
 
+            const bool invalidCustomGeneration =
+                rigSource == "generate" && ReadChoice(draftValues, "rigProfile", "humanoid") == "custom";
+            if (invalidCustomGeneration)
+                ui.TextColoredWrapped(theme.Warning, "Custom mapping requires an imported skeleton. Choose Keep "
+                                                     "imported skeleton, or select a supported generation profile.");
             ui.Separator();
-            if (ui.Button(m_Dirty ? "Apply & Regenerate" : "Regenerate"))
             {
-                try
+                auto invalidGenerationScope = ui.BeginDisabled(invalidCustomGeneration);
+                if (ui.Button(draftDirty ? "Apply & Regenerate" : "Regenerate"))
                 {
-                    m_Controller.ApplyRiggingStudioSettings(model->Id, m_Draft);
-                    m_Dirty = false;
-                    m_Message = "Rig regeneration queued in the isolated asset worker.";
-                }
-                catch (const std::exception& error)
-                {
-                    m_Message = error.what();
-                    m_Controller.ReportRiggingStudioError(m_Message);
+                    try
+                    {
+                        m_Controller.ApplyRiggingStudioSettings(model->Id, draftValues);
+                        draftDirty = false;
+                        m_Message.clear();
+                        m_MessageError = false;
+                    }
+                    catch (const std::exception& error)
+                    {
+                        m_Message = error.what();
+                        m_MessageError = true;
+                        m_Controller.ReportRiggingStudioError(m_Message);
+                    }
+                    // Applying refreshes the controller's record storage. Reacquire
+                    // the selected model next frame before using any record views.
+                    return;
                 }
             }
             ui.SameLine();
             if (ui.Button("Revert"))
             {
-                m_Draft = model->ImportSettings;
-                m_Dirty = false;
+                m_Drafts.Revert(model->Id, model->ImportSettings);
                 m_Message = "Draft settings reverted.";
+                m_MessageError = false;
             }
             if (!m_Message.empty())
-                ui.TextColored(theme.MutedText, m_Message);
+                ui.TextColored(m_MessageError ? theme.Error : theme.MutedText, m_Message);
             if (!m_Controller.RiggingStudioStatus().empty())
                 ui.TextColored(theme.MutedText, m_Controller.RiggingStudioStatus());
 
@@ -336,6 +415,13 @@ namespace KeireEditor
                         type = assets->TryGetType(subAsset);
                     auto id = ui.PushId(subAsset.ToString());
                     ui.Text(type ? AssetTypeLabel(*type) : std::string_view("Generated Asset"));
+                    if (assets)
+                        if (const auto metadata = assets->TryGetMetadata(subAsset);
+                            metadata && !metadata->DisplayName.empty())
+                        {
+                            ui.SameLine();
+                            ui.Text(metadata->DisplayName);
+                        }
                     ui.SameLine();
                     if (ui.Button("Reveal"))
                         m_Controller.RevealRiggingStudioAsset(subAsset);
@@ -352,6 +438,11 @@ namespace KeireEditor
                                 ui.TextColored(theme.MutedText,
                                                std::to_string(rig->Definition().Bones.size()) + " bones  |  " +
                                                    std::to_string(rig->Definition().Chains.size()) + " IK chains");
+                                if (rig->Definition().Chains.empty())
+                                    ui.TextColoredWrapped(
+                                        theme.Warning,
+                                        "No semantic chains were inferred. Imported animation is preserved; "
+                                        "use explicit bone names for custom IK.");
                                 if (auto mapping = ui.BeginTreeNode("Semantic bone map", false); mapping)
                                 {
                                     for (const auto& bone : rig->Definition().Bones)
@@ -380,6 +471,7 @@ namespace KeireEditor
                 {
                     Keire::AssetId Clip;
                     const Keire::AssetSourceRecord* Model = nullptr;
+                    std::string Name;
                 };
                 std::vector<ClipChoice> clips;
                 for (const auto& candidate : records)
@@ -388,29 +480,38 @@ namespace KeireEditor
                         continue;
                     const auto animation = DescribeModelAnimation(candidate, *assets);
                     for (const auto clip : animation.Clips)
-                        clips.push_back({clip, &candidate});
+                    {
+                        const auto metadata = assets->TryGetMetadata(clip);
+                        const auto name = metadata && !metadata->DisplayName.empty()
+                                              ? metadata->DisplayName
+                                              : "Unnamed clip " + clip.ToString().substr(0, 8);
+                        clips.push_back({clip, &candidate, name});
+                    }
                 }
                 const auto selected =
                     std::ranges::find_if(clips, [this](const auto& value) { return value.Clip == m_SourceClip; });
-                const auto preview = selected == clips.end()
-                                         ? std::string("Select source clip")
-                                         : selected->Model->RelativePath.filename().generic_string() + " / " +
-                                               selected->Clip.ToString().substr(0, 8);
+                const auto preview =
+                    selected == clips.end()
+                        ? std::string("Select source clip")
+                        : selected->Model->RelativePath.filename().generic_string() + " / " + selected->Name;
                 if (auto combo = ui.BeginCombo("Source Clip", preview); combo)
                 {
                     for (const auto& choice : clips)
                     {
                         auto id = ui.PushId(choice.Clip.ToString());
-                        const auto label = choice.Model->RelativePath.filename().generic_string() + " / " +
-                                           choice.Clip.ToString().substr(0, 8);
+                        const auto label = choice.Model->RelativePath.filename().generic_string() + " / " + choice.Name;
                         if (ui.Selectable(label, choice.Clip == m_SourceClip))
                         {
                             m_SourceClip = choice.Clip;
-                            m_RetargetName = choice.Model->RelativePath.stem().string() + " Retargeted";
+                            m_RetargetName =
+                                SuggestedRetargetName(choice.Model->RelativePath.stem().string(), choice.Name);
                         }
                     }
                 }
                 (void)ui.InputText("Output Name", m_RetargetName);
+                const auto nameError = RetargetOutputNameError(m_RetargetName);
+                if (!nameError.empty())
+                    ui.TextColoredWrapped(theme.Warning, nameError);
                 if (!m_SourceClip)
                 {
                     ui.TextColored(theme.MutedText, "Choose a generated animation clip to inspect compatibility.");
@@ -418,6 +519,23 @@ namespace KeireEditor
                 }
 
                 const auto* sourceModel = FindParentModel(records, m_SourceClip);
+                bool sourceImportFailed = false;
+                if (const auto database = m_Controller.RiggingStudioDatabase(); database && sourceModel)
+                {
+                    const auto sourceStatus = database->ImportStatus(sourceModel->Id);
+                    sourceImportFailed = sourceStatus.State == Keire::AssetImportState::Failed;
+                    if (sourceImportFailed)
+                    {
+                        ui.TextColoredWrapped(theme.Error,
+                                              "Source model import failed. The clip may be the last good result. "
+                                              "Repair and reimport the source model before baking.");
+                        for (const auto& diagnostic : sourceStatus.Diagnostics)
+                            ui.TextColoredWrapped(diagnostic.Severity == Keire::AssetDiagnosticSeverity::Error
+                                                      ? theme.Error
+                                                      : theme.Warning,
+                                                  diagnostic.Message);
+                    }
+                }
                 const auto sourceAnimation =
                     sourceModel ? DescribeModelAnimation(*sourceModel, *assets) : ModelAnimationAssets{};
                 const auto targetAnimation = DescribeModelAnimation(*model, *assets);
@@ -452,10 +570,71 @@ namespace KeireEditor
                 ui.TextColored(theme.MutedText,
                                std::to_string(sourceRig->Definition().Bones.size()) + " source bones  ->  " +
                                    std::to_string(targetRig->Definition().Bones.size()) + " target bones");
-                if (m_DiagnosticSourceClip != sourceClip || m_DiagnosticSourceSkeleton != sourceSkeleton ||
+                const bool inputsChanged =
+                    m_DiagnosticSourceClip != sourceClip || m_DiagnosticSourceSkeleton != sourceSkeleton ||
                     m_DiagnosticSourceRig != sourceRig || m_DiagnosticTargetSkeleton != targetSkeleton ||
-                    m_DiagnosticTargetRig != targetRig)
+                    m_DiagnosticTargetRig != targetRig;
+                bool mappingChanged = m_MappingDraft.Select(m_SourceClip, model->Id);
+                if (mappingChanged)
+                    m_MappingMessage.clear();
+                if (auto mappingEditor = ui.BeginTreeNode("Edit bone mappings"); mappingEditor)
                 {
+                    ui.TextWrapped("Choose a target bone for each source track that needs repair. Automatic restores "
+                                   "name and semantic matching. Overrides apply to this source/target selection; "
+                                   "baking saves the resulting animation.");
+                    (void)ui.InputText("Filter source bones", m_MappingDraft.SourceFilter);
+                    for (const auto& track : sourceClip->Tracks())
+                    {
+                        if (track.Bone >= sourceSkeleton->Bones().size())
+                            continue;
+                        const auto& sourceName = sourceSkeleton->Bones()[track.Bone].Name;
+                        if (!RetargetBoneMatchesFilter(sourceName, m_MappingDraft.SourceFilter))
+                            continue;
+                        auto id = ui.PushId(sourceName);
+                        const auto found = std::ranges::find(m_MappingDraft.Overrides, sourceName,
+                                                             &Keire::AnimationRetargetOverride::SourceBone);
+                        const auto current =
+                            found == m_MappingDraft.Overrides.end() ? std::string("Automatic") : found->TargetBone;
+                        auto mappingPreview = current;
+                        if (found == m_MappingDraft.Overrides.end() && m_RetargetDiagnostics && !inputsChanged)
+                        {
+                            const auto mapped = std::ranges::find(m_RetargetDiagnostics->Mappings, track.Bone,
+                                                                  &Keire::AnimationRetargetBoneMapping::SourceBone);
+                            mappingPreview += mapped != m_RetargetDiagnostics->Mappings.end() && mapped->TargetBone
+                                                  ? ": " + mapped->TargetName
+                                                  : ": no matching target";
+                        }
+                        if (auto picker = ui.BeginCombo(sourceName, mappingPreview); picker)
+                        {
+                            (void)ui.InputText("Find target bone", m_MappingDraft.TargetFilter);
+                            if (ui.Selectable("Automatic", found == m_MappingDraft.Overrides.end()))
+                            {
+                                std::erase_if(m_MappingDraft.Overrides, [&sourceName](const auto& item)
+                                              { return item.SourceBone == sourceName; });
+                                mappingChanged = true;
+                            }
+                            for (const auto& targetBone : targetSkeleton->Bones())
+                                if (RetargetBoneMatchesFilter(targetBone.Name, m_MappingDraft.TargetFilter) &&
+                                    ui.Selectable(targetBone.Name, current == targetBone.Name))
+                                {
+                                    std::erase_if(m_MappingDraft.Overrides, [&sourceName](const auto& item)
+                                                  { return item.SourceBone == sourceName; });
+                                    m_MappingDraft.Overrides.push_back({sourceName, targetBone.Name});
+                                    mappingChanged = true;
+                                }
+                        }
+                    }
+                    if (mappingChanged)
+                        m_MappingMessage.clear();
+                    if (const auto database = m_Controller.RiggingStudioDatabase())
+                        mappingChanged |= Detail::DrawRetargetMappingActions(
+                            ui, theme, database->Specification().ProjectRoot, sourceAnimation.Skeleton,
+                            targetAnimation.Skeleton, *sourceSkeleton, *targetSkeleton, m_MappingDraft.Overrides,
+                            m_MappingMessage, m_MappingMessageError);
+                }
+                if (inputsChanged || mappingChanged)
+                {
+                    m_ReviewedPartialMapping = false;
                     m_DiagnosticSourceClip = sourceClip;
                     m_DiagnosticSourceSkeleton = sourceSkeleton;
                     m_DiagnosticSourceRig = sourceRig;
@@ -463,14 +642,17 @@ namespace KeireEditor
                     m_DiagnosticTargetRig = targetRig;
                     try
                     {
-                        m_RetargetDiagnostics =
-                            Keire::DiagnoseAnimationRetargeting(*sourceSkeleton, sourceRig->Definition(), *sourceClip,
-                                                                *targetSkeleton, targetRig->Definition());
+                        m_RetargetDiagnostics = Keire::DiagnoseAnimationRetargeting(
+                            *sourceSkeleton, sourceRig->Definition(), *sourceClip, *targetSkeleton,
+                            targetRig->Definition(), m_MappingDraft.Overrides);
+                        m_Message.clear();
+                        m_MessageError = false;
                     }
                     catch (const std::exception& error)
                     {
                         m_RetargetDiagnostics.reset();
                         m_Message = error.what();
+                        m_MessageError = true;
                     }
                 }
 
@@ -478,12 +660,23 @@ namespace KeireEditor
                 if (m_RetargetDiagnostics)
                 {
                     const auto& diagnostics = *m_RetargetDiagnostics;
-                    ui.TextColored(compatible ? theme.Success : theme.Error,
+                    const bool partial = HasPartialRetargetMapping(diagnostics);
+                    ui.TextColored(!compatible ? theme.Error
+                                   : partial   ? theme.Warning
+                                               : theme.Success,
                                    std::to_string(diagnostics.MappedTrackCount) + " / " +
                                        std::to_string(diagnostics.SourceTrackCount) + " tracks mapped  |  " +
                                        std::to_string(diagnostics.ExactNameMatchCount) + " exact  |  " +
                                        std::to_string(diagnostics.HierarchyMatchCount) + " hierarchy  |  " +
-                                       std::to_string(diagnostics.SemanticMatchCount) + " semantic");
+                                       std::to_string(diagnostics.SemanticMatchCount) + " semantic  |  " +
+                                       std::to_string(diagnostics.ManualMatchCount) + " manual");
+                    if (partial)
+                    {
+                        ui.TextColoredWrapped(theme.Warning,
+                                              "Partial mapping: unmapped animation tracks will be omitted. "
+                                              "Review the diagnostics before baking.");
+                        (void)ui.Checkbox("I reviewed the omitted tracks", m_ReviewedPartialMapping);
+                    }
                     ui.TextColored(diagnostics.RootMotionMapped ? theme.Success : theme.Warning,
                                    diagnostics.RootMotionMapped ? "Root motion mapping is compatible."
                                                                 : "Root motion will be disabled for this bake.");
@@ -493,7 +686,7 @@ namespace KeireEditor
                     if (scaleFallbacks != 0)
                         ui.TextColored(theme.Warning, std::to_string(scaleFallbacks) +
                                                           " animated scale components will use target bind scale.");
-                    if (auto details = ui.BeginTreeNode("Retarget diagnostics", !compatible); details)
+                    if (auto details = ui.BeginTreeNode("Retarget diagnostics", !compatible || partial); details)
                     {
                         for (const auto& mapping : diagnostics.Mappings)
                         {
@@ -512,7 +705,12 @@ namespace KeireEditor
                         }
                     }
                 }
-                if (auto disabled = ui.BeginDisabled(!compatible); disabled)
+                if (draftDirty)
+                    ui.TextColored(theme.Warning, "Apply or revert the pending import settings before baking.");
+                if (auto disabled = ui.BeginDisabled(!nameError.empty() || !m_RetargetDiagnostics ||
+                                                     !CanBakeRetarget(*m_RetargetDiagnostics, m_ReviewedPartialMapping,
+                                                                      draftDirty, sourceImportFailed, importFailed));
+                    disabled)
                 {
                     if (ui.Button("Bake Retargeted Clip"))
                     {
@@ -520,17 +718,19 @@ namespace KeireEditor
                         {
                             const auto baked = Keire::RetargetAnimationClipWithDiagnostics(
                                 *sourceSkeleton, sourceRig->Definition(), *sourceClip, targetAnimation.Skeleton,
-                                *targetSkeleton, targetRig->Definition());
+                                *targetSkeleton, targetRig->Definition(), m_MappingDraft.Overrides);
                             m_Controller.CreateRiggingStudioRetarget(
                                 m_RetargetName,
                                 Keire::AnimationClipAsset::Encode(baked.Clip->Skeleton(), baked.Clip->Duration(),
                                                                   baked.Clip->Tracks(), baked.Clip->Events(),
                                                                   baked.Clip->RootMotion()));
-                            m_Message = "Retargeted clip creation queued in the isolated asset worker.";
+                            m_Message.clear();
+                            m_MessageError = false;
                         }
                         catch (const std::exception& error)
                         {
                             m_Message = error.what();
+                            m_MessageError = true;
                             m_Controller.ReportRiggingStudioError(m_Message);
                         }
                     }
@@ -576,8 +776,8 @@ void EditorWorkspaceLayer::CreateRiggingStudioRetarget(const std::string_view na
         throw std::runtime_error("Asset creation services are unavailable.");
     if (m_AssetOperations->Busy())
         throw std::runtime_error("Wait for the active asset operation before creating a retargeted clip.");
-    if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
-        throw std::invalid_argument("Retargeted clip name must be one non-empty path component.");
+    if (const auto error = KeireEditor::RetargetOutputNameError(name); !error.empty())
+        throw std::invalid_argument(std::string(error));
     const auto directory = m_AssetBrowserPanel ? m_AssetBrowserPanel->CurrentFolder() : std::filesystem::path{};
     auto destination = directory / (std::string(name) + ".keireanim");
     for (std::size_t copy = 2; m_AssetDatabase->Find(destination); ++copy)

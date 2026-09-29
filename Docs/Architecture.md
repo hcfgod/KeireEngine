@@ -1,5 +1,9 @@
 # Architecture
 
+Generated asset catalogs preserve `AssetDerivedMetadata::DisplayName` as optional presentation metadata. Cooking
+copies the importer-provided subasset name; catalog, worker and import-cache codecs retain it. Legacy catalogs and
+caches without a name remain readable. Identity and dependency resolution continue to use asset IDs.
+
 Managed input actions retain their identity when the editor Game viewport loses focus. The editor suppresses sampled
 values and transient events while preserving action type, frame, and enabled state. Missing or released contexts still
 report invalid handles; focus changes do not masquerade as disposal or fault gameplay scripts.
@@ -650,15 +654,32 @@ same prefab extraction transaction as named creation. Prefab thumbnails compose 
 resolve asynchronous mesh handles, then transfer immutable mesh references and world matrices to the bounded CPU
 thumbnail worker.
 
-Managed IDE generation consumes the same validated `.keireasm` graph and C# project generator as managed builds.
-Persistent solution/project files are conveniences derived from canonical assembly assets and source roots; they do
-not become build authority or expose runtime-host implementation state.
+Managed IDE generation and builds consume the same resolved assembly graph. `ResolveProjectManagedAssemblies`
+adds stable engine-owned predefined assembly identities without creating assets, resolves each C# source to its nearest
+custom folder boundary, and partitions otherwise unclaimed Editor-folder sources into `Assembly-CSharp-Editor`.
+Schema 3+ folder definitions follow their asset location when moved; explicit legacy source roots retain their coverage.
+Assembly-reference assets add folder boundaries targeting an existing custom definition. Schema 4 evaluates target filters,
+constraints, and resource version symbols after source ownership, then validates the remaining graph. Removed custom
+assemblies never release their sources to a predefined assembly; references from active custom assemblies to removed
+assemblies fail. The resolver discovers managed PE DLLs under Assets and shares resolved DLL paths with IDE generation,
+compiler references, and build-input digests. The Inspector owns an editable draft and checks the original bytes before
+publishing settings through the workspace asset service. Registry importers recognize both definitions and references.
+Resolved source lists are shared by IDE projects, compiler projects, and source digests, so nested assemblies never
+compile the same script twice. Predefined assemblies reference eligible custom assemblies; custom-to-predefined
+references, missing references, cycles, and runtime-to-editor dependencies are rejected before compilation.
+Successful build status retains runtime/editor assembly paths in dependency order from that generation. Reload uses
+that snapshot instead of rescanning edited assets or sorting DLL names, ensuring cross-assembly base types are loaded
+before derived types. Persistent solution/project files are derived authoring conveniences, not build authority.
 Each collectible managed load context receives its own Coral internal-call table. Calls cross an application-owned
 `IScriptRuntimeServices` boundary, retain only value handles, validate the currently executing script generation, and
 route gameplay logging, frame time, input actions, and transform access back to owner-thread engine services.
 Coral's forked reflection registry assigns monotonic opaque IDs with reference-equality lookup, so hash collisions and
 retired metadata cannot alias a later type, method, field, property, or attribute. Context, assembly, and reflected-method
 caches are concurrent across independent runtime hosts; diagnostic load status is thread-local.
+On Windows, successful runtime initialization pins `hostfxr.dll` for the process lifetime. CoreCLR remains resident
+after a Coral host closes; unloading and reloading hostfxr would lose its initialization state while hostpolicy retains
+the CLR. The OS owns this idempotent library pin; script instances and collectible contexts remain owned and released
+by their script system. No native module handle enters the public API.
 Managed build generations contain both the engine API and gameplay outputs. Source checkouts incrementally compile the
 API project into generation-local storage, while packaged editors copy their bundled API; candidate reloads consume
 that immutable pair transactionally rather than resolving a process-global API artifact.
@@ -668,6 +689,8 @@ This removes memory-mapped access to a live publisher path. A rejected candidate
 source snapshot metadata, and the captured managed exception, then unloads only the candidate context. Windows package
 entrypoints also share the repository workspace lock; cooked runtime smoke tests execute against an invocation-unique
 content copy that is removed after validation, so parallel direct invocations cannot share mutable validation state.
+Direct Windows builds acquire the workspace lock before the native build mutex, matching the top-level launcher.
+This fixed order prevents a direct regression build and a project build from waiting on each other.
 Windows claims the lock directory by atomically renaming a unique empty sibling; an existence check followed by
 directory creation cannot establish exclusive ownership. Waiters tolerate the current owner releasing its directory
 or heartbeat during inspection. The owner/heartbeat protocol remains compatible with the Unix launcher.
@@ -1053,6 +1076,11 @@ window claim, swapchain, and presentation lifecycle described above. Partial ini
 Shutdown removes event forwarding, persists the active layout when configured, closes the UI renderer/platform bridges,
 and destroys the context before RenderSystem releases GPU and window resources.
 
+The private UI frame bridge preserves a held movement frame when a queued release would otherwise consume a drag's
+final movement in the same frame. It temporarily retains the release and following events in order, restoring them
+after backend frame processing. Subthreshold clicks, disabled input trickling, and focus-loss cancellation bypass
+this deferral. No backend event types cross the public UI boundary.
+
 Scene submissions carry a Kéire-owned `RenderEnvironmentSettings` value. JSON persistence stays private in
 `ProjectSettings/Rendering.keiresettings`; public headers expose only colors, scalar values, paths, and validation
 functions. Fragment-stage lighting consumes that environment together with the deterministic active Directional Light.
@@ -1132,6 +1160,9 @@ The named workspace teardown invokes `Shutdown() noexcept` while panels and call
 callback admission and releases the owned documents without re-entering already-destroyed workspace dependencies.
 All authoring mutations, including menu primitives and viewport mesh/material drops, cross `SceneDocument`; workspace
 code may inspect an active scene for presentation and picking but does not create, destroy, or edit scene objects itself.
+Entity creation removes the new entity if its requested component cannot be attached. Imported-model setup extends
+that rollback across transform, renderer, and Animator configuration through the scene document. The workspace wraps
+placement history in an undo transaction and commits it only after setup succeeds, preserving redo on failure.
 Hierarchy multi-moves validate every source, destination, insertion sibling, cycle, and preserved world transform before
 mutation. Selected descendants collapse under their selected root, and the validated roots move in payload order as one
 editor transaction.
@@ -1551,8 +1582,8 @@ documents and uses the public Kéire UI facade. Details live in [Input Actions E
 Project descriptor schema 4 stores both the default input asset and stable default map ID. The editor and packaged
 runtime resolve that map at Play startup, falling back to the asset's first map only for an unset legacy selection.
 Managed legacy polling resolves actions through that selected stable map ID in both editor Play Mode and packaged
-players. Generated input wrappers use ordinary folder-independent managed-script placement and extend the selected
-runtime assembly's source roots when `Assets/Scripts/Generated` is not already covered.
+players. Generated input wrappers use ordinary folder-independent managed-script placement; unclaimed files in
+`Assets/Scripts/Generated` belong to the predefined runtime assembly.
 
 ## Event And Time Runtime
 
@@ -1769,6 +1800,12 @@ once per snapshot, preserving scene order while avoiding recursive full-scene se
 
 ## Animator Controller Authoring
 
+The controller preview owns its resolved skeleton, asset handles, and animation instance separately from the authored
+Animator component. It resolves the target skeleton from the skin without writing the component's skeleton reference.
+Preview ticking depends on panel registration visibility, not whether ImGui submits the panel contents; collapsing
+or hiding a dock tab therefore preserves playback. Closing the panel/document or entering Play Mode stops it.
+Target rejection clears the transient runtime pose; stopping after scene closure remains safe and idempotent.
+
 Animation graph execution remains owned by `KeireCore`: stable local IDs identify parameters, layers, state-machine
 subgraphs, states, transitions, conditions, and blend-tree children, while `AnimatorInstance` owns typed runtime values
 and immutable debug snapshots. Subgraphs are authoring/navigation groups with validated per-group entry states; the
@@ -1817,7 +1854,10 @@ unsupported compute paths use the deterministic CPU implementation; both paths p
 deformed stream reused by scene, depth, and shadow recording. No native pointer or graphics allocation crosses the
 managed boundary.
 
-`RiggingStudioPanel` owns only draft import settings and retarget selection. `AssetDatabase::SetImportSettings` commits
+`RiggingStudioPanel` owns draft import settings, retarget selection, and manual mapping edits. Its private mapping store
+writes versioned project configuration atomically under `Config/RetargetMappings`, keyed by source/target skeleton IDs.
+Loading validates bounded input and current bone names before replacing a draft; these authoring presets do not become
+runtime asset dependencies. `AssetDatabase::SetImportSettings` commits
 validated metadata atomically, `RequestReimport` advances the source generation, and the isolated asset worker publishes
 the complete model/subasset transaction. Import-time animation compression reduces keys against explicit translation,
 rotation, and scale tolerances and reports measured errors. Retargeting produces a bone-by-bone exact/semantic/conflict
@@ -1871,6 +1911,18 @@ walkable-normal tests, and an up/forward/down stair transaction. Authored capsul
 Jolt receives the derived cylinder half-height. Ground state and resolved velocity are copied back to the component
 after stepping. Managed code receives only values through the concrete `CharacterController`; no Jolt shape or body handle
 crosses the scripting boundary.
+
+Collision shape dimensions derived from world transforms are compared with a small relative floating-point tolerance.
+The installed dimensions remain the comparison baseline, so pure rotation preserves the live body's contacts while
+cumulative authored scaling still causes a rebuild.
+
+The editor Game view and camera preview construct their view matrix from the camera's presentation transform, including
+interpolated parent translation and current look rotation, through the shared internal camera builder.
+
+Managed component registration captures persistent field defaults from a temporary constructed instance without invoking
+gameplay lifecycle callbacks. New components start with that state. Older scenes retain their serialized state while the
+Inspector projects missing scalar fields from these defaults; explicit saved zeros remain authoritative. Constructors
+and field initializers must therefore be safe before an entity is attached to a runtime world.
 
 Character Controllers and dynamic rigid bodies retain previous/current authoritative world samples after physics.
 Render updates interpolate a separate Transform presentation matrix; collision, scripts, and gameplay queries never
@@ -2094,3 +2146,11 @@ compatibility evidence. Core accepts legacy schema-1 records and reports their u
 metadata. The Editor presents diagnostics and Hub-cached update candidates; Core remains responsible for preflight,
 archive verification, cache integrity, and transactional file publication. Asset import journals include project version
 metadata and receipts, and failed rollback retains its journal for recovery.
+
+### Standalone animation clip preview
+
+The Animator Controller panel owns one transient preview state shared by controller and standalone clip playback.
+Opening a clip creates a separate in-memory document with one clip state; it never replaces the authored controller
+document or its undo context. Standalone playback may sample onto a selected Animator with a different controller,
+without changing serialized component properties. Switching preview sources stops the prior pose; closing the panel,
+returning to the controller, or entering scene Play Mode releases the transient pose through the same cleanup path.

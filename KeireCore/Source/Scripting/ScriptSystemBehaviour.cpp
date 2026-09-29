@@ -284,16 +284,22 @@ namespace Keire
             const auto componentType = type.ComponentType;
             const auto managedType = type.Name;
             const auto properties = type.Properties;
+            // Capture initializers without invoking gameplay lifecycle callbacks. Missing fields in older
+            // scenes must display the same values that managed construction supplies at runtime.
+            auto prototype = m_Impl->CreateObject(type, 0, {});
+            const auto defaultState = m_Impl->CaptureState(prototype, true);
+            const auto defaults = ProjectManagedState(defaultState, properties);
             const std::weak_ptr<Detail::ManagedBehaviourComponentCallbacks> callbacks = m_Impl->ComponentCallbacks;
-            registration.Factory = [componentType, managedType, callbacks]
+            registration.Factory = [componentType, managedType, callbacks, defaultState]
             {
-                return Ref<Component>(
-                    CreateRef<Detail::ManagedBehaviourComponent>(componentType, managedType, callbacks));
+                auto component = CreateRef<Detail::ManagedBehaviourComponent>(componentType, managedType, callbacks);
+                component->SetSerializedState(defaultState);
+                return Ref<Component>(component);
             };
-            registration.Serialize = [properties](const Component& component)
+            registration.Serialize = [properties, defaults](const Component& component)
             {
                 const auto& managed = dynamic_cast<const Detail::ManagedBehaviourComponent&>(component);
-                return ProjectManagedState(managed.SerializedState(), properties);
+                return ProjectManagedState(managed.SerializedState(), properties, &defaults);
             };
             registration.Deserialize =
                 [properties](Component& component, const ComponentPropertyBag& values, const std::uint32_t version)

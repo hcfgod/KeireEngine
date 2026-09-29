@@ -336,6 +336,9 @@ namespace Keire::Detail
             if (item.contains("metadata"))
             {
                 const auto& metadata = item.at("metadata");
+                entry.Metadata.DisplayName = metadata.value("displayName", std::string{});
+                if (entry.Metadata.DisplayName.size() > 4096U)
+                    throw std::runtime_error("Asset catalog display name exceeds 4096 bytes.");
                 if (metadata.contains("localBounds"))
                 {
                     const auto& bounds = metadata.at("localBounds");
@@ -368,6 +371,8 @@ namespace Keire::Detail
             for (const auto dependency : entry.Dependencies)
                 dependencies.push_back(dependency.ToString());
             Json metadata = Json::object();
+            if (!entry.Metadata.DisplayName.empty())
+                metadata["displayName"] = entry.Metadata.DisplayName;
             if (entry.Metadata.LocalBounds)
             {
                 const auto& bounds = *entry.Metadata.LocalBounds;

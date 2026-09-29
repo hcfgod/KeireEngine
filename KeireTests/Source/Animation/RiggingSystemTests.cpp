@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -290,10 +291,7 @@ TEST_CASE("Animation retargeting collapses Assimp FBX helpers without a referenc
     const Keire::Quaternion animatedRotation{0.0F, 0.0F, 0.7071068F, 0.7071068F};
     const std::vector<Keire::SkeletonBone> sourceBones{
         {"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
-        {"mixamorig:LeftArm_$AssimpFbx$_Translation",
-         0,
-         {{1.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}},
-         {}},
+        {"mixamorig:LeftArm_$AssimpFbx$_Translation", 0, {{1.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
         {"mixamorig:LeftArm_$AssimpFbx$_Rotation", 1, {{}, sourceBindRotation, {1.0F, 1.0F, 1.0F}}, {}},
         {"mixamorig:LeftArm", 2, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
         {"mixamorig:LeftHand", 3, {{1.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
@@ -308,8 +306,7 @@ TEST_CASE("Animation retargeting collapses Assimp FBX helpers without a referenc
     const Keire::AnimationClipAsset sourceClip(
         Keire::AssetId::Generate(), 1.0F,
         {{2,
-          {{0.0F, {{}, sourceBindRotation, {1.0F, 1.0F, 1.0F}}},
-           {1.0F, {{}, animatedRotation, {1.0F, 1.0F, 1.0F}}}}}});
+          {{0.0F, {{}, sourceBindRotation, {1.0F, 1.0F, 1.0F}}}, {1.0F, {{}, animatedRotation, {1.0F, 1.0F, 1.0F}}}}}});
 
     const auto result = Keire::RetargetAnimationClipWithDiagnostics(
         sourceSkeleton, sourceRig, sourceClip, Keire::AssetId::Generate(), targetSkeleton, targetRig);
@@ -359,6 +356,60 @@ TEST_CASE("Two bone and FABRIK solvers reject malformed chains and move valid ch
     CHECK(Keire::SolveFabrikIk(*skeleton, pose, fabrik));
     fabrik.Chain = {0, 2};
     CHECK_FALSE(Keire::SolveFabrikIk(*skeleton, pose, fabrik));
+}
+
+TEST_CASE("IK solvers support imported centimeter scale without rejecting valid rotations")
+{
+    const Keire::SkeletonAsset skeleton({{"Units", -1, {{}, {}, {0.001F, 0.001F, 0.001F}}, {}},
+                                         {"Root", 0, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"Middle", 1, {{0.0F, 100.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"End", 2, {{0.0F, 100.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}});
+    for (const bool fabrik : {false, true})
+    {
+        CAPTURE(fabrik);
+        std::vector<Keire::BoneTransform> pose;
+        for (const auto& bone : skeleton.Bones())
+            pose.push_back(bone.BindPose);
+        const Keire::Vector3 target{0.08F, 0.12F, 0.03F};
+        if (fabrik)
+            REQUIRE(Keire::SolveFabrikIk(skeleton, pose, {{1, 2, 3}, target, 128, 0.00001F, 1.0F}));
+        else
+            REQUIRE(Keire::SolveTwoBoneIk(skeleton, pose, {1, 2, 3, target, {0.0F, 0.0F, 1.0F}}));
+        CHECK(Distance(Keire::Math::TransformPoint(ModelMatrices(skeleton, pose)[3], {}), target) < 0.0001F);
+    }
+}
+
+TEST_CASE("IK failures leave the entire input pose unchanged")
+{
+    const Keire::SkeletonAsset skeleton({{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"Middle", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"End", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}});
+    for (const bool fabrik : {false, true})
+    {
+        for (int invalidInput = 0; invalidInput < 4; ++invalidInput)
+        {
+            CAPTURE(fabrik);
+            CAPTURE(invalidInput);
+            std::vector<Keire::BoneTransform> pose;
+            for (const auto& bone : skeleton.Bones())
+                pose.push_back(bone.BindPose);
+            if (invalidInput == 0)
+                // The root can rotate, but the next joint has a singular model basis.
+                pose[1].Scale.X = 0.0F;
+            else if (invalidInput == 1)
+                pose[1].Translation.X = std::numeric_limits<float>::infinity();
+            else if (invalidInput == 2)
+                pose[1].Rotation = {0.0F, 0.0F, 0.0F, 0.0F};
+            else
+                pose[1].Scale.X = std::numeric_limits<float>::infinity();
+            const auto before = pose;
+            if (fabrik)
+                CHECK_FALSE(Keire::SolveFabrikIk(skeleton, pose, {{0, 1, 2}, {1.0F, 1.0F, 0.0F}}));
+            else
+                CHECK_FALSE(Keire::SolveTwoBoneIk(skeleton, pose, {0, 1, 2, {1.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}}));
+            CHECK(pose == before);
+        }
+    }
 }
 
 TEST_CASE("Two bone IK preserves model-space targets under rotated parents and orients the end effector")

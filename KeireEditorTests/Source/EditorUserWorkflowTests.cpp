@@ -238,6 +238,8 @@ TEST_CASE("Asset Browser double-click routes material and shader authoring asset
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.keireui") == UiDocument);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.KEIREUI") == UiDocument);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("UI/Hud.keirestyle") == UiStyleSheet);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Animations/Walk.keireanim") == AnimationClip);
+    CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Animations/Walk.KEIREANIM") == AnimationClip);
     CHECK(KeireEditor::ResolveAssetBrowserOpenAction("Textures/Surface.png") == External);
 
     Keire::AssetSourceRecord instance;
@@ -272,7 +274,7 @@ TEST_CASE("Asset creation labels keep Shader Graph and Material Graph workflows 
     CHECK(NamedAssetCreationDisplayName(NamedAssetCreationKind::UiFontFamily) == "UI font family");
 }
 
-TEST_CASE("managed script creation stays in the selected folder and extends runtime source coverage")
+TEST_CASE("managed script creation uses predefined assemblies outside custom folders")
 {
     Keire::ManagedAssemblyDefinition gameplay;
     gameplay.Name = "Gameplay";
@@ -287,20 +289,16 @@ TEST_CASE("managed script creation stays in the selected folder and extends runt
     CHECK(nested.SourceRootToAdd.empty());
 
     const auto sibling = KeireEditor::ResolveManagedScriptPlacement(assemblies, "Characters/Enemies");
-    CHECK(sibling.Assembly == gameplayId);
+    CHECK_FALSE(sibling.Assembly);
     CHECK(sibling.RootNamespace == "Game");
-    CHECK(sibling.SourceRootToAdd == std::filesystem::path("Assets/Characters/Enemies"));
-    CHECK(KeireEditor::ExtendManagedAssemblySourceRoots(gameplay, sibling.SourceRootToAdd));
-    CHECK(std::ranges::find(gameplay.SourceRoots, sibling.SourceRootToAdd) != gameplay.SourceRoots.end());
-    CHECK_FALSE(KeireEditor::ExtendManagedAssemblySourceRoots(gameplay, "Assets/Characters/Enemies/Nested"));
-
+    CHECK(sibling.SourceRootToAdd.empty());
     const auto generated = KeireEditor::ResolveManagedScriptPlacement(assemblies, "Scripts/Generated");
-    CHECK(generated.Assembly == gameplayId);
-    CHECK(generated.SourceRootToAdd == std::filesystem::path("Assets/Scripts/Generated"));
-
-    CHECK(KeireEditor::ExtendManagedAssemblySourceRoots(gameplay, "Assets/Scripts"));
-    CHECK(std::ranges::find(gameplay.SourceRoots, std::filesystem::path("Assets/Scripts/Gameplay")) ==
-          gameplay.SourceRoots.end());
+    CHECK_FALSE(generated.Assembly);
+    CHECK(generated.SourceRootToAdd.empty());
+    const auto standalone = KeireEditor::ResolveManagedScriptPlacement({}, "MyFeature");
+    CHECK_FALSE(standalone.Assembly);
+    CHECK(standalone.SourceRootToAdd.empty());
+    CHECK_THROWS(KeireEditor::ResolveManagedScriptPlacement({}, "../Outside"));
 
     const auto stableId = Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000103");
     const auto behaviour = KeireEditor::BuildManagedScriptSource(KeireEditor::ManagedScriptTemplateKind::Behaviour,

@@ -2,7 +2,55 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
+#include <filesystem>
+#include <map>
+#include <string>
+
+TEST_CASE("Model importer preserves single-frame actions as constant pose clips")
+{
+    const std::string source = R"({
+        "asset":{"version":"2.0"},
+        "buffers":[{"uri":"data:application/octet-stream;base64,AAAAAAAAgD8AAABAAABAQA==","byteLength":16}],
+        "bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":4},{"buffer":0,"byteOffset":4,"byteLength":12}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":1,"type":"SCALAR","min":[0],"max":[0]},
+                     {"bufferView":1,"componentType":5126,"count":1,"type":"VEC3"}],
+        "nodes":[{"name":"Hips"}],
+        "animations":[{"name":"Authored Pose","samplers":[{"input":0,"output":1}],
+                       "channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]}],
+        "scenes":[{"nodes":[0]}],"scene":0
+    })";
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.ProjectRoot = std::filesystem::current_path();
+    context.SourceRoot = context.ProjectRoot;
+    context.SourcePath = context.SourceRoot / "Characters/pose.gltf";
+    context.RelativePath = "Characters/pose.gltf";
+    std::map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+    const auto importer = Keire::CreateMeshAssetImporter();
+    const auto output = importer.ContextualImport(context, std::as_bytes(std::span(source)));
+    const auto repeated = importer.ContextualImport(context, std::as_bytes(std::span(source)));
+    CHECK(output.Bytes == repeated.Bytes);
+    const auto take = std::ranges::find(output.SubAssets, Keire::AnimationClipAsset::StaticType(),
+                                        &Keire::AssetGeneratedSubAsset::Type);
+    REQUIRE(take != output.SubAssets.end());
+    const auto clip = Keire::AnimationClipAsset::Decode(take->Bytes);
+    CHECK(clip->Duration() == doctest::Approx(1.0F / 30.0F));
+    REQUIRE(clip->Tracks().size() == 1);
+    REQUIRE(clip->Tracks().front().Keys.size() == 1);
+    CHECK(clip->Tracks().front().Keys.front().Time == 0.0F);
+    // glTF's right-handed coordinates are converted to the engine's left-handed space.
+    CHECK(clip->Tracks().front().Keys.front().Value.Translation == Keire::Vector3{1.0F, 2.0F, -3.0F});
+    const auto repeatedTake = std::ranges::find(repeated.SubAssets, take->Id, &Keire::AssetGeneratedSubAsset::Id);
+    REQUIRE(repeatedTake != repeated.SubAssets.end());
+    CHECK(repeatedTake->Bytes == take->Bytes);
+    CHECK(std::ranges::any_of(
+        output.Diagnostics, [](const auto& diagnostic)
+        { return diagnostic.Message.find("single-frame animation 'Authored Pose'") != std::string::npos; }));
+}
 
 TEST_CASE("Standalone animation clip importer preserves bytes and declares its skeleton")
 {

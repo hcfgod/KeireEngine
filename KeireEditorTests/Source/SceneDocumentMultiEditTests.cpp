@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/ImportedModelCreation.h"
 #include "KeireClient/Editor/InspectorComponentUtilities.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
@@ -8,9 +9,97 @@
 #include <doctest/doctest.h>
 
 #include <array>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+TEST_CASE("scene document rolls back entity creation when component setup fails")
+{
+    KeireEditor::SceneDocument document;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Creation rollback"));
+    document.Open(scene);
+    const auto parent = document.CreateEntity("Existing parent");
+    document.Select(parent.Value());
+    const auto missing = Keire::ComponentTypeId(Keire::AssetId::Generate());
+    CHECK_THROWS((void)document.CreateEntity("Rejected child", parent, missing));
+    CHECK(scene->Entities().size() == 1);
+    CHECK(scene->FindEntity(parent).Children().empty());
+    CHECK(document.Selection() == parent.Value());
+    const auto valid = document.CreateEntity("Valid child", parent, Keire::PointLightComponent::StaticType());
+    CHECK(scene->FindEntity(valid).GetComponent<Keire::PointLightComponent>());
+    CHECK(scene->FindEntity(parent).Children().size() == 1);
+    document.Close();
+}
+
+TEST_CASE("imported model placement rolls back transform and animation failures")
+{
+    KeireEditor::SceneDocument document;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Model rollback"));
+    document.Open(scene);
+    const auto existing = document.CreateEntity("Keep me");
+    document.Select(existing.Value());
+    const auto mesh = Keire::AssetId::Generate();
+    CHECK_THROWS_WITH((void)KeireEditor::CreateImportedModel(document, "Invalid position", mesh,
+                                                             {std::numeric_limits<float>::quiet_NaN(), 0, 0}, {}),
+                      "Transform position must be finite.");
+    CHECK(scene->Entities().size() == 1);
+    const KeireEditor::ImportedModelAnimation incomplete{.Skin = Keire::AssetId::Generate()};
+    CHECK_THROWS_WITH((void)KeireEditor::CreateImportedModel(document, "Invalid rig", mesh, {}, incomplete),
+                      "An imported skin requires a skeleton.");
+    CHECK(scene->Entities().size() == 1);
+    CHECK(document.Selection() == existing.Value());
+    CHECK(scene->FindEntity(existing).Name() == "Keep me");
+    const KeireEditor::ImportedModelAnimation complete{
+        .Skeleton = Keire::AssetId::Generate(), .Skin = Keire::AssetId::Generate(), .Rig = Keire::AssetId::Generate()};
+    const auto created = KeireEditor::CreateImportedModel(document, "Valid model", mesh, {2, 3, 4}, complete);
+    CHECK(scene->Entities().size() == 2);
+    CHECK(scene->FindEntity(created).GetComponent<Keire::AnimatorComponent>()->Skeleton() == complete.Skeleton);
+    CHECK(scene->FindEntity(created).GetComponent<Keire::MeshRendererComponent>()->Mesh() == mesh);
+    CHECK(scene->FindEntity(created).GetComponent<Keire::MeshRendererComponent>()->Tint() ==
+          Keire::Color{1.0F, 1.0F, 1.0F, 1.0F});
+    auto restored = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), scene->Snapshot());
+    CHECK(restored->FindEntity(created).GetComponent<Keire::MeshRendererComponent>()->Tint() ==
+          Keire::Color{1.0F, 1.0F, 1.0F, 1.0F});
+    restored->Close();
+    document.Close();
+}
+
+TEST_CASE("failed model placement cancels its history transaction without losing redo")
+{
+    auto service = Keire::CreateRef<Keire::UndoService>();
+    auto history = service->CreateContext({.Name = "Placement"});
+    int previousEdit = 0;
+    history->Execute(Keire::CreateUndoCommand("Previous edit", [&] { previousEdit = 1; }, [&] { previousEdit = 0; }));
+    REQUIRE(history->Undo());
+    KeireEditor::SceneDocument document;
+    const auto asset = Keire::AssetId::Generate();
+    auto scene = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("Failed placement"));
+    document.Open(scene, asset, {}, history);
+    const auto existing = document.CreateEntity("Keep me");
+    const auto before = scene->Snapshot();
+    const auto place = [&]
+    {
+        auto transaction = history->BeginTransaction("Create Mesh Entity");
+        history->RecordApplied(Keire::CreateUndoCommand(
+            "Placement snapshot", [] {},
+            [&] { document.ReplaceEditingScene(Keire::CreateRef<Keire::Scene>(asset, before), true); }));
+        (void)KeireEditor::CreateImportedModel(document, "Invalid rig", Keire::AssetId::Generate(), {},
+                                               {.Skin = Keire::AssetId::Generate()});
+        transaction->Commit();
+    };
+    CHECK_THROWS_WITH(place(), "An imported skin requires a skeleton.");
+    CHECK(history->UndoCount() == 0);
+    CHECK(history->RedoCount() == 1);
+    CHECK(document.ActiveScene()->Entities().size() == 1);
+    CHECK(document.ActiveScene()->FindEntity(existing).Name() == "Keep me");
+    CHECK(history->Redo());
+    CHECK(previousEdit == 1);
+    document.Close();
+    service->Close();
+}
 
 TEST_CASE("scene document multi-edit applies common component changes atomically")
 {

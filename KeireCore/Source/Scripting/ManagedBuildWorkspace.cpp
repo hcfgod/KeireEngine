@@ -223,6 +223,8 @@ namespace Keire
                         const bool includeEditorApi, const std::string_view targetFramework,
                         const std::string_view languageVersion)
         {
+            if (!assembly.SourceFiles && assembly.Definition.SourceRoots.empty())
+                throw std::invalid_argument("Resolve folder assemblies before generating managed projects.");
             std::string text = "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
                                "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    "
                                "<TargetFramework>" +
@@ -241,6 +243,7 @@ namespace Keire
                                std::string(assembly.Definition.AllowUnsafe ? "true" : "false") +
                                "</AllowUnsafeBlocks>\n"
                                "    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>\n"
+                               "    <DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>\n"
                                "    <DefaultItemExcludes>$(DefaultItemExcludes);Library/**;Logs/**;Temp/**;Build/**"
                                "</DefaultItemExcludes>\n    <AssemblyName>" +
                                XmlEscape(assembly.Definition.Name) + "</AssemblyName>\n    <RootNamespace>" +
@@ -257,15 +260,25 @@ namespace Keire
                 text += "</DefineConstants>\n";
             }
             text += "  </PropertyGroup>\n  <ItemGroup>\n";
-            for (const auto& root : assembly.Definition.SourceRoots)
+            if (assembly.SourceFiles)
             {
-                std::error_code error;
-                auto source = std::filesystem::relative(projectRoot / root, projectDirectory, error);
-                if (error || source.empty())
-                    source = projectRoot / root;
-                text += "    <Compile Include=\"" + XmlEscape(PathText(source / "**" / "*.cs")) + "\" LinkBase=\"" +
-                        XmlEscape(PathText(root)) + "\" />\n";
+                for (const auto& sourceFile : *assembly.SourceFiles)
+                {
+                    const auto source = (projectRoot / sourceFile).lexically_relative(projectDirectory);
+                    text += "    <Compile Include=\"" + XmlEscape(PathText(source)) + "\" Link=\"" +
+                            XmlEscape(PathText(sourceFile)) + "\" />\n";
+                }
             }
+            else
+                for (const auto& root : assembly.Definition.SourceRoots)
+                {
+                    std::error_code error;
+                    auto source = std::filesystem::relative(projectRoot / root, projectDirectory, error);
+                    if (error || source.empty())
+                        source = projectRoot / root;
+                    text += "    <Compile Include=\"" + XmlEscape(PathText(source / "**" / "*.cs")) + "\" LinkBase=\"" +
+                            XmlEscape(PathText(root)) + "\" />\n";
+                }
             text += "  </ItemGroup>\n";
             if (!managedApiProject.empty())
             {
@@ -312,6 +325,17 @@ namespace Keire
                 text += "  <ItemGroup>\n";
                 for (const auto reference : assembly.Definition.References)
                     text += "    <ProjectReference Include=\"" + XmlEscape(names.at(reference)) + ".csproj\" />\n";
+                text += "  </ItemGroup>\n";
+            }
+            if (!assembly.PrecompiledFiles.empty())
+            {
+                text += "  <ItemGroup>\n";
+                for (const auto& dll : assembly.PrecompiledFiles)
+                {
+                    const auto path = (projectRoot / dll).lexically_relative(projectDirectory);
+                    text += "    <Reference Include=\"" + XmlEscape(PathText(dll.stem())) + "\"><HintPath>" +
+                            XmlEscape(PathText(path)) + "</HintPath><Private>true</Private></Reference>\n";
+                }
                 text += "  </ItemGroup>\n";
             }
             if (!assembly.Definition.Packages.empty())

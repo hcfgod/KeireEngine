@@ -1,6 +1,7 @@
 #pragma once
 
 #include "KeireClientInternal/Editor/AnimatorControllerPanelModelInternal.h"
+#include "KeireClientInternal/Editor/AnimatorPreviewSelection.h"
 
 #include "KeireClient/Editor/AnimatorControllerDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
@@ -20,7 +21,7 @@
 
 namespace KeireEditor
 {
-    struct AnimatorControllerPanel::PreviewState final
+    struct AnimatorControllerPreviewState final
     {
         struct RetargetedClip final
         {
@@ -52,6 +53,8 @@ namespace KeireEditor
         std::unique_ptr<Keire::AnimatorInstance> Instance;
         std::uint64_t SkeletonRevision = 0;
         std::string Diagnostic;
+        std::string PreviewLayer;
+        std::string PreviewStateId;
 
         static Keire::RigDefinition BestRig(const Keire::SkeletonAsset& skeleton)
         {
@@ -114,6 +117,8 @@ namespace KeireEditor
             Playing = false;
             SeekRequested.reset();
             Diagnostic.clear();
+            PreviewLayer.clear();
+            PreviewStateId.clear();
             Scene = {};
             Entity = {};
             Graph = {};
@@ -275,8 +280,31 @@ namespace KeireEditor
             return 1.0F;
         }
 
+        void Tick(const bool panelOpen, SceneDocument& sceneDocument, const AnimatorControllerDocument& controller,
+                  const Keire::Ref<Keire::AssetSystem>& assets, const bool standaloneClip = false)
+        {
+            const auto session = sceneDocument.PlaySession();
+            if (!panelOpen || !controller.Asset() || (session && session->State() != Keire::ScenePlayState::Stopped))
+            {
+                Stop();
+                return;
+            }
+            if (!Active)
+                return;
+            try
+            {
+                Synchronize(sceneDocument, controller, assets, standaloneClip);
+            }
+            catch (const std::exception& error)
+            {
+                Playing = false;
+                ClearPose();
+                Diagnostic = error.what();
+            }
+        }
+
         void Synchronize(SceneDocument& sceneDocument, const AnimatorControllerDocument& controller,
-                         const Keire::Ref<Keire::AssetSystem>& assets)
+                         const Keire::Ref<Keire::AssetSystem>& assets, const bool standaloneClip = false)
         {
             const auto now = std::chrono::steady_clock::now();
             const float deltaSeconds =
@@ -290,7 +318,7 @@ namespace KeireEditor
             if (!scene || !selection)
             {
                 ClearPose();
-                Diagnostic = "Select a scene entity with an Animator to preview this controller.";
+                Diagnostic = "Select a scene entity with an Animator to preview this animation.";
                 return;
             }
             const Keire::EntityId entityId(selection);
@@ -306,21 +334,25 @@ namespace KeireEditor
                 entity ? entity.GetComponent<Keire::AnimatorComponent>() : Keire::Ref<Keire::AnimatorComponent>{};
             if (!animator)
             {
+                ClearPose();
                 Diagnostic = "The selected entity does not have an Animator component.";
                 return;
             }
-            if (animator->Graph() != controller.Asset())
+            if (!standaloneClip && animator->Graph() != controller.Asset())
             {
+                ClearPose();
                 Diagnostic = "Assign this controller to the selected Animator before previewing it.";
                 return;
             }
             if (!animator->SkinnedMesh())
             {
+                ClearPose();
                 Diagnostic = "Assign a skinned mesh to the selected Animator before previewing it.";
                 return;
             }
             if (!assets)
             {
+                ClearPose();
                 Diagnostic = "The asset system is unavailable.";
                 return;
             }
@@ -334,6 +366,7 @@ namespace KeireEditor
             const auto skin = SkinHandle.TryGetLoaded();
             if (!skin)
             {
+                ClearPose();
                 Diagnostic = "Preview is waiting for the skinned mesh to load.";
                 return;
             }
@@ -341,11 +374,10 @@ namespace KeireEditor
             const auto targetSkeleton = skin->Skeleton();
             if (!targetSkeleton)
             {
+                ClearPose();
                 Diagnostic = "The assigned skinned mesh does not reference a skeleton.";
                 return;
             }
-            if (animator->Skeleton() != targetSkeleton)
-                animator->SetSkeleton(targetSkeleton);
             if (Graph != controller.Asset() || Skeleton != targetSkeleton)
             {
                 Invalidate();
@@ -357,6 +389,7 @@ namespace KeireEditor
             const auto skeleton = SkeletonHandle.TryGetLoaded();
             if (!skeleton)
             {
+                ClearPose();
                 Diagnostic = "Preview is waiting for the target skeleton to load.";
                 return;
             }
@@ -365,7 +398,10 @@ namespace KeireEditor
             if (!GraphAsset)
                 GraphAsset = Keire::CreateRef<Keire::AnimationGraphAsset>(controller.Definition());
             if (!DependenciesReady(*GraphAsset, assets))
+            {
+                ClearPose();
                 return;
+            }
             if (!Instance)
             {
                 Instance = std::make_unique<Keire::AnimatorInstance>(
@@ -379,7 +415,10 @@ namespace KeireEditor
             bool sampled = false;
             if (RestartRequested)
             {
-                Instance->Reset();
+                if (PreviewStateId.empty())
+                    Instance->Reset();
+                else
+                    ResetSelectedPreview(*Instance, controller.Definition(), PreviewLayer, PreviewStateId);
                 sample = Instance->Update(0.0F);
                 RestartRequested = false;
                 NormalizedTime = 0.0F;
@@ -387,9 +426,18 @@ namespace KeireEditor
             }
             if (SeekRequested)
             {
-                Instance->Reset();
-                const float duration = CurrentClipDuration(controller.Definition(), assets);
-                sample = Instance->Update(duration * std::min(*SeekRequested, 0.999999F));
+                if (PreviewStateId.empty())
+                {
+                    Instance->Reset();
+                    const float duration = CurrentClipDuration(controller.Definition(), assets);
+                    sample = Instance->Update(duration * std::min(*SeekRequested, 0.999999F));
+                }
+                else
+                {
+                    ResetSelectedPreview(*Instance, controller.Definition(), PreviewLayer, PreviewStateId,
+                                         std::min(*SeekRequested, 0.999999F));
+                    sample = Instance->Update(0.0F);
+                }
                 SeekRequested.reset();
                 sampled = true;
             }

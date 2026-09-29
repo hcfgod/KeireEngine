@@ -1,6 +1,7 @@
 #include "Keire/Ui/UiElements.h"
 #include "KeireInternal/Ui/UiDocumentElementsInternal.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <limits>

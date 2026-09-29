@@ -1,4 +1,5 @@
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
+#include "KeireInternal/Scenes/AnimationNamedIkGoals.h"
 
 #include "Keire/Scenes/Scene.h"
 
@@ -6,6 +7,9 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -242,4 +246,64 @@ TEST_CASE("Automatic foot grounding keeps rising surfaces collision safe and fad
     CHECK_FALSE(
         Keire::Detail::UpdateAutomaticFootGroundingSmoothing({}, {}, {2.0F, 1.0F, 0.0F}, 1.0F / 60.0F, 0.0F, state));
     CHECK_FALSE(state.Initialized);
+}
+
+TEST_CASE("Named animation IK reports each failed goal and still solves independent limbs")
+{
+    const Keire::SkeletonAsset skeleton({{"A0", -1, {{-2.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"A1", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"A2", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"B0", -1, {{2.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"B1", 3, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"B2", 4, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}});
+    std::map<std::string, std::uint32_t, std::less<>> indices;
+    std::vector<Keire::BoneTransform> pose;
+    for (std::uint32_t index = 0; index < skeleton.Bones().size(); ++index)
+    {
+        indices.emplace(skeleton.Bones()[index].Name, index);
+        pose.push_back(skeleton.Bones()[index].BindPose);
+    }
+    const auto before = pose;
+    auto expected = pose;
+    REQUIRE(Keire::SolveTwoBoneIk(skeleton, expected, {0, 1, 2, {-1.0F, 1.0F, 0.0F}, {0.0F, 0.0F, 1.0F}}));
+    REQUIRE(Keire::SolveFabrikIk(skeleton, expected, {{3, 4, 5}, {3.0F, 1.0F, 0.0F}}));
+    const std::vector<Keire::AnimatorIkGoal> goals{
+        {.Name = "missing", .Space = Keire::AnimatorIkSpace::Model, .Bones = {"absent", "A1", "A2"}},
+        {.Name = "left",
+         .Space = Keire::AnimatorIkSpace::Model,
+         .Bones = {"A0", "A1", "A2"},
+         .Target = {-1.0F, 1.0F, 0.0F}},
+        {.Name = "reversed",
+         .Solver = Keire::AnimatorIkSolver::Fabrik,
+         .Space = Keire::AnimatorIkSpace::Model,
+         .Bones = {"B2", "B1", "B0"}},
+        {.Name = "no-world", .Bones = {"B0", "B1", "B2"}},
+        {.Name = "right",
+         .Solver = Keire::AnimatorIkSolver::Fabrik,
+         .Space = Keire::AnimatorIkSpace::Model,
+         .Bones = {"B0", "B1", "B2"},
+         .Target = {3.0F, 1.0F, 0.0F}}};
+    const auto diagnostics = Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, goals, pose, indices, std::nullopt);
+    CHECK(diagnostics.find("'missing' references missing bone 'absent'") != std::string::npos);
+    CHECK(diagnostics.find("'reversed' could not solve its chain") != std::string::npos);
+    CHECK(diagnostics.find("'no-world' could not resolve") != std::string::npos);
+    CHECK(diagnostics.find("'left'") == std::string::npos);
+    CHECK(diagnostics.find("'right'") == std::string::npos);
+    CHECK(pose == expected);
+    CHECK(pose != before);
+
+    auto worldGoal = goals.back();
+    worldGoal.Space = Keire::AnimatorIkSpace::World;
+    worldGoal.Target.X += 10.0F;
+    pose = before;
+    expected = before;
+    REQUIRE(Keire::SolveFabrikIk(skeleton, expected, {{3, 4, 5}, {3.0F, 1.0F, 0.0F}}));
+    const auto worldToModel = Keire::Math::ComposeTransform({-10.0F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F});
+    CHECK(Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {&worldGoal, 1}, pose, indices, worldToModel).empty());
+    CHECK(pose == expected);
+
+    pose = before;
+    CHECK_FALSE(
+        Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {goals.data(), 1}, pose, indices, std::nullopt).empty());
+    CHECK(pose == before);
 }

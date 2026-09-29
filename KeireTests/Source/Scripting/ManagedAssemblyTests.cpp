@@ -1,5 +1,6 @@
 #include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/ECS/Component.h"
+#include "Keire/ECS/Components/AnimatorComponent.h"
 #include "Keire/ECS/Components/AudioComponents.h"
 #include "Keire/Jobs/JobSystem.h"
 #include "Keire/Scenes/Scene.h"
@@ -682,7 +683,14 @@ TEST_CASE("Third-person sandbox gameplay assembly compiles against Keire.Managed
     const auto dotnet = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet");
 #endif
     REQUIRE(std::filesystem::is_regular_file(dotnet));
-    const auto root = std::filesystem::absolute("Samples/KeireSandbox");
+    auto root = std::filesystem::absolute("Samples/KeireSandbox");
+    bool predefined = false;
+    SUBCASE("Existing project with an explicit gameplay definition") {}
+    SUBCASE("New Hub project with a predefined gameplay assembly")
+    {
+        root = std::filesystem::absolute("KeireHubContent/Templates/Payloads/Sandbox");
+        predefined = true;
+    }
     const auto assemblyDirectory = "Library/SandboxScriptValidation-" + Keire::AssetId::Generate().ToString();
     struct Cleanup final
     {
@@ -693,7 +701,6 @@ TEST_CASE("Third-person sandbox gameplay assembly compiles against Keire.Managed
             std::filesystem::remove_all(Root, ignored);
         }
     } cleanup{root / assemblyDirectory};
-    const auto assembly = Keire::ManagedAssemblyAsset::Decode(ReadBytes(root / "Assets/Scripts/Gameplay.keireasm"));
     Keire::ScriptSystemSpecification specification;
     specification.Mode = Keire::ScriptMode::Enabled;
     specification.ProjectRoot = root;
@@ -702,7 +709,18 @@ TEST_CASE("Third-person sandbox gameplay assembly compiles against Keire.Managed
     specification.DotnetExecutable = dotnet;
     auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
     Keire::ManagedBuildRequest request;
-    request.Assemblies = {{TestAsset(102), assembly->Definition()}};
+    if (predefined)
+    {
+        const auto path = std::filesystem::path("Assets/FirstPersonController/FirstPerson.keireasm");
+        const auto assembly = Keire::ManagedAssemblyAsset::Decode(ReadBytes(root / path));
+        const std::array custom{Keire::ManagedAssemblyGraphEntry{TestAsset(103), assembly->Definition(), path}};
+        request.Assemblies = Keire::ResolveProjectManagedAssemblies(root, custom);
+    }
+    else
+    {
+        const auto assembly = Keire::ManagedAssemblyAsset::Decode(ReadBytes(root / "Assets/Scripts/Gameplay.keireasm"));
+        request.Assemblies = {{TestAsset(102), assembly->Definition()}};
+    }
     const auto operation = scripts->StartBuild(std::move(request));
     REQUIRE(scripts->WaitForBuild(operation, std::chrono::seconds(60)));
     const auto status = scripts->BuildStatus();
@@ -788,6 +806,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "[SerializeField] public bool DisableObserved = false; "
                "[SerializeField] public int RuntimeServiceTicks = -1; "
                "[SerializeField] public bool AnimatorIkObserved = false; "
+               "[SerializeField] public bool IkMissingAnimatorRejected = false; "
+               "[SerializeField] public bool IkInvalidUpdateRejected = false; "
+               "private Animator? ikAnimator; "
                "[SerializeField, Min(0.0), Max(1.0), InspectorStep(0.05)] "
                "public float AnimatorIkWeight = -1.0f; "
                "[SerializeField] public bool AnimationEventObserved = false; "
@@ -850,9 +871,24 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "zone.ReverbSend = 0.75f; zone.Priority = 3; AudioReverbValidationObserved = "
                "zone.Shape == AudioReverbZoneShape.Sphere && zone.SphereRadius == 8.0f && "
                "zone.BlendDistance == 2.0f && zone.ReverbSend == 0.75f && zone.Priority == 3; } } "
-               "protected override void OnDisable() { DisableObserved = !Enabled; } "
+               "protected override void OnDisable() { DisableObserved = !Enabled; "
+               "var animator = GetComponent<Animator>(); if (animator != null) { "
+               "animator.ClearIK(\"Hand\"); animator.ClearIK(\"Spine\"); } } "
                "protected override void OnAnimatorIk(AnimationIkContext context) { "
-               "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; } "
+               "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; "
+               "var animator = GetComponent<Animator>(); if (animator == null) { "
+               "try { ikAnimator?.SetTwoBoneIK(\"Hand\", \"Root\", \"Middle\", \"End\", "
+               "default, default); } catch (System.InvalidOperationException) { "
+               "IkMissingAnimatorRejected = true; } return; } "
+               "ikAnimator = animator; var target = new Vector3(context.LayerWeight, 2, 3); "
+               "animator.SetTwoBoneIK(\"Hand\", \"Root\", \"Middle\", \"End\", target, "
+               "new Vector3(0, 0, 1), context.LayerWeight, AnimatorIkSpace.Model); "
+               "animator.SetFabrikIK(\"Spine\", new[] { \"Pelvis\", \"Spine\", \"Head\" }, "
+               "target, 0.75f, 32, 0.002f, AnimatorIkSpace.World); "
+               "try { animator.SetTwoBoneIK(\"Hand\", \"Root\", \"Middle\", \"End\", "
+               "new Vector3(float.NaN, 0, 0), default); } "
+               "catch (System.ArgumentOutOfRangeException error) { "
+               "IkInvalidUpdateRejected = error.ParamName == \"target\"; } } "
                "protected override void OnAnimationEvent(AnimationEvent animationEvent) { "
                "AnimationEventObserved = true; AnimationEventName = animationEvent.Name; "
                "AnimationEventText = animationEvent.Text; } "
@@ -1059,10 +1095,16 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
 
     const auto authoredComponent = registration->Factory();
     REQUIRE(authoredComponent);
+    CHECK(std::get<double>(registration->Serialize(*authoredComponent).at("Speed")) == doctest::Approx(7.5));
     registration->Deserialize(*authoredComponent, {{"managedState", std::string(R"({"Version":1,"Fields":[]})")}},
                               registration->SchemaVersion);
     const auto authoredScalarValues = registration->Serialize(*authoredComponent);
     REQUIRE(authoredScalarValues.contains("managedState"));
+    CHECK(std::get<double>(authoredScalarValues.at("Speed")) == doctest::Approx(7.5));
+    registration->Deserialize(*authoredComponent,
+                              {{"managedState", authoredScalarValues.at("managedState")}, {"Speed", 0.0}},
+                              registration->SchemaVersion);
+    CHECK(std::get<double>(registration->Serialize(*authoredComponent).at("Speed")) == doctest::Approx(0.0));
     registration->Deserialize(*authoredComponent,
                               {{"managedState", authoredScalarValues.at("managedState")}, {"Speed", 9.5}},
                               registration->SchemaVersion);
@@ -1340,6 +1382,44 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(std::get<bool>(ikResults.at("AnimatorIkObserved")));
     CHECK(std::get<double>(ikResults.at("AnimatorIkWeight")) == doctest::Approx(0.625));
 
+    const auto runtimeAnimator = runtimeEntity.AddComponent<Keire::AnimatorComponent>();
+    REQUIRE(runtimeAnimator);
+    for (int frame = 0; frame < 24; ++frame)
+    {
+        const float weight = static_cast<float>(frame) / 23.0F;
+        CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = weight}));
+        const auto goals = runtimeAnimator->IkGoals();
+        REQUIRE(goals.size() == 2);
+        CHECK(goals[0].Name == "Hand");
+        CHECK(goals[0].Solver == Keire::AnimatorIkSolver::TwoBone);
+        CHECK(goals[0].Space == Keire::AnimatorIkSpace::Model);
+        CHECK(goals[0].Bones == std::vector<std::string>{"Root", "Middle", "End"});
+        CHECK(goals[0].Target == Keire::Vector3{weight, 2.0F, 3.0F});
+        CHECK(goals[0].Pole == Keire::Vector3{0.0F, 0.0F, 1.0F});
+        CHECK(goals[0].Weight == doctest::Approx(weight));
+        CHECK(goals[1].Name == "Spine");
+        CHECK(goals[1].Solver == Keire::AnimatorIkSolver::Fabrik);
+        CHECK(goals[1].Space == Keire::AnimatorIkSpace::World);
+        CHECK(goals[1].Bones == std::vector<std::string>{"Pelvis", "Spine", "Head"});
+        CHECK(goals[1].Target == goals[0].Target);
+        CHECK(goals[1].Weight == doctest::Approx(0.75F));
+        CHECK(goals[1].MaximumIterations == 32);
+        CHECK(goals[1].Tolerance == doctest::Approx(0.002F));
+        const auto results = registration->Serialize(*runtimeComponent);
+        CHECK(std::get<bool>(results.at("IkInvalidUpdateRejected")));
+    }
+    runtimeComponent->SetEnabled(false);
+    CHECK(runtimeAnimator->IkGoals().empty());
+    runtimeComponent->SetEnabled(true);
+    CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = 0.5F}));
+    CHECK(runtimeAnimator->IkGoals().size() == 2);
+    REQUIRE(runtimeEntity.RemoveComponent<Keire::AnimatorComponent>());
+    CHECK_NOTHROW(play->FixedUpdate(1.0F / 60.0F));
+    REQUIRE_FALSE(runtimeEntity.HasComponent<Keire::AnimatorComponent>());
+    CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = 0.5F}));
+    const auto missingAnimatorResults = registration->Serialize(*runtimeComponent);
+    CHECK(std::get<bool>(missingAnimatorResults.at("IkMissingAnimatorRejected")));
+
     CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimationEvent(
         scriptedEntity.Id(), {"Procedural.StateChanged", 0.0F, 0, 0.0F, "Turn In Place"}));
     const auto animationEventResults = registration->Serialize(*runtimeComponent);
@@ -1560,6 +1640,189 @@ TEST_CASE("Managed assembly graphs are acyclic and complete")
     graph[1].Definition.References = {TestAsset(1)};
     CHECK_THROWS_WITH_AS(Keire::ValidateManagedAssemblyGraph(graph), "Managed assembly references contain a cycle.",
                          std::invalid_argument);
+}
+
+TEST_CASE("Managed predefined assemblies assign arbitrary folders and nearest custom boundaries")
+{
+    const auto root = UniqueTemporaryRoot("Keire-AssemblyFolders-");
+    struct Cleanup
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(Root, error);
+        }
+    } cleanup{root};
+    const auto write = [&](const std::filesystem::path& path)
+    {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << "// script\n";
+    };
+    write("Assets/Player.cs");
+    write("Assets/World/AI/Enemy.cs");
+    write("Assets/Tools/Editor/Tool.cs");
+    write("Assets/Feature/Feature.cs");
+    write("Assets/Feature/Nested/Nested.cs");
+    write("Assets/Feature/Editor/Owned.cs");
+    write("Library/Generated/Ignored.cs");
+    auto graph = Keire::ResolveProjectManagedAssemblies(root, {});
+    REQUIRE(graph.size() == 2);
+    CHECK(graph[0].Definition.Name == "Assembly-CSharp");
+    CHECK(graph[0].SourceFiles->size() == 4);
+    CHECK(graph[1].Definition.Name == "Assembly-CSharp-Editor");
+    CHECK(graph[1].SourceFiles->size() == 2);
+    CHECK(graph[1].Definition.References == std::vector{graph[0].Asset});
+
+    Keire::ManagedAssemblyDefinition feature;
+    feature.Name = "Feature";
+    feature.RootNamespace = "Feature";
+    Keire::ManagedAssemblyDefinition nested = feature;
+    nested.Name = "Nested";
+    nested.AutoReferenced = false;
+    std::array custom{
+        Keire::ManagedAssemblyGraphEntry{TestAsset(301), feature, "Assets/Feature/Feature.keireasm"},
+        Keire::ManagedAssemblyGraphEntry{TestAsset(302), nested, "Assets/Feature/Nested/Nested.keireasm"}};
+    graph = Keire::ResolveProjectManagedAssemblies(root, custom);
+    REQUIRE(graph.size() == 4);
+    CHECK(graph[0].SourceFiles->size() == 2);
+    CHECK(graph[1].SourceFiles->size() == 1);
+    CHECK(graph[2].SourceFiles->size() == 2);
+    CHECK(graph[3].SourceFiles->size() == 1);
+    CHECK(graph[2].Definition.References == std::vector{TestAsset(301)});
+    CHECK(custom[0].Definition.SourceRoots.empty());
+    const auto decoded = Keire::ManagedAssemblyAsset::Decode(Keire::ManagedAssemblyAsset::Encode(nested));
+    CHECK_FALSE(decoded->Definition().AutoReferenced);
+    CHECK(decoded->Definition().SourceRoots.empty());
+
+    SUBCASE("Moving a folder definition changes ownership without rewriting source roots")
+    {
+        custom[0].DefinitionPath = "Assets/World/Feature.keireasm";
+        graph = Keire::ResolveProjectManagedAssemblies(root, custom);
+        CHECK(*graph[0].SourceFiles == std::vector<std::filesystem::path>{"Assets/World/AI/Enemy.cs"});
+    }
+    SUBCASE("Duplicate boundaries are rejected")
+    {
+        custom[1].DefinitionPath = "Assets/Feature/Other.keireasm";
+        CHECK_THROWS_AS((void)Keire::ResolveProjectManagedAssemblies(root, custom), std::invalid_argument);
+    }
+    SUBCASE("Custom assemblies cannot reference predefined assemblies")
+    {
+        custom[0].Definition.References = {graph[2].Asset};
+        CHECK_THROWS_AS((void)Keire::ResolveProjectManagedAssemblies(root, custom), std::invalid_argument);
+    }
+    SUBCASE("Legacy explicit roots retain their coverage")
+    {
+        custom[0].Definition.SchemaVersion = 1;
+        custom[0].Definition.SourceRoots = {"Assets/World"};
+        graph = Keire::ResolveProjectManagedAssemblies(root, custom);
+        CHECK(*graph[0].SourceFiles == std::vector<std::filesystem::path>{"Assets/World/AI/Enemy.cs"});
+    }
+    SUBCASE("Reserved names and escaping paths are rejected")
+    {
+        custom[0].Definition.Name = "Assembly-CSharp";
+        CHECK_THROWS_AS((void)Keire::ResolveProjectManagedAssemblies(root, custom), std::invalid_argument);
+        custom[0].Definition.Name = "Feature";
+        custom[0].DefinitionPath = "../Feature.keireasm";
+        CHECK_THROWS_AS((void)Keire::ResolveProjectManagedAssemblies(root, custom), std::invalid_argument);
+    }
+}
+
+TEST_CASE("Managed predefined assemblies compile and reload cross assembly classes in dependency order")
+{
+    const auto root = UniqueTemporaryRoot("Keire-PredefinedBuild-");
+    struct Cleanup
+    {
+        std::filesystem::path Root;
+        ~Cleanup()
+        {
+            std::error_code error;
+            std::filesystem::remove_all(Root, error);
+        }
+    } cleanup{root};
+    const auto write = [&](const std::filesystem::path& path, const std::string_view text)
+    {
+        std::filesystem::create_directories((root / path).parent_path());
+        std::ofstream(root / path) << text;
+    };
+    write("Assets/Shared/Base.cs",
+          "using Keire; namespace Shared; public interface IValue { int Value { get; } } "
+          "public abstract class Base : Behaviour, IValue { public int Value => 42; } "
+          "public static class Utility { public static int Read<T>(T value) where T : IValue => value.Value; }");
+    write("Assets/Feature/Derived.cs", "namespace Feature; public abstract class Derived : Shared.Base { "
+                                       "public int Read() => Shared.Utility.Read(this); }");
+    write("Assets/Any Folder/Player.cs",
+          "using Keire; namespace Game; "
+          "[StableComponentId(\"73616e64-626f-4078-8000-000000000399\")] "
+          "public sealed class Player : Feature.Derived { protected override void Start() { "
+          "if (Read() != 42) throw new System.Exception(\"Cross assembly call failed\"); } }");
+    Keire::ManagedAssemblyDefinition shared;
+    shared.Name = "ZShared";
+    shared.RootNamespace = "Shared";
+    Keire::ManagedAssemblyDefinition feature;
+    feature.Name = "AFeature";
+    feature.RootNamespace = "Feature";
+    feature.References = {TestAsset(310)};
+    const std::array custom{
+        Keire::ManagedAssemblyGraphEntry{TestAsset(311), feature, "Assets/Feature/Feature.keireasm"},
+        Keire::ManagedAssemblyGraphEntry{TestAsset(310), shared, "Assets/Shared/Shared.keireasm"}};
+    Keire::ScriptSystemSpecification specification;
+    specification.Mode = Keire::ScriptMode::Enabled;
+    specification.ProjectRoot = root;
+    specification.AssemblyDirectory = "Library/ScriptAssemblies";
+    specification.ManagedApiAssembly = std::filesystem::absolute("Build/Managed/Keire.Managed.dll");
+#if defined(_WIN32)
+    specification.DotnetExecutable = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet.exe");
+#else
+    specification.DotnetExecutable = std::filesystem::absolute("Build/Dependencies/dotnet-sdk/dotnet");
+#endif
+    const std::string configuration =
+        std::string(KEIRE_BUILD_CONFIGURATION) == "Release" || std::string(KEIRE_BUILD_CONFIGURATION) == "Dist"
+            ? "Release"
+            : "Debug";
+    specification.RuntimeHostDirectory = std::filesystem::absolute("Build/Dependencies/coral/Build/" + configuration);
+    specification.RuntimeRootDirectory = specification.DotnetExecutable.parent_path();
+    auto scripts = Keire::CreateRef<Keire::ScriptSystem>(specification);
+    Keire::ManagedBuildRequest request;
+    request.Assemblies = Keire::ResolveProjectManagedAssemblies(root, custom);
+    const auto workspace = scripts->GenerateIdeWorkspace(request, "Folders");
+    CHECK(workspace.Projects.size() == 3);
+    const auto operation = scripts->StartBuild(request);
+    REQUIRE(scripts->WaitForBuild(operation, std::chrono::seconds(90)));
+    const auto status = scripts->BuildStatus();
+    for (const auto& diagnostic : status.Diagnostics)
+        INFO(diagnostic.Message);
+    REQUIRE(status.State == Keire::ManagedBuildState::Succeeded);
+    REQUIRE(status.RuntimeAssemblies.size() == 3);
+    CHECK(status.RuntimeAssemblies[0].filename() == "ZShared.dll");
+    CHECK(status.RuntimeAssemblies[1].filename() == "AFeature.dll");
+    CHECK(status.RuntimeAssemblies[2].filename() == "Assembly-CSharp.dll");
+    Keire::ManagedReloadRequest reload;
+    reload.ManagedApiAssembly = status.ManagedApiAssembly;
+    reload.Assemblies = status.RuntimeAssemblies;
+    const bool prepared = scripts->PrepareReload(reload);
+    INFO(scripts->ReloadStatus().Diagnostic);
+    REQUIRE(prepared);
+    const auto types = scripts->ReloadStatus().AvailableTypes;
+    CHECK(std::ranges::find(types, "Game.Player") != types.end());
+    scripts->CommitReload();
+    const auto instance = scripts->CreateBehaviour("Game.Player", 1, TestAsset(312));
+    CHECK_NOTHROW(scripts->InvokeBehaviour(instance, Keire::ManagedBehaviourCallback::Start));
+    CHECK(scripts->RuntimeDiagnostics().empty());
+    CHECK(scripts->DestroyBehaviour(instance));
+    auto missingReference = custom;
+    missingReference[0].Definition.References.clear();
+    request.Assemblies = Keire::ResolveProjectManagedAssemblies(root, missingReference);
+    const auto rejected = scripts->StartBuild(request);
+    REQUIRE(scripts->WaitForBuild(rejected, std::chrono::seconds(90)));
+    CHECK(scripts->BuildStatus().State == Keire::ManagedBuildState::Failed);
+    CHECK(scripts->ReloadStatus().State == Keire::ManagedReloadState::Active);
+    CHECK(scripts->ReloadStatus().Generation == 1);
+    // Packaged players enumerate DLLs; the host must also resolve dependencies for unsorted callers.
+    std::ranges::reverse(reload.Assemblies);
+    REQUIRE(scripts->PrepareReload(reload));
+    scripts->CommitReload();
+    scripts->Close();
 }
 
 TEST_CASE("Managed assembly schema one remains readable and assembly classifications are isolated")

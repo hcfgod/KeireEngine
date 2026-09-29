@@ -7,6 +7,57 @@
 
 namespace Keire::Detail
 {
+    void UiBackendNewFrame()
+    {
+        auto& context = *ImGui::GetCurrentContext();
+        auto& io = context.IO;
+        struct DeferredEvents
+        {
+            ImGuiContext& Context;
+            ImVector<ImGuiInputEvent> Events;
+            ~DeferredEvents()
+            {
+                for (const auto& event : Events)
+                    Context.InputEventsQueue.push_back(event);
+            }
+        } deferred{context, {}};
+        bool focusLost = false;
+        for (const auto& event : context.InputEventsQueue)
+            focusLost |= event.Type == ImGuiInputEventType_Focus && !event.AppFocused.Focused;
+        if (io.ConfigInputTrickleEventQueue && !focusLost)
+        {
+            ImVec2 position = io.MousePos;
+            bool moved = false;
+            for (int index = 0; index < context.InputEventsQueue.Size; ++index)
+            {
+                const auto& event = context.InputEventsQueue[index];
+                if (event.Type == ImGuiInputEventType_MousePos)
+                {
+                    position = {event.MousePos.PosX, event.MousePos.PosY};
+                    moved = position.x != io.MousePos.x || position.y != io.MousePos.y;
+                }
+                if (event.Type != ImGuiInputEventType_MouseButton || event.MouseButton.Down || !moved ||
+                    !ImGui::IsMousePosValid(&position))
+                    continue;
+                const int button = event.MouseButton.Button;
+                if (button < 0 || button >= ImGuiMouseButton_COUNT || !io.MouseDown[button])
+                    continue;
+                const float dx = position.x - io.MouseClickedPos[button].x;
+                const float dy = position.y - io.MouseClickedPos[button].y;
+                if (dx * dx + dy * dy < io.MouseDragThreshold * io.MouseDragThreshold)
+                    continue;
+                // ImGui can consume movement and release together, leaving no held frame for drag widgets.
+                // Retain the ordered tail so this frame applies the final drag position before releasing it.
+                deferred.Events.reserve(context.InputEventsQueue.Size - index);
+                for (int tail = index; tail < context.InputEventsQueue.Size; ++tail)
+                    deferred.Events.push_back(context.InputEventsQueue[tail]);
+                context.InputEventsQueue.resize(index);
+                break;
+            }
+        }
+        ImGui::NewFrame();
+    }
+
     namespace
     {
         [[nodiscard]] ImGuiKey NativeKey(const UiKey key) noexcept

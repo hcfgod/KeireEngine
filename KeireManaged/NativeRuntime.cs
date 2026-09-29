@@ -837,6 +837,11 @@ internal static unsafe class NativeRuntime
                                               string endBone, Vector3 target, Vector3 pole, float weight,
                                               AnimatorIkSpace space)
     {
+        AnimatorIkValidation.Goal(goal, target, weight, space);
+        AnimatorIkValidation.Name(rootBone, nameof(rootBone));
+        AnimatorIkValidation.Name(middleBone, nameof(middleBone));
+        AnimatorIkValidation.Name(endBone, nameof(endBone));
+        AnimatorIkValidation.Vector(pole, nameof(pole));
         using NativeString nativeGoal = goal;
         using NativeString nativeRoot = rootBone;
         using NativeString nativeMiddle = middleBone;
@@ -850,11 +855,19 @@ internal static unsafe class NativeRuntime
                                              float weight, uint maximumIterations, float tolerance,
                                              AnimatorIkSpace space)
     {
+        AnimatorIkValidation.Goal(goal, target, weight, space);
         ArgumentNullException.ThrowIfNull(bones);
+        if (bones.Count < 2 || bones.Count > 256)
+            throw new ArgumentException("FABRIK chains must contain 2..256 bones.", nameof(bones));
+        if (maximumIterations == 0 || maximumIterations > 1024)
+            throw new ArgumentOutOfRangeException(nameof(maximumIterations), "FABRIK iterations must be between 1 and 1024.");
+        if (!float.IsFinite(tolerance) || tolerance <= 0)
+            throw new ArgumentOutOfRangeException(nameof(tolerance), "FABRIK tolerance must be finite and positive.");
         const char separator = '\u001f';
         foreach (string bone in bones)
         {
-            if (string.IsNullOrWhiteSpace(bone) || bone.Contains(separator))
+            AnimatorIkValidation.Name(bone, nameof(bones));
+            if (bone.Contains(separator))
                 throw new ArgumentException("FABRIK bone names must be non-empty and may not contain U+001F.",
                                             nameof(bones));
         }
@@ -867,6 +880,7 @@ internal static unsafe class NativeRuntime
 
     internal static bool ClearAnimatorIk(Entity entity, string goal)
     {
+        AnimatorIkValidation.Name(goal, nameof(goal));
         using NativeString nativeGoal = goal;
         return ClearAnimatorIkIcall(entity.World, entity.Id.High, entity.Id.Low, nativeGoal) != 0;
     }

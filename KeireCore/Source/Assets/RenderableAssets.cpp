@@ -269,7 +269,7 @@ namespace Keire
     {
         AssetImporterRegistration result;
         result.Name = "Keire.Mesh";
-        result.Version = 23;
+        result.Version = 25;
         result.Type = MeshAsset::StaticType();
         result.CompatibleTypes = {AnimationSourceAsset::StaticType()};
         result.Extensions = {".obj", ".fbx", ".gltf", ".glb", ".keiremesh"};
@@ -364,6 +364,12 @@ namespace Keire
             if (!scene)
             {
                 auto diagnostic = std::string("Mesh import failed: ") + importer.GetErrorString();
+                const auto memoryPath = std::string("$$$___magic___$$$.") + extension;
+                const auto sourceLabel = context.RelativePath.empty() ? context.SourcePath.filename().generic_string()
+                                                                      : context.RelativePath.generic_string();
+                for (auto offset = diagnostic.find(memoryPath); offset != std::string::npos;
+                     offset = diagnostic.find(memoryPath, offset + sourceLabel.size()))
+                    diagnostic.replace(offset, memoryPath.size(), sourceLabel);
                 if (projectIO && !projectIO->LastReadFailure().empty())
                     diagnostic += " " + std::string(projectIO->LastReadFailure());
                 throw std::invalid_argument(std::move(diagnostic));
@@ -386,6 +392,10 @@ namespace Keire
             const bool useEmbeddedSkinning = hasSkinning && (rigSource == "embedded" || animationSource);
             const bool useEmbeddedHierarchy = useEmbeddedSkinning || animationSource;
             const bool generateRig = !animationSource && rigSource == "generate";
+            if (generateRig && requestedRigProfile == "custom")
+                throw std::invalid_argument(
+                    "Custom mapping preserves an imported skeleton. Choose Keep imported skeleton, "
+                    "or select a humanoid, biped, or quadruped profile to generate a skeleton.");
             const bool animated = useEmbeddedSkinning || generateRig;
             if (!animated && !animationSource)
             {
@@ -868,9 +878,10 @@ namespace Keire
                 output.SubAssets.push_back({skeletonId, SkeletonAsset::StaticType(), "skeleton/default", "Skeleton",
                                             SkeletonAsset::Encode(skeletonBones)});
                 const SkeletonAsset embeddedSkeleton(skeletonBones);
-                const auto profile = requestedRigProfile == "quadruped" ? RigProfileType::Quadruped
-                                     : requestedRigProfile == "biped"   ? RigProfileType::Biped
-                                                                        : RigProfileType::Humanoid;
+                const auto profile = requestedRigProfile == "custom"      ? RigProfileType::Custom
+                                     : requestedRigProfile == "quadruped" ? RigProfileType::Quadruped
+                                     : requestedRigProfile == "biped"     ? RigProfileType::Biped
+                                                                          : RigProfileType::Humanoid;
                 const auto embeddedRig = InferRigDefinition(embeddedSkeleton, profile, skinningMethod,
                                                             static_cast<std::uint8_t>(requestedInfluences));
                 rigId = context.ResolveSubAssetId("rig/default");
@@ -880,10 +891,15 @@ namespace Keire
                 for (unsigned int animationIndex = 0; animationIndex < scene->mNumAnimations; ++animationIndex)
                 {
                     const auto* animation = scene->mAnimations[animationIndex];
-                    if (!animation || animation->mDuration <= 0.0)
+                    if (!animation)
                         continue;
+                    if (!std::isfinite(animation->mDuration) || animation->mDuration < 0.0)
+                        throw std::invalid_argument("Imported animation duration must be finite and non-negative.");
                     const auto ticksPerSecond = animation->mTicksPerSecond > 0.0 ? animation->mTicksPerSecond : 30.0;
-                    const auto duration = static_cast<float>(animation->mDuration / ticksPerSecond);
+                    // Runtime clips require positive duration; a single-frame action holds its authored pose.
+                    const auto duration = animation->mDuration == 0.0
+                                              ? 1.0F / 30.0F
+                                              : static_cast<float>(animation->mDuration / ticksPerSecond);
                     std::vector<AnimationTrack> tracks;
                     for (unsigned int channelIndex = 0; channelIndex < animation->mNumChannels; ++channelIndex)
                     {
@@ -961,6 +977,10 @@ namespace Keire
                     auto name = std::string(animation->mName.C_Str());
                     if (name.empty())
                         name = "Animation " + std::to_string(animationIndex + 1U);
+                    if (animation->mDuration == 0.0)
+                        output.Diagnostics.push_back(
+                            {AssetDiagnosticSeverity::Information, context.RelativePath, 0, 0,
+                             "Imported single-frame animation '" + name + "' as a constant pose lasting 1/30 second."});
                     if (requestedAnimationMotion == ImportedAnimationMotion::InPlaceHorizontal ||
                         requestedAnimationMotion == ImportedAnimationMotion::InPlace)
                     {
@@ -1314,14 +1334,14 @@ namespace Keire
                                  1.0,
                                  {"embedded", "generate", "none"}},
                                 {"rigProfile",
-                                 "Avatar Profile",
+                                 "Mapping Profile",
                                  "Rig",
                                  AssetImportOptionKind::Choice,
                                  std::string("humanoid"),
                                  {},
                                  {},
                                  1.0,
-                                 {"humanoid", "biped", "quadruped"}},
+                                 {"humanoid", "biped", "quadruped", "custom"}},
                                 {"maximumInfluences",
                                  "Maximum Influences",
                                  "Rig",

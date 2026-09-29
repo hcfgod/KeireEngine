@@ -1,6 +1,7 @@
 #include "doctest/doctest.h"
 
 #include "Keire/Assets/AssetPipeline.h"
+#include "KeireInternal/Assets/AssetImportDrafts.h"
 #include "KeireInternal/Assets/AssetSourceDiscovery.h"
 
 #include <chrono>
@@ -9,6 +10,46 @@
 #include <span>
 #include <string>
 #include <thread>
+
+TEST_CASE("asset import drafts preserve pending edits across selection and external import changes")
+{
+    Keire::Internal::AssetImportDrafts drafts;
+    const auto fox = Keire::AssetId::Generate();
+    const auto human = Keire::AssetId::Generate();
+    const Keire::AssetImportSettings original{{"rigSource", std::string("embedded")}};
+    auto& edited = drafts.Select(fox, original);
+    edited.Values["rigSource"] = std::string("generate");
+    edited.Dirty = true;
+    CHECK(drafts.Select(human, original).Values == original);
+    const Keire::AssetImportSettings external{{"rigSource", std::string("none")}};
+    CHECK(std::get<std::string>(drafts.Select(fox, external).Values.at("rigSource")) == "generate");
+    CHECK(drafts.Select(fox, external).Dirty);
+    CHECK(drafts.Select(fox, external).Baseline == original);
+    drafts.Revert(fox, external);
+    CHECK_FALSE(drafts.Select(fox, external).Dirty);
+    CHECK(drafts.Select(fox, external).Values == external);
+    CHECK(drafts.Select(fox, external).Baseline == external);
+    CHECK(drafts.Select(human, external).Values == external);
+}
+
+TEST_CASE("import settings refresh clean inspectors and preserve conflicting drafts")
+{
+    using Keire::Internal::SynchronizeImportSettingsDraft;
+    const Keire::AssetImportSettings original{{"rigProfile", std::string("humanoid")}};
+    const Keire::AssetImportSettings external{{"rigProfile", std::string("quadruped")}};
+    auto baseline = original;
+    auto draft = original;
+    CHECK_FALSE(SynchronizeImportSettingsDraft(external, baseline, draft));
+    CHECK(baseline == external);
+    CHECK(draft == external);
+    draft["maximumInfluences"] = std::string("8");
+    const auto pending = draft;
+    CHECK(SynchronizeImportSettingsDraft(original, baseline, draft));
+    CHECK(baseline == external);
+    CHECK(draft == pending);
+    CHECK_FALSE(SynchronizeImportSettingsDraft(external, baseline, draft));
+    CHECK(draft == pending);
+}
 
 TEST_CASE("asset source discovery waits for stable files and forgets removed candidates")
 {

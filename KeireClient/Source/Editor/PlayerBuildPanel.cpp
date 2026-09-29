@@ -1,6 +1,7 @@
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireClient/Editor/EditorCommandRouter.h"
+#include "KeireClient/Editor/EditorManagedRuntimeCoordinator.h"
 #include "KeireClient/Editor/PlayerBuildService.h"
 #include "KeireClient/Editor/ProjectSettingsDocument.h"
 #include "KeireClient/Editor/SceneDocument.h"
@@ -85,9 +86,16 @@ void EditorWorkspaceLayer::SavePlayerBuildConfiguration()
     const auto project = Owner().GetProject();
     if (!project || !m_PlayerBuildSettingsLoaded)
         throw std::logic_error("Player build settings are not available.");
+    const auto previousProfiles = Keire::LoadPlayerBuildProfiles(project->Root());
+    const auto previousTarget =
+        Keire::FindPlayerBuildProfile(previousProfiles, previousProfiles.ActiveProfile).Platform;
     Keire::SavePlayerSettings(project->Root(), m_PlayerSettings);
     Keire::SavePlayerBuildProfiles(project->Root(), m_PlayerBuildProfiles);
     Keire::SavePlayerBuildScenes(project->Root(), m_PlayerBuildScenes);
+    if (m_ManagedRuntimeCoordinator &&
+        previousTarget !=
+            Keire::FindPlayerBuildProfile(m_PlayerBuildProfiles, m_PlayerBuildProfiles.ActiveProfile).Platform)
+        m_ManagedRuntimeCoordinator->ScheduleBuild(0.1);
 }
 
 bool EditorWorkspaceLayer::CanBuildPlayer(const bool runAfterBuild) const noexcept

@@ -39,8 +39,11 @@ $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $BuildTimer = [Diagnostics.Stopwatch]::StartNew()
 $BuildSucceeded = $false
 $BuildProfileBinaryLog = $null
-$BuildLock = Enter-KeireBuildLock -RepositoryRoot $Root
+# Direct builds and project.ps1 must acquire shared locks in the same order.
+$WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "build"
+$BuildLock = $null
 try {
+$BuildLock = Enter-KeireBuildLock -RepositoryRoot $Root
 $Project = Get-ProjectConfig
 $WorkspaceName = $Project.PROJECT_IDENTIFIER
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
@@ -215,7 +218,12 @@ if ($Generator -eq "ninja" -and $runtimeStagingTarget -in @($Project.HUB_TARGET,
 $BuildSucceeded = $true
 }
 finally {
-    Exit-KeireBuildLock -Mutex $BuildLock
+    try {
+        if ($BuildLock) { Exit-KeireBuildLock -Mutex $BuildLock }
+    }
+    finally {
+        Exit-KeireWorkspaceLock -Lock $WorkspaceLock
+    }
     $BuildTimer.Stop()
     if ($ProfileBuild) {
         $profileDirectory = Join-Path $Root "Build\Reports\BuildProfiles"

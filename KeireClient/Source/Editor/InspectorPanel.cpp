@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
+#include "KeireClient/Editor/AnimatorInspectorDiagnostic.h"
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/EulerEditContinuity.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
@@ -1098,10 +1099,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                 : state.Quality == Keire::ProceduralMotionQuality::Medium ? "Medium"
                                                 : state.Quality == Keire::ProceduralMotionQuality::Low    ? "Low"
                                                                                                           : "Auto"));
-                            if (!animator->RuntimeDiagnostic().empty())
-                                ui.TextColored(theme.Warning, animator->RuntimeDiagnostic());
                             ui.Separator();
                         }
+                        if (const auto animator = Keire::DynamicRefCast<Keire::AnimatorComponent>(component))
+                            DrawAnimatorInspectorDiagnostic(ui, *animator, theme.Warning);
                         DrawUiDocumentInspectorActions(ui, component, m_Controller, theme);
                         std::string activeGroup;
                         Keire::ComponentPropertyBag values;

@@ -12,6 +12,13 @@
 
 namespace KeireEditor
 {
+    Keire::Matrix4 SceneCameraController::ProjectionMatrix(const float aspect) const
+    {
+        // Small imported models need a close near plane when framed at their authored scale.
+        const float nearPlane = std::min(0.05F, m_Camera.State().Distance * 0.1F);
+        return m_Camera.ProjectionMatrix(aspect, 60.0F, nearPlane);
+    }
+
     Keire::RenderCamera SceneCameraController::RenderCamera(const float aspect) const
     {
         Keire::RenderCamera camera;

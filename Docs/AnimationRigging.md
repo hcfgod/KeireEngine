@@ -3,6 +3,19 @@
 Kéire treats model geometry, skeletons, semantic rigs, skin weights, clips, and Animator Controllers as separate assets.
 This keeps reimport, retargeting, prefab references, and cooked dependencies deterministic.
 
+## Optional Imported-Model Regression Check
+
+The native test `downloaded rigging models preserve skeletons skinning clips and identity retargets` runs when
+`Build/Validation/RiggingModels` exists. Place the Khronos glTF Sample Assets GLBs for **Fox**, **CesiumMan**, and
+**RiggedSimple** in separate subfolders there, retaining their accompanying README license/credit notices. Models are
+test inputs and are not redistributed with the engine. The check imports each twice, validates four/eight influences
+with both skinning methods, verifies skeleton references, and retargets each clip back to its own skeleton. It skips
+when the optional fixture directory is absent. Visual deformation and cross-character retargeting still require an
+editor review; this check does not establish those qualities.
+
+Additional GLBs in that directory must contain skinning and animation. The local creature pass also uses
+**Wolf Spider (Rigged) - (Rabidosa rabida)** by Dreaming In Alternation 27 (CC BY 4.0), with its original credit notice.
+
 For characters whose complete pose is generated without clips, see [Procedural Humanoid Motion](ProceduralMotion.md).
 That pose source shares semantic rigs and the Animator's final override stages while leaving graph-mode behavior
 unchanged.
@@ -11,12 +24,12 @@ unchanged.
 
 1. Import an FBX, glTF, or GLB model into the Project panel. For an animation take, set **Content** to `animation` in
    the Import Assets dialog; the source is labeled **Animation Source** and must include its embedded skinned skeleton.
-2. Select the model and open **Window > Rigging Studio**.
+2. Open **Window > Rigging Studio** and choose the model from **Model**, or select it in the Project panel.
 3. Choose a **Rig Source**:
-   - `Embedded` preserves authored bones and weights.
-   - `Generate` creates a deterministic rig and weights for an unrigged mesh.
+   - `Keep imported skeleton` preserves authored bones and weights.
+   - `Generate a skeleton` creates a deterministic rig and weights for an unrigged mesh.
    - `None` imports static geometry only.
-4. Choose the **Avatar Profile**:
+4. Choose the **Profile** for either an imported or generated skeleton:
    - `Humanoid` maps a conventional human skeleton.
    - `Biped` uses the two-legged profile without requiring human-specific authoring.
    - `Quadruped` maps front/rear legs, paws or hooves, spine, head, and tail.
@@ -31,6 +44,10 @@ unchanged.
 
 Embedded skeleton inference recognizes common Mixamo, Blender, and Unreal-style names. It never reorders or removes
 bones. Unrecognized bones remain in the skeleton with the `None` semantic so animation and skin indices stay intact.
+
+Unapplied import settings are retained per model while switching selection or windows within the open Studio session.
+Choose **Apply & Regenerate** to publish them, or **Revert** to restore the model's current import settings. Drafts are
+not saved across editor restarts.
 
 Arbitrary creatures use `RigProfileType::Custom` and an authored `RigDefinition` through the public C++ API. A custom
 profile defines exact bones, parentage, bind transforms, semantic roles, and IK chains:
@@ -47,7 +64,8 @@ const auto result = Keire::GenerateRig(mesh, request);
 ## Inspect And Retarget
 
 Rigging Studio lists the model's skeleton, semantic rig, skinned mesh, and embedded clips. Expand **Semantic Bone Map**
-to inspect the durable role assigned to each source bone.
+to review inferred mappings. Clip and bone dropdowns reveal the current selection when opened; wheel scrolling remains
+available within the list.
 
 To retarget:
 
@@ -67,9 +85,22 @@ fall back to a safe value; source and target assets remain unchanged if validati
 
 ## Animator Controllers
 
+When keeping Play Mode edits, property labels include their Inspector group, such as **Right Arm IK / Enabled**,
+so each limb's changes can be selected independently from the Animator component's own enabled state.
+
+Double-click a baked `.keireanim` clip to open **Animation Clip Preview**. Select a scene object with an Animator and
+skinned mesh, then use **Play**, **Pause**, **Restart**, **Stop**, or **Timeline** to inspect it. Stop scene Play Mode
+first. The preview leaves the object's controller assignment and the open controller document unchanged, including
+unsaved edits. **Back to Controller** restores that document. Narrow panels stack the playback buttons and wrap clip
+names; the timeline uses the available panel width. Closing the panel or stopping preview clears the
+temporary pose. Clips from another skeleton use the existing automatic retargeting rules; bake explicit mappings in
+Rigging Studio when automatic matching is insufficient.
+
 Create an **Animator Controller** in the Project panel and double-click it. Drag clips, Animation Sources, or animated
-models into the graph; container assets expand their generated clip subassets into states. Create parameters, layers,
+models into the graph; container assets expand their generated clip subassets into states using authored clip names.
+Older clips without names use numbered model names; duplicate state names receive a numeric suffix. Create parameters, layers,
 transitions, masks, blend trees, and state-machine subgraphs, then assign the controller to an Animator component.
+Dropped clip batches and **Auto Layout** use a spaced grid so state titles and ports remain visible.
 Override layers replace masked bones, additive layers apply deltas from the skeleton bind pose, and avatar-mask weights
 can attenuate either mode per bone. Runtime sampling, events, root motion, transitions, and skinning occur in scene-safe
 order.
@@ -97,8 +128,21 @@ Self-transitions are rejected. A second transition between the same two states i
 conditions or exit timing can be distinct. Deleting a state also removes every incident transition transactionally.
 
 Select the animated scene object while its controller is open to use the selection-backed **Animation Preview Scene**.
+Use the searchable **Add Animation** picker to create states from baked clips or named imported actions without
+dragging files. The first clip creates a base layer when necessary; later clips keep the existing entry state and
+are added to the current layer and subgraph.
+The Animation Clip, blend-child Clip, and Avatar Mask fields use searchable, type-filtered pickers. Imported actions
+display their authored names beside their source model; incompatible or missing references are identified in the field.
+If model placement fails during transform, renderer, or Animator setup, the partial scene object is removed.
+A successful placement can be undone immediately without first clicking the Hierarchy.
+Collapsing the Animator Controller or switching dock tabs keeps its Edit Mode preview running so the model stays
+visible in the scene. Closing the controller, closing its document, or entering Play Mode stops the preview.
+Choose **Preview Selected** to start at the selected state without changing any authored entry state. Restart and
+Timeline keep that preview selection, including its layer; normal layer blending and transitions still apply.
+Choose **Preview Graph** to return to the authored entry states. Stop clears the preview selection.
 In Edit Mode, Preview, Pause, Restart, Stop, and Timeline scrub evaluate the graph on the selected object without
-serializing the preview pose. Closing the panel, entering Play Mode, changing target, or pressing Stop clears the
+serializing the preview pose or changing the Animator's authored skeleton reference. The preview uses the skinned
+mesh's skeleton locally. Invalid target assignments clear the previous pose and show a recovery message. Closing the panel, entering Play Mode, changing target, or pressing Stop clears the
 transient pose. In Play Mode, the same strip reports the live state and normalized progress, displays the active
 transition and blend progress, and highlights the active graph state.
 
@@ -137,9 +181,17 @@ Direct `AnimationClip` and `AnimatorController` fields are supported serialized 
 explicit playback selects controller states so transitions, layers, masks, blend trees, events, and root motion remain
 coherent.
 
-IK goals persist by name until replaced or cleared. World-space goals are converted to model space at the animation
+IK goals persist by name until replaced or cleared. Each goal is evaluated independently in submission order;
+a failed goal leaves its pose changes unapplied, reports a named diagnostic, and does not suppress later goals. World-space goals are converted to model space at the animation
 boundary. Invalid entities, missing Animator components, stale Play generations, missing bones, and invalid solver
 limits are rejected without exposing native pointers.
+C# IK setters validate names (1..256 UTF-8 bytes), finite target/pole coordinates, weight (0..1), coordinate space,
+chain length (2..256), iteration count (1..1024), and positive finite tolerance before submitting a native command.
+Invalid arguments throw an `ArgumentException` naming the offending parameter and leave existing goals unchanged.
+Bone existence and hierarchy are checked during pose evaluation, where failures produce named goal diagnostics.
+The Animator Inspector displays these runtime diagnostics for both graph and procedural pose sources, wrapping long
+messages inside the panel. Correct the reported target or bone chain; the message clears after successful evaluation.
+Clear goals owned by a behaviour in its `OnDisable` callback when they should stop influencing the pose with that behaviour.
 
 ### Inspector-authored arm IK
 
@@ -251,6 +303,9 @@ this at locomotion boundaries so ground adaptation remains active on slopes and 
 jumps, falls, swimming, climbing, or other airborne poses. This runtime value is independent of skeleton naming and is
 not serialized into the Animator component.
 
+FABRIK can also bend a straight chain toward a closer collinear target, using the root's orientation to choose a
+deterministic initial bend. Zero weight leaves the authored pose unchanged. As with other iterative targets,
+`MaximumIterations` and `Tolerance` bound convergence work.
 Two-bone and FABRIK rotations are solved in model space and converted back through the actual parent transform, so
 rotated parents and imported bind orientations do not corrupt local bone rotations. Two-bone chains may contain
 translation, pre-rotation, and rotation helper nodes between their resolved joints, as commonly produced by FBX
@@ -268,6 +323,13 @@ Finger curl and individual finger joints are not part of limb IK; pose them in t
 managed IK goals.
 
 `SolveFootGrounding` is also available to custom character runtimes that already own their contact queries.
+Contacts with zero weight do not pull or tilt the pelvis and are excluded from solved/unreachable-foot counts.
+When every contact is disabled, a valid pose is preserved exactly. Invalid contact data and non-finite poses are still
+rejected without modifying the input pose.
+Partial contact weights also blend pelvis support: foot centers and slope normals use relative contact weights,
+and the strongest contact bounds horizontal and rotational correction. Each contact's bounded vertical correction
+fades with its own weight. `PelvisWeight` scales all pelvis corrections, including tilt, so fading support does not
+apply a full-strength correction when its weight first becomes positive.
 `RagdollPoseTransition` provides an interruptible animated-to-physics pose blend with finite duration validation,
 shortest-path quaternion interpolation, zero-duration switching, and a deterministic return transition. The animation
 system intentionally does not create or own a ragdoll's bodies and constraints: the physics/character layer supplies a
@@ -288,6 +350,51 @@ hardware before applying it broadly.
 
 ## Cooking Guarantees
 
+Rigging Studio's **Mapping Profile** selects semantic inference rules; it does not replace an imported skeleton.
+Custom creatures retain their full hierarchy and animation even when no semantic chains can be inferred. Inspect the
+bone map and use explicit bone names for custom IK. Quadruped inference also recognizes front limbs named UpperArm,
+ForeArm and Hand, and rear limbs named Leg01, Leg02 and Foot.
+
+Clip choices and generated assets show authored names after reimport. Partial retargets show a warning and require
+**I reviewed the omitted tracks** before baking. Changing source or target data resets that review.
+Use **Edit bone mappings** to select explicit target bones for unmatched or incorrectly matched source tracks.
+Filter source bones or search within a target picker to locate joints in large rigs. Automatic fields show the
+resolved target name, or **no matching target**, so missing mappings are visible without opening diagnostics.
+**Automatic** restores name/semantic matching for that track. Manual choices take priority over automatic matches;
+assigning the same target to multiple manual source bindings is rejected. Overrides and searches survive asset
+refreshes, including saving another animation graph. Reloaded rigs are validated again; removed or renamed bones
+produce an error until their mappings are repaired. Selecting another source clip or target model resets the draft.
+Bake the clip to retain the resulting animation; mapping drafts are not saved across editor restarts.
+
+The C++ diagnostic and bake functions also accept a span of `AnimationRetargetOverride` entries containing
+`SourceBone` and `TargetBone` names. They reject unknown names and duplicate logical source/target bindings before
+baking. Existing overloads retain automatic matching. Diagnostics identify manual matches separately.
+
+Apply or revert pending import settings first; failed source or target imports keep their diagnostics visible and cannot be used for a new bake.
+Repair and reimport the affected model even if its last good cached clip or preview remains available.
+
+Dragging a skinned model from Project into the Scene creates a Mesh Renderer and an Animator with its imported
+skeleton, skin, and rig assigned. Create or assign an Animator Controller to select and play its clips. Static
+models remain renderer-only. Ambiguous skins or a missing skeleton produce a reimport diagnostic before placement.
+Clean Inspector fields follow edits from Rigging Studio; conflicting drafts are retained with a warning, and Revert
+loads the latest imported settings.
+
+Downloaded-model regression coverage also carries solved poses through 24 successive moving targets per eligible
+three-bone chain, checking finite transforms, anchored roots, segment lengths, and progress toward each target for
+both two-bone and FABRIK solvers. This complements, but does not replace, live gameplay and deformation review.
+The optional spider regression solves all eight complete leg chains over 48 moving-target frames, checks isolation
+between legs, preserved segment lengths, unreachable targets, and recovery after invalid input. Zero-weight FABRIK
+preserves the input transforms exactly, while still validating the request and chain.
+Managed runtime integration coverage loads a gameplay assembly into a playing scene and verifies repeated public
+`Animator` IK updates, unchanged goals after rejected arguments, `OnDisable` cleanup, re-enabling, and rejection through
+a cached component reference after deferred removal completes. These checks cover command and lifecycle behavior;
+they do not substitute for visual review of the resulting pose on each rig.
+
+IK rotation extraction normalizes basis lengths before decomposition, so unit conversion scales such as 0.001 do not
+make valid imported chains fail. Optional downloaded-model tests exercise both two-bone and FABRIK solvers on
+nonzero-length three-bone chains, checking finite poses, stationary roots, and progress toward targets. These numerical
+checks supplement visual testing; they do not certify deformation quality or automatic semantic mapping for every rig.
+
 Strict cooking rejects:
 
 - malformed rig, clip, skeleton, or skinned-mesh payloads;
@@ -298,3 +405,16 @@ Strict cooking rejects:
 
 Generated IDs and schema-v1 skinned meshes remain compatible. Reimport writes immutable cache generations and only
 publishes a complete last-good result.
+
+Custom/imported mapping preserves authored bone names and hierarchy without inferring humanoid roles. Use it for spiders and other custom creatures; address IK chains by their bone names. Generating a custom skeleton requires an authored profile through the C++ API; the importer offers generation only for humanoid, biped, and quadruped profiles.
+
+In **Edit bone mappings**, **Save Mapping** writes the manual pairs to `Config/RetargetMappings` in the project.
+The file is keyed by stable source/target skeleton IDs, so other clips from that pair can use **Load Saved Mapping**,
+even after restarting the editor. Include these configuration files in project version control when sharing mappings.
+Save replaces the previous mapping for that pair; Load replaces the current manual edits. Loading validates the file,
+identities, unique bindings, and current bone names before replacing anything. Missing or renamed bones produce a
+repair message and leave the current edits unchanged. An empty saved mapping restores automatic matching.
+Saving also checks the current skeletons before writing: stale bone pairs cannot overwrite an existing valid preset.
+Mappings do not copy automatically to unrelated skeleton assets; review and save their bindings separately.
+
+Two-bone and FABRIK solves are transactional: a rejected request or invalid pose leaves every input transform unchanged. Non-finite transforms and zero-length rotation quaternions are rejected.

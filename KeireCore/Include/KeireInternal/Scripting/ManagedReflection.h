@@ -88,7 +88,8 @@ namespace Keire::Detail
     }
 
     [[nodiscard]] ComponentPropertyBag ProjectManagedState(const std::string& state,
-                                                           const std::vector<ComponentProperty>& properties);
+                                                           const std::vector<ComponentProperty>& properties,
+                                                           const ComponentPropertyBag* defaults = nullptr);
     [[nodiscard]] std::string ApplyManagedState(const std::string& state, const ComponentPropertyBag& values,
                                                 const std::vector<ComponentProperty>& properties);
     [[nodiscard]] ManagedAssetMetadataResult ParseManagedAssetMetadata(std::string_view text);

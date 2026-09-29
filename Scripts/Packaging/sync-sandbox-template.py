@@ -58,6 +58,12 @@ def _source_files() -> dict[Path, Path]:
             for prefix in EXCLUDED_ASSET_PREFIXES
         ):
             continue
+        # New projects use predefined assemblies; the canonical sample retains its explicit assembly example.
+        if relative.as_posix() in {"Assets/Scripts/Gameplay.keireasm", "Assets/Scripts/Gameplay.keireasm.keiremeta"}:
+            continue
+        runtime = Path("Assets/Scripts/Runtime")
+        if runtime in relative.parents:
+            relative = Path("Assets/Scripts") / relative.relative_to(runtime)
         files[relative] = source
     return dict(sorted(files.items(), key=lambda item: item[0].as_posix()))
 
@@ -127,7 +133,7 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
             "Assets/Examples/MaterialLab/ShaderGraphs/01_Foundations/SG_01_StudioPaint.keireshadergraph",
             "Assets/Examples/MaterialLab/MaterialGraphs/01_Foundations/MG_01_StudioPaint.keirematerial",
             "Assets/Examples/MaterialLab/ShaderGraphs/03_Advanced/SG_12_IridescentShield.keireshadergraph",
-            "Assets/Scripts/Runtime/Examples/ShowcaseOrbit.cs",
+            "Assets/Scripts/Examples/ShowcaseOrbit.cs",
             "Assets/Vfx/ArcaneNova.keirevfx",
         ],
     }

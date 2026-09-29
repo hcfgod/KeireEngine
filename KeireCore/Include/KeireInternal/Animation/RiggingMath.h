@@ -122,9 +122,24 @@ namespace Keire::RiggingDetail
 
     [[nodiscard]] inline bool MatrixRotation(const Matrix4& matrix, Quaternion& rotation) noexcept
     {
+        if (!Math::IsFinite(matrix))
+            return false;
+        auto normalized = matrix;
+        // Unit conversion on imported rigs can make a valid basis determinant smaller
+        // than the decomposition epsilon. Rotation does not depend on basis lengths.
+        for (std::size_t column = 0; column < 3; ++column)
+        {
+            const auto offset = column * 4;
+            const auto length =
+                std::hypot(matrix.Elements[offset], matrix.Elements[offset + 1], matrix.Elements[offset + 2]);
+            if (!std::isfinite(length) || length <= 0.0F)
+                return false;
+            for (std::size_t row = 0; row < 3; ++row)
+                normalized.Elements[offset + row] /= length;
+        }
         Vector3 position;
         Vector3 scale;
-        return Math::DecomposeTransform(matrix, position, rotation, scale);
+        return Math::DecomposeTransform(normalized, position, rotation, scale);
     }
 
     [[nodiscard]] inline bool SetBoneModelRotation(const SkeletonAsset& skeleton,

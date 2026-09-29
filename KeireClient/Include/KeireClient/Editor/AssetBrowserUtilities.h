@@ -91,6 +91,7 @@ namespace KeireEditor
         External,
         InputActions,
         AnimationGraph,
+        AnimationClip,
         AudioMixer,
         VfxEffect,
         UiDocument,
@@ -137,6 +138,9 @@ namespace KeireEditor
     [[nodiscard]] std::vector<Keire::AssetId> DecodeAssetPayload(std::span<const std::byte> bytes);
     [[nodiscard]] Keire::AssetId DecodeSingleAssetPayload(std::span<const std::byte> bytes);
     [[nodiscard]] std::string EncodeAssetPayload(std::span<const Keire::AssetId> assets);
+    [[nodiscard]] std::vector<ManagedScriptAssemblyCandidate>
+    ReadManagedScriptAssemblies(const std::filesystem::path& projectRoot,
+                                std::span<const Keire::AssetSourceRecord> records);
     [[nodiscard]] ManagedScriptPlacement
     ResolveManagedScriptPlacement(std::span<const ManagedScriptAssemblyCandidate> assemblies,
                                   const std::filesystem::path& selectedAssetFolder);

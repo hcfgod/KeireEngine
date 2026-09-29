@@ -18,6 +18,8 @@ namespace KeireEditor
             return "C# script";
         case NamedAssetCreationKind::ScriptableObjectScript:
             return "C# ScriptableObject class";
+        case NamedAssetCreationKind::ManagedAssemblyReference:
+            return "assembly reference";
         case NamedAssetCreationKind::ManagedAssembly:
             return "managed assembly";
         case NamedAssetCreationKind::ManagedData:
