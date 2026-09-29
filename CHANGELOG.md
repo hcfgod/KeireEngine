@@ -1,5 +1,7 @@
 # Changelog
 
+- Native Animator IK setters reject unknown coordinate spaces before adding or replacing goals, preserving the last valid goal.
+
 - Editor combo pickers reveal the selected option when opened, while preserving subsequent wheel scrolling and parent-panel position.
 
 - FABRIK escapes straight-chain collinear stalls with a deterministic bend in the root's frame, preserving zero-weight poses and bone lengths across imported scales.

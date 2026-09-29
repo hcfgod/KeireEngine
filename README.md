@@ -669,6 +669,7 @@ Saving rejects stale bone names and preserves the previous preset until those pa
 it replaces current manual edits only after validation succeeds.
 C# IK setters report invalid arguments by parameter before changing goals; clear a behaviour's persistent goals in
 `OnDisable` when they should stop with that behaviour.
+Native C++ IK setters also reject unknown coordinate spaces without changing existing goals.
 FABRIK at zero weight leaves the authored pose unchanged, allowing a goal to fade out without altering bone rotations.
 Straight chains can bend toward closer collinear targets using a deterministic initial bend in the root's frame.
 Editor clip and bone dropdowns reveal the current selection when opened without preventing manual scrolling.

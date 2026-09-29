@@ -241,6 +241,8 @@ namespace Keire
                                         const float weight, const std::uint32_t maximumIterations,
                                         const float tolerance, const AnimatorIkSpace space)
     {
+        if (space != AnimatorIkSpace::Model && space != AnimatorIkSpace::World)
+            throw std::invalid_argument("Animator IK space must be Model or World.");
         if (name.empty() || name.size() > 256)
             throw std::invalid_argument("Animator IK goal names must contain 1..256 characters.");
         if (chain.size() < 2 || chain.size() > 256)

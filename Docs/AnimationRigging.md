@@ -188,6 +188,8 @@ limits are rejected without exposing native pointers.
 C# IK setters validate names (1..256 UTF-8 bytes), finite target/pole coordinates, weight (0..1), coordinate space,
 chain length (2..256), iteration count (1..1024), and positive finite tolerance before submitting a native command.
 Invalid arguments throw an `ArgumentException` naming the offending parameter and leave existing goals unchanged.
+Native C++ IK setters accept only `AnimatorIkSpace::Model` and `AnimatorIkSpace::World`; other values throw
+`std::invalid_argument` before adding or replacing a goal.
 Bone existence and hierarchy are checked during pose evaluation, where failures produce named goal diagnostics.
 The Animator Inspector displays these runtime diagnostics for both graph and procedural pose sources, wrapping long
 messages inside the panel. Correct the reported target or bone chain; the message clears after successful evaluation.
