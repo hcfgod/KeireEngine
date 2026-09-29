@@ -221,3 +221,37 @@ TEST_CASE("Foot planting respects changed collision filters and reacquires eligi
         CHECK(fixture.FootY() == doctest::Approx(.05F).epsilon(.005));
     }
 }
+
+TEST_CASE("Planted feet follow static support transform rebuilds without losing their anchor")
+{
+    SupportFixture fixture;
+    for (int i = 0; i < 5; ++i)
+        fixture.Tick();
+    auto support = fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id());
+    const auto transform = support.GetComponent<Keire::TransformComponent>();
+    const auto initialFoot = fixture.Animator->RuntimeDebugSnapshot()->Pose[3].WorldPosition;
+    REQUIRE(initialFoot.Y == doctest::Approx(0.05F).epsilon(0.005));
+    const auto localAnchor = Keire::Math::TransformPoint(Keire::Math::Inverse(transform->WorldMatrix()), initialFoot);
+    for (int stage = 0; stage < 4; ++stage)
+    {
+        CAPTURE(stage);
+        if (stage == 0)
+            transform->SetLocalPosition({0.05F, -0.35F, 0.0F});
+        else if (stage == 1)
+            transform->SetLocalScale({1.1F, 1.2F, 1.0F});
+        else if (stage == 2)
+            transform->SetLocalRotation(Keire::Math::EulerDegreesToQuaternion({0.0F, 5.0F, 5.0F}));
+        else
+        {
+            transform->SetLocalRotation({});
+            transform->SetLocalPosition({0.0F, -0.45F, 0.0F});
+            transform->SetLocalScale({1.0F, 1.0F, 1.0F});
+        }
+        fixture.Tick();
+        const auto expected = Keire::Math::TransformPoint(transform->WorldMatrix(), localAnchor);
+        const auto actual = fixture.Animator->RuntimeDebugSnapshot()->Pose[3].WorldPosition;
+        CHECK(actual.X == doctest::Approx(expected.X).epsilon(0.005));
+        CHECK(actual.Y == doctest::Approx(expected.Y).epsilon(0.005));
+        CHECK(actual.Z == doctest::Approx(expected.Z).epsilon(0.005));
+    }
+}
