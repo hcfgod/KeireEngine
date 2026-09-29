@@ -44,7 +44,7 @@ namespace Keire
         }
 
         bool SolveTwoBoneIkWorking(const SkeletonAsset& skeleton, const std::span<BoneTransform> localPose,
-                                   const TwoBoneIkRequest& request)
+                                   const TwoBoneIkRequest& request, float* reachError = nullptr)
         {
             if (localPose.size() != skeleton.Bones().size() || request.Root >= localPose.size() ||
                 request.Middle >= localPose.size() || request.End >= localPose.size() ||
@@ -90,6 +90,8 @@ namespace Keire
             const auto targetDistance =
                 std::clamp(requestedDistance, std::abs(upperLength - lowerLength) + singularityMargin,
                            upperLength + lowerLength - singularityMargin);
+            if (reachError)
+                *reachError = std::abs(requestedDistance - targetDistance);
             const auto forward = Normalize(targetDelta);
             auto bendVector = ProjectOntoPlane(Subtract(request.Pole, rootPosition), forward);
             if (Length(bendVector) <= Epsilon)
@@ -429,9 +431,11 @@ namespace Keire
         {
             const auto normal = Normalize(contact.Normal);
             const auto target = Add(contact.Position, Multiply(normal, request.FootHeight));
-            if (!SolveTwoBoneIk(
+            float reachError = 0.0F;
+            if (!SolveTwoBoneIkWorking(
                     skeleton, working,
-                    {contact.UpperLeg, contact.LowerLeg, contact.Foot, target, contact.Pole, contact.Weight}))
+                    {contact.UpperLeg, contact.LowerLeg, contact.Foot, target, contact.Pole, contact.Weight},
+                    &reachError))
                 return std::nullopt;
             const auto surfaceAlignment = FromTo(sampledSoleNormals[contactIndex], normal);
             const auto desiredFootRotation = Multiply(surfaceAlignment, sampledFootRotations[contactIndex]);
@@ -447,7 +451,9 @@ namespace Keire
             const auto solvedPosition = Math::TransformPoint(solvedWorld[contact.Foot], {});
             const auto positionError = Length(Subtract(solvedPosition, target));
             result.MaximumPositionError = std::max(result.MaximumPositionError, positionError);
-            if (positionError > request.PositionTolerance)
+            // Partial rotation blending intentionally leaves positional error even for a reachable target.
+            const auto limitError = contact.Weight < 1.0F ? reachError : positionError;
+            if (limitError > request.PositionTolerance)
                 ++result.UnreachableFeet;
             ++result.SolvedFeet;
             ++contactIndex;

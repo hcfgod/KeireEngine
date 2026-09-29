@@ -1,5 +1,8 @@
 # Changelog
 
+- Foot grounding no longer reports reachable targets as pelvis/leg-limit failures during partial contact blending;
+  genuinely unreachable targets still report limits, and position-error measurements retain the actual blended error.
+
 - CPU skinning reuses per-character vertex and upload buffers after warm-up, reducing allocation overhead in
   dual-quaternion animation and IK previews while retaining separate current/previous poses for motion vectors.
 

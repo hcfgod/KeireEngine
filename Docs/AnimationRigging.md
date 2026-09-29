@@ -442,3 +442,10 @@ the bind translation, and subsequent movement uses consecutive sampled root posi
 
 Animator runtime diagnostics refresh on each evaluation. Correcting a missing bone or disabling the
 failing grounding pass clears its warning on the next update; unresolved failures remain visible.
+
+### Grounding Reach Diagnostics
+
+`FootGroundingResult.UnreachableFeet` reports targets beyond the leg's reachable range while a contact fades in or
+out; a deliberately partial solve is not itself a leg-limit failure. At full contact weight, the final solved
+position must meet `PositionTolerance`. `MaximumPositionError` always measures the actual final distance to the
+target, including the residual distance intentionally retained by partial blending.

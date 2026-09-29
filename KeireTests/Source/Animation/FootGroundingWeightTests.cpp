@@ -126,3 +126,42 @@ TEST_CASE("Fading in a second support does not jump the pelvis away from the pla
     CHECK(std::abs(result->HorizontalPelvisAdjustment.X - base->HorizontalPelvisAdjustment.X) < 0.001F);
     CHECK(std::abs(result->PelvisRotationAdjustmentDegrees - base->PelvisRotationAdjustmentDegrees) < 0.001F);
 }
+
+TEST_CASE("Reachable foot targets do not report leg limits during contact blending")
+{
+    for (const float weight : {0.1F, 0.5F, 1.0F})
+    {
+        CAPTURE(weight);
+        GroundingFixture fixture;
+        fixture.Request.Pelvis.reset();
+        fixture.Request.Torso.reset();
+        fixture.Request.Contacts.resize(1);
+        fixture.Request.Contacts.front().Position = {-0.25F, 0.4F, 0.4F};
+        fixture.Request.Contacts.front().Weight = weight;
+        const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+        REQUIRE(result);
+        CHECK(result->SolvedFeet == 1);
+        CHECK(result->UnreachableFeet == 0);
+        if (weight < 1.0F)
+            CHECK(result->MaximumPositionError > fixture.Request.PositionTolerance);
+    }
+}
+
+TEST_CASE("Unreachable foot targets retain limit diagnostics at partial blend weights")
+{
+    for (const float weight : {0.1F, 0.5F, 1.0F})
+    {
+        CAPTURE(weight);
+        GroundingFixture fixture;
+        fixture.Request.Pelvis.reset();
+        fixture.Request.Torso.reset();
+        fixture.Request.Contacts.resize(1);
+        fixture.Request.Contacts.front().Position = {-0.25F, -2.0F, 0.4F};
+        fixture.Request.Contacts.front().Weight = weight;
+        const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+        REQUIRE(result);
+        CHECK(result->SolvedFeet == 1);
+        CHECK(result->UnreachableFeet == 1);
+        CHECK(result->MaximumPositionError > fixture.Request.PositionTolerance);
+    }
+}

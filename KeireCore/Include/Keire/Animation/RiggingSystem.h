@@ -251,10 +251,12 @@ namespace Keire
     struct FootGroundingResult
     {
         std::size_t SolvedFeet = 0;
+        // Reach-limit failures; partial contact blending does not count its intentional residual distance.
         std::size_t UnreachableFeet = 0;
         float PelvisAdjustment = 0.0F;
         Vector3 HorizontalPelvisAdjustment;
         float PelvisRotationAdjustmentDegrees = 0.0F;
+        // Actual target distance after blending, including intentionally incomplete contact influence.
         float MaximumPositionError = 0.0F;
     };
 
