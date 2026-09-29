@@ -134,6 +134,41 @@ TEST_CASE("Automatic leg IK derives a shared knee plane from rig geometry and re
     CHECK(Keire::Detail::IkDot(rightInitialDirection, rightSlopeDirection) > 0.8F);
 }
 
+TEST_CASE("Automatic leg IK keeps its knee side when a near-straight sampled reference changes sign")
+{
+    Keire::Detail::AutomaticLimbIkState state;
+    const Keire::Vector3 hip{0.0F, 2.0F, 0.0F};
+    const Keire::Vector3 ankle{};
+    for (int frame = 0; frame < 120; ++frame)
+    {
+        const float sign = frame % 2 == 0 ? 1.0F : -1.0F;
+        const auto pole =
+            Keire::Detail::StableAutomaticLimbPole(hip, {0.0F, 1.0F, sign * 0.0001F}, ankle, {0.0F, 0.1F, 0.0F},
+                                                   {0.0F, 0.0F, sign}, 1.0F / 60.0F, 0.12F, 0.9F, state);
+        CAPTURE(frame);
+        CHECK(pole.Z > 1.9F);
+    }
+}
+
+TEST_CASE("Automatic leg IK follows a continuously turning reference without reversing its knee")
+{
+    Keire::Detail::AutomaticLimbIkState state;
+    const Keire::Vector3 hip{0.0F, 2.0F, 0.0F};
+    Keire::Vector3 previous{0.0F, 0.0F, 1.0F};
+    for (int frame = 0; frame <= 360; ++frame)
+    {
+        const float angle = static_cast<float>(frame) * 0.01745329252F;
+        const Keire::Vector3 reference{std::sin(angle), 0.0F, std::cos(angle)};
+        const auto pole =
+            Keire::Detail::StableAutomaticLimbPole(hip, {reference.X * 0.2F, 1.0F, reference.Z * 0.2F}, {},
+                                                   {0.0F, 0.1F, 0.0F}, reference, 1.0F / 60.0F, 0.12F, 0.9F, state);
+        const auto direction = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(pole, hip));
+        CHECK(Keire::Detail::IkDot(previous, direction) > 0.99F);
+        CHECK(Keire::Detail::IkDot(reference, direction) > 0.95F);
+        previous = direction;
+    }
+}
+
 TEST_CASE("Automatic foot planting locks animation drift and releases on a deliberate lift")
 {
     Keire::Detail::AutomaticFootPlantState state;
@@ -221,6 +256,29 @@ TEST_CASE("Automatic foot grounding smooths support handoffs independently of fr
     CHECK(sixtyHertzTarget->Blend == doctest::Approx(thirtyHertzTarget->Blend).epsilon(0.0001));
     CHECK(sixtyHertzTarget->Position.X < 1.0F);
     CHECK(sixtyHertzTarget->Position.X > 0.99F);
+}
+
+TEST_CASE("Automatic foot grounding blends endpoints above flat and sloped contact planes")
+{
+    for (const auto normal : {Keire::Vector3{0.0F, 1.0F, 0.0F}, Keire::Vector3{0.6F, 0.8F, 0.0F}})
+    {
+        for (const float rate : {30.0F, 60.0F, 144.0F})
+        {
+            Keire::Detail::AutomaticFootGroundingSmoothingState state;
+            const Keire::Vector3 surface{0.0F, 0.15F, 0.0F};
+            for (int frame = 0; frame < 60; ++frame)
+            {
+                const auto target = Keire::Detail::UpdateAutomaticFootGroundingSmoothing(surface, normal, {},
+                                                                                         1.0F / rate, 0.12F, state);
+                REQUIRE(target);
+                CHECK(Keire::Detail::IkDot(Keire::Detail::IkSubtract(target->Position, surface), normal) >= -0.000001F);
+            }
+            const auto released =
+                Keire::Detail::UpdateAutomaticFootGroundingSmoothing({}, {}, {}, 1.0F / rate, 0.12F, state);
+            REQUIRE(released);
+            CHECK(Keire::Detail::IkDot(Keire::Detail::IkSubtract(released->Position, surface), normal) < 0.0F);
+        }
+    }
 }
 
 TEST_CASE("Automatic foot grounding keeps rising surfaces collision safe and fades released contacts")

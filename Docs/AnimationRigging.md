@@ -284,12 +284,18 @@ the probe result, so a raised platform moved back underneath takes over from the
 through it. Deep penetrations are recovered in the same frame. This
 corrects contact-phase sliding, but it does not turn an animation without a usable gait into a complete procedural
 locomotion system. **Response Time (Seconds)** smooths contact acquisition, platform movement, lower-surface handoff,
-normal changes, IK weight, and release back to the sampled animation with an elapsed-time response that is independent
+normal changes, contact influence, and release back to the sampled animation with an elapsed-time response that is independent
 of frame rate. Zero selects immediate response. Upward surface motion is clamped along the contact normal in the same
 frame so a smoother response cannot push the sole through an approaching platform; its lateral motion and rotation
 remain filtered. Automatic toe discovery uses semantic names when present and skin influence plus bind topology
 otherwise; while planted, the toe root blends back to its neutral bind rotation so the forefoot rests with the
 ankle-aligned sole instead of retaining an animated upward curl.
+
+Contact acquisition blends the foot endpoint before solving the leg and keeps that endpoint above the active support
+plane. At full authored Position Weight, reachable contacts therefore do not sink below their target while influence
+ramps up. Lower authored weights deliberately retain more animation, and unreachable targets remain constrained by leg
+reach. Knee stabilization retains its bend hemisphere when a nearly straight sampled pose reverses the inferred knee
+reference, while still following continuous character turns.
 
 At a ledge, one remaining planted contact also receives the bounded bind-neutral pelvis correction. This shifts the
 character's weight toward the supported leg while the unsupported foot releases, rather than leaving the hips centered

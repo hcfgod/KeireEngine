@@ -193,7 +193,19 @@ namespace Keire::Detail
                 return std::nullopt;
             }
         }
-        return AutomaticFootGroundingTarget{state.Position, state.Normal, std::clamp(state.Blend, 0.0F, 1.0F)};
+        const auto blend = std::clamp(state.Blend, 0.0F, 1.0F);
+        Vector3 position{sampledPosition.X + (state.Position.X - sampledPosition.X) * blend,
+                         sampledPosition.Y + (state.Position.Y - sampledPosition.Y) * blend,
+                         sampledPosition.Z + (state.Position.Z - sampledPosition.Z) * blend};
+        if (desiredPosition)
+        {
+            // Blend the endpoint, not the joint rotations: a fading contact must still respect its support plane.
+            const auto normal = IkNormalize(*desiredNormal);
+            const auto penetration = std::max(IkDot(IkSubtract(*desiredPosition, position), normal), 0.0F);
+            position = {position.X + normal.X * penetration, position.Y + normal.Y * penetration,
+                        position.Z + normal.Z * penetration};
+        }
+        return AutomaticFootGroundingTarget{position, state.Normal, blend};
     }
 
     [[nodiscard]] inline bool ShouldReleaseAutomaticFootPlant(const Vector3 sampledPosition,
@@ -371,7 +383,8 @@ namespace Keire::Detail
         if (hasPreferredBend)
         {
             if (hasStableBend)
-                stableBend = align(stableBend, preferredBend);
+                // Near extension the sampled reference can reverse; retained history owns the bend hemisphere.
+                preferredBend = align(preferredBend, stableBend);
             if (hasSampledBend)
                 sampledBend = align(sampledBend, preferredBend);
         }

@@ -437,7 +437,7 @@ namespace Keire
                                        *footTarget,
                                        contact->Normal,
                                        pole,
-                                       settings.Weight * runtimeWeight * chainRuntimeWeight * smoothed->Blend,
+                                       settings.Weight * runtimeWeight * chainRuntimeWeight,
                                        settings.RotationWeight * runtimeWeight * chainRuntimeWeight * smoothed->Blend};
             auto toe = runtimeState.FootToeBones.find(*chain[2]);
             if (toe == runtimeState.FootToeBones.end())

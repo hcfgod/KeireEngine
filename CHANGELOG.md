@@ -1,5 +1,8 @@
 # Changelog
 
+- Automatic leg IK retains its knee bend side through near-straight animation reference reversals. Foot contact
+  acquisition blends endpoint positions against the support plane, avoiding penetration caused by fading joint rotations.
+
 - Foot grounding no longer reports reachable targets as pelvis/leg-limit failures during partial contact blending;
   genuinely unreachable targets still report limits, and position-error measurements retain the actual blended error.
 

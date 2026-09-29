@@ -150,6 +150,24 @@ namespace
         Keire::Ref<Keire::AnimatorComponent> Animator;
     };
 } // namespace
+TEST_CASE("Foot grounding contact fade does not sink a reachable foot into raised support")
+{
+    SupportFixture fixture;
+    auto settings = fixture.Animator->FootGrounding();
+    settings.Enabled = false;
+    fixture.Animator->SetFootGrounding(settings);
+    fixture.Tick();
+    settings.Enabled = true;
+    settings.ResponseTime = 0.12F;
+    fixture.Animator->SetFootGrounding(settings);
+    for (int frame = 0; frame < 30; ++frame)
+    {
+        fixture.Tick();
+        CAPTURE(frame);
+        CHECK(fixture.FootY() >= 0.049F);
+    }
+}
+
 TEST_CASE("Foot planting releases unavailable support and reacquires restored colliders")
 {
     for (int mode = 0; mode < 4; ++mode)
