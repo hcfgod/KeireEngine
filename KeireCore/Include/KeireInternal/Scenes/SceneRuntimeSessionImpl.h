@@ -395,6 +395,7 @@ namespace Keire
                                         AnimationRuntimeState& state);
 
         void SynchronizeAnimation(const float deltaSeconds);
+        void AdvanceFrame(float deltaSeconds, float interpolationAlpha);
 
         void ClearAnimation() noexcept { Animators.clear(); }
 

@@ -670,6 +670,7 @@ it replaces current manual edits only after validation succeeds.
 C# IK setters report invalid arguments by parameter before changing goals; clear a behaviour's persistent goals in
 `OnDisable` when they should stop with that behaviour.
 Native C++ IK setters also reject unknown coordinate spaces without changing existing goals.
+While Play mode is paused, **Step** advances one complete frame so animation graphs and scripted IK can be inspected frame by frame.
 FABRIK at zero weight leaves the authored pose unchanged, allowing a goal to fade out without altering bone rotations.
 Straight chains can bend toward closer collinear targets using a deterministic initial bend in the root's frame.
 Editor clip and bone dropdowns reveal the current selection when opened without preventing manual scrolling.

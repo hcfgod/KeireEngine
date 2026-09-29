@@ -1,5 +1,7 @@
 # Changelog
 
+- Paused editor stepping now advances a complete frame, including animation graphs, managed Update/LateUpdate, VFX, and runtime UI; non-finite step durations are rejected before gameplay runs.
+
 - Native Animator IK setters reject unknown coordinate spaces before adding or replacing goals, preserving the last valid goal.
 
 - Editor combo pickers reveal the selected option when opened, while preserving subsequent wheel scrolling and parent-panel position.

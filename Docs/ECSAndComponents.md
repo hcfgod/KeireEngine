@@ -51,7 +51,9 @@ onto a different layer. Their legacy single-bit layer setters remain source-comp
 Play mode invokes `Awake`, `OnEnable`, `Start`, `FixedUpdate`, `Update`, `OnDisable`, and `OnDestroy` in deterministic
 component execution order. `Awake` and `Start` run once. Entity activation includes every ancestor; disabling a parent
 disables active descendant components. Pausing a runtime session skips normal updates without invoking disable. Step
-runs exactly one fixed update while paused.
+runs exactly one fixed update and one complete frame while remaining paused: physics and procedural motion, then
+Update, animation/IK, LateUpdate, VFX, and runtime UI. Its delta must be finite and positive; invalid deltas throw before
+callbacks run. A callback failure stops later phases and faults the session just as it does during normal playback.
 
 Callback exceptions fault and pause the runtime session, preserve the authored scene, and expose a diagnostic naming
 the failed phase. Stop closes the runtime clone, invokes teardown, and discards every play-mode mutation.

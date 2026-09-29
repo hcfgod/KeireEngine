@@ -207,6 +207,8 @@ namespace Keire
         void Play();
         void Pause(bool paused = true);
         void TogglePause();
+        /// Advances one fixed tick and one complete frame while paused; returns false in other states or on failure.
+        /// The delta must be finite and positive. Ordinary paused updates do not advance the resulting pose.
         [[nodiscard]] bool Step(float fixedDeltaSeconds);
         void FixedUpdate(float deltaSeconds);
         void Update(float deltaSeconds);

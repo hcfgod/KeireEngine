@@ -949,9 +949,13 @@ asset from the authored source until the runtime clone is published. It commits 
 owner-thread safe boundaries. Each session retains isolated physics, audio, VFX, UI, and managed lifecycle state while
 all loaded sessions tick and render. A persistent hierarchy keeps its
 original session as an unloaded carrier so identity and lifecycle are not reconstructed across transitions. Pause
-suppresses update callbacks, Step advances one fixed tick, and world Close stops every session. Component callback
+suppresses update callbacks, Step advances one fixed tick and one complete frame, and world Close stops every session. Component callback
 exceptions fault only their session and preserve the edit scene. Detailed contracts live in
 [ECS And Components](ECSAndComponents.md).
+
+`SceneRuntimeSession::Step` shares the normal per-frame update path after advancing one fixed tick. It preserves the
+paused state while updating gameplay, animation/IK, LateUpdate, VFX, and presentation exactly once. Paused host updates
+do not overwrite the stepped pose's interpolation state; invalid step durations are rejected before callbacks run.
 
 Managed entities use an opaque identity derived from the owning `SceneState`, shared by every Behaviour in that
 runtime scene. Internal calls resolve an entity through any live Behaviour anchor in the same world and then through

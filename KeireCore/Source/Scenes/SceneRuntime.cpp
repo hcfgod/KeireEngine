@@ -466,13 +466,15 @@ namespace Keire
         m_Impl->RequireOwner("Step");
         if (m_Impl->PlayState != ScenePlayState::Paused)
             return false;
-        if (fixedDeltaSeconds <= 0.0F)
-            throw std::invalid_argument("Scene step delta must be positive.");
+        if (!std::isfinite(fixedDeltaSeconds) || fixedDeltaSeconds <= 0.0F)
+            throw std::invalid_argument("Scene step delta must be finite and positive.");
         m_Impl->Invoke("FixedUpdate", [&] { m_Impl->Runtime->FixedUpdate(fixedDeltaSeconds); });
         if (m_Impl->PlayState != ScenePlayState::Faulted)
             m_Impl->Invoke("Physics", [&] { m_Impl->StepPhysics(fixedDeltaSeconds); });
         if (m_Impl->PlayState != ScenePlayState::Faulted)
             m_Impl->Invoke("Procedural Animation", [&] { m_Impl->AdvanceProceduralAnimation(fixedDeltaSeconds); });
+        if (m_Impl->PlayState != ScenePlayState::Faulted)
+            m_Impl->AdvanceFrame(fixedDeltaSeconds, 1.0F);
         return m_Impl->PlayState != ScenePlayState::Faulted;
     }
 
@@ -496,23 +498,25 @@ namespace Keire
         m_Impl->RequireOwner("Update");
         if (!std::isfinite(interpolationAlpha) || interpolationAlpha < 0.0F || interpolationAlpha > 1.0F)
             throw std::invalid_argument("Scene presentation interpolation alpha must be finite and in the range 0..1.");
-        m_Impl->PresentationInterpolationAlpha = interpolationAlpha;
         if (m_Impl->PlayState == ScenePlayState::Playing)
+            m_Impl->AdvanceFrame(deltaSeconds, interpolationAlpha);
+    }
+
+    void SceneRuntimeSession::Impl::AdvanceFrame(const float deltaSeconds, const float interpolationAlpha)
+    {
+        PresentationInterpolationAlpha = interpolationAlpha;
+        ApplyPhysicsPresentationInterpolation(interpolationAlpha);
+        Invoke("Update", [&] { Runtime->Update(deltaSeconds); });
+        if (PlayState != ScenePlayState::Faulted)
+            Invoke("Animation", [&] { SynchronizeAnimation(deltaSeconds); });
+        if (PlayState != ScenePlayState::Faulted)
+            Invoke("LateUpdate", [&] { Runtime->LateUpdate(); });
+        if (PlayState != ScenePlayState::Faulted)
+            Invoke("VFX", [&] { SynchronizeVfx(deltaSeconds); });
+        if (Presentation && PlayState != ScenePlayState::Faulted)
         {
-            m_Impl->ApplyPhysicsPresentationInterpolation(interpolationAlpha);
-            m_Impl->Invoke("Update", [&] { m_Impl->Runtime->Update(deltaSeconds); });
-            if (m_Impl->PlayState != ScenePlayState::Faulted)
-                m_Impl->Invoke("Animation", [&] { m_Impl->SynchronizeAnimation(deltaSeconds); });
-            if (m_Impl->PlayState != ScenePlayState::Faulted)
-                m_Impl->Invoke("LateUpdate", [&] { m_Impl->Runtime->LateUpdate(); });
-            if (m_Impl->PlayState != ScenePlayState::Faulted)
-                m_Impl->Invoke("VFX", [&] { m_Impl->SynchronizeVfx(deltaSeconds); });
-            if (m_Impl->Presentation && m_Impl->PlayState != ScenePlayState::Faulted)
-            {
-                m_Impl->Presentation->Synchronize(m_Impl->Runtime, m_Impl->PresentationWidth,
-                                                  m_Impl->PresentationHeight, true, m_Impl->SafeArea);
-                m_Impl->Presentation->AdvanceUi(std::max(deltaSeconds, 0.0F));
-            }
+            Presentation->Synchronize(Runtime, PresentationWidth, PresentationHeight, true, SafeArea);
+            Presentation->AdvanceUi(std::max(deltaSeconds, 0.0F));
         }
     }
 

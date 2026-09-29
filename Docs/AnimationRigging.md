@@ -191,6 +191,8 @@ Invalid arguments throw an `ArgumentException` naming the offending parameter an
 Native C++ IK setters accept only `AnimatorIkSpace::Model` and `AnimatorIkSpace::World`; other values throw
 `std::invalid_argument` before adding or replacing a goal.
 Bone existence and hierarchy are checked during pose evaluation, where failures produce named goal diagnostics.
+Use the editor's **Pause** and **Step** controls to inspect animation and IK one frame at a time. Step runs one fixed
+tick followed by Update, animation/IK evaluation, LateUpdate, VFX, and runtime UI, then remains paused.
 The Animator Inspector displays these runtime diagnostics for both graph and procedural pose sources, wrapping long
 messages inside the panel. Correct the reported target or bone chain; the message clears after successful evaluation.
 Clear goals owned by a behaviour in its `OnDisable` callback when they should stop influencing the pose with that behaviour.
