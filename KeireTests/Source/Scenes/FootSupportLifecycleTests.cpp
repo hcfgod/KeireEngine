@@ -274,6 +274,49 @@ TEST_CASE("Planted feet follow static support transform rebuilds without losing 
     }
 }
 
+TEST_CASE("Foot grounding smoothly releases lost support and safely reacquires a rising platform")
+{
+    SupportFixture fixture;
+    auto settings = fixture.Animator->FootGrounding();
+    settings.ResponseTime = 0.12F;
+    fixture.Animator->SetFootGrounding(settings);
+    auto support = fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id());
+    const auto collider = support.GetComponent<Keire::ColliderComponent>();
+    const auto transform = support.GetComponent<Keire::TransformComponent>();
+    float previous = fixture.FootY();
+    collider->SetEnabled(false);
+    for (int frame = 0; frame < 90; ++frame)
+    {
+        fixture.Tick();
+        const float current = fixture.FootY();
+        CAPTURE(frame);
+        CHECK(current <= previous + 0.0001F);
+        CHECK(current >= -0.0001F);
+        CHECK(previous - current < 0.02F);
+        CHECK(fixture.Animator->RuntimeDiagnostic().empty());
+        previous = current;
+    }
+    CHECK(previous == doctest::Approx(0.0F).epsilon(0.001));
+    transform->SetLocalPosition({0.0F, -0.35F, 0.0F});
+    collider->SetEnabled(true);
+    for (int frame = 0; frame < 30; ++frame)
+    {
+        fixture.Tick();
+        CAPTURE(frame);
+        CHECK(fixture.FootY() >= 0.149F);
+        CHECK(fixture.FootY() <= 0.151F);
+        CHECK(fixture.Animator->RuntimeDiagnostic().empty());
+    }
+    settings.Weight = 0.0F;
+    fixture.Animator->SetFootGrounding(settings);
+    fixture.Tick();
+    CHECK(fixture.FootY() == doctest::Approx(0.0F).epsilon(0.001));
+    settings.Weight = 1.0F;
+    fixture.Animator->SetFootGrounding(settings);
+    fixture.Tick();
+    CHECK(fixture.FootY() >= 0.149F);
+}
+
 TEST_CASE("Animator grounding diagnostics clear after repair or disabling the failed pass")
 {
     for (const bool disable : {false, true})
