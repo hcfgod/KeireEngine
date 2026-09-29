@@ -4,6 +4,7 @@
 #include <doctest/doctest.h>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 namespace
@@ -83,6 +84,47 @@ TEST_CASE("Planted-foot support anchors follow translated rotated and scaled pla
     CHECK_FALSE(Keire::Detail::CaptureFootPlantSupportAnchor(singularSupport, initialPosition, initialNormal));
     CHECK_FALSE(Keire::Detail::CaptureFootPlantSupportAnchor(initialSupport, initialPosition, {}));
     CHECK_FALSE(Keire::Detail::ResolveFootPlantSupportAnchor(initialSupport, {{}, {}}));
+}
+
+TEST_CASE("Planted-foot normals remain perpendicular to sloped platforms after scale changes")
+{
+    const Keire::Vector3 localTangent{1.0F, -1.0F, 0.0F};
+    const auto initial = Keire::Math::ComposeTransform({}, {}, {2.0F, 1.0F, 1.0F});
+    const auto anchor = Keire::Detail::CaptureFootPlantSupportAnchor(initial, {}, {0.5F, 1.0F, 0.0F});
+    REQUIRE(anchor);
+    for (const Keire::Vector3 scale : {Keire::Vector3{1.0F, 1.0F, 1.0F}, {0.5F, 3.0F, 2.0F}, {-2.0F, 0.5F, 1.0F}})
+    {
+        const auto moved = Keire::Math::ComposeTransform(
+            {3.0F, 4.0F, -2.0F}, Keire::Math::EulerDegreesToQuaternion({15.0F, 35.0F, -20.0F}), scale);
+        const auto resolved = Keire::Detail::ResolveFootPlantSupportAnchor(moved, *anchor);
+        REQUIRE(resolved);
+        const auto tangent = Keire::Math::TransformDirection(moved, localTangent);
+        CHECK(std::abs(tangent.X * resolved->Normal.X + tangent.Y * resolved->Normal.Y +
+                       tangent.Z * resolved->Normal.Z) < 0.00001F);
+        CHECK(Distance(resolved->Normal, {}) == doctest::Approx(1.0F));
+        const auto recovered =
+            Keire::Detail::CaptureFootPlantSupportAnchor(moved, resolved->Position, resolved->Normal);
+        REQUIRE(recovered);
+        CHECK(Distance(recovered->LocalNormal, anchor->LocalNormal) < 0.00001F);
+    }
+}
+
+TEST_CASE("Planted-foot support rejects invalid transforms and recovers without changing its anchor")
+{
+    const auto anchor = Keire::Detail::CaptureFootPlantSupportAnchor({}, {1.0F, 2.0F, 3.0F}, {0.0F, 1.0F, 0.0F});
+    REQUIRE(anchor);
+    auto singular = Keire::Math::ComposeTransform({}, {}, {0.0F, 1.0F, 1.0F});
+    CHECK_FALSE(Keire::Detail::ResolveFootPlantSupportAnchor(singular, *anchor));
+    CHECK_FALSE(Keire::Detail::CaptureFootPlantSupportAnchor(singular, {}, {0.0F, 1.0F, 0.0F}));
+    singular.Elements[0] = std::numeric_limits<float>::infinity();
+    CHECK_FALSE(Keire::Detail::ResolveFootPlantSupportAnchor(singular, *anchor));
+    CHECK_FALSE(Keire::Detail::CaptureFootPlantSupportAnchor(singular, {}, {0.0F, 1.0F, 0.0F}));
+    CHECK_FALSE(Keire::Detail::ResolveFootPlantSupportAnchor({}, {{}, {}}));
+    CHECK_FALSE(Keire::Detail::CaptureFootPlantSupportAnchor({}, {}, {}));
+    const auto resolved = Keire::Detail::ResolveFootPlantSupportAnchor({}, *anchor);
+    REQUIRE(resolved);
+    CHECK(resolved->Position == anchor->LocalPosition);
+    CHECK(resolved->Normal == anchor->LocalNormal);
 }
 
 TEST_CASE("Foot grounding preserves an imported ankle joint's animated sole clearance")

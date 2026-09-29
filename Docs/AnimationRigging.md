@@ -264,7 +264,9 @@ without flickering on ordinary ramps.
 
 **Lock Planted Feet** holds a near-ground sole target across animation samples. When the contact belongs to a scene
 entity, the target and normal are stored in that support's local space, so the planted foot and leg follow a platform
-that translates, rotates, scales, or recreates its static physics body. The animation-release reference remains
+that translates, rotates, scales, or recreates its static physics body. Surface normals follow nonuniform and mirrored
+scale changes so planted feet remain aligned with sloped surfaces. Invalid support transforms discard the anchor.
+The animation-release reference remains
 independent of support motion, so moving a platform is not mistaken for a deliberate foot lift. Small horizontal motion
 in an idle/walk contact phase is therefore removed instead of becoming visible skating. **Plant Distance** controls
 contact acquisition; **Release Distance** releases a deliberately lifted foot, and a reach limit releases an

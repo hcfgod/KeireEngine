@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <optional>
 #include <span>
@@ -47,37 +48,34 @@ namespace Keire::Detail
         Vector3 LocalNormal{0.0F, 1.0F, 0.0F};
     };
 
+    // Surface normals are covectors: use the transpose of the inverse position transform.
+    [[nodiscard]] inline std::optional<Vector3> TransformFootSupportNormal(const Matrix4& inverseTransform,
+                                                                           const Vector3 normal) noexcept
+    {
+        const auto& m = inverseTransform.Elements;
+        const Vector3 transformed{m[0] * normal.X + m[1] * normal.Y + m[2] * normal.Z,
+                                  m[4] * normal.X + m[5] * normal.Y + m[6] * normal.Z,
+                                  m[8] * normal.X + m[9] * normal.Y + m[10] * normal.Z};
+        const auto length = std::hypot(transformed.X, transformed.Y, transformed.Z);
+        if (!Math::IsFinite(transformed) || !std::isfinite(length) || length <= 0.0F)
+            return std::nullopt;
+        return Vector3{transformed.X / length, transformed.Y / length, transformed.Z / length};
+    }
+
     [[nodiscard]] inline std::optional<FootPlantSupportAnchor>
     CaptureFootPlantSupportAnchor(const Matrix4& supportToWorld, const Vector3 worldPosition,
                                   const Vector3 worldNormal) noexcept
     {
-        Vector3 supportPosition;
-        Vector3 supportScale;
-        Quaternion supportRotation;
-        const auto normalLength =
-            std::sqrt(worldNormal.X * worldNormal.X + worldNormal.Y * worldNormal.Y + worldNormal.Z * worldNormal.Z);
-        if (!Math::IsFinite(worldPosition) || !Math::IsFinite(worldNormal) || !std::isfinite(normalLength) ||
-            normalLength <= 0.000001F ||
-            !Math::DecomposeTransform(supportToWorld, supportPosition, supportRotation, supportScale))
-        {
+        if (!Math::IsFinite(worldPosition) || !Math::IsFinite(worldNormal))
             return std::nullopt;
-        }
-
         try
         {
             const auto worldToSupport = Math::Inverse(supportToWorld);
-            const auto worldToSupportRotation =
-                Math::Inverse(Math::ComposeTransform({}, supportRotation, {1.0F, 1.0F, 1.0F}));
-            auto localNormal = Math::TransformDirection(
-                worldToSupportRotation,
-                {worldNormal.X / normalLength, worldNormal.Y / normalLength, worldNormal.Z / normalLength});
-            const auto localNormalLength = std::sqrt(localNormal.X * localNormal.X + localNormal.Y * localNormal.Y +
-                                                     localNormal.Z * localNormal.Z);
-            if (!Math::IsFinite(localNormal) || !std::isfinite(localNormalLength) || localNormalLength <= 0.000001F)
+            const auto localNormal = TransformFootSupportNormal(supportToWorld, worldNormal);
+            const auto localPosition = Math::TransformPoint(worldToSupport, worldPosition);
+            if (!localNormal || !Math::IsFinite(localPosition))
                 return std::nullopt;
-            localNormal = {localNormal.X / localNormalLength, localNormal.Y / localNormalLength,
-                           localNormal.Z / localNormalLength};
-            return FootPlantSupportAnchor{Math::TransformPoint(worldToSupport, worldPosition), localNormal};
+            return FootPlantSupportAnchor{localPosition, *localNormal};
         }
         catch (const std::exception&)
         {
@@ -88,31 +86,21 @@ namespace Keire::Detail
     [[nodiscard]] inline std::optional<ModelFootGroundContact>
     ResolveFootPlantSupportAnchor(const Matrix4& supportToWorld, const FootPlantSupportAnchor& anchor) noexcept
     {
-        Vector3 supportPosition;
-        Vector3 supportScale;
-        Quaternion supportRotation;
-        const auto localNormalLength =
-            std::sqrt(anchor.LocalNormal.X * anchor.LocalNormal.X + anchor.LocalNormal.Y * anchor.LocalNormal.Y +
-                      anchor.LocalNormal.Z * anchor.LocalNormal.Z);
-        if (!Math::IsFinite(anchor.LocalPosition) || !Math::IsFinite(anchor.LocalNormal) ||
-            !std::isfinite(localNormalLength) || localNormalLength <= 0.000001F ||
-            !Math::DecomposeTransform(supportToWorld, supportPosition, supportRotation, supportScale))
+        if (!Math::IsFinite(anchor.LocalPosition) || !Math::IsFinite(anchor.LocalNormal))
+            return std::nullopt;
+        try
+        {
+            const auto worldToSupport = Math::Inverse(supportToWorld);
+            const auto worldNormal = TransformFootSupportNormal(worldToSupport, anchor.LocalNormal);
+            const auto worldPosition = Math::TransformPoint(supportToWorld, anchor.LocalPosition);
+            if (!worldNormal || !Math::IsFinite(worldPosition))
+                return std::nullopt;
+            return ModelFootGroundContact{worldPosition, *worldNormal};
+        }
+        catch (const std::exception&)
         {
             return std::nullopt;
         }
-
-        const auto supportRotationToWorld = Math::ComposeTransform({}, supportRotation, {1.0F, 1.0F, 1.0F});
-        auto worldNormal = Math::TransformDirection(supportRotationToWorld, anchor.LocalNormal);
-        const auto worldNormalLength =
-            std::sqrt(worldNormal.X * worldNormal.X + worldNormal.Y * worldNormal.Y + worldNormal.Z * worldNormal.Z);
-        if (!Math::IsFinite(worldNormal) || !std::isfinite(worldNormalLength) || worldNormalLength <= 0.000001F)
-            return std::nullopt;
-        worldNormal = {worldNormal.X / worldNormalLength, worldNormal.Y / worldNormalLength,
-                       worldNormal.Z / worldNormalLength};
-        const auto worldPosition = Math::TransformPoint(supportToWorld, anchor.LocalPosition);
-        if (!Math::IsFinite(worldPosition))
-            return std::nullopt;
-        return ModelFootGroundContact{worldPosition, worldNormal};
     }
 
     [[nodiscard]] inline std::optional<ModelFootGroundContact>

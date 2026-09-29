@@ -1,5 +1,7 @@
 # Changelog
 
+- Planted feet retain the correct slope normal when a supporting platform changes nonuniform or mirrored scale; invalid support transforms release safely.
+
 - Paused editor stepping now advances a complete frame, including animation graphs, managed Update/LateUpdate, VFX, and runtime UI; non-finite step durations are rejected before gameplay runs.
 
 - Native Animator IK setters reject unknown coordinate spaces before adding or replacing goals, preserving the last valid goal.
