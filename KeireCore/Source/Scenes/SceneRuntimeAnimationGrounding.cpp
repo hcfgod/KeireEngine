@@ -175,8 +175,13 @@ namespace Keire
             if (resolvedLockedSupport && plantRuntime.Support)
             {
                 const auto supportEntity = Runtime->FindEntity(*plantRuntime.Support);
-                const auto supportTransform =
-                    supportEntity ? supportEntity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                const auto supportBody = PhysicsBodies.find(*plantRuntime.Support);
+                const bool hasSupportBody = supportBody != PhysicsBodies.end() && supportBody->second.Body &&
+                                            supportBody->second.HasDefinition &&
+                                            !supportBody->second.Definition.Trigger;
+                const auto supportTransform = supportEntity && hasSupportBody
+                                                  ? supportEntity.GetComponent<TransformComponent>()
+                                                  : Ref<TransformComponent>{};
                 const auto supportContact = supportTransform
                                                 ? Detail::ResolveFootPlantSupportAnchor(supportTransform->WorldMatrix(),
                                                                                         plantRuntime.SupportAnchor)

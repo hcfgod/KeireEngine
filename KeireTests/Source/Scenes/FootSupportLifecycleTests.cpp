@@ -1,0 +1,182 @@
+#include "KeireTests/TestSupport.h"
+
+#include <doctest/doctest.h>
+
+#include <chrono>
+#include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <span>
+#include <string>
+#include <system_error>
+#include <thread>
+#include <utility>
+#include <vector>
+
+namespace
+{
+    struct SupportFixture
+    {
+        SupportFixture()
+        {
+            Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+            Character = Scene->CreateEntity("Character");
+            Floor = Scene->CreateEntity("Support");
+            Floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -.45F, 0});
+            Floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5, .5F, 5});
+            AddAnimation();
+            Keire::PhysicsSystemSpecification physics;
+            physics.Mode = Keire::PhysicsMode::Enabled;
+            Physics = Keire::CreateRef<Keire::PhysicsSystem>(physics);
+            Session =
+                Keire::CreateRef<Keire::SceneRuntimeSession>(Scene, Assets, Keire::Ref<Keire::AudioSystem>{}, Physics);
+            Session->Play();
+            Animator = Session->RuntimeScene()->FindEntity(Character.Id()).GetComponent<Keire::AnimatorComponent>();
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while ((!Animator->RuntimeDebugSnapshot() || Animator->RuntimeDebugSnapshot()->Pose.empty()) &&
+                   std::chrono::steady_clock::now() < deadline)
+            {
+                (void)Assets->PumpCompletions();
+                Tick();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            REQUIRE(Animator->RuntimeDebugSnapshot());
+            REQUIRE(Animator->RuntimeDebugSnapshot()->Pose.size() == 7);
+        }
+        ~SupportFixture()
+        {
+            if (Session)
+                Session->Stop();
+            if (Physics)
+                Physics->Close();
+            if (Scene)
+                Scene->Close();
+            if (Assets)
+                Assets->Close();
+            Database = {};
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+        void Tick()
+        {
+            Session->FixedUpdate(1.0F / 60.0F);
+            Session->Update(1.0F / 60.0F, 1.0F);
+            REQUIRE(Session->State() == Keire::ScenePlayState::Playing);
+        }
+        float FootY() const { return Animator->RuntimeDebugSnapshot()->Pose[3].WorldPosition.Y; }
+        void Write(const std::string& name, const std::vector<std::byte>& bytes)
+        {
+            std::ofstream stream(Root / "Assets" / name, std::ios::binary);
+            stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            REQUIRE(stream.good());
+        }
+        void AddAnimation()
+        {
+            std::filesystem::create_directories(Root / "Assets");
+            Keire::AssetDatabaseSpecification specification;
+            specification.ProjectRoot = Root;
+            const auto importer = [&](const std::string& extension, const Keire::AssetTypeId type)
+            {
+                Keire::AssetImporterRegistration value;
+                value.Name = "SupportTest" + extension;
+                value.Type = type;
+                value.Extensions = {extension};
+                value.Import = [](std::span<const std::byte> bytes)
+                { return std::vector<std::byte>(bytes.begin(), bytes.end()); };
+                specification.Importers.push_back(std::move(value));
+            };
+            importer(".supportskeleton", Keire::SkeletonAsset::StaticType());
+            importer(".supportclip", Keire::AnimationClipAsset::StaticType());
+            importer(".supportgraph", Keire::AnimationGraphAsset::StaticType());
+            Database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
+            Write("Rig.supportskeleton", Keire::SkeletonAsset::Encode(std::vector<Keire::SkeletonBone>{
+                                             {"Hips", -1, {{0, 2, 0}, {}, {1, 1, 1}}, {}},
+                                             {"LeftUpLeg", 0, {{-.25F, 0, 0}, {}, {1, 1, 1}}, {}},
+                                             {"LeftLeg", 1, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
+                                             {"LeftFoot", 2, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
+                                             {"RightUpLeg", 0, {{.25F, 0, 0}, {}, {1, 1, 1}}, {}},
+                                             {"RightLeg", 4, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
+                                             {"RightFoot", 5, {{0, -1, 0}, {}, {1, 1, 1}}, {}}}));
+            (void)Database->ImportAll();
+            const auto skeleton = Database->Find("Rig.supportskeleton");
+            REQUIRE(skeleton);
+            Keire::AnimationTrack track;
+            track.Bone = 0;
+            track.Keys = {{0.0F, {{0, 2, 0}, {}, {1, 1, 1}}}, {1.0F, {{0, 2, 0}, {}, {1, 1, 1}}}};
+            Write("Move.supportclip",
+                  Keire::AnimationClipAsset::Encode(skeleton->Id, 1.0F, std::span(&track, 1), {}, false));
+            (void)Database->ImportAll();
+            const auto clip = Database->Find("Move.supportclip");
+            REQUIRE(clip);
+            Keire::AnimationGraphDefinition graph;
+            graph.EntryState = "Move";
+            graph.States = {{"Move", clip->Id}};
+            Write("Controller.supportgraph", Keire::AnimationGraphAsset::Encode(graph));
+            const auto imported = Database->ImportAll();
+            const auto controller = Database->Find("Controller.supportgraph");
+            REQUIRE(controller);
+            Keire::AssetSystemSpecification assets;
+            assets.Mode = Keire::AssetMode::Development;
+            assets.DevelopmentCatalog = imported.CatalogPath;
+            assets.WorkerCount = 1;
+            assets.Decoders = {Keire::CreateSkeletonAssetDecoder(), Keire::CreateAnimationClipAssetDecoder(),
+                               Keire::CreateAnimationGraphAssetDecoder()};
+            Assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assets));
+            const auto animator = Character.AddComponent<Keire::AnimatorComponent>();
+            animator->SetSkeleton(skeleton->Id);
+            animator->SetGraph(controller->Id);
+            animator->SetApplyRootMotion(false);
+            Keire::AnimatorFootGroundingSettings grounding;
+            grounding.Enabled = true;
+            grounding.AutomaticBoneMapping = false;
+            grounding.FootOffset = 0;
+            grounding.ResponseTime = 0;
+            animator->SetFootGrounding(grounding);
+        }
+
+        std::filesystem::path Root = KeireTests::MakeTestDirectory("support-lifecycle");
+        Keire::Ref<Keire::Scene> Scene;
+        Keire::Entity Character;
+        Keire::Entity Floor;
+        Keire::Ref<Keire::AssetDatabase> Database;
+        Keire::Ref<Keire::AssetSystem> Assets;
+        Keire::Ref<Keire::PhysicsSystem> Physics;
+        Keire::Ref<Keire::SceneRuntimeSession> Session;
+        Keire::Ref<Keire::AnimatorComponent> Animator;
+    };
+} // namespace
+TEST_CASE("Foot planting releases unavailable support and reacquires restored colliders")
+{
+    for (int mode = 0; mode < 4; ++mode)
+    {
+        CAPTURE(mode);
+        SupportFixture fixture;
+        for (int i = 0; i < 5; ++i)
+            fixture.Tick();
+        CHECK(fixture.FootY() == doctest::Approx(.05F).epsilon(.005));
+        auto floor = fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id());
+        auto collider = floor.GetComponent<Keire::ColliderComponent>();
+        if (mode == 0)
+            collider->SetEnabled(false);
+        else if (mode == 1)
+            REQUIRE(floor.RemoveComponent<Keire::ColliderComponent>());
+        else if (mode == 2)
+            floor.SetActive(false);
+        else
+            collider->SetTrigger(true);
+        for (int i = 0; i < 5; ++i)
+            fixture.Tick();
+        CHECK(fixture.FootY() == doctest::Approx(0.0F).epsilon(.005));
+        if (mode == 0)
+            collider->SetEnabled(true);
+        else if (mode == 1)
+            floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5, .5F, 5});
+        else if (mode == 2)
+            floor.SetActive(true);
+        else
+            collider->SetTrigger(false);
+        for (int i = 0; i < 5; ++i)
+            fixture.Tick();
+        CHECK(fixture.FootY() == doctest::Approx(.05F).epsilon(.005));
+    }
+}

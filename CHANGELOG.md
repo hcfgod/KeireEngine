@@ -1,5 +1,7 @@
 # Changelog
 
+- Foot planting releases scene supports when their collider is disabled, removed, made a trigger, or deactivated, and reacquires restored surfaces.
+
 - Planted feet retain the correct slope normal when a supporting platform changes nonuniform or mirrored scale; invalid support transforms release safely.
 
 - Paused editor stepping now advances a complete frame, including animation graphs, managed Update/LateUpdate, VFX, and runtime UI; non-finite step durations are rejected before gameplay runs.
