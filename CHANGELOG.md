@@ -1,5 +1,7 @@
 # Changelog
 
+- Existing foot locks now respect changed grounding masks, collider layers and masks, and project collision-matrix exclusions; eligible restored supports can be planted again.
+
 - Foot planting releases scene supports when their collider is disabled, removed, made a trigger, or deactivated, and reacquires restored surfaces.
 
 - Planted feet retain the correct slope normal when a supporting platform changes nonuniform or mirrored scale; invalid support transforms release safely.

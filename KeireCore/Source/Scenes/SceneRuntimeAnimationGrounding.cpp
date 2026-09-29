@@ -1,6 +1,7 @@
 #include "KeireInternal/Scenes/SceneRuntimeSessionImpl.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 
 namespace Keire
@@ -97,6 +98,7 @@ namespace Keire
             }
         }
 
+        const auto queryCollisionMask = PhysicsService->CollisionMatrix()[std::countr_zero(queryLayer)];
         auto& request = runtimeState.FootGroundingRequestCache;
         request.Pelvis = pelvis;
         request.Torso.reset();
@@ -178,7 +180,10 @@ namespace Keire
                 const auto supportBody = PhysicsBodies.find(*plantRuntime.Support);
                 const bool hasSupportBody = supportBody != PhysicsBodies.end() && supportBody->second.Body &&
                                             supportBody->second.HasDefinition &&
-                                            !supportBody->second.Definition.Trigger;
+                                            !supportBody->second.Definition.Trigger &&
+                                            (supportBody->second.Definition.Layer & settings.CollisionMask) != 0 &&
+                                            (supportBody->second.Definition.Layer & queryCollisionMask) != 0 &&
+                                            (supportBody->second.Definition.Mask & queryLayer) != 0;
                 const auto supportTransform = supportEntity && hasSupportBody
                                                   ? supportEntity.GetComponent<TransformComponent>()
                                                   : Ref<TransformComponent>{};

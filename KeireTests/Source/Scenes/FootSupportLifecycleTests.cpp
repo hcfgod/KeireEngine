@@ -17,7 +17,7 @@ namespace
 {
     struct SupportFixture
     {
-        SupportFixture()
+        explicit SupportFixture(const bool restrictLayers = false)
         {
             Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
             Character = Scene->CreateEntity("Character");
@@ -27,6 +27,11 @@ namespace
             AddAnimation();
             Keire::PhysicsSystemSpecification physics;
             physics.Mode = Keire::PhysicsMode::Enabled;
+            if (restrictLayers)
+            {
+                physics.CollisionMatrix[0] &= ~2U;
+                physics.CollisionMatrix[1] &= ~1U;
+            }
             Physics = Keire::CreateRef<Keire::PhysicsSystem>(physics);
             Session =
                 Keire::CreateRef<Keire::SceneRuntimeSession>(Scene, Assets, Keire::Ref<Keire::AudioSystem>{}, Physics);
@@ -175,6 +180,42 @@ TEST_CASE("Foot planting releases unavailable support and reacquires restored co
             floor.SetActive(true);
         else
             collider->SetTrigger(false);
+        for (int i = 0; i < 5; ++i)
+            fixture.Tick();
+        CHECK(fixture.FootY() == doctest::Approx(.05F).epsilon(.005));
+    }
+}
+
+TEST_CASE("Foot planting respects changed collision filters and reacquires eligible support")
+{
+    for (int mode = 0; mode < 4; ++mode)
+    {
+        CAPTURE(mode);
+        SupportFixture fixture(mode == 3);
+        auto settings = fixture.Animator->FootGrounding();
+        settings.CollisionMask = mode == 3 ? ~0U : 1U;
+        fixture.Animator->SetFootGrounding(settings);
+        for (int i = 0; i < 5; ++i)
+            fixture.Tick();
+        CHECK(fixture.FootY() == doctest::Approx(.05F).epsilon(.005));
+        auto collider =
+            fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id()).GetComponent<Keire::ColliderComponent>();
+        if (mode == 0 || mode == 3)
+            collider->SetLayer(2U);
+        else if (mode == 1)
+            collider->SetMask(2U);
+        else
+        {
+            settings.CollisionMask = 2U;
+            fixture.Animator->SetFootGrounding(settings);
+        }
+        for (int i = 0; i < 5; ++i)
+            fixture.Tick();
+        CHECK(fixture.FootY() == doctest::Approx(0.0F).epsilon(.005));
+        collider->SetLayer(1U);
+        collider->SetMask(~0U);
+        settings.CollisionMask = mode == 3 ? ~0U : 1U;
+        fixture.Animator->SetFootGrounding(settings);
         for (int i = 0; i < 5; ++i)
             fixture.Tick();
         CHECK(fixture.FootY() == doctest::Approx(.05F).epsilon(.005));

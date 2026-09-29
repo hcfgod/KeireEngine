@@ -675,7 +675,7 @@ FABRIK at zero weight leaves the authored pose unchanged, allowing a goal to fad
 Straight chains can bend toward closer collinear targets using a deterministic initial bend in the root's frame.
 Editor clip and bone dropdowns reveal the current selection when opened without preventing manual scrolling.
 Planted foot locks follow moving supports, including slope changes from nonuniform or mirrored platform scaling.
-Invalid support transforms and unavailable support colliders discard the lock safely; restored surfaces can be planted again.
+Invalid support transforms and unavailable support colliders discard the lock safely; restored surfaces can be planted again. Existing locks obey collision layers, masks, and the project collision matrix.
 
 Custom foot-grounding callers can disable individual contacts with zero weight without affecting pelvis support or
 reach diagnostics. Disabling every contact preserves the pose; invalid inputs still fail without modifying it.

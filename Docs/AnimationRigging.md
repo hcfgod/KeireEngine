@@ -267,6 +267,8 @@ entity, the target and normal are stored in that support's local space, so the p
 that translates, rotates, scales, or recreates its static physics body. Surface normals follow nonuniform and mirrored
 scale changes so planted feet remain aligned with sloped surfaces. Invalid support transforms discard the anchor. Disabling or removing the support collider, deactivating its entity,
 or converting it to a trigger releases the lock; restoring a solid support allows normal contact acquisition again.
+Existing locks also obey the grounding collision mask, the support collider layer/mask, and the project collision
+matrix, so changing filters cannot leave a foot attached to an excluded surface.
 The animation-release reference remains
 independent of support motion, so moving a platform is not mistaken for a deliberate foot lift. Small horizontal motion
 in an idle/walk contact phase is therefore removed instead of becoming visible skating. **Plant Distance** controls
