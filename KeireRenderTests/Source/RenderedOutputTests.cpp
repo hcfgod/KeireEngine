@@ -902,11 +902,14 @@ namespace
             surface.ClearColor = {0.0F, 0.0F, 0.0F, 1.0F};
             surface.SampleCount = Keire::RenderSampleCount::One;
             m_View = Owner().Renderer()->CreateView(surface);
+            surface.Name = "Skinned mesh second viewport";
+            m_SecondView = Owner().Renderer()->CreateView(surface);
             Keire::RenderCamera camera;
             camera.View = Keire::Math::LookAt({0.0F, 0.0F, 2.5F}, {0.0F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F});
             camera.Projection = Keire::Math::Perspective(55.0F, 1.0F, 0.1F, 100.0F);
             camera.ClearColor = surface.ClearColor;
             m_View->SetCamera(camera);
+            m_SecondView->SetCamera(camera);
         }
 
         void OnDetach() noexcept override
@@ -920,6 +923,7 @@ namespace
                 m_Scene->Close();
             m_Animator.Reset();
             m_View.Reset();
+            m_SecondView.Reset();
             m_Scene.Reset();
         }
 
@@ -936,24 +940,45 @@ namespace
                 m_Results->SkinningPreparationMilliseconds.push_back(
                     Owner().Renderer()->Statistics().SkinningPreparationMilliseconds);
                 auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
+                const auto secondPixels =
+                    Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_SecondView->Surface());
                 const auto left = GreenDominance(pixels, true);
                 const auto right = GreenDominance(pixels, false);
-                if (m_Results->Frames.empty() && right > left + MinimumBehaviorDelta)
+                if (m_ViewsReady)
                 {
-                    m_Results->Frames.push_back(std::move(pixels));
-                    SetPaletteTranslation(0.65F);
+                    CAPTURE(m_Frames);
+                    const bool matchingViews = pixels == secondPixels;
+                    CHECK(matchingViews);
+                    ++m_ComparedFrames;
+                    if (m_Results->Frames.empty() && right > left + MinimumBehaviorDelta)
+                    {
+                        m_Results->Frames.push_back(std::move(pixels));
+                        SetPaletteTranslation(0.65F);
+                    }
+                    else if (m_Results->Frames.size() == 1 && left > right + MinimumBehaviorDelta)
+                    {
+                        m_Results->Frames.push_back(std::move(pixels));
+                        m_DeformationCaptured = true;
+                    }
+                    if (m_DeformationCaptured)
+                        SetPaletteTranslation(0.45F * std::sin(static_cast<float>(m_ComparedFrames) * 0.4F));
                 }
-                else if (m_Results->Frames.size() == 1 && left > right + MinimumBehaviorDelta)
+                else
                 {
-                    m_Results->Frames.push_back(std::move(pixels));
-                    m_DeformationCaptured = true;
+                    // Asset requests may become ready between viewport submissions. Start both temporal
+                    // histories only after both views contain the same fully deformed, shaded mesh.
+                    m_ViewsReady = right > left + MinimumBehaviorDelta && pixels == secondPixels;
                 }
             }
 
-            if (m_DeformationCaptured && m_Frames >= 8)
+            if (m_DeformationCaptured && m_ComparedFrames >= 16)
                 complete = true;
             if (++m_Frames >= 120)
+            {
+                CHECK(m_DeformationCaptured);
+                CHECK(m_ComparedFrames >= 16);
                 complete = true;
+            }
             if (complete)
             {
                 Owner().RequestExit();
@@ -964,7 +989,10 @@ namespace
             environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             environment.AmbientIntensity = 1.0F;
             environment.SkyVisible = false;
+            environment.RequestedAntiAliasing =
+                m_ViewsReady ? Keire::RenderAntiAliasingMode::Taa : Keire::RenderAntiAliasingMode::None;
             Owner().Renderer()->Submit({m_Scene, m_View, false, environment});
+            Owner().Renderer()->Submit({m_Scene, m_SecondView, false, environment});
             m_Submitted = true;
         }
 
@@ -982,8 +1010,11 @@ namespace
         std::shared_ptr<CaptureResults> m_Results;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
+        Keire::Ref<Keire::RenderView> m_SecondView;
         Keire::Ref<Keire::AnimatorComponent> m_Animator;
         std::uint32_t m_Frames = 0;
+        std::uint32_t m_ComparedFrames = 0;
+        bool m_ViewsReady = false;
         bool m_Submitted = false;
         bool m_DeformationCaptured = false;
     };
@@ -2173,7 +2204,7 @@ TEST_CASE("skinned asset vertices follow bounded palette deformation")
     CHECK(std::ranges::all_of(firstStaticBuild, results->SkinningStaticBuilds.end(),
                               [](const std::uint64_t count) { return count == 1; }));
     REQUIRE(results->SkinningOutputBuilds.size() == results->SkinningStaticBuilds.size());
-    CHECK(results->SkinningOutputBuilds.back() == 3);
+    CHECK(results->SkinningOutputBuilds.back() == 6);
     CHECK(results->SkinningOutputBuilds[results->SkinningOutputBuilds.size() - 2] ==
           results->SkinningOutputBuilds.back());
     REQUIRE(results->HasStatistics);
