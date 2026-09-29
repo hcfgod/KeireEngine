@@ -427,3 +427,7 @@ Saving also checks the current skeletons before writing: stale bone pairs cannot
 Mappings do not copy automatically to unrelated skeleton assets; review and save their bindings separately.
 
 Two-bone and FABRIK solves are transactional: a rejected request or invalid pose leaves every input transform unchanged. Non-finite transforms and zero-length rotation quaternions are rejected.
+
+Root-motion extraction retains the skeleton root's bind rotation and translation in the rendered pose.
+This preserves imported axis corrections and model origins; initial movement is measured relative to
+the bind translation, and subsequent movement uses consecutive sampled root positions.

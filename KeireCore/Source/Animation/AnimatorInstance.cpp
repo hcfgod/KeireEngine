@@ -935,18 +935,22 @@ namespace Keire
         if (baseRootMotion && !result.LocalPose.empty())
         {
             const auto current = result.LocalPose.front();
+            const auto& rootBind = m_Skeleton->Bones().front().BindPose;
             if (!baseWrapped)
             {
-                result.RootMotion = {current.Translation.X - m_PreviousRoot.Translation.X,
-                                     current.Translation.Y - m_PreviousRoot.Translation.Y,
-                                     current.Translation.Z - m_PreviousRoot.Translation.Z};
+                const auto previousTranslation =
+                    m_HasPreviousRootRotation ? m_PreviousRoot.Translation : rootBind.Translation;
+                result.RootMotion = {current.Translation.X - previousTranslation.X,
+                                     current.Translation.Y - previousTranslation.Y,
+                                     current.Translation.Z - previousTranslation.Z};
                 if (m_HasPreviousRootRotation)
                     result.RootRotation = RotationDelta(m_PreviousRoot.Rotation, current.Rotation);
             }
             m_PreviousRoot = current;
             m_HasPreviousRootRotation = true;
-            result.LocalPose.front().Translation = {};
-            result.LocalPose.front().Rotation = {};
+            // Imported roots can carry the model's axis correction and origin, not just locomotion.
+            result.LocalPose.front().Translation = rootBind.Translation;
+            result.LocalPose.front().Rotation = rootBind.Rotation;
         }
         else
         {

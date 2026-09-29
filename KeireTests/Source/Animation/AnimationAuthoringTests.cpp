@@ -579,6 +579,36 @@ TEST_CASE("Animator blend-tree rotation accumulation treats opposite quaternion 
     CHECK(std::abs(dot) == doctest::Approx(1.0F));
 }
 
+TEST_CASE("Root motion preserves imported root bind orientation and offset")
+{
+    const auto skeletonId = Keire::AssetId::Parse("50000000-0000-4000-8000-000000000001");
+    const auto clipId = Keire::AssetId::Parse("50000000-0000-4000-8000-000000000002");
+    const Keire::BoneTransform bind{
+        {2.0F, 3.0F, 4.0F}, Keire::Math::EulerDegreesToQuaternion({-90.0F, 0.0F, 0.0F}), {1.0F, 1.0F, 1.0F}};
+    const std::vector<Keire::SkeletonBone> bones{{"AxisCorrection", -1, bind, {}},
+                                                 {"Hips", 0, {{0.0F, 0.0F, 1.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    const auto skeleton = Keire::CreateRef<Keire::SkeletonAsset>(bones);
+    Keire::AnimationTrack track;
+    track.Bone = 1;
+    track.Keys = {{0.0F, bones[1].BindPose}, {1.0F, bones[1].BindPose}};
+    const auto clip = Keire::AnimationClipAsset::Decode(
+        Keire::AnimationClipAsset::Encode(skeletonId, 1.0F, std::span(&track, 1), {}, true));
+    const auto graph =
+        Keire::CreateRef<Keire::AnimationGraphAsset>(GraphWithBaseLayer({}, {ClipState("state-axis", "Axis", clipId)}));
+    Keire::AnimatorInstance animator(skeleton, graph, [clipId, clip](const Keire::AssetId id)
+                                     { return id == clipId ? clip : Keire::Ref<Keire::AnimationClipAsset>{}; });
+    for (const auto delta : {0.0F, 0.25F, 0.9F})
+    {
+        const auto sample = animator.Update(delta);
+        REQUIRE(sample.LocalPose.size() == 2);
+        CHECK(sample.LocalPose.front().Translation == bind.Translation);
+        CHECK(sample.LocalPose.front().Rotation == bind.Rotation);
+        CHECK(sample.LocalPose.front().Scale == bind.Scale);
+        CHECK(sample.RootMotion == Keire::Vector3{});
+        CHECK(sample.RootRotation == Keire::Quaternion{});
+    }
+}
+
 TEST_CASE("Animator publishes rotational root motion without reset or wrap discontinuities")
 {
     const auto skeletonId = Keire::AssetId::Parse("50000000-0000-4000-8000-000000000001");

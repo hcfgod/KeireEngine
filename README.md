@@ -699,3 +699,6 @@ Collapsing the Animator Controller or switching dock tabs keeps its Edit Mode pr
 visible in the scene. Closing the controller, closing its document, or entering Play Mode stops the preview.
 Use **Preview Selected** in the controller to test an action without changing its entry state, or **Preview Graph**
 to test normal graph playback.
+
+Imported animated models retain their root bind orientation and origin during root-motion playback,
+including models with an authored axis correction. No compensating entity rotation is required.

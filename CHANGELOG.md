@@ -94,6 +94,8 @@
 
 ### Regression harness portability and source organization
 
+- Root-motion extraction preserves imported root bind orientation and origin, preventing sideways characters and spurious initial movement from model offsets.
+
 - Split UI widgets, stylesheet parsing, editor stylesheet controls, and asset streaming tests to meet source-file budgets.
 - Use real directory aliases in Git Bash fixtures and support installed Windows Python with Unix metadata line endings.
 - Add `.asmref` folder references, platform filters, define constraints, semantic version defines, and managed DLL overrides.
