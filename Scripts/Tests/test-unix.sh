@@ -1013,6 +1013,9 @@ assert_true env PERL5LIB="$ROOT/Scripts/Dependencies" perl -MJSON -e \
 assert_true grep -q 'SDL3DebugLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -q 'SDL3ReleaseLibrary' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q 'filter "configurations:Profile"' "$ROOT/Scripts/Premake/Common.lua"
+assert_true perl -0ne \
+  'for $c (qw(Release Profile)) { exit 1 unless /filter "configurations:$c"\s+runtime "Release"\s+optimize "speed"/ } exit 0' \
+  "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q '"KEIRE_PROFILE_TELEMETRY"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q '"TRACY_ON_DEMAND"' "$ROOT/Scripts/Premake/Common.lua"
 assert_true grep -F -q '"TRACY_ONLY_LOCALHOST"' "$ROOT/Scripts/Premake/Common.lua"

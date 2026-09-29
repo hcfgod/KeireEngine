@@ -1,5 +1,8 @@
 # Changelog
 
+- Release and Profile builds explicitly enable speed optimization; MSVC now receives `/O2` instead of the
+  preference-only `/Ot`, avoiding unoptimized animation and rendering work in Release editor builds.
+
 - CPU dual-quaternion skinning converts bone matrices once per pose evaluation instead of once per vertex influence,
   reducing repeated work when rendering animated characters and IK previews.
 

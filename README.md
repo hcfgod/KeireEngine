@@ -300,7 +300,8 @@ from the Editor distribution folder. You can also launch directly through `Scrip
 Player exports prefer the Editor's bundled Build Support when compatible, so a same-version module installed by an
 older development build cannot override it. Installed modules remain the fallback for other targets or configurations.
 
-Supported build configurations are `Debug`, `Release`, `Dist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`.
+Supported build configurations are `Debug`, `Release`, `Profile`, `Dist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`.
+`Release` and `Profile` explicitly enable speed optimization, including `/O2` for MSVC builds.
 Available generators and sanitizer support vary by host platform and toolchain; `doctor` and `help` report the valid
 local combination.
 

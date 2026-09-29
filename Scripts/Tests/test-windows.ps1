@@ -1834,6 +1834,11 @@ Assert-True ($packageConfig.Contains('"${_text_sdk_libraries}"')) "SDK Core tran
 $publicLogHeader = Get-Content (Join-Path (Get-RepositoryRoot) "KeireCore\Include\Keire\Log.h") -Raw
 Assert-True (-not $publicLogHeader.Contains("spdlog/") -and -not $publicLogHeader.Contains("fmt::") -and $publicLogHeader.Contains("KEIRE_COMPILED_LOG_LEVEL")) "Public logging boundary is engine-owned"
 $commonPremake = Get-Content (Join-Path (Get-RepositoryRoot) "Scripts\Premake\Common.lua") -Raw
+foreach ($optimizedConfiguration in @("Release", "Profile")) {
+    Assert-True ($commonPremake -match ('filter "configurations:' + $optimizedConfiguration +
+        '"\s+runtime "Release"\s+optimize "speed"')) `
+        "$optimizedConfiguration enables speed optimization rather than MSVC preference-only /Ot"
+}
 Assert-True ($commonPremake.Contains('_DISABLE_STRING_ANNOTATION') -and $commonPremake.Contains('_DISABLE_VECTOR_ANNOTATION')) "MSVC sanitizer dependency ABI alignment"
 $windowsPackage = Get-Content (Join-Path $Windows "package.ps1") -Raw
 $windowsArchiveMergerPath = Join-Path $Windows "merge-static-libraries.ps1"

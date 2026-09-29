@@ -374,7 +374,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
 
     filter "configurations:Release"
         runtime "Release"
-        optimize "on"
+        optimize "speed"
         symbols "on"
         defines
         {
@@ -384,7 +384,7 @@ function ApplyCommonProjectSettings(repositoryRoot)
 
     filter "configurations:Profile"
         runtime "Release"
-        optimize "on"
+        optimize "speed"
         symbols "on"
         defines
         {
