@@ -119,10 +119,13 @@ namespace Keire
                 std::optional<EntityId> Support;
                 Detail::FootPlantSupportAnchor SupportAnchor;
                 Detail::FootPlantSupportAnchor SupportSurfaceAnchor;
+                std::optional<Detail::FootPlantSupportAnchor> SmoothedSupportAnchor;
                 Vector3 SurfacePosition;
                 Vector3 SurfaceNormal{0.0F, 1.0F, 0.0F};
                 Vector3 ReleasePosition;
                 Vector3 ReleaseNormal{0.0F, 1.0F, 0.0F};
+                Vector3 AnimationPlantPosition;
+                bool AwaitingAnimationPlant = false;
             };
 
             struct RetargetedClip final
@@ -165,6 +168,7 @@ namespace Keire
             Detail::AutomaticFootGroundingSmoothingState RightFootGroundingSmoothingState;
             FootPlantRuntimeState LeftFootPlantState;
             FootPlantRuntimeState RightFootPlantState;
+            std::size_t UnreachableFootCount = 0;
             AssetId FootClearanceMesh;
             std::uint64_t FootClearanceSkinRevision = 0;
             std::uint64_t FootClearanceMeshRevision = 0;

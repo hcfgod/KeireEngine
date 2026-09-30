@@ -99,6 +99,27 @@ TEST_CASE("Automatic leg IK preserves the sampled knee bend instead of forcing a
     CHECK(std::isfinite(straight.Z));
 }
 
+TEST_CASE("Shared knee direction ignores opposite noise from a nearly straight leg")
+{
+    const Keire::Vector3 leftHip{-0.25F, 2.0F, 0.0F}, rightHip{0.25F, 2.0F, 0.0F};
+    const Keire::Vector3 leftFoot{-0.25F, 0.0F, 0.0F}, rightFoot{0.25F, 0.0F, 0.0F};
+    for (const bool leftSwing : {false, true})
+    {
+        const Keire::Vector3 leftKnee{-0.25F + (leftSwing ? 0.1F : 0.000001F), 1.0F, leftSwing ? 0.2F : -0.00002F};
+        const Keire::Vector3 rightKnee{0.25F + (leftSwing ? 0.000001F : 0.1F), 1.0F, leftSwing ? -0.00002F : 0.2F};
+        const auto reference = Keire::Detail::OrientBipedKneeReference({0, 0, 1}, leftHip, leftKnee, leftFoot, rightHip,
+                                                                       rightKnee, rightFoot);
+        CHECK(reference.Z > 0.99F);
+        for (const float targetZ : {-0.5F, 0.5F})
+        {
+            Keire::Detail::AutomaticLimbIkState state;
+            const auto pole = Keire::Detail::StableAutomaticLimbPole(
+                leftHip, leftKnee, leftFoot, {-0.25F, 0.0F, targetZ}, reference, 1.0F / 60.0F, 0.12F, 0.9F, state);
+            CHECK(pole.Z > 0.0F);
+        }
+    }
+}
+
 TEST_CASE("Automatic leg IK derives a shared knee plane from rig geometry and resists slope sway")
 {
     const Keire::Vector3 leftHip{-0.25F, 2.0F, 0.0F};
@@ -184,11 +205,11 @@ TEST_CASE("Automatic foot planting locks animation drift and releases on a delib
     CHECK(state.Locked);
     CHECK(animationDrift == Keire::Vector3{});
 
-    const auto overextended = Keire::Detail::UpdateAutomaticFootPlant({0.22F, 0.06F, 0.0F}, {0.22F, 0.0F, 0.0F}, normal,
-                                                                      1.0F, 0.08F, 0.18F, state);
+    const auto continuedStride = Keire::Detail::UpdateAutomaticFootPlant({0.22F, 0.06F, 0.0F}, {0.22F, 0.0F, 0.0F},
+                                                                         normal, 1.0F, 0.08F, 0.18F, state);
     CHECK(state.Locked);
-    CHECK((state.Position == Keire::Vector3{0.22F, 0.0F, 0.0F}));
-    CHECK((overextended == Keire::Vector3{0.22F, 0.0F, 0.0F}));
+    CHECK(state.Position == Keire::Vector3{});
+    CHECK(continuedStride == Keire::Vector3{});
 
     const auto lifted = Keire::Detail::UpdateAutomaticFootPlant({0.22F, 0.3F, 0.0F}, {0.22F, 0.0F, 0.0F}, normal, 1.0F,
                                                                 0.08F, 0.18F, state);
@@ -258,6 +279,64 @@ TEST_CASE("Automatic foot grounding smooths support handoffs independently of fr
     CHECK(sixtyHertzTarget->Position.X > 0.99F);
 }
 
+TEST_CASE("Foot acquisition finishes before moving animation can slide a planted endpoint")
+{
+    for (const float rate : {30.0F, 60.0F, 144.0F})
+    {
+        CAPTURE(rate);
+        Keire::Detail::AutomaticFootGroundingSmoothingState state;
+        const Keire::Vector3 anchor{0.0F, 0.0F, 0.0F};
+        const Keire::Vector3 normal{0.0F, 1.0F, 0.0F};
+        float previousBlend = 0.0F;
+        for (int frame = 1; frame <= static_cast<int>(rate); ++frame)
+        {
+            const auto time = static_cast<float>(frame) / rate;
+            const auto target = Keire::Detail::UpdateAutomaticFootGroundingSmoothing(
+                anchor, normal, {0.4F * time, 0.0F, -0.2F * time}, 1.0F / rate, 0.12F, state);
+            REQUIRE(target);
+            CHECK(target->Blend >= previousBlend);
+            if (frame == 1)
+                CHECK(target->Blend < 0.5F);
+            if (time >= 0.13F)
+            {
+                CHECK(target->Blend == 1.0F);
+                CHECK(target->Position.X == doctest::Approx(0.0F).epsilon(0.000001));
+                CHECK(target->Position.Z == doctest::Approx(0.0F).epsilon(0.000001));
+            }
+            previousBlend = target->Blend;
+        }
+    }
+}
+
+TEST_CASE("Changing foot response during acquisition does not reverse contact influence")
+{
+    Keire::Detail::AutomaticFootGroundingSmoothingState state;
+    const Keire::Vector3 anchor{};
+    const Keire::Vector3 normal{0.0F, 1.0F, 0.0F};
+    const Keire::Vector3 sampled{0.3F, 0.0F, 0.0F};
+    const auto initial =
+        Keire::Detail::UpdateAutomaticFootGroundingSmoothing(anchor, normal, sampled, 0.06F, 0.12F, state);
+    REQUIRE(initial);
+    CHECK(initial->Blend == doctest::Approx(0.5F));
+    const auto paused =
+        Keire::Detail::UpdateAutomaticFootGroundingSmoothing(anchor, normal, sampled, 0.0F, 0.8F, state);
+    REQUIRE(paused);
+    CHECK(paused->Blend == initial->Blend);
+    const auto slower =
+        Keire::Detail::UpdateAutomaticFootGroundingSmoothing(anchor, normal, sampled, 0.02F, 0.8F, state);
+    REQUIRE(slower);
+    CHECK(slower->Blend >= initial->Blend);
+    CHECK(slower->Position.X <= initial->Position.X);
+    const auto immediate =
+        Keire::Detail::UpdateAutomaticFootGroundingSmoothing(anchor, normal, sampled, 0.02F, 0.0F, state);
+    REQUIRE(immediate);
+    CHECK(immediate->Blend == 1.0F);
+    const auto retained =
+        Keire::Detail::UpdateAutomaticFootGroundingSmoothing(anchor, normal, sampled, 0.02F, 1.0F, state);
+    REQUIRE(retained);
+    CHECK(retained->Blend == 1.0F);
+}
+
 TEST_CASE("Automatic foot grounding blends endpoints above flat and sloped contact planes")
 {
     for (const auto normal : {Keire::Vector3{0.0F, 1.0F, 0.0F}, Keire::Vector3{0.6F, 0.8F, 0.0F}})
@@ -278,6 +357,49 @@ TEST_CASE("Automatic foot grounding blends endpoints above flat and sloped conta
             REQUIRE(released);
             CHECK(Keire::Detail::IkDot(Keire::Detail::IkSubtract(released->Position, surface), normal) < 0.0F);
         }
+    }
+}
+
+TEST_CASE("A new foot touchdown does not inherit the previous step's smoothing anchor")
+{
+    for (const float rate : {30.0F, 60.0F, 144.0F})
+    {
+        const Keire::Vector3 normal{0.0F, 1.0F, 0.0F};
+        Keire::Detail::AutomaticFootGroundingSmoothingState state;
+        REQUIRE(Keire::Detail::UpdateAutomaticFootGroundingSmoothing(Keire::Vector3{-0.3F, 0.0F, 0.0F}, normal, {},
+                                                                     0.0F, 0.0F, state));
+        for (int frame = 0; frame < static_cast<int>(rate * 0.2F); ++frame)
+        {
+            REQUIRE(Keire::Detail::UpdateAutomaticFootGroundingSmoothing({}, {}, {0.3F, 0.1F, 0.0F}, 1.0F / rate, 0.12F,
+                                                                         state));
+        }
+        const Keire::Vector3 landing{0.3F, 0.0F, 0.0F};
+        const auto touchdown =
+            Keire::Detail::UpdateAutomaticFootGroundingSmoothing(landing, normal, landing, 1.0F / rate, 0.12F, state);
+        REQUIRE(touchdown);
+        CHECK(touchdown->Position.X == doctest::Approx(landing.X));
+        CHECK(state.Position.X == doctest::Approx(landing.X));
+        CHECK(touchdown->Blend < 1.0F);
+    }
+}
+
+TEST_CASE("Brief foot contact loss preserves support influence when the surface returns")
+{
+    for (const float rate : {30.0F, 60.0F, 144.0F})
+    {
+        Keire::Detail::AutomaticFootGroundingSmoothingState state;
+        const Keire::Vector3 surface{0.0F, 0.15F, 0.0F};
+        const Keire::Vector3 normal{0.0F, 1.0F, 0.0F};
+        REQUIRE(Keire::Detail::UpdateAutomaticFootGroundingSmoothing(surface, normal, surface, 0.0F, 0.0F, state));
+        const auto released =
+            Keire::Detail::UpdateAutomaticFootGroundingSmoothing({}, {}, surface, 1.0F / rate, 0.12F, state);
+        REQUIRE(released);
+        const auto restored =
+            Keire::Detail::UpdateAutomaticFootGroundingSmoothing(surface, normal, surface, 1.0F / rate, 0.12F, state);
+        REQUIRE(restored);
+        CHECK(restored->Blend >= released->Blend);
+        CHECK(restored->Blend < 1.0F);
+        CHECK(restored->Position.Y == doctest::Approx(surface.Y));
     }
 }
 
@@ -364,6 +486,73 @@ TEST_CASE("Named animation IK reports each failed goal and still solves independ
     CHECK_FALSE(
         Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {goals.data(), 1}, pose, indices, std::nullopt).empty());
     CHECK(pose == before);
+}
+
+TEST_CASE("Named IK world targets and poles follow rotated scaled and reflected actor transforms")
+{
+    const Keire::SkeletonAsset skeleton({{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"Middle", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"End", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"Unrelated", 0, {{0.0F, 0.0F, 1.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}});
+    const std::map<std::string, std::uint32_t, std::less<>> indices{
+        {"Root", 0}, {"Middle", 1}, {"End", 2}, {"Unrelated", 3}};
+    std::vector<Keire::BoneTransform> bindPose;
+    for (const auto& bone : skeleton.Bones())
+        bindPose.push_back(bone.BindPose);
+
+    for (const auto scale : std::array<Keire::Vector3, 4>{
+             {{0.02F, 0.02F, 0.02F}, {2.0F, 2.0F, 2.0F}, {0.5F, 2.0F, 1.5F}, {-1.0F, 1.0F, 1.0F}}})
+    {
+        CAPTURE(scale.X);
+        CAPTURE(scale.Y);
+        const auto parent = Keire::Math::ComposeTransform(
+            {3.0F, -2.0F, 1.0F}, Keire::Math::EulerDegreesToQuaternion({15.0F, 37.0F, -20.0F}), scale);
+        const auto child = Keire::Math::ComposeTransform(
+            {0.3F, 0.2F, -0.4F}, Keire::Math::EulerDegreesToQuaternion({-25.0F, 10.0F, 8.0F}), {1.0F, 1.0F, 1.0F});
+        const auto modelToWorld = Keire::Math::Multiply(parent, child);
+        const auto worldToModel = Keire::Math::Inverse(modelToWorld);
+        for (const auto solver : {Keire::AnimatorIkSolver::TwoBone, Keire::AnimatorIkSolver::Fabrik})
+        {
+            CAPTURE(static_cast<int>(solver));
+            for (const float weight : {0.0F, 0.5F, 1.0F})
+            {
+                CAPTURE(weight);
+                Keire::AnimatorIkGoal modelGoal{.Name = "limb",
+                                                .Solver = solver,
+                                                .Space = Keire::AnimatorIkSpace::Model,
+                                                .Bones = {"Root", "Middle", "End"},
+                                                .Target = {0.7F, 1.2F, 0.25F},
+                                                .Pole = {-0.2F, 0.3F, 1.0F},
+                                                .Weight = weight,
+                                                .MaximumIterations = 128,
+                                                .Tolerance = 0.0001F};
+                auto worldGoal = modelGoal;
+                worldGoal.Space = Keire::AnimatorIkSpace::World;
+                worldGoal.Target = Keire::Math::TransformPoint(modelToWorld, modelGoal.Target);
+                worldGoal.Pole = Keire::Math::TransformPoint(modelToWorld, modelGoal.Pole);
+                auto modelPose = bindPose;
+                auto worldPose = bindPose;
+                REQUIRE(Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {&modelGoal, 1}, modelPose, indices,
+                                                                  std::nullopt)
+                            .empty());
+                REQUIRE(Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {&worldGoal, 1}, worldPose, indices,
+                                                                  worldToModel)
+                            .empty());
+                CHECK(worldPose[3] == bindPose[3]);
+                if (weight == 0.0F)
+                    CHECK(worldPose == bindPose);
+                for (std::size_t index = 0; index < modelPose.size(); ++index)
+                {
+                    const auto expected = Keire::Math::ComposeTransform(
+                        modelPose[index].Translation, modelPose[index].Rotation, modelPose[index].Scale);
+                    const auto actual = Keire::Math::ComposeTransform(
+                        worldPose[index].Translation, worldPose[index].Rotation, worldPose[index].Scale);
+                    for (std::size_t element = 0; element < actual.Elements.size(); ++element)
+                        CHECK(actual.Elements[element] == doctest::Approx(expected.Elements[element]).epsilon(0.0002F));
+                }
+            }
+        }
+    }
 }
 
 TEST_CASE("Automatic foot grounding release uses one response blend at every frame rate")

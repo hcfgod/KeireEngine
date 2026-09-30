@@ -1,17 +1,20 @@
 #include "KeireClient/Editor/InputActionsDocument.h"
 
-#include "KeireInternal/FileSystem.h"
-
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 
 namespace KeireEditor
 {
     void InputActionsDocument::Open(const Keire::AssetId asset, Keire::InputActionAssetDefinition definition,
-                                    Keire::Ref<Keire::UndoContext> undo, std::filesystem::path source)
+                                    Keire::Ref<Keire::UndoContext> undo, std::filesystem::path source,
+                                    std::optional<std::vector<std::byte>> loadedBytes)
     {
+        DocumentSourcePersistence persistence;
+        persistence.Bind(source, std::move(loadedBytes));
         Close();
+        m_Persistence = std::move(persistence);
         m_Asset = asset;
         m_Definition = std::move(definition);
         m_Undo = std::move(undo);
@@ -22,9 +25,7 @@ namespace KeireEditor
     {
         if (!m_Asset || m_Source.empty())
             throw std::logic_error("InputActionsDocument cannot save without an asset and source path.");
-        const auto bytes = Keire::InputActionAsset::Encode(m_Definition);
-        const std::string contents(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        Keire::Detail::WriteTextFileAtomically(m_Source, contents);
+        m_Persistence.Publish(Keire::InputActionAsset::Encode(m_Definition));
         m_Dirty = false;
     }
 
@@ -141,6 +142,7 @@ namespace KeireEditor
         m_Binding = {};
         m_Definition = {};
         m_Source.clear();
+        m_Persistence = {};
         m_Undo.Reset();
         m_Dirty = false;
     }

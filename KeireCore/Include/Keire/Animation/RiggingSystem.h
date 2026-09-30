@@ -233,6 +233,8 @@ namespace Keire
         std::optional<std::uint32_t> Toe;
         // Pelvis support influence, independent of endpoint IK weight during contact acquisition/release.
         float SupportWeight = 1.0F;
+        // Optional model-space support anchor before endpoint blending; defaults to Position.
+        std::optional<Vector3> SupportPosition;
     };
 
     struct FootGroundingRequest
@@ -245,6 +247,7 @@ namespace Keire
         float MaximumPelvisAdjustment = 0.5F;
         float MaximumHorizontalPelvisAdjustment = 0.0F;
         float PelvisSupportRadius = 0.0F;
+        // Terrain tilt is added to the sampled torso direction, preserving authored lean on flat support.
         float PelvisRotationWeight = 0.0F;
         float MaximumPelvisRotationDegrees = 0.0F;
         float PositionTolerance = 0.01F;

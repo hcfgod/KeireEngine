@@ -1175,8 +1175,9 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                         auto scene = Keire::CreateRef<Keire::Scene>(created, *completion->Context.SceneSnapshot,
                                                                     editing->Components());
                         scene->MarkSaved();
+                        m_SceneDocument->SetIdentity(created, completion->Context.SceneSource,
+                                                     Keire::SceneAsset::Encode(*completion->Context.SceneSnapshot));
                         m_SceneDocument->ReplaceEditingScene(std::move(scene), false);
-                        m_SceneDocument->SetIdentity(created, completion->Context.SceneSource);
                         if (const auto project = Owner().GetProject())
                         {
                             m_SceneDocument->SetRecoveryPath(project->SceneRecoveryDirectory() /

@@ -18,14 +18,15 @@ void EditorWorkspaceLayer::OpenInputActions(const Keire::AssetId asset)
         throw std::invalid_argument("Only .keireinput assets can be opened in the Input Actions editor.");
     const auto source = m_AssetDatabase->Specification().ProjectRoot /
                         m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    auto definition = Keire::InputActionAsset::Decode(KeireEditor::Detail::ReadBytes(source))->Definition();
+    auto loadedBytes = KeireEditor::Detail::ReadBytes(source);
+    auto definition = Keire::InputActionAsset::Decode(loadedBytes)->Definition();
     if (const auto context = m_InputActionsDocument->UndoContext())
         context->Close();
     Keire::Ref<Keire::UndoContext> context;
     if (const auto undo = Owner().Undo())
         context = undo->CreateContext(
             {.Name = "Input Actions: " + record->RelativePath.stem().string(), .MaximumCommands = 128});
-    m_InputActionsDocument->Open(asset, std::move(definition), std::move(context), source);
+    m_InputActionsDocument->Open(asset, std::move(definition), std::move(context), source, std::move(loadedBytes));
     if (!m_InputActionsDocument->Definition().ActionMaps.empty())
         m_InputActionsDocument->SelectMap(m_InputActionsDocument->Definition().ActionMaps.front().Id);
     m_ActiveUndoContext = m_InputActionsDocument->UndoContext();

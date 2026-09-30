@@ -186,6 +186,8 @@ namespace Keire::RenderBackend
     {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         std::uint64_t abandonedHandles = 0;
+        for (auto* query : TimestampQueries)
+            abandonedHandles += static_cast<std::uint64_t>(query != nullptr);
         for (const auto& frame : InFlight)
         {
             abandonedHandles += static_cast<std::uint64_t>(frame.Fence != nullptr);
@@ -203,6 +205,10 @@ namespace Keire::RenderBackend
                 CompleteFrame(frame.Frame, true);
         }
         InFlight.clear();
+        TimestampQueries.fill(nullptr);
+        Statistics.GpuTimingSupported = false;
+        Statistics.GpuFrameMilliseconds = 0.0F;
+        Statistics.GpuTimingFrame = 0;
 
         for (const auto& surface : AllSurfaceEpochs())
         {
@@ -348,6 +354,26 @@ namespace Keire::RenderBackend
             throw GpuDeviceLostError(
                 DeviceLossDiagnostic("SDL_CreateGPUDevice", "Recreated backend changed unexpectedly."));
         DeviceDriver = recreatedDriver;
+        Statistics.GpuTimingSupported = false;
+        Statistics.GpuFrameMilliseconds = 0.0F;
+        Statistics.GpuTimingFrame = 0;
+        if (SDL_GPUSupportsTimestampQueries(Device))
+        {
+            for (std::uint32_t slot = 0; slot < Specification.MaximumFramesInFlight; ++slot)
+            {
+                TimestampQueries[slot] = SDL_CreateGPUTimestampQuery(Device);
+                if (!TimestampQueries[slot])
+                {
+                    KEIRE_CORE_WARN("GPU timestamp queries unavailable: {}", LastSdlError());
+                    for (auto*& query : TimestampQueries)
+                    {
+                        SDL_ReleaseGPUTimestampQuery(Device, query);
+                        query = nullptr;
+                    }
+                    break;
+                }
+            }
+        }
         const auto deviceProperties = SDL_GetGPUDeviceProperties(Device);
         const auto property = [deviceProperties](const char* name) -> std::string
         {

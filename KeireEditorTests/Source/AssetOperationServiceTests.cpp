@@ -706,6 +706,26 @@ TEST_CASE("Material creation uses the warmed source index and rejects offline co
     CHECK_FALSE(finish().Result.Success);
     CHECK(Keire::Detail::ReadTextFile(occupied, 1024) == "external unsaved work");
 
+    const auto occupiedClip = project->Root() / "Assets/Retargeted.keireanim";
+    Keire::Detail::WriteTextFileAtomically(occupiedClip, "external animation work");
+    operations.QueueCreateAsset("Retargeted.keireanim", bytes, {}, {});
+    const auto clipConflict = finish();
+    CHECK_FALSE(clipConflict.Result.Success);
+    CHECK_FALSE(clipConflict.Result.Diagnostic.empty());
+    CHECK(Keire::Detail::ReadTextFile(occupiedClip, 1024) == "external animation work");
+
+    // A malformed encoded clip must fail visibly, then leave the worker able to accept another creation.
+    operations.QueueCreateAsset("Malformed.keireanim", bytes, {}, {});
+    const auto malformedClip = finish();
+    CHECK_FALSE(malformedClip.Result.Success);
+    CHECK_FALSE(malformedClip.Result.Diagnostic.empty());
+    operations.QueueCreateAsset("Recovered.keirematerial", bytes, {}, {});
+    const auto recovered = finish();
+    INFO(recovered.Result.Diagnostic);
+    CHECK(recovered.Result.Success);
+    CHECK(recovered.Result.CreatedAsset);
+    CHECK(Keire::Detail::ReadTextFile(occupiedClip, 1024) == "external animation work");
+
     // Dependency edits after warmup must still be validated, rather than trusting cached cooked data.
     Keire::Detail::WriteTextFileAtomically(project->Root() / "Assets/Warm.keireshadergraph", "invalid graph");
     operations.QueueCreateAsset("Invalid.keirematerial", bytes, {}, {});

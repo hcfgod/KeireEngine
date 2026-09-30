@@ -1,8 +1,10 @@
 #include "Keire/Core.h"
+#include "KeireInternal/Scenes/AnimationIkPasses.h"
 
 #include <doctest/doctest.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
@@ -327,4 +329,105 @@ TEST_CASE("downloaded rigging models preserve skeletons skinning clips and ident
             }
     }
     CHECK(modelCount >= 3);
+}
+
+TEST_CASE("Imported walking knees preserve their bend side through repeated extension limits" *
+          doctest::skip(!std::filesystem::is_regular_file("Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb")))
+{
+    const auto path = std::filesystem::absolute("Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb");
+    std::ifstream stream(path, std::ios::binary | std::ios::ate);
+    REQUIRE(stream.is_open());
+    REQUIRE(stream.tellg() > 0);
+    std::vector<std::byte> bytes(static_cast<std::size_t>(stream.tellg()));
+    stream.seekg(0);
+    stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    REQUIRE(stream.good());
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.SourcePath = path;
+    context.RelativePath = path.filename();
+    context.ImportSettings["materialImport"] = std::string("none");
+    context.ImportSettings["rigSource"] = std::string("embedded");
+    std::map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+    const auto imported = Keire::CreateMeshAssetImporter().ContextualImport(context, bytes);
+    const auto skeletonData =
+        std::ranges::find(imported.SubAssets, Keire::SkeletonAsset::StaticType(), &Keire::AssetGeneratedSubAsset::Type);
+    const auto clipData = std::ranges::find(imported.SubAssets, Keire::AnimationClipAsset::StaticType(),
+                                            &Keire::AssetGeneratedSubAsset::Type);
+    REQUIRE(skeletonData != imported.SubAssets.end());
+    REQUIRE(clipData != imported.SubAssets.end());
+    const auto skeleton = Keire::SkeletonAsset::Decode(skeletonData->Bytes);
+    const auto clip = Keire::AnimationClipAsset::Decode(clipData->Bytes);
+    Keire::AnimationGraphDefinition graph;
+    graph.EntryState = "Walk";
+    graph.States = {{"Walk", clipData->Id}};
+    Keire::AnimatorInstance animator(skeleton, Keire::CreateRef<Keire::AnimationGraphAsset>(graph),
+                                     [clip](Keire::AssetId) { return clip; });
+    std::array<std::array<std::uint32_t, 3>, 2> chains{};
+    for (std::size_t leg = 0; leg < 2; ++leg)
+        for (std::size_t joint = 0; joint < 3; ++joint)
+        {
+            const auto name = std::string("leg_joint_") + (leg == 0 ? "L_" : "R_") + std::to_string(joint + 1);
+            const auto bone = std::ranges::find(skeleton->Bones(), name, &Keire::SkeletonBone::Name);
+            REQUIRE(bone != skeleton->Bones().end());
+            chains[leg][joint] = static_cast<std::uint32_t>(bone - skeleton->Bones().begin());
+        }
+    const auto matrices = [&](const std::vector<Keire::BoneTransform>& pose)
+    {
+        std::vector<Keire::Matrix4> result(pose.size());
+        for (std::size_t bone = 0; bone < pose.size(); ++bone)
+        {
+            result[bone] = Keire::Math::ComposeTransform(pose[bone].Translation, pose[bone].Rotation, pose[bone].Scale);
+            if (skeleton->Bones()[bone].Parent >= 0)
+                result[bone] = Keire::Math::Multiply(result[skeleton->Bones()[bone].Parent], result[bone]);
+        }
+        return result;
+    };
+    using namespace Keire::Detail;
+    std::array<AutomaticLimbIkState, 2> states;
+    std::array<Keire::Vector3, 2> previousBends{};
+    for (int frame = 0; frame < 1200; ++frame)
+    {
+        CAPTURE(frame);
+        auto pose = animator.Update(1.0F / 60.0F).LocalPose;
+        const auto sampled = matrices(pose);
+        const auto position = [&](std::size_t leg, std::size_t joint)
+        { return Keire::Math::TransformPoint(sampled[chains[leg][joint]], {}); };
+        const auto reference = OrientBipedKneeReference(
+            AutomaticBipedKneeReference(position(0, 0), position(1, 0), {0, 1, 0}), position(0, 0), position(0, 1),
+            position(0, 2), position(1, 0), position(1, 1), position(1, 2));
+        for (std::size_t leg = 0; leg < 2; ++leg)
+        {
+            CAPTURE(leg);
+            const auto hip = position(leg, 0), knee = position(leg, 1), foot = position(leg, 2);
+            const auto upper = IkVectorLength(IkSubtract(knee, hip));
+            const auto lower = IkVectorLength(IkSubtract(foot, knee));
+            const auto reach = upper + lower;
+            const auto direction = IkNormalize(IkSubtract(foot, hip));
+            const auto extension = 0.99F + 0.03F * std::sin(static_cast<float>(frame) * 0.035F);
+            const Keire::Vector3 target{hip.X + direction.X * reach * extension,
+                                        hip.Y + direction.Y * reach * extension,
+                                        hip.Z + direction.Z * reach * extension};
+            const auto pole =
+                StableAutomaticLimbPole(hip, knee, foot, target, reference, 1.0F / 60.0F, 0.12F, 0.9F, states[leg]);
+            AutomaticLimbIkState reacquired;
+            (void)StableAutomaticLimbPole(hip, knee, foot, target, reference, 1.0F / 60.0F, 0.12F, 0.9F, reacquired);
+            CHECK(IkDot(reacquired.BendDirection, states[leg].BendDirection) > 0.0F);
+            REQUIRE(
+                Keire::SolveTwoBoneIk(*skeleton, pose, {chains[leg][0], chains[leg][1], chains[leg][2], target, pole}));
+            const auto solved = matrices(pose);
+            const auto solvedKnee = Keire::Math::TransformPoint(solved[chains[leg][1]], {});
+            const auto solvedFoot = Keire::Math::TransformPoint(solved[chains[leg][2]], {});
+            const auto bend = IkNormalize(IkProjectOntoPlane(IkSubtract(solvedKnee, hip), direction));
+            CHECK(IkVectorLength(IkSubtract(solvedKnee, hip)) == doctest::Approx(upper).epsilon(0.001));
+            CHECK(IkVectorLength(IkSubtract(solvedFoot, solvedKnee)) == doctest::Approx(lower).epsilon(0.001));
+            CHECK(IkVectorLength(IkSubtract(solvedFoot, hip)) < reach * 0.999F);
+            CHECK(IkDot(bend, states[leg].BendDirection) > 0.99F);
+            if (frame != 0)
+                CHECK(IkDot(bend, previousBends[leg]) > 0.8F);
+            previousBends[leg] = bend;
+        }
+    }
 }

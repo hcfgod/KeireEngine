@@ -580,6 +580,7 @@ void EditorWorkspaceLayer::DrawDialogs(Keire::UiFrame& ui, Keire::UiWorkspace& w
     DrawDirtyShaderGraphDialog(ui);
     DrawDirtyMaterialGraphDialog(ui);
     DrawDirtyPlayerBuildDialog(ui);
+    DrawSceneSourceConflictDialog(ui);
 }
 
 void EditorWorkspaceLayer::DrawNameDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace,

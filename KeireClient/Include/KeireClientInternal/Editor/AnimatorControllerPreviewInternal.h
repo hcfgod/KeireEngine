@@ -31,6 +31,7 @@ namespace KeireEditor
             std::uint64_t ClipRevision = 0;
             std::uint64_t SourceSkeletonRevision = 0;
             std::uint64_t TargetSkeletonRevision = 0;
+            std::string MappingDiagnostic;
         };
 
         bool Active = false;
@@ -198,19 +199,37 @@ namespace KeireEditor
                 {
                     const auto sourceRig = BestRig(*sourceSkeleton);
                     const auto targetRig = BestRig(*targetSkeleton);
-                    retargeted.Clip = Keire::RetargetAnimationClip(*sourceSkeleton, sourceRig, *clip, Skeleton,
-                                                                   *targetSkeleton, targetRig);
+                    auto result = Keire::RetargetAnimationClipWithDiagnostics(*sourceSkeleton, sourceRig, *clip,
+                                                                              Skeleton, *targetSkeleton, targetRig);
+                    if (!result.Diagnostics.Compatible())
+                    {
+                        retargeted.Clip = {};
+                        Diagnostic = "Preview cannot play this clip: no animation tracks map to the selected "
+                                     "skeleton. Select a compatible character or edit bone mappings in Rigging Studio.";
+                        return {};
+                    }
+                    retargeted.MappingDiagnostic.clear();
+                    if (result.Diagnostics.MappedTrackCount < result.Diagnostics.SourceTrackCount)
+                        retargeted.MappingDiagnostic =
+                            "Preview maps " + std::to_string(result.Diagnostics.MappedTrackCount) + " of " +
+                            std::to_string(result.Diagnostics.SourceTrackCount) +
+                            " animation tracks. Unmapped bones retain their reference pose. Review bone mappings "
+                            "in Rigging Studio before using this animation.";
+                    retargeted.Clip = std::move(result.Clip);
                     retargeted.ClipRevision = clipRevision;
                     retargeted.SourceSkeletonRevision = sourceRevision;
                     retargeted.TargetSkeletonRevision = targetRevision;
                 }
                 catch (const std::exception& error)
                 {
-                    Diagnostic = "Preview clip is incompatible with the target skeleton: " + std::string(error.what());
+                    Diagnostic = "Preview clip is incompatible with the target skeleton: " + std::string(error.what()) +
+                                 " Select a compatible character or edit bone mappings in Rigging Studio.";
                     retargeted.Clip = {};
                     return {};
                 }
             }
+            if (!retargeted.MappingDiagnostic.empty())
+                Diagnostic = retargeted.MappingDiagnostic;
             return retargeted.Clip;
         }
 
@@ -237,22 +256,38 @@ namespace KeireEditor
         {
             Diagnostic.clear();
             bool ready = true;
+            std::string failure;
+            std::string warning;
+            const auto inspect = [&](auto&& resolve)
+            {
+                Diagnostic.clear();
+                if (!resolve())
+                {
+                    ready = false;
+                    if (failure.empty())
+                        failure = Diagnostic;
+                }
+                else if (warning.empty())
+                    warning = Diagnostic;
+            };
             for (const auto& layer : graph.Definition().Layers)
             {
-                if (layer.AvatarMask && !ResolveMask(layer.AvatarMask, assets))
-                    ready = false;
+                if (layer.AvatarMask)
+                    inspect([&] { return ResolveMask(layer.AvatarMask, assets); });
                 for (const auto& state : layer.States)
                 {
                     const auto clip = state.Motion.Clip ? state.Motion.Clip : state.Clip;
-                    if (clip && !ResolveClip(clip, assets))
-                        ready = false;
+                    if (clip)
+                        inspect([&] { return ResolveClip(clip, assets); });
                     for (const auto& child : state.Motion.Children)
-                        if (child.Clip && !ResolveClip(child.Clip, assets))
-                            ready = false;
+                        if (child.Clip)
+                            inspect([&] { return ResolveClip(child.Clip, assets); });
                 }
             }
-            if (!ready && Diagnostic.empty())
-                Diagnostic = "Preview is waiting for animation dependencies to load.";
+            // A playable partial retarget must never hide the dependency that prevents playback.
+            Diagnostic = ready             ? std::move(warning)
+                         : failure.empty() ? "Preview is waiting for animation dependencies to load."
+                                           : std::move(failure);
             return ready;
         }
 
@@ -453,9 +488,8 @@ namespace KeireEditor
             const auto palette = BuildPalette(*skeleton, sample.LocalPose);
             animator->SetRuntimePose(sample.State, sample.NormalizedTime, Instance->Playing(), palette);
             animator->SetRuntimeDebugSnapshot(Instance->DebugSnapshot());
-            animator->SetRuntimeDiagnostic({});
+            animator->SetRuntimeDiagnostic(Diagnostic);
             NormalizedTime = AnimatorControllerPanelInternal::TimelineFraction(sample.NormalizedTime);
-            Diagnostic.clear();
         }
     };
 } // namespace KeireEditor

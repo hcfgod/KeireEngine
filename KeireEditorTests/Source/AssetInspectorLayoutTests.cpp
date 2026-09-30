@@ -21,6 +21,7 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 TEST_CASE("Animator preview keeps authored skeleton settings and clears rejected target poses")
@@ -503,6 +504,38 @@ TEST_CASE("Rigging Studio prevents baking stale clips after either model import 
     CHECK(KeireEditor::CanBakeRetarget(diagnostics, true, false, false, false));
 }
 
+TEST_CASE("Rigging Studio reports failed runtime assets and clears the error after regeneration")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.DevelopmentCatalog.clear();
+    specification.Decoders = {Keire::CreateSkeletonAssetDecoder()};
+    const auto assets = Keire::CreateRef<Keire::AssetSystem>(specification);
+    const auto id = Keire::AssetId::Generate();
+    const auto handle = assets->Load<Keire::SkeletonAsset>(id);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (handle.State() != Keire::AssetState::Failed && std::chrono::steady_clock::now() < deadline)
+    {
+        (void)assets->PumpCompletions();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK_THROWS_AS(handle.Require(), Keire::AssetLoadError);
+    REQUIRE(handle.State() == Keire::AssetState::Failed);
+    REQUIRE_FALSE(handle.Diagnostic().Message.empty());
+    const auto error = KeireEditor::RetargetAssetLoadError(handle, "Target skeleton");
+    CHECK(error.find("Target skeleton failed to load.") != std::string::npos);
+    CHECK(error.find(handle.Diagnostic().Message) != std::string::npos);
+    CHECK(error.find("Regenerate") != std::string::npos);
+    REQUIRE(assets->PublishDevelopmentAsset(
+        id, Keire::CreateRef<Keire::SkeletonAsset>(std::vector<Keire::SkeletonBone>{{"Root", -1, {}, {}}})));
+    CHECK(handle.TryGetLoaded());
+    CHECK(KeireEditor::RetargetAssetLoadError(handle, "Target skeleton").empty());
+    const Keire::AssetHandle<Keire::SkeletonAsset> cancelled;
+    CHECK(KeireEditor::RetargetAssetLoadError(cancelled, "Source skeleton").find("load was cancelled") !=
+          std::string::npos);
+    assets->Close();
+}
+
 TEST_CASE("Rigging Studio validates portable output names before baking")
 {
     for (const auto name :
@@ -514,6 +547,23 @@ TEST_CASE("Rigging Studio validates portable output names before baking")
     const auto suggested = KeireEditor::SuggestedRetargetName("Fox", "Walk/Run: Take 1");
     CHECK(suggested == "Fox Walk_Run_ Take 1 Retargeted");
     CHECK(KeireEditor::RetargetOutputNameError(suggested).empty());
+}
+
+TEST_CASE("Rigging Studio suggests valid names for long and unusual imported labels")
+{
+    for (const auto& model :
+         {std::string(" Leading model"), std::string("CON.asset"), std::string(250, 'm'), std::string{}})
+    {
+        const auto name = KeireEditor::SuggestedRetargetName(model, std::string(250, 'c'));
+        CAPTURE(model);
+        CAPTURE(name);
+        CHECK(KeireEditor::RetargetOutputNameError(name).empty());
+        CHECK(name.ends_with(" Retargeted"));
+    }
+    const auto unicode = KeireEditor::SuggestedRetargetName(std::string(218, 'm') + "\xC3\xA9", "Walk");
+    CHECK(KeireEditor::RetargetOutputNameError(unicode).empty());
+    CHECK(unicode == std::string(218, 'm') + " Retargeted");
+    CHECK(KeireEditor::RetargetOutputNameError(KeireEditor::SuggestedRetargetName("", "")).empty());
 }
 
 TEST_CASE("Imported model drops configure animation assets and preserve authored Animators")
@@ -602,4 +652,140 @@ TEST_CASE("Retarget mapping drafts survive asset reloads and reset only for anot
     draft.Overrides.push_back({"source foot", "target foot"});
     CHECK(draft.Select(Keire::AssetId{5, 6}, Keire::AssetId{7, 8}));
     CHECK(draft.Overrides.empty());
+}
+
+TEST_CASE("Rigging Studio reveal resolves runtime outputs to their source without losing direct records")
+{
+    Keire::AssetSourceRecord model;
+    model.Id = Keire::AssetId::Generate();
+    const auto generated = Keire::AssetId::Generate();
+    Keire::AssetSourceRecord editable;
+    editable.Id = Keire::AssetId::Generate();
+    model.SubAssets = {generated, editable.Id};
+    const std::array records{model, editable};
+    CHECK(KeireEditor::ResolveRiggingStudioRevealAsset(records, model.Id) == model.Id);
+    CHECK(KeireEditor::ResolveRiggingStudioRevealAsset(records, generated) == model.Id);
+    CHECK(KeireEditor::ResolveRiggingStudioRevealAsset(records, editable.Id) == editable.Id);
+    CHECK_FALSE(KeireEditor::ResolveRiggingStudioRevealAsset(records, {}));
+    CHECK_FALSE(KeireEditor::ResolveRiggingStudioRevealAsset(records, Keire::AssetId::Generate()));
+    CHECK_FALSE(KeireEditor::ResolveRiggingStudioRevealAsset({}, generated));
+}
+
+TEST_CASE("Animator preview reports unmapped and partial retargets and recovers after skeleton reload")
+{
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.DevelopmentCatalog.clear();
+    specification.Decoders = {Keire::CreateSkeletonAssetDecoder(), Keire::CreateAnimationClipAssetDecoder()};
+    const auto sourceId = Keire::AssetId::Generate();
+    const auto targetId = Keire::AssetId::Generate();
+    const auto clipId = Keire::AssetId::Generate();
+    struct TemporaryCatalog
+    {
+        std::filesystem::path Root = std::filesystem::absolute(
+            std::filesystem::path("Build") / ("PreviewRetarget-" + Keire::AssetId::Generate().ToString()));
+        ~TemporaryCatalog()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } catalog;
+    std::filesystem::create_directories(catalog.Root);
+    // The catalog supplies type identity; live publication below supplies the payload before any load.
+    const std::array entries{Keire::Detail::CatalogEntry{.Id = clipId,
+                                                         .Type = Keire::AnimationClipAsset::StaticType(),
+                                                         .PackPath = "preview.pack",
+                                                         .Offset = 16,
+                                                         .CompressedBytes = 1,
+                                                         .UncompressedBytes = 1},
+                             Keire::Detail::CatalogEntry{.Id = sourceId,
+                                                         .Type = Keire::SkeletonAsset::StaticType(),
+                                                         .PackPath = "preview.pack",
+                                                         .Offset = 16,
+                                                         .CompressedBytes = 1,
+                                                         .UncompressedBytes = 1}};
+    specification.DevelopmentCatalog = catalog.Root / "catalog.json";
+    Keire::Detail::WriteCatalog(specification.DevelopmentCatalog, entries);
+    {
+        std::ofstream pack(catalog.Root / "preview.pack", std::ios::binary);
+        Keire::Detail::WritePackHeader(pack);
+        pack.put(0);
+        REQUIRE(pack.good());
+    }
+    const auto assets = Keire::CreateRef<Keire::AssetSystem>(specification);
+
+    const auto makeSkeleton = [](std::string first, std::string second)
+    {
+        return Keire::CreateRef<Keire::SkeletonAsset>(
+            std::vector<Keire::SkeletonBone>{{"SharedRoot", -1, {}, {}},
+                                             {std::move(first), 0, {{0, 1, 0}, {}, {1, 1, 1}}, {}},
+                                             {std::move(second), 0, {{1, 0, 0}, {}, {1, 1, 1}}, {}}});
+    };
+    REQUIRE(assets->PublishDevelopmentAsset(sourceId, makeSkeleton("CustomA", "CustomB")));
+    REQUIRE(assets->PublishDevelopmentAsset(targetId, makeSkeleton("OtherX", "OtherY")));
+    const std::vector<Keire::AnimationTrack> tracks{{1, {{0, {}}, {1, {}}}}, {2, {{0, {}}, {1, {}}}}};
+    REQUIRE(assets->PublishDevelopmentAsset(
+        clipId, Keire::AnimationClipAsset::Decode(Keire::AnimationClipAsset::Encode(sourceId, 1, tracks, {}, false))));
+    // Generated clips have runtime catalog identities but no editable source record of their own.
+    CHECK(KeireEditor::RiggingStudioClipPreviewName(clipId, assets).find(clipId.ToString()) != std::string::npos);
+    CHECK_THROWS_AS(KeireEditor::RiggingStudioClipPreviewName(sourceId, assets), std::invalid_argument);
+    CHECK_THROWS_AS(KeireEditor::RiggingStudioClipPreviewName(Keire::AssetId::Generate(), assets),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(KeireEditor::RiggingStudioClipPreviewName({}, assets), std::invalid_argument);
+    CHECK_THROWS_AS(KeireEditor::RiggingStudioClipPreviewName(clipId, {}), std::invalid_argument);
+    KeireEditor::AnimatorControllerPreviewState preview;
+    preview.Skeleton = targetId;
+    preview.SkeletonHandle = assets->Load<Keire::SkeletonAsset>(targetId);
+    INFO(preview.Diagnostic);
+    CHECK_FALSE(preview.ResolveClip(clipId, assets));
+    CHECK(preview.Diagnostic.find("incompatible") != std::string::npos);
+    CHECK(preview.Diagnostic.find("Rigging Studio") != std::string::npos);
+    REQUIRE(assets->PublishDevelopmentAsset(targetId, makeSkeleton("CustomA", "OtherY")));
+    REQUIRE(preview.ResolveClip(clipId, assets));
+    CHECK(preview.Diagnostic.find("1 of 2") != std::string::npos);
+    preview.Diagnostic.clear();
+    REQUIRE(preview.ResolveClip(clipId, assets));
+    CHECK(preview.Diagnostic.find("1 of 2") != std::string::npos);
+    const auto missingClip = Keire::AssetId::Generate();
+    const auto makeGraph = [](const Keire::AssetId first, const Keire::AssetId second)
+    {
+        Keire::AnimationGraphDefinition definition;
+        Keire::AnimationLayerDefinition layer;
+        layer.Id = "base";
+        layer.Name = "Base";
+        layer.EntryStateId = "first";
+        Keire::AnimationStateDefinition state;
+        state.Id = "first";
+        state.Name = "First";
+        state.Clip = first;
+        layer.States.push_back(state);
+        state.Id = "second";
+        state.Name = "Second";
+        state.Clip = second;
+        layer.States.push_back(state);
+        definition.Layers.push_back(layer);
+        return Keire::CreateRef<Keire::AnimationGraphAsset>(definition);
+    };
+    for (const bool missingFirst : {true, false})
+    {
+        const auto graph = makeGraph(missingFirst ? missingClip : clipId, missingFirst ? clipId : missingClip);
+        CHECK_FALSE(preview.DependenciesReady(*graph, assets));
+        CHECK(preview.Diagnostic.find("missing or incompatible") != std::string::npos);
+    }
+    const auto repairedGraph = makeGraph(clipId, clipId);
+    auto maskedDefinition = repairedGraph->Definition();
+    maskedDefinition.Layers.front().AvatarMask = Keire::AssetId::Generate();
+    const auto maskedGraph = Keire::CreateRef<Keire::AnimationGraphAsset>(maskedDefinition);
+    CHECK_FALSE(preview.DependenciesReady(*maskedGraph, assets));
+    CHECK(preview.Diagnostic.find("avatar mask") != std::string::npos);
+    CHECK(preview.DependenciesReady(*repairedGraph, assets));
+    CHECK(preview.Diagnostic.find("1 of 2") != std::string::npos);
+    REQUIRE(assets->PublishDevelopmentAsset(targetId, makeSkeleton("CustomA", "CustomB")));
+    preview.Diagnostic.clear();
+    REQUIRE(preview.ResolveClip(clipId, assets));
+    CHECK(preview.Diagnostic.empty());
+    CHECK(preview.DependenciesReady(*repairedGraph, assets));
+    CHECK(preview.Diagnostic.empty());
+    preview.Stop();
+    assets->Close();
 }

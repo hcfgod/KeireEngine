@@ -635,7 +635,10 @@ namespace Keire
         float SwapchainWaitMilliseconds = 0.0F;
         float UiRecordingMilliseconds = 0.0F;
         float GpuSubmissionMilliseconds = 0.0F;
+        /// Last completed GPU queue interval, measured by device timestamps. Valid when GpuTimingSupported is true.
         float GpuFrameMilliseconds = 0.0F;
+        /// Originating accepted frame ID for the asynchronous GPU timing sample; zero means unavailable.
+        std::uint64_t GpuTimingFrame = 0;
         float GpuCompletionLatencyMilliseconds = 0.0F;
         float VfxGpuCompletionLatencyMilliseconds = 0.0F;
         float RendererLatencyMilliseconds = 0.0F;

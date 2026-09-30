@@ -234,7 +234,8 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
         throw std::invalid_argument("Only .keirescene assets can be opened as scenes.");
     const auto source = m_AssetDatabase->Specification().ProjectRoot /
                         m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    const auto definition = Keire::SceneAsset::Decode(ReadSceneBytes(source))->Definition();
+    auto loadedBytes = ReadSceneBytes(source);
+    const auto definition = Keire::SceneAsset::Decode(loadedBytes)->Definition();
     auto scene = Keire::CreateRef<Keire::Scene>(asset, definition, Owner().Scenes()->Components());
     scene->MarkSaved();
     Keire::Ref<Keire::UndoContext> context;
@@ -247,7 +248,7 @@ void EditorWorkspaceLayer::OpenScene(const Keire::AssetId asset)
     DiscardSceneRecovery();
     if (m_SceneDocument->UndoContext())
         m_SceneDocument->UndoContext()->Close();
-    m_SceneDocument->Open(std::move(scene), asset, source, std::move(context));
+    m_SceneDocument->Open(std::move(scene), asset, source, std::move(context), std::move(loadedBytes));
     if (const auto project = Owner().GetProject())
         m_SceneDocument->SetRecoveryPath(project->SceneRecoveryDirectory() /
                                          (asset.ToString() + ".keirescene.recovery"));
@@ -310,95 +311,6 @@ void EditorWorkspaceLayer::RequestOpenScene(const Keire::AssetId asset)
         return;
     }
     QueueSceneTransition(DocumentAction::Open, asset);
-}
-
-void EditorWorkspaceLayer::SaveScene()
-{
-    if (m_PrefabEditingStage)
-    {
-        SavePrefabEditingStage();
-        return;
-    }
-    if (!m_SceneDocument->EditingScene() || !m_AssetDatabase || !m_SceneDocument->Asset())
-        return;
-    try
-    {
-        m_SceneDocument->Save();
-        QueueMaterialCatalogRefresh(m_SceneDocument->Asset());
-        m_SceneDocument->SetStatus("Scene saved atomically; refreshing runtime content in the background.");
-        AddConsoleMessage("Scene", "Saved " + Keire::Detail::PathToUtf8(m_SceneDocument->Source().filename()),
-                          m_Theme.Success);
-    }
-    catch (const std::exception& error)
-    {
-        m_SceneDocument->SetStatus(std::string("Scene save failed: ") + error.what());
-        ReportError("Scene", m_SceneDocument->Status());
-    }
-}
-
-void EditorWorkspaceLayer::SaveSceneAs()
-{
-    if (!m_SceneDocument->EditingScene() || !m_AssetDatabase || m_SceneDocument->SaveDialog())
-        return;
-    const auto assets = m_AssetDatabase->Specification().ProjectRoot / m_AssetDatabase->Specification().SourceDirectory;
-    Keire::SaveFileDialogSpecification dialog;
-    dialog.Title = "Save Scene As";
-    dialog.DefaultLocation = assets / "Scenes";
-    dialog.DefaultName = m_SceneDocument->EditingScene()->Name() + " Copy.keirescene";
-    dialog.FilterName = "Kéire Scene";
-    dialog.Extension = "keirescene";
-    m_SceneDocument->SetSaveDialog(Owner().Windows()->ShowSaveFileDialog(Owner().MainWindow()->Id(), dialog));
-    m_SceneDocument->SetStatus("Choose a new scene path under this project's Assets directory.");
-}
-
-void EditorWorkspaceLayer::CompleteSaveSceneAs()
-{
-    if (!m_SceneDocument->SaveDialog() ||
-        m_SceneDocument->SaveDialog()->Status() == Keire::SaveFileDialogStatus::Pending)
-        return;
-    const auto operation = m_SceneDocument->TakeSaveDialog();
-    if (operation->Status() == Keire::SaveFileDialogStatus::Cancelled)
-        return;
-    if (operation->Status() == Keire::SaveFileDialogStatus::Failed)
-    {
-        m_SceneDocument->SetStatus("Save As dialog failed: " + operation->Diagnostic());
-        return;
-    }
-    try
-    {
-        auto destination = operation->SelectedPath();
-        if (destination.extension() != ".keirescene")
-            destination += ".keirescene";
-        const auto assets = std::filesystem::weakly_canonical(m_AssetDatabase->Specification().ProjectRoot /
-                                                              m_AssetDatabase->Specification().SourceDirectory);
-        const auto parent = std::filesystem::weakly_canonical(destination.parent_path());
-        const auto relativeParent = std::filesystem::relative(parent, assets);
-        if (relativeParent.empty() || relativeParent.native().starts_with(std::filesystem::path("..").native()) ||
-            destination.filename().empty())
-            throw std::invalid_argument("Scene Save As must remain inside the project's Assets directory.");
-        if (std::filesystem::exists(destination))
-            throw std::invalid_argument("Scene Save As requires a new path and will not overwrite an existing asset.");
-        const auto sourceDefinition = m_SceneDocument->EditingScene()->Snapshot();
-        auto definition = sourceDefinition;
-        definition.Name = Keire::Detail::PathToUtf8(destination.stem());
-        const auto bytes = Keire::SceneAsset::Encode(definition);
-        const auto relative = relativeParent / destination.filename();
-        if (!m_AssetOperations)
-            throw std::logic_error("The isolated asset worker is unavailable.");
-        m_AssetOperations->QueueCreateAsset(relative, bytes, {},
-                                            {.FollowUp = KeireEditor::AssetOperationFollowUp::AdoptSceneCopy,
-                                             .UndoName = "Save Scene As",
-                                             .SceneSnapshot = definition,
-                                             .SourceSceneSnapshot = sourceDefinition,
-                                             .SourceSceneAsset = m_SceneDocument->Asset(),
-                                             .SceneSource = destination});
-        m_SceneDocument->SetStatus("Saving the scene copy in the isolated asset worker.");
-    }
-    catch (const std::exception& error)
-    {
-        m_SceneDocument->SetStatus(std::string("Scene Save As failed: ") + error.what());
-        ReportError("Scene", m_SceneDocument->Status());
-    }
 }
 
 void EditorWorkspaceLayer::RequestCloseScene()

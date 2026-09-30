@@ -288,6 +288,7 @@ namespace Keire
                 contact.Foot >= localPose.size() || !IsDescendantOf(skeleton, contact.LowerLeg, contact.UpperLeg) ||
                 !IsDescendantOf(skeleton, contact.Foot, contact.LowerLeg) || !feet.insert(contact.Foot).second ||
                 !Math::IsFinite(contact.Position) || !Math::IsFinite(contact.Normal) ||
+                (contact.SupportPosition && !Math::IsFinite(*contact.SupportPosition)) ||
                 Length(contact.Normal) <= Epsilon || !Math::IsFinite(contact.Pole) || !std::isfinite(contact.Weight) ||
                 contact.Weight < 0.0F || contact.Weight > 1.0F || !std::isfinite(contact.RotationWeight) ||
                 contact.RotationWeight < 0.0F || contact.RotationWeight > 1.0F ||
@@ -344,8 +345,6 @@ namespace Keire
             {
                 const auto sampledPelvis = Math::TransformPoint(sampledWorld[*request.Pelvis], {});
                 const auto sampledTorso = Math::TransformPoint(sampledWorld[*request.Torso], {});
-                const auto bindPelvis = Math::TransformPoint(bindWorld[*request.Pelvis], {});
-                const auto bindTorso = Math::TransformPoint(bindWorld[*request.Torso], {});
                 Vector3 averageNormal;
                 for (const auto& contact : supportContacts)
                     averageNormal =
@@ -353,7 +352,9 @@ namespace Keire
                                                     contact.Weight * contact.SupportWeight / totalSupportWeight));
                 averageNormal = Normalize(averageNormal);
                 const auto slopeRotation = FromTo({0.0F, 1.0F, 0.0F}, averageNormal);
-                const auto desiredTorsoDirection = Rotate(slopeRotation, Normalize(Subtract(bindTorso, bindPelvis)));
+                // Terrain adds tilt to the authored lean; flat support must not straighten the animation.
+                const auto desiredTorsoDirection =
+                    Rotate(slopeRotation, Normalize(Subtract(sampledTorso, sampledPelvis)));
                 auto correction = FromTo(Subtract(sampledTorso, sampledPelvis), desiredTorsoDirection);
                 correction = Normalize(correction);
                 const auto angleRadians = 2.0F * std::acos(std::clamp(std::abs(correction.W), 0.0F, 1.0F));
@@ -385,9 +386,9 @@ namespace Keire
                         Add(sampledFootCenter,
                             Multiply(Math::TransformPoint(sampledWorld[contact.Foot], {}), normalizedWeight));
                     targetFootCenter =
-                        Add(targetFootCenter,
-                            Multiply(Add(contact.Position, Multiply(Normalize(contact.Normal), request.FootHeight)),
-                                     normalizedWeight));
+                        Add(targetFootCenter, Multiply(Add(contact.SupportPosition.value_or(contact.Position),
+                                                           Multiply(Normalize(contact.Normal), request.FootHeight)),
+                                                       normalizedWeight));
                 }
                 const auto sampledPelvis = Math::TransformPoint(sampledWorld[*request.Pelvis], {});
                 const auto currentPelvis = Math::TransformPoint(world[*request.Pelvis], {});
@@ -411,7 +412,8 @@ namespace Keire
                 const auto lower = Math::TransformPoint(world[contact.LowerLeg], {});
                 const auto foot = Math::TransformPoint(world[contact.Foot], {});
                 const auto reach = Length(Subtract(lower, upper)) + Length(Subtract(foot, lower));
-                const auto target = Add(contact.Position, Multiply(Normalize(contact.Normal), request.FootHeight));
+                const auto target = Add(contact.SupportPosition.value_or(contact.Position),
+                                        Multiply(Normalize(contact.Normal), request.FootHeight));
                 const auto movedUpper = Add(upper, result.HorizontalPelvisAdjustment);
                 const auto dx = target.X - movedUpper.X;
                 const auto dz = target.Z - movedUpper.Z;

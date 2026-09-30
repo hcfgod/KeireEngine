@@ -81,7 +81,7 @@ function Get-LockedDependencySource {
     return $source
 }
 
-function Get-AssimpPatchDigest {
+function Get-DependencyPatchDigest {
     param([Parameter(Mandatory = $true)][IO.FileInfo[]]$PatchFiles)
 
     $hasher = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
@@ -97,96 +97,124 @@ function Get-AssimpPatchDigest {
     }
 }
 
-function Assert-PatchedAssimpSource {
+function Assert-PatchedDependencySource {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
         [Parameter(Mandatory = $true)][string]$Commit,
         [Parameter(Mandatory = $true)][string]$Digest,
-        [Parameter(Mandatory = $true)][IO.FileInfo[]]$PatchFiles
+        [Parameter(Mandatory = $true)][IO.FileInfo[]]$PatchFiles,
+        [ValidateSet("Assimp", "SDL")][string]$Name = "Assimp"
     )
+
+    $dependencySlug = $Name.ToLowerInvariant()
 
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if (-not $item -or -not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
-        throw "Patched Assimp source is missing or unsafe: $Path"
+        throw "Patched $Name source is missing or unsafe: $Path"
     }
     $head = ([string](& git -C $Path rev-parse HEAD)).Trim()
     if ($LASTEXITCODE -ne 0 -or $head -ne $Commit) {
-        throw "Patched Assimp source is not based on locked commit $Commit."
+        throw "Patched $Name source is not based on locked commit $Commit."
     }
-    $stamp = Join-Path $Path "keire-assimp-patch.stamp"
+    $stamp = Join-Path $Path "keire-$dependencySlug-patch.stamp"
     if (-not (Test-Path -LiteralPath $stamp -PathType Leaf) -or
         (Get-Content -LiteralPath $stamp -Raw).Trim() -ne "$Commit|$Digest") {
-        throw "Patched Assimp source stamp does not match the locked commit and patch digest."
+        throw "Patched $Name source stamp does not match the locked commit and patch digest."
     }
     foreach ($patch in $PatchFiles) {
         & git -C $Path apply --reverse --check --whitespace=error-all -- $patch.FullName
-        if ($LASTEXITCODE -ne 0) { throw "Assimp patch is not applied cleanly: $($patch.Name)" }
+        if ($LASTEXITCODE -ne 0) { throw "$Name patch is not applied cleanly: $($patch.Name)" }
     }
     & git -C $Path diff --check
-    if ($LASTEXITCODE -ne 0) { throw "Patched Assimp source contains invalid whitespace." }
+    if ($LASTEXITCODE -ne 0) { throw "Patched $Name source contains invalid whitespace." }
     $expectedPaths = @($PatchFiles | ForEach-Object {
         Select-String -LiteralPath $_.FullName -Pattern '^diff --git a/(.+) b/(.+)$' | ForEach-Object {
             $_.Matches[0].Groups[2].Value
         }
     } | Sort-Object -Unique)
-    $actualPaths = @(& git -C $Path diff --name-only --no-ext-diff | Sort-Object -Unique)
+    & git -C $Path diff --cached --quiet --exit-code
+    if ($LASTEXITCODE -ne 0) { throw "Patched $Name source contains staged changes." }
+    $actualPaths = @(& git -C $Path diff HEAD --name-only --no-ext-diff | Sort-Object -Unique)
     if ($LASTEXITCODE -ne 0 -or (Compare-Object $expectedPaths $actualPaths)) {
-        throw "Patched Assimp source contains changes outside the committed patch set."
+        throw "Patched $Name source contains changes outside the committed patch set."
+    }
+    $expectedBlobs = @{}
+    foreach ($patch in $PatchFiles) {
+        $relativePath = $null
+        foreach ($line in [IO.File]::ReadLines($patch.FullName)) {
+            if ($line -match '^diff --git a/(.+) b/(.+)$') { $relativePath = $Matches[2] }
+            elseif ($line -match '^index [0-9a-f]+\.\.([0-9a-f]{9,40})(?: [0-7]{6})?$' -and $relativePath) {
+                $expectedBlobs[$relativePath] = $Matches[1]
+            }
+        }
+    }
+    if (Compare-Object $expectedPaths @($expectedBlobs.Keys | Sort-Object)) {
+        throw "Dependency patch is missing final blob identities."
+    }
+    foreach ($relativePath in $expectedBlobs.Keys) {
+        $actualBlob = ([string](& git -C $Path hash-object "--path=$relativePath" -- $relativePath)).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $actualBlob.StartsWith($expectedBlobs[$relativePath], [StringComparison]::Ordinal)) {
+            throw "Patched $Name content differs from the declared patch: $relativePath"
+        }
     }
     $untracked = @(& git -C $Path ls-files --others --exclude-standard)
-    if ($LASTEXITCODE -ne 0 -or $untracked.Count -ne 1 -or $untracked[0] -ne "keire-assimp-patch.stamp") {
-        throw "Patched Assimp source contains unexpected untracked files."
+    if ($LASTEXITCODE -ne 0 -or $untracked.Count -ne 1 -or $untracked[0] -ne "keire-$dependencySlug-patch.stamp") {
+        throw "Patched $Name source contains unexpected untracked files."
     }
 }
 
-function Get-PatchedAssimpSource {
+function Get-PatchedDependencySource {
     param(
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$Commit,
         [Parameter(Mandatory = $true)][string]$Digest,
-        [Parameter(Mandatory = $true)][IO.FileInfo[]]$PatchFiles
+        [Parameter(Mandatory = $true)][IO.FileInfo[]]$PatchFiles,
+        [ValidateSet("Assimp", "SDL")][string]$Name = "Assimp"
     )
+
+    $dependencySlug = $Name.ToLowerInvariant()
 
     $sourceBase = Join-Path $env:LOCALAPPDATA "KeireDependencySources"
     $sourceContainerRoot = Split-Path $sourceBase -Parent
     $commitPrefix = $Commit.Substring(0, 8)
     $digestPrefix = $Digest.Substring(0, 8)
+    $patchPrefix = if ($Name -eq "Assimp") { "ap" } else { "sp" }
     $patched = Get-KeireWorkspaceJunctionPath -BasePath $sourceBase `
-        -Prefix "ap-$commitPrefix-$digestPrefix" -RepositoryRoot $Root
+        -Prefix "$patchPrefix-$commitPrefix-$digestPrefix" -RepositoryRoot $Root
     if (Test-Path -LiteralPath $patched) {
-        Assert-PatchedAssimpSource $patched $Commit $Digest $PatchFiles
+        Assert-PatchedDependencySource $patched $Commit $Digest $PatchFiles -Name $Name
         return $patched
     }
 
     New-Item -ItemType Directory -Force $sourceBase | Out-Null
     $cacheLock = Enter-KeireWorkspaceLock -RepositoryRoot $sourceBase `
-        -CommandName "dependency-source-assimp-patched-$Commit-$digestPrefix" `
-        -LockRelativePath ".locks\assimp-patched-$Commit-$digestPrefix.lock"
+        -CommandName "dependency-source-$dependencySlug-patched-$Commit-$digestPrefix" `
+        -LockRelativePath ".locks\$dependencySlug-patched-$Commit-$digestPrefix.lock"
     $temporary = "$patched.tmp-$PID"
     try {
         if (Test-Path -LiteralPath $patched) {
-            Assert-PatchedAssimpSource $patched $Commit $Digest $PatchFiles
+            Assert-PatchedDependencySource $patched $Commit $Digest $PatchFiles -Name $Name
             return $patched
         }
         if (Get-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue) {
             Remove-KeireGeneratedDirectory -RepositoryRoot $sourceContainerRoot -AllowedRoot $sourceBase `
-                -Path $temporary -Description "temporary patched Assimp source"
+                -Path $temporary -Description "temporary patched $Name source"
         }
         & git -c core.longpaths=true clone --quiet --no-hardlinks $Source $temporary
-        if ($LASTEXITCODE -ne 0) { throw "Could not clone the locked Assimp submodule." }
+        if ($LASTEXITCODE -ne 0) { throw "Could not clone the locked $Name submodule." }
         & git -C $temporary config core.longpaths true
-        if ($LASTEXITCODE -ne 0) { throw "Could not enable long paths for the patched Assimp source." }
+        if ($LASTEXITCODE -ne 0) { throw "Could not enable long paths for the patched $Name source." }
         $temporaryHead = ([string](& git -C $temporary rev-parse HEAD)).Trim()
         if ($LASTEXITCODE -ne 0 -or $temporaryHead -ne $Commit) {
-            throw "Temporary Assimp source is not based on locked commit $Commit."
+            throw "Temporary $Name source is not based on locked commit $Commit."
         }
         foreach ($patch in $PatchFiles) {
             & git -C $temporary apply --whitespace=error-all -- $patch.FullName
-            if ($LASTEXITCODE -ne 0) { throw "Could not apply Assimp patch $($patch.Name)." }
+            if ($LASTEXITCODE -ne 0) { throw "Could not apply $Name patch $($patch.Name)." }
         }
-        [IO.File]::WriteAllText((Join-Path $temporary "keire-assimp-patch.stamp"), "$Commit|$Digest`n",
+        [IO.File]::WriteAllText((Join-Path $temporary "keire-$dependencySlug-patch.stamp"), "$Commit|$Digest`n",
             [Text.UTF8Encoding]::new($false))
-        Assert-PatchedAssimpSource $temporary $Commit $Digest $PatchFiles
+        Assert-PatchedDependencySource $temporary $Commit $Digest $PatchFiles -Name $Name
         Move-Item -LiteralPath $temporary -Destination $patched
     }
     catch {
@@ -194,10 +222,10 @@ function Get-PatchedAssimpSource {
         if (Get-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue) {
             try {
                 Remove-KeireGeneratedDirectory -RepositoryRoot $sourceContainerRoot -AllowedRoot $sourceBase `
-                    -Path $temporary -Description "temporary patched Assimp source"
+                    -Path $temporary -Description "temporary patched $Name source"
             }
             catch {
-                Write-Warning "Could not safely clean temporary patched Assimp source '$temporary': $($_.Exception.Message)"
+                Write-Warning "Could not safely clean temporary patched $Name source '$temporary': $($_.Exception.Message)"
             }
         }
         throw $failure
@@ -205,7 +233,7 @@ function Get-PatchedAssimpSource {
     finally {
         Exit-KeireWorkspaceLock -Lock $cacheLock
     }
-    Assert-PatchedAssimpSource $patched $Commit $Digest $PatchFiles
+    Assert-PatchedDependencySource $patched $Commit $Digest $PatchFiles -Name $Name
     return $patched
 }
 
@@ -226,16 +254,31 @@ if ($LASTEXITCODE -ne 0 -or $assimpHead -ne $Lock.ASSIMP_COMMIT -or $assimpStatu
 $assimpPatchRoot = Join-Path $Root "Patches\Assimp"
 $assimpPatchFiles = @(Get-ChildItem -LiteralPath $assimpPatchRoot -Filter "*.patch" -File | Sort-Object Name)
 if ($assimpPatchFiles.Count -eq 0) { throw "The Kéire Assimp patch set is empty." }
-$assimpPatchDigest = Get-AssimpPatchDigest $assimpPatchFiles
-$assimpPatchedSource = Get-PatchedAssimpSource $assimpSource $Lock.ASSIMP_COMMIT `
+$assimpPatchDigest = Get-DependencyPatchDigest $assimpPatchFiles
+$assimpPatchedSource = Get-PatchedDependencySource $assimpSource $Lock.ASSIMP_COMMIT `
     $assimpPatchDigest $assimpPatchFiles
 $assimpPatchedLink = Join-Path $Root "Build\Dependencies\assimp-patched-$($assimpPatchDigest.Substring(0, 16))"
 Initialize-KeireWorkspaceJunction -Path $assimpPatchedLink -Target $assimpPatchedSource | Out-Null
 
+$sdlSource = Join-Path $Root "Vendor\SDL"
+$sdlSourceItem = Get-Item -LiteralPath $sdlSource -Force
+if (-not $sdlSourceItem.PSIsContainer -or ($sdlSourceItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw "The SDL submodule must be an ordinary source directory."
+}
+$sdlHead = ([string](& git -C $sdlSource rev-parse HEAD)).Trim()
+if ($LASTEXITCODE -ne 0 -or $sdlHead -ne $Lock.SDL_COMMIT) { throw "SDL must match its locked commit." }
+$sdlStatus = @(& git -C $sdlSource status --porcelain --untracked-files=all)
+if ($LASTEXITCODE -ne 0 -or $sdlStatus.Count -ne 0) { throw "The SDL submodule must remain clean before patching." }
+$sdlPatchRoot = Join-Path $Root "Patches\SDL"
+$sdlPatchFiles = @(Get-ChildItem -LiteralPath $sdlPatchRoot -Filter "*.patch" -File | Sort-Object Name)
+if ($sdlPatchFiles.Count -eq 0) { throw "The Kéire SDL patch set is empty." }
+$sdlPatchDigest = Get-DependencyPatchDigest $sdlPatchFiles
+$sdlPatchedSource = Get-PatchedDependencySource $sdlSource $Lock.SDL_COMMIT $sdlPatchDigest $sdlPatchFiles -Name "SDL"
+
 $compiler = if ($Toolset -eq "clang") { (& clang++ --version | Select-Object -First 1) }
 elseif ($Toolset -eq "gcc") { (& g++ --version | Select-Object -First 1) }
 else { "MSVC $env:VCToolsVersion WindowsSDK $env:WindowsSDKVersion" }
-$sourceLayoutIdentity = "workspace-assimp-v3:${assimpPatchedSource}:${assimpPatchDigest}"
+$sourceLayoutIdentity = "workspace-patches-v4:${assimpPatchedSource}:${assimpPatchDigest}:${sdlPatchedSource}:${sdlPatchDigest}"
 $options = @(
     "-DSDL_SHARED=OFF", "-DSDL_STATIC=ON", "-DSDL_TEST_LIBRARY=OFF", "-DSDL_TESTS=OFF",
     "-DSDL_EXAMPLES=OFF", "-DSDL_AUDIO=OFF", "-DSDL_CAMERA=OFF", "-DSDL_JOYSTICK=ON",
@@ -363,7 +406,9 @@ foreach ($configuration in @("Debug", "Release")) {
     $sodiumRuntime = Join-Path $install "bin\libsodium.dll"
     $sodiumLicense = Join-Path $install "share\licenses\libsodium\LICENSE"
     $stamp = Join-Path $build "keire-dependency.stamp"
-    $valid = -not $Force -and (Test-Path $library) -and (Test-Path $assimpLibrary) -and
+    $valid = -not $Force -and (Test-Path (Join-Path $install "share\keire\sdl-patch.stamp")) -and
+        ((Get-Content -LiteralPath (Join-Path $install "share\keire\sdl-patch.stamp") -Raw).Trim() -eq "$($Lock.SDL_COMMIT)|$sdlPatchDigest") -and
+        (Test-Path $library) -and (Test-Path $assimpLibrary) -and
         (Test-Path $joltLibrary) -and (Test-Path $recastLibrary) -and (Test-Path $detourLibrary) -and
         (Test-Path $detourCrowdLibrary) -and (Test-Path $detourTileCacheLibrary) -and
         (Test-Path $miniaudioLibrary) -and (Test-Path $freetypeLibrary) -and (Test-Path $harfbuzzLibrary) -and
@@ -388,7 +433,7 @@ foreach ($configuration in @("Debug", "Release")) {
     New-Item -ItemType Directory -Force -Path $build | Out-Null
     Write-Host "==> Configuring native dependencies ($configuration)"
     & cmake -S (Join-Path $Root "Scripts\Dependencies") -B $build -G Ninja "-DCMAKE_MAKE_PROGRAM=$Ninja" `
-        "-DKEIRE_SDL_SOURCE=$(Join-Path $Root 'Vendor\SDL')" `
+        "-DKEIRE_SDL_SOURCE=$sdlPatchedSource" `
         "-DKEIRE_ASSIMP_SOURCE=$assimpPatchedSource" "-DKEIRE_JOLT_SOURCE=$joltSource" `
         "-DKEIRE_RECAST_SOURCE=$recastSource" "-DKEIRE_MINIAUDIO_SOURCE=$miniaudioSource" `
         "-DKEIRE_FREETYPE_SOURCE=$freetypeSource" "-DKEIRE_HARFBUZZ_SOURCE=$harfbuzzSource" `
@@ -417,6 +462,9 @@ foreach ($configuration in @("Debug", "Release")) {
         -not (Test-Path -LiteralPath (Join-Path $install "cmake\SDL3Config.cmake"))) {
         throw "Native $configuration dependency install is incomplete."
     }
+    $sdlPatchStamp = Join-Path $install "share\keire\sdl-patch.stamp"
+    New-Item -ItemType Directory -Force (Split-Path $sdlPatchStamp -Parent) | Out-Null
+    [IO.File]::WriteAllText($sdlPatchStamp, "$($Lock.SDL_COMMIT)|$sdlPatchDigest`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText($stamp, "$key|$configuration`n", [Text.UTF8Encoding]::new($false))
 }
 
@@ -500,6 +548,7 @@ $manifest = @"
 DependencyManifest = {
     MacOSDeploymentTarget = "$($Lock.MACOS_DEPLOYMENT_TARGET)",
     SDLCommit = "$($Lock.SDL_COMMIT)",
+    SDLPatchDigest = "$sdlPatchDigest",
     JSONCommit = "$($Lock.JSON_COMMIT)",
     AssimpCommit = "$($Lock.ASSIMP_COMMIT)",
     AssimpPatchDigest = "$assimpPatchDigest",

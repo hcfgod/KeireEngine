@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorManagedRuntimeCoordinator.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
@@ -21,7 +22,6 @@
 #include <array>
 #include <cctype>
 #include <cmath>
-#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <optional>
@@ -161,20 +161,7 @@ namespace
         return result.str();
     }
 
-    [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
-    {
-        std::ifstream stream(path, std::ios::binary | std::ios::ate);
-        if (!stream)
-            throw std::runtime_error("Could not open prefab source: " + Keire::Detail::PathToUtf8(path));
-        const auto size = stream.tellg();
-        if (size < 0 || size > static_cast<std::streamoff>(64U * 1024U * 1024U))
-            throw std::runtime_error("Prefab source size is invalid.");
-        std::vector<std::byte> result(static_cast<std::size_t>(size));
-        stream.seekg(0);
-        if (!result.empty() && !stream.read(reinterpret_cast<char*>(result.data()), size))
-            throw std::runtime_error("Could not read prefab source: " + Keire::Detail::PathToUtf8(path));
-        return result;
-    }
+    using KeireEditor::Detail::ReadBytes;
 } // namespace
 
 void EditorWorkspaceLayer::DrawBuildSettings(Keire::UiFrame& ui)

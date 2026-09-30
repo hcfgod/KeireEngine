@@ -760,11 +760,16 @@ assert_true grep -F -q 'git add Vendor/%s Config/Dependencies.lock' "$ROOT/Scrip
 assert_true grep -q 'keire-dependency.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q -- '-DKEIRE_ASSIMP_SOURCE="$assimp_patched_source"' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q 'assimp_patch_root="$ROOT/Patches/Assimp"' "$ROOT/Scripts/Unix/dependencies.sh"
-assert_true grep -F -q 'keire-assimp-patch.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'keire-$dependency_slug-patch.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q 'key="$sdl_commit|$assimp_commit|$assimp_patch_digest|' \
   "$ROOT/Scripts/Unix/dependencies.sh"
 assert_true grep -F -q 'AssimpPatchDigest = "$assimp_patch_digest"' \
   "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'sdl_patch_root="$ROOT/Patches/SDL"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q -- '-DKEIRE_SDL_SOURCE="$sdl_patched_source"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'SDLPatchDigest = "$sdl_patch_digest"' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q '$assimp_patch_digest|$sdl_patch_digest|' "$ROOT/Scripts/Unix/dependencies.sh"
+assert_true grep -F -q 'share/keire/sdl-patch.stamp' "$ROOT/Scripts/Unix/dependencies.sh"
 assimp_identity_patch="$ROOT/Patches/Assimp/fbx-model-id-names.patch"
 assert_true grep -F -q 'void FBXConverter::BuildModelNames()' "$assimp_identity_patch"
 assert_true grep -F -q 'ModelName(*cluster->TargetNode())' "$assimp_identity_patch"

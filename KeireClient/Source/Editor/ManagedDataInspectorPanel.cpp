@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/ManagedDataInspectorPanel.h"
+#include "KeireClient/Editor/EditorAssetFileService.h"
 
 #include "Keire/Core.h"
 #include "KeireClient/Editor/AssetPicker.h"
@@ -9,8 +10,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
-#include <fstream>
-#include <iterator>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
@@ -25,16 +24,7 @@ namespace KeireEditor
         constexpr std::size_t MaximumVisibleRawBytes = std::size_t{8U} * 1024U;
         constexpr std::size_t MaximumEditableCollectionElements = 4096;
 
-        [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
-        {
-            std::ifstream input(path, std::ios::binary);
-            if (!input)
-                throw std::runtime_error("Could not open the managed data source.");
-            const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-            std::vector<std::byte> result(characters.size());
-            std::ranges::transform(characters, result.begin(), [](const char value) { return std::byte(value); });
-            return result;
-        }
+        using Detail::ReadBytes;
 
         [[nodiscard]] std::int64_t MinimumInteger(const Keire::ManagedAssetPropertyDescriptor& property)
         {

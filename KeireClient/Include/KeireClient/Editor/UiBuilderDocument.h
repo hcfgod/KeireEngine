@@ -1,5 +1,7 @@
 #pragma once
 
+#include "KeireClient/Editor/DocumentSourcePersistence.h"
+
 #include "Keire/Scenes/ScenePresentationRuntime.h"
 #include "Keire/Ui.h"
 #include "Keire/Ui/UiToolkit.h"
@@ -391,6 +393,7 @@ namespace KeireEditor
         std::uint64_t m_Revision = 0;
         std::uint64_t m_Generation = 0;
         std::filesystem::path m_Source;
+        DocumentSourcePersistence m_Persistence;
         Keire::Ref<Keire::UndoContext> m_Undo;
         bool m_Dirty = false;
     };

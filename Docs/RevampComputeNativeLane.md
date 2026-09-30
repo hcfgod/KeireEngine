@@ -48,10 +48,10 @@ device inert before throwing. Native storage is retained until stack guards unwi
 reclaims it. Recovery requires a fresh device and new resources; automatic reload or recreation is not claimed.
 
 `Application::Compute()` lazily owns a reference-counted compute device selected from the live renderer backend. It
-rejects access outside an active rendered application or from another thread. The application waits for compute work
-before UI and non-UI presentation and shuts the service down before renderer/window teardown on normal and exceptional
-exit. References retained by clients are inert after shutdown. This is an interim application-owned independent queue
-and coarse completion barrier, not shared graphics resources or final frame-graph scheduling.
+rejects access outside an active rendered application or from another thread. Before UI and non-UI presentation the
+application polls completed compute fences without waiting, and shuts the service down before renderer/window teardown
+on normal and exceptional exit. References retained by clients are inert after shutdown. This is an application-owned
+independent device, without shared graphics resources or frame-graph scheduling.
 
 ## Checks performed by this lane
 
@@ -70,7 +70,7 @@ The lead owns compiler-to-GPU execution tests, managed integration, umbrella-hea
 build evidence. This lane has not run Debug, Release, AddressSanitizer, Linux, macOS, or packaged consumer validation.
 
 The independent GPU device is backend infrastructure. It does not share buffers with `RenderSystem`, participate in the
-engine frame graph beyond its coarse application presentation barrier, expose storage textures/samplers, automatically recover after device loss, reload
+engine frame graph, expose storage textures/samplers, automatically recover after device loss, reload
 programs in place, or implement graphics indirect draws. Those integration gates remain open. No editor creation menu or
 material picker was changed by this lane.
 
@@ -113,3 +113,23 @@ Still open: storage textures/samplers and their verified compiler reflection, sh
 scheduling, automatic device recreation, and actual Vulkan/Metal host runs. Texture support requires public opaque
 texture identities, format/mip/access validation, SDL texture transfer ownership, managed commands, and SPIR-V image
 reflection; adding only dispatch bindings would not close this contract.
+
+## September 29 review: nonblocking presentation retirement
+
+`ComputeDevice::PollCompletions` queries existing submission fences and releases only fences already signaled by the
+GPU. It returns the number of native fences retired, retains completed submission identities, and preserves readback
+transfers until explicit `ReleaseSubmission`. It neither initializes an unused device nor waits for pending work.
+It follows the existing owner-thread/open-device contract. Repeated polling after retirement returns zero.
+
+Both application presentation paths now use this poll instead of `WaitIdle`. There are no graphics consumers of these
+independent-device buffers, so unrelated rendering has no dependency requiring a device-wide barrier. Actual CPU
+consumers still synchronize through `Wait`, `Readback`, or `GetReadback`; ordered compute submissions remain on the
+same device. `ReleaseSubmission` retains its synchronous contract, and shutdown retains its full device-idle barrier
+before releasing transfers, resources, and the device. This change does not introduce graphics resource sharing or
+claim a measured frame-rate improvement.
+
+Focused tests cover lazy polling, wrong-thread rejection without state mutation, shutdown rejection, repeated fence
+retirement, retained completion identities, readback data after source destruction, and shutdown with an unreleased
+snapshot. The hardware tests are `compute GPU D3D12*`, `compute GPU Vulkan*`, and `compute GPU Metal*` in `KeireTests`;
+they require `--no-skip` and a built shader compiler on their native hosts. Debug/Release, ASan lifecycle, packaged SDK,
+and hardware execution are delegated to the coordinated validation chat; this edit records no new execution pass.

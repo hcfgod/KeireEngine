@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/DocumentSourcePersistence.h"
 
 #include <cstddef>
 #include <filesystem>
@@ -98,17 +99,22 @@ namespace KeireEditor
         void SetMeshRenderersMaterial(std::span<const Keire::AssetId> entities, std::size_t slot,
                                       Keire::AssetId material);
         void Open(Keire::Ref<Keire::Scene> scene, Keire::AssetId asset = {}, std::filesystem::path source = {},
-                  Keire::Ref<Keire::UndoContext> undo = {});
+                  Keire::Ref<Keire::UndoContext> undo = {},
+                  std::optional<std::vector<std::byte>> loadedBytes = std::nullopt);
         void ReplaceEditingScene(Keire::Ref<Keire::Scene> scene, bool preserveSelection = true);
         void SetLoadOperation(Keire::Ref<Keire::SceneLoadOperation> operation) noexcept;
         void SetSaveDialog(Keire::Ref<Keire::SaveFileDialogOperation> operation) noexcept;
         [[nodiscard]] Keire::Ref<Keire::SaveFileDialogOperation> TakeSaveDialog() noexcept;
         void SetUndoContext(Keire::Ref<Keire::UndoContext> undo) noexcept;
-        void SetIdentity(Keire::AssetId asset, std::filesystem::path source);
+        void SetIdentity(Keire::AssetId asset, std::filesystem::path source,
+                         std::optional<std::vector<std::byte>> loadedBytes = std::nullopt);
         /// Changing the recovery target resets its timer and detects snapshots belonging to the new target.
         void SetRecoveryPath(std::filesystem::path path);
         void SetStatus(std::string status);
-        void Save();
+        void Save(bool overwriteExternalChanges = false);
+        void ReloadSource();
+        void DismissSourceConflict() noexcept { m_Persistence.DismissConflict(); }
+        [[nodiscard]] bool SourceConflict() const noexcept { return m_Persistence.Conflict(); }
         /// Autosaves silently; an unresolved snapshot from a previously opened document is never overwritten.
         [[nodiscard]] bool WriteRecovery();
         void RestoreRecovery();
@@ -135,6 +141,7 @@ namespace KeireEditor
         Keire::AssetId m_Selection;
         std::vector<Keire::AssetId> m_Selections;
         std::filesystem::path m_Source;
+        DocumentSourcePersistence m_Persistence;
         std::filesystem::path m_RecoveryPath;
         std::string m_Status;
         double m_RecoverySeconds = 0.0;

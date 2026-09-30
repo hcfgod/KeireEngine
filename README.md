@@ -353,6 +353,12 @@ or explicitly save the scene. Asset Inspector file actions use full-width rows s
 Rename, Duplicate, and Move to Trash remain accessible in narrow panels.
 Inspector Duplicate and Move to Trash participate in Project asset undo/redo after their operations finish.
 
+Saving a scene checks that its source still matches the version opened by the editor. External changes or deletion
+leave local edits and recovery intact and offer **Reload**, **Save Copy**, **Overwrite**, or **Cancel**. Reload discards
+local scene edits; Overwrite explicitly replaces the external version. Input Action, Animator Controller, and UI
+documents also reject stale saves through their document error handling. Authoring reads enforce format-specific
+size limits before allocation and reject files that change size during the read.
+
 Create a Material to author an OpenPBR surface directly, then create Material Instances from the selected material
 to vary its parameters and keywords. A separate Shader Graph is needed only for specialized shader targets or legacy
 template workflows. Editor Play supports explicit `Assets.LoadRuntime` residency leases; dispose each operation when
@@ -424,8 +430,10 @@ tokens, and synchronous readback through `Keire::ComputeDevice`. `Application::C
 device while rendering is active. Calls and resource disposal belong to the device's creation thread. C# wrappers
 implement `IDisposable`; hosts register compiled programs through `ScriptSystem.RegisterComputeProgram`.
 
-This implementation uses an independent GPU device and does not share scene-rendering resources. Texture bindings,
-asynchronous readback, full render dependency scheduling, and cross-platform acceptance remain incomplete. See
+This implementation uses an independent GPU device and does not share scene-rendering resources. Presentation polls
+completed submissions without draining the compute queue. Consumers explicitly wait for results or request an
+asynchronous readback snapshot; submission identities and snapshots remain valid until released. Texture bindings,
+full render dependency scheduling, and cross-platform acceptance remain incomplete. See
 [material/shader progress](Docs/MaterialShaderReplacement.md) for the current implementation and evidence.
 
 ## Packaging and Releases
@@ -554,6 +562,16 @@ presentation without maintaining a second copy of the prose.
 ## Validation
 
 Use the narrowest relevant test while working, then run the platform regression harness before release-facing changes.
+Record current-revision native results, missing hosts, and retained artifacts using the
+[acceptance evidence workflow](Docs/CurrentAcceptanceEvidence.md). Historical results and cross builds do not close
+the current native platform matrix.
+
+The maintained SDL patch adds optional GPU timestamp queries for D3D12, Vulkan, and Metal. The renderer collects
+completed frame intervals asynchronously and reports their originating frame separately from CPU completion latency.
+Unsupported devices remain explicit. Dependency launchers apply the versioned patch to an isolated source cache;
+SDK manifests retain its digest. See [GPU timing and performance gates](Docs/PerformanceGates.md) for measurement
+semantics and required native validation.
+
 Common Windows checks are:
 
 ```powershell
@@ -674,6 +692,10 @@ C# IK setters report invalid arguments by parameter before changing goals; clear
 Native C++ IK setters also reject unknown coordinate spaces without changing existing goals.
 While Play mode is paused, **Step** advances one complete frame so animation graphs and scripted IK can be inspected frame by frame.
 FABRIK at zero weight leaves the authored pose unchanged, allowing a goal to fade out without altering bone rotations.
+For grounding investigations, Trace-level Core logs report contact transitions, support changes, release reasons,
+and reach-limit recovery without repeating steady states. See [grounding diagnostics](Docs/AnimationRigging.md#contact-support-and-endpoint-influence).
+The optional imported walking regression can also export per-frame poses and matching contact logs through
+`KEIRE_IK_TEST_TRACE_DIRECTORY`; it covers multiple update rates and moving or disappearing supports.
 Straight chains can bend toward closer collinear targets using a deterministic initial bend in the root's frame.
 Editor clip and bone dropdowns reveal the current selection when opened without preventing manual scrolling.
 Planted foot locks follow moving supports, including slope changes from nonuniform or mirrored platform scaling.
@@ -682,6 +704,9 @@ Invalid support transforms and unavailable support colliders discard the lock sa
 Custom foot-grounding callers can disable individual contacts with zero weight without affecting pelvis support or
 reach diagnostics. Disabling every contact preserves the pose; invalid inputs still fail without modifying it.
 Partial contact weights fade pelvis support, and `PelvisWeight` scales translation and tilt together.
+Clip foot grounding preserves authored horizontal body motion during support transfers; procedural locomotion profiles
+can opt into horizontal balance with `MaximumHorizontalPelvisAdjustmentRatio`.
+Grounding retains its support anchor as a foot lifts, so Response Time releases pelvis support gradually on raised ground.
 Fast panel drags retain their final position even when pointer movement and release arrive between rendered frames.
 Select a small imported creature and press F over Scene to inspect it at its authored scale without enlarging the model.
 Framing and follow selection use the current animated pose while previewing; stopping preview restores bind-pose framing.

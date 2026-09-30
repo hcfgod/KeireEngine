@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/UiBuilderStyleSheetDocument.h"
+#include "KeireClient/Editor/EditorAssetFileService.h"
 
 #include "Keire/Ui/UiStyleProperties.h"
 #include "KeireInternal/FileSystem.h"
@@ -18,6 +19,12 @@ namespace KeireEditor
         [[nodiscard]] std::span<const std::byte> Bytes(const std::string_view value) noexcept
         {
             return {reinterpret_cast<const std::byte*>(value.data()), value.size()};
+        }
+
+        [[nodiscard]] std::string ReadStyleSource(const std::filesystem::path& source)
+        {
+            const auto bytes = Detail::ReadBytes(source, "UI style sheet", Keire::MaximumUiDocumentBytes);
+            return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
         }
 
         [[nodiscard]] std::vector<std::string_view> Lines(const std::string_view source)
@@ -336,6 +343,8 @@ namespace KeireEditor
     {
         if (!asset || revision == 0 || source.empty())
             throw std::invalid_argument("Opening a UI style sheet requires an asset, revision, and source path.");
+        auto sourceText = ReadStyleSource(source);
+        definition = Keire::UiStyleSheetAsset::ParseSource(Bytes(sourceText));
         Keire::UiStyleSheetAsset::Validate(definition);
         Close();
         m_Asset = asset;
@@ -345,7 +354,7 @@ namespace KeireEditor
         m_Revision = revision;
         m_Generation = 1;
         m_Source = std::move(source);
-        m_SourceText = Keire::Detail::ReadTextFile(m_Source, Keire::MaximumUiDocumentBytes);
+        m_SourceText = std::move(sourceText);
         m_BaselineSource = m_SourceText;
         m_SourceDiagnostic.reset();
         m_Undo = std::move(undo);
@@ -694,16 +703,18 @@ namespace KeireEditor
 
     bool UiBuilderStyleSheetDocument::ExternalConflict() const
     {
-        if (!m_Asset || m_Source.empty() || !std::filesystem::exists(m_Source))
+        if (!m_Asset || m_Source.empty())
             return false;
-        return Keire::Detail::ReadTextFile(m_Source, Keire::MaximumUiDocumentBytes) != m_BaselineSource;
+        if (!std::filesystem::exists(m_Source))
+            return true;
+        return ReadStyleSource(m_Source) != m_BaselineSource;
     }
 
     std::string UiBuilderStyleSheetDocument::ExternalComparison(const std::size_t maximumLines) const
     {
         if (!m_Asset || m_Source.empty() || maximumLines == 0U || !std::filesystem::exists(m_Source))
             return {};
-        const auto external = Keire::Detail::ReadTextFile(m_Source, Keire::MaximumUiDocumentBytes);
+        const auto external = ReadStyleSource(m_Source);
         if (external == m_SourceText)
             return "The draft and disk source are identical.\n";
         const auto localLines = Lines(m_SourceText);
@@ -789,7 +800,7 @@ namespace KeireEditor
             throw std::logic_error("Open a UI style sheet before reloading it.");
         if (m_Dirty && !discardLocalChanges)
             throw std::logic_error("The UI style sheet has unsaved changes. Revert explicitly to discard them.");
-        const auto source = Keire::Detail::ReadTextFile(m_Source, Keire::MaximumUiDocumentBytes);
+        const auto source = ReadStyleSource(m_Source);
         auto definition = Keire::UiStyleSheetAsset::ParseSource(Bytes(source));
         Keire::UiStyleSheetAsset::Validate(definition);
         m_Definition = std::move(definition);

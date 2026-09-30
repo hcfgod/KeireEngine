@@ -88,6 +88,10 @@ namespace
       protected:
         void OnAttach() override
         {
+            const auto timing = Owner().Renderer()->Statistics();
+            CHECK_FALSE(timing.GpuTimingSupported);
+            CHECK(timing.GpuTimingFrame == 0);
+            CHECK(timing.GpuFrameMilliseconds == 0.0F);
             auto renderer = Owner().Renderer();
             CHECK_THROWS_AS(Keire::RenderSystemInternalAccess::BeginFrame(
                                 *renderer, {std::numeric_limits<float>::quiet_NaN(), 0.0F}),

@@ -167,6 +167,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void DrawDeleteDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace, std::string_view title, bool theme);
     void DrawDirtyThemeDialog(Keire::UiFrame& ui, Keire::UiWorkspace& workspace);
     void DrawDirtySceneDialog(Keire::UiFrame& ui);
+    void DrawSceneSourceConflictDialog(Keire::UiFrame& ui);
     void DrawDirtyShaderGraphDialog(Keire::UiFrame& ui);
     void DrawDirtyMaterialGraphDialog(Keire::UiFrame& ui);
     void DrawDirtyPlayerBuildDialog(Keire::UiFrame& ui);
@@ -408,6 +409,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void ApplyRiggingStudioSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) override;
     void CreateRiggingStudioRetarget(std::string_view name, std::vector<std::byte> bytes) override;
     void RevealRiggingStudioAsset(Keire::AssetId asset) override;
+    void PreviewRiggingStudioClip(Keire::AssetId asset) override;
     void ReportRiggingStudioError(std::string message) noexcept override;
     [[nodiscard]] std::span<const Keire::AssetSourceRecord> ProjectSettingsAssetRecords() const noexcept override;
     void RevealProjectSettingsAsset(Keire::AssetId asset) override;

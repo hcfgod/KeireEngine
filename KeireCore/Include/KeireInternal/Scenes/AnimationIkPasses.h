@@ -56,7 +56,10 @@ namespace Keire::Detail
         Vector3 Position;
         Vector3 Normal{0.0F, 1.0F, 0.0F};
         float Blend = 0.0F;
+        float AcquisitionProgress = 0.0F;
+        float AcquisitionStartBlend = 0.0F;
         bool Initialized = false;
+        bool HasContact = false;
     };
 
     struct AutomaticFootGroundingTarget final
@@ -151,11 +154,16 @@ namespace Keire::Detail
                 return std::nullopt;
             }
 
-            if (!state.Initialized)
+            if (!state.Initialized || !state.HasContact)
             {
+                // A landing starts a new anchor lifetime. Interpolating from the previous
+                // step's released anchor pulls the foot sideways at touchdown.
                 state.Position = *desiredPosition;
                 state.Normal = normal;
-                state.Blend = responseTime <= 0.000001F ? 1.0F : responseBlend;
+                if (!state.Initialized)
+                    state.Blend = 0.0F;
+                state.AcquisitionProgress = 0.0F;
+                state.AcquisitionStartBlend = state.Blend;
                 state.Initialized = true;
             }
             else
@@ -171,11 +179,21 @@ namespace Keire::Detail
                                             state.Normal.Y + (normal.Y - state.Normal.Y) * responseBlend,
                                             state.Normal.Z + (normal.Z - state.Normal.Z) * responseBlend};
                 state.Normal = IkNormalize(blendedNormal);
-                state.Blend += (1.0F - state.Blend) * responseBlend;
             }
+            // Finish acquisition in finite time so the authored stance cannot keep dragging a planted foot.
+            // Start from retained support influence after a brief probe dropout, with zero endpoint slope.
+            // Preserve progress when Response Time is edited while playing, including a paused frame.
+            state.AcquisitionProgress = responseTime <= 0.000001F
+                                            ? 1.0F
+                                            : std::min(1.0F, state.AcquisitionProgress + deltaSeconds / responseTime);
+            const auto progress = state.AcquisitionProgress;
+            const auto acquisition = progress * progress * (3.0F - 2.0F * progress);
+            state.Blend = state.AcquisitionStartBlend + (1.0F - state.AcquisitionStartBlend) * acquisition;
+            state.HasContact = true;
         }
         else
         {
+            state.HasContact = false;
             if (!state.Initialized)
                 return std::nullopt;
             if (responseBlend >= 1.0F)
@@ -219,9 +237,9 @@ namespace Keire::Detail
         }
         const auto displacement = IkSubtract(sampledPosition, referencePosition);
         const auto lift = IkDot(displacement, normal);
-        const auto horizontalTravel = IkVectorLength(IkProjectOntoPlane(displacement, normal));
-        const auto reachLimit = std::max(releaseDistance, legLength * 0.2F);
-        return lift > releaseDistance || horizontalTravel > reachLimit;
+        // Horizontal stride motion is what a plant lock must resist. Actual leg reach and
+        // moving-support reanchoring are checked separately by the runtime.
+        return lift > releaseDistance;
     }
 
     [[nodiscard]] inline bool ShouldReanchorMovingFootSupport(const Vector3 lockedPosition,
@@ -315,7 +333,9 @@ namespace Keire::Detail
         const auto sampledBend = [](const Vector3 hip, const Vector3 knee, const Vector3 foot)
         {
             const auto legDirection = IkNormalize(IkSubtract(foot, hip));
-            return IkNormalize(IkProjectOntoPlane(IkSubtract(knee, hip), legDirection));
+            // A nearly straight stance leg must not outweigh a clearly bent swing leg.
+            // Normalizing each bend separately gives numerical noise an equal vote.
+            return IkProjectOntoPlane(IkSubtract(knee, hip), legDirection);
         };
         const auto left = sampledBend(leftHip, leftKnee, leftFoot);
         const auto right = sampledBend(rightHip, rightKnee, rightFoot);

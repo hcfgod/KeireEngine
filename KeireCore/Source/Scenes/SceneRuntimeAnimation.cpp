@@ -510,16 +510,31 @@ namespace Keire
                 state = std::make_unique<AnimationRuntimeState>();
             // Diagnostics describe this evaluation, so repaired settings must not retain an old failure.
             animator->SetRuntimeDiagnostic({});
+            const auto resetIkContacts = [&]
+            {
+                // Resuming evaluation must acquire contacts at the current actor position.
+                state->LeftArmIkState = {};
+                state->RightArmIkState = {};
+                state->LeftFootIkState = {};
+                state->RightFootIkState = {};
+                state->LeftFootGroundingSmoothingState = {};
+                state->RightFootGroundingSmoothingState = {};
+                state->LeftFootPlantState = {};
+                state->RightFootPlantState = {};
+                state->UnreachableFootCount = 0;
+            };
+            if (!entity.ActiveInHierarchy() || !animator->Enabled())
+            {
+                resetIkContacts();
+                continue;
+            }
             if (animator->PoseSource() == AnimatorPoseSource::ProceduralHumanoid)
             {
-                if (entity.ActiveInHierarchy() && animator->Enabled())
+                PublishProceduralAnimation(entity, *animator, *state);
+                if (animator->FootGrounding().Enabled && animator->RuntimeDiagnostic().empty())
                 {
-                    PublishProceduralAnimation(entity, *animator, *state);
-                    if (animator->FootGrounding().Enabled && animator->RuntimeDiagnostic().empty())
-                    {
-                        animator->SetRuntimeDiagnostic(
-                            "Legacy automatic foot grounding is ignored in Procedural Humanoid mode.");
-                    }
+                    animator->SetRuntimeDiagnostic(
+                        "Legacy automatic foot grounding is ignored in Procedural Humanoid mode.");
                 }
                 continue;
             }
@@ -531,12 +546,14 @@ namespace Keire
                 const auto skin = Assets->Load<SkinnedMeshAsset>(skinId, AssetPriority::High).TryGetLoaded();
                 if (!skin)
                 {
+                    resetIkContacts();
                     animator->SetRuntimeDiagnostic("Animator is waiting for the assigned skinned mesh to load.");
                     continue;
                 }
                 targetSkeleton = skin->Skeleton();
                 if (!targetSkeleton)
                 {
+                    resetIkContacts();
                     animator->SetRuntimeDiagnostic("The assigned skinned mesh does not reference a skeleton.");
                     continue;
                 }
@@ -558,8 +575,6 @@ namespace Keire
                     state->SkeletonHandle = Assets->Load<SkeletonAsset>(state->Skeleton, AssetPriority::High);
                 animator->SetRuntimeDiagnostic({});
             }
-            if (!entity.ActiveInHierarchy() || !animator->Enabled())
-                continue;
             if (!state->Graph || !state->Skeleton)
             {
                 animator->SetRuntimeDiagnostic("Animator requires both controller and skeleton assets.");
@@ -593,6 +608,7 @@ namespace Keire
             const auto skeletonRevision = state->SkeletonHandle.Revision();
             if (!state->Instance || state->SkeletonRevision != skeletonRevision)
             {
+                resetIkContacts();
                 auto* runtimeState = state.get();
                 state->Instance = std::make_unique<AnimatorInstance>(
                     skeleton, graph, [this, runtimeState](const AssetId id) { return ResolveClip(*runtimeState, id); },

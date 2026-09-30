@@ -527,7 +527,7 @@ namespace Keire
                         {
                             ProfileScope present(m_Impl->ProfilerService, ProfileCategory::Rendering, "Present");
                             if (m_Impl->ComputeService)
-                                m_Impl->ComputeService->WaitIdle();
+                                (void)m_Impl->ComputeService->PollCompletions();
                             m_Impl->UserInterface->EndFrame();
                             uiFrame = false;
                         }
@@ -540,7 +540,7 @@ namespace Keire
                     {
                         ProfileScope present(m_Impl->ProfilerService, ProfileCategory::Rendering, "Present");
                         if (m_Impl->ComputeService)
-                            m_Impl->ComputeService->WaitIdle();
+                            (void)m_Impl->ComputeService->PollCompletions();
                         RenderSystemInternalAccess::EndFrame(*m_Impl->Renderer, nullptr);
                         renderFrame = false;
                     }
@@ -754,6 +754,8 @@ namespace Keire
                                                             statistics.VfxGpuCompletionLatencyMilliseconds);
                         m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU timing supported",
                                                             statistics.GpuTimingSupported ? 1.0 : 0.0);
+                        m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU timing frame",
+                                                            static_cast<double>(statistics.GpuTimingFrame));
                         if (statistics.GpuTimingSupported)
                             m_Impl->ProfilerService->SetCounter(ProfileCategory::Rendering, "GPU frame (ms)",
                                                                 statistics.GpuFrameMilliseconds);

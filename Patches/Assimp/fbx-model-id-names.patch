@@ -1,5 +1,5 @@
 diff --git a/code/AssetLib/FBX/FBXConverter.cpp b/code/AssetLib/FBX/FBXConverter.cpp
-index f190d600a..6a7e28ccc 100644
+index f190d600a3bde7ab37edacfaae7da6f848f09479..fe29ca4fc074ca8fa11ae2825c6f9a17484fc32f 100644
 --- a/code/AssetLib/FBX/FBXConverter.cpp
 +++ b/code/AssetLib/FBX/FBXConverter.cpp
 @@ -134,12 +134,15 @@ FBXConverter::FBXConverter(aiScene *out, const Document &doc, bool removeEmptyBo
@@ -122,7 +122,7 @@ index f190d600a..6a7e28ccc 100644
                                  morphAnimData *animData;
                                  auto animIt = morphAnimDatas->find(name.C_Str());
 diff --git a/code/AssetLib/FBX/FBXConverter.h b/code/AssetLib/FBX/FBXConverter.h
-index f33b26ee1..ef1a15243 100644
+index f33b26ee15686258b11d8522dfc8bff68853de50..ef1a1524379ebc7ff18f6310c0fc5d0995096ce3 100644
 --- a/code/AssetLib/FBX/FBXConverter.h
 +++ b/code/AssetLib/FBX/FBXConverter.h
 @@ -135,6 +135,13 @@ private:

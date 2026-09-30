@@ -1,10 +1,14 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/DocumentSourcePersistence.h"
 
+#include <cstddef>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -21,7 +25,7 @@ namespace KeireEditor
         [[nodiscard]] std::string_view SelectedState() const noexcept { return m_SelectedState; }
 
         void Open(Keire::AssetId asset, Keire::AnimationGraphDefinition definition, Keire::Ref<Keire::UndoContext> undo,
-                  std::filesystem::path source);
+                  std::filesystem::path source, std::optional<std::vector<std::byte>> loadedBytes = std::nullopt);
         void Save();
         void ReplaceDefinition(Keire::AnimationGraphDefinition definition, bool dirty = true);
         void SelectParameter(std::string id);
@@ -37,6 +41,7 @@ namespace KeireEditor
         Keire::AssetId m_Asset;
         Keire::AnimationGraphDefinition m_Definition;
         std::filesystem::path m_Source;
+        DocumentSourcePersistence m_Persistence;
         Keire::Ref<Keire::UndoContext> m_Undo;
         std::string m_SelectedParameter;
         std::string m_SelectedLayer;

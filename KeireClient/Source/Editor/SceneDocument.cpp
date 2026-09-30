@@ -1,5 +1,6 @@
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/InspectorTransformUndo.h"
 
 #include "Keire/Assets/RenderingAssets.h"
@@ -936,11 +937,14 @@ namespace KeireEditor
     }
 
     void SceneDocument::Open(Keire::Ref<Keire::Scene> scene, const Keire::AssetId asset, std::filesystem::path source,
-                             Keire::Ref<Keire::UndoContext> undo)
+                             Keire::Ref<Keire::UndoContext> undo, std::optional<std::vector<std::byte>> loadedBytes)
     {
         if (!scene)
             throw std::invalid_argument("SceneDocument::Open requires a scene.");
+        DocumentSourcePersistence persistence;
+        persistence.Bind(source, std::move(loadedBytes));
         Close();
+        m_Persistence = std::move(persistence);
         m_Scene = std::move(scene);
         if (!source.empty())
         {
@@ -991,10 +995,20 @@ namespace KeireEditor
 
     void SceneDocument::SetUndoContext(Keire::Ref<Keire::UndoContext> undo) noexcept { m_Undo = std::move(undo); }
 
-    void SceneDocument::SetIdentity(const Keire::AssetId asset, std::filesystem::path source)
+    void SceneDocument::SetIdentity(const Keire::AssetId asset, std::filesystem::path source,
+                                    std::optional<std::vector<std::byte>> loadedBytes)
     {
+        if (asset == m_Asset && !loadedBytes)
+        {
+            m_Persistence.Relocate(source);
+            m_Source = std::move(source);
+            return;
+        }
+        DocumentSourcePersistence persistence;
+        persistence.Bind(source, std::move(loadedBytes));
         m_Asset = asset;
         m_Source = std::move(source);
+        m_Persistence = std::move(persistence);
     }
 
     void SceneDocument::SetRecoveryPath(std::filesystem::path path)
@@ -1010,14 +1024,31 @@ namespace KeireEditor
 
     void SceneDocument::SetStatus(std::string status) { m_Status = std::move(status); }
 
-    void SceneDocument::Save()
+    void SceneDocument::Save(const bool overwriteExternalChanges)
     {
-        if (!m_Scene || m_Source.empty())
+        if (!m_Scene || !m_Scene->IsOpen() || m_Source.empty())
             throw std::logic_error("SceneDocument cannot save without an editing scene and source path.");
-        const auto bytes = Keire::SceneAsset::Encode(m_Scene->Snapshot());
-        const std::string contents(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-        Keire::Detail::WriteTextFileAtomically(m_Source, contents);
+        m_Persistence.Publish(Keire::SceneAsset::Encode(m_Scene->Snapshot()), overwriteExternalChanges);
         m_Scene->MarkSaved();
+        DiscardRecovery();
+    }
+
+    void SceneDocument::ReloadSource()
+    {
+        if (!m_Scene || !m_Scene->IsOpen() || m_Source.empty() || m_PlaySession)
+            throw std::logic_error("Stop Play and open a scene before reloading its source.");
+        auto bytes = Detail::ReadSceneBytes(m_Source);
+        auto scene = Keire::CreateRef<Keire::Scene>(m_Asset, Keire::SceneAsset::Decode(bytes)->Definition(),
+                                                    m_Scene->Components());
+        DocumentSourcePersistence persistence;
+        persistence.Bind(m_Source, std::move(bytes));
+        auto generation = Keire::CreateRef<SceneDocumentEditGeneration>();
+        scene->MarkSaved();
+        if (m_Undo)
+            m_Undo->Clear();
+        ReplaceEditingScene(std::move(scene), false);
+        m_EditGeneration = std::move(generation);
+        m_Persistence = std::move(persistence);
         DiscardRecovery();
     }
 
@@ -1036,8 +1067,7 @@ namespace KeireEditor
     {
         if (!m_Scene || m_RecoveryPath.empty() || !std::filesystem::is_regular_file(m_RecoveryPath))
             throw std::logic_error("SceneDocument has no recovery snapshot to restore.");
-        const auto source = Keire::Detail::ReadTextFile(m_RecoveryPath, std::size_t{64U} * 1024U * 1024U);
-        const auto bytes = std::as_bytes(std::span(source.data(), source.size()));
+        const auto bytes = Detail::ReadSceneBytes(m_RecoveryPath);
         auto restored = Keire::CreateRef<Keire::Scene>(m_Asset, Keire::SceneAsset::Decode(bytes)->Definition(),
                                                        m_Scene->Components());
         restored->MarkDirty();
@@ -1120,6 +1150,7 @@ namespace KeireEditor
         m_Asset = {};
         ClearSelection();
         m_Source.clear();
+        m_Persistence = {};
         m_RecoveryPath.clear();
         m_Status.clear();
         m_RecoverySeconds = 0.0;

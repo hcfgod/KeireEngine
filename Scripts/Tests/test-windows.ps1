@@ -967,15 +967,21 @@ Assert-True ($dependencyScript.Contains('Get-KeireWorkspaceJunctionPath') -and
              $shaderCompilerScript.Contains('Get-KeireWorkspaceJunctionPath') -and
              $shaderCompilerScript.Contains('Initialize-KeireWorkspaceJunction')) `
     "Checkout-bound Windows dependency junctions use validated distinct workspace identities"
-Assert-True ($dependencyScript.Contains('$sourceLayoutIdentity = "workspace-assimp-v3:${assimpPatchedSource}:${assimpPatchDigest}"') -and
+Assert-True ($dependencyScript.Contains('$sourceLayoutIdentity = "workspace-patches-v4:${assimpPatchedSource}:${assimpPatchDigest}:${sdlPatchedSource}:${sdlPatchDigest}"') -and
              $dependencyScript.Contains('$Lock.LIBSODIUM_COMMIT, $sourceLayoutIdentity, $Architecture')) `
     "Windows native dependency stamps include the isolated patched Assimp source layout"
 Assert-True ($dependencyScript.Contains('Patches\Assimp') -and
-             $dependencyScript.Contains('keire-assimp-patch.stamp') -and
+             $dependencyScript.Contains('keire-$dependencySlug-patch.stamp') -and
              $dependencyScript.Contains('git -C $temporary apply --whitespace=error-all') -and
              $dependencyScript.Contains('"-DKEIRE_ASSIMP_SOURCE=$assimpPatchedSource"') -and
              $dependencyScript.Contains('AssimpPatchDigest = "$assimpPatchDigest"')) `
     "Windows dependencies apply and identify the committed Assimp patch set"
+Assert-True ($dependencyScript.Contains('Patches\SDL') -and
+             $dependencyScript.Contains('"-DKEIRE_SDL_SOURCE=$sdlPatchedSource"') -and
+             $dependencyScript.Contains('SDLPatchDigest = "$sdlPatchDigest"') -and
+             $dependencyScript.Contains('share\keire\sdl-patch.stamp') -and
+             $dependencyScript.Contains('$sdlHead -ne $Lock.SDL_COMMIT')) `
+    "Windows dependencies isolate, fingerprint, and publish the pinned SDL backend patch identity"
 $assimpIdentityPatch = Get-Content (Join-Path (Get-RepositoryRoot) `
     "Patches\Assimp\fbx-model-id-names.patch") -Raw
 Assert-True ($assimpIdentityPatch.Contains('void FBXConverter::BuildModelNames()') -and

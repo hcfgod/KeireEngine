@@ -110,6 +110,25 @@ cp -R "$sdl_install/include/SDL3" "$stage/third-party/SDL3/include/"
 cp "$sdl_install/lib/libSDL3.a" "$stage/third-party/SDL3/lib/"
 cp -R "$sdl_install/cmake/"* "$stage/third-party/SDL3/cmake/"
 cp -R "$sdl_install/share/licenses/SDL3" "$stage/third-party/SDL3/licenses/"
+sdl_patch_identity="$(tr -d '\r\n' < "$sdl_install/share/keire/sdl-patch.stamp")"
+sdl_patch_commit="${sdl_patch_identity%%|*}"
+sdl_patch_digest="${sdl_patch_identity#*|}"
+[[ "$sdl_patch_commit" == "$(config_value "$ROOT/Config/Dependencies.lock" SDL_COMMIT)" &&
+   "$sdl_patch_digest" =~ ^[0-9a-f]{64}$ ]] || { printf 'Packaged SDL patch identity is invalid.\n' >&2; exit 1; }
+python3 - "$ROOT/Patches/SDL" "$sdl_patch_digest" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+patches = sorted(Path(sys.argv[1]).glob("*.patch"))
+digest = hashlib.sha256()
+for patch in patches:
+    digest.update((patch.name + "\n").encode("utf-8"))
+    digest.update(patch.read_bytes())
+if not patches or digest.hexdigest() != sys.argv[2]:
+    raise SystemExit("Rebuild SDL before packaging changed backend patches.")
+PY
+cp "$sdl_install/share/keire/sdl-patch.stamp" "$stage/third-party/SDL3/"
+cp -R "$ROOT/Patches/SDL" "$stage/third-party/SDL3/patches"
 cp "$ROOT/README.md" "$ROOT/LICENSE.txt" "$ROOT/THIRD_PARTY_NOTICES.md" "$stage/"
 cp -R "$ROOT/Docs/Diagnostics/"* "$stage/Docs/Diagnostics/"
 cp "$ROOT/Docs/PlayerBuilds.md" "$stage/Docs/"
@@ -128,14 +147,14 @@ python3 - "$stage/build-manifest.json" \
   "$(config_value "$ROOT/Config/Dependencies.lock" FREETYPE_COMMIT)" \
   "$(config_value "$ROOT/Config/Dependencies.lock" HARFBUZZ_COMMIT)" \
   "$(config_value "$ROOT/Config/Dependencies.lock" FRIBIDI_COMMIT)" \
-  "$(config_value "$ROOT/Config/Dependencies.lock" LIBUNIBREAK_COMMIT)" <<'PY'
+  "$(config_value "$ROOT/Config/Dependencies.lock" LIBUNIBREAK_COMMIT)" "$sdl_patch_digest" <<'PY'
 import json
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 manifest = json.loads(path.read_text(encoding="utf-8"))
-for key, value in zip(("freeType", "harfBuzz", "friBidi", "libunibreak"), sys.argv[2:]):
+for key, value in zip(("freeType", "harfBuzz", "friBidi", "libunibreak", "sdlPatchDigest"), sys.argv[2:]):
     manifest[key] = value
 path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 PY

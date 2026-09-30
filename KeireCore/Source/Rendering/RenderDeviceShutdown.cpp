@@ -17,6 +17,11 @@ namespace Keire::RenderBackend
         const bool injectedWindowClaimed = WindowClaimed;
         GpuDestructionThread = std::this_thread::get_id();
         (void)SDL_WaitForGPUIdle(injectedDevice);
+        for (auto*& query : TimestampQueries)
+        {
+            SDL_ReleaseGPUTimestampQuery(injectedDevice, query);
+            query = nullptr;
+        }
         AbandonLostDeviceResources(interrupted);
         if (injectedWindowClaimed && injectedWindow)
             SDL_ReleaseWindowFromGPUDevice(injectedDevice, injectedWindow);
@@ -81,6 +86,14 @@ namespace Keire::RenderBackend
             }
 
             EditorUiTextures.ReleaseGpuTextures(Device, false);
+            for (auto*& query : TimestampQueries)
+            {
+                SDL_ReleaseGPUTimestampQuery(Device, query);
+                query = nullptr;
+            }
+            Statistics.GpuTimingSupported = false;
+            Statistics.GpuFrameMilliseconds = 0.0F;
+            Statistics.GpuTimingFrame = 0;
 
             for (const auto& surface : AllSurfaceEpochs())
             {

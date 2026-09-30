@@ -760,7 +760,7 @@ TEST_CASE("Foot grounding shifts the pelvis toward a single ledge support")
     CHECK(pose[0].Translation.X == doctest::Approx(-0.2F));
 }
 
-TEST_CASE("Foot grounding removes bounded pelvis pitch using the rig's own torso axis")
+TEST_CASE("Foot grounding bounds terrain tilt added to the rig's sampled torso axis")
 {
     const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{0.0F, 2.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
                                                  {"Spine", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
@@ -790,13 +790,17 @@ TEST_CASE("Foot grounding removes bounded pelvis pitch using the rig's own torso
     request.Contacts.push_back({2, 3, 4, {-0.2F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {-0.2F, 1.0F, 1.0F}});
     request.Contacts.push_back({5, 6, 7, {0.2F, 0.0F, 0.0F}, {0.0F, 1.0F, 0.0F}, {0.2F, 1.0F, 1.0F}});
 
+    // A forward slope adds tilt to the animated 25-degree lean, capped at ten additional degrees.
+    for (auto& contact : request.Contacts)
+        contact.Normal = {0.0F, 0.8660254F, 0.5F};
+
     const auto solved = Keire::SolveFootGrounding(skeleton, pose, request);
     REQUIRE(solved);
     CHECK(solved->PelvisRotationAdjustmentDegrees == doctest::Approx(10.0F).epsilon(0.01));
     const auto after = ModelMatrices(skeleton, pose);
     const auto afterPelvis = Keire::Math::TransformPoint(after[0], {});
     const auto afterTorso = Keire::Math::TransformPoint(after[1], {});
-    CHECK(std::abs(afterTorso.Z - afterPelvis.Z) < std::abs(beforeTorso.Z - beforePelvis.Z));
+    CHECK(std::abs(afterTorso.Z - afterPelvis.Z) > std::abs(beforeTorso.Z - beforePelvis.Z));
 }
 
 TEST_CASE("Ragdoll pose transitions blend deterministically and support interruption")

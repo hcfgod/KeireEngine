@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstring>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <type_traits>
 
@@ -94,6 +95,17 @@ namespace Keire::RenderBackend
         const auto releaseFrontFrame = [this, &liveSurfaces]()
         {
             auto& frame = InFlight.front();
+            if (auto* query = TimestampQueries.at(frame.Frame->FrameSlot))
+            {
+                double milliseconds = 0.0;
+                Statistics.GpuTimingSupported =
+                    SDL_GetGPUTimestampQueryResult(Device, query, frame.Fence, &milliseconds) &&
+                    std::isfinite(milliseconds) && milliseconds >= 0.0 &&
+                    milliseconds <= static_cast<double>((std::numeric_limits<float>::max)());
+                Statistics.GpuFrameMilliseconds =
+                    Statistics.GpuTimingSupported ? static_cast<float>(milliseconds) : 0.0F;
+                Statistics.GpuTimingFrame = Statistics.GpuTimingSupported ? frame.Frame->Id : 0;
+            }
             const auto completionLatency =
                 std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - frame.SubmittedAt).count();
             Statistics.GpuCompletionLatencyMilliseconds = completionLatency;

@@ -274,7 +274,7 @@ void EditorWorkspaceLayer::OpenShaderGraph(const Keire::AssetId asset)
             return std::nullopt;
         try
         {
-            const auto include = ReadBytes(path);
+            const auto include = ReadBytes(path, "shader include", 1024U * 1024U);
             return std::string(reinterpret_cast<const char*>(include.data()), include.size());
         }
         catch (...)
@@ -342,7 +342,8 @@ void EditorWorkspaceLayer::OpenAnimationGraph(const Keire::AssetId asset)
     }
     const auto source = m_AssetDatabase->Specification().ProjectRoot /
                         m_AssetDatabase->Specification().SourceDirectory / record->RelativePath;
-    auto definition = Keire::AnimationGraphAsset::Decode(ReadBytes(source))->Definition();
+    auto loadedBytes = ReadBytes(source);
+    auto definition = Keire::AnimationGraphAsset::Decode(loadedBytes)->Definition();
     if (const auto context = m_AnimatorControllerDocument->UndoContext())
         context->Close();
     Keire::Ref<Keire::UndoContext> context;
@@ -351,7 +352,8 @@ void EditorWorkspaceLayer::OpenAnimationGraph(const Keire::AssetId asset)
         context = undo->CreateContext(
             {.Name = "Animator Controller: " + record->RelativePath.stem().string(), .MaximumCommands = 128});
     }
-    m_AnimatorControllerDocument->Open(asset, std::move(definition), std::move(context), source);
+    m_AnimatorControllerDocument->Open(asset, std::move(definition), std::move(context), source,
+                                       std::move(loadedBytes));
     m_ActiveUndoContext = m_AnimatorControllerDocument->UndoContext();
     m_AnimatorControllerPanel->ResetTransientState();
     m_AnimatorControllerPanel->SetMessage("Loaded " + record->RelativePath.generic_string() + ".");

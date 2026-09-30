@@ -88,6 +88,10 @@ namespace Keire
                                                            ComputeBufferId arguments, std::uint32_t offset = 0,
                                                            std::span<const std::byte> uniforms = {});
         [[nodiscard]] bool IsComplete(ComputeSubmissionId submission);
+        /// Polls submitted work without waiting and retires completed native fences.
+        /// Identities and readback snapshots remain valid until ReleaseSubmission. Returns the number retired.
+        /// Presentation calls this automatically; consumers must still Wait or GetReadback before using results.
+        [[nodiscard]] std::uint32_t PollCompletions();
         void Wait(ComputeSubmissionId submission);
         void ReleaseSubmission(ComputeSubmissionId submission);
         [[nodiscard]] std::vector<std::byte> Readback(ComputeBufferId buffer, std::uint32_t offset = 0,

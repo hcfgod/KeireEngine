@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "Keire/Project/SharedShaderLibrary.h"
@@ -25,8 +26,6 @@
 #include <cmath>
 #include <cstddef>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <ranges>
 #include <span>
 #include <sstream>
@@ -36,16 +35,7 @@
 
 namespace
 {
-    [[nodiscard]] std::vector<std::byte> ReadBytes(const std::filesystem::path& path)
-    {
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            throw std::runtime_error("Cannot open asset: " + Keire::Detail::PathToUtf8(path));
-        const std::vector<char> characters{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
-        std::vector<std::byte> bytes(characters.size());
-        std::ranges::transform(characters, bytes.begin(), [](const char value) { return std::byte(value); });
-        return bytes;
-    }
+    using KeireEditor::Detail::ReadBytes;
     [[nodiscard]] std::string FormatAssetDiagnostic(const Keire::AssetImportDiagnostic& diagnostic)
     {
         auto result = Keire::Detail::PathToUtf8(diagnostic.RelativePath);

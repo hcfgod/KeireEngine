@@ -192,6 +192,9 @@ limits are rejected without exposing native pointers.
 C# IK setters validate names (1..256 UTF-8 bytes), finite target/pole coordinates, weight (0..1), coordinate space,
 chain length (2..256), iteration count (1..1024), and positive finite tolerance before submitting a native command.
 Invalid arguments throw an `ArgumentException` naming the offending parameter and leave existing goals unchanged.
+Managed regression tests preserve Unicode goal and bone names, maximum-length FABRIK chain ordering, and the
+owning entity identity on removal. The native managed-host integration additionally checks Unicode goal updates,
+cleanup on disable, rejection after Animator removal, and recovery after adding a replacement Animator.
 Native C++ IK setters accept only `AnimatorIkSpace::Model` and `AnimatorIkSpace::World`; other values throw
 `std::invalid_argument` before adding or replacing a goal.
 Bone existence and hierarchy are checked during pose evaluation, where failures produce named goal diagnostics.
@@ -236,13 +239,13 @@ solver itself.
 
 After graph sampling, managed IK, and authored arm IK, the scene runtime probes below each animated foot, ignores the
 nearest Character Controller hierarchy (including a capsule on an Animator parent), rejects surfaces over
-**Maximum Ground Slope**, lowers the pelvis once for the lowest valid contact, and applies a bounded support-balance
-correction that preserves the sampled pelvis-to-feet offset and follows terrain-induced foot displacement. It also removes a bounded amount of pitch/roll
-from the inferred pelvis-to-chest or
-pelvis-to-spine axis while preserving authored yaw. **Body Lean Correction** controls how strongly grounding removes
-pitch/roll already present in the animation, and **Maximum Lean Correction** bounds that change in degrees. A zero
-weight preserves the authored lean; a full weight restores the rig's bind-neutral torso direction up to the authored
-angle limit. These corrections use semantic inference, skeleton topology, and the imported bind pose rather than
+**Maximum Ground Slope**, and lowers the pelvis when needed to reach valid contacts. Clip playback preserves authored
+horizontal body motion during foot locking and support transfer. Procedural locomotion can additionally request bounded
+horizontal balance through its profile's `MaximumHorizontalPelvisAdjustmentRatio`.
+**Body Lean Correction** controls terrain tilt applied to the sampled pelvis-to-chest or pelvis-to-spine axis;
+**Maximum Lean Correction** bounds that change in degrees. Authored lean is preserved, including on flat ground
+throughout foot-contact acquisition and release. Zero weight disables terrain tilt; full weight applies the support
+slope up to the angle limit. These corrections use semantic inference, skeleton topology, and the imported bind pose rather than
 Mixamo names or hard-coded bone axes or strengths. The pelvis is never lifted merely to satisfy a positive sole offset.
 The solver preserves each bind-pose ankle-to-sole clearance, solves both leg chains, and aligns the sampled sole normal
 with the contact normal. The bind pose defines the rig's neutral sole independently of the imported foot bone's local
@@ -274,21 +277,31 @@ or converting it to a trigger releases the lock; restoring a solid support allow
 Existing locks also obey the grounding collision mask, the support collider layer/mask, and the project collision
 matrix, so changing filters cannot leave a foot attached to an excluded surface.
 The animation-release reference remains
-independent of support motion, so moving a platform is not mistaken for a deliberate foot lift. Small horizontal motion
-in an idle/walk contact phase is therefore removed instead of becoming visible skating. **Plant Distance** controls
-contact acquisition; **Release Distance** releases a deliberately lifted foot, and a reach limit releases an
+independent of support motion, so moving a platform is not mistaken for a deliberate foot lift. Horizontal animation
+motion alone does not release a reachable planted foot or repeatedly relocate its anchor. Lift is measured from the
+lowest sampled animation position during the plant, independently of terrain height correction. After a deliberate lift,
+the foot must return within **Plant Distance** of that animation reference before ordinary contact acquisition resumes.
+**Plant Distance** controls
+contact acquisition; **Release Distance** releases a deliberately lifted foot. These are world-space distances:
+choose them below the clip's actual foot lift, rather than using one threshold for every model size. For the
+metre-tall Cesium walking fixture, 0.015 m plant and 0.035 m release preserve the stride; a 0.18 m release can
+hold the foot ahead of the hips well into the next step. Keep release greater than plant to avoid contact chatter.
+A reach limit releases an
 overextended leg so the next step can proceed. A support that travels sideways is re-anchored beneath the sampled foot
 before it can pull the two-bone chain straight. If that surface leaves, the runtime immediately selects the valid
 surface below and blends the visible target according to the response setting; every locked foot continues checking
 the probe result, so a raised platform moved back underneath takes over from the ground lock instead of clipping
 through it. Deep penetrations are recovered in the same frame. This
 corrects contact-phase sliding, but it does not turn an animation without a usable gait into a complete procedural
-locomotion system. **Response Time (Seconds)** smooths contact acquisition, platform movement, lower-surface handoff,
+locomotion system. **Response Time (Seconds)** smooths contact acquisition, lower-surface handoff,
 normal changes, contact influence, and release back to the sampled animation with an elapsed-time response that is independent
 of frame rate. Release fades from the last contact toward the animated endpoint once, using that same response
-time; it does not also move the stored contact toward the animation. Zero selects immediate response. Upward surface motion is clamped along the contact normal in the same
-frame so a smoother response cannot push the sole through an approaching platform; its lateral motion and rotation
-remain filtered. Automatic toe discovery uses semantic names when present and skin influence plus bind topology
+time; it does not also move the stored contact toward the animation. A new touchdown starts a fresh anchor and
+resumes the acquisition blend from its remaining influence, so a still-fading previous step cannot drag the new
+contact sideways and a brief probe dropout cannot abruptly reduce pelvis support. Locked support motion carries
+the smoothing history with the platform, preventing lag during descent and direction changes. Zero selects immediate
+response. Approaching surfaces clamp the target along the contact normal in the same frame so contact blending cannot
+push the sole through them. Automatic toe discovery uses semantic names when present and skin influence plus bind topology
 otherwise. Weighted or explicitly named toes remain eligible when a high ankle pivot places them mostly below the
 ankle; the height-to-length heuristic applies only to unnamed, unweighted fallback bones. While planted, the toe root blends back to its neutral bind rotation so the forefoot rests with the
 ankle-aligned sole instead of retaining an animated upward curl.
@@ -386,8 +399,14 @@ Custom creatures retain their full hierarchy and animation even when no semantic
 bone map and use explicit bone names for custom IK. Quadruped inference also recognizes front limbs named UpperArm,
 ForeArm and Hand, and rear limbs named Leg01, Leg02 and Foot.
 
+Suggested retarget clip names replace invalid filename characters, trim leading spaces, and shorten long imported
+labels at UTF-8 character boundaries to fit the 230-byte portable filename limit. Reserved device names receive
+an underscore prefix. You can still edit the suggestion before baking.
+
 Clip choices and generated assets show authored names after reimport. Partial retargets show a warning and require
 **I reviewed the omitted tracks** before baking. Changing source or target data resets that review.
+When no tracks map, baking stays disabled and the panel directs you to choose a compatible source clip or edit the
+bone mappings. Root-motion bake warnings appear only after at least one track maps.
 Use **Edit bone mappings** to select explicit target bones for unmatched or incorrectly matched source tracks.
 Filter source bones or search within a target picker to locate joints in large rigs. Automatic fields show the
 resolved target name, or **no matching target**, so missing mappings are visible without opening diagnostics.
@@ -410,12 +429,38 @@ models remain renderer-only. Ambiguous skins or a missing skeleton produce a rei
 Clean Inspector fields follow edits from Rigging Studio; conflicting drafts are retained with a warning, and Revert
 loads the latest imported settings.
 
+Retargeting distinguishes pending loads from failed or cancelled source clips, skeletons, and rig assets. A failed
+load shows the affected source/target role and the loader's diagnostic. Regenerate the affected model's runtime
+assets, then select the source clip again. Baking remains unavailable until all required assets load successfully;
+the error clears when regenerated data becomes available.
+
 Downloaded-model regression coverage also carries solved poses through 24 successive moving targets per eligible
 three-bone chain, checking finite transforms, anchored roots, segment lengths, and progress toward each target for
 both two-bone and FABRIK solvers. This complements, but does not replace, live gameplay and deformation review.
+Retarget regression tests also bake bent limbs onto targets with unequal segment proportions and different reference
+rotations, then serialize and decode the clip. They check target local transforms, return to the reference pose,
+duration, skeleton identity, and animation-event preservation; they do not assess the target mesh's skin weights.
+Animation deltas are converted between source and target reference bone axes before being applied. This keeps a bend
+in the same model-space direction when equivalent limbs use different local joint frames. Previously baked clips
+retain their stored poses; re-bake them to use this correction.
+The reference-axis regression also animates parent rotation and translation while transferring a translated, bent
+limb between equivalent rigs with different parent axes. It checks both joint origins and child endpoints across
+three parent reference orientations and the return to the bind pose.
 The optional spider regression solves all eight complete leg chains over 48 moving-target frames, checks isolation
 between legs, preserved segment lengths, unreachable targets, and recovery after invalid input. Zero-weight FABRIK
-preserves the input transforms exactly, while still validating the request and chain.
+preserves the input transforms exactly, while still validating the request and chain. The same fixture also samples
+all seven imported clips across two loop boundaries, solving eight animated leg chains at weights 0, 0.25, 0.5, and 1.
+Failure output identifies the clip, frame, weight, and leg; checks include finite transforms, segment lengths, anchored
+roots, full-weight target progress, and unchanged transforms outside the active chain.
+The optional Fox quadruped regression samples all three imported clips across two loop boundaries, applies both
+two-bone and FABRIK to all four animated limbs at those same weights, and verifies invalid-target rollback followed
+by a valid solve. It also crossfades to another imported clip and back, verifies that transition frames were exercised,
+and sweeps IK influence from zero to full. These checks use the imported animation pose rather than assuming
+bind-pose limb geometry.
+Named-goal tests compare world-space targets and poles with equivalent model-space requests under rotated parents,
+small and large uniform scales, nonuniform scales, and reflection. Both solvers exercise zero, partial, and full
+influence, checking equivalent local transforms and preservation of unrelated bones. This validates goal conversion;
+it does not promise rigid world-space segment lengths under nonuniform scaling.
 Managed runtime integration coverage loads a gameplay assembly into a playing scene and verifies repeated public
 `Animator` IK updates, unchanged goals after rejected arguments, `OnDisable` cleanup, re-enabling, and rejection through
 a cached component reference after deferred removal completes. These checks cover command and lifecycle behavior;
@@ -466,12 +511,104 @@ target, including the residual distance intentionally retained by partial blendi
 
 ### Contact support and endpoint influence
 
+For a grounding investigation, enable the existing logger's Trace level with
+`Keire::Log::SetLevel(Keire::LogLevel::Trace)` after logging initialization. Core logs include `[IK]` contact events
+in Release as well as Debug: entity ID, foot index (0 left, 1 right), planted target, forced acquisition,
+release causes, support loss/replacement, and changes in unreachable-foot count with position error and pelvis
+adjustment. Stable contact and unchanged reach limits do not emit a message every frame. Restore Info level after
+capture; the normal rotating log limits still apply. These events diagnose solver decisions, while screenshots or
+video and pose inspection remain necessary to assess visual quality.
+
+Planted contacts carry their retained smoothing anchor with the support transform before applying Response Time.
+This preserves platform-relative placement during translation, rotation, and scale changes, without adding a
+second lag to descending or reversing platforms. Response Time still blends contact acquisition and release.
+Acquisition reaches full influence over Response Time using a smooth curve with zero slope at its endpoints.
+Once acquired, a contact remains fully planted until released; it no longer retains a decaying contribution from
+the moving animation for the entire stance. A brief probe dropout reacquires from its remaining influence, and
+release keeps its exponential fade. Zero Response Time applies contact changes immediately.
+Changing Response Time during acquisition preserves progress, so increasing it in Play Mode does not pull an
+already planting foot back toward its animation pose. Paused frames preserve that progress as well.
+When an Animator or its entity is inactive during evaluation, retained limb stabilization and foot contacts are
+cleared. Reactivation acquires support at the actor's current position instead of pulling feet toward stale anchors.
+Named gameplay IK goals remain assigned while disabled; a new Play session starts with a fresh runtime scene.
+Invalid grounding mappings or unavailable world transforms also discard retained contacts, so repairing the
+configuration after moving the actor reacquires support at its current position.
+An unavailable skinned mesh also clears retained IK contacts while preserving playback and named goals. Restoring
+the mesh after moving the actor acquires fresh contacts instead of pulling its feet back to the previous location.
+Reloading a skeleton discards stabilization and contact state from its previous revision before evaluating the
+new limb geometry. Named gameplay goals remain assigned and are validated against the reloaded bone names.
+Swinging feet respect the probed surface clearance even while contact locking is suppressed. This corrects only
+normal penetration and adds no planted anchor or pelvis-support influence, preventing a late upward snap when a
+descending swing reaches raised ground without holding the foot down during its next lift.
+The planted-contact regression runs two platform cycles at 30, 60, and 144 Hz with simultaneous translation, pitch,
+yaw, and roll. It checks support-relative anchor error, segment lengths, reach limits, and knee speed, and logs the
+maximum anchor error and knee speed for each rate. This controlled stance test complements the imported walking
+fixture; it does not measure mesh sliding during authored foot lifts or contact transfers.
+
+Automatic biped knee orientation uses the magnitude of each sampled knee bend when choosing the shared bend side.
+A nearly straight leg therefore cannot reverse the direction established by the bent leg when contact resumes.
+With Knee Stability above zero, the retained bend direction also spans swing and contact-free frames. A sampled
+backward knee is corrected without creating a ground contact or moving the pelvis. Already consistent unsupported
+poses are left untouched, and correction preserves the sampled foot orientation even at partial grounding weight.
+Unsupported correction rotates the sampled bend around the hip-to-foot axis instead of applying the two-bone
+solver's reach margin. This preserves the authored endpoint and avoids a minimum-bend jump as a nearly straight
+leg returns to its valid bend side. Regression coverage checks partial-weight endpoint/orientation preservation
+and bounds raised- and moving-ground knee speed in the imported walking fixture.
+The unsupported foot's orientation is restored through its full parent transform, including nonuniform ancestor
+scale. Rotated, uniformly scaled, nonuniformly scaled, and reflected parent fixtures verify active partial/full
+correction, retained endpoints and segment lengths, and the complete foot transform.
+Set Knee Stability to zero to retain the authored unsupported bend, or disable grounding
+to compare the original animation.
+
+The optional imported walking regression uses `Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb` at 30, 60,
+and 144 Hz on flat, sloped, raised, moving, and disappearing supports, plus an unmodified animation baseline.
+Set `KEIRE_IK_TEST_TRACE_DIRECTORY` to an output directory when running the `Imported walking character exercises*`
+test to export `walking-poses.csv` and `walking-contacts.log` for frame-by-frame correlation. The fixture checks
+bone lengths, finite poses, and knee direction through the scene runtime and physics; it does not render skin.
+The exported contact log includes `[IK-test] walking sweep complete`; export waits for that marker to reach the
+log file, so asynchronous logging cannot silently omit the final simulation frames.
+
+The shared-scene regression runs 32 actors with identically named IK goals and distinct model-space targets.
+It checks every evaluated bone for finite positions, target isolation, an unavailable mesh and its recovery,
+and Animator removal/replacement across the deferred component lifecycle boundary. This is a correctness
+fixture, not a crowd-performance benchmark or a substitute for profiling a game's actual rigs.
+
+The authored-limb lifecycle regression deletes and replaces target and pole entities during Play Mode. It checks
+that unavailable references produce specific diagnostics without interrupting an independent named IK goal,
+leave the affected limb in its sampled pose, and recover when a replacement reference is assigned. Clearing a
+deleted pole override resumes automatic pole selection. Every evaluated bone must remain finite throughout.
+
 `FootGroundContact.SupportWeight` controls how strongly a solved foot supports pelvis position and lean, independently
 of its endpoint `Weight`. It defaults to 1 for existing native callers. Zero support still permits foot IK, but does not
 pull the pelvis. Values must be finite and within [0, 1]; invalid requests leave the pose unchanged. Automatic grounding
 uses its existing Response Time contact blend for support influence, so acquiring a second foot does not abruptly cap
 the correction from the existing support. This behavior also applies to Animator grounding configured through C#.
 
+Terrain lean correction tilts the sampled torso direction toward the support slope while preserving authored lean.
+Flat support does not straighten an animated torso as feet acquire or release contact.
+
 Pelvis response uses each contact's support weight once in the grounding solver. The runtime keeps the authored
 pelvis weight and correction limits fixed during acquisition/release; it does not multiply them by another
 contact fade. This avoids accelerating body recovery when the last planted foot releases.
+
+`FootGroundContact.SupportPosition` optionally supplies the model-space support anchor independently of the blended
+endpoint `Position`. Omit it to retain the endpoint as support. Automatic grounding retains this anchor during release
+and fades only its support influence, preventing a rapidly shrinking reach constraint from snapping the pelvis upward.
+The same Response Time setting controls this release in the Inspector and C# Animator grounding API.
+
+In Rigging Studio's **Generated runtime assets** list, choose **Preview** beside an animation clip to open
+Animation Clip Preview directly. Select a scene character with an Animator and skinned mesh, then press Play.
+The preview uses the imported clip without baking a copy or changing the character's assigned controller.
+Compatibility warnings and missing-dependency errors use the same checks as baked clip previews.
+
+In Rigging Studio's **Generated runtime assets** list, **Reveal Source** selects the owning model in the Project
+panel and Inspector. Generated outputs do not have separate editable source files. Outputs that do have their own
+source record use **Reveal** to select that file directly. If the source was removed, refresh the Project panel or
+reimport the model before trying again.
+
+Animation previews report how many tracks map when automatically retargeting to a different skeleton.
+A clip with no mapped tracks cannot preview; select a compatible character or edit mappings in Rigging Studio.
+Partial previews retain a warning because unmapped bones use their reference pose. The warning is refreshed
+when the source clip or skeleton changes, including after reimport.
+For controllers with multiple clips, a missing clip or avatar mask takes priority over partial-mapping warnings.
+After repairing the missing dependency, preview shows any remaining mapping warning or clears the diagnostic.

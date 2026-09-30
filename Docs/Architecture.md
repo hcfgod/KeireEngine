@@ -1,5 +1,18 @@
 # Architecture
 
+## Document persistence and bounded source reads
+
+Editor documents share `DocumentSourcePersistence`, which owns the path and exact source bytes used to open or last
+save a document. Publication compares the current bounded source to that baseline before atomic replacement;
+conflict or write failure does not advance the baseline. Asset renames preserve the existing baseline. Scene reload
+prepares a replacement before clearing history or changing the editing scene, and conflicts preserve recovery.
+The scene UI owns the user's Reload/Save Copy/Overwrite decision; the persistence service is independently testable.
+This detects stale saves, but ordinary filesystem replacement is not compare-and-swap against arbitrary external
+writers in the final compare/replace interval.
+
+`EditorAssetFileService` reads into one bounded buffer, with limits matched to authoring formats and explicit
+truncation/growth/I/O failure handling. This bounds source memory; supported-size document parsing remains synchronous.
+
 Generated asset catalogs preserve `AssetDerivedMetadata::DisplayName` as optional presentation metadata. Cooking
 copies the importer-provided subasset name; catalog, worker and import-cache codecs retain it. Legacy catalogs and
 caches without a name remain readable. Identity and dependency resolution continue to use asset IDs.
@@ -44,10 +57,19 @@ device-generation lifecycle. Adjacent CPU batches must also match the material i
 Compute compilation validates the generated SPIR-V buffer ABI against `ProgramArtifact` reflection before publishing
 backend binaries. The current `ComputeDevice` owns an independent GPU device and opaque device-scoped identities;
 copies of identities do not extend resource lifetime. Operations and destruction require the construction thread.
-`Application::Compute()` lazily owns a device matching the renderer backend, waits for its work before presentation,
-and closes it during teardown. This coarse synchronization is interim integration: renderer resource sharing and
-explicit render-feature dependencies are still required. Managed wrappers enforce the same owner-thread/disposal
+`Application::Compute()` lazily owns a device matching the renderer backend, polls completed submissions without
+waiting during presentation, and closes it during teardown. Completion retires native fences while retaining public
+submission identities and readback snapshots until explicit release. Consumers wait when they actually need results;
+shutdown still drains owned work before releasing resources. Renderer resource sharing and explicit render-feature
+dependencies remain separate work. Managed wrappers enforce the same owner-thread/disposal
 contract and keep pointer-bearing interop signatures private.
+
+GPU timestamp queries are implemented through a versioned SDL backend extension in `Patches/SDL`, applied to isolated
+dependency source caches rather than the vendor checkout. The native backends own query resources; the renderer
+retains a bounded ring until final submission fences complete, then publishes device elapsed time and its source frame.
+Unsupported devices and device recreation reset timing validity. These intervals are distinct from CPU completion
+latency. Dependency cache identity and packaged SDK provenance include the patch digest in addition to the upstream
+locked commit; native backend acceptance remains recorded per platform.
 
 Reviewed migration performs a full import of its isolated staged project before catalog validation and publication.
 This ensures validation covers the converted project rather than relying on a partial incremental catalog.

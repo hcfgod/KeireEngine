@@ -11,6 +11,7 @@ TEST_CASE("compute devices reject invalid input before initializing native servi
 {
     Keire::ComputeDevice device(Keire::ProgramBackend::Vulkan);
     CHECK(device.IsOpen());
+    CHECK(device.PollCompletions() == 0);
     CHECK_THROWS_AS(device.CreateBuffer(0), std::invalid_argument);
     CHECK_THROWS_AS(device.CreateBuffer(3), std::invalid_argument);
     CHECK_THROWS_AS(device.CreateBuffer(4, true), std::invalid_argument);
@@ -51,6 +52,7 @@ TEST_CASE("compute shutdown is idempotent and all subsequent mutations reject")
     CHECK_THROWS_AS(device.GetReadback({}), std::logic_error);
     CHECK_THROWS_AS(device.ReloadPipeline({}, {}), std::logic_error);
     CHECK_THROWS_AS(device.WaitIdle(), std::logic_error);
+    CHECK_THROWS_AS(device.PollCompletions(), std::logic_error);
     CHECK_THROWS_AS(device.IsComplete({}), std::logic_error);
 }
 
@@ -75,14 +77,16 @@ TEST_CASE("compute owner thread rejection leaves the device open")
             reject([&] { device.Shutdown(); });
             reject([&] { (void)device.CreateBuffer(16); });
             reject([&] { device.WaitIdle(); });
+            reject([&] { (void)device.PollCompletions(); });
             reject([&] { (void)device.RequestReadback({}); });
             reject([&] { (void)device.GetReadback({}); });
             reject([&] { device.ReloadPipeline({}, {}); });
             reject([&] { (void)device.Dispatch({}, {}, {}); });
         });
     worker.join();
-    CHECK(rejected == 7);
+    CHECK(rejected == 8);
     CHECK(device.IsOpen());
+    CHECK(device.PollCompletions() == 0);
     CHECK_NOTHROW(device.WaitIdle());
     CHECK_NOTHROW(device.Shutdown());
 }

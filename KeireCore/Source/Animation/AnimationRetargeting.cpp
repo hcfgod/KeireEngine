@@ -482,6 +482,19 @@ namespace Keire
                     Vector3 deltaScale;
                     if (!Math::DecomposeTransform(sourceDelta, deltaTranslation, deltaRotation, deltaScale))
                         throw std::runtime_error("Animation retargeting produced a non-decomposable source delta.");
+                    Quaternion sourceBindRotation;
+                    Quaternion targetBindRotation;
+                    if (!RiggingDetail::MatrixRotation(sourceBindModels[entry.Source], sourceBindRotation) ||
+                        !RiggingDetail::MatrixRotation(targetBindModels[entry.Target], targetBindRotation))
+                        throw std::runtime_error("Animation retargeting could not resolve reference bone axes.");
+                    // The same visible reference pose can use different local joint axes. Express the
+                    // source-local delta in the target bind frame before applying it to that rig.
+                    const auto sourceToTarget = RiggingDetail::Normalize(
+                        RiggingDetail::Multiply(RiggingDetail::Conjugate(targetBindRotation), sourceBindRotation));
+                    deltaTranslation = RiggingDetail::Rotate(sourceToTarget, deltaTranslation);
+                    deltaRotation = RiggingDetail::Normalize(
+                        RiggingDetail::Multiply(RiggingDetail::Multiply(sourceToTarget, deltaRotation),
+                                                RiggingDetail::Conjugate(sourceToTarget)));
                     deltaTranslation = RiggingDetail::Multiply(deltaTranslation, entry.TranslationScale);
                     sourceDelta =
                         Math::ComposeTransform(deltaTranslation, deltaRotation, SafeRelativeScale(deltaScale));

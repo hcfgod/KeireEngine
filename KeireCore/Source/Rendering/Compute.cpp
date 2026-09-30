@@ -473,6 +473,22 @@ namespace Keire
         return !fence || SDL_QueryGPUFence(m_Impl->Device, fence);
     }
 
+    std::uint32_t ComputeDevice::PollCompletions()
+    {
+        m_Impl->RequireOpen();
+        std::uint32_t retired = 0;
+        for (auto& [id, fence] : m_Impl->Submissions)
+        {
+            if (fence && SDL_QueryGPUFence(m_Impl->Device, fence))
+            {
+                SDL_ReleaseGPUFence(m_Impl->Device, fence);
+                fence = nullptr;
+                ++retired;
+            }
+        }
+        return retired;
+    }
+
     void ComputeDevice::Wait(const ComputeSubmissionId submission)
     {
         auto& fence = m_Impl->Get(submission);

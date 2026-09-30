@@ -185,4 +185,71 @@ TEST_CASE("downloaded spider full leg chains track moving goals and recover afte
             }
         }
     }
+
+    std::size_t animatedClips = 0;
+    for (const auto& asset : imported.SubAssets)
+    {
+        if (asset.Type != Keire::AnimationClipAsset::StaticType())
+            continue;
+        CAPTURE(asset.Name);
+        const auto clip = Keire::AnimationClipAsset::Decode(asset.Bytes);
+        Keire::AnimationGraphDefinition graph;
+        graph.EntryState = "Creature";
+        graph.States = {{"Creature", asset.Id}};
+        Keire::AnimatorInstance animator(skeleton, Keire::CreateRef<Keire::AnimationGraphAsset>(graph),
+                                         [clip](Keire::AssetId) { return clip; });
+        // Sample through two loop boundaries. Goals follow the animated pose rather than the bind pose.
+        for (int frame = 0; frame < 96; ++frame)
+        {
+            CAPTURE(frame);
+            const auto sampledPose = animator.Update(clip->Duration() / 40.0F).LocalPose;
+            const auto sampled = SpiderMatrices(*skeleton, sampledPose);
+            for (const float weight : {0.0F, 0.25F, 0.5F, 1.0F})
+            {
+                CAPTURE(weight);
+                auto solvedPose = sampledPose;
+                for (const auto& chain : chains)
+                {
+                    CAPTURE(skeleton->Bones()[chain.front()].Name);
+                    float reach = 0.0F;
+                    for (std::size_t index = 1; index < chain.size(); ++index)
+                        reach += SpiderDistance(Keire::Math::TransformPoint(sampled[chain[index - 1]], {}),
+                                                Keire::Math::TransformPoint(sampled[chain[index]], {}));
+                    REQUIRE(reach > 0.0F);
+                    const auto foot = Keire::Math::TransformPoint(sampled[chain.back()], {});
+                    const float phase = static_cast<float>(frame) * 0.2F;
+                    const Keire::Vector3 target{foot.X + reach * 0.05F * std::sin(phase),
+                                                foot.Y + reach * 0.05F * std::cos(phase), foot.Z};
+                    const auto before = solvedPose;
+                    REQUIRE(Keire::SolveFabrikIk(*skeleton, solvedPose, {chain, target, 128, reach * 0.0001F, weight}));
+                    const auto after = SpiderMatrices(*skeleton, solvedPose);
+                    if (weight == 0.0F)
+                        CHECK(solvedPose == before);
+                    if (weight == 1.0F)
+                        CHECK(SpiderDistance(Keire::Math::TransformPoint(after[chain.back()], {}), target) <=
+                              SpiderDistance(foot, target) + reach * 0.001F);
+                    CHECK(SpiderDistance(Keire::Math::TransformPoint(after[chain.front()], {}),
+                                         Keire::Math::TransformPoint(sampled[chain.front()], {})) < reach * 0.001F);
+                    for (std::size_t index = 1; index < chain.size(); ++index)
+                    {
+                        const auto length = SpiderDistance(Keire::Math::TransformPoint(sampled[chain[index - 1]], {}),
+                                                           Keire::Math::TransformPoint(sampled[chain[index]], {}));
+                        const auto solvedLength =
+                            SpiderDistance(Keire::Math::TransformPoint(after[chain[index - 1]], {}),
+                                           Keire::Math::TransformPoint(after[chain[index]], {}));
+                        CHECK(std::abs(solvedLength - length) < reach * 0.001F);
+                    }
+                    for (std::size_t index = 0; index < solvedPose.size(); ++index)
+                    {
+                        for (const auto element : after[index].Elements)
+                            REQUIRE(std::isfinite(element));
+                        if (std::ranges::find(chain, index) == chain.end())
+                            CHECK(solvedPose[index] == before[index]);
+                    }
+                }
+            }
+        }
+        ++animatedClips;
+    }
+    CHECK(animatedClips == 7);
 }

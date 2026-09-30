@@ -38,6 +38,35 @@ namespace
     };
 } // namespace
 
+TEST_CASE("Pelvis support release is independent of the blended foot endpoint")
+{
+    for (const float blend : {0.0F, 0.01F, 0.25F, 0.5F, 0.9F, 1.0F})
+    {
+        GroundingFixture fixture;
+        fixture.Request.Contacts.resize(1);
+        auto& contact = fixture.Request.Contacts.front();
+        contact.SupportPosition = Keire::Vector3{-0.25F, -0.2F, 0.0F};
+        contact.Position.Y = -0.2F * blend;
+        contact.SupportWeight = blend;
+        fixture.Request.PelvisWeight = 1.0F;
+        const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+        REQUIRE(result);
+        CAPTURE(blend);
+        CHECK(result->PelvisAdjustment == doctest::Approx(-0.2F * blend).epsilon(0.00001F));
+        CHECK(result->MaximumPositionError <= fixture.Request.PositionTolerance);
+    }
+}
+
+TEST_CASE("Invalid support anchors reject grounding without changing the pose")
+{
+    GroundingFixture fixture;
+    const auto original = fixture.Pose;
+    fixture.Request.Contacts.front().SupportPosition =
+        Keire::Vector3{0.0F, std::numeric_limits<float>::quiet_NaN(), 0.0F};
+    CHECK_FALSE(Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request));
+    CHECK(fixture.Pose == original);
+}
+
 TEST_CASE("Zero-weight ground contacts do not pull the pelvis or change active support diagnostics")
 {
     GroundingFixture fixture;
@@ -260,6 +289,47 @@ TEST_CASE("Foot grounding lowers the pelvis only when a support exceeds leg reac
     REQUIRE(lowered);
     CHECK(lowered->PelvisAdjustment == doctest::Approx(-0.2F + std::sqrt(4.0F - 0.64F) - 2.0F));
     CHECK(lowered->UnreachableFeet == 0);
+}
+
+TEST_CASE("Flat support preserves authored torso lean throughout contact release")
+{
+    for (const float lean : {-25.0F, -10.0F, 10.0F, 25.0F})
+    {
+        for (const float support : {0.0F, 0.01F, 0.25F, 0.5F, 1.0F})
+        {
+            CAPTURE(lean);
+            CAPTURE(support);
+            GroundingFixture fixture;
+            fixture.Pose[0].Rotation = Keire::Math::EulerDegreesToQuaternion({lean, 0.0F, 0.0F});
+            fixture.Request.MaximumHorizontalPelvisAdjustment = 0.0F;
+            fixture.Request.MaximumPelvisAdjustment = 0.0F;
+            fixture.Request.Contacts.resize(1);
+            fixture.Request.Contacts.front().SupportWeight = support;
+            const auto sampledRotation = fixture.Pose[0].Rotation;
+            const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+            REQUIRE(result);
+            CHECK(result->PelvisRotationAdjustmentDegrees == doctest::Approx(0.0F).epsilon(0.00001F));
+            CHECK(fixture.Pose[0].Rotation == sampledRotation);
+        }
+    }
+}
+
+TEST_CASE("Slope correction adds terrain tilt to authored torso lean")
+{
+    GroundingFixture fixture;
+    fixture.Pose[0].Rotation = Keire::Math::EulerDegreesToQuaternion({10.0F, 0.0F, 0.0F});
+    fixture.Request.MaximumHorizontalPelvisAdjustment = 0.0F;
+    fixture.Request.MaximumPelvisAdjustment = 0.0F;
+    fixture.Request.Contacts.resize(1);
+    constexpr float slopeRadians = 10.0F * 0.01745329251994329577F;
+    fixture.Request.Contacts.front().Normal = {0.0F, std::cos(slopeRadians), std::sin(slopeRadians)};
+    const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+    REQUIRE(result);
+    CHECK(result->PelvisRotationAdjustmentDegrees == doctest::Approx(10.0F).epsilon(0.001F));
+    const auto expected = Keire::Math::EulerDegreesToQuaternion({20.0F, 0.0F, 0.0F});
+    const auto actual = fixture.Pose[0].Rotation;
+    CHECK(std::abs(actual.X * expected.X + actual.Y * expected.Y + actual.Z * expected.Z + actual.W * expected.W) >
+          0.99999F);
 }
 
 TEST_CASE("Authored strides do not shift the pelvis as matching ground supports change")

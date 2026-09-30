@@ -20,11 +20,12 @@ Three measurements answer different questions:
 | GPU completion latency | CPU submit until its fence is observed complete | No; includes queueing and polling cadence |
 | GPU fence wait | CPU time blocked when the frames-in-flight limit is reached | No; measures back-pressure on that frame |
 
-The current SDL GPU boundary provides portable fences but no portable timestamp-query API. Kéire therefore publishes
-completion latency for diagnosis while leaving `GPU timing supported` false. The reference profiles require true GPU
-timestamps and fail clearly on that backend; they never relabel completion or command-recording time as GPU cost. A
-future backend timestamp implementation can populate the existing statistics contract without changing capture files
-or gate definitions.
+The maintained SDL patch adds optional native GPU timestamp queries for D3D12, Vulkan, and capable Metal devices.
+The renderer publishes a device timestamp interval only after its submission fence completes. `GPU timing supported`
+remains false until a valid sample exists, and remains false on unsupported devices. `GPU timing frame` identifies the
+accepted frame that produced the asynchronous sample; it is not necessarily the currently captured CPU frame.
+Completion latency, command recording, and CPU fence waits remain separate counters. The reference profiles still
+require true timestamps; no gate threshold or timing requirement has been relaxed.
 
 ### 2026-08-16 acceptance audit
 
@@ -45,6 +46,41 @@ evidence.
 This Windows audit is not native macOS, Metal, or ARM64 acceptance. Those lanes require their own native hosts and raw
 build, test, rendered-output, package-consumer, and player-smoke artifacts. Platform claims remain unchanged until that
 evidence exists.
+
+### 2026-09-29 implementation: maintained timestamp backend
+
+The lock pins SDL `release-3.4.10`, commit `11a9d3212ef3063a2755982ce71a26b365cef32a`. Upstream does not supply this
+query API; its [query API request](https://github.com/libsdl-org/SDL/issues/11696) was still open when checked on this
+date. The first-party patch [`0001-gpu-timestamp-queries.patch`](../Patches/SDL/0001-gpu-timestamp-queries.patch) adds
+an explicitly marked extension in the isolated dependency source. The tracked vendor checkout and submodule pin are
+unchanged. Build/package provenance records the patch digest.
+
+- D3D12 records timestamp query-heap writes and resolves into readback memory, converting device ticks with that
+  submission queue's native frequency.
+- Vulkan records query-pool reset/start/end operations, reads completed results without a wait flag, and converts
+  ticks using the device period and queue-family valid-bit mask. Unsupported timestamp queues report unavailable.
+- Metal checks for timestamp counters and blit-boundary sampling, samples counter buffers with barriers, and resolves
+  only after completion. It calibrates GPU units against paired device CPU/GPU clock samples using
+  [Apple's documented conversion](https://developer.apple.com/documentation/metal/converting-gpu-timestamps-into-cpu-time).
+  Unsupported devices continue reporting unavailable; completion latency is never used as a substitute.
+
+The private renderer owns one reusable two-slot query per accepted-frame slot (at most three). A start-marker
+submission precedes uploads and offscreen surfaces; the final marker follows swapchain commands on the same device.
+Swapchain acquisition and CPU recording finish before the measured submissions begin. The measurement is elapsed GPU
+queue time across that frame's submissions, not a sum of individual pass busy times; queue scheduling and submission
+gaps within the markers may contribute. There is no per-frame device wait for measurement.
+
+The final frame fence owns completion. Only retirement reads its query, publishes `GpuFrameMilliseconds` and
+`GpuTimingFrame`, and permits slot reuse. Invalid/unavailable results clear the supported flag, duration, and frame ID;
+a new recording does not replace a valid older sample with zero. Normal teardown releases the query ring after idle.
+Lost generations abandon their queries with the other unusable native handles; test-injected loss safely releases them
+after its explicit idle barrier. Device recreation starts with unavailable timing until a fresh valid result arrives.
+
+`KeireRenderTests` adds `GPU timestamp queries*` and `GPU timing publishes*` cases for native query recording rejection,
+reuse, cancellation, completed results, and renderer frame attribution. Headless core coverage verifies unavailable
+zeros; existing loss/recovery and post-submit failure tests exercise the extended teardown paths. Native D3D12/Vulkan,
+Metal, ASan, SDK/package checks, and controlled Release captures are delegated to the coordinated validation chat.
+Implementation is not evidence that the reference performance budgets pass. No new passing capture is claimed here.
 
 ## Capture metadata
 

@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -1412,6 +1413,9 @@ namespace
         bool InvalidReloadQueued = false;
         std::uint64_t PenultimateFailureBuilds = 0;
         std::uint64_t SettledFailureBuilds = 0;
+        std::size_t Frames = 0;
+        int LastStage = 0;
+        double ElapsedSeconds = 0.0;
     };
 
     class AssetRevisionCaptureLayer final : public Keire::Layer
@@ -1457,6 +1461,12 @@ namespace
 
         void OnUpdate(const Keire::Time&) override
         {
+            const auto now = std::chrono::steady_clock::now();
+            if (m_FrameCount == 0)
+                m_Started = now;
+            m_Results->ElapsedSeconds = std::chrono::duration<double>(now - m_Started).count();
+            m_Results->LastStage = m_Stage;
+            m_Results->Frames = m_FrameCount;
             if (m_Submitted)
             {
                 auto pixels = Keire::RenderSystemInternalAccess::ReadbackRGBA8(*Owner().Renderer(), *m_View->Surface());
@@ -1503,7 +1513,9 @@ namespace
                         Keire::RenderSystemInternalAccess::MaterialBindingBuildCount(*Owner().Renderer());
                 }
             }
-            if (++m_FrameCount > 120)
+            // Asset loading and shader compilation run asynchronously; frame count is not a loading deadline.
+            ++m_FrameCount;
+            if (m_Results->ElapsedSeconds > 15.0)
             {
                 Owner().RequestExit();
                 return;
@@ -1518,6 +1530,7 @@ namespace
       private:
         RenderAssetFixture& m_Fixture;
         std::shared_ptr<ReloadCaptureResults> m_Results;
+        std::chrono::steady_clock::time_point m_Started;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         std::size_t m_FrameCount = 0;
@@ -2419,6 +2432,8 @@ TEST_CASE("render asset revisions swap atomically and failed reloads preserve la
         REQUIRE(application.Run() == 0);
     }
 
+    INFO("Reload stage=" << results->LastStage << " frames=" << results->Frames
+                         << " elapsed_seconds=" << results->ElapsedSeconds);
     REQUIRE(results->TextureReloadQueued);
     REQUIRE(results->MaterialReloadQueued);
     REQUIRE(results->ShaderReloadQueued);

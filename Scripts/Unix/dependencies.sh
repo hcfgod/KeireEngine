@@ -51,58 +51,91 @@ while IFS= read -r patch; do
 done < <(find "$assimp_patch_root" -maxdepth 1 -type f -name '*.patch' -print | LC_ALL=C sort)
 ((${#assimp_patches[@]} > 0)) || { printf 'The Kéire Assimp patch set is empty.\n' >&2; exit 1; }
 if command -v sha256sum >/dev/null 2>&1; then
-  assimp_patch_digest="$({ for patch in "${assimp_patches[@]}"; do basename "$patch"; printf '\n'; cat "$patch"; done; } | sha256sum | awk '{print $1}')"
+  assimp_patch_digest="$({ for patch in "${assimp_patches[@]}"; do printf '%s\n' "$(basename "$patch")"; cat "$patch"; done; } | sha256sum | awk '{print $1}')"
 else
-  assimp_patch_digest="$({ for patch in "${assimp_patches[@]}"; do basename "$patch"; printf '\n'; cat "$patch"; done; } | shasum -a 256 | awk '{print $1}')"
+  assimp_patch_digest="$({ for patch in "${assimp_patches[@]}"; do printf '%s\n' "$(basename "$patch")"; cat "$patch"; done; } | shasum -a 256 | awk '{print $1}')"
 fi
 
-validate_patched_assimp_source() {
+validate_patched_dependency_source() {
   local source_path="${1:?source path is required}"
-  local expected_stamp="$assimp_commit|$assimp_patch_digest"
+  local dependency_name="${2:?dependency name is required}"
+  local dependency_commit="${3:?commit is required}" dependency_patch_digest="${4:?patch digest is required}"
+  local dependency_slug
+  dependency_slug="$(printf '%s' "$dependency_name" | tr '[:upper:]' '[:lower:]')"
+  shift 4
+  local expected_stamp="$dependency_commit|$dependency_patch_digest"
   [[ -d "$source_path" && ! -L "$source_path" ]] || {
-    printf 'Patched Assimp source is missing or unsafe: %s\n' "$source_path" >&2
+    printf 'Patched dependency source is missing or unsafe: %s\n' "$source_path" >&2
     return 1
   }
-  [[ "$(git -C "$source_path" rev-parse HEAD)" == "$assimp_commit" ]] || {
-    printf 'Patched Assimp source is not based on locked commit %s.\n' "$assimp_commit" >&2
+  [[ "$(git -C "$source_path" rev-parse HEAD)" == "$dependency_commit" ]] || {
+    printf 'Patched dependency source is not based on locked commit %s.\n' "$dependency_commit" >&2
     return 1
   }
-  [[ -f "$source_path/keire-assimp-patch.stamp" &&
-     "$(tr -d '\r\n' < "$source_path/keire-assimp-patch.stamp")" == "$expected_stamp" ]] || {
-    printf 'Patched Assimp source stamp does not match the locked commit and patch digest.\n' >&2
+  [[ -f "$source_path/keire-$dependency_slug-patch.stamp" &&
+     "$(tr -d '\r\n' < "$source_path/keire-$dependency_slug-patch.stamp")" == "$expected_stamp" ]] || {
+    printf 'Patched dependency source stamp does not match the locked commit and patch digest.\n' >&2
     return 1
   }
   local patch
-  for patch in "${assimp_patches[@]}"; do
+  for patch in "$@"; do
     git -C "$source_path" apply --reverse --check --whitespace=error-all -- "$patch" || return 1
   done
   git -C "$source_path" diff --check || return 1
   local expected_paths actual_paths untracked
-  expected_paths="$(sed -n 's#^diff --git a/[^ ]* b/##p' "${assimp_patches[@]}" | LC_ALL=C sort -u)"
-  actual_paths="$(git -C "$source_path" diff --name-only --no-ext-diff | LC_ALL=C sort -u)"
-  [[ "$actual_paths" == "$expected_paths" ]] || {
-    printf 'Patched Assimp source contains changes outside the committed patch set.\n' >&2
+  expected_paths="$(sed -n 's#^diff --git a/[^ ]* b/##p' "$@" | LC_ALL=C sort -u)"
+  git -C "$source_path" diff --cached --quiet --exit-code || {
+    printf 'Patched dependency source contains staged changes.\n' >&2
     return 1
   }
+  actual_paths="$(git -C "$source_path" diff HEAD --name-only --no-ext-diff | LC_ALL=C sort -u)"
+  [[ "$actual_paths" == "$expected_paths" ]] || {
+    printf 'Patched dependency source contains changes outside the committed patch set.\n' >&2
+    return 1
+  }
+  local expected_blobs hashed_paths actual_blob expected_path expected_blob
+  expected_blobs="$(awk '
+    /^diff --git / { path=$4; sub(/^b\//, "", path) }
+    /^index / { split($2, ids, /\.\./); hashes[path]=ids[2] }
+    END { for (path in hashes) print path " " hashes[path] }
+  ' "$@")"
+  hashed_paths="$(printf '%s\n' "$expected_blobs" | cut -d ' ' -f 1 | LC_ALL=C sort -u)"
+  [[ "$hashed_paths" == "$expected_paths" ]] || {
+    printf 'Dependency patch is missing final blob identities.\n' >&2
+    return 1
+  }
+  while IFS=' ' read -r expected_path expected_blob; do
+    [[ "$expected_blob" =~ ^[0-9a-f]{9,40}$ ]] || return 1
+    actual_blob="$(git -C "$source_path" hash-object --path="$expected_path" -- "$expected_path")" || return 1
+    [[ "$actual_blob" == "$expected_blob"* ]] || {
+      printf 'Patched dependency content differs from the declared patch: %s\n' "$expected_path" >&2
+      return 1
+    }
+  done <<< "$expected_blobs"
   untracked="$(git -C "$source_path" ls-files --others --exclude-standard)"
-  [[ "$untracked" == keire-assimp-patch.stamp ]] || {
-    printf 'Patched Assimp source contains unexpected untracked files.\n' >&2
+  [[ "$untracked" == keire-$dependency_slug-patch.stamp ]] || {
+    printf 'Patched dependency source contains unexpected untracked files.\n' >&2
     return 1
   }
 }
 
-prepare_patched_assimp_source() {
-  local vendor_source="$ROOT/Vendor/assimp"
-  local cache_root="$ROOT/Build/Dependencies/assimp-patched"
-  local source_path="$cache_root/${assimp_commit:0:12}-${assimp_patch_digest:0:16}"
-  local temporary_path="$cache_root/.tmp-${assimp_commit:0:12}-${assimp_patch_digest:0:16}-$$"
-  [[ "$(git -C "$vendor_source" rev-parse HEAD)" == "$assimp_commit" &&
+prepare_patched_dependency_source() {
+  local dependency_name="${1:?dependency name is required}" vendor_source="${2:?vendor source is required}"
+  local dependency_commit="${3:?commit is required}" dependency_patch_digest="${4:?patch digest is required}"
+  local dependency_slug
+  dependency_slug="$(printf '%s' "$dependency_name" | tr '[:upper:]' '[:lower:]')"
+  [[ "$dependency_slug" == assimp || "$dependency_slug" == sdl ]] || return 1
+  shift 4
+  local cache_root="$ROOT/Build/Dependencies/$dependency_slug-patched"
+  local source_path="$cache_root/${dependency_commit:0:12}-${dependency_patch_digest:0:16}"
+  local temporary_path="$cache_root/.tmp-${dependency_commit:0:12}-${dependency_patch_digest:0:16}-$$"
+  [[ "$(git -C "$vendor_source" rev-parse HEAD)" == "$dependency_commit" &&
      -z "$(git -C "$vendor_source" status --porcelain --untracked-files=all)" ]] || {
-    printf 'The Assimp submodule must match the locked commit and remain clean before downstream patches are applied.\n' >&2
+    printf 'The dependency submodule must match the locked commit and remain clean before downstream patches are applied.\n' >&2
     return 1
   }
   if [[ -e "$source_path" || -L "$source_path" ]]; then
-    validate_patched_assimp_source "$source_path" || return 1
+    validate_patched_dependency_source "$source_path" "$dependency_name" "$dependency_commit" "$dependency_patch_digest" "$@" || return 1
     printf '%s\n' "$source_path"
     return
   fi
@@ -110,21 +143,21 @@ prepare_patched_assimp_source() {
   case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; *) return 1 ;; esac
   if ! git clone --quiet --no-hardlinks "$vendor_source" "$temporary_path"; then
     case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; esac
-    printf 'Could not clone the locked Assimp submodule.\n' >&2
+    printf 'Could not clone the locked dependency submodule.\n' >&2
     return 1
   fi
   local patch
-  for patch in "${assimp_patches[@]}"; do
+  for patch in "$@"; do
     if ! git -C "$temporary_path" apply --whitespace=error-all -- "$patch"; then
       case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; esac
-      printf 'Could not apply Assimp patch %s.\n' "$(basename "$patch")" >&2
+      printf 'Could not apply dependency patch %s.\n' "$(basename "$patch")" >&2
       return 1
     fi
   done
-  printf '%s\n' "$assimp_commit|$assimp_patch_digest" > "$temporary_path/keire-assimp-patch.stamp"
-  if ! validate_patched_assimp_source "$temporary_path" || ! mv "$temporary_path" "$source_path"; then
+  printf '%s\n' "$dependency_commit|$dependency_patch_digest" > "$temporary_path/keire-$dependency_slug-patch.stamp"
+  if ! validate_patched_dependency_source "$temporary_path" "$dependency_name" "$dependency_commit" "$dependency_patch_digest" "$@" || ! mv "$temporary_path" "$source_path"; then
     case "$temporary_path" in "$cache_root"/*) rm -rf "$temporary_path" ;; esac
-    printf 'Could not publish patched Assimp source.\n' >&2
+    printf 'Could not publish patched dependency source.\n' >&2
     return 1
   fi
   printf '%s\n' "$source_path"
@@ -200,7 +233,19 @@ harfbuzz_source="$(locked_source harfbuzz "$harfbuzz_url" "$harfbuzz_commit")"
 fribidi_source="$(locked_source fribidi "$fribidi_url" "$fribidi_commit")"
 libunibreak_source="$(locked_source libunibreak "$libunibreak_url" "$libunibreak_commit")"
 libsodium_source="$(locked_source libsodium "$libsodium_url" "$libsodium_commit")"
-assimp_patched_source="$(prepare_patched_assimp_source)"
+assimp_patched_source="$(prepare_patched_dependency_source Assimp "$ROOT/Vendor/assimp" "$assimp_commit" "$assimp_patch_digest" "${assimp_patches[@]}")"
+sdl_patch_root="$ROOT/Patches/SDL"
+sdl_patches=()
+while IFS= read -r patch; do
+  sdl_patches+=("$patch")
+done < <(find "$sdl_patch_root" -maxdepth 1 -type f -name '*.patch' -print | LC_ALL=C sort)
+((${#sdl_patches[@]} > 0)) || { printf 'The Kéire SDL patch set is empty.\n' >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then
+  sdl_patch_digest="$({ for patch in "${sdl_patches[@]}"; do printf '%s\n' "$(basename "$patch")"; cat "$patch"; done; } | sha256sum | awk '{print $1}')"
+else
+  sdl_patch_digest="$({ for patch in "${sdl_patches[@]}"; do printf '%s\n' "$(basename "$patch")"; cat "$patch"; done; } | shasum -a 256 | awk '{print $1}')"
+fi
+sdl_patched_source="$(prepare_patched_dependency_source SDL "$ROOT/Vendor/SDL" "$sdl_commit" "$sdl_patch_digest" "${sdl_patches[@]}")"
 if [[ "$toolset" == clang ]]; then export CC=clang CXX=clang++; else export CC=gcc CXX=g++; fi
 compiler="$($CXX --version | head -n 1)"
 bridge="$ROOT/Scripts/Dependencies/CMakeLists.txt"
@@ -239,7 +284,7 @@ if [[ "$platform" == Mac ]]; then
   options+=("-DCMAKE_OSX_ARCHITECTURES=$cmake_architecture"
     "-DCMAKE_OSX_DEPLOYMENT_TARGET=$macos_deployment_target")
 fi
-key="$sdl_commit|$assimp_commit|$assimp_patch_digest|$jolt_commit|$recast_commit|$miniaudio_commit|$freetype_commit|$harfbuzz_commit|$fribidi_commit|$libunibreak_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
+key="$sdl_commit|$assimp_commit|$assimp_patch_digest|$sdl_patch_digest|$jolt_commit|$recast_commit|$miniaudio_commit|$freetype_commit|$harfbuzz_commit|$fribidi_commit|$libunibreak_commit|$libsodium_commit|$architecture|$toolset|$compiler|$bridge_hash|${options[*]}"
 base="$ROOT/Build/Dependencies/$system-$output_arch-$toolset"
 
 validate_sdl_input_backends() {
@@ -291,7 +336,8 @@ for configuration in Debug Release; do
   detour_library="$install/lib/libDetour$recast_suffix.a"
   crowd_library="$install/lib/libDetourCrowd$recast_suffix.a"
   tile_cache_library="$install/lib/libDetourTileCache$recast_suffix.a"
-  if [[ "$force" != 1 && -f "$library" && -f "$assimp_library" && -f "$zlib_library" &&
+  if [[ "$force" != 1 && -f "$install/share/keire/sdl-patch.stamp" &&
+        "$(tr -d '\r\n' < "$install/share/keire/sdl-patch.stamp")" == "$sdl_commit|$sdl_patch_digest" && -f "$library" && -f "$assimp_library" && -f "$zlib_library" &&
         -f "$jolt_library" && -f "$recast_library" && -f "$detour_library" &&
         -f "$crowd_library" && -f "$tile_cache_library" && -f "$miniaudio_library" &&
         -f "$freetype_library" && -f "$harfbuzz_library" && -f "$fribidi_library" &&
@@ -305,7 +351,7 @@ for configuration in Debug Release; do
   [[ "$build" == "$base/Debug" || "$build" == "$base/Release" ]] || { printf 'Refusing to replace dependency cache outside %s.\n' "$base" >&2; exit 1; }
   rm -rf "$build"
   mkdir -p "$build"
-  cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$ROOT/Vendor/SDL" -DKEIRE_ASSIMP_SOURCE="$assimp_patched_source" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DKEIRE_FREETYPE_SOURCE="$freetype_source" -DKEIRE_HARFBUZZ_SOURCE="$harfbuzz_source" -DKEIRE_FRIBIDI_SOURCE="$fribidi_source" -DKEIRE_LIBUNIBREAK_SOURCE="$libunibreak_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
+  cmake -S "$ROOT/Scripts/Dependencies" -B "$build" -G Ninja -DKEIRE_SDL_SOURCE="$sdl_patched_source" -DKEIRE_ASSIMP_SOURCE="$assimp_patched_source" -DKEIRE_JOLT_SOURCE="$jolt_source" -DKEIRE_RECAST_SOURCE="$recast_source" -DKEIRE_MINIAUDIO_SOURCE="$miniaudio_source" -DKEIRE_FREETYPE_SOURCE="$freetype_source" -DKEIRE_HARFBUZZ_SOURCE="$harfbuzz_source" -DKEIRE_FRIBIDI_SOURCE="$fribidi_source" -DKEIRE_LIBUNIBREAK_SOURCE="$libunibreak_source" -DCMAKE_BUILD_TYPE="$configuration" -DCMAKE_INSTALL_PREFIX="$install" "${options[@]}"
   cmake --build "$build" --target install --parallel "$(build_parallel_jobs)"
   validate_sdl_input_backends "$build" "$configuration"
   sodium_build="$build/libsodium"
@@ -337,6 +383,8 @@ for configuration in Debug Release; do
      -f "$install/include/freetype2/ft2build.h" && -f "$install/include/harfbuzz/hb.h" &&
      -f "$install/include/fribidi/fribidi.h" && -f "$install/include/unibreak/linebreak.h" &&
      -f "$install/cmake/SDL3Config.cmake" ]] || { printf 'Native %s install is incomplete.\n' "$configuration" >&2; exit 1; }
+  mkdir -p "$install/share/keire"
+  printf '%s\n' "$sdl_commit|$sdl_patch_digest" > "$install/share/keire/sdl-patch.stamp"
   printf '%s\n' "$key|$configuration" > "$stamp"
 done
 
@@ -409,6 +457,7 @@ cat > "$ROOT/Build/Generated/Dependencies.lua" <<EOF
 DependencyManifest = {
     MacOSDeploymentTarget = "$macos_deployment_target",
     SDLCommit = "$sdl_commit",
+    SDLPatchDigest = "$sdl_patch_digest",
     JSONCommit = "$json_commit",
     AssimpCommit = "$assimp_commit",
     AssimpPatchDigest = "$assimp_patch_digest",

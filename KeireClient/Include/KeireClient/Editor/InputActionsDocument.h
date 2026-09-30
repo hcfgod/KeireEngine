@@ -1,11 +1,15 @@
 #pragma once
 
 #include "Keire/Core.h"
+#include "KeireClient/Editor/DocumentSourcePersistence.h"
 
+#include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace KeireEditor
 {
@@ -21,7 +25,8 @@ namespace KeireEditor
         [[nodiscard]] Keire::Ref<Keire::UndoContext> UndoContext() const noexcept { return m_Undo; }
         [[nodiscard]] bool Dirty() const noexcept { return m_Dirty; }
         void Open(Keire::AssetId asset, Keire::InputActionAssetDefinition definition,
-                  Keire::Ref<Keire::UndoContext> undo = {}, std::filesystem::path source = {});
+                  Keire::Ref<Keire::UndoContext> undo = {}, std::filesystem::path source = {},
+                  std::optional<std::vector<std::byte>> loadedBytes = std::nullopt);
         void Save();
         void ReplaceDefinition(Keire::InputActionAssetDefinition definition, bool dirty = true);
         [[nodiscard]] bool TryReplaceDefinition(Keire::InputActionAssetDefinition definition, std::string& diagnostic,
@@ -46,6 +51,7 @@ namespace KeireEditor
         Keire::AssetId m_Binding;
         Keire::InputActionAssetDefinition m_Definition;
         std::filesystem::path m_Source;
+        DocumentSourcePersistence m_Persistence;
         Keire::Ref<Keire::UndoContext> m_Undo;
         bool m_Dirty = false;
     };

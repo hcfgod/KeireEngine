@@ -899,7 +899,14 @@ namespace KeireEditor
         if (!asset || revision == 0 || source.empty())
             throw std::invalid_argument("Opening a UI Builder document requires an asset, revision, and source path.");
         Keire::UiVisualTreeAsset::Validate(definition);
+        DocumentSourcePersistence persistence;
+        persistence.Bind(source);
+        if (const auto& loaded = persistence.LoadedBytes();
+            loaded && Keire::UiVisualTreeAsset::Encode(Keire::UiVisualTreeAsset::ParseSource(*loaded)) !=
+                          Keire::UiVisualTreeAsset::Encode(definition))
+            throw DocumentSourceConflict();
         Close();
+        m_Persistence = std::move(persistence);
         m_Asset = asset;
         m_Selection = definition.Root.StableId;
         m_Selections = {m_Selection};
@@ -923,6 +930,7 @@ namespace KeireEditor
         m_Revision = 0;
         m_Generation = 0;
         m_Source.clear();
+        m_Persistence = {};
         m_Undo.Reset();
         m_Dirty = false;
     }
@@ -1382,41 +1390,6 @@ namespace KeireEditor
             return {};
         const auto bytes = Keire::UiVisualTreeAsset::EncodeSource(m_Definition);
         return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
-    }
-
-    void UiBuilderDocument::Save()
-    {
-        if (!m_Asset || m_Source.empty())
-            throw std::logic_error("Open a UI document before saving it.");
-        const auto bytes = Keire::UiVisualTreeAsset::EncodeSource(m_Definition);
-        Keire::Detail::WriteTextFileAtomically(m_Source, {reinterpret_cast<const char*>(bytes.data()), bytes.size()});
-        m_Baseline = m_Definition;
-        m_Dirty = false;
-        AdvanceGeneration();
-    }
-
-    void UiBuilderDocument::ReloadFromSource(const bool discardLocalChanges)
-    {
-        if (!m_Asset || m_Source.empty())
-            throw std::logic_error("Open a UI document before reloading it.");
-        if (m_Dirty && !discardLocalChanges)
-            throw std::logic_error("The UI document has unsaved changes. Revert explicitly to discard them.");
-        const auto text = Keire::Detail::ReadTextFile(m_Source, Keire::MaximumUiDocumentBytes);
-        const auto bytes = std::as_bytes(std::span(text));
-        auto definition = Keire::UiVisualTreeAsset::ParseSource(bytes);
-        Keire::UiVisualTreeAsset::Validate(definition);
-        auto before = m_Definition;
-        const bool changed = Keire::UiVisualTreeAsset::Encode(before) != Keire::UiVisualTreeAsset::Encode(definition);
-        m_Definition = std::move(definition);
-        m_Baseline = m_Definition;
-        NormalizeSelection();
-        if (!Find(m_Selection))
-            Select(m_Definition.Root.StableId);
-        if (changed)
-            RecordApplied("Revert UI document", std::move(before));
-        RefreshDirtyState();
-        if (changed)
-            AdvanceGeneration();
     }
 
     bool UiBuilderDocument::Undo() { return m_Undo && m_Undo->Undo(); }

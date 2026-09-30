@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <string>
@@ -20,6 +21,26 @@ namespace
     {
         int Value = 0;
     };
+
+    bool ValidateGroundingContact()
+    {
+        const Keire::SkeletonAsset skeleton({{"Pelvis", -1, {{0, 2, 0}, {}, {1, 1, 1}}, {}},
+                                             {"Hip", 0, {{0, 0, 0}, {}, {1, 1, 1}}, {}},
+                                             {"Knee", 1, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
+                                             {"Foot", 2, {{0, -1, 0}, {}, {1, 1, 1}}, {}}});
+        std::vector<Keire::BoneTransform> pose;
+        for (const auto& bone : skeleton.Bones())
+            pose.push_back(bone.BindPose);
+        Keire::FootGroundingRequest request;
+        request.Pelvis = 0;
+        request.FootHeight = 0;
+        request.Contacts.push_back({1, 2, 3, {0, -0.1F, 0}});
+        request.Contacts.front().SupportPosition = Keire::Vector3{0, -0.2F, 0};
+        request.Contacts.front().SupportWeight = 0.5F;
+        const auto result = Keire::SolveFootGrounding(skeleton, pose, request);
+        return result && result->SolvedFeet == 1 && std::abs(result->PelvisAdjustment + 0.1F) < 0.0001F &&
+               result->MaximumPositionError <= request.PositionTolerance;
+    }
 } // namespace
 
 int main(const int argc, char* argv[])
@@ -71,7 +92,8 @@ int main(const int argc, char* argv[])
     return std::string(Keire::GetName()).empty() || build.Version.empty() || eventValue != 42 ||
                    time.FrameCount() != 1 || uiSpecification.Mode != Keire::UiMode::Headless || !scene ||
                    scene->Definition().SchemaVersion != Keire::CurrentSceneSchemaVersion ||
-                   scene->Definition().Objects.size() != 1 || scene->Definition().Objects.front().Layer != 7
+                   scene->Definition().Objects.size() != 1 || scene->Definition().Objects.front().Layer != 7 ||
+                   !ValidateGroundingContact()
                ? 1
                : 0;
 }

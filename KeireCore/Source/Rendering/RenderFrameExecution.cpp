@@ -494,7 +494,6 @@ namespace Keire::RenderBackend
         Statistics.SwapchainWaitMilliseconds = 0.0F;
         Statistics.UiRecordingMilliseconds = 0.0F;
         Statistics.GpuSubmissionMilliseconds = 0.0F;
-        Statistics.GpuFrameMilliseconds = 0.0F;
         Statistics.GpuOcclusionDepthPassMilliseconds = 0.0F;
         Statistics.GpuOcclusionPyramidRecordingMilliseconds = 0.0F;
         Statistics.GpuOcclusionCullingRecordingMilliseconds = 0.0F;
@@ -535,6 +534,7 @@ namespace Keire::RenderBackend
         if (GpuSubmissionSerial == std::numeric_limits<std::uint64_t>::max())
             throw std::overflow_error("GPU submission serial exhausted.");
         SDL_GPUCommandBuffer* commands = nullptr;
+        SDL_GPUCommandBuffer* timestampCommands = nullptr;
         SDL_GPUFence* submittedFence = nullptr;
         std::vector<SDL_GPUCommandBuffer*> surfaceCommands;
         surfaceCommands.reserve(frame->Requests.size());
@@ -633,7 +633,43 @@ namespace Keire::RenderBackend
             Statistics.CommandRecordingUnattributedMilliseconds =
                 std::max(0.0F, Statistics.CommandRecordingMilliseconds - attributedRecordingMilliseconds);
 
+            // A dedicated queue marker brackets every upload, offscreen surface, and swapchain submission.
+            // The slot cannot be reused until its final fence retires; polling never waits for timestamps.
+            if (auto* query = TimestampQueries.at(frame->FrameSlot))
+            {
+                timestampCommands = SDL_AcquireGPUCommandBuffer(Device);
+                if (!timestampCommands || !SDL_WriteGPUTimestamp(timestampCommands, query, 0))
+                    throw std::runtime_error("Record GPU frame timestamp failed: " + LastSdlError());
+            }
+            // Finish recording, including the CPU swapchain wait, before beginning the measured GPU interval.
+            commands = SDL_AcquireGPUCommandBuffer(Device);
+            if (!commands)
+                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(swapchain) failed: " + LastSdlError());
+            if (frame->EditorUi)
+            {
+                resolvedEditorUi = frame->EditorUi->ResolveForRender(
+                    EditorUiTextures, frame->DeviceGeneration,
+                    [this](const RenderSurfaceToken& token)
+                    {
+                        const auto surface = ResolveSurface(token);
+                        return reinterpret_cast<std::uintptr_t>(
+                            surface ? surface->PublishedTexture.load(std::memory_order_acquire) : nullptr);
+                    });
+            }
+            RecordSwapchain(commands, resolvedEditorUi ? resolvedEditorUi->Data() : nullptr);
+
+            if (auto* query = TimestampQueries.at(frame->FrameSlot))
+                if (!SDL_WriteGPUTimestamp(commands, query, 1))
+                    throw std::runtime_error("Record final GPU frame timestamp failed: " + LastSdlError());
+
             const auto uploadStarted = std::chrono::steady_clock::now();
+            if (timestampCommands)
+            {
+                auto* marker = std::exchange(timestampCommands, nullptr);
+                if (!SDL_SubmitGPUCommandBuffer(marker))
+                    throw std::runtime_error("Submit GPU frame timestamp failed: " + LastSdlError());
+                gpuWorkSubmitted = true;
+            }
             if (FrameUploadPass)
             {
                 SDL_EndGPUCopyPass(FrameUploadPass);
@@ -671,22 +707,6 @@ namespace Keire::RenderBackend
                     throw std::runtime_error("SDL_SubmitGPUCommandBuffer(surface) failed: " + LastSdlError());
                 gpuWorkSubmitted = true;
             }
-
-            commands = SDL_AcquireGPUCommandBuffer(Device);
-            if (!commands)
-                throw std::runtime_error("SDL_AcquireGPUCommandBuffer(swapchain) failed: " + LastSdlError());
-            if (frame->EditorUi)
-            {
-                resolvedEditorUi = frame->EditorUi->ResolveForRender(
-                    EditorUiTextures, frame->DeviceGeneration,
-                    [this](const RenderSurfaceToken& token)
-                    {
-                        const auto surface = ResolveSurface(token);
-                        return reinterpret_cast<std::uintptr_t>(
-                            surface ? surface->PublishedTexture.load(std::memory_order_acquire) : nullptr);
-                    });
-            }
-            RecordSwapchain(commands, resolvedEditorUi ? resolvedEditorUi->Data() : nullptr);
 
             submittedFence = SDL_SubmitGPUCommandBufferAndAcquireFence(commands);
             commands = nullptr;
@@ -825,6 +845,7 @@ namespace Keire::RenderBackend
                 const auto abandonedHandles = static_cast<std::uint64_t>(FrameUploadPass != nullptr) +
                                               static_cast<std::uint64_t>(FrameUploadCommands != nullptr) +
                                               static_cast<std::uint64_t>(commands != nullptr) +
+                                              static_cast<std::uint64_t>(timestampCommands != nullptr) +
                                               static_cast<std::uint64_t>(submittedFence != nullptr) +
                                               static_cast<std::uint64_t>(FrameUploadTransfers.size()) +
                                               static_cast<std::uint64_t>(FrameTransientBuffers.size()) +
@@ -839,6 +860,7 @@ namespace Keire::RenderBackend
                 FrameUploadCommands = nullptr;
                 std::ranges::fill(surfaceCommands, nullptr);
                 commands = nullptr;
+                timestampCommands = nullptr;
                 submittedFence = nullptr;
                 FrameUploadTransfers.clear();
                 FrameTransientBuffers.clear();
@@ -856,6 +878,14 @@ namespace Keire::RenderBackend
                         LostGenerationGpuCleanupCallCount.fetch_add(1U, std::memory_order_relaxed);
                 };
 #endif
+                if (timestampCommands)
+                {
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                    recordGpuCleanupCall();
+#endif
+                    (void)SDL_CancelGPUCommandBuffer(timestampCommands);
+                    timestampCommands = nullptr;
+                }
                 if (FrameUploadPass)
                 {
 #if defined(KEIRE_ENABLE_TEST_HOOKS)

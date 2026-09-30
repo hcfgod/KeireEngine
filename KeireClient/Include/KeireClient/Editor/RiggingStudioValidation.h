@@ -2,14 +2,60 @@
 
 #include "Keire/Animation/RiggingSystem.h"
 #include "Keire/Assets/Asset.h"
+#include "Keire/Assets/AssetPipeline.h"
+#include "Keire/Assets/AssetSystem.h"
 
 #include <algorithm>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace KeireEditor
 {
+    [[nodiscard]] inline std::string RiggingStudioClipPreviewName(const Keire::AssetId clip,
+                                                                  const Keire::Ref<Keire::AssetSystem>& assets)
+    {
+        if (!assets || !clip || assets->TryGetType(clip) != Keire::AnimationClipAsset::StaticType())
+            throw std::invalid_argument(
+                "This animation clip is no longer available. Regenerate the model's runtime assets and try again.");
+        if (const auto metadata = assets->TryGetMetadata(clip); metadata && !metadata->DisplayName.empty())
+            return metadata->DisplayName;
+        return "Animation Clip " + clip.ToString();
+    }
+
+    [[nodiscard]] inline Keire::AssetId
+    ResolveRiggingStudioRevealAsset(const std::span<const Keire::AssetSourceRecord> records,
+                                    const Keire::AssetId asset) noexcept
+    {
+        if (!asset)
+            return {};
+        for (const auto& record : records)
+            if (record.Id == asset)
+                return asset;
+        // Runtime-only outputs belong to their imported source; they have no editable file record.
+        for (const auto& record : records)
+            if (std::find(record.SubAssets.begin(), record.SubAssets.end(), asset) != record.SubAssets.end())
+                return record.Id;
+        return {};
+    }
+
+    template <typename T>
+    [[nodiscard]] std::string RetargetAssetLoadError(const Keire::AssetHandle<T>& handle, const std::string_view label)
+    {
+        const auto state = handle.State();
+        if (state != Keire::AssetState::Failed && state != Keire::AssetState::Cancelled)
+            return {};
+        auto message =
+            std::string(label) + (state == Keire::AssetState::Cancelled ? " load was cancelled." : " failed to load.");
+        const auto diagnostic = handle.Diagnostic();
+        if (!diagnostic.Message.empty())
+            message += " " + diagnostic.Message;
+        message += " Regenerate the affected model's runtime assets, then select the source clip again.";
+        return message;
+    }
+
     class RetargetMappingDraft final
     {
       public:
@@ -75,7 +121,29 @@ namespace KeireEditor
         for (auto& c : result)
             if (static_cast<unsigned char>(c) < 32 || std::string_view("<>:\"/\\|?*").find(c) != std::string_view::npos)
                 c = '_';
-        return result + " Retargeted";
+        const auto first = result.find_first_not_of(' ');
+        result.erase(0, first == std::string::npos ? result.size() : first);
+        if (result.empty())
+            result = "Animation";
+        constexpr std::string_view suffix = " Retargeted";
+        const auto truncate = [&result]
+        {
+            constexpr std::size_t maximum = 230 - suffix.size();
+            if (result.size() <= maximum)
+                return;
+            auto end = maximum;
+            // Imported labels are UTF-8; retain whole characters at the portable filename limit.
+            while (end > 0 && (static_cast<unsigned char>(result[end]) & 0xC0) == 0x80)
+                --end;
+            result.resize(end);
+        };
+        truncate();
+        if (!RetargetOutputNameError(result + std::string(suffix)).empty())
+        {
+            result.insert(result.begin(), '_');
+            truncate();
+        }
+        return result + std::string(suffix);
     }
 
     [[nodiscard]] inline bool HasPartialRetargetMapping(const Keire::AnimationRetargetDiagnostics& diagnostics) noexcept

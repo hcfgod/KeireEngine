@@ -1,5 +1,66 @@
 # Changelog
 
+- Rigging Studio can preview imported animation clips directly from Generated runtime assets, without baking
+  a copy or creating an Animator Controller first.
+
+- Animation previews preserve blocking dependency errors when another clip has only a partial-mapping warning,
+  so multi-clip graphs explain why playback cannot start.
+
+- Rigging Studio's generated runtime assets reveal their owning source model instead of clearing the Inspector.
+  Outputs with their own editable source records still reveal those records directly.
+
+- Animation previews reject clips with no mapped tracks and retain partial-retarget warnings, including
+  mapped-track counts and guidance to review bone mappings in Rigging Studio.
+
+- Animators recovering from unavailable skinned meshes reacquire foot contacts at the current actor position,
+  preventing stale anchors from pulling feet backward after movement during loading.
+  Skeleton reloads also discard contacts from the previous limb geometry.
+- Unsupported knee stabilization rotates the authored bend around the hip-to-foot axis, preserving endpoint reach
+  and avoiding a minimum-bend snap when a nearly straight leg returns to its valid authored bend.
+  Partial correction also preserves foot orientation under a nonuniformly scaled rig parent.
+- Descending swings respect raised-ground clearance before foot locking resumes, avoiding a late forced-plant snap.
+  Repairing invalid grounding mappings also clears stale contacts before support is reacquired.
+- Reactivated Animators acquire fresh foot contacts after movement while disabled, preventing feet from being
+  pulled back to stale support anchors. Named gameplay IK goals remain assigned.
+- Foot grounding finishes smooth contact acquisition within Response Time, removing residual animation influence
+  that could keep planted feet sliding through a short stance. Contact release retains its gradual fade.
+- Retargeting converts animation rotation and translation deltas between source and target reference bone axes,
+  preserving bend direction when equivalent limbs use different local joint frames. Re-bake affected clips.
+- Rigging Studio suggests portable retarget names even for long or unusual imported labels, preserving UTF-8
+  character boundaries and avoiding reserved device names.
+- Rigging Studio reports failed or cancelled retarget asset loads with the affected role, loader diagnostic, and
+  regeneration guidance instead of displaying an indefinite loading message.
+- Automatic grounding retains knee stabilization through swing and contact-free walking frames, correcting
+  backward sampled bends without inventing support, moving the unsupported pelvis, or tilting the sampled foot.
+- Trace-level grounding diagnostics now report contact transitions, release reasons, support changes, and
+  reach-limit/recovery events in Release and Debug without repeating unchanged states every frame.
+- Automatic knee orientation weights sampled bends by their actual magnitude, preventing nearly straight-leg
+  noise from reversing a newly acquired knee direction during walking.
+- Planted-foot smoothing follows a moving support's translation, rotation, and scale, avoiding delayed foot motion
+  and knee wobble when platforms descend or reverse direction.
+- Foot grounding starts a fresh smoothing anchor at touchdown, preventing the previous step's fading contact
+  from pulling the foot sideways and disturbing the knee on landing. Brief contact loss preserves the remaining
+  support influence when contact returns, avoiding an abrupt pelvis-support drop.
+- Grounding measures foot lift from the sampled animation's planted position and waits for the swing to end before
+  reacquiring support, preventing raised terrain from holding walking feet down through a step.
+- Reachable planted feet no longer release and reanchor from horizontal animation drift alone; foot lift, actual
+  overextension, and moving-support recovery continue to control release.
+- Automatic grounding retains its support anchor during release, avoiding rapid pelvis recovery on raised surfaces.
+- Clip foot grounding preserves horizontal body motion when planted support transfers between feet, avoiding
+  backward body sliding during in-place walks. Procedural profiles retain explicit horizontal balance control.
+- Foot grounding preserves animated torso lean on flat ground and adds bounded terrain tilt, avoiding
+  support-driven straightening during walking.
+- Rigging Studio explains recovery options when no animation tracks map and hides irrelevant bake warnings.
+
+- Scene saves detect external edits/deletion and offer Reload, Save Copy, or explicit Overwrite while preserving
+  rejected edits and recovery. Shared persistence also protects Input Action, Animator Controller, and UI documents.
+- Editor authoring reads enforce format-specific allocation limits and reject truncated or growing source files.
+- Compute presentation polls completion without a whole-device wait; explicit result access and shutdown retain
+  synchronization. Optional D3D12, Vulkan, and Metal timestamp backends report actual GPU frame intervals separately
+  from CPU completion latency, with the maintained SDL patch identified in dependency caches and SDK manifests.
+- Current acceptance ledgers bind native validation and artifact hashes to a revision and working-tree fingerprint;
+  historical, cross-built, or unavailable results cannot close the native platform matrix.
+
 - Automatic grounding no longer fades pelvis weights and correction limits a second time outside the solver,
   reducing abrupt body recovery when planted support releases.
 

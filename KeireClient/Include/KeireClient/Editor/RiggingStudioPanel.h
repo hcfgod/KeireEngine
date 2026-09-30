@@ -25,6 +25,7 @@ namespace KeireEditor
         virtual void ApplyRiggingStudioSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) = 0;
         virtual void CreateRiggingStudioRetarget(std::string_view name, std::vector<std::byte> bytes) = 0;
         virtual void RevealRiggingStudioAsset(Keire::AssetId asset) = 0;
+        virtual void PreviewRiggingStudioClip(Keire::AssetId asset) = 0;
         virtual void ReportRiggingStudioError(std::string message) noexcept = 0;
     };
 

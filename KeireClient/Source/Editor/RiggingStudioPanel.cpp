@@ -423,8 +423,23 @@ namespace KeireEditor
                             ui.Text(metadata->DisplayName);
                         }
                     ui.SameLine();
-                    if (ui.Button("Reveal"))
+                    if (ui.Button(record != records.end() ? "Reveal" : "Reveal Source"))
                         m_Controller.RevealRiggingStudioAsset(subAsset);
+                    if (type && *type == Keire::AnimationClipAsset::StaticType())
+                    {
+                        ui.SameLine();
+                        if (ui.Button("Preview"))
+                        {
+                            try
+                            {
+                                m_Controller.PreviewRiggingStudioClip(subAsset);
+                            }
+                            catch (const std::exception& error)
+                            {
+                                m_Controller.ReportRiggingStudioError(error.what());
+                            }
+                        }
+                    }
 
                     if (type && *type == Keire::RigDefinitionAsset::StaticType())
                     {
@@ -547,20 +562,37 @@ namespace KeireEditor
                     return;
                 }
 
-                const auto sourceClip =
-                    assets->Load<Keire::AnimationClipAsset>(m_SourceClip, Keire::AssetPriority::Normal).TryGetLoaded();
-                const auto sourceSkeleton =
-                    assets->Load<Keire::SkeletonAsset>(sourceAnimation.Skeleton, Keire::AssetPriority::Normal)
-                        .TryGetLoaded();
-                const auto sourceRig =
-                    assets->Load<Keire::RigDefinitionAsset>(sourceAnimation.Rig, Keire::AssetPriority::Normal)
-                        .TryGetLoaded();
-                const auto targetSkeleton =
-                    assets->Load<Keire::SkeletonAsset>(targetAnimation.Skeleton, Keire::AssetPriority::Normal)
-                        .TryGetLoaded();
-                const auto targetRig =
-                    assets->Load<Keire::RigDefinitionAsset>(targetAnimation.Rig, Keire::AssetPriority::Normal)
-                        .TryGetLoaded();
+                const auto sourceClipHandle =
+                    assets->Load<Keire::AnimationClipAsset>(m_SourceClip, Keire::AssetPriority::Normal);
+                const auto sourceSkeletonHandle =
+                    assets->Load<Keire::SkeletonAsset>(sourceAnimation.Skeleton, Keire::AssetPriority::Normal);
+                const auto sourceRigHandle =
+                    assets->Load<Keire::RigDefinitionAsset>(sourceAnimation.Rig, Keire::AssetPriority::Normal);
+                const auto targetSkeletonHandle =
+                    assets->Load<Keire::SkeletonAsset>(targetAnimation.Skeleton, Keire::AssetPriority::Normal);
+                const auto targetRigHandle =
+                    assets->Load<Keire::RigDefinitionAsset>(targetAnimation.Rig, Keire::AssetPriority::Normal);
+                bool loadFailed = false;
+                const auto reportLoadFailure = [&](const auto& handle, const std::string_view label)
+                {
+                    if (const auto error = RetargetAssetLoadError(handle, label); !error.empty())
+                    {
+                        ui.TextColoredWrapped(theme.Error, error);
+                        loadFailed = true;
+                    }
+                };
+                reportLoadFailure(sourceClipHandle, "Source clip");
+                reportLoadFailure(sourceSkeletonHandle, "Source skeleton");
+                reportLoadFailure(sourceRigHandle, "Source rig");
+                reportLoadFailure(targetSkeletonHandle, "Target skeleton");
+                reportLoadFailure(targetRigHandle, "Target rig");
+                if (loadFailed)
+                    return;
+                const auto sourceClip = sourceClipHandle.TryGetLoaded();
+                const auto sourceSkeleton = sourceSkeletonHandle.TryGetLoaded();
+                const auto sourceRig = sourceRigHandle.TryGetLoaded();
+                const auto targetSkeleton = targetSkeletonHandle.TryGetLoaded();
+                const auto targetRig = targetRigHandle.TryGetLoaded();
                 if (!sourceClip || !sourceSkeleton || !sourceRig || !targetSkeleton || !targetRig)
                 {
                     ui.TextColored(theme.MutedText, "Loading source and target rig data...");
@@ -670,6 +702,12 @@ namespace KeireEditor
                                        std::to_string(diagnostics.HierarchyMatchCount) + " hierarchy  |  " +
                                        std::to_string(diagnostics.SemanticMatchCount) + " semantic  |  " +
                                        std::to_string(diagnostics.ManualMatchCount) + " manual");
+                    if (!compatible)
+                    {
+                        ui.TextColoredWrapped(theme.Error,
+                                              "Cannot bake: no animation tracks map to this rig. Choose a compatible "
+                                              "Source Clip or use Edit bone mappings to assign matching target bones.");
+                    }
                     if (partial)
                     {
                         ui.TextColoredWrapped(theme.Warning,
@@ -677,9 +715,10 @@ namespace KeireEditor
                                               "Review the diagnostics before baking.");
                         (void)ui.Checkbox("I reviewed the omitted tracks", m_ReviewedPartialMapping);
                     }
-                    ui.TextColored(diagnostics.RootMotionMapped ? theme.Success : theme.Warning,
-                                   diagnostics.RootMotionMapped ? "Root motion mapping is compatible."
-                                                                : "Root motion will be disabled for this bake.");
+                    if (compatible)
+                        ui.TextColored(diagnostics.RootMotionMapped ? theme.Success : theme.Warning,
+                                       diagnostics.RootMotionMapped ? "Root motion mapping is compatible."
+                                                                    : "Root motion will be disabled for this bake.");
                     std::size_t scaleFallbacks = 0;
                     for (const auto& mapping : diagnostics.Mappings)
                         scaleFallbacks += mapping.ScaleFallbackKeyCount;
@@ -790,9 +829,21 @@ void EditorWorkspaceLayer::CreateRiggingStudioRetarget(const std::string_view na
 
 void EditorWorkspaceLayer::RevealRiggingStudioAsset(const Keire::AssetId asset)
 {
-    m_SelectedAsset = asset;
+    const auto source = KeireEditor::ResolveRiggingStudioRevealAsset(RiggingStudioRecords(), asset);
+    if (!source)
+    {
+        SetAssetError("The asset's source is no longer available. Refresh the Project panel or reimport the model.");
+        return;
+    }
+    m_SelectedAsset = source;
     if (m_AssetBrowserPanel)
-        m_AssetBrowserPanel->RevealAsset(asset);
+        m_AssetBrowserPanel->RevealAsset(source);
 }
 
 void EditorWorkspaceLayer::ReportRiggingStudioError(std::string message) noexcept { SetAssetError(std::move(message)); }
+
+void EditorWorkspaceLayer::PreviewRiggingStudioClip(const Keire::AssetId asset)
+{
+    auto name = KeireEditor::RiggingStudioClipPreviewName(asset, RiggingStudioAssets());
+    m_AnimatorControllerPanel->OpenClip(asset, std::move(name));
+}

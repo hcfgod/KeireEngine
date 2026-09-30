@@ -214,6 +214,26 @@ Copy-Item "$sdlInstall\include\SDL3" "$stage\third-party\SDL3\include\" -Recurse
 Copy-Item "$sdlInstall\lib\SDL3-static.lib" "$stage\third-party\SDL3\lib\"
 Copy-Item "$sdlInstall\cmake\*" "$stage\third-party\SDL3\cmake\" -Recurse
 Copy-Item "$sdlInstall\licenses\SDL3" "$stage\third-party\SDL3\licenses\" -Recurse
+$sdlPatchStamp = Get-Content -LiteralPath (Join-Path $sdlInstall "share\keire\sdl-patch.stamp") -Raw
+$sdlPatchIdentity = $sdlPatchStamp.Trim().Split('|')
+if ($sdlPatchIdentity.Count -ne 2 -or $sdlPatchIdentity[0] -ne $Lock.SDL_COMMIT -or
+    $sdlPatchIdentity[1] -cnotmatch '^[0-9a-f]{64}$') {
+    throw "Packaged SDL patch identity is missing or does not match the dependency lock."
+}
+$sdlPatchHasher = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
+try {
+    $packagedSdlPatches = @(Get-ChildItem -LiteralPath (Join-Path $Root "Patches\SDL") -Filter "*.patch" -File | Sort-Object Name)
+    if ($packagedSdlPatches.Count -eq 0) { throw "The SDL backend patch set is empty." }
+    foreach ($patch in $packagedSdlPatches) {
+        $sdlPatchHasher.AppendData([Text.Encoding]::UTF8.GetBytes($patch.Name + "`n"))
+        $sdlPatchHasher.AppendData([IO.File]::ReadAllBytes($patch.FullName))
+    }
+    $packagedSdlDigest = [BitConverter]::ToString($sdlPatchHasher.GetHashAndReset()).Replace("-", "").ToLowerInvariant()
+    if ($packagedSdlDigest -ne $sdlPatchIdentity[1]) { throw "Rebuild SDL before packaging changed backend patches." }
+}
+finally { $sdlPatchHasher.Dispose() }
+Copy-Item -LiteralPath (Join-Path $sdlInstall "share\keire\sdl-patch.stamp") -Destination "$stage\third-party\SDL3\"
+Copy-Item -LiteralPath (Join-Path $Root "Patches\SDL") -Destination "$stage\third-party\SDL3\patches" -Recurse
 Copy-Item "$Root\README.md", "$Root\LICENSE.txt", "$Root\THIRD_PARTY_NOTICES.md" $stage
 Copy-Item "$Root\Docs\Diagnostics\*" "$stage\Docs\Diagnostics\" -Recurse
 Copy-Item "$Root\Docs\PlayerBuilds.md" "$stage\Docs\"
@@ -235,6 +255,7 @@ $commit = Get-GitHeadCommit $Root "unknown"
 $dotnetRuntimeVersion = (Get-ChildItem "$Root\Build\Dependencies\dotnet-sdk\shared\Microsoft.NETCore.App" -Directory |
     Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
 $manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; developmentArtifact=$developmentArtifact; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT; jolt=$Lock.JOLT_COMMIT; recast=$Lock.RECAST_COMMIT; miniaudio=$Lock.MINIAUDIO_COMMIT; coral=$Lock.CORAL_COMMIT; dotnetRuntime=$dotnetRuntimeVersion }
+$manifest["sdlPatchDigest"] = $sdlPatchIdentity[1]
 $manifest["freeType"] = $Lock.FREETYPE_COMMIT
 $manifest["harfBuzz"] = $Lock.HARFBUZZ_COMMIT
 $manifest["friBidi"] = $Lock.FRIBIDI_COMMIT

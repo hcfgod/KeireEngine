@@ -42,6 +42,12 @@ namespace
         const std::array bindings{Keire::ComputeBufferBinding{0, output, true}};
         const auto submission = device.Dispatch(pipeline, bindings, {5, 1, 1});
         CHECK_THROWS_AS(device.GetReadback(submission), std::invalid_argument);
+        // Polling may observe either state immediately. The explicit barrier makes retirement deterministic.
+        const auto initiallyRetired = device.PollCompletions();
+        CHECK(initiallyRetired <= 1);
+        device.WaitIdle();
+        CHECK(device.PollCompletions() == 1 - initiallyRetired);
+        CHECK(device.PollCompletions() == 0);
         device.Wait(submission);
         CHECK(device.IsComplete(submission));
         device.ReleaseSubmission(submission);
@@ -119,6 +125,9 @@ namespace
         const auto snapshot = device.RequestReadback(output, 16, 16);
         device.Upload(output, zeros);
         device.DestroyBuffer(output);
+        device.WaitIdle();
+        CHECK(device.PollCompletions() == 1);
+        CHECK(device.PollCompletions() == 0);
         device.Wait(snapshot);
         CHECK(device.IsComplete(snapshot));
         const auto snapshotBytes = device.GetReadback(snapshot);
@@ -130,12 +139,15 @@ namespace
         CHECK(snapshotValues[3] == doctest::Approx(1.0F));
         device.ReleaseSubmission(snapshot);
         CHECK_THROWS_AS(device.GetReadback(snapshot), std::invalid_argument);
+        // Shutdown owns pending fences and snapshots even when callers never poll or release them.
+        const auto abandonedSnapshot = device.RequestReadback(arguments);
         device.DestroyBuffer(arguments);
         CHECK_THROWS_AS(device.Readback(output), std::invalid_argument);
         device.DestroyPipeline(pipeline);
         CHECK_THROWS_AS(device.Dispatch(pipeline, bindings, {1, 1, 1}), std::invalid_argument);
         device.Shutdown();
         CHECK_FALSE(device.IsOpen());
+        CHECK_THROWS_AS(device.GetReadback(abandonedSnapshot), std::logic_error);
         CHECK_NOTHROW(device.Shutdown());
         while (windows->PollEvent())
         {
