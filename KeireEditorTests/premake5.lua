@@ -50,6 +50,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InputActionsDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InputActionsCodeGenerator.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InspectorComponentUtilities.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InspectorPropertyEditor.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/InspectorPropertyVisibility.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialDocument.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/MaterialSelectionDocument.cpp",

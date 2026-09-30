@@ -95,6 +95,19 @@ namespace KeireEditor
                 throw std::invalid_argument("The asset source inventory contains duplicate or empty identities.");
         }
 
+        auto ownerByIdentity = byId;
+        for (const auto& record : records)
+        {
+            for (const auto subAsset : record.SubAssets)
+            {
+                if (!subAsset)
+                    throw std::invalid_argument("The asset source inventory contains an empty subasset identity.");
+                if (!ownerByIdentity.emplace(subAsset, &record).second)
+                    throw std::invalid_argument("The asset source inventory contains a colliding subasset identity: " +
+                                                subAsset.ToString());
+            }
+        }
+
         std::set<Keire::AssetId> included;
         if (selection.Folder)
         {
@@ -123,17 +136,34 @@ namespace KeireEditor
             const auto record = byId.at(pending[index]);
             for (const auto dependency : record->Dependencies)
             {
-                if (!byId.contains(dependency))
-                    throw std::invalid_argument("A selected asset dependency is not present in the project database.");
-                if (included.emplace(dependency).second)
-                    pending.push_back(dependency);
+                const auto owner = ownerByIdentity.find(dependency);
+                if (owner == ownerByIdentity.end())
+                    throw std::invalid_argument("Asset-package source '" + record->RelativePath.generic_string() +
+                                                "' (" + record->Id.ToString() + ") depends on missing asset " +
+                                                dependency.ToString() + ".");
+                if (included.emplace(owner->second->Id).second)
+                    pending.push_back(owner->second->Id);
             }
         }
 
         std::vector<Keire::AssetSourceRecord> result;
         result.reserve(included.size());
         for (const auto asset : included)
-            result.push_back(*byId.at(asset));
+        {
+            auto record = *byId.at(asset);
+            std::vector<Keire::AssetId> dependencies;
+            dependencies.reserve(record.Dependencies.size());
+            for (const auto dependency : record.Dependencies)
+            {
+                const auto owner = ownerByIdentity.at(dependency)->Id;
+                if (owner != record.Id)
+                    dependencies.push_back(owner);
+            }
+            std::ranges::sort(dependencies);
+            dependencies.erase(std::unique(dependencies.begin(), dependencies.end()), dependencies.end());
+            record.Dependencies = std::move(dependencies);
+            result.push_back(std::move(record));
+        }
         std::ranges::sort(result, {}, [](const auto& record) { return record.RelativePath.generic_string(); });
         return result;
     }

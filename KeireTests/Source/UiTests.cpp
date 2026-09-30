@@ -316,7 +316,13 @@ namespace
                                 std::invalid_argument);
                 CHECK_THROWS_AS(ui.DrawCircle({0.0F, 0.0F}, -1.0F, {}), std::invalid_argument);
                 bool checked = false;
+                const auto checkboxFirstVertex = drawList->VtxBuffer.Size;
                 (void)ui.Checkbox("Check", checked);
+                const auto checkboxOutline = ImGui::GetColorU32(ImGuiCol_Border);
+                bool checkboxOutlineDrawn = false;
+                for (int index = checkboxFirstVertex; index < drawList->VtxBuffer.Size; ++index)
+                    checkboxOutlineDrawn |= drawList->VtxBuffer[index].col == checkboxOutline;
+                CHECK(checkboxOutlineDrawn);
                 float value = 0.5F;
                 (void)ui.SliderFloat("Value", value, 0.0F, 1.0F);
                 int fixedValue = 14;

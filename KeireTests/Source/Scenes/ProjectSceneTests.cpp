@@ -820,6 +820,25 @@ TEST_CASE("Projects create isolated starter assets and hold exclusive editor loc
     CHECK(recoveredRegistry->Entries().empty());
 }
 
+TEST_CASE("Project creation rejects non-portable directory names before writing files")
+{
+    TemporaryDirectory directory("ProjectPortableNameTests");
+    const std::vector<std::string> reserved{
+        "CON",      "con.txt",  "PRN",         "AUX.data",        "NUL",         "COM1",     "com9.log", "LPT1",
+        "lpt9.log", "CON .txt", "COM\xC2\xB9", "com\xC2\xB2.txt", "LPT\xC2\xB3", "Project.",
+    };
+    for (const auto& name : reserved)
+    {
+        CAPTURE(name);
+        CHECK_THROWS_AS((void)Keire::Project::Create({directory.Path, name, Keire::ProjectTemplate::Empty}),
+                        std::invalid_argument);
+        CHECK(std::filesystem::is_empty(directory.Path));
+    }
+
+    const auto nearMiss = Keire::Project::Create({directory.Path, "COM10", Keire::ProjectTemplate::Empty});
+    CHECK(nearMiss->Root() == directory.Path / "COM10");
+}
+
 TEST_CASE("Project registry preserves UTF-8 paths across save and reload")
 {
     TemporaryDirectory directory("ProjectUtf8Tests");

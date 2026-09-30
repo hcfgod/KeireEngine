@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 
+#include "KeireInternal/VisualStudioDiscovery.h"
+
 #include <algorithm>
 #include <cstdlib>
 #include <optional>
@@ -148,9 +150,6 @@ namespace KeireEditor
         const auto programFilesValue = Environment("ProgramFiles");
         const auto programFiles =
             programFilesValue ? std::filesystem::path(*programFilesValue) : std::filesystem::path{};
-        const auto programFilesX86Value = Environment("ProgramFiles(x86)");
-        const auto programFilesX86 =
-            programFilesX86Value ? std::filesystem::path(*programFilesX86Value) : std::filesystem::path{};
         Add(profiles, "vscode", "Visual Studio Code", {local / "Programs/Microsoft VS Code/Code.exe", "code.exe"});
         Add(profiles, "vscode-insiders", "Visual Studio Code Insiders",
             {local / "Programs/Microsoft VS Code Insiders/Code - Insiders.exe", "code-insiders.exe"});
@@ -164,11 +163,11 @@ namespace KeireEditor
         AddDiscovered(profiles, "clion", "JetBrains CLion", {"clion64.exe", "clion.exe"},
                       {local / "Programs", local / "JetBrains/Toolbox/apps", programFiles / "JetBrains"},
                       {"clion64.exe", "clion.exe"});
-        Add(profiles, "visual-studio", "Visual Studio",
-            {programFiles / "Microsoft Visual Studio/2022/Community/Common7/IDE/devenv.exe",
-             programFiles / "Microsoft Visual Studio/2022/Professional/Common7/IDE/devenv.exe",
-             programFiles / "Microsoft Visual Studio/2022/Enterprise/Common7/IDE/devenv.exe",
-             programFilesX86 / "Microsoft Visual Studio/2019/Community/Common7/IDE/devenv.exe", "devenv.exe"});
+        const auto visualStudio = Keire::Detail::ResolveCompatibleVisualStudioExecutable();
+        profiles.push_back({.Id = "visual-studio",
+                            .DisplayName = "Visual Studio",
+                            .Executable = visualStudio,
+                            .Installed = !visualStudio.empty()});
         Add(profiles, "sublime", "Sublime Text", {"sublime_text.exe"});
         Add(profiles, "neovim", "Neovim", {"nvim.exe"});
 #elif defined(__APPLE__)

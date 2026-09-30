@@ -113,6 +113,34 @@ TEST_CASE("rigid body registration retains gravity authoring")
     CHECK_FALSE(dynamic_cast<const Keire::RigidBodyComponent&>(*target).UseGravity());
 }
 
+TEST_CASE("rigid body motion accepts defined modes and rejects invalid values transactionally")
+{
+    Keire::RigidBodyComponent body;
+    for (const auto motion :
+         {Keire::PhysicsMotionType::Static, Keire::PhysicsMotionType::Dynamic, Keire::PhysicsMotionType::Kinematic})
+    {
+        CHECK_NOTHROW(body.SetMotion(motion));
+        CHECK(body.Motion() == motion);
+    }
+
+    CHECK_THROWS_AS(body.SetMotion(static_cast<Keire::PhysicsMotionType>(255)), std::invalid_argument);
+    CHECK(body.Motion() == Keire::PhysicsMotionType::Kinematic);
+
+    const auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Motion"));
+    auto entity = scene->CreateEntity("Body");
+    REQUIRE(entity.AddComponent<Keire::ColliderComponent>());
+    const auto attached = entity.AddComponent<Keire::RigidBodyComponent>();
+    REQUIRE(attached);
+    attached->SetMotion(Keire::PhysicsMotionType::Dynamic);
+    scene->MarkSaved();
+    REQUIRE_FALSE(scene->Dirty());
+
+    CHECK_THROWS_AS(attached->SetMotion(static_cast<Keire::PhysicsMotionType>(255)), std::invalid_argument);
+    CHECK(attached->Motion() == Keire::PhysicsMotionType::Dynamic);
+    CHECK_FALSE(scene->Dirty());
+}
+
 TEST_CASE("character landing preserves fall distance and allows grounded walking")
 {
     auto scene =

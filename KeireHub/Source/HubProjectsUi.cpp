@@ -499,6 +499,7 @@ namespace KeireHub
                                                                                 : "  |  Newer - migration risk";
                         }
                         ui.TextColored(m_Tokens.MutedText, label);
+                        ui.TextColoredWrapped(m_Tokens.MutedText, Utf8Path(editor.Root));
                     }
                 }
                 if (!found)

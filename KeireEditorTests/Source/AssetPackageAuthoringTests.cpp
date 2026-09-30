@@ -113,6 +113,93 @@ TEST_CASE("asset-package folder selection includes nested assets and outside dep
     CHECK(std::ranges::any_of(selected, [&](const auto& record) { return record.Id == texture.Id; }));
 }
 
+TEST_CASE("asset-package dependencies resolve generated subassets to their source owner")
+{
+    PackageFixture fixture;
+    auto material = fixture.Add("Materials/Hero.keirematerial", "material");
+    auto shaderGraph = fixture.Add("Shaders/Lit.keireshadergraph", "shader graph");
+    const auto compiledShader = Keire::AssetId::Generate();
+    shaderGraph.SubAssets.push_back(compiledShader);
+    material.Dependencies = {compiledShader, shaderGraph.Id};
+    const std::vector records{material, shaderGraph};
+
+    const auto selected = KeireEditor::ResolveAssetPackageRecords(records, {.Assets = {material.Id}});
+
+    REQUIRE(selected.size() == 2);
+    const auto resolvedMaterial =
+        std::ranges::find_if(selected, [&](const auto& record) { return record.Id == material.Id; });
+    REQUIRE(resolvedMaterial != selected.end());
+    CHECK(resolvedMaterial->Dependencies == std::vector{shaderGraph.Id});
+}
+
+TEST_CASE("asset-package child-only dependencies include their source owner in the archive manifest")
+{
+    PackageFixture fixture;
+    auto material = fixture.Add("Materials/Hero.keirematerial", "material");
+    auto shaderGraph = fixture.Add("Shaders/Lit.keireshadergraph", "shader graph");
+    const auto compiledShader = Keire::AssetId::Generate();
+    shaderGraph.SubAssets.push_back(compiledShader);
+    material.Dependencies = {compiledShader};
+    const auto output = fixture.Root / "Exports/GeneratedDependency.keireassetpackage";
+
+    const auto package =
+        KeireEditor::CreateAssetPackageArchive({.ProjectRoot = fixture.Root,
+                                                .SourceDirectory = "Assets",
+                                                .StagingParent = fixture.Root / "Library/AssetPackageExports",
+                                                .Output = output,
+                                                .Selection = {.Assets = {material.Id}},
+                                                .Draft = fixture.Draft(),
+                                                .Records = {material, shaderGraph}});
+
+    REQUIRE(package.Manifest.Assets.size() == 2);
+    const auto packagedMaterial =
+        std::ranges::find_if(package.Manifest.Assets, [&](const auto& asset) { return asset.Id == material.Id; });
+    REQUIRE(packagedMaterial != package.Manifest.Assets.end());
+    CHECK(packagedMaterial->Dependencies == std::vector{shaderGraph.Id});
+    CHECK(std::ranges::none_of(package.Manifest.Assets, [&](const auto& asset) { return asset.Id == compiledShader; }));
+    CHECK(Keire::InspectAssetPackageArchive(output).Manifest == package.Manifest);
+}
+
+TEST_CASE("asset-package source-owned subasset dependencies do not become self-dependencies")
+{
+    PackageFixture fixture;
+    auto shaderGraph = fixture.Add("Shaders/Lit.keireshadergraph", "shader graph");
+    const auto compiledShader = Keire::AssetId::Generate();
+    shaderGraph.SubAssets.push_back(compiledShader);
+    shaderGraph.Dependencies.push_back(compiledShader);
+
+    const auto selected =
+        KeireEditor::ResolveAssetPackageRecords(std::span(&shaderGraph, 1), {.Assets = {shaderGraph.Id}});
+
+    REQUIRE(selected.size() == 1);
+    CHECK(selected.front().Dependencies.empty());
+}
+
+TEST_CASE("asset-package source inventory rejects empty and colliding subasset identities")
+{
+    PackageFixture fixture;
+    auto first = fixture.Add("Materials/First.keirematerial", "first");
+    auto second = fixture.Add("Materials/Second.keirematerial", "second");
+
+    SUBCASE("empty")
+    {
+        first.SubAssets.push_back(Keire::AssetId{});
+        CHECK_THROWS_WITH_AS(
+            static_cast<void>(KeireEditor::ResolveAssetPackageRecords(std::span(&first, 1), {.Assets = {first.Id}})),
+            "The asset source inventory contains an empty subasset identity.", std::invalid_argument);
+    }
+
+    SUBCASE("colliding")
+    {
+        first.SubAssets.push_back(second.Id);
+        const std::vector records{first, second};
+        CHECK_THROWS_WITH_AS(
+            static_cast<void>(KeireEditor::ResolveAssetPackageRecords(records, {.Assets = {first.Id}})),
+            "The asset source inventory contains a colliding subasset identity: " + second.Id.ToString(),
+            std::invalid_argument);
+    }
+}
+
 TEST_CASE("asset-package authoring rejects metadata outside the project Assets root")
 {
     PackageFixture fixture;
@@ -137,10 +224,13 @@ TEST_CASE("asset-package selection rejects a dependency missing from the project
 {
     PackageFixture fixture;
     auto asset = fixture.Add("Materials/Hero.keirematerial", "material");
-    asset.Dependencies.push_back(Keire::AssetId::Generate());
+    const auto missing = Keire::AssetId::Generate();
+    asset.Dependencies.push_back(missing);
 
-    CHECK_THROWS_AS(
+    CHECK_THROWS_WITH_AS(
         static_cast<void>(KeireEditor::ResolveAssetPackageRecords(std::span(&asset, 1), {.Assets = {asset.Id}})),
+        "Asset-package source 'Materials/Hero.keirematerial' (" + asset.Id.ToString() + ") depends on missing asset " +
+            missing.ToString() + ".",
         std::invalid_argument);
 }
 

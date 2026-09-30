@@ -5,6 +5,8 @@
 #include "KeireHub/HubManagedEditorRepairIntegration.h"
 #include "KeireHub/HubPackageTaskWorkflow.h"
 
+#include "KeireHubInternal/HubEditorManagementNotice.h"
+
 #include "Keire/Log.h"
 
 #include <utility>
@@ -77,12 +79,8 @@ namespace KeireHub
             return;
         }
 
-        if (completion->Operation == HubEditorManagementOperation::Refresh)
-        {
-            notice = "Editor installation refresh completed.";
-            noticeError = false;
+        if (!Detail::ShouldAnnounceSuccessfulEditorManagementCompletion(completion->Operation))
             return;
-        }
         if (completion->Operation == HubEditorManagementOperation::Verify)
         {
             switch (completion->VerifiedHealth.value_or(InstallationHealth::Unknown))

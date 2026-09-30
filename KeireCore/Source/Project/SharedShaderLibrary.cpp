@@ -253,6 +253,33 @@ namespace Keire
                                        ShaderGraphTemplate::Ui,  ShaderGraphTemplate::Fullscreen,
                                        ShaderGraphTemplate::Vfx, ShaderGraphTemplate::CustomGraphics};
         constexpr std::array names{"Lit", "Unlit", "UI", "Fullscreen", "VFX", "CustomGraphics"};
+        std::array<AssetId, names.size()> identities;
+        std::array<std::filesystem::path, names.size()> paths;
+        std::array<std::vector<std::byte>, names.size()> sources;
+        std::array<std::vector<std::byte>, names.size()> metadataFiles;
+        Json entries = Json::array();
+        for (std::size_t index = 0; index < names.size(); ++index)
+        {
+            const std::string name = std::string("Kéire/") + names[index];
+            identities[index] = Identity(name);
+            paths[index] = std::filesystem::path("Keire/SharedShaders") / Version /
+                           (std::string(names[index]) + ".keireshadergraph");
+            sources[index] = ShaderGraphAsset::EncodeSource(Definition(templates[index], name));
+            const auto metadata = Json{{"schemaVersion", 1},
+                                       {"id", identities[index].ToString()},
+                                       {"type", ShaderGraphAsset::StaticType().Value().ToString()},
+                                       {"importer", "Keire.ShaderGraph"},
+                                       {"importerVersion", CreateShaderGraphAssetImporter().Version},
+                                       {"dependencies", Json::array()},
+                                       {"subAssets", Json::array()}};
+            metadataFiles[index] = Bytes(metadata.dump(2) + '\n');
+            entries.push_back({{"name", name},
+                               {"id", identities[index].ToString()},
+                               {"path", paths[index].generic_string()},
+                               {"sha256", Digest(sources[index])}});
+        }
+
+        std::array<bool, names.size()> canonicalPairs{};
         for (const auto& entry : std::filesystem::recursive_directory_iterator(projectRoot / "Assets"))
         {
             if (entry.is_symlink())
@@ -260,36 +287,56 @@ namespace Keire
             if (!entry.is_regular_file() || entry.path().extension() != ".keiremeta")
                 continue;
             const auto metadata = Json::parse(fs.Read(entry.path().lexically_relative(projectRoot), MaximumBytes));
-            for (const auto name : names)
-                if (metadata.at("id") == Identity(std::string("Kéire/") + name).ToString())
+            for (std::size_t index = 0; index < names.size(); ++index)
+            {
+                if (metadata.at("id") != identities[index].ToString())
+                    continue;
+                const auto expected = std::filesystem::path("Assets") / (paths[index].string() + ".keiremeta");
+                if (entry.path().lexically_relative(projectRoot) != expected)
                     throw std::runtime_error("A shared shader identity is already owned by another source asset.");
+            }
         }
-        Json entries = Json::array();
+
+        bool hasCanonicalContent = false;
+        for (std::size_t index = 0; index < names.size(); ++index)
+        {
+            const auto sourcePath = std::filesystem::path("Assets") / paths[index];
+            const auto metadataPath = std::filesystem::path(sourcePath.string() + ".keiremeta");
+            const bool sourceExists = fs.Exists(sourcePath);
+            const bool metadataExists = fs.Exists(metadataPath);
+            hasCanonicalContent |= sourceExists || metadataExists;
+            if (sourceExists != metadataExists)
+                throw std::runtime_error("An incomplete shared shader library cannot be adopted.");
+            if (!sourceExists)
+                continue;
+            if (fs.Read(sourcePath, MaximumBytes) != sources[index])
+                throw std::runtime_error("A pre-existing shared shader differs from the pinned library.");
+            const auto metadata = Json::parse(fs.Read(metadataPath, MaximumBytes));
+            if (metadata.at("id") != identities[index].ToString())
+                throw std::runtime_error("A pre-existing shared shader has a different source identity.");
+            canonicalPairs[index] = true;
+        }
+
+        const auto lock = Bytes(Json{{"schemaVersion", 1}, {"version", Version}, {"shaders", entries}}.dump(2) + '\n');
+        if (hasCanonicalContent)
+        {
+            if (!std::ranges::all_of(canonicalPairs, [](const bool present) { return present; }))
+                throw std::runtime_error("A partial shared shader library cannot be adopted.");
+            const std::array files{Detail::ProjectFileReplacement{std::filesystem::path(LockPath), std::nullopt, lock}};
+            Detail::PublishMaterialMigrationFiles(projectRoot, files);
+            return ReadSharedShaderLibrary(projectRoot);
+        }
+
         std::vector<Detail::ProjectFileReplacement> files;
         for (std::size_t index = 0; index < names.size(); ++index)
         {
-            const std::string name = std::string("Kéire/") + names[index];
-            const auto id = Identity(name);
-            const auto path = std::filesystem::path("Keire/SharedShaders") / Version /
-                              (std::string(names[index]) + ".keireshadergraph");
-            const auto source = ShaderGraphAsset::EncodeSource(Definition(templates[index], name));
-            const auto metadata = Json{{"schemaVersion", 1},
-                                       {"id", id.ToString()},
-                                       {"type", ShaderGraphAsset::StaticType().Value().ToString()},
-                                       {"importer", "Keire.ShaderGraph"},
-                                       {"importerVersion", CreateShaderGraphAssetImporter().Version},
-                                       {"dependencies", Json::array()},
-                                       {"subAssets", Json::array()}};
-            files.push_back({std::filesystem::path("Assets") / (path.string() + ".keiremeta"), std::nullopt,
-                             Bytes(metadata.dump(2) + '\n')});
+            files.push_back({std::filesystem::path("Assets") / (paths[index].string() + ".keiremeta"), std::nullopt,
+                             metadataFiles[index]});
             // Publish metadata before the source so an active asset scan never sees a new source without its
             // pinned identity and creates an unrelated generated sidecar for it.
-            files.push_back({std::filesystem::path("Assets") / path, std::nullopt, source});
-            entries.push_back(
-                {{"name", name}, {"id", id.ToString()}, {"path", path.generic_string()}, {"sha256", Digest(source)}});
+            files.push_back({std::filesystem::path("Assets") / paths[index], std::nullopt, sources[index]});
         }
-        files.push_back({std::filesystem::path(LockPath), std::nullopt,
-                         Bytes(Json{{"schemaVersion", 1}, {"version", Version}, {"shaders", entries}}.dump(2) + '\n')});
+        files.push_back({std::filesystem::path(LockPath), std::nullopt, lock});
         Detail::PublishMaterialMigrationFiles(projectRoot, files);
         return ReadSharedShaderLibrary(projectRoot);
     }

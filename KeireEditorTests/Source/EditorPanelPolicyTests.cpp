@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/EditorPanelMenuPolicy.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
+#include "KeireClientInternal/Editor/PhysicsPropertyDrawers.h"
+#include "KeireClientInternal/Editor/VfxPropertyDrawers.h"
 
 #include <doctest/doctest.h>
 
@@ -25,8 +27,9 @@ namespace
         {
             Label = label;
             Choices.assign(choices.begin(), choices.end());
+            ValueBeforeEdit = value;
             ++ChoiceEdits;
-            ++value;
+            value = Selection.value_or(value + 1);
             return true;
         }
         bool EditScalar(std::string_view, double&, double, std::optional<double>, std::optional<double>) override
@@ -48,6 +51,8 @@ namespace
 
         std::string Label;
         std::vector<std::string_view> Choices;
+        std::optional<std::int64_t> Selection;
+        std::optional<std::int64_t> ValueBeforeEdit;
         std::size_t ChoiceEdits = 0;
     };
 
@@ -80,4 +85,55 @@ TEST_CASE("integer choice overrides expose readable labels")
     CHECK(editor.ChoiceEdits == 1);
 
     CHECK_THROWS_AS(drawers.RegisterIntegerChoices(ChoiceComponentType(), "empty", {}), std::invalid_argument);
+}
+
+TEST_CASE("physics property drawers expose and recover rigid body motion choices")
+{
+    KeireEditor::PropertyDrawerRegistry drawers;
+    KeireEditor::Detail::RegisterPhysicsPropertyDrawers(drawers);
+    ChoicePropertyEditor editor;
+    editor.Selection = static_cast<std::int64_t>(Keire::PhysicsMotionType::Kinematic);
+    Keire::ComponentProperty property{"motion", "Motion", "Body", Keire::ComponentPropertyKind::Integer};
+    Keire::ComponentPropertyValue value = std::int64_t{99};
+
+    CHECK(drawers.Draw(editor, Keire::RigidBodyComponent::StaticType(), property, value));
+    REQUIRE(editor.ValueBeforeEdit);
+    CHECK(*editor.ValueBeforeEdit == 99);
+    CHECK(std::get<std::int64_t>(value) == static_cast<std::int64_t>(Keire::PhysicsMotionType::Kinematic));
+    CHECK(editor.Label == "Motion##motion");
+    CHECK(editor.Choices == std::vector<std::string_view>{"Static", "Dynamic", "Kinematic"});
+    CHECK(editor.ChoiceEdits == 1);
+}
+
+TEST_CASE("VFX property drawers expose and recover quality and culling choices")
+{
+    KeireEditor::PropertyDrawerRegistry drawers;
+    KeireEditor::Detail::RegisterVfxPropertyDrawers(drawers);
+    const auto registration = Keire::CreateVfxEmitterComponentRegistration();
+    const auto quality =
+        std::ranges::find(registration.Properties, std::string_view("quality"), &Keire::ComponentProperty::Key);
+    const auto culling =
+        std::ranges::find(registration.Properties, std::string_view("culling"), &Keire::ComponentProperty::Key);
+    REQUIRE(quality != registration.Properties.end());
+    REQUIRE(culling != registration.Properties.end());
+
+    ChoicePropertyEditor editor;
+    editor.Selection = static_cast<std::int64_t>(Keire::VfxQualityTier::Cinematic);
+    Keire::ComponentPropertyValue qualityValue = std::int64_t{99};
+    CHECK(drawers.Draw(editor, registration.Type, *quality, qualityValue));
+    REQUIRE(editor.ValueBeforeEdit);
+    CHECK(*editor.ValueBeforeEdit == 99);
+    CHECK(std::get<std::int64_t>(qualityValue) == static_cast<std::int64_t>(Keire::VfxQualityTier::Cinematic));
+    CHECK(editor.Label == "Quality Tier##quality");
+    CHECK(editor.Choices == std::vector<std::string_view>{"Low", "Medium", "High", "Cinematic"});
+
+    editor.Selection = static_cast<std::int64_t>(Keire::VfxCullingMode::AlwaysSimulate);
+    Keire::ComponentPropertyValue cullingValue = std::int64_t{-1};
+    CHECK(drawers.Draw(editor, registration.Type, *culling, cullingValue));
+    REQUIRE(editor.ValueBeforeEdit);
+    CHECK(*editor.ValueBeforeEdit == -1);
+    CHECK(std::get<std::int64_t>(cullingValue) == static_cast<std::int64_t>(Keire::VfxCullingMode::AlwaysSimulate));
+    CHECK(editor.Label == "Culling Mode##culling");
+    CHECK(editor.Choices == std::vector<std::string_view>{"Automatic", "Fixed Bounds", "Always Simulate"});
+    CHECK(editor.ChoiceEdits == 2);
 }

@@ -1,11 +1,88 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClientInternal/Editor/AssetPickerLabels.h"
+#include "KeireClientInternal/Editor/AssetPickerSearchScope.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include <doctest/doctest.h>
 
 #include <array>
 #include <optional>
 #include <string>
+
+TEST_CASE("Asset picker search follows the logical picker scope")
+{
+    using KeireEditor::Detail::ActivateAssetPickerSearchScope;
+    using KeireEditor::Detail::ClearAssetPickerSearchScope;
+
+    std::string activeScope;
+    std::string search;
+    const auto visualTreeType = Keire::UiVisualTreeAsset::StaticType();
+    const auto panelSettingsType = Keire::UiPanelSettingsAsset::StaticType();
+
+    CHECK(ActivateAssetPickerSearchScope(activeScope, search, "Visual Tree", visualTreeType, std::nullopt));
+    search = "hud";
+    CHECK_FALSE(ActivateAssetPickerSearchScope(activeScope, search, "Visual Tree", visualTreeType, std::nullopt));
+    CHECK(search == "hud");
+
+    CHECK(ActivateAssetPickerSearchScope(activeScope, search, "Panel Settings", panelSettingsType, std::nullopt));
+    CHECK(search.empty());
+
+    search = "settings";
+    CHECK(ActivateAssetPickerSearchScope(activeScope, search, "Panel Settings", visualTreeType, std::nullopt));
+    CHECK(search.empty());
+
+    search = "slot";
+    CHECK(
+        ActivateAssetPickerSearchScope(activeScope, search, "Panel Settings##Secondary", visualTreeType, std::nullopt));
+    CHECK(search.empty());
+
+    const auto managedType = Keire::ManagedTypeId(Keire::AssetId(1, 2));
+    search = "data";
+    CHECK(
+        ActivateAssetPickerSearchScope(activeScope, search, "Panel Settings##Secondary", visualTreeType, managedType));
+    CHECK(search.empty());
+
+    search = "retained";
+    ClearAssetPickerSearchScope(activeScope, search);
+    CHECK(activeScope.empty());
+    CHECK(search.empty());
+    CHECK(ActivateAssetPickerSearchScope(activeScope, search, "Visual Tree", visualTreeType, std::nullopt));
+}
+
+TEST_CASE("Inspector field layout stacks narrow controls and reserves inline actions")
+{
+    using KeireEditor::Detail::ResolveInspectorFieldLayout;
+
+    const auto narrow = ResolveInspectorFieldLayout(230.0F, 24.0F);
+    CHECK(narrow.Stacked);
+    CHECK(narrow.ControlWidth == doctest::Approx(198.0F));
+    CHECK(narrow.ControlWidth + 24.0F + KeireEditor::Detail::InspectorInlineActionSpacing <= 230.0F);
+
+    const auto boundary = ResolveInspectorFieldLayout(300.0F, 24.0F);
+    CHECK_FALSE(boundary.Stacked);
+    CHECK(boundary.ControlWidth == 0.0F);
+
+    const auto tiny = ResolveInspectorFieldLayout(-50.0F, 24.0F);
+    CHECK(tiny.Stacked);
+    CHECK(tiny.ControlWidth == 1.0F);
+}
+
+TEST_CASE("Inspector actions stack when narrow or when their content does not fit")
+{
+    using KeireEditor::Detail::ShouldStackInspectorAction;
+
+    CHECK(ShouldStackInspectorAction(230.0F, 80.0F, 40.0F));
+    CHECK(ShouldStackInspectorAction(360.0F, 310.0F, 50.0F));
+    CHECK_FALSE(ShouldStackInspectorAction(360.0F, 180.0F, 50.0F));
+}
+
+TEST_CASE("Inspector compact controls keep visible labels separate from hidden control labels")
+{
+    CHECK(KeireEditor::Detail::InspectorVisibleLabel("Material##Primary") == "Material");
+    CHECK(KeireEditor::Detail::InspectorVisibleLabel("Speed") == "Speed");
+    CHECK(KeireEditor::Detail::InspectorControlLabel("Material##Primary", true) == "##Material##Primary");
+    CHECK(KeireEditor::Detail::InspectorControlLabel("Material##Primary", false) == "Material##Primary");
+}
 
 TEST_CASE("Asset picker compact labels keep generated actions before their source path")
 {

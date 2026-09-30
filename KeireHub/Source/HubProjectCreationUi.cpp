@@ -57,8 +57,6 @@ namespace KeireHub
         DrawHubModalHeader(ui, tokens, "Create a new project",
                            "Choose a verified template and a compatible installed editor.", "NEW PROJECT");
 
-        const auto editorAvailable = [](const HubEditorUiRecord& editor)
-        { return editor.Healthy && !editor.Entrypoint.empty() && !editor.AssetToolEntrypoint.empty(); };
         const auto compatibilityInput = [](const HubEditorUiRecord& editor)
         {
             return HubTemplateEditorCompatibilityInput{.Version = editor.Version,
@@ -80,17 +78,11 @@ namespace KeireHub
                 snapshot.Editors, [&](const HubEditorUiRecord& editor)
                 { return EvaluateTemplateCompatibility(item, compatibilityInput(editor)).Compatible(); });
         };
+        auto editorChoices = selectedTemplate == snapshot.Templates.end()
+                                 ? std::vector<HubProjectEditorChoice>{}
+                                 : BuildHubProjectEditorChoices(snapshot.Editors, *selectedTemplate);
+        editorId = SelectHubProjectEditorId(editorChoices, editorId);
         auto selectedEditor = std::ranges::find(snapshot.Editors, editorId, &HubEditorUiRecord::Id);
-        const bool selectedPairCompatible =
-            selectedTemplate != snapshot.Templates.end() && selectedEditor != snapshot.Editors.end() &&
-            EvaluateTemplateCompatibility(*selectedTemplate, compatibilityInput(*selectedEditor)).Compatible();
-        if (!selectedPairCompatible)
-        {
-            selectedEditor = selectedTemplate == snapshot.Templates.end()
-                                 ? std::ranges::find_if(snapshot.Editors, editorAvailable)
-                                 : compatibleEditor(*selectedTemplate);
-            editorId = selectedEditor == snapshot.Editors.end() ? std::string{} : selectedEditor->Id;
-        }
 
         Keire::UiTableOptions layoutOptions;
         layoutOptions.Borders = false;
@@ -116,8 +108,9 @@ namespace KeireHub
                         if (selectedEditor == snapshot.Editors.end() ||
                             !EvaluateTemplateCompatibility(item, compatibilityInput(*selectedEditor)).Compatible())
                         {
-                            selectedEditor = firstCompatibleEditor;
-                            editorId = selectedEditor->Id;
+                            editorChoices = BuildHubProjectEditorChoices(snapshot.Editors, item);
+                            editorId = SelectHubProjectEditorId(editorChoices, {});
+                            selectedEditor = std::ranges::find(snapshot.Editors, editorId, &HubEditorUiRecord::Id);
                         }
                     }
                 }
@@ -125,23 +118,32 @@ namespace KeireHub
 
             (void)ui.TableNextColumn();
             ui.TextColored({0.58F, 0.68F, 0.88F, 1.0F}, "PROJECT DETAILS");
-            const std::string editorPreview = selectedEditor == snapshot.Editors.end()
-                                                  ? "No compatible editor installed"
-                                                  : selectedEditor->Version + "  ·  " + selectedEditor->Channel;
+            editorChoices = selectedTemplate == snapshot.Templates.end()
+                                ? std::vector<HubProjectEditorChoice>{}
+                                : BuildHubProjectEditorChoices(snapshot.Editors, *selectedTemplate);
+            editorId = SelectHubProjectEditorId(editorChoices, editorId);
+            selectedEditor = std::ranges::find(snapshot.Editors, editorId, &HubEditorUiRecord::Id);
+            const auto selectedChoice = std::ranges::find(editorChoices, editorId, &HubProjectEditorChoice::Id);
+            const std::string editorPreview =
+                selectedChoice == editorChoices.end() ? "No compatible editor installed" : selectedChoice->PrimaryLabel;
             if (auto combo = ui.BeginCombo("Editor version", editorPreview); combo)
             {
-                for (const auto& editor : snapshot.Editors)
+                for (const auto& choice : editorChoices)
                 {
-                    if (!editorAvailable(editor) || selectedTemplate == snapshot.Templates.end() ||
-                        !EvaluateTemplateCompatibility(*selectedTemplate, compatibilityInput(editor)).Compatible())
-                        continue;
-                    if (ui.Selectable(editor.Version + "  ·  " + editor.Channel, editor.Id == editorId))
+                    auto id = ui.PushId(choice.Id);
+                    if (ui.Selectable(choice.PrimaryLabel, choice.Id == editorId))
                     {
-                        editorId = editor.Id;
+                        editorId = choice.Id;
                         selectedEditor = std::ranges::find(snapshot.Editors, editorId, &HubEditorUiRecord::Id);
                     }
+                    ui.TextColoredWrapped(tokens.MutedText, choice.RootLabel);
                 }
             }
+            if (selectedChoice != editorChoices.end())
+                ui.TextColoredWrapped(tokens.MutedText, "Selected installation: " + selectedChoice->RootLabel);
+            ui.TextColored(tokens.MutedText, std::to_string(editorChoices.size()) + " of " +
+                                                 std::to_string(snapshot.Editors.size()) +
+                                                 " registered installations compatible with this template.");
             if (selectedTemplate != snapshot.Templates.end())
             {
                 ui.TextColored({0.55F, 0.60F, 0.68F, 1.0F}, "Template v" + selectedTemplate->Version + "  ·  Editors " +
@@ -177,8 +179,10 @@ namespace KeireHub
                 EvaluateTemplateCompatibility(*selectedTemplate, compatibilityInput(*selectedEditor)).Compatible();
             const auto destinationAllowed = ValidateProjectDestinationRoot(destination, distributionRoot);
             if (!validName)
-                ui.TextColored({0.96F, 0.38F, 0.42F, 1.0F},
-                               "Use 1-128 bytes with no reserved characters or surrounding whitespace.");
+                ui.TextColoredWrapped(
+                    {0.96F, 0.38F, 0.42F, 1.0F},
+                    "Use 1-128 bytes without reserved characters, surrounding whitespace, a trailing period, or "
+                    "Windows device names such as CON or COM1.");
             else if (error)
                 ui.TextColored({0.96F, 0.38F, 0.42F, 1.0F}, "The destination could not be inspected.");
             else if (!parentAvailable && !parentCreatable)

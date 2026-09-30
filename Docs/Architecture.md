@@ -874,6 +874,9 @@ resolves registry dependency closure into an exact source-controlled lockfile, v
 owned global cache, mounts it read-only, and supports transactional embed/revert/remove. `ProjectAssetPackageImporter`
 owns dependency-aware selective imports, three-way update decisions, executable-code consent fingerprints,
 source-controlled receipts, safe removal, rollback journals, and interrupted-operation recovery.
+Authoring dependency closure maps generated subasset identities back to their source owners; manifests contain only
+top-level source IDs while copied metadata preserves stable subasset regeneration. Unknown identities fail with the
+dependent source path and both asset IDs instead of being ignored.
 The parser's deterministic mutation corpus distributes truncations and bit flips across a valid archive and appends
 trailing-data cases; every rejection must leave the authorized staging parent without a partial extraction tree.
 
@@ -1078,6 +1081,9 @@ Accepted Core and Client writes also enter a bounded structured record history u
 polls that history from its owner thread and advances an opaque sequence, so startup and worker messages reach the
 Console panel without invoking UI from logging threads or exposing spdlog across the boundary. Coral's host callback is
 adapted to the Core channel instead of writing around this path.
+Managed build parsing deduplicates exact compiler diagnostics within one process output while preserving first-seen
+order; later builds remain independent. The Console keeps raw severity totals, shows repetition on collapsed rows, and
+renders the complete wrapped entry for the current selection.
 
 File paths are intentionally relative to the process working directory. Scripts and generated IDE targets set that directory to the repository root, producing consistent `Logs/Core.log` and `Logs/Client.log` paths.
 
@@ -1225,6 +1231,10 @@ before replacing the document. Dirty-scene and Play-change decisions approve or 
 requests remain non-destructive. Panels use `Scene::IsOpen()`-filtered document views so an obsolete reference is inert.
 Minimized or unavailable swapchain textures are skipped safely. Docking is active, while multi-viewports are forced off
 because detached native windows require a separate ownership milestone.
+Existing floating panels are constrained to the main viewport before window submission so hit testing and first-wheel
+routing use the same visible geometry, and genuinely new panels retain a post-submission geometry fallback. The UI
+input boundary processes a safe leading pointer-move plus wheel cluster in one frame so hover resolves at the new
+position before wheel routing; button, key, text, focus, and ambiguous event tails retain ordered trickling.
 
 `UiWorkspace` is an optional application-owned profile service layered above `UiSystem`. Panels register stable IDs and receive move-only registrations; the workspace owns visibility and submitted backend names without exposing Dear ImGui. The Default layout is an immutable factory recipe expressed through `UiLayoutBuilder`, while named layouts capture docking state plus known and unknown panel visibility. Changes autosave to a current-session document and the active custom profile. Explicit reset reapplies the factory recipe; custom profiles support save-as, rename, delete, and portable import/export.
 
@@ -1255,6 +1265,8 @@ entity without exposing scene, asset-system, or GPU pointers to the public UI mo
 The retained tree owns dirty style/layout/geometry propagation, ordered focus, hit testing, nested clipping, bounded
 events, and immutable draw-command capture. Screen and camera panels are submitted only to Game/Play/runtime output;
 the Scene viewport cannot composite or intercept them. Render-texture panels select explicit offscreen targets.
+Buttons and toggles receive lowest-priority neutral semantic styles before the project cascade, including state feedback;
+authored base and pseudo-state declarations remain authoritative. An unchecked toggle still emits a bounded indicator.
 World-surface panels retain physical dimensions, pixels-per-unit, transform, and depth policy; presentation maps input
 rays through panel UV and renderer submission treats the panel as scene content. Additive scenes retain deterministic
 document order and dispatch pointer input from the topmost document backward until handled.
@@ -1294,8 +1306,12 @@ generations retain the previous immutable type catalog.
 `UiBuilderDocument` and `UiBuilderStyleSheetDocument` own validated authoring definitions, generation counters, dirty
 state, explicit persistence, and independent undo histories. `UiBuilderPanel` translates Design, Styles, and Debug
 interactions into those document operations. Inspector drafts track the asset, selection, and document generation;
-edits apply only changed fields, and only an explicit class edit broadcasts classes across the selection. Hierarchy
-rows borrow the current definition and traversal ends immediately after a successful reparent invalidates those rows.
+edits apply only changed fields, and only an explicit class edit broadcasts classes across the selection. At compact
+widths, Inspector labels stack above full-width controls, descriptive text wraps, and binding actions remain on visible
+rows. Hierarchy rows borrow the current definition and traversal ends immediately after a successful reparent
+invalidates those rows.
+Inspector asset-picker searches are scoped to the full field identity plus native and managed asset types. Reopening
+the same field retains its useful query, while opening a different logical field starts unfiltered.
 Style Studio reads one shared property registry, keeps a lossless source
 draft, publishes only valid development revisions, preserves the last valid preview during parse errors, and rejects
 silent overwrites when the baseline file hash changes. Schema-v1 styles retain source until a v2-only declaration or
@@ -1443,8 +1459,9 @@ explicit private unlocked helpers are used only while that boundary is already h
 depends on recursive-lock behavior. `AssetPipeline.cpp` remains the small stable API facade.
 Scene picking consumes catalog metadata through `AssetSystem` and does not own an importer or source-model cache.
 `SceneCameraController` owns navigation persistence and entity locking. `ViewportAssetDropRouter` dispatches scene,
-input, mesh, and material drops through narrow commands, leaving the workspace responsible for composition and modal
-coordination.
+input, prefab, mesh, material, and VFX Effect drops through narrow commands, leaving the workspace responsible for
+composition and modal coordination. Dropping a VFX Effect creates a positioned entity with an assigned VFX Emitter;
+the workspace owns its transactional scene edit, selection, and status.
 
 `AssetSystem` is optionally created after `EventBus` and closed before it. Its bounded priority scheduler owns worker
 threads, while handles own reference-counted shared state and immutable payload revisions. Workers perform I/O,

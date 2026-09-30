@@ -79,7 +79,8 @@ namespace Keire
     [[nodiscard]] KEIRE_API SharedShaderLibrary ApplySharedShaderInputs(const std::filesystem::path& projectRoot,
                                                                         const SharedShaderUpgradeReview& review);
 
-    /// Installs once on explicit material creation. Existing pinned sources are verified, never regenerated.
+    /// Installs once on explicit material creation. A missing lock is recovered only for a complete canonical library;
+    /// existing pinned sources are verified and never regenerated.
     /// The caller must own the project's exclusive access and pause source mutations during publication.
     [[nodiscard]] KEIRE_API SharedShaderLibrary EnsureSharedShaderLibrary(const std::filesystem::path& projectRoot);
     /// Returns an empty library when the project has not opted in. Missing or modified pinned content is an error.

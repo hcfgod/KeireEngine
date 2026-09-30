@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/ManagedAssemblyInspectorPanel.h"
 #include "Keire/Scripting/ManagedAssemblyReferenceAsset.h"
 #include "KeireClient/Editor/EditorPanels.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 #include "KeireInternal/FileSystem.h"
 #include <algorithm>
 #include <array>
@@ -83,11 +84,23 @@ namespace KeireEditor
             {
                 ui.TextColored(theme.Accent, "ASSEMBLY DEFINITION");
                 auto& definition = *m_Definition;
-                m_Dirty |= ui.InputText("Assembly Name", definition.Name);
-                m_Dirty |= ui.InputText("Root Namespace", definition.RootNamespace);
+                const auto prepareAssemblyField = [&ui](const std::string_view label)
+                {
+                    const auto layout = Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width, 0.0F,
+                                                                            Detail::InspectorInlineActionSpacing,
+                                                                            Detail::InspectorDescriptiveFieldWidth);
+                    if (layout.Stacked)
+                    {
+                        ui.TextWrapped(Detail::InspectorVisibleLabel(label));
+                        ui.SetNextItemWidth(layout.ControlWidth);
+                    }
+                    return Detail::InspectorControlLabel(label, layout.Stacked);
+                };
+                m_Dirty |= ui.InputText(prepareAssemblyField("Assembly Name"), definition.Name);
+                m_Dirty |= ui.InputText(prepareAssemblyField("Root Namespace"), definition.RootNamespace);
                 const std::array<std::string_view, 3> labels{"Runtime", "Editor", "Tests"};
-                if (auto combo =
-                        ui.BeginCombo("Classification", labels.at(static_cast<std::size_t>(definition.Classification)));
+                if (auto combo = ui.BeginCombo(prepareAssemblyField("Classification"),
+                                               labels.at(static_cast<std::size_t>(definition.Classification)));
                     combo)
                     for (std::size_t i = 0; i < labels.size(); ++i)
                         if (ui.Selectable(labels[i], static_cast<std::size_t>(definition.Classification) == i))

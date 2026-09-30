@@ -4,13 +4,16 @@
 #include "KeireInternal/FileSystem.h"
 
 #include <doctest/doctest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <filesystem>
 #include <set>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace
@@ -118,6 +121,64 @@ TEST_CASE("Shared shader installation refuses occupied destinations before publi
     CHECK(fs.Read(source, 16) == occupied);
     CHECK_FALSE(fs.Exists("ProjectSettings/SharedShaders.lock"));
     CHECK_FALSE(fs.Exists("Assets/Keire/SharedShaders/1.0.0/Unlit.keireshadergraph"));
+}
+
+TEST_CASE("Shared shader installation adopts only a complete byte-exact canonical library")
+{
+    SharedShaderFixture fixture;
+    const auto installed = Keire::EnsureSharedShaderLibrary(fixture.Root);
+    const Keire::Detail::AnchoredFileSystem fs(fixture.Root);
+    std::vector<std::pair<std::filesystem::path, std::vector<std::byte>>> originals;
+    for (const auto& shader : installed.Shaders)
+    {
+        const auto source = std::filesystem::path("Assets") / shader.SourcePath;
+        const auto metadata = std::filesystem::path(source.string() + ".keiremeta");
+        originals.emplace_back(source, fs.Read(source, 4U * 1024U * 1024U));
+        originals.emplace_back(metadata, fs.Read(metadata, 4U * 1024U * 1024U));
+    }
+    fs.Remove("ProjectSettings/SharedShaders.lock");
+
+    const auto adopted = Keire::EnsureSharedShaderLibrary(fixture.Root);
+
+    CHECK(adopted.Version == installed.Version);
+    CHECK(adopted.Shaders.size() == installed.Shaders.size());
+    CHECK(fs.Exists("ProjectSettings/SharedShaders.lock"));
+    for (const auto& [path, bytes] : originals)
+        CHECK(fs.Read(path, 4U * 1024U * 1024U) == bytes);
+}
+
+TEST_CASE("Shared shader installation refuses to adopt partial or modified canonical content")
+{
+    SharedShaderFixture fixture;
+    const auto installed = Keire::EnsureSharedShaderLibrary(fixture.Root);
+    const Keire::Detail::AnchoredFileSystem fs(fixture.Root);
+    fs.Remove("ProjectSettings/SharedShaders.lock");
+    const auto firstSource = std::filesystem::path("Assets") / installed.Shaders.front().SourcePath;
+
+    SUBCASE("modified source")
+    {
+        auto modified = fs.Read(firstSource, 4U * 1024U * 1024U);
+        modified.push_back(std::byte{' '});
+        fs.WriteFileAtomically(firstSource, modified);
+        CHECK_THROWS_AS((void)Keire::EnsureSharedShaderLibrary(fixture.Root), std::runtime_error);
+        CHECK(fs.Read(firstSource, 4U * 1024U * 1024U) == modified);
+    }
+    SUBCASE("missing sidecar")
+    {
+        fs.Remove(std::filesystem::path(firstSource.string() + ".keiremeta"));
+        CHECK_THROWS_AS((void)Keire::EnsureSharedShaderLibrary(fixture.Root), std::runtime_error);
+        CHECK(fs.Exists(firstSource));
+    }
+    SUBCASE("changed sidecar identity")
+    {
+        const auto metadataPath = std::filesystem::path(firstSource.string() + ".keiremeta");
+        auto metadata = nlohmann::json::parse(fs.Read(metadataPath, 4U * 1024U * 1024U));
+        metadata["id"] = Keire::AssetId::Generate().ToString();
+        const auto contents = metadata.dump(2) + '\n';
+        fs.WriteFileAtomically(metadataPath, std::as_bytes(std::span(contents)));
+        CHECK_THROWS_AS((void)Keire::EnsureSharedShaderLibrary(fixture.Root), std::runtime_error);
+    }
+    CHECK_FALSE(fs.Exists("ProjectSettings/SharedShaders.lock"));
 }
 
 TEST_CASE("Shared shader installation rejects identities owned by another source")

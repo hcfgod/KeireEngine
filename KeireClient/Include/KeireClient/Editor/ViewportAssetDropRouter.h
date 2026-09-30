@@ -12,6 +12,7 @@ namespace KeireEditor
         virtual void OpenDroppedInputActions(Keire::AssetId asset) = 0;
         virtual void InstantiateDroppedPrefab(Keire::AssetId asset, Keire::Vector3 position) = 0;
         virtual void CreateDroppedMeshEntity(Keire::AssetId asset, Keire::Vector3 position) = 0;
+        virtual void CreateDroppedVfxEntity(Keire::AssetId asset, Keire::Vector3 position) = 0;
         virtual void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) = 0;
     };
 

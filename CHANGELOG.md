@@ -2,6 +2,59 @@
 
 ## Unreleased
 
+## 0.4.6 - 2026-09-30
+
+- Fixed the UI Builder Inspector at narrow and floating widths by stacking labeled fields, wrapping descriptive text,
+  and keeping binding removal actions inside the visible pane.
+- Asset-picker search now follows the active logical field and asset type instead of leaking an irrelevant query into
+  the next picker opened in the Inspector.
+- Unstyled runtime buttons and toggles now have visible neutral, interactive affordances while authored base and
+  pseudo-state stylesheet rules continue to override those defaults.
+- Floating editor panels are constrained before window submission so their first mouse-wheel event reaches the
+  foreground scroll child instead of locking onto a covered panel.
+- The Rigid Body Inspector exposes Motion as Static, Dynamic, or Kinematic instead of a raw integer, and native motion
+  setters reject invalid enum values without changing component state.
+- Managed compiler diagnostics are deduplicated per build, collapsed Console rows show occurrence counts, and selecting
+  a row exposes its complete wrapped path and message instead of leaving the actionable text clipped.
+- Asset-package authoring resolves generated subasset dependencies through their owning source assets, emits only
+  importable top-level manifest dependencies, and identifies genuine missing dependency IDs and source paths.
+- The VFX Emitter Inspector exposes readable Quality Tier and Culling Mode choices instead of raw persisted integers.
+
+- Marketplace upload reservations accept new releases of published products while preserving published-version
+  immutability and publisher ownership checks.
+- Marketplace validator worker and broker report version 0.4.5 for current-release package validation.
+- Hub startup keeps Home actions stable when the routine background editor refresh completes instead of showing an
+  auto-expiring success banner that shifts the page during interaction.
+- Hub notices use a permanently reserved status rail and user-action feedback remains until dismissed or replaced,
+  preventing expiring messages from moving installation controls beneath the pointer.
+- Managed script workspaces prefer a compatible Visual Studio 18 or newer installation for .NET 10 authoring instead
+  of reopening an incompatible Visual Studio 2022 instance selected by the Windows file association.
+- Narrow Inspector panels stack property and asset labels above their controls and expose a full-width Add Component
+  action, keeping labels, asset reveal buttons, and component search usable at the default 1280-pixel layout.
+- Directional Light's bespoke color, shadow, baking, and cookie controls use the same responsive Inspector layout,
+  with wrapped baking guidance, preventing long labels, controls, and help text from clipping in the default narrow
+  panel.
+- Unchecked UI checkboxes retain a theme-colored outline, keeping Collider, VFX, and other boolean states visible in
+  narrow Inspectors instead of showing only their labels.
+- Dropping a VFX Effect into the Scene creates a positioned VFX Emitter entity instead of appearing inert and logging
+  the supported authoring gesture as an error.
+- Hub project creation and Open With choices distinguish same-version Editor installations by stable identity,
+  ownership, and full path, with deterministic compatible-editor ordering.
+- Hub and Core project creation reject Windows device aliases, control characters, and trailing spaces or periods on
+  every host, preventing apparently successful projects whose directories are not portable or normally manageable.
+- Sandbox template 1.3.2 includes the pinned shared-shader ownership lock, so fresh projects import and render the six
+  bundled shared Shader Graphs instead of rejecting their reserved identities.
+- Projects created from Sandbox 1.3.1 recover a missing shared-shader ownership lock only when all six canonical sources
+  and identities match the pinned library exactly; partial or modified content remains untouched and is rejected.
+- Play waits asynchronously for a cold default input action asset before enabling its configured map, avoiding a false
+  missing-map error when a newly created project enters Play for the first time.
+- Managed Assembly name, namespace, and classification fields stack responsively in a narrow Inspector instead of
+  clipping their labels and controls.
+- Open Visual Studio workspaces refresh their explicit script and assembly inventory before managed builds, including
+  failed builds, and every script open revalidates the design-time project so new or moved files retain IntelliSense.
+- Fresh projects defer the hidden default Input Actions runtime context until the first catalog is mounted, avoiding a
+  false frame-one missing-asset error while preserving source, import, and wrong-type diagnostics.
+
 ## 0.4.5 - 2026-09-30
 
 - Windows package validation waits for the GUI runtime smoke process to finish and checks its actual exit code

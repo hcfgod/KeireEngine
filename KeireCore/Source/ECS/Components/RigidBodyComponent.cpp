@@ -26,6 +26,8 @@ namespace Keire
 
     void RigidBodyComponent::SetMotion(const PhysicsMotionType value)
     {
+        if (value < PhysicsMotionType::Static || value > PhysicsMotionType::Kinematic)
+            throw std::invalid_argument("Rigid Body motion type is outside the supported range.");
         m_Motion = value;
         NotifyChanged();
     }

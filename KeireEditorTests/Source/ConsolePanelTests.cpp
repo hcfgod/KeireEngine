@@ -57,6 +57,43 @@ TEST_CASE("Editor Console captures native Core and Client records exactly once")
     CHECK(panel.MessageCount() == 3);
 }
 
+TEST_CASE("Editor Console collapse projection tracks repetitions without merging presentation differences")
+{
+    const Keire::UiColor error{1.0F, 0.0F, 0.0F, 1.0F};
+    const Keire::UiColor warning{1.0F, 0.5F, 0.0F, 1.0F};
+    const std::vector<KeireEditor::Detail::ConsoleProjectionEntry> entries{
+        {"Managed Build", "CS1525: Invalid expression term", error, Keire::LogLevel::Error},
+        {"Managed Build", "CS1525: Invalid expression term", error, Keire::LogLevel::Error},
+        {"Managed Build", "CS1525: Invalid expression term", warning, Keire::LogLevel::Error},
+        {"Managed Build", "CS1525: Invalid expression term", error, Keire::LogLevel::Warn},
+        {"Managed Runtime", "CS1525: Invalid expression term", error, Keire::LogLevel::Error},
+        {"Managed Runtime", "Different text", error, Keire::LogLevel::Error},
+    };
+
+    const auto collapsed = KeireEditor::Detail::ProjectConsoleEntries(entries, true);
+    REQUIRE(collapsed.size() == 5);
+    CHECK(collapsed[0].SourceIndex == 0);
+    CHECK(collapsed[0].Repetitions == 2);
+    CHECK(collapsed[1].SourceIndex == 2);
+    CHECK(collapsed[1].Repetitions == 1);
+    CHECK(collapsed[2].SourceIndex == 3);
+    CHECK(collapsed[3].SourceIndex == 4);
+    CHECK(collapsed[4].SourceIndex == 5);
+
+    const auto expanded = KeireEditor::Detail::ProjectConsoleEntries(entries, false);
+    REQUIRE(expanded.size() == entries.size());
+    CHECK(std::ranges::all_of(expanded, [](const auto& entry) { return entry.Repetitions == 1; }));
+}
+
+TEST_CASE("Editor Console detail formatting preserves complete messages and summarizes multiple selection")
+{
+    const auto formatted = KeireEditor::Detail::FormatConsoleEntry(
+        42, "Managed Build", "D:/A/Very/Long/Project/Path/Player.cs:12:7: CS1525: Invalid expression term ';'");
+    CHECK(formatted == "[42] [Managed Build] "
+                       "D:/A/Very/Long/Project/Path/Player.cs:12:7: CS1525: Invalid expression term ';'");
+    CHECK(KeireEditor::Detail::FormatConsoleSelectionSummary(3) == "3 messages selected.");
+}
+
 TEST_CASE("Editor Console selection supports range additive and retained message behavior")
 {
     KeireEditor::ConsoleSelection selection;

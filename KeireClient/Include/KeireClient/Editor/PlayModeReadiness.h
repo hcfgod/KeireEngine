@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/Assets/Asset.h"
 #include "Keire/Scripting/ScriptSystem.h"
 
 #include <cstdint>
@@ -12,6 +13,31 @@ namespace KeireEditor
         WaitingForManagedRuntime,
         ManagedRuntimeUnavailable
     };
+
+    enum class PlayModeInputReadiness : std::uint8_t
+    {
+        Waiting,
+        Ready,
+        Unavailable
+    };
+
+    [[nodiscard]] constexpr PlayModeInputReadiness
+    EvaluatePlayModeInputReadiness(const Keire::AssetState state) noexcept
+    {
+        switch (state)
+        {
+        case Keire::AssetState::Queued:
+        case Keire::AssetState::Loading:
+            return PlayModeInputReadiness::Waiting;
+        case Keire::AssetState::Ready:
+        case Keire::AssetState::Reloading:
+            return PlayModeInputReadiness::Ready;
+        case Keire::AssetState::Failed:
+        case Keire::AssetState::Cancelled:
+            return PlayModeInputReadiness::Unavailable;
+        }
+        return PlayModeInputReadiness::Unavailable;
+    }
 
     [[nodiscard]] constexpr PlayModeReadiness
     EvaluatePlayModeReadiness(const bool requiresManagedRuntime, const bool runtimeHostAvailable,

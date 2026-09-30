@@ -16,6 +16,29 @@
 
 namespace KeireEditor
 {
+    namespace Detail
+    {
+        struct ConsoleProjectionEntry final
+        {
+            std::string_view Category;
+            std::string_view Text;
+            Keire::UiColor Color;
+            Keire::LogLevel Level = Keire::LogLevel::Info;
+        };
+
+        struct ConsoleProjectedEntry final
+        {
+            std::size_t SourceIndex = 0;
+            std::size_t Repetitions = 1;
+        };
+
+        [[nodiscard]] std::vector<ConsoleProjectedEntry>
+        ProjectConsoleEntries(std::span<const ConsoleProjectionEntry> entries, bool collapse);
+        [[nodiscard]] std::string FormatConsoleEntry(std::uint64_t frame, std::string_view category,
+                                                     std::string_view text);
+        [[nodiscard]] std::string FormatConsoleSelectionSummary(std::size_t selectionCount);
+    } // namespace Detail
+
     class ConsoleSelection final
     {
       public:

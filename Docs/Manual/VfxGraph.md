@@ -12,7 +12,8 @@ asset.
 4. Right-click the graph to add Contexts, Operators, Blackboard values, and ordered Blocks.
 5. Configure **Effect Settings**: loop, duration, simulation space, seed, and capacity.
 6. Compile, fix every graph diagnostic, and save.
-7. Add a **VFX Emitter** component to an entity and assign the effect.
+7. Drag the effect into the Scene to create a positioned **VFX Emitter**, or add the component to an existing entity
+   and assign the effect in its Inspector.
 
 Required Spawn, Initialize, Update, and Output flow depends on the effect. Context anchors are protected. Blocks execute
 in their authored order inside a Context; Operators provide typed values through cables. Starting search from a pin

@@ -47,6 +47,23 @@ namespace
                 .HasAssetToolEntrypoint = true};
     }
 
+    [[nodiscard]] HubEditorUiRecord InstalledEditor(std::string id, std::string version, std::string channel,
+                                                    std::filesystem::path root, const bool managed = false)
+    {
+        return {.Id = std::move(id),
+                .Version = std::move(version),
+                .Channel = std::move(channel),
+                .Platform = "windows",
+                .Architecture = "x86_64",
+                .Root = std::move(root),
+                .Entrypoint = "KeireClient.exe",
+                .AssetToolEntrypoint = "KeireAssetTool.exe",
+                .MinimumProjectSchema = 2,
+                .MaximumProjectSchema = 3,
+                .Managed = managed,
+                .Healthy = true};
+    }
+
     void WriteValidPng(const std::filesystem::path& path)
     {
         constexpr std::array<unsigned char, 71> png{
@@ -161,6 +178,54 @@ TEST_CASE("Project creation requests default to opening the created project and 
 
     request.OpenAfterCreation = false;
     CHECK_FALSE(request.OpenAfterCreation);
+}
+
+TEST_CASE("Project editor choices distinguish roots and rank independently of registry order")
+{
+    const auto projectTemplate = Template("keire.empty", "Empty", "Core");
+    const auto external = InstalledEditor("external", "1.2.0", "stable", "C:/Editors/External");
+    const auto managed = InstalledEditor("managed", "1.2.0", "stable", u8"C:/Editors/Kéire Café", true);
+    const auto preview = InstalledEditor("preview", "1.3.0", "preview", "C:/Editors/Preview");
+    const std::array firstOrder{external, managed, preview};
+    const std::array secondOrder{preview, external, managed};
+
+    const auto first = BuildHubProjectEditorChoices(firstOrder, projectTemplate);
+    const auto second = BuildHubProjectEditorChoices(secondOrder, projectTemplate);
+    REQUIRE(first.size() == 3);
+    REQUIRE(second.size() == 3);
+    CHECK(first[0].Id == "preview");
+    CHECK(first[1].Id == "managed");
+    CHECK(first[2].Id == "external");
+    CHECK(std::ranges::equal(first, second, std::ranges::equal_to{}, &HubProjectEditorChoice::Id,
+                             &HubProjectEditorChoice::Id));
+    CHECK(first[1].PrimaryLabel.find("Managed") != std::string::npos);
+    const std::u8string expectedRoot = u8"C:/Editors/Kéire Café";
+    CHECK(first[1].RootLabel == std::string(reinterpret_cast<const char*>(expectedRoot.data()), expectedRoot.size()));
+    CHECK(first[1].RootLabel != first[2].RootLabel);
+    CHECK(SelectHubProjectEditorId(first, "external") == "external");
+    CHECK(SelectHubProjectEditorId(first, "missing") == "preview");
+}
+
+TEST_CASE("Project editor choices retain duplicate versions and filter unavailable installations")
+{
+    const auto projectTemplate = Template("keire.empty", "Empty", "Core");
+    auto first = InstalledEditor("first", "1.2.0", "stable", "C:/Editors/First");
+    auto second = InstalledEditor("second", "1.2.0", "stable", "D:/Editors/Second");
+    auto unhealthy = InstalledEditor("unhealthy", "1.2.0", "stable", "C:/Editors/Unhealthy");
+    unhealthy.Healthy = false;
+    auto missingTool = InstalledEditor("missing-tool", "1.2.0", "stable", "C:/Editors/MissingTool");
+    missingTool.AssetToolEntrypoint.clear();
+    auto unsupportedVersion = InstalledEditor("new", "2.0.0", "stable", "C:/Editors/New");
+    auto unsupportedSchema = InstalledEditor("schema", "1.2.0", "stable", "C:/Editors/Schema");
+    unsupportedSchema.MinimumProjectSchema = 4;
+    const std::array editors{first, second, unhealthy, missingTool, unsupportedVersion, unsupportedSchema};
+
+    const auto choices = BuildHubProjectEditorChoices(editors, projectTemplate);
+    REQUIRE(choices.size() == 2);
+    CHECK(choices[0].Id != choices[1].Id);
+    CHECK(choices[0].PrimaryLabel == choices[1].PrimaryLabel);
+    CHECK(choices[0].RootLabel == "C:/Editors/First");
+    CHECK(choices[1].RootLabel == "D:/Editors/Second");
 }
 
 TEST_CASE("Hub template workflow preserves UTF-8 project names in Windows paths")

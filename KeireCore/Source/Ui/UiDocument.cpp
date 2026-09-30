@@ -21,6 +21,49 @@ namespace Keire
 {
     namespace
     {
+        [[nodiscard]] bool HasPseudoState(const UiStylePseudoState values, const UiStylePseudoState value) noexcept
+        {
+            return (static_cast<std::uint16_t>(values) & static_cast<std::uint16_t>(value)) != 0U;
+        }
+
+        void ApplyDefaultControlStyle(RuntimeUiStyle& style, const UiVisualElementType type,
+                                      const UiStylePseudoState states) noexcept
+        {
+            const bool button = type == UiVisualElementType::Button;
+            const bool toggle = type == UiVisualElementType::Toggle;
+            if (!button && !toggle)
+                return;
+
+            const bool checked = toggle && HasPseudoState(states, UiStylePseudoState::Checked);
+            style.Background = checked ? Color{0.16F, 0.36F, 0.58F, 1.0F} : Color{0.17F, 0.19F, 0.23F, 1.0F};
+            style.Border = {0.38F, 0.42F, 0.50F, 1.0F};
+            style.BorderWidth = 1.0F;
+            style.CornerRadius = 6.0F;
+            style.Padding = {12.0F, 8.0F, 12.0F, 8.0F};
+            style.HorizontalAlignment = button ? RuntimeUiAlignment::Center : RuntimeUiAlignment::Start;
+            style.VerticalAlignment = RuntimeUiAlignment::Center;
+
+            if (HasPseudoState(states, UiStylePseudoState::Disabled))
+            {
+                style.Background = {0.13F, 0.14F, 0.16F, 0.72F};
+                style.Border = {0.29F, 0.31F, 0.35F, 0.72F};
+            }
+            else if (HasPseudoState(states, UiStylePseudoState::Active))
+            {
+                style.Background = checked ? Color{0.10F, 0.25F, 0.43F, 1.0F} : Color{0.10F, 0.12F, 0.15F, 1.0F};
+            }
+            else if (HasPseudoState(states, UiStylePseudoState::Focus))
+            {
+                style.Background = checked ? Color{0.20F, 0.42F, 0.67F, 1.0F} : Color{0.20F, 0.25F, 0.34F, 1.0F};
+                style.Border = {0.44F, 0.68F, 1.0F, 1.0F};
+                style.BorderWidth = 2.0F;
+            }
+            else if (HasPseudoState(states, UiStylePseudoState::Hover))
+            {
+                style.Background = checked ? Color{0.20F, 0.44F, 0.70F, 1.0F} : Color{0.23F, 0.27F, 0.33F, 1.0F};
+            }
+        }
+
         [[nodiscard]] std::string Lower(std::string_view value)
         {
             std::string result(value);
@@ -1241,6 +1284,7 @@ namespace Keire
                         style.MaximumLines = parentState->Style.MaximumLines;
                     }
                 }
+                ApplyDefaultControlStyle(style, element.Definition->Type, element.PseudoStates);
                 for (const auto& [name, property] : cascade)
                 {
                     if (name.starts_with("--"))

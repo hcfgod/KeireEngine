@@ -1,5 +1,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClientInternal/Editor/AssetPickerLabels.h"
+#include "KeireClientInternal/Editor/AssetPickerSearchScope.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include <algorithm>
 #include <cctype>
@@ -212,8 +214,18 @@ namespace KeireEditor
         bool changed = false;
         {
             auto id = ui.PushId(options.Label);
+            const auto layout = Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width, 24.0F);
+            if (layout.Stacked)
+            {
+                const auto visibleLabel = Detail::InspectorVisibleLabel(options.Label);
+                if (!visibleLabel.empty())
+                    ui.TextWrapped(visibleLabel);
+                ui.SetNextItemWidth(layout.ControlWidth);
+            }
             if (auto combo = ui.BeginCombo("##Asset", preview); combo)
             {
+                (void)Detail::ActivateAssetPickerSearchScope(m_SearchScope, m_Search, options.Label,
+                                                             options.ExpectedType, options.ExpectedManagedType);
                 (void)ui.InputTextWithHint("##Search", "Search project assets", m_Search);
                 ui.Separator();
                 if (options.AllowNone && ui.Selectable(options.EmptyLabel, !value))
@@ -274,15 +286,18 @@ namespace KeireEditor
             if (auto disabled = ui.BeginDisabled(!value || !options.Reveal); disabled)
                 if (ui.IconButton("Reveal", Keire::UiIcon::Search, false, {24.0F, 0.0F}) && value && options.Reveal)
                     options.Reveal(value);
-            ui.SameLine();
-            ui.Text(options.Label.substr(0, options.Label.find("##")));
+            if (!layout.Stacked)
+            {
+                ui.SameLine();
+                ui.Text(Detail::InspectorVisibleLabel(options.Label));
+            }
         }
         return changed;
     }
 
     void AssetPicker::Clear() noexcept
     {
-        m_Search.clear();
+        Detail::ClearAssetPickerSearchScope(m_SearchScope, m_Search);
         m_Diagnostic.clear();
     }
 } // namespace KeireEditor

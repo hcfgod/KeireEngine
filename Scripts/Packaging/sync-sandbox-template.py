@@ -40,7 +40,11 @@ def _is_temporary(path: Path) -> bool:
 
 def _source_files() -> dict[Path, Path]:
     files: dict[Path, Path] = {}
-    candidates = [SAMPLE_ROOT / ".gitignore", SAMPLE_ROOT / "README.md"]
+    candidates = [
+        SAMPLE_ROOT / ".gitignore",
+        SAMPLE_ROOT / "README.md",
+        SAMPLE_ROOT / "ProjectSettings" / "SharedShaders.lock",
+    ]
     candidates.extend((SAMPLE_ROOT / "Assets").rglob("*"))
     candidates.extend((SAMPLE_ROOT / "ProjectSettings").glob("*.keiresettings"))
     for source in candidates:
@@ -102,10 +106,34 @@ def _sandbox_manifest(catalog: dict[str, object]) -> dict[str, object]:
     raise RuntimeError("Template catalog has no keire.sandbox manifest.")
 
 
+def _default_project_configuration() -> dict[str, object]:
+    descriptor_path = SAMPLE_ROOT / "ProjectSettings" / "Project.keireproject"
+    input_path = SAMPLE_ROOT / "Assets" / "Input" / "DefaultInput.keireinput"
+    input_metadata_path = input_path.with_name(input_path.name + ".keiremeta")
+    descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
+    input_definition = json.loads(input_path.read_text(encoding="utf-8"))
+    input_metadata = json.loads(input_metadata_path.read_text(encoding="utf-8"))
+    configuration = {
+        "startupScene": descriptor.get("startupScene"),
+        "defaultInput": descriptor.get("defaultInput"),
+        "defaultInputMap": descriptor.get("defaultInputMap"),
+    }
+    if configuration["defaultInput"] != input_metadata.get("id"):
+        raise RuntimeError("Sandbox default input does not match its asset metadata ID.")
+    action_maps = input_definition.get("actionMaps")
+    if not isinstance(action_maps, list) or not any(
+        isinstance(action_map, dict)
+        and action_map.get("id") == configuration["defaultInputMap"]
+        for action_map in action_maps
+    ):
+        raise RuntimeError("Sandbox default input map is absent from the default input asset.")
+    return configuration
+
+
 def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
     payload_files = _payload_manifest(files)
     return {
-        "version": "1.3.1",
+        "version": "1.3.2",
         "compatibleEditors": ">=0.3.0 <2.0.0",
         "projectSchema": 4,
         "description": (
@@ -122,11 +150,7 @@ def _expected_manifest(files: dict[Path, Path]) -> dict[str, object]:
         ],
         "estimatedSizeBytes": sum(int(entry["sizeBytes"]) for entry in payload_files),
         "payloadFiles": payload_files,
-        "defaultProjectConfiguration": {
-            "startupScene": "85be2f8e-31eb-5971-bca9-e5dd6b3f4029",
-            "defaultInput": "97b38693-6dc3-4f06-a228-44ba5786e8d1",
-            "defaultInputMap": "a6b6db76-6436-4aa4-b96a-a72a0f987101",
-        },
+        "defaultProjectConfiguration": _default_project_configuration(),
         "starterContent": [
             "Assets/Scenes/SandboxShowcase.keirescene",
             "Assets/Scenes/SampleScene.keirescene",
@@ -153,6 +177,9 @@ def _payload_files() -> dict[Path, Path]:
 
 def _check(files: dict[Path, Path]) -> list[str]:
     errors: list[str] = []
+    shared_shader_lock = Path("ProjectSettings/SharedShaders.lock")
+    if shared_shader_lock not in files:
+        errors.append("canonical projection is missing ProjectSettings/SharedShaders.lock")
     payload = _payload_files()
     expected_paths = set(files)
     payload_paths = set(payload)

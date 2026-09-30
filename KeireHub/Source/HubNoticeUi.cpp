@@ -6,26 +6,25 @@
 
 namespace KeireHub::Detail
 {
+    void AdvanceHubNotice(std::string& notice, std::string& observedNotice,
+                          std::chrono::steady_clock::time_point& noticeStarted,
+                          const std::chrono::steady_clock::time_point now) noexcept
+    {
+        if (observedNotice == notice)
+            return;
+        observedNotice = notice;
+        noticeStarted = now;
+    }
+
     void DrawHubNotice(Keire::UiFrame& ui, const HubDesignTokens& tokens, std::string& notice, const bool noticeError,
                        std::string& observedNotice, std::chrono::steady_clock::time_point& noticeStarted)
     {
-        const auto now = std::chrono::steady_clock::now();
-        if (observedNotice != notice)
-        {
-            observedNotice = notice;
-            noticeStarted = now;
-        }
-        if (!noticeError && !notice.empty() && now - noticeStarted >= std::chrono::seconds(5))
-        {
-            notice.clear();
-            observedNotice.clear();
-        }
-        if (notice.empty())
-            return;
+        AdvanceHubNotice(notice, observedNotice, noticeStarted, std::chrono::steady_clock::now());
 
-        [[maybe_unused]] const auto bannerBackground =
-            ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
-        if (auto banner = ui.BeginChild("HubGlobalNotice", {0.0F, 48.0F}, true); banner)
+        [[maybe_unused]] const auto bannerBackground = ui.PushStyleColor(
+            Keire::UiStyleColorRole::ChildBackground, notice.empty() ? tokens.Canvas : tokens.Elevated);
+        if (auto banner = ui.BeginChild("HubGlobalNotice", {0.0F, HubNoticeRailHeight}, !notice.empty());
+            banner && !notice.empty())
         {
             Keire::UiTableOptions layout;
             layout.Borders = false;
@@ -38,7 +37,8 @@ namespace KeireHub::Detail
                 ui.TableSetupColumn("Action", Keire::UiTableColumnSizing::Fixed, 76.0F);
                 ui.TableNextRow();
                 (void)ui.TableNextColumn();
-                ui.TextColoredWrapped(noticeError ? tokens.Danger : tokens.Success, notice);
+                ui.TextColoredWrapped(noticeError ? tokens.Danger : tokens.Success,
+                                      std::string(noticeError ? "Error: " : "Status: ") + notice);
                 (void)ui.TableNextColumn();
                 if (ui.Button("Dismiss##HubNotice", {68.0F, 28.0F}))
                 {

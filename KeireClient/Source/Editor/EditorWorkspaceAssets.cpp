@@ -554,8 +554,7 @@ bool EditorWorkspaceLayer::PrepareAssetBrowserExternalOpen(const Keire::AssetId 
     if (!record || (record->RelativePath.extension() != ".cs" && record->RelativePath.extension() != ".keireasm"))
         return false;
     const bool reuseManagedSession = m_ManagedIdeWorkspaceOpened;
-    if (!reuseManagedSession)
-        GenerateManagedIdeWorkspace();
+    GenerateManagedIdeWorkspace();
     m_ManagedIdeWorkspaceOpened = true;
     return reuseManagedSession;
 }
@@ -1302,6 +1301,7 @@ void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult
                     m_AssetBrowserPanel->InvalidateThumbnail(asset);
                 (void)assets->Reload(asset, Keire::AssetPriority::Background);
             }
+            RefreshInputActionsContext();
         }
     }
     for (const auto& importStatus : result.Statuses)

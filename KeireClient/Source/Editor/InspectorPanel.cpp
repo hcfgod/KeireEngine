@@ -15,6 +15,7 @@
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/UiBuilderInspector.h"
 #include "KeireClient/Editor/VfxEmitterInspector.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/ECS/Components/AudioComponents.h"
@@ -141,7 +142,17 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 m_EntityNameTarget = entity.Id().Value();
                 m_EntityNameDraft = currentName;
             }
-            (void)ui.InputText(multiEditing ? "Primary Entity Name" : "Entity Name", m_EntityNameDraft);
+            const auto entityNameLabel =
+                multiEditing ? std::string_view("Primary Entity Name") : std::string_view("Entity Name");
+            const auto entityNameLayout = KeireEditor::Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width);
+            if (entityNameLayout.Stacked)
+            {
+                ui.TextWrapped(entityNameLabel);
+                ui.SetNextItemWidth(entityNameLayout.ControlWidth);
+            }
+            (void)ui.InputText(entityNameLayout.Stacked ? "###InspectorEntityName"
+                                                        : std::string(entityNameLabel) + "###InspectorEntityName",
+                               m_EntityNameDraft);
             const auto nameState = ui.LastItemState();
             const bool validEntityName = SceneDocument::IsValidEntityName(m_EntityNameDraft);
             if (nameState.DeactivatedAfterEdit)
@@ -568,6 +579,21 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                     "DIRECTIONAL LIGHT", mixedComponentValues);
                             if (lightExpanded && !removed)
                             {
+                                const auto prepareLightField = [&ui](const std::string_view label)
+                                {
+                                    const auto layout = KeireEditor::Detail::ResolveInspectorFieldLayout(
+                                        ui.ContentAvailable().Width, 0.0F,
+                                        KeireEditor::Detail::InspectorInlineActionSpacing,
+                                        KeireEditor::Detail::InspectorDescriptiveFieldWidth);
+                                    if (layout.Stacked)
+                                    {
+                                        const auto visibleLabel = KeireEditor::Detail::InspectorVisibleLabel(label);
+                                        if (!visibleLabel.empty())
+                                            ui.TextWrapped(visibleLabel);
+                                        ui.SetNextItemWidth(layout.ControlWidth);
+                                    }
+                                    return KeireEditor::Detail::InspectorControlLabel(label, layout.Stacked);
+                                };
                                 auto enabled = light->Enabled();
                                 if (ui.Checkbox("Enabled", enabled))
                                 {
@@ -576,7 +602,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 }
                                 auto color = light->LightColor();
                                 Keire::UiColor editorColor{color.Red, color.Green, color.Blue, color.Alpha};
-                                if (ui.ColorEdit("Color", editorColor))
+                                if (ui.ColorEdit(prepareLightField("Color"), editorColor))
                                 {
                                     m_Controller.RecordInspectorUndo();
                                     setComponentProperty(light->Type(), "color",
@@ -584,7 +610,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                                                       editorColor.Blue, editorColor.Alpha});
                                 }
                                 auto intensity = light->Intensity();
-                                if (ui.SliderFloat("Intensity", intensity, 0.0F, 100.0F))
+                                if (ui.SliderFloat(prepareLightField("Intensity"), intensity, 0.0F, 100.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
                                     setComponentProperty(light->Type(), "intensity", static_cast<double>(intensity));
@@ -596,7 +622,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     setComponentProperty(light->Type(), "useTemperature", temperature);
                                 }
                                 auto kelvin = light->ColorTemperatureKelvin();
-                                if (ui.SliderFloat("Temperature (K)", kelvin, 1000.0F, 20000.0F))
+                                if (ui.SliderFloat(prepareLightField("Temperature (K)"), kelvin, 1000.0F, 20000.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
                                     setComponentProperty(light->Type(), "temperature", static_cast<double>(kelvin));
@@ -605,7 +631,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 const auto shadowLabel = shadows == Keire::ShadowQuality::Disabled ? "Disabled"
                                                          : shadows == Keire::ShadowQuality::Hard   ? "Hard"
                                                                                                    : "Soft";
-                                if (auto shadowMode = ui.BeginCombo("Shadows", shadowLabel); shadowMode)
+                                if (auto shadowMode = ui.BeginCombo(prepareLightField("Shadows"), shadowLabel);
+                                    shadowMode)
                                 {
                                     constexpr std::array modes{Keire::ShadowQuality::Disabled,
                                                                Keire::ShadowQuality::Hard, Keire::ShadowQuality::Soft};
@@ -621,14 +648,14 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     }
                                 }
                                 auto shadowStrength = light->ShadowStrength();
-                                if (ui.SliderFloat("Shadow Strength", shadowStrength, 0.0F, 1.0F))
+                                if (ui.SliderFloat(prepareLightField("Shadow Strength"), shadowStrength, 0.0F, 1.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
                                     setComponentProperty(light->Type(), "shadowStrength",
                                                          static_cast<double>(shadowStrength));
                                 }
                                 auto bias = light->ShadowBias();
-                                if (ui.SliderFloat("Shadow Bias", bias, 0.0F, 1.0F))
+                                if (ui.SliderFloat(prepareLightField("Shadow Bias"), bias, 0.0F, 1.0F))
                                 {
                                     m_Controller.RecordInspectorUndo();
                                     setComponentProperty(light->Type(), "shadowBias", static_cast<double>(bias));
@@ -1037,11 +1064,18 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     std::size_t groupRows = 0;
                     std::size_t headerRows = 0;
                     std::size_t additionalTextRows = 0;
+                    std::size_t visiblePropertyRows = 0;
+                    std::size_t stackedPropertyRows = 0;
                     std::string_view previousGroup;
                     for (const auto& property : registration->Properties)
                     {
                         if (!IsInspectorPropertyVisible(registration->Type, property.Key))
                             continue;
+                        if (collider && !ColliderPropertyVisible(collider->Shape(), property.Key))
+                            continue;
+                        ++visiblePropertyRows;
+                        if (property.Kind != Keire::ComponentPropertyKind::Boolean)
+                            ++stackedPropertyRows;
                         if (!property.Group.empty() && property.Group != previousGroup)
                         {
                             ++groupRows;
@@ -1071,12 +1105,16 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                    : 58.0F)
                             : 0.0F;
                     const float uiDocumentActionsHeight = UiDocumentInspectorActionsHeight(component);
+                    const bool compactFields =
+                        ui.ContentAvailable().Width < KeireEditor::Detail::InspectorCompactFieldWidth;
+                    const float compactFieldHeight =
+                        compactFields ? static_cast<float>(stackedPropertyRows) * 12.0F : 0.0F;
                     const float cardHeight =
                         expanded ? std::max(115.0F, 80.0F + anchorPickerHeight +
-                                                        static_cast<float>(registration->Properties.size()) * 34.0F +
+                                                        static_cast<float>(visiblePropertyRows) * 34.0F +
                                                         static_cast<float>(groupRows + headerRows) * 22.0F +
                                                         static_cast<float>(additionalTextRows) * 20.0F +
-                                                        vfxInspectorHeight + audioSetupHeight +
+                                                        compactFieldHeight + vfxInspectorHeight + audioSetupHeight +
                                                         animatorDiagnosticsHeight + uiDocumentActionsHeight)
                                  : 38.0F;
                     if (auto card = ui.BeginChild(cardId, {0.0F, cardHeight}, true); card)
@@ -1435,8 +1473,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 }
             }
             ui.Spacing();
-            if (auto add = ui.BeginCombo("Add Component", "Search components..."); add)
+            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+            if (auto add = ui.BeginCombo("##AddComponent", "Add Component..."); add)
             {
+                ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
                 (void)ui.InputTextWithHint("##ComponentSearch", "Search scripts and components", m_ComponentSearch);
                 for (const auto& registration : scene->Components()->Registrations())
                 {

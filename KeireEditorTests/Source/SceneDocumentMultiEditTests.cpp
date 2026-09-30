@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/DroppedVfxCreation.h"
 #include "KeireClient/Editor/ImportedModelCreation.h"
 #include "KeireClient/Editor/InspectorComponentUtilities.h"
 #include "KeireClient/Editor/SceneDocument.h"
@@ -5,6 +6,7 @@
 #include "Keire/ECS/Components/JointComponents.h"
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/PointLightComponent.h"
+#include "Keire/ECS/Components/VfxEmitterComponent.h"
 
 #include <doctest/doctest.h>
 
@@ -64,6 +66,39 @@ TEST_CASE("imported model placement rolls back transform and animation failures"
     CHECK(restored->FindEntity(created).GetComponent<Keire::MeshRendererComponent>()->Tint() ==
           Keire::Color{1.0F, 1.0F, 1.0F, 1.0F});
     restored->Close();
+    document.Close();
+}
+
+TEST_CASE("dropped VFX placement assigns a positioned emitter and rolls back failures")
+{
+    KeireEditor::SceneDocument document;
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("VFX placement"));
+    document.Open(scene);
+    const auto existing = document.CreateEntity("Keep me");
+    document.Select(existing.Value());
+    const auto effect = Keire::AssetId::Generate();
+
+    CHECK_THROWS_WITH((void)KeireEditor::CreateDroppedVfxEmitter(document, "Invalid position", effect,
+                                                                 {std::numeric_limits<float>::quiet_NaN(), 0.0F, 0.0F}),
+                      "Transform position must be finite.");
+    CHECK(scene->Entities().size() == 1);
+    CHECK(document.Selection() == existing.Value());
+    CHECK_THROWS_WITH((void)KeireEditor::CreateDroppedVfxEmitter(document, "Invalid effect", {}, {}),
+                      "A dropped VFX effect requires a valid asset ID.");
+    CHECK(scene->Entities().size() == 1);
+
+    const auto created = KeireEditor::CreateDroppedVfxEmitter(document, "Fire", effect, {2.0F, 3.0F, 4.0F});
+    const auto entity = scene->FindEntity(created);
+    REQUIRE(entity);
+    CHECK(entity.Name() == "Fire");
+    REQUIRE(entity.GetComponent<Keire::TransformComponent>());
+    CHECK(entity.GetComponent<Keire::TransformComponent>()->LocalPosition() == (Keire::Vector3{2.0F, 3.0F, 4.0F}));
+    REQUIRE(entity.GetComponent<Keire::VfxEmitterComponent>());
+    CHECK(entity.GetComponent<Keire::VfxEmitterComponent>()->Effect() == effect);
+    CHECK(entity.GetComponent<Keire::VfxEmitterComponent>()->PlayOnAwake());
+    CHECK_FALSE(entity.GetComponent<Keire::VfxEmitterComponent>()->EditModePreview());
+    CHECK(document.Dirty());
     document.Close();
 }
 

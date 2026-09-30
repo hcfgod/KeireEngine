@@ -149,7 +149,7 @@ namespace Keire::Detail
                       .CornerRadius = state.Style.CornerRadius * scale});
             }
         }
-        else if (state.Type == RuntimeUiElementType::Toggle && state.Control.Checked)
+        else if (state.Type == RuntimeUiElementType::Toggle)
         {
             const float inset = std::min(7.0F * scale, std::min(state.Rect.Width, state.Rect.Height) * 0.3F);
             const float indicatorSize = std::min(22.0F * scale, std::max(0.0F, state.Rect.Height - inset * 2.0F));
@@ -158,8 +158,12 @@ namespace Keire::Detail
                   .Rect = {state.Rect.X + state.Rect.Width - inset - indicatorSize,
                            state.Rect.Y + (state.Rect.Height - indicatorSize) * 0.5F, indicatorSize, indicatorSize},
                   .ClipRect = state.ClipRect,
-                  .ColorValue = ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
-                  .CornerRadius = std::min(state.Style.CornerRadius * scale, indicatorSize * 0.5F)});
+                  .ColorValue = ApplyRuntimeUiOpacity(state.Control.Checked ? state.Style.Foreground
+                                                                            : Color{0.0F, 0.0F, 0.0F, 0.0F},
+                                                      state.Style.Opacity),
+                  .BorderColor = ApplyRuntimeUiOpacity(state.Style.Foreground, state.Style.Opacity),
+                  .CornerRadius = std::min(state.Style.CornerRadius * scale, indicatorSize * 0.5F),
+                  .BorderWidth = std::max(scale, 1.0F)});
         }
         else if (state.Type == RuntimeUiElementType::ScrollView)
         {

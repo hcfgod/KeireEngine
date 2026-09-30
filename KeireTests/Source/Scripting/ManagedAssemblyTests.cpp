@@ -207,6 +207,8 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     gameplay.SourceRoots = {"Assets/Scripts/Gameplay"};
     Keire::ManagedBuildRequest request;
     request.Assemblies.push_back({TestAsset(91), gameplay});
+    request.Assemblies.front().SourceFiles =
+        std::vector<std::filesystem::path>{"Assets/Scripts/Gameplay/FrontierBeacon.cs"};
     const auto workspace = scripts->GenerateIdeWorkspace(request, "My Game");
 
     CHECK(workspace.Solution == root / "My_Game.sln");
@@ -230,6 +232,7 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
               "<WarningsNotAsErrors>$(WarningsNotAsErrors);CS0168;CS0169;CS0219;CS0414;CS0618</WarningsNotAsErrors>") !=
           std::string::npos);
     CHECK(projectText.find("Library/ScriptAssemblies/References/Keire.Managed.dll") != std::string::npos);
+    CHECK(projectText.find("Assets/Scripts/Gameplay/FrontierBeacon.cs") != std::string::npos);
     CHECK(std::filesystem::is_regular_file(root / "Library/ScriptAssemblies/References/Keire.Managed.dll"));
     CHECK(projectText.find(root.generic_string()) == std::string::npos);
 
@@ -242,6 +245,38 @@ TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
     const bool projectTimePreserved = std::filesystem::last_write_time(workspace.Projects.front()) == preservedTime;
     CHECK(solutionTimePreserved);
     CHECK(projectTimePreserved);
+
+    request.Assemblies.front().SourceFiles->push_back("Assets/Scripts/Gameplay/PhysicsDropProbe.cs");
+    (void)scripts->GenerateIdeWorkspace(request, "My Game");
+    auto refreshedBytes = ReadBytes(workspace.Projects.front());
+    std::string refreshed(reinterpret_cast<const char*>(refreshedBytes.data()), refreshedBytes.size());
+    CHECK(refreshed.find("Assets/Scripts/Gameplay/FrontierBeacon.cs") != std::string::npos);
+    CHECK(refreshed.find("Assets/Scripts/Gameplay/PhysicsDropProbe.cs") != std::string::npos);
+    CHECK(std::filesystem::last_write_time(workspace.Projects.front()) != preservedTime);
+
+    request.Assemblies.front().SourceFiles =
+        std::vector<std::filesystem::path>{"Assets/Scripts/Gameplay/RenamedProbe.cs"};
+    Keire::ManagedAssemblyDefinition tools;
+    tools.Name = "Tools";
+    tools.RootNamespace = "Game.Tools";
+    request.Assemblies.front().Definition.References.push_back(TestAsset(92));
+    request.Assemblies.push_back(
+        {TestAsset(92), tools, {}, std::vector<std::filesystem::path>{"Assets/Scripts/Tools/Utility.cs"}});
+    const auto expanded = scripts->GenerateIdeWorkspace(request, "My Game");
+    REQUIRE(expanded.Projects.size() == 2);
+    refreshedBytes = ReadBytes(workspace.Projects.front());
+    refreshed.assign(reinterpret_cast<const char*>(refreshedBytes.data()), refreshedBytes.size());
+    CHECK(refreshed.find("FrontierBeacon.cs") == std::string::npos);
+    CHECK(refreshed.find("PhysicsDropProbe.cs") == std::string::npos);
+    CHECK(refreshed.find("Assets/Scripts/Gameplay/RenamedProbe.cs") != std::string::npos);
+    CHECK(refreshed.find("Tools.VisualStudio.csproj") != std::string::npos);
+    const auto toolsProject = ReadBytes(root / "Tools.VisualStudio.csproj");
+    const std::string toolsProjectText(reinterpret_cast<const char*>(toolsProject.data()), toolsProject.size());
+    CHECK(toolsProjectText.find("Assets/Scripts/Tools/Utility.cs") != std::string::npos);
+    const auto expandedSolution = ReadBytes(expanded.Solution);
+    const std::string expandedSolutionText(reinterpret_cast<const char*>(expandedSolution.data()),
+                                           expandedSolution.size());
+    CHECK(expandedSolutionText.find("Tools.VisualStudio.csproj") != std::string::npos);
 }
 
 TEST_CASE("Managed IDE workspace isolates editor APIs and installs binding generators")
@@ -453,6 +488,37 @@ TEST_CASE("Managed build traversal visits graph roots and retains independent as
     CHECK(text.find("Include=\"Left.csproj\"") == std::string::npos);
     CHECK(text.find("Include=\"Right.csproj\"") == std::string::npos);
     CHECK(text.find("Targets=\"Restore\"") != std::string::npos);
+}
+
+TEST_CASE("Managed compiler diagnostics discard exact build-summary duplicates within each parse")
+{
+    const std::string duplicate =
+        "D:/Project/Assets/Scripts/Player.cs(12,7): error CS1525: Invalid expression term ';' [Game.csproj]\r\n";
+    const std::string distinct =
+        "D:/Project/Assets/Scripts/Player.cs(12,8): error CS1525: Invalid expression term ';' [Game.csproj]\r\n";
+    const std::string warning =
+        "D:/Project/Assets/Scripts/Player.cs(18,3): warning CS0168: Variable is declared but never used "
+        "[Game.csproj]\r\n";
+
+    const auto diagnostics = Keire::Detail::ParseDiagnostics(duplicate + duplicate + distinct + warning, 3);
+    REQUIRE(diagnostics.size() == 3);
+    CHECK(diagnostics[0].Severity == Keire::ManagedDiagnosticSeverity::Error);
+    CHECK(diagnostics[0].Source == std::filesystem::path("D:/Project/Assets/Scripts/Player.cs"));
+    CHECK(diagnostics[0].Line == 12);
+    CHECK(diagnostics[0].Column == 7);
+    CHECK(diagnostics[0].Code == "CS1525");
+    CHECK(diagnostics[0].Message == "Invalid expression term ';'");
+    CHECK(diagnostics[1].Column == 8);
+    CHECK(diagnostics[2].Severity == Keire::ManagedDiagnosticSeverity::Warning);
+
+    const auto bounded = Keire::Detail::ParseDiagnostics(duplicate + duplicate + warning, 2);
+    REQUIRE(bounded.size() == 2);
+    CHECK(bounded[0].Code == "CS1525");
+    CHECK(bounded[1].Code == "CS0168");
+
+    const auto separateParse = Keire::Detail::ParseDiagnostics(duplicate, 1);
+    REQUIRE(separateParse.size() == 1);
+    CHECK(separateParse[0].Code == "CS1525");
 }
 
 TEST_CASE("Managed compiler sessions reuse an isolated process and release it on stop")

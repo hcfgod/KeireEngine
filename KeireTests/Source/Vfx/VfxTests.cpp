@@ -1960,6 +1960,37 @@ TEST_CASE("VFX Emitter component schema exposes typed effect authoring")
     CHECK(mutableEmitter.ParameterOverrides().empty());
 }
 
+TEST_CASE("VFX Emitter quality and culling setters validate their enum domains")
+{
+    Keire::VfxEmitterComponent emitter;
+    CHECK(emitter.Quality() == Keire::VfxQualityTier::High);
+    CHECK(emitter.Culling() == Keire::VfxCullingMode::Automatic);
+
+    constexpr std::array qualities{Keire::VfxQualityTier::Low, Keire::VfxQualityTier::Medium,
+                                   Keire::VfxQualityTier::High, Keire::VfxQualityTier::Cinematic};
+    for (const auto quality : qualities)
+    {
+        emitter.SetQuality(quality);
+        CHECK(emitter.Quality() == quality);
+    }
+    emitter.SetQuality(Keire::VfxQualityTier::Medium);
+    CHECK_THROWS_WITH_AS(emitter.SetQuality(static_cast<Keire::VfxQualityTier>(255)),
+                         "VFX Emitter quality tier is invalid.", std::invalid_argument);
+    CHECK(emitter.Quality() == Keire::VfxQualityTier::Medium);
+
+    constexpr std::array cullingModes{Keire::VfxCullingMode::Automatic, Keire::VfxCullingMode::FixedBounds,
+                                      Keire::VfxCullingMode::AlwaysSimulate};
+    for (const auto culling : cullingModes)
+    {
+        emitter.SetCulling(culling);
+        CHECK(emitter.Culling() == culling);
+    }
+    emitter.SetCulling(Keire::VfxCullingMode::FixedBounds);
+    CHECK_THROWS_WITH_AS(emitter.SetCulling(static_cast<Keire::VfxCullingMode>(255)),
+                         "VFX Emitter culling mode is invalid.", std::invalid_argument);
+    CHECK(emitter.Culling() == Keire::VfxCullingMode::FixedBounds);
+}
+
 TEST_CASE("VFX volume assets round trip weighted cells and sample deterministically")
 {
     Keire::VfxVolumeDefinition definition;

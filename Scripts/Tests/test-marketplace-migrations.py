@@ -706,6 +706,18 @@ require(
     "Automatic publication must commit the existing immutable object without copying package bytes.",
 )
 
+release_upload = (ROOT / "supabase/migrations/20260930070000_allow_published_product_release_uploads.sql").read_text(encoding="utf-8")
+require("product.state in ('draft', 'changes_requested', 'published')" in release_upload,
+        "Published products must accept new release reservations.")
+require("v_version_state not in ('draft', 'validation_failed', 'changes_requested')" in release_upload,
+        "Published versions must remain immutable.")
+require("membership.user_id = p_actor_user_id" in release_upload
+        and "membership.role in ('owner', 'admin')" in release_upload
+        and "publisher.suspended_at is null" in release_upload
+        and "<> 'service_role'" in release_upload
+        and "update public.marketplace_products" not in release_upload,
+        "Release reservations must preserve publisher authority and published listing metadata.")
+
 print(
     f"Marketplace migration validation passed for {len(public_tables)} forced-RLS public tables."
 )

@@ -3,6 +3,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/SceneDocument.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include <array>
 #include <cstddef>
@@ -25,6 +26,20 @@ namespace KeireEditor
                 sceneDocument.SetComponentProperty(Keire::EntityId(editTargets.front()), light->Type(), property,
                                                    std::move(value));
         };
+        const auto prepareLightField = [&ui](const std::string_view label)
+        {
+            const auto layout = Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width, 0.0F,
+                                                                    Detail::InspectorInlineActionSpacing,
+                                                                    Detail::InspectorDescriptiveFieldWidth);
+            if (layout.Stacked)
+            {
+                const auto visibleLabel = Detail::InspectorVisibleLabel(label);
+                if (!visibleLabel.empty())
+                    ui.TextWrapped(visibleLabel);
+                ui.SetNextItemWidth(layout.ControlWidth);
+            }
+            return Detail::InspectorControlLabel(label, layout.Stacked);
+        };
 
         auto contactShadows = light->ContactShadows();
         if (ui.Checkbox("Contact Shadows", contactShadows))
@@ -39,9 +54,10 @@ namespace KeireEditor
                                                Keire::ShadowResolutionHint::VeryHigh};
         constexpr std::array<std::string_view, 4> shadowResolutionLabels{"Low", "Medium", "High", "Very High"};
         const auto selectedResolution = static_cast<std::size_t>(shadowResolution);
-        if (auto resolution = ui.BeginCombo("Shadow Resolution", selectedResolution < shadowResolutionLabels.size()
-                                                                     ? shadowResolutionLabels[selectedResolution]
-                                                                     : "Invalid");
+        if (auto resolution =
+                ui.BeginCombo(prepareLightField("Shadow Resolution"), selectedResolution < shadowResolutionLabels.size()
+                                                                          ? shadowResolutionLabels[selectedResolution]
+                                                                          : "Invalid");
             resolution)
         {
             for (std::size_t index = 0; index < shadowResolutions.size(); ++index)
@@ -60,8 +76,9 @@ namespace KeireEditor
                                        Keire::LightBakeMode::Baked};
         constexpr std::array<std::string_view, 3> bakeModeLabels{"Realtime", "Mixed", "Baked"};
         const auto selectedBakeMode = static_cast<std::size_t>(bakeMode);
-        if (auto baking = ui.BeginCombo(
-                "Bake Mode", selectedBakeMode < bakeModeLabels.size() ? bakeModeLabels[selectedBakeMode] : "Invalid");
+        if (auto baking =
+                ui.BeginCombo(prepareLightField("Bake Mode"),
+                              selectedBakeMode < bakeModeLabels.size() ? bakeModeLabels[selectedBakeMode] : "Invalid");
             baking)
         {
             for (std::size_t index = 0; index < bakeModes.size(); ++index)
@@ -76,16 +93,17 @@ namespace KeireEditor
 
         const auto& theme = m_Controller.InspectorTheme();
         if (bakeMode == Keire::LightBakeMode::Baked)
-            ui.TextColored(theme.MutedText,
-                           "Bake-only: no realtime direct light or moving shadows. Re-bake Lighting after edits.");
+            ui.TextColoredWrapped(
+                theme.MutedText,
+                "Bake-only: no realtime direct light or moving shadows. Re-bake Lighting after edits.");
         else if (bakeMode == Keire::LightBakeMode::Mixed)
-            ui.TextColored(theme.MutedText, "Baked indirect lighting with realtime direct light and shadows.");
+            ui.TextColoredWrapped(theme.MutedText, "Baked indirect lighting with realtime direct light and shadows.");
         else
-            ui.TextColored(theme.MutedText, "Realtime direct light and dynamic shadows.");
-        ui.TextColored(theme.MutedText, "Shadow Resolution scales the project base: 0.25x / 0.5x / 1x / 2x.");
+            ui.TextColoredWrapped(theme.MutedText, "Realtime direct light and dynamic shadows.");
+        ui.TextColoredWrapped(theme.MutedText, "Shadow Resolution scales the project base: 0.25x / 0.5x / 1x / 2x.");
 
         auto indirectMultiplier = light->IndirectMultiplier();
-        if (ui.SliderFloat("Indirect Multiplier", indirectMultiplier, 0.0F, 10.0F))
+        if (ui.SliderFloat(prepareLightField("Indirect Multiplier"), indirectMultiplier, 0.0F, 10.0F))
         {
             m_Controller.RecordInspectorUndo();
             setProperty("indirectMultiplier", static_cast<double>(indirectMultiplier));
@@ -106,19 +124,19 @@ namespace KeireEditor
             setProperty("cookie", cookie);
         }
         auto cookieScale = light->CookieScale();
-        if (ui.DragVector2("Cookie Scale", cookieScale, 0.01F))
+        if (ui.DragVector2(prepareLightField("Cookie Scale"), cookieScale, 0.01F))
         {
             m_Controller.RecordInspectorUndo();
             setProperty("cookieScale", cookieScale);
         }
         auto cookieOffset = light->CookieOffset();
-        if (ui.DragVector2("Cookie Offset", cookieOffset, 0.01F))
+        if (ui.DragVector2(prepareLightField("Cookie Offset"), cookieOffset, 0.01F))
         {
             m_Controller.RecordInspectorUndo();
             setProperty("cookieOffset", cookieOffset);
         }
         auto cookieRotation = light->CookieRotationDegrees();
-        if (ui.SliderFloat("Cookie Rotation", cookieRotation, -180.0F, 180.0F))
+        if (ui.SliderFloat(prepareLightField("Cookie Rotation"), cookieRotation, -180.0F, 180.0F))
         {
             m_Controller.RecordInspectorUndo();
             setProperty("cookieRotation", static_cast<double>(cookieRotation));

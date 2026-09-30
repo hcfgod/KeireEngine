@@ -4,12 +4,47 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <optional>
 #include <ranges>
 #include <sstream>
 #include <utility>
 
 namespace KeireEditor
 {
+    std::vector<Detail::ConsoleProjectedEntry>
+    Detail::ProjectConsoleEntries(const std::span<const ConsoleProjectionEntry> entries, const bool collapse)
+    {
+        std::vector<ConsoleProjectedEntry> projected;
+        projected.reserve(entries.size());
+        for (std::size_t index = 0; index < entries.size(); ++index)
+        {
+            const auto& entry = entries[index];
+            if (collapse && !projected.empty())
+            {
+                const auto& previous = entries[projected.back().SourceIndex];
+                if (entry.Category == previous.Category && entry.Text == previous.Text &&
+                    entry.Level == previous.Level && entry.Color == previous.Color)
+                {
+                    ++projected.back().Repetitions;
+                    continue;
+                }
+            }
+            projected.push_back({index, 1});
+        }
+        return projected;
+    }
+
+    std::string Detail::FormatConsoleEntry(const std::uint64_t frame, const std::string_view category,
+                                           const std::string_view text)
+    {
+        return "[" + std::to_string(frame) + "] [" + std::string(category) + "] " + std::string(text);
+    }
+
+    std::string Detail::FormatConsoleSelectionSummary(const std::size_t selectionCount)
+    {
+        return std::to_string(selectionCount) + " messages selected.";
+    }
+
     namespace
     {
         [[nodiscard]] Keire::UiColor LogColor(const Keire::LogLevel level,
@@ -192,24 +227,20 @@ namespace KeireEditor
                 m_PausedSnapshot.clear();
                 m_Selection.Clear();
             }
-            auto logRegion = ui.BeginChild("ConsoleLogs");
-            if (!logRegion)
-                return;
-            if (m_Paused ? m_PausedSnapshot.empty() : m_Messages.empty())
-            {
-                ui.TextColored(theme.Success, "Ready");
-                return;
-            }
+            constexpr float preferredDetailHeight = 88.0F;
+            constexpr float detailSpacing = 8.0F;
+            const auto content = ui.ContentAvailable();
+            const float detailHeight = std::clamp(content.Height - detailSpacing - 1.0F, 1.0F, preferredDetailHeight);
+            const float logHeight = std::max(content.Height - detailHeight - detailSpacing, 1.0F);
             const auto drawEntries = [&](const auto& entries)
             {
-                std::vector<const Message*> visibleEntries;
                 std::vector<std::uint64_t> available;
                 available.reserve(entries.size());
                 for (const auto& entry : entries)
                     available.push_back(entry.Serial);
                 m_Selection.Retain(available);
-                std::string previousCategory;
-                std::string previousText;
+
+                std::vector<const Message*> candidateEntries;
                 for (const auto& entry : entries)
                 {
                     if (!m_Search.empty() && entry.Category.find(m_Search) == std::string::npos &&
@@ -219,17 +250,19 @@ namespace KeireEditor
                         (entry.Level == Keire::LogLevel::Warn && !m_ShowWarnings) ||
                         (entry.Level >= Keire::LogLevel::Error && !m_ShowErrors))
                         continue;
-                    if (m_Collapse && entry.Category == previousCategory && entry.Text == previousText)
-                        continue;
-                    visibleEntries.push_back(&entry);
-                    previousCategory = entry.Category;
-                    previousText = entry.Text;
+                    candidateEntries.push_back(&entry);
                 }
 
+                std::vector<Detail::ConsoleProjectionEntry> projectionEntries;
+                projectionEntries.reserve(candidateEntries.size());
+                for (const auto* entry : candidateEntries)
+                    projectionEntries.push_back({entry->Category, entry->Text, entry->Color, entry->Level});
+                const auto projectedEntries = Detail::ProjectConsoleEntries(projectionEntries, m_Collapse);
+
                 std::vector<std::uint64_t> visibleOrder;
-                visibleOrder.reserve(visibleEntries.size());
-                for (const auto* entry : visibleEntries)
-                    visibleOrder.push_back(entry->Serial);
+                visibleOrder.reserve(projectedEntries.size());
+                for (const auto& projected : projectedEntries)
+                    visibleOrder.push_back(candidateEntries[projected.SourceIndex]->Serial);
 
                 const auto copySelection = [&]
                 {
@@ -242,7 +275,7 @@ namespace KeireEditor
                         if (!first)
                             copied << '\n';
                         first = false;
-                        copied << '[' << entry.Frame << "] [" << entry.Category << "] " << entry.Text;
+                        copied << Detail::FormatConsoleEntry(entry.Frame, entry.Category, entry.Text);
                     }
                     try
                     {
@@ -254,10 +287,12 @@ namespace KeireEditor
                     }
                 };
 
-                for (const auto* entry : visibleEntries)
+                for (const auto& projected : projectedEntries)
                 {
-                    const auto formatted =
-                        "[" + std::to_string(entry->Frame) + "] [" + entry->Category + "] " + entry->Text;
+                    const auto* entry = candidateEntries[projected.SourceIndex];
+                    auto formatted = Detail::FormatConsoleEntry(entry->Frame, entry->Category, entry->Text);
+                    if (projected.Repetitions > 1)
+                        formatted = "\xC3\x97" + std::to_string(projected.Repetitions) + "  " + formatted;
                     auto id = ui.PushId(std::to_string(entry->Serial));
                     auto textColor = ui.PushStyleColor(Keire::UiStyleColorRole::Text, entry->Color);
                     if (ui.Selectable(formatted, m_Selection.Contains(entry->Serial)))
@@ -275,10 +310,49 @@ namespace KeireEditor
                 if (ui.Shortcut({.Key = Keire::UiKey::C, .Primary = true}))
                     copySelection();
             };
-            if (m_Paused)
-                drawEntries(m_PausedSnapshot);
-            else
-                drawEntries(m_Messages);
+            {
+                auto logRegion = ui.BeginChild("ConsoleLogs", {0.0F, logHeight});
+                if (logRegion)
+                {
+                    if (m_Paused ? m_PausedSnapshot.empty() : m_Messages.empty())
+                        ui.TextColored(theme.Success, "Ready");
+                    else if (m_Paused)
+                        drawEntries(m_PausedSnapshot);
+                    else
+                        drawEntries(m_Messages);
+                }
+            }
+
+            std::optional<std::pair<Keire::UiColor, std::string>> selectedDetail;
+            const auto selected = m_Selection.Selected();
+            if (selected.size() == 1)
+            {
+                const auto findSelected = [&](const auto& entries)
+                {
+                    const auto entry = std::ranges::find_if(entries, [serial = selected.front()](const Message& message)
+                                                            { return message.Serial == serial; });
+                    if (entry != entries.end())
+                    {
+                        selectedDetail = std::pair{
+                            entry->Color, Detail::FormatConsoleEntry(entry->Frame, entry->Category, entry->Text)};
+                    }
+                };
+                if (m_Paused)
+                    findSelected(m_PausedSnapshot);
+                else
+                    findSelected(m_Messages);
+            }
+
+            ui.Separator();
+            if (auto details = ui.BeginChild("ConsoleDetails", {0.0F, detailHeight}, true); details)
+            {
+                if (selectedDetail)
+                    ui.TextColoredWrapped(selectedDetail->first, selectedDetail->second);
+                else if (selected.size() > 1)
+                    ui.TextColored(theme.MutedText, Detail::FormatConsoleSelectionSummary(selected.size()));
+                else
+                    ui.TextColored(theme.MutedText, "Select a message to inspect its full text.");
+            }
         }
     }
 } // namespace KeireEditor

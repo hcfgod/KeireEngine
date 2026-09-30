@@ -105,18 +105,17 @@ to the operating-system file association.
 
 Opening a C# script first regenerates SDK-style `<Assembly>.csproj` files and a project-root Visual Studio solution from
 the live `.keireasm` graph. The projects share the same source roots, project references, .NET target, namespaces, and
-engine API used by the managed build. Source checkouts include `Keire.Managed.csproj` in the solution and reference it
-through a generated .NET 8 design-time facade so Visual Studio 2022 has complete engine semantic information and source
-navigation. The generated root gameplay projects also target .NET 8/C# 12 for Visual Studio 2022 design-time
-compatibility, while Kéire's separate internal compilation projects remain on .NET 10/C# 14. Packaged editors use a
-stable project-local `Keire.Managed.dll` reference. The first C# open publishes the IDE workspace; later script opens do
-not rewrite the loaded `.sln` or `.csproj`, so Visual Studio does not prompt to reload it. Later Windows opens enumerate
-Visual Studio automation sessions, match the loaded solution's canonical path to the current project, and open the
-source through that exact instance. An unrelated most-recent Visual Studio window is never selected. While Visual
-Studio is still starting, or if the original instance has closed, Kéire invokes the solution-associated Visual Studio
-executable with the exact project solution and a `File.OpenFile` command for the requested source instead of using
-Visual Studio's editor-only `/Edit` mode or sending the file to another project. This applies to an explicit
-`devenv.exe` preference and to the Windows system-default path. Build Settings also exposes
+engine API used by the managed build. Source checkouts include `Keire.Managed.csproj` in the solution and can reference
+it through a generated .NET 8/C# 12 design-time facade. Packaged editors instead generate .NET 10/C# 14 projects against
+the stable project-local `Keire.Managed.dll` reference. Every C# or assembly open revalidates the IDE workspace, and an
+already-open workspace refreshes before each managed build. Content-stable writes preserve unchanged timestamps, while
+added, removed, or moved scripts and assembly-graph edits update the generated projects even when compilation later
+fails. Later Windows opens enumerate compatible Visual Studio automation sessions, require Visual Studio 18 or newer
+for packaged .NET 10 workspaces, match the loaded solution's canonical path to the current project, and open the source
+through that exact instance. An unrelated or incompatible Visual Studio window is never selected. While Visual Studio
+is still starting, or if the original instance has closed, Kéire discovers the newest complete, launchable compatible
+installation and opens the exact project solution before issuing `File.OpenFile` for the requested source. An explicit
+`devenv.exe` preference remains authoritative. Build Settings also exposes
 **Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
 
 Managed builds keep strict warnings-as-errors behavior for correctness and analyzer diagnostics, but common unused local

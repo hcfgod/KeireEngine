@@ -5,6 +5,7 @@
 
 #include "KeireClient/Editor/AssetBrowserPanel.h"
 #include "KeireClient/Editor/AssetOperationService.h"
+#include "KeireClient/Editor/DroppedVfxCreation.h"
 #include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/EditorCommandRouter.h"
 #include "KeireClient/Editor/EditorDocumentWorkspaceCoordinator.h"
@@ -558,22 +559,57 @@ void EditorWorkspaceLayer::BeginPlayMode()
         {
             try
             {
-                m_GameplayInputContext =
-                    input->CreateActionContext(project->Descriptor().DefaultInput, m_EditorInputUser);
-                if (!m_GameplayInputContext)
-                    throw std::runtime_error("The default input action asset could not create an input context.");
-                const auto definition = m_GameplayInputContext->Definition();
+                const auto defaultInput = project->Descriptor().DefaultInput;
+                if (!m_PendingGameplayInputAsset || m_PendingGameplayInputAsset.Id() != defaultInput)
+                {
+                    const auto assets = Owner().Assets();
+                    if (!assets)
+                        throw std::runtime_error("The asset service is unavailable while loading the default input.");
+                    m_PendingGameplayInputAsset =
+                        assets->Load<Keire::InputActionAsset>(defaultInput, Keire::AssetPriority::Critical);
+                }
+                const auto inputReadiness =
+                    KeireEditor::EvaluatePlayModeInputReadiness(m_PendingGameplayInputAsset.State());
+                if (inputReadiness == KeireEditor::PlayModeInputReadiness::Waiting)
+                {
+                    m_PlayStartPending = true;
+                    m_SceneDocument->SetStatus("Play queued while the default input actions load.");
+                    AddConsoleMessage("Play Mode", "Waiting for the default input action asset before entering Play.",
+                                      m_Theme.Accent);
+                    return;
+                }
+                if (inputReadiness == KeireEditor::PlayModeInputReadiness::Unavailable)
+                {
+                    const auto diagnostic = m_PendingGameplayInputAsset.Diagnostic();
+                    throw std::runtime_error(diagnostic.Message.empty()
+                                                 ? "The default input action asset could not be loaded."
+                                                 : diagnostic.Message);
+                }
+                const auto inputAsset = m_PendingGameplayInputAsset.TryGetLoaded();
+                if (!inputAsset)
+                    throw std::runtime_error("The default input action asset completed without usable content.");
+                const auto& definition = inputAsset->Definition();
                 m_GameplayInputMap = project->Descriptor().DefaultInputMap;
                 if (!m_GameplayInputMap && !definition.ActionMaps.empty())
                     m_GameplayInputMap = definition.ActionMaps.front().Id;
-                if (!m_GameplayInputMap || !m_GameplayInputContext->EnableMap(m_GameplayInputMap))
+                if (!m_GameplayInputMap || std::ranges::none_of(definition.ActionMaps, [this](const auto& map)
+                                                                { return map.Id == m_GameplayInputMap; }))
+                {
                     throw std::runtime_error("The default input action asset does not contain the configured map.");
+                }
+                m_GameplayInputContext = input->CreateActionContext(defaultInput, m_EditorInputUser);
+                if (!m_GameplayInputContext)
+                    throw std::runtime_error("The default input action asset could not create an input context.");
+                if (!m_GameplayInputContext->EnableMap(m_GameplayInputMap))
+                    throw std::runtime_error("The loaded default input map could not be enabled.");
                 m_ManagedInputCaptureOverride.emplace(m_GameplayInputContext->OverrideUiCapture(m_GameplayInputMap));
+                m_PendingGameplayInputAsset = {};
             }
             catch (const std::exception& error)
             {
                 m_ManagedInputCaptureOverride.reset();
                 m_GameplayInputContext.Reset();
+                m_PendingGameplayInputAsset = {};
                 m_GameplayInputMap = {};
                 ReportError("Play Mode Input", error.what());
                 return;
@@ -655,11 +691,17 @@ void EditorWorkspaceLayer::ContinuePendingPlayMode()
     const auto scripts = Owner().Scripts();
     const auto build = scripts ? scripts->BuildStatus() : Keire::ManagedBuildStatus{};
     const auto readiness = KeireEditor::EvaluatePlayModeReadiness(
-        true, scripts && scripts->RuntimeHostAvailable(), build.State,
+        ProjectRequiresManagedRuntime(), scripts && scripts->RuntimeHostAvailable(), build.State,
         scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle,
         !build.Operation || build.Operation == m_LastManagedReload);
     if (readiness == KeireEditor::PlayModeReadiness::WaitingForManagedRuntime)
         return;
+    if (m_PendingGameplayInputAsset &&
+        KeireEditor::EvaluatePlayModeInputReadiness(m_PendingGameplayInputAsset.State()) ==
+            KeireEditor::PlayModeInputReadiness::Waiting)
+    {
+        return;
+    }
     m_PlayStartPending = false;
     if (readiness == KeireEditor::PlayModeReadiness::ManagedRuntimeUnavailable)
     {
@@ -671,7 +713,7 @@ void EditorWorkspaceLayer::ContinuePendingPlayMode()
         ReportError("Play Mode", reason);
         return;
     }
-    m_SceneDocument->SetStatus("Gameplay scripts are ready. Entering Play.");
+    m_SceneDocument->SetStatus("Play prerequisites are ready. Entering Play.");
     BeginPlayMode();
 }
 
@@ -680,6 +722,7 @@ void EditorWorkspaceLayer::RequestStopPlayMode()
     if (m_PlayStartPending)
     {
         m_PlayStartPending = false;
+        m_PendingGameplayInputAsset = {};
         m_SceneDocument->SetStatus("Queued Play request cancelled.");
         return;
     }
@@ -1000,7 +1043,8 @@ void EditorWorkspaceLayer::RouteSceneViewportAsset(const Keire::AssetTypeId type
                                                    const Keire::EntityId target, Keire::UiPosition position)
 {
     Keire::Vector3 worldPosition{};
-    if (type == Keire::PrefabAsset::StaticType() || type == Keire::MeshAsset::StaticType())
+    if (type == Keire::PrefabAsset::StaticType() || type == Keire::MeshAsset::StaticType() ||
+        type == Keire::VfxEffectAsset::StaticType())
         worldPosition = KeireEditor::ResolveSceneDropPosition(m_SceneViewportPanel->ViewportRect(), position,
                                                               m_SceneViewportPanel->LastCamera());
     m_ViewportAssetDropRouter->Route(type, asset, target, worldPosition, *this);
@@ -1087,6 +1131,31 @@ void EditorWorkspaceLayer::CreateDroppedMeshEntity(const Keire::AssetId asset, K
     m_SceneDocument->SetStatus(
         "Created " + scene->FindEntity(entity).Name() + " from " + record->RelativePath.filename().string() + "." +
         (animation.Skin ? " Imported rig assigned. Create or assign an Animator Controller to play clips." : ""));
+}
+
+void EditorWorkspaceLayer::CreateDroppedVfxEntity(const Keire::AssetId asset, Keire::Vector3 position)
+{
+    const auto scene = ActiveScene();
+    if (!scene)
+        throw std::runtime_error("Open a scene before dropping a VFX Effect.");
+    const auto record = m_AssetDatabase ? m_AssetDatabase->Find(asset) : std::nullopt;
+    if (!record || record->Type != Keire::VfxEffectAsset::StaticType())
+        throw std::runtime_error("The dropped VFX Effect no longer exists in the project database.");
+
+    const auto history = m_SceneDocument->History();
+    auto transaction = history && history->IsOpen() ? history->BeginTransaction("Create VFX Emitter") : nullptr;
+    RecordSceneUndo("Create VFX Emitter");
+    const auto entity =
+        KeireEditor::CreateDroppedVfxEmitter(*m_SceneDocument, record->RelativePath.stem().string(), asset, position);
+    if (transaction)
+        transaction->Commit();
+    ActivateSceneViewportHistory();
+    m_SceneDocument->Select(entity.Value());
+    if (m_SceneDocument->PlaySession())
+        m_PlayEditorTouchedEntities.insert(entity.Value());
+    m_SelectedAsset = {};
+    m_SceneDocument->SetStatus("Created " + scene->FindEntity(entity).Name() + " with VFX Emitter from " +
+                               record->RelativePath.filename().string() + ".");
 }
 
 void EditorWorkspaceLayer::AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset)

@@ -4,6 +4,7 @@
 #include "KeireClient/Editor/EditorAssetFileService.h"
 #include "KeireClient/Editor/InputActionsCodeGenerator.h"
 #include "KeireClient/Editor/InputActionsDocument.h"
+#include "KeireClientInternal/Editor/InputActionsContextReadiness.h"
 #include "KeireInternal/FileSystem.h"
 
 #include <stdexcept>
@@ -33,9 +34,26 @@ void EditorWorkspaceLayer::OpenInputActions(const Keire::AssetId asset)
     m_InputActionsPanel->SetMessage("Loaded " + record->RelativePath.generic_string() + ".");
     m_InputActionsPanel->ResetTransientState();
     m_InputContext.Reset();
-    if (const auto input = Owner().Input(); input && m_EditorInputUser)
-        m_InputContext = input->CreateActionContext(asset, m_EditorInputUser, Keire::InputContextRole::EditorControl);
+    RefreshInputActionsContext();
     m_InputActionsPanel->Registration().SetVisible(true);
+}
+
+void EditorWorkspaceLayer::RefreshInputActionsContext()
+{
+    if (m_InputContext || !m_InputActionsDocument->Asset() || !m_EditorInputUser)
+        return;
+    const auto assets = Owner().Assets();
+    const auto input = Owner().Input();
+    if (!assets || !input)
+        return;
+    const auto readiness = KeireEditor::Detail::EvaluateInputActionsContextReadiness(
+        assets->TryGetType(m_InputActionsDocument->Asset()), Keire::InputActionAsset::StaticType());
+    if (readiness == KeireEditor::Detail::InputActionsContextReadiness::WaitingForCatalog)
+        return;
+    if (readiness == KeireEditor::Detail::InputActionsContextReadiness::WrongType)
+        throw std::runtime_error("The mounted default input asset has an unexpected runtime type.");
+    m_InputContext = input->CreateActionContext(m_InputActionsDocument->Asset(), m_EditorInputUser,
+                                                Keire::InputContextRole::EditorControl);
 }
 
 void EditorWorkspaceLayer::SaveInputActions()

@@ -167,6 +167,10 @@ Installed component discovery and inventory validation run on a background workf
 modal consume immutable snapshots and show a deliberate checking state while that scan is active; package enumeration,
 manifest parsing, and inventory hashing never run inside a UI frame.
 
+The workspace reserves a fixed status rail above every page. User-action feedback remains there until it is dismissed
+or replaced, so locating, verifying, repairing, or removing an editor never causes installation cards and their
+controls to move when a message changes.
+
 Templates are data-driven. The browser searches and filters the three verified templates packaged with this release:
 Empty Project, 3D Starter, and Kéire Sandbox. The 3D Starter payload opens a ready-to-run scene with an active camera
 and directional light; Empty Project deliberately has no startup scene. Sandbox packages the canonical sample's clean
@@ -178,12 +182,23 @@ starter content, package requirements, and license references from the manifest.
 each healthy installed editor before the creation dialog offers a template/editor pair. Remote template download and
 update controls remain absent until template packages are connected to the persistent package-task pipeline.
 
+The creation dialog identifies every compatible editor by version, channel, ownership, and full installation path.
+It keeps an explicitly selected compatible installation; otherwise it defaults by newest version, then Stable,
+Preview, Nightly, managed ownership, path, and installation ID. The dialog reports compatible versus registered
+installation counts so health or template filtering is visible rather than mistaken for deduplication. Project
+**Open with editor** choices also show their full installation paths.
+
 Creation stages only declared payload files, writes schema-4 project metadata, validates the staged project
 out-of-process with the selected editor's Asset Tool, and publishes atomically. Failures remove staging and leave an
 existing destination untouched. The creation dialog explicitly chooses whether to open the result in the selected
 editor. Validation observes Hub shutdown, terminates its child process promptly, and removes staging instead of making
 application shutdown wait for the full validation timeout. Creation progress appears in the task center and never
 blocks the UI thread.
+
+Project names and final destination directory components are validated for portable filesystem use before staging.
+This rejects control characters, trailing spaces or periods, and Windows device aliases such as `CON`, `AUX`,
+`COM1`, or those aliases followed by an extension on every host. Near-miss names such as `Console`, `COM10`, and
+`.config` remain valid. Core project creation applies the same directory-component rule before writing files.
 
 `Scripts/Packaging/sync-sandbox-template.py` owns the deterministic Sandbox projection and manifest hashes. Run it
 after changing canonical Sandbox authoring content; `--check` is part of the Windows and Unix fast regression suites

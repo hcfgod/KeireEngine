@@ -140,7 +140,14 @@ namespace Keire
     {
         RequireActive("Checkbox");
         const std::string safeLabel(label);
-        return ImGui::Checkbox(safeLabel.c_str(), &value);
+        const bool changed = ImGui::Checkbox(safeLabel.c_str(), &value);
+        const auto minimum = ImGui::GetItemRectMin();
+        const float size = ImGui::GetFrameHeight();
+        const auto& style = ImGui::GetStyle();
+        ImGui::GetWindowDrawList()->AddRect(minimum, {minimum.x + size, minimum.y + size},
+                                            ImGui::GetColorU32(ImGuiCol_Border), style.FrameRounding,
+                                            ImDrawFlags_RoundCornersAll, std::max(style.FrameBorderSize, 1.0F));
+        return changed;
     }
 
     bool UiFrame::DragInteger(const std::string_view label, std::int64_t& value, const double speed,

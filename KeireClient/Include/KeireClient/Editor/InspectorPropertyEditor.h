@@ -66,6 +66,7 @@ namespace KeireEditor
         SetManagedReferenceGraphEditController(const ManagedReferenceGraphEditController* controller) noexcept override;
 
       private:
+        [[nodiscard]] std::string PrepareFieldControl(std::string_view label);
         [[nodiscard]] const std::vector<Keire::Entity>& SceneEntities();
         bool DrawManagedValue(Keire::ManagedAssetValueNode& value,
                               const Keire::ManagedAssetPropertyDescriptor& descriptor, std::string_view path);

@@ -1629,6 +1629,162 @@ TEST_CASE("UI template roots retain stylesheet dimensions inside non-stretching 
     CHECK(cardState->Rect.Height == doctest::Approx(320.0F));
 }
 
+TEST_CASE("unstyled semantic controls provide deterministic default affordances")
+{
+    constexpr std::string_view source = R"xml(<ui schemaVersion="1" name="DefaultControls">
+  <VisualElement id="50000000-0000-4000-8000-000000000105" name="root" style="width: 400; height: 140;">
+    <Button id="50000000-0000-4000-8000-000000000106" name="button" text="Continue"
+            style="position: absolute; left: 10; top: 10; width: 180; height: 48;"/>
+    <Toggle id="50000000-0000-4000-8000-000000000107" name="toggle" text="Hints" checked="false"
+            style="position: absolute; left: 10; top: 72; width: 180; height: 40;"/>
+  </VisualElement>
+</ui>)xml";
+    const auto visualTree =
+        Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(AsBytes(source)));
+    const auto document = Keire::CreateRef<Keire::UiDocument>(visualTree);
+    const auto button = document->Find("button");
+    const auto toggle = document->Find("toggle");
+    REQUIRE(button);
+    REQUIRE(toggle);
+    document->Tree()->Layout(400.0F, 140.0F);
+
+    const auto rootState = document->Tree()->State(document->Root());
+    const auto buttonState = document->Tree()->State(*button);
+    const auto toggleState = document->Tree()->State(*toggle);
+    REQUIRE(rootState);
+    REQUIRE(buttonState);
+    REQUIRE(toggleState);
+    CHECK(rootState->Style.Background.Alpha == doctest::Approx(0.0F));
+    CHECK(rootState->Style.BorderWidth == doctest::Approx(0.0F));
+    CHECK(buttonState->Style.Background.Alpha > 0.0F);
+    CHECK(buttonState->Style.Border.Alpha > 0.0F);
+    CHECK(buttonState->Style.BorderWidth > 0.0F);
+    CHECK(toggleState->Style.Background.Alpha > 0.0F);
+    CHECK(toggleState->Style.Border.Alpha > 0.0F);
+
+    const auto base = buttonState->Style.Background;
+    const auto baseBorder = buttonState->Style.Border;
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Hover, true);
+    const auto hover = document->Tree()->State(*button)->Style.Background;
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Hover, false);
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Active, true);
+    const auto active = document->Tree()->State(*button)->Style.Background;
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Active, false);
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Focus, true);
+    const auto focused = document->Tree()->State(*button);
+    REQUIRE(focused);
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Focus, false);
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Disabled, true);
+    const auto disabled = document->Tree()->State(*button)->Style.Background;
+    CHECK(hover != base);
+    CHECK(active != base);
+    CHECK(active != hover);
+    CHECK(focused->Style.Background != base);
+    CHECK(focused->Style.Border != baseBorder);
+    CHECK(disabled != base);
+
+    std::vector<Keire::RuntimeUiDrawCommand> uncheckedQuads;
+    std::ranges::copy_if(document->Tree()->DrawCommands(), std::back_inserter(uncheckedQuads),
+                         [toggle](const auto& command)
+                         { return command.Element == *toggle && command.Type == Keire::RuntimeUiDrawType::Quad; });
+    REQUIRE(uncheckedQuads.size() == 2);
+    const auto& uncheckedIndicator = uncheckedQuads.back();
+    CHECK(uncheckedIndicator.Rect.Width <= 22.0F);
+    CHECK(uncheckedIndicator.ColorValue.Alpha == doctest::Approx(0.0F));
+    CHECK(uncheckedIndicator.BorderColor.Alpha > 0.0F);
+    CHECK(uncheckedIndicator.BorderWidth > 0.0F);
+
+    auto control = toggleState->Control;
+    control.Checked = true;
+    REQUIRE(document->Tree()->SetControl(*toggle, control));
+    REQUIRE(document->Advance(0.0F));
+    document->Tree()->Layout(400.0F, 140.0F);
+    const auto checkedState = document->Tree()->State(*toggle);
+    REQUIRE(checkedState);
+    CHECK(checkedState->Style.Background != toggleState->Style.Background);
+    const auto checkedIndicator = std::ranges::find_if(document->Tree()->DrawCommands(),
+                                                       [toggle, width = checkedState->Rect.Width](const auto& command)
+                                                       {
+                                                           return command.Element == *toggle &&
+                                                                  command.Type == Keire::RuntimeUiDrawType::Quad &&
+                                                                  command.Rect.Width < width * 0.5F;
+                                                       });
+    REQUIRE(checkedIndicator != document->Tree()->DrawCommands().end());
+    CHECK(checkedIndicator->ColorValue.Alpha > 0.0F);
+}
+
+TEST_CASE("authored semantic control styles override every built-in state")
+{
+    constexpr std::string_view source = R"xml(<ui schemaVersion="1" name="AuthoredControls">
+  <VisualElement id="50000000-0000-4000-8000-000000000108" name="root" style="width: 300; height: 120;">
+    <Button id="50000000-0000-4000-8000-000000000109" name="button" text="Continue"
+            style="width: 180; height: 48;"/>
+    <Toggle id="50000000-0000-4000-8000-000000000110" name="toggle" text="Hints" checked="false"
+            style="width: 180; height: 40;"/>
+  </VisualElement>
+</ui>)xml";
+    constexpr std::string_view styles = R"css(@keire-style 1;
+Button { background-color: #a01020ff; border-color: #b02030ff; border-width: 3; }
+Button:hover { background-color: #c03040ff; }
+Button:focus { background-color: #d04050ff; border-color: #e05060ff; }
+Button:active { background-color: #f06070ff; }
+Button:disabled { background-color: #706070ff; border-color: #806080ff; }
+Toggle { background-color: #106020ff; }
+Toggle:hover { background-color: #187028ff; }
+Toggle:checked { background-color: #208030ff; }
+)css";
+    const auto visualTree =
+        Keire::CreateRef<Keire::UiVisualTreeAsset>(Keire::UiVisualTreeAsset::ParseSource(AsBytes(source)));
+    const auto styleSheet =
+        Keire::CreateRef<Keire::UiStyleSheetAsset>(Keire::UiStyleSheetAsset::ParseSource(AsBytes(styles)));
+    const auto document = Keire::CreateRef<Keire::UiDocument>(
+        visualTree, std::vector<Keire::Ref<const Keire::UiStyleSheetAsset>>{styleSheet});
+    const auto button = document->Find("button");
+    const auto toggle = document->Find("toggle");
+    REQUIRE(button);
+    REQUIRE(toggle);
+
+    auto buttonState = document->Tree()->State(*button);
+    REQUIRE(buttonState);
+    CHECK(buttonState->Style.Background.Red == doctest::Approx(160.0F / 255.0F));
+    CHECK(buttonState->Style.Border.Red == doctest::Approx(176.0F / 255.0F));
+    CHECK(buttonState->Style.BorderWidth == doctest::Approx(3.0F));
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Hover, true);
+    buttonState = document->Tree()->State(*button);
+    REQUIRE(buttonState);
+    CHECK(buttonState->Style.Background.Red == doctest::Approx(192.0F / 255.0F));
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Hover, false);
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Focus, true);
+    buttonState = document->Tree()->State(*button);
+    REQUIRE(buttonState);
+    CHECK(buttonState->Style.Background.Red == doctest::Approx(208.0F / 255.0F));
+    CHECK(buttonState->Style.Border.Red == doctest::Approx(224.0F / 255.0F));
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Focus, false);
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Active, true);
+    buttonState = document->Tree()->State(*button);
+    REQUIRE(buttonState);
+    CHECK(buttonState->Style.Background.Red == doctest::Approx(240.0F / 255.0F));
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Active, false);
+    document->SetPseudoState(*button, Keire::UiStylePseudoState::Disabled, true);
+    buttonState = document->Tree()->State(*button);
+    REQUIRE(buttonState);
+    CHECK(buttonState->Style.Background.Red == doctest::Approx(112.0F / 255.0F));
+    CHECK(buttonState->Style.Border.Red == doctest::Approx(128.0F / 255.0F));
+
+    auto toggleState = document->Tree()->State(*toggle);
+    REQUIRE(toggleState);
+    CHECK(toggleState->Style.Background.Green == doctest::Approx(96.0F / 255.0F));
+    document->SetPseudoState(*toggle, Keire::UiStylePseudoState::Hover, true);
+    toggleState = document->Tree()->State(*toggle);
+    REQUIRE(toggleState);
+    CHECK(toggleState->Style.Background.Green == doctest::Approx(112.0F / 255.0F));
+    document->SetPseudoState(*toggle, Keire::UiStylePseudoState::Hover, false);
+    document->SetPseudoState(*toggle, Keire::UiStylePseudoState::Checked, true);
+    toggleState = document->Tree()->State(*toggle);
+    REQUIRE(toggleState);
+    CHECK(toggleState->Style.Background.Green == doctest::Approx(128.0F / 255.0F));
+}
+
 TEST_CASE("Checked retained toggles preserve their label surface and bound their indicator")
 {
     constexpr std::string_view source = R"xml(<ui schemaVersion="1" name="ToggleIndicator">

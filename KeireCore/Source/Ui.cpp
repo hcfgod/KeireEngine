@@ -36,7 +36,35 @@ namespace Keire
 {
     namespace
     {
-        void ConstrainFloatingPanelToViewport()
+        [[nodiscard]] bool PrepareFloatingPanelConstraint(const std::string& name)
+        {
+            auto* window = ImGui::FindWindowByName(name.c_str());
+            if (window == nullptr)
+                return false;
+            if (window->DockId != 0)
+                return false;
+
+            const auto* viewport = window->Viewport != nullptr ? window->Viewport : ImGui::GetMainViewport();
+            if (viewport == nullptr || viewport->WorkSize.x <= 0.0F || viewport->WorkSize.y <= 0.0F)
+                return false;
+
+            const auto size = window->SizeFull;
+            const ImVec2 constrainedSize{std::min(size.x, viewport->WorkSize.x),
+                                         std::min(size.y, viewport->WorkSize.y)};
+            if (constrainedSize.x != size.x || constrainedSize.y != size.y)
+                ImGui::SetNextWindowSize(constrainedSize, ImGuiCond_Always);
+
+            const auto position = window->Pos;
+            const ImVec2 maximumPosition{viewport->WorkPos.x + viewport->WorkSize.x - constrainedSize.x,
+                                         viewport->WorkPos.y + viewport->WorkSize.y - constrainedSize.y};
+            const ImVec2 constrainedPosition{std::clamp(position.x, viewport->WorkPos.x, maximumPosition.x),
+                                             std::clamp(position.y, viewport->WorkPos.y, maximumPosition.y)};
+            if (constrainedPosition.x != position.x || constrainedPosition.y != position.y)
+                ImGui::SetNextWindowPos(constrainedPosition, ImGuiCond_Always);
+            return true;
+        }
+
+        void ConstrainCurrentFloatingPanelToViewport()
         {
             if (ImGui::GetWindowDockID() != 0)
                 return;
@@ -511,11 +539,13 @@ namespace Keire
         }
         bool* visible = panel.VisibilityAddress();
         const bool previous = *visible;
-        const bool submitted = ImGui::Begin(panel.SubmittedName().c_str(), visible,
+        const auto& submittedName = panel.SubmittedName();
+        const bool existingWindowPrepared = !maximized && PrepareFloatingPanelConstraint(submittedName);
+        const bool submitted = ImGui::Begin(submittedName.c_str(), visible,
                                             Detail::ToImGuiWindowFlags(effectiveOptions) |
                                                 (maximized ? ImGuiWindowFlags_NoDocking : ImGuiWindowFlags_None));
-        if (!maximized)
-            ConstrainFloatingPanelToViewport();
+        if (!maximized && !existingWindowPrepared)
+            ConstrainCurrentFloatingPanelToViewport();
         panel.NotifyWindowSubmitted();
         panel.NotifyVisibilityChanged(previous);
         m_Impl->OpenScope(UiScope::Kind::Window);

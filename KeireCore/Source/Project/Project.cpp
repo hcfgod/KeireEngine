@@ -15,6 +15,7 @@
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scripting/ManagedAssemblyAsset.h"
 #include "KeireInternal/FileSystem.h"
+#include "KeireInternal/PortablePath.h"
 #include "KeireInternal/Project/StarterProjectUiInternal.h"
 #include "KeireInternal/ProjectFileTransaction.h"
 #include "KeireInternal/Scripting/ManagedSdk.h"
@@ -592,6 +593,8 @@ namespace Keire
     Ref<Project> Project::Create(const ProjectCreateSpecification& specification)
     {
         ValidateName(specification.Name);
+        if (!Detail::IsPortableDirectoryComponent(specification.Name))
+            throw std::invalid_argument("Project name is not a portable directory name.");
         if (specification.Location.empty())
             throw std::invalid_argument("Project location must not be empty.");
         const auto location = std::filesystem::absolute(specification.Location).lexically_normal();

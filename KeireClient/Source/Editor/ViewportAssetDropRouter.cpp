@@ -18,6 +18,8 @@ namespace KeireEditor
             commands.InstantiateDroppedPrefab(asset, position);
         else if (type == Keire::MeshAsset::StaticType())
             commands.CreateDroppedMeshEntity(asset, position);
+        else if (type == Keire::VfxEffectAsset::StaticType())
+            commands.CreateDroppedVfxEntity(asset, position);
         else if (type == Keire::MaterialAsset::StaticType() || type == Keire::MaterialGraphAsset::StaticType() ||
                  type == Keire::MaterialInstanceAsset::StaticType() ||
                  type == Keire::ShaderGraphInstanceAsset::StaticType())

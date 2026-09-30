@@ -336,7 +336,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
                         continue;
                     }
                     if (!activeScene || !activeScene->IsOpen())
-                        throw std::runtime_error("Create or open a scene before dropping meshes or materials.");
+                        throw std::runtime_error("Create or open a scene before dropping assets into it.");
                     const auto hit = KeireEditor::PickSceneEntity(activeScene, imageRect, ui.PointerState().Position,
                                                                   camera, resolveMeshBounds, resolvePoseBounds);
                     m_Controller.RouteSceneViewportAsset(record->Type, asset, hit, ui.PointerState().Position);

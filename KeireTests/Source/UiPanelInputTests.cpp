@@ -168,7 +168,7 @@ namespace
                         m_PopupScroll = popup->Scroll.y;
                         io.AddMouseWheelEvent(0.0F, -1.0F);
                     }
-                    if (m_Frame == 9)
+                    if (m_Frame == 8)
                     {
                         CHECK(popup->Scroll.y > m_PopupScroll);
                         CHECK(parent->Scroll.y == m_ParentScroll);
@@ -233,6 +233,138 @@ namespace
         Keire::UiPanelRegistration m_Source;
         int m_Frame = 0;
     };
+
+    class FloatingScrollRoutingLayer final : public Keire::Layer
+    {
+      public:
+        FloatingScrollRoutingLayer() : Layer("Floating scroll routing") {}
+
+      protected:
+        void OnAttach() override
+        {
+            m_Background = Owner().GetUiWorkspace().RegisterPanel({"test.scroll-background", "Scroll Background"});
+            m_Foreground = Owner().GetUiWorkspace().RegisterPanel({"test.scroll-foreground", "Scroll Foreground"});
+        }
+
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            const auto* viewport = ImGui::GetMainViewport();
+            REQUIRE(viewport);
+            auto& io = ImGui::GetIO();
+
+            ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
+            ImGui::SetNextWindowSize(viewport->WorkSize, ImGuiCond_Always);
+            if (auto background = ui.BeginPanel(m_Background, {.NoSavedSettings = true}); background)
+            {
+                if (auto scroll = ui.BeginChild("BackgroundScroll", {0.0F, 0.0F}, false); scroll)
+                {
+                    m_BackgroundWindow = ImGui::GetCurrentWindow();
+                    for (int row = 0; row < 80; ++row)
+                        ui.Text("Background row " + std::to_string(row));
+                }
+            }
+
+            if (m_Frame == 0)
+            {
+                ImGui::SetNextWindowPos({viewport->WorkPos.x + 80.0F, viewport->WorkPos.y + 60.0F}, ImGuiCond_Always);
+                ImGui::SetNextWindowSize({320.0F, 240.0F}, ImGuiCond_Always);
+            }
+            if (auto foreground = ui.BeginPanel(m_Foreground, {.NoSavedSettings = true}); foreground)
+            {
+                auto* foregroundWindow = ImGui::GetCurrentWindow();
+                m_ForegroundWindow = foregroundWindow;
+                if (m_Frame == 1)
+                {
+                    CHECK(foregroundWindow->Pos.x >= viewport->WorkPos.x);
+                    CHECK(foregroundWindow->Pos.y >= viewport->WorkPos.y);
+                    CHECK(foregroundWindow->Pos.x + foregroundWindow->Size.x <=
+                          viewport->WorkPos.x + viewport->WorkSize.x);
+                    CHECK(foregroundWindow->Pos.y + foregroundWindow->Size.y <=
+                          viewport->WorkPos.y + viewport->WorkSize.y);
+                }
+
+                if (auto scroll = ui.BeginChild("ForegroundScroll", {0.0F, 130.0F}, true); scroll)
+                {
+                    m_ForegroundScrollWindow = ImGui::GetCurrentWindow();
+                    for (int row = 0; row < 40; ++row)
+                        ui.Text("Foreground row " + std::to_string(row));
+                }
+
+                if (m_Frame == 0)
+                {
+                    ImGui::SetWindowSize(foregroundWindow, {viewport->WorkSize.x * 2.0F, viewport->WorkSize.y * 2.0F},
+                                         ImGuiCond_Always);
+                    ImGui::SetWindowPos(foregroundWindow,
+                                        {viewport->WorkPos.x + viewport->WorkSize.x - 20.0F,
+                                         viewport->WorkPos.y + viewport->WorkSize.y - 20.0F},
+                                        ImGuiCond_Always);
+                }
+            }
+
+            if (m_Frame == 1)
+            {
+                REQUIRE(m_ForegroundScrollWindow);
+                const auto center = m_ForegroundScrollWindow->InnerRect.GetCenter();
+                io.AddMousePosEvent(center.x, center.y);
+            }
+            if (m_Frame == 3)
+            {
+                REQUIRE(m_BackgroundWindow);
+                REQUIRE(m_ForegroundScrollWindow);
+                REQUIRE(ImGui::GetCurrentContext()->HoveredWindow == m_ForegroundScrollWindow);
+                REQUIRE(m_ForegroundScrollWindow->ScrollMax.y > 0.0F);
+                m_BackgroundScroll = m_BackgroundWindow->Scroll.y;
+                m_ForegroundScroll = m_ForegroundScrollWindow->Scroll.y;
+                io.AddMouseWheelEvent(0.0F, -1.0F);
+                io.AddMouseWheelEvent(0.0F, -1.0F);
+                io.AddMouseWheelEvent(0.0F, -1.0F);
+            }
+            if (m_Frame == 6)
+            {
+                REQUIRE(m_BackgroundWindow);
+                REQUIRE(m_ForegroundScrollWindow);
+                CHECK(m_ForegroundScrollWindow->Scroll.y > m_ForegroundScroll);
+                CHECK(m_BackgroundWindow->Scroll.y == m_BackgroundScroll);
+                m_BackgroundScroll = m_BackgroundWindow->Scroll.y;
+                m_ForegroundScroll = m_ForegroundScrollWindow->Scroll.y;
+                REQUIRE(m_ForegroundWindow);
+                ImGui::SetWindowSize(m_ForegroundWindow, {320.0F, 240.0F}, ImGuiCond_Always);
+                ImGui::SetWindowPos(m_ForegroundWindow, {viewport->WorkPos.x + 80.0F, viewport->WorkPos.y + 60.0F},
+                                    ImGuiCond_Always);
+                const auto backgroundPoint = m_BackgroundWindow->InnerRect.GetCenter();
+                io.AddMousePosEvent(m_BackgroundWindow->InnerRect.Max.x - 40.0F, backgroundPoint.y);
+            }
+            if (m_Frame == 8)
+            {
+                REQUIRE(m_BackgroundWindow);
+                REQUIRE(m_ForegroundScrollWindow);
+                REQUIRE(ImGui::GetCurrentContext()->HoveredWindow == m_BackgroundWindow);
+                const auto center = m_ForegroundScrollWindow->InnerRect.GetCenter();
+                io.AddMouseWheelEvent(0.0F, -1.0F);
+                io.AddMousePosEvent(center.x, center.y);
+            }
+            if (m_Frame == 10)
+            {
+                REQUIRE(m_BackgroundWindow);
+                REQUIRE(m_ForegroundScrollWindow);
+                CHECK(m_ForegroundScrollWindow->Scroll.y > m_ForegroundScroll);
+                CHECK(m_BackgroundWindow->Scroll.y == m_BackgroundScroll);
+                Owner().RequestExit();
+            }
+            ++m_Frame;
+        }
+
+      private:
+        Keire::UiPanelRegistration m_Background;
+        Keire::UiPanelRegistration m_Foreground;
+        ImGuiWindow* m_BackgroundWindow = nullptr;
+        ImGuiWindow* m_ForegroundWindow = nullptr;
+        ImGuiWindow* m_ForegroundScrollWindow = nullptr;
+        float m_BackgroundScroll = 0.0F;
+        float m_ForegroundScroll = 0.0F;
+        int m_Frame = 0;
+    };
+
 } // namespace
 
 TEST_CASE("UI drop target focus displaces a source panel submitted later")
@@ -279,7 +411,22 @@ TEST_CASE("floating UI panels accept queued collapse drag and close input")
     }
 }
 
-TEST_CASE("UI rapid drag release preserves event order and cancellation")
+TEST_CASE("constrained floating panel routes continuous wheel input to its scroll child")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.TargetFrameRate = 0;
+    specification.Ui.Mode = Keire::UiMode::Headless;
+    specification.Ui.LayoutPath.clear();
+    specification.Ui.Workspace.Enabled = true;
+    specification.Ui.Workspace.Ephemeral = true;
+    Keire::Application application(specification);
+    (void)application.PushLayer(std::make_unique<FloatingScrollRoutingLayer>());
+    CHECK(application.Run() == 0);
+}
+
+TEST_CASE("UI input queue preserves pointer action order and cancellation")
 {
     const auto previous = ImGui::GetCurrentContext();
     const auto context = ImGui::CreateContext();
@@ -307,6 +454,44 @@ TEST_CASE("UI rapid drag release preserves event order and cancellation")
     frame();
     REQUIRE(io.MouseDown[0]);
 
+    SUBCASE("pointer movement and wheel share one frame while later input remains ordered")
+    {
+        io.AddMousePosEvent(200.0F, 150.0F);
+        io.AddMouseWheelEvent(0.0F, -1.0F);
+        io.AddMouseButtonEvent(0, false);
+        frame();
+        CHECK(io.MousePos.x == 200.0F);
+        CHECK(io.MousePos.y == 150.0F);
+        CHECK(io.MouseDown[0]);
+        CHECK(io.ConfigInputTrickleEventQueue);
+        REQUIRE(context->InputEventsQueue.size() == 1);
+        CHECK(context->InputEventsQueue.front().Type == ImGuiInputEventType_MouseButton);
+        REQUIRE(context->InputEventsTrail.size() == 2);
+        CHECK(context->InputEventsTrail[0].Type == ImGuiInputEventType_MousePos);
+        CHECK(context->InputEventsTrail[1].Type == ImGuiInputEventType_MouseWheel);
+        frame();
+        CHECK_FALSE(io.MouseDown[0]);
+        CHECK(context->InputEventsQueue.empty());
+    }
+    SUBCASE("wheel before pointer movement shares one frame while later input remains ordered")
+    {
+        io.AddMouseWheelEvent(0.0F, -1.0F);
+        io.AddMousePosEvent(200.0F, 150.0F);
+        io.AddMouseButtonEvent(0, false);
+        frame();
+        CHECK(io.MousePos.x == 200.0F);
+        CHECK(io.MousePos.y == 150.0F);
+        CHECK(io.MouseDown[0]);
+        CHECK(io.ConfigInputTrickleEventQueue);
+        REQUIRE(context->InputEventsQueue.size() == 1);
+        CHECK(context->InputEventsQueue.front().Type == ImGuiInputEventType_MouseButton);
+        REQUIRE(context->InputEventsTrail.size() == 2);
+        CHECK(context->InputEventsTrail[0].Type == ImGuiInputEventType_MouseWheel);
+        CHECK(context->InputEventsTrail[1].Type == ImGuiInputEventType_MousePos);
+        frame();
+        CHECK_FALSE(io.MouseDown[0]);
+        CHECK(context->InputEventsQueue.empty());
+    }
     SUBCASE("movement gets a held frame then releases before the next press")
     {
         io.AddMousePosEvent(200.0F, 150.0F);

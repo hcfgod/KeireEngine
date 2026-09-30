@@ -131,6 +131,13 @@ TEST_CASE("Project-name validation matches the creation preflight contract")
 {
     CHECK(IsValidProjectName("Project"));
     CHECK(IsValidProjectName("Kéire Sandbox"));
+    CHECK(IsValidProjectName("Console"));
+    CHECK(IsValidProjectName("Conifer"));
+    CHECK(IsValidProjectName("COM0"));
+    CHECK(IsValidProjectName("COM10"));
+    CHECK(IsValidProjectName("LPT0"));
+    CHECK(IsValidProjectName("LPT10"));
+    CHECK(IsValidProjectName(".config"));
     CHECK_FALSE(IsValidProjectName(""));
     CHECK_FALSE(IsValidProjectName("."));
     CHECK_FALSE(IsValidProjectName(".."));
@@ -138,7 +145,56 @@ TEST_CASE("Project-name validation matches the creation preflight contract")
     CHECK_FALSE(IsValidProjectName("Project "));
     CHECK_FALSE(IsValidProjectName("Project\tName"));
     CHECK_FALSE(IsValidProjectName("Project/Name"));
+    CHECK_FALSE(IsValidProjectName("Project."));
     CHECK_FALSE(IsValidProjectName(std::string(129, 'a')));
+
+    const std::vector<std::string> reserved{
+        "CON",         "con.txt",
+        "Con.tar.gz",  "PRN",
+        "prn.json",    "AUX",
+        "aux.data",    "NUL",
+        "nul.txt",     "COM1",
+        "com9.log",    "LPT1",
+        "lpt9.log",    "CON .txt",
+        "COM\xC2\xB9", "com\xC2\xB2.txt",
+        "LPT\xC2\xB3", "lpt\xC2\xB9.log",
+    };
+    for (const auto& name : reserved)
+    {
+        CAPTURE(name);
+        CHECK_FALSE(IsValidProjectName(name));
+    }
+    for (char digit = '1'; digit <= '9'; ++digit)
+    {
+        const auto communicationDevice = std::string("COM") + digit;
+        const auto printerDevice = std::string("lpt") + digit + ".txt";
+        CAPTURE(communicationDevice);
+        CAPTURE(printerDevice);
+        CHECK_FALSE(IsValidProjectName(communicationDevice));
+        CHECK_FALSE(IsValidProjectName(printerDevice));
+    }
+    for (unsigned int byte = 0; byte <= 0x1FU; ++byte)
+    {
+        auto name = std::string("Project") + static_cast<char>(byte) + "Name";
+        CAPTURE(byte);
+        CHECK_FALSE(IsValidProjectName(name));
+    }
+}
+
+TEST_CASE("Template preflight rejects a non-portable destination component independently of its project name")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    TemplateManager manager(BuiltInTemplates(), Services());
+    REQUIRE(manager.Load());
+    auto request = Request(temporary.Path() / "CON.txt");
+    request.ProjectName = "Portable Display Name";
+
+    const auto result = manager.Preflight(request);
+
+    REQUIRE_FALSE(result);
+    CHECK(result.Error().Code == HubErrorCode::InvalidArgument);
+    CHECK(std::filesystem::is_empty(temporary.Path()));
+    CHECK_FALSE(HasStagingDirectory(temporary.Path()));
 }
 
 TEST_CASE("Template manager loads the three manifest-driven built-in templates")
@@ -284,6 +340,14 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
     CHECK_FALSE(std::filesystem::exists(first.Value().Root / "Assets/Scripts/Gameplay.keireasm"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Scripts/Examples/ShowcaseOrbit.cs"));
     CHECK(std::filesystem::exists(first.Value().Root / "Assets/Audio/InterfaceConfirm.wav"));
+    const auto sharedShaders =
+        nlohmann::json::parse(KeireHubTests::ReadText(first.Value().Root / "ProjectSettings/SharedShaders.lock"));
+    CHECK(sharedShaders.at("schemaVersion") == 1);
+    CHECK(sharedShaders.at("version") == "1.0.0");
+    REQUIRE(sharedShaders.at("shaders").is_array());
+    CHECK(sharedShaders.at("shaders").size() == 6);
+    CHECK(std::ranges::any_of(sharedShaders.at("shaders"), [](const auto& shader)
+                              { return shader.at("path") == "Keire/SharedShaders/1.0.0/Lit.keireshadergraph"; }));
     CHECK_FALSE(std::filesystem::exists(first.Value().Root / "Assets/Generated"));
     const auto descriptor =
         nlohmann::json::parse(KeireHubTests::ReadText(first.Value().Root / "ProjectSettings/Project.keireproject"));
@@ -292,7 +356,7 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
     CHECK(descriptor.at("defaultInputMap") == "a6b6db76-6436-4aa4-b96a-a72a0f987101");
     CHECK(descriptor.at("createdWithEngineVersion") == "0.3.0");
     CHECK(descriptor.at("minimumEngineVersion") == "0.3.0");
-    CHECK(descriptor.at("template").at("version") == "1.3.1");
+    CHECK(descriptor.at("template").at("version") == "1.3.2");
 }
 
 TEST_CASE("Sandbox requires the Material Ecosystem capable editor line")

@@ -164,6 +164,8 @@ metadata and does not implicitly create an ambient reflection binding.
 
 The built-in controls are `Label`, `Image`, `Button`, `TextField`, `Toggle`, `Slider`, `ProgressBar`, `ScrollView`,
 virtualized `ListView` and `TreeView`, `DropdownField`, `Foldout`, `TabView`, `Toolbar`, and `TemplateContainer`.
+Buttons and toggles have neutral visible defaults, including hover, pressed, focus, disabled, and checked feedback, so
+new documents remain usable before a stylesheet is linked. Project base and pseudo-state rules override those defaults.
 
 Scene scripts query the live source-backed tree through the entity's `UIDocument`. Returned handles are checked against
 the document generation and become inert after a successful reload or destruction; a failed reload keeps the previous

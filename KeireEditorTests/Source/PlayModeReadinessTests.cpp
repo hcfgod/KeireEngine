@@ -49,3 +49,16 @@ TEST_CASE("Play Mode waits for an in-flight replacement even with an active last
               KeireEditor::PlayModeReadiness::Ready);
     }
 }
+
+TEST_CASE("Play Mode distinguishes pending available and failed default input loads")
+{
+    using KeireEditor::EvaluatePlayModeInputReadiness;
+    using KeireEditor::PlayModeInputReadiness;
+
+    CHECK(EvaluatePlayModeInputReadiness(Keire::AssetState::Queued) == PlayModeInputReadiness::Waiting);
+    CHECK(EvaluatePlayModeInputReadiness(Keire::AssetState::Loading) == PlayModeInputReadiness::Waiting);
+    CHECK(EvaluatePlayModeInputReadiness(Keire::AssetState::Ready) == PlayModeInputReadiness::Ready);
+    CHECK(EvaluatePlayModeInputReadiness(Keire::AssetState::Reloading) == PlayModeInputReadiness::Ready);
+    CHECK(EvaluatePlayModeInputReadiness(Keire::AssetState::Failed) == PlayModeInputReadiness::Unavailable);
+    CHECK(EvaluatePlayModeInputReadiness(Keire::AssetState::Cancelled) == PlayModeInputReadiness::Unavailable);
+}

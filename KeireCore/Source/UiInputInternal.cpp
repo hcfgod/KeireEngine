@@ -24,8 +24,41 @@ namespace Keire::Detail
         bool focusLost = false;
         for (const auto& event : context.InputEventsQueue)
             focusLost |= event.Type == ImGuiInputEventType_Focus && !event.AppFocused.Focused;
+        bool coalescePointerWheel = false;
         if (io.ConfigInputTrickleEventQueue && !focusLost)
         {
+            // ImGui normally postpones pointer movement and wheel input that arrive in the same pump. Process one
+            // leading position/wheel cluster together so hover uses its position regardless of OS event ordering.
+            bool hasPointerPosition = false;
+            bool hasWheel = false;
+            int pointerWheelEnd = context.InputEventsQueue.Size;
+            for (int index = 0; index < context.InputEventsQueue.Size; ++index)
+            {
+                const auto type = context.InputEventsQueue[index].Type;
+                if (type == ImGuiInputEventType_MouseViewport)
+                    continue;
+                if (type == ImGuiInputEventType_MousePos && (!hasWheel || !hasPointerPosition))
+                {
+                    hasPointerPosition = true;
+                    continue;
+                }
+                if (type == ImGuiInputEventType_MouseWheel)
+                {
+                    hasWheel = true;
+                    continue;
+                }
+                pointerWheelEnd = index;
+                break;
+            }
+            coalescePointerWheel = hasPointerPosition && hasWheel;
+            if (coalescePointerWheel && pointerWheelEnd < context.InputEventsQueue.Size)
+            {
+                deferred.Events.reserve(context.InputEventsQueue.Size - pointerWheelEnd);
+                for (int tail = pointerWheelEnd; tail < context.InputEventsQueue.Size; ++tail)
+                    deferred.Events.push_back(context.InputEventsQueue[tail]);
+                context.InputEventsQueue.resize(pointerWheelEnd);
+            }
+
             ImVec2 position = io.MousePos;
             bool moved = false;
             for (int index = 0; index < context.InputEventsQueue.Size; ++index)
@@ -55,7 +88,11 @@ namespace Keire::Detail
                 break;
             }
         }
+        const bool trickleInput = io.ConfigInputTrickleEventQueue;
+        if (coalescePointerWheel)
+            io.ConfigInputTrickleEventQueue = false;
         ImGui::NewFrame();
+        io.ConfigInputTrickleEventQueue = trickleInput;
     }
 
     namespace

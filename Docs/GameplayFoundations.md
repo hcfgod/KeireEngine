@@ -48,11 +48,12 @@ Before a C# source opens, the editor regenerates a project-root Visual Studio so
 resolved assembly. The first Windows open loads that solution normally and then runs Visual Studio's `File.OpenFile` command
 for the requested script. Later opens target the running Visual Studio instance that has that exact solution loaded,
 instead of opening an isolated source file or relying on the most-recent IDE window. The generated projects are
-authoring artifacts; managed builds continue to regenerate and compile from the canonical assembly definitions.
+authoring artifacts; they are refreshed before builds once a workspace is open, including when the runtime build fails,
+while managed compilation and last-good assembly publication remain governed by the canonical assembly definitions.
 
-`ScriptSystem::StartBuild` generates SDK-style `net8.0` gameplay projects under a staging directory, references the
-staged `Keire.Managed.dll`, runs the verified .NET 10 SDK on a cancellable worker, parses source/line/column diagnostics, and
-atomically publishes `Library/ScriptAssemblies/Active` only after a successful build. A failed or cancelled build
+`ScriptSystem::StartBuild` generates SDK-style `net10.0` gameplay projects under a staging directory, references the
+staged `Keire.Managed.dll`, runs the verified .NET 10 SDK on a cancellable worker, parses source/line/column diagnostics,
+and atomically publishes `Library/ScriptAssemblies/Active` only after a successful build. A failed or cancelled build
 leaves the previous active directory untouched.
 
 The application-owned Coral fork discovers hostfxr through nethost and accepts an explicit bundled .NET root.

@@ -25,7 +25,13 @@ def require(condition: bool, message: str) -> None:
 
 
 definitions = module.PACKAGES
-require(module.VERSION == "0.4.4", "Official packages must follow the current project version.")
+configuration = dict(
+    line.split("=", 1)
+    for line in (ROOT / "Config/Project.conf").read_text(encoding="utf-8").splitlines()
+    if "=" in line and not line.lstrip().startswith("#")
+)
+expected_version = configuration["PROJECT_VERSION"].strip()
+require(module.VERSION == expected_version, "Official packages must follow the current project version.")
 require(
     len(definitions) == 6,
     "The official release set must contain six first-party products.",
@@ -64,9 +70,9 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
             f"{definition.slug} changed its reviewed entry points.",
         )
         require(
-            manifest["version"] == "0.4.4"
-            and manifest["compatibility"]["minimumEngineVersion"] == "0.4.4"
-            and manifest["compatibility"]["managedApiVersion"] == "0.4.4",
+            manifest["version"] == expected_version
+            and manifest["compatibility"]["minimumEngineVersion"] == expected_version
+            and manifest["compatibility"]["managedApiVersion"] == expected_version,
             f"{definition.slug} does not identify the current first-party source release.",
         )
         require(
@@ -74,8 +80,10 @@ with tempfile.TemporaryDirectory(prefix="keire-official-package-test-") as tempo
             f"{definition.slug} declares a missing entry point.",
         )
         if definition.slug == "first-person-controller":
-            patch_manifest = module.create_manifest(definition, payload, "0.4.5")
-            require(patch_manifest["version"] == "0.4.5", "Package patches need independent versions.")
+            major, minor, patch = map(int, expected_version.split("."))
+            patch_version = f"{major}.{minor}.{patch + 1}"
+            patch_manifest = module.create_manifest(definition, payload, patch_version)
+            require(patch_manifest["version"] == patch_version, "Package patches need independent versions.")
             require(patch_manifest["compatibility"] == manifest["compatibility"], "Package patch versions must not raise engine/API requirements.")
             import json
             prefab = json.loads((payload / definition.entry_points[0]).read_text(encoding="utf-8"))

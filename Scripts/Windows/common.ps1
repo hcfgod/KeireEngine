@@ -1032,6 +1032,7 @@ function Get-WindowsRequiredHubContentPaths {
         "content\Templates\Payloads\Starter3D\ProjectSettings\Rendering.keiresettings",
         "content\Templates\Payloads\Sandbox\README.md",
         "content\Templates\Payloads\Sandbox\Assets\Scripts\FirstPersonCamera.cs",
+        "content\Templates\Payloads\Sandbox\ProjectSettings\SharedShaders.lock",
         "content\Templates\Payloads\Sandbox\ProjectSettings\Scripting.keiresettings",
         "content\Templates\Thumbnails\empty.png", "content\Templates\Thumbnails\starter-3d.png",
         "content\Templates\Thumbnails\sandbox.png"

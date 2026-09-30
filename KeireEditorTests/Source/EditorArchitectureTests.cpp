@@ -1941,6 +1941,11 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
         void OpenDroppedInputActions(const Keire::AssetId asset) override { Input = asset; }
         void InstantiateDroppedPrefab(const Keire::AssetId asset, Keire::Vector3) override { Prefab = asset; }
         void CreateDroppedMeshEntity(const Keire::AssetId asset, Keire::Vector3) override { Mesh = asset; }
+        void CreateDroppedVfxEntity(const Keire::AssetId asset, const Keire::Vector3 position) override
+        {
+            Vfx = asset;
+            VfxPosition = position;
+        }
         void AssignDroppedMaterial(const Keire::EntityId entity, const Keire::AssetId asset) override
         {
             Target = entity;
@@ -1951,6 +1956,8 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
         Keire::AssetId Input;
         Keire::AssetId Prefab;
         Keire::AssetId Mesh;
+        Keire::AssetId Vfx;
+        Keire::Vector3 VfxPosition;
         Keire::AssetId Material;
         Keire::EntityId Target;
     } commands;
@@ -1965,6 +1972,9 @@ TEST_CASE("viewport asset drops dispatch through narrow typed commands")
     CHECK(commands.Prefab == asset);
     router.Route(Keire::MeshAsset::StaticType(), asset, {}, {}, commands);
     CHECK(commands.Mesh == asset);
+    router.Route(Keire::VfxEffectAsset::StaticType(), asset, {}, {1.0F, 2.0F, 3.0F}, commands);
+    CHECK(commands.Vfx == asset);
+    CHECK(commands.VfxPosition == (Keire::Vector3{1.0F, 2.0F, 3.0F}));
     router.Route(Keire::MaterialAsset::StaticType(), asset, target, {}, commands);
     CHECK(commands.Material == asset);
     CHECK(commands.Target == target);

@@ -200,7 +200,8 @@ the attachment after the type becomes available.
 
 Opening a C# source from the editor regenerates a project-root solution and one SDK-style project per predefined or custom assembly.
 These files provide IntelliSense and navigation. The resolved assembly graph remains authoritative; editing only a generated
-project does not change a runtime build.
+project does not change a runtime build. Once opened, the design-time workspace refreshes before each build and on every
+script open, so new, renamed, moved, or failing sources remain part of their assembly for completion and navigation.
 
 The editor's Visual Studio authoring façade may use a compatibility target for design-time support. Runtime gameplay
 builds still use the engine's .NET 10 and C# 14 policy.

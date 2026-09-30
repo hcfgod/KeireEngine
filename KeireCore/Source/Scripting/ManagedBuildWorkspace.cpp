@@ -7,9 +7,12 @@
 #include <fstream>
 #include <ranges>
 #include <regex>
+#include <set>
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <unordered_set>
+#include <utility>
 
 namespace Keire
 {
@@ -149,6 +152,9 @@ namespace Keire
             static const std::regex pattern(
                 R"(^(.+?)\(([0-9]+),([0-9]+)\): (warning|error) ([A-Za-z]+[0-9]+): (.+?)(?: \[.+\])?\r?$)");
             std::vector<ManagedBuildDiagnostic> result;
+            std::set<std::tuple<ManagedDiagnosticSeverity, std::filesystem::path, std::uint32_t, std::uint32_t,
+                                std::string, std::string>>
+                seen;
             std::size_t begin = 0;
             while (begin < output.size() && result.size() < maximum)
             {
@@ -157,10 +163,19 @@ namespace Keire
                 std::smatch match;
                 if (std::regex_match(line, match, pattern))
                 {
-                    result.push_back(
-                        {match[4] == "warning" ? ManagedDiagnosticSeverity::Warning : ManagedDiagnosticSeverity::Error,
-                         std::filesystem::path(match[1].str()), static_cast<std::uint32_t>(std::stoul(match[2].str())),
-                         static_cast<std::uint32_t>(std::stoul(match[3].str())), match[5].str(), match[6].str()});
+                    ManagedBuildDiagnostic diagnostic{match[4] == "warning" ? ManagedDiagnosticSeverity::Warning
+                                                                            : ManagedDiagnosticSeverity::Error,
+                                                      std::filesystem::path(match[1].str()),
+                                                      static_cast<std::uint32_t>(std::stoul(match[2].str())),
+                                                      static_cast<std::uint32_t>(std::stoul(match[3].str())),
+                                                      match[5].str(),
+                                                      match[6].str()};
+                    if (seen.emplace(diagnostic.Severity, diagnostic.Source, diagnostic.Line, diagnostic.Column,
+                                     diagnostic.Code, diagnostic.Message)
+                            .second)
+                    {
+                        result.push_back(std::move(diagnostic));
+                    }
                 }
                 if (end == std::string::npos)
                     break;

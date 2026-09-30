@@ -732,6 +732,21 @@ void EditorWorkspaceLayer::StartManagedBuild()
                        : target == Keire::PlayerPlatform::Linux ? "Linux"
                                                                 : "macOS";
     request.Assemblies = Keire::ResolveProjectManagedAssemblies(projectRoot, request.Assemblies, context);
+    if (m_ManagedIdeWorkspaceOpened)
+    {
+        try
+        {
+            (void)scripts->GenerateIdeWorkspace(request, projectRoot.filename().string());
+        }
+        catch (const std::exception& error)
+        {
+            AddConsoleMessage("IDE Workspace",
+                              std::string("Could not refresh the design-time script inventory; the runtime build will "
+                                          "continue. ") +
+                                  error.what(),
+                              m_Theme.Warning, Keire::LogLevel::Warn);
+        }
+    }
     request.Configuration = "Debug";
     if (m_PlayerBuildSettingsLoaded)
     {

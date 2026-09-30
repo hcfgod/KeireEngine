@@ -2,6 +2,7 @@
 
 #include "KeireClient/Editor/AssetBrowserUtilities.h"
 #include "KeireClient/Editor/UiBuilderInspector.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include "Keire/Ui/UiElements.h"
 
@@ -868,24 +869,36 @@ namespace KeireEditor
         ui.Text(std::string(UiBuilderElementTypeName(element->Type)) +
                 (document.Selections().size() > 1 ? "  (" + std::to_string(document.Selections().size()) + " selected)"
                                                   : std::string{}));
-        ui.TextColored(m_Controller.UiBuilderTheme().MutedText, element->StableId.ToString());
+        ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText, element->StableId.ToString());
         ui.Separator();
-        const bool nameEdited = ui.InputText("Name", m_NameDraft);
-        const bool classesEdited =
-            ui.InputText(document.Selections().size() > 1 ? "Classes (all selected)" : "Classes", m_ClassesDraft);
-        const bool textEdited = ui.InputText("Text", m_TextDraft);
+        const auto prepareField = [&ui](const std::string_view label)
+        {
+            const auto layout = Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width);
+            if (layout.Stacked)
+            {
+                const auto visibleLabel = Detail::InspectorVisibleLabel(label);
+                if (!visibleLabel.empty())
+                    ui.TextWrapped(visibleLabel);
+                ui.SetNextItemWidth(layout.ControlWidth);
+            }
+            return Detail::InspectorControlLabel(label, layout.Stacked);
+        };
+        const bool nameEdited = ui.InputText(prepareField("Name"), m_NameDraft);
+        const bool classesEdited = ui.InputText(
+            prepareField(document.Selections().size() > 1 ? "Classes (all selected)" : "Classes"), m_ClassesDraft);
+        const bool textEdited = ui.InputText(prepareField("Text"), m_TextDraft);
         bool customTypeEdited = false;
         if (element->Type == Keire::UiVisualElementType::Custom)
-            customTypeEdited = ui.InputText("Custom Type", m_CustomTypeDraft);
+            customTypeEdited = ui.InputText(prepareField("Custom Type"), m_CustomTypeDraft);
         bool templateEdited = false;
         if (element->Type == Keire::UiVisualElementType::TemplateContainer)
-            templateEdited = ui.InputText("Template Asset ID", m_TemplateDraft);
+            templateEdited = ui.InputText(prepareField("Template Asset ID"), m_TemplateDraft);
         bool slotEdited = false;
         if (element->Type != Keire::UiVisualElementType::Slot)
-            slotEdited = ui.InputText("Slot Assignment", m_SlotDraft);
-        bool inlineStyleEdited = ui.InputTextMultiline("Inline Style", m_InlineStyleDraft, 5);
-        ui.TextColored(m_Controller.UiBuilderTheme().MutedText,
-                       "Property changes apply automatically and are undoable.");
+            slotEdited = ui.InputText(prepareField("Slot Assignment"), m_SlotDraft);
+        bool inlineStyleEdited = ui.InputTextMultiline(prepareField("Inline Style"), m_InlineStyleDraft, 5);
+        ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText,
+                              "Property changes apply automatically and are undoable.");
         if (ui.Button("Clear Inline Styles"))
         {
             m_InlineStyleDraft.clear();
@@ -894,14 +907,20 @@ namespace KeireEditor
 
         ui.Separator();
         ui.Text("Bindings");
-        ui.TextColored(m_Controller.UiBuilderTheme().MutedText,
-                       "Target property <- source path. Target properties are unique per element.");
+        ui.TextColoredWrapped(m_Controller.UiBuilderTheme().MutedText,
+                              "Target property <- source path. Target properties are unique per element.");
         for (std::size_t index = 0; index < element->Bindings.size(); ++index)
         {
             const auto& binding = element->Bindings[index];
-            ui.Text(binding.Property + " <- " + binding.Path + "  [" + binding.Mode + "]");
-            ui.SameLine();
-            if (ui.Button("Remove##UiBinding" + std::to_string(index)))
+            const auto summary = binding.Property + " <- " + binding.Path + "  [" + binding.Mode + "]";
+            const bool stackedAction = Detail::ShouldStackInspectorAction(
+                ui.ContentAvailable().Width, ui.MeasureText(summary).Width, ui.MeasureText("Remove").Width + 20.0F);
+            ui.TextWrapped(summary);
+            if (!stackedAction)
+                ui.SameLine();
+            const auto removeSize =
+                stackedAction ? Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), 0.0F} : Keire::UiSize{};
+            if (ui.Button("Remove##UiBinding" + std::to_string(index), removeSize))
             {
                 auto bindings = element->Bindings;
                 bindings.erase(bindings.begin() + static_cast<std::ptrdiff_t>(index));
@@ -910,9 +929,9 @@ namespace KeireEditor
                 return;
             }
         }
-        (void)ui.InputTextWithHint("Target Property", "text, value, checked...", m_BindingPropertyDraft);
-        (void)ui.InputTextWithHint("Source Path", "Player.Health", m_BindingPathDraft);
-        if (auto combo = ui.BeginCombo("Binding Mode", m_BindingModeDraft); combo)
+        (void)ui.InputTextWithHint(prepareField("Target Property"), "text, value, checked...", m_BindingPropertyDraft);
+        (void)ui.InputTextWithHint(prepareField("Source Path"), "Player.Health", m_BindingPathDraft);
+        if (auto combo = ui.BeginCombo(prepareField("Binding Mode"), m_BindingModeDraft); combo)
         {
             constexpr std::array modes{"OneWay", "TwoWay", "OneTime"};
             for (const auto mode : modes)

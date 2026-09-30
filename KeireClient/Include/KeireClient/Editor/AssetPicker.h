@@ -42,6 +42,7 @@ namespace KeireEditor
 
       private:
         std::string m_Search;
+        std::string m_SearchScope;
         std::string m_Diagnostic;
     };
 } // namespace KeireEditor

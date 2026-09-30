@@ -1,5 +1,7 @@
 #include "KeireHubRuntime/TemplateManager.h"
 
+#include "KeireInternal/PortablePath.h"
+
 #include <KeireHubRuntimeInternal/Persistence.h>
 #include <KeireHubRuntimeInternal/Sha256.h>
 
@@ -408,8 +410,7 @@ namespace KeireHub
 
     bool IsValidProjectName(const std::string_view name) noexcept
     {
-        if (name.empty() || name.size() > 128 || name == "." || name == ".." ||
-            name.find_first_of("<>:\"/\\|?*\r\n\t") != std::string_view::npos)
+        if (name.size() > 128 || !Keire::Detail::IsPortableDirectoryComponent(name))
             return false;
         return std::isspace(static_cast<unsigned char>(name.front())) == 0 &&
                std::isspace(static_cast<unsigned char>(name.back())) == 0;
@@ -501,7 +502,7 @@ namespace KeireHub
 
         std::error_code error;
         auto destination = std::filesystem::absolute(request.Destination, error).lexically_normal();
-        if (error || destination.filename().empty())
+        if (error || !Keire::Detail::IsPortableDirectoryComponent(Detail::PathToUtf8(destination.filename())))
             return HubResult<TemplateCreationPlan>::Failure(TemplateError(HubErrorCode::InvalidArgument,
                                                                           "The project destination is invalid.",
                                                                           request.ProjectName, error.message()));

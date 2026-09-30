@@ -373,7 +373,8 @@ Use this workflow for a first effect:
    or Custom HLSL node, then drag between compatible typed pins to connect it.
 7. Open **Effect Settings**. Choose Loop, Duration, Simulation Space, Seed, and Capacity.
 8. Select **Compile**, then use the default **CPU (Authoring)** preview while tuning the effect.
-9. Add a **VFX Emitter** component to a scene entity and assign the `.keirevfx` asset.
+9. Drag the `.keirevfx` asset into the Scene to create a positioned **VFX Emitter**, or add the component to an
+   existing entity and assign the asset in its Inspector.
 10. Enable **Preview In Edit Mode** to see the scene emitter without entering Play Mode.
 11. Choose **Local** simulation space for an aura or other effect that must follow the entity. Choose **World** for
     smoke, sparks, or trails that should remain where they were emitted.
@@ -1342,8 +1343,8 @@ the component registry.
 | **Auto Destroy** | Destroys the entire runtime entity after its effect handle finishes. |
 | **Simulation Speed** | Per-emitter speed from `0` to `8`; zero pauses simulation. |
 | **Seed Offset** | Per-emitter deterministic variation. |
-| **Quality Tier** | Low, Medium, High, or Cinematic. Persisted, but not consumed by runtime policy yet. |
-| **Culling Mode** | Automatic, Fixed Bounds, or Always Simulate. Persisted, but not consumed by runtime culling yet. |
+| **Quality Tier** | Low, Medium, High, or Cinematic. The Inspector uses labeled choices. Persisted, but not consumed by runtime policy yet. |
+| **Culling Mode** | Automatic, Fixed Bounds, or Always Simulate. The Inspector uses labeled choices. Persisted, but not consumed by runtime culling yet. |
 | **Bounds Center** | Authored culling center. Validated and persisted, but not consumed yet. |
 | **Bounds Extent** | Positive authored culling extents. Validated and persisted, but not consumed yet. |
 | **Preview In Edit Mode** | Enables transient preview for this scene emitter outside Play Mode. |

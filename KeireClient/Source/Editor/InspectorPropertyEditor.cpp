@@ -7,6 +7,7 @@
 #include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/MaterialInspectorPanel.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -55,6 +56,19 @@ namespace KeireEditor
 
     bool InspectorPropertyEditor::EditBoundary() const noexcept { return m_EditBoundary; }
 
+    std::string InspectorPropertyEditor::PrepareFieldControl(const std::string_view label)
+    {
+        const auto layout = Detail::ResolveInspectorFieldLayout(m_Ui.ContentAvailable().Width);
+        if (layout.Stacked)
+        {
+            const auto visibleLabel = Detail::InspectorVisibleLabel(label);
+            if (!visibleLabel.empty())
+                m_Ui.TextWrapped(visibleLabel);
+            m_Ui.SetNextItemWidth(layout.ControlWidth);
+        }
+        return Detail::InspectorControlLabel(label, layout.Stacked);
+    }
+
     void InspectorPropertyEditor::PropertyCategory(const std::string_view label)
     {
         m_Ui.Separator();
@@ -75,7 +89,7 @@ namespace KeireEditor
     bool InspectorPropertyEditor::EditHdrColor(const std::string_view label, Keire::Color& value)
     {
         Keire::UiColor color{value.Red, value.Green, value.Blue, value.Alpha};
-        const bool changed = m_Ui.ColorEditHdr(label, color);
+        const bool changed = m_Ui.ColorEditHdr(PrepareFieldControl(label), color);
         if (changed)
             value = {color.Red, color.Green, color.Blue, color.Alpha};
         return Track(changed);
@@ -86,13 +100,14 @@ namespace KeireEditor
     {
         const auto lower = minimum ? std::optional<std::int64_t>(InspectorIntegerBound(*minimum)) : std::nullopt;
         const auto upper = maximum ? std::optional<std::int64_t>(InspectorIntegerBound(*maximum)) : std::nullopt;
-        return Track(m_Ui.DragInteger(label, value, step, lower, upper));
+        return Track(m_Ui.DragInteger(PrepareFieldControl(label), value, step, lower, upper));
     }
 
     bool InspectorPropertyEditor::EditIntegerSlider(const std::string_view label, std::int64_t& value,
                                                     const double minimum, const double maximum)
     {
-        return Track(m_Ui.SliderInteger(label, value, InspectorIntegerBound(minimum), InspectorIntegerBound(maximum)));
+        return Track(m_Ui.SliderInteger(PrepareFieldControl(label), value, InspectorIntegerBound(minimum),
+                                        InspectorIntegerBound(maximum)));
     }
 
     bool InspectorPropertyEditor::EditChoice(const std::string_view label, std::int64_t& value,
@@ -102,7 +117,7 @@ namespace KeireEditor
                                  ? choices[static_cast<std::size_t>(value)]
                                  : std::string_view("Invalid");
         bool changed = false;
-        if (auto combo = m_Ui.BeginCombo(label, preview); combo)
+        if (auto combo = m_Ui.BeginCombo(PrepareFieldControl(label), preview); combo)
         {
             for (std::size_t index = 0; index < choices.size(); ++index)
             {
@@ -119,29 +134,29 @@ namespace KeireEditor
     bool InspectorPropertyEditor::EditScalar(const std::string_view label, double& value, const double step,
                                              const std::optional<double> minimum, const std::optional<double> maximum)
     {
-        return Track(m_Ui.DragScalar(label, value, step, minimum, maximum));
+        return Track(m_Ui.DragScalar(PrepareFieldControl(label), value, step, minimum, maximum));
     }
 
     bool InspectorPropertyEditor::EditScalarSlider(const std::string_view label, double& value, const double minimum,
                                                    const double maximum)
     {
-        return Track(m_Ui.SliderScalar(label, value, minimum, maximum));
+        return Track(m_Ui.SliderScalar(PrepareFieldControl(label), value, minimum, maximum));
     }
 
     bool InspectorPropertyEditor::EditText(const std::string_view label, std::string& value)
     {
-        return Track(m_Ui.InputText(label, value));
+        return Track(m_Ui.InputText(PrepareFieldControl(label), value));
     }
 
     bool InspectorPropertyEditor::EditTextMultiline(const std::string_view label, std::string& value,
                                                     const std::uint32_t visibleLines)
     {
-        return Track(m_Ui.InputTextMultiline(label, value, visibleLines));
+        return Track(m_Ui.InputTextMultiline(PrepareFieldControl(label), value, visibleLines));
     }
 
     bool InspectorPropertyEditor::EditVector2(const std::string_view label, Keire::Vector2& value, const double step)
     {
-        return Track(m_Ui.DragVector2(label, value, static_cast<float>(step)));
+        return Track(m_Ui.DragVector2(PrepareFieldControl(label), value, static_cast<float>(step)));
     }
 
     bool InspectorPropertyEditor::EditVector3(const std::string_view label, Keire::Vector3& value, const double step)
@@ -151,19 +166,19 @@ namespace KeireEditor
 
     bool InspectorPropertyEditor::EditVector4(const std::string_view label, Keire::Vector4& value, const double step)
     {
-        return Track(m_Ui.DragVector4(label, value, static_cast<float>(step)));
+        return Track(m_Ui.DragVector4(PrepareFieldControl(label), value, static_cast<float>(step)));
     }
 
     bool InspectorPropertyEditor::EditQuaternion(const std::string_view label, Keire::Quaternion& value,
                                                  const double step)
     {
-        return Track(m_Ui.DragQuaternion(label, value, static_cast<float>(step)));
+        return Track(m_Ui.DragQuaternion(PrepareFieldControl(label), value, static_cast<float>(step)));
     }
 
     bool InspectorPropertyEditor::EditColor(const std::string_view label, Keire::Color& value)
     {
         Keire::UiColor color{value.Red, value.Green, value.Blue, value.Alpha};
-        const bool changed = m_Ui.ColorEdit(label, color);
+        const bool changed = m_Ui.ColorEdit(PrepareFieldControl(label), color);
         (void)Track(changed);
         if (!changed)
             return false;
@@ -228,7 +243,7 @@ namespace KeireEditor
         const auto selected = m_Scene ? m_Scene->FindEntity(value) : Keire::Entity{};
         const auto preview = selected ? selected.Name() : (value ? "Missing entity" : "None");
         bool changed = false;
-        if (auto combo = m_Ui.BeginCombo(label, preview); combo)
+        if (auto combo = m_Ui.BeginCombo(PrepareFieldControl(label), preview); combo)
         {
             if (m_Ui.Selectable("None", !value))
             {
@@ -298,7 +313,7 @@ namespace KeireEditor
                                     : value.Entity              ? "Missing component"
                                                                 : "None";
         bool changed = false;
-        if (auto combo = m_Ui.BeginCombo(label, preview); combo)
+        if (auto combo = m_Ui.BeginCombo(PrepareFieldControl(label), preview); combo)
         {
             if (m_Ui.Selectable("None", !value.Entity))
             {
@@ -426,6 +441,7 @@ namespace KeireEditor
     {
         constexpr std::size_t maximumCollectionEntries = 16'384;
         const auto label = descriptor.DisplayName.empty() ? descriptor.Name : descriptor.DisplayName;
+        const bool compactField = Detail::ResolveInspectorFieldLayout(m_Ui.ContentAvailable().Width).Stacked;
         const bool nullable = descriptor.Kind == Keire::ManagedAssetPropertyKind::Text ||
                               descriptor.Kind == Keire::ManagedAssetPropertyKind::SerializableObject ||
                               descriptor.Kind == Keire::ManagedAssetPropertyKind::Array ||
@@ -450,7 +466,7 @@ namespace KeireEditor
             if (descriptor.ManagedTypeName == "System.Char")
             {
                 auto candidate = std::get<std::string>(value.Value);
-                if (m_Ui.InputText(label, candidate))
+                if (m_Ui.InputText(PrepareFieldControl(label), candidate))
                 {
                     if (candidate.size() != 1)
                         throw std::invalid_argument("Managed character field '" + std::string(path) +
@@ -470,8 +486,9 @@ namespace KeireEditor
             const auto maximum = descriptor.Maximum
                                      ? std::optional<std::int64_t>(InspectorIntegerBound(*descriptor.Maximum))
                                      : std::nullopt;
-            changed = descriptor.Slider ? m_Ui.SliderInteger(label, integer, *minimum, *maximum)
-                                        : m_Ui.DragInteger(label, integer, descriptor.Step, minimum, maximum);
+            const auto controlLabel = PrepareFieldControl(label);
+            changed = descriptor.Slider ? m_Ui.SliderInteger(controlLabel, integer, *minimum, *maximum)
+                                        : m_Ui.DragInteger(controlLabel, integer, descriptor.Step, minimum, maximum);
             break;
         }
         case Keire::ManagedAssetPropertyKind::UnsignedInteger:
@@ -487,40 +504,48 @@ namespace KeireEditor
             auto& integer = std::get<std::uint64_t>(value.Value);
             const auto minimum = bound(descriptor.Minimum, 0);
             const auto maximum = bound(descriptor.Maximum, std::numeric_limits<std::uint64_t>::max());
-            changed = descriptor.Slider ? m_Ui.SliderUnsignedInteger(label, integer, minimum, maximum)
-                                        : m_Ui.DragUnsignedInteger(label, integer, descriptor.Step, minimum, maximum);
+            const auto controlLabel = PrepareFieldControl(label);
+            changed = descriptor.Slider
+                          ? m_Ui.SliderUnsignedInteger(controlLabel, integer, minimum, maximum)
+                          : m_Ui.DragUnsignedInteger(controlLabel, integer, descriptor.Step, minimum, maximum);
             break;
         }
         case Keire::ManagedAssetPropertyKind::Scalar:
         {
             auto& scalar = std::get<double>(value.Value);
-            changed = descriptor.Slider
-                          ? m_Ui.SliderScalar(label, scalar, *descriptor.Minimum, *descriptor.Maximum)
-                          : m_Ui.DragScalar(label, scalar, descriptor.Step, descriptor.Minimum, descriptor.Maximum);
+            const auto controlLabel = PrepareFieldControl(label);
+            changed =
+                descriptor.Slider
+                    ? m_Ui.SliderScalar(controlLabel, scalar, *descriptor.Minimum, *descriptor.Maximum)
+                    : m_Ui.DragScalar(controlLabel, scalar, descriptor.Step, descriptor.Minimum, descriptor.Maximum);
             break;
         }
         case Keire::ManagedAssetPropertyKind::Text:
-            changed = descriptor.TextLines > 1
-                          ? m_Ui.InputTextMultiline(label, std::get<std::string>(value.Value), descriptor.TextLines)
-                          : m_Ui.InputText(label, std::get<std::string>(value.Value));
+        {
+            const auto controlLabel = PrepareFieldControl(label);
+            changed =
+                descriptor.TextLines > 1
+                    ? m_Ui.InputTextMultiline(controlLabel, std::get<std::string>(value.Value), descriptor.TextLines)
+                    : m_Ui.InputText(controlLabel, std::get<std::string>(value.Value));
             break;
+        }
         case Keire::ManagedAssetPropertyKind::Vector2:
-            changed = m_Ui.DragVector2(label, std::get<Keire::Vector2>(value.Value));
+            changed = m_Ui.DragVector2(PrepareFieldControl(label), std::get<Keire::Vector2>(value.Value));
             break;
         case Keire::ManagedAssetPropertyKind::Vector3:
             changed = m_Ui.DragVector3(label, std::get<Keire::Vector3>(value.Value));
             break;
         case Keire::ManagedAssetPropertyKind::Vector4:
-            changed = m_Ui.DragVector4(label, std::get<Keire::Vector4>(value.Value));
+            changed = m_Ui.DragVector4(PrepareFieldControl(label), std::get<Keire::Vector4>(value.Value));
             break;
         case Keire::ManagedAssetPropertyKind::Quaternion:
-            changed = m_Ui.DragQuaternion(label, std::get<Keire::Quaternion>(value.Value));
+            changed = m_Ui.DragQuaternion(PrepareFieldControl(label), std::get<Keire::Quaternion>(value.Value));
             break;
         case Keire::ManagedAssetPropertyKind::Color:
         {
             auto& color = std::get<Keire::Color>(value.Value);
             Keire::UiColor candidate{color.Red, color.Green, color.Blue, color.Alpha};
-            if (m_Ui.ColorEdit(label, candidate))
+            if (m_Ui.ColorEdit(PrepareFieldControl(label), candidate))
             {
                 color = {candidate.Red, candidate.Green, candidate.Blue, candidate.Alpha};
                 changed = true;
@@ -565,7 +590,8 @@ namespace KeireEditor
                     changed = DrawManagedValue(value.Children[index], descriptor.Children.front(),
                                                std::string(path) + "[" + std::to_string(index) + "]") ||
                               changed;
-                    m_Ui.SameLine();
+                    if (!compactField)
+                        m_Ui.SameLine();
                     if (m_Ui.Button("Remove"))
                     {
                         value.Children.erase(value.Children.begin() + static_cast<std::ptrdiff_t>(index));
@@ -608,7 +634,8 @@ namespace KeireEditor
                                                    std::string(path) + "[" + std::to_string(index) + "]") ||
                                   changed;
                     }
-                    m_Ui.SameLine();
+                    if (!compactField)
+                        m_Ui.SameLine();
                     if (m_Ui.Button("Remove Entry"))
                     {
                         value.Children.erase(value.Children.begin() + static_cast<std::ptrdiff_t>(index));
@@ -635,7 +662,8 @@ namespace KeireEditor
 
         if (nullable)
         {
-            m_Ui.SameLine();
+            if (!compactField)
+                m_Ui.SameLine();
             if (m_Ui.Button("Set null"))
             {
                 value.Value = std::monostate{};
@@ -668,7 +696,7 @@ namespace KeireEditor
 
             auto target = m_Scene->FindEntity(listener.Target);
             const auto targetPreview = target ? target.Name() : std::string("None");
-            if (auto combo = m_Ui.BeginCombo("Target", targetPreview); combo)
+            if (auto combo = m_Ui.BeginCombo(PrepareFieldControl("Target"), targetPreview); combo)
             {
                 if (m_Ui.Selectable("None", !listener.Target))
                 {
@@ -694,7 +722,7 @@ namespace KeireEditor
             if (listener.Component)
                 selectedRegistration = registry->Find(listener.Component);
             const auto componentPreview = selectedRegistration ? selectedRegistration->Name : std::string("None");
-            if (auto combo = m_Ui.BeginCombo("Component", componentPreview); combo)
+            if (auto combo = m_Ui.BeginCombo(PrepareFieldControl("Component"), componentPreview); combo)
             {
                 if (m_Ui.Selectable("None", !listener.Component))
                 {
@@ -725,7 +753,7 @@ namespace KeireEditor
 
             selectedRegistration = listener.Component ? registry->Find(listener.Component) : std::nullopt;
             const auto methodPreview = listener.Method.empty() ? std::string("No Function") : listener.Method;
-            if (auto combo = m_Ui.BeginCombo("Function", methodPreview); combo)
+            if (auto combo = m_Ui.BeginCombo(PrepareFieldControl("Function"), methodPreview); combo)
             {
                 if (m_Ui.Selectable("No Function", listener.Method.empty()))
                 {

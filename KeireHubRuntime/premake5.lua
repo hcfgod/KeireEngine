@@ -28,7 +28,8 @@ project(HubRuntimeTarget)
 
     includedirs
     {
-        "Include"
+        "Include",
+        "../" .. ProjectConfig.CORE_DIRECTORY .. "/Include"
     }
 
     externalincludedirs

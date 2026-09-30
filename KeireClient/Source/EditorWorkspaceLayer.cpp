@@ -48,6 +48,8 @@
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireClientInternal/Editor/PhysicsPropertyDrawers.h"
+#include "KeireClientInternal/Editor/VfxPropertyDrawers.h"
 
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/Diagnostics/DiagnosticBundleUiInternal.h"
@@ -389,6 +391,8 @@ EditorWorkspaceLayer::EditorWorkspaceLayer(const bool smoke, const bool initiali
                                                                                            )
                                 : nullptr)
 {
+    KeireEditor::Detail::RegisterPhysicsPropertyDrawers(*m_PropertyDrawers);
+    KeireEditor::Detail::RegisterVfxPropertyDrawers(*m_PropertyDrawers);
     m_PropertyDrawers->RegisterOverride(
         Keire::TransformComponent::StaticType(), "rotation",
         [](KeireEditor::IPropertyEditor& editor, const Keire::ComponentProperty& property,

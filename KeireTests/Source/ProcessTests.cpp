@@ -4,7 +4,9 @@
 
 #include "KeireInternal/FileSystem.h"
 #include "KeireInternal/Process.h"
+#include "KeireInternal/VisualStudioDiscovery.h"
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <filesystem>
@@ -12,6 +14,7 @@
 #include <future>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 
 #if defined(_WIN32)
@@ -212,6 +215,58 @@ TEST_CASE("managed external editor targeting reuses one solution for scripts and
 
     std::error_code error;
     std::filesystem::remove_all(root, error);
+}
+
+TEST_CASE("Visual Studio discovery parses complete launchable instances and ranks compatible versions")
+{
+    constexpr std::string_view document = R"json(
+[
+  {"installationVersion":"17.14.37516.0","productPath":"C:/VS17/devenv.exe","isComplete":true,"isLaunchable":true},
+  {"installationVersion":"18.9.999.1","productPath":"C:/VS18.9/devenv.exe","isComplete":true,"isLaunchable":true},
+  {"installationVersion":"18.10.12224.181","productPath":"C:/VS18.10-A/devenv.exe","isComplete":true,"isLaunchable":true},
+  {"installationVersion":"18.10.12224.181","productPath":"C:/VS18.10-B/devenv.exe","isComplete":true,"isLaunchable":true},
+  {"installationVersion":"19.bad","productPath":"C:/Invalid/devenv.exe","isComplete":true,"isLaunchable":true},
+  {"installationVersion":20,"productPath":"C:/WrongType/devenv.exe","isComplete":true,"isLaunchable":true},
+  {"installationVersion":"20.0.0.0","productPath":"C:/Incomplete/devenv.exe","isComplete":false,"isLaunchable":true},
+  {"installationVersion":"21.0.0.0","productPath":"C:/Unlaunchable/devenv.exe","isComplete":true,"isLaunchable":false}
+]
+)json";
+    const auto parsed = Keire::Detail::ParseVisualStudioInstallations(document);
+    REQUIRE(parsed.size() == 4);
+
+    const auto selected = Keire::Detail::SelectCompatibleVisualStudioInstallation(
+        parsed, Keire::Detail::ManagedWorkspaceMinimumVisualStudioMajor);
+    REQUIRE(selected);
+    constexpr std::array<std::uint32_t, 4> expectedVersion{18, 10, 12224, 181};
+    CHECK(selected->Version == expectedVersion);
+    CHECK(selected->Executable == std::filesystem::path("C:/VS18.10-B/devenv.exe"));
+    auto reversed = parsed;
+    std::ranges::reverse(reversed);
+    CHECK(Keire::Detail::SelectCompatibleVisualStudioInstallation(reversed, 18) == selected);
+    CHECK_FALSE(Keire::Detail::SelectCompatibleVisualStudioInstallation(parsed, 19));
+}
+
+TEST_CASE("Visual Studio discovery rejects malformed and unbounded input")
+{
+    CHECK(Keire::Detail::ParseVisualStudioInstallations("not json").empty());
+    CHECK(Keire::Detail::ParseVisualStudioInstallations("{}").empty());
+    CHECK(Keire::Detail::ParseVisualStudioInstallations(std::string((std::size_t{1} << 20U) + 1, ' ')).empty());
+    std::string tooMany = "[";
+    for (std::size_t index = 0; index < 129; ++index)
+        tooMany += index == 0 ? "{}" : ",{}";
+    tooMany += ']';
+    CHECK(Keire::Detail::ParseVisualStudioInstallations(tooMany).empty());
+}
+
+TEST_CASE("managed Visual Studio DTE reuse requires a compatible major version")
+{
+    using Keire::Detail::IsCompatibleVisualStudioDteMoniker;
+    constexpr auto minimum = Keire::Detail::ManagedWorkspaceMinimumVisualStudioMajor;
+    CHECK_FALSE(IsCompatibleVisualStudioDteMoniker(L"!VisualStudio.DTE.17.0:1234", minimum));
+    CHECK(IsCompatibleVisualStudioDteMoniker(L"!VisualStudio.DTE.18.0:1234", minimum));
+    CHECK(IsCompatibleVisualStudioDteMoniker(L"!VisualStudio.DTE.19.2:1234", minimum));
+    CHECK_FALSE(IsCompatibleVisualStudioDteMoniker(L"!VisualStudio.DTE.bad:1234", minimum));
+    CHECK_FALSE(IsCompatibleVisualStudioDteMoniker(L"Other.DTE.18.0:1234", minimum));
 }
 
 TEST_CASE("Child process termination is bounded and idempotent")

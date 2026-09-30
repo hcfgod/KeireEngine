@@ -429,6 +429,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void OpenDroppedInputActions(Keire::AssetId asset) override;
     void InstantiateDroppedPrefab(Keire::AssetId asset, Keire::Vector3 position) override;
     void CreateDroppedMeshEntity(Keire::AssetId asset, Keire::Vector3 position) override;
+    void CreateDroppedVfxEntity(Keire::AssetId asset, Keire::Vector3 position) override;
     void AssignDroppedMaterial(Keire::EntityId entity, Keire::AssetId asset) override;
     void ConfigureAssetImporters(Keire::AssetDatabaseSpecification& specification) const;
     void
@@ -586,6 +587,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     void SynchronizeEditModeVfxPreviews();
     void StopEditModeVfxPreviews() noexcept;
     void OpenInputActions(Keire::AssetId asset);
+    void RefreshInputActionsContext();
     void SaveInputActions();
     void RecordInputUndo(std::string_view name = "Edit Input Actions");
     void UndoInputEdit();
@@ -953,6 +955,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     std::string m_PlayerSigningEnvironmentText;
     Keire::Ref<Keire::InputActionContext> m_InputContext;
     Keire::Ref<Keire::InputActionContext> m_GameplayInputContext;
+    Keire::AssetHandle<Keire::InputActionAsset> m_PendingGameplayInputAsset;
     Keire::AssetId m_GameplayInputMap;
     Keire::Ref<Keire::SceneRuntimeWorld> m_PlayRuntimeWorld;
     struct ManagedSceneOperation final

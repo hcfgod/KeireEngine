@@ -1,18 +1,22 @@
 #include "Keire/Core.h"
 #include "KeireClient/Editor/AnimatorInspectorDiagnostic.h"
 #include "KeireClient/Editor/AssetInspectorFileActions.h"
+#include "KeireClient/Editor/AssetPicker.h"
 #include "KeireClient/Editor/ImportedModelAnimation.h"
+#include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/RiggingStudioValidation.h"
 #include "KeireClientInternal/Editor/AnimatorClipCreation.h"
 #include "KeireClientInternal/Editor/AnimatorControllerPanelModelInternal.h"
 #include "KeireClientInternal/Editor/AnimatorControllerPreviewInternal.h"
 #include "KeireClientInternal/Editor/AnimatorPreviewSelection.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 #include "KeireClientInternal/Editor/StandaloneClipPreview.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -20,8 +24,10 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 TEST_CASE("Animator preview keeps authored skeleton settings and clears rejected target poses")
@@ -386,7 +392,7 @@ namespace
       protected:
         void OnUi(Keire::UiFrame& ui) override
         {
-            for (const float width : std::array{150.0F, 220.0F, 360.0F})
+            for (const float width : std::array{150.0F, 220.0F, 230.0F, 360.0F})
             {
                 const auto label = "Inspector " + std::to_string(width);
                 ui.SetNextWindowSize({width, 700.0F}, false);
@@ -394,6 +400,197 @@ namespace
                 {
                     std::string name = "Long scene Caf\xc3\xa9.keirescene";
                     const auto bounds = ui.ContentRect();
+                    const float addComponentWidth = ui.ContentAvailable().Width;
+                    ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+                    {
+                        const auto addComponent = ui.BeginCombo("##AddComponent", "Add Component...");
+                        (void)addComponent;
+                    }
+                    const auto addComponentBounds = ui.LastItemRect();
+                    CHECK(addComponentBounds.Minimum.X >= bounds.Minimum.X);
+                    CHECK(addComponentBounds.Maximum.X <= bounds.Maximum.X);
+                    CHECK(addComponentBounds.Maximum.X - addComponentBounds.Minimum.X ==
+                          doctest::Approx(addComponentWidth));
+                    CHECK(addComponentBounds.Maximum.X - addComponentBounds.Minimum.X >=
+                          ui.MeasureText("Add Component...").Width);
+
+                    std::string componentSearch;
+                    const float componentSearchWidth = ui.ContentAvailable().Width;
+                    ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+                    (void)ui.InputTextWithHint("##ComponentSearch", "Search scripts and components", componentSearch);
+                    const auto componentSearchBounds = ui.LastItemRect();
+                    CHECK(componentSearchBounds.Minimum.X >= bounds.Minimum.X);
+                    CHECK(componentSearchBounds.Maximum.X <= bounds.Maximum.X);
+                    CHECK(componentSearchBounds.Maximum.X - componentSearchBounds.Minimum.X ==
+                          doctest::Approx(componentSearchWidth));
+
+                    const auto entityNameLayout =
+                        KeireEditor::Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width);
+                    std::string entityName = "Narrow entity";
+                    if (entityNameLayout.Stacked)
+                    {
+                        ui.TextWrapped("Entity Name");
+                        ui.SetNextItemWidth(entityNameLayout.ControlWidth);
+                    }
+                    (void)ui.InputText(entityNameLayout.Stacked ? "###InspectorEntityName"
+                                                                : "Entity Name###InspectorEntityName",
+                                       entityName);
+                    const auto entityNameBounds = ui.LastItemRect();
+                    CHECK(entityNameBounds.Minimum.X >= bounds.Minimum.X);
+                    CHECK(entityNameBounds.Maximum.X <= bounds.Maximum.X);
+                    if (entityNameLayout.Stacked)
+                    {
+                        CHECK(entityNameBounds.Maximum.X - entityNameBounds.Minimum.X ==
+                              doctest::Approx(entityNameLayout.ControlWidth));
+                    }
+
+                    if (width == 230.0F || width == 360.0F)
+                    {
+                        const auto prepareLightField = [&ui](const std::string_view fieldLabel)
+                        {
+                            const auto layout = KeireEditor::Detail::ResolveInspectorFieldLayout(
+                                ui.ContentAvailable().Width, 0.0F, KeireEditor::Detail::InspectorInlineActionSpacing,
+                                KeireEditor::Detail::InspectorDescriptiveFieldWidth);
+                            if (layout.Stacked)
+                            {
+                                ui.TextWrapped(KeireEditor::Detail::InspectorVisibleLabel(fieldLabel));
+                                ui.SetNextItemWidth(layout.ControlWidth);
+                            }
+                            return std::pair{layout,
+                                             KeireEditor::Detail::InspectorControlLabel(fieldLabel, layout.Stacked)};
+                        };
+                        const auto checkLightControlBounds = [&](const Keire::UiItemRect controlBounds,
+                                                                 const KeireEditor::Detail::InspectorFieldLayout layout)
+                        {
+                            CHECK(controlBounds.Minimum.X >= bounds.Minimum.X);
+                            CHECK(controlBounds.Maximum.X <= bounds.Maximum.X);
+                            if (layout.Stacked)
+                            {
+                                CHECK(controlBounds.Maximum.X - controlBounds.Minimum.X ==
+                                      doctest::Approx(layout.ControlWidth));
+                            }
+                        };
+
+                        for (const auto fieldLabel :
+                             {std::string_view("Temperature (K)"), std::string_view("Shadow Bias"),
+                              std::string_view("Indirect Multiplier")})
+                        {
+                            auto id = ui.PushId(fieldLabel);
+                            auto [layout, controlLabel] = prepareLightField(fieldLabel);
+                            CHECK(layout.Stacked);
+                            CHECK(KeireEditor::Detail::InspectorVisibleLabel(controlLabel) ==
+                                  (layout.Stacked ? std::string_view{} : fieldLabel));
+                            float value = 0.5F;
+                            CHECK_FALSE(ui.SliderFloat(controlLabel, value, 0.0F, 1.0F));
+                            checkLightControlBounds(ui.LastItemRect(), layout);
+                        }
+
+                        auto id = ui.PushId("ShadowResolutionLayout");
+                        auto [layout, controlLabel] = prepareLightField("Shadow Resolution");
+                        CHECK(layout.Stacked);
+                        CHECK(KeireEditor::Detail::InspectorVisibleLabel(controlLabel) ==
+                              (layout.Stacked ? std::string_view{} : std::string_view("Shadow Resolution")));
+                        {
+                            const auto resolution = ui.BeginCombo(controlLabel, "High");
+                            (void)resolution;
+                        }
+                        checkLightControlBounds(ui.LastItemRect(), layout);
+
+                        for (const auto fieldLabel :
+                             {std::string_view("Assembly Name"), std::string_view("Root Namespace")})
+                        {
+                            auto assemblyId = ui.PushId(fieldLabel);
+                            auto [assemblyLayout, assemblyControlLabel] = prepareLightField(fieldLabel);
+                            std::string value = "Gameplay.Runtime";
+                            CHECK_FALSE(ui.InputText(assemblyControlLabel, value));
+                            checkLightControlBounds(ui.LastItemRect(), assemblyLayout);
+                        }
+
+                        auto classificationId = ui.PushId("ClassificationLayout");
+                        auto [classificationLayout, classificationLabel] = prepareLightField("Classification");
+                        {
+                            const auto classification = ui.BeginCombo(classificationLabel, "Runtime");
+                            (void)classification;
+                        }
+                        checkLightControlBounds(ui.LastItemRect(), classificationLayout);
+                    }
+
+                    {
+                        auto id = ui.PushId("UiBuilderInspector");
+                        const auto uiBuilderLayout =
+                            KeireEditor::Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width);
+                        std::string slotAssignment = "PrimaryOverlaySlot";
+                        if (uiBuilderLayout.Stacked)
+                        {
+                            ui.TextWrapped("Slot Assignment");
+                            ui.SetNextItemWidth(uiBuilderLayout.ControlWidth);
+                        }
+                        (void)ui.InputText(
+                            KeireEditor::Detail::InspectorControlLabel("Slot Assignment", uiBuilderLayout.Stacked),
+                            slotAssignment);
+                        const auto slotBounds = ui.LastItemRect();
+                        CHECK(slotBounds.Minimum.X >= bounds.Minimum.X);
+                        CHECK(slotBounds.Maximum.X <= bounds.Maximum.X);
+
+                        const std::string bindingSummary =
+                            "Player.Health.Current <- Runtime.Player.Health.Current [OneWay]";
+                        const bool stackedAction = KeireEditor::Detail::ShouldStackInspectorAction(
+                            ui.ContentAvailable().Width, ui.MeasureText(bindingSummary).Width,
+                            ui.MeasureText("Remove").Width + 20.0F);
+                        ui.TextWrapped(bindingSummary);
+                        if (!stackedAction)
+                            ui.SameLine();
+                        const auto removeSize = stackedAction
+                                                    ? Keire::UiSize{std::max(ui.ContentAvailable().Width, 1.0F), 0.0F}
+                                                    : Keire::UiSize{};
+                        (void)ui.Button("Remove##UiBuilderBinding", removeSize);
+                        const auto removeBounds = ui.LastItemRect();
+                        CHECK(removeBounds.Minimum.X >= bounds.Minimum.X);
+                        CHECK(removeBounds.Maximum.X <= bounds.Maximum.X);
+                        if (stackedAction)
+                        {
+                            CHECK(removeBounds.Maximum.X - removeBounds.Minimum.X == doctest::Approx(removeSize.Width));
+                        }
+                    }
+
+                    if (width == 230.0F)
+                    {
+                        KeireEditor::AssetPicker assetPicker;
+                        KeireEditor::InspectorPropertyEditor propertyEditor(ui, {}, {}, {}, assetPicker);
+                        Keire::Vector3 directVector{1.0F, 2.0F, 3.0F};
+                        Keire::Vector3 propertyVector = directVector;
+                        float directVectorHeight = 0.0F;
+                        {
+                            auto id = ui.PushId("DirectVector");
+                            const auto before = ui.CursorPosition();
+                            CHECK_FALSE(ui.DragVector3("Center", directVector));
+                            directVectorHeight = ui.CursorPosition().Y - before.Y;
+                        }
+                        {
+                            auto id = ui.PushId("PropertyVector");
+                            const auto before = ui.CursorPosition();
+                            CHECK_FALSE(propertyEditor.EditVector3("Center", propertyVector, 0.1));
+                            CHECK(ui.CursorPosition().Y - before.Y == doctest::Approx(directVectorHeight));
+                        }
+
+                        bool directBoolean = false;
+                        bool propertyBoolean = false;
+                        {
+                            auto id = ui.PushId("DirectBoolean");
+                            CHECK_FALSE(ui.Checkbox("Is Trigger", directBoolean));
+                        }
+                        const auto directBooleanBounds = ui.LastItemRect();
+                        {
+                            auto id = ui.PushId("PropertyBoolean");
+                            CHECK_FALSE(propertyEditor.EditBoolean("Is Trigger", propertyBoolean));
+                        }
+                        const auto propertyBooleanBounds = ui.LastItemRect();
+                        CHECK(propertyBooleanBounds.Maximum.X - propertyBooleanBounds.Minimum.X ==
+                              doctest::Approx(directBooleanBounds.Maximum.X - directBooleanBounds.Minimum.X));
+                        CHECK(propertyBooleanBounds.Maximum.Y - propertyBooleanBounds.Minimum.Y ==
+                              doctest::Approx(directBooleanBounds.Maximum.Y - directBooleanBounds.Minimum.Y));
+                    }
+
                     CHECK(KeireEditor::DrawAssetInspectorFileActions(ui, name) ==
                           KeireEditor::AssetInspectorFileAction::None);
                     const auto trash = ui.LastItemRect();
