@@ -861,3 +861,93 @@ TEST_CASE("install worker cleanup preserves unknown nested transaction content")
         CHECK_FALSE(registration.Value);
     }
 }
+
+TEST_CASE("install worker recovery cleans empty nested backup directories without a receipt")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto source = CreatePackage(temporary.Path(), InstallProduct::Editor, "6.0.0", "payload");
+    const auto destination = temporary.Path() / "editor";
+    TestRegistrationStore registration;
+    auto request = Request(InstallProduct::Editor, source, destination, registration);
+    REQUIRE(InstallPackageTransaction(request));
+    request.ContinueAfterPhase = [&](const InstallTransactionPhase phase)
+    {
+        if (phase == InstallTransactionPhase::Staged)
+            std::filesystem::create_directories(TransactionRoot(destination) / "backup" / "bin" / "Managed" / "Dotnet");
+        return phase != InstallTransactionPhase::Staged;
+    };
+    REQUIRE_FALSE(UninstallPackageTransaction(request));
+    const auto backup = TransactionRoot(destination) / "backup";
+    REQUIRE_FALSE(std::filesystem::exists(backup / InstallReceiptFileName));
+
+    SUBCASE("empty directories are safe to prune")
+    {
+        REQUIRE(RecoverInstallTransaction(Request(InstallProduct::Editor, {}, destination, registration)));
+        CHECK(RecoverInstallTransaction(Request(InstallProduct::Editor, {}, destination, registration)));
+        CHECK_FALSE(std::filesystem::exists(TransactionLocatorPath(destination)));
+        CHECK_FALSE(std::filesystem::exists(backup));
+        CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "payload");
+        CHECK(VerifyInstalledPackage(Request(InstallProduct::Editor, {}, destination, registration)));
+    }
+    SUBCASE("unexpected files still prevent cleanup")
+    {
+        const auto unknown = backup / "bin" / "Managed" / "Dotnet" / "user.txt";
+        KeireHubTests::WriteText(unknown, "preserve-me");
+        CHECK_FALSE(RecoverInstallTransaction(Request(InstallProduct::Editor, {}, destination, registration)));
+        CHECK(KeireHubTests::ReadText(unknown) == "preserve-me");
+        CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "payload");
+    }
+    SUBCASE("directory links do not grant cleanup authority")
+    {
+        const auto outside = temporary.Path() / "unrelated";
+        KeireHubTests::WriteText(outside / "user.txt", "preserve-link-target");
+        const auto link = backup / "bin" / "linked";
+        std::error_code error;
+        std::filesystem::create_directory_symlink(outside, link, error);
+        if (error)
+        {
+            MESSAGE("Directory symlink creation unavailable: ", error.message());
+            return;
+        }
+        CHECK_FALSE(RecoverInstallTransaction(Request(InstallProduct::Editor, {}, destination, registration)));
+        CHECK(KeireHubTests::ReadText(outside / "user.txt") == "preserve-link-target");
+        CHECK(std::filesystem::is_symlink(std::filesystem::symlink_status(link)));
+    }
+}
+
+TEST_CASE("install worker prepares destinations before extracting a payload")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto source = CreatePackage(temporary.Path(), InstallProduct::Editor, "6.0.0", "payload");
+    const auto destination = temporary.Path() / "editor";
+    TestRegistrationStore registration;
+    auto request = Request(InstallProduct::Editor, {}, destination, registration);
+    CHECK(PrepareInstallDestination(request));
+    CHECK_FALSE(std::filesystem::exists(destination));
+    REQUIRE(InstallPackageTransaction(Request(InstallProduct::Editor, source, destination, registration)));
+    CHECK(PrepareInstallDestination(request));
+    CHECK(VerifyInstalledPackage(request));
+
+    SUBCASE("a different registered location fails before creating the destination")
+    {
+        const auto alternate = temporary.Path() / "alternate";
+        auto result = PrepareInstallDestination(Request(InstallProduct::Editor, {}, alternate, registration));
+        REQUIRE_FALSE(result);
+        CHECK(result.Error().Message.find("Choose that folder to upgrade") != std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(alternate));
+        CHECK(VerifyInstalledPackage(request));
+    }
+    SUBCASE("changed owned content is preserved")
+    {
+        KeireHubTests::WriteText(destination / "bin" / "app.exe", "modified");
+        CHECK_FALSE(PrepareInstallDestination(request));
+        CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "modified");
+    }
+    SUBCASE("preparation does not authorize a later unsafe install")
+    {
+        REQUIRE(PrepareInstallDestination(request));
+        KeireHubTests::WriteText(destination / "bin" / "app.exe", "modified-after-prepare");
+        CHECK_FALSE(InstallPackageTransaction(Request(InstallProduct::Editor, source, destination, registration)));
+        CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "modified-after-prepare");
+    }
+}

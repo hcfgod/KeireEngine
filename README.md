@@ -5,9 +5,17 @@
 
 **Build worlds. Keep control.**
 
+Choose **Window > Presentation** to switch between VSync, Mailbox, and Immediate (VSync off). The menu shows the
+active mode, disables modes unavailable on your GPU, and remembers your choice for this project's editor session.
+Games can query support and change modes through C# `Screen.PresentMode`, `Screen.TrySetPresentMode`, and
+`Screen.VSyncEnabled`. See [presentation controls](Docs/Scripting/RenderingAndMaterials.md).
+
 Baked animation clips open an internal preview: double-click a `.keireanim`, select an animated scene object, and
 play or scrub without changing its controller. Preview Speed defaults to 1× independently of the object's Animator
 Speed. See [animation workflows](Docs/AnimationRigging.md).
+In Play Mode, the Animator's **Playback Speed** multiplies each controller state's **State Speed**: 0.2 is one-fifth
+speed and 2 is double speed. Playback Speed 0 pauses all animation playback and automatic transitions while grounding
+and IK remain responsive. State Speed 0 holds only that state's motion; transitions can still leave it.
 
 UI button and label text respects authored padding in runtime draw commands, including scaled and rotated elements.
 Use padding on controls for text clearance and on their containers for spacing around child controls.
@@ -449,6 +457,10 @@ Packaging is performed on the target operating system:
 Windows Editor and Hub installers use the shared first-party install worker for exact hash receipts, transactional
 rollback, reparse-safe destination checks, and drift-preserving uninstall. Fresh installs require an absent or empty
 ordinary directory; unknown and modified neighboring files are never recursively removed.
+Setup checks the destination before extracting the large payload. If the product is already registered elsewhere,
+select that installation folder to upgrade it, or uninstall it from Windows Settings before choosing another folder.
+Interrupted transactions containing only empty backup directories recover automatically; unknown files remain protected.
+Player Support retains debugging symbols but excludes incremental linker caches to reduce download and installation size.
 Installer details show transaction phases. Uninstall and rollback skip directory-pruning retries while sibling
 files remain, avoiding a multi-second delay for every file in a populated directory.
 

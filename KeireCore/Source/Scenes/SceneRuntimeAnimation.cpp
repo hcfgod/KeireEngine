@@ -647,7 +647,8 @@ namespace Keire
             const float speed = std::max(animator->Speed(), 0.0F);
             if (animator->Speed() < 0.0F)
                 animator->SetRuntimeDiagnostic("Negative Animator speed is not supported and is treated as zero.");
-            auto sample = state->Instance->Update(animator->Paused() ? 0.0F : deltaSeconds * speed);
+            const bool playbackPaused = animator->Paused() || speed == 0.0F;
+            auto sample = state->Instance->Update(playbackPaused ? 0.0F : deltaSeconds * speed, playbackPaused);
             Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
             const auto ikDiagnostics = Detail::EvaluateIndependentAnimationIkPasses(
                 [&] { return ApplyIkGoals(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices); },

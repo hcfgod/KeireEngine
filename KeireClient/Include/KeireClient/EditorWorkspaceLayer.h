@@ -606,6 +606,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] bool SetManagedTimeScale(double scale) noexcept override;
     [[nodiscard]] bool ManagedTimePaused() const noexcept override;
     [[nodiscard]] bool SetManagedTimePaused(bool paused) noexcept override;
+    [[nodiscard]] Keire::ManagedPresentationState ManagedPresentation() const noexcept override;
+    [[nodiscard]] bool SetManagedPresentMode(std::uint8_t mode) noexcept override;
     [[nodiscard]] Keire::ManagedScreenState ManagedScreen() const noexcept override;
     [[nodiscard]] bool SetManagedScreen(std::uint32_t width, std::uint32_t height,
                                         Keire::ManagedScreenMode mode) noexcept override;
@@ -1052,6 +1054,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     bool m_ShowPerformanceOverlay = false;
     bool m_ShowAdvancedPerformanceOverlay = false;
     bool m_MaximizeGameOnPlay = false;
+    std::optional<std::uint8_t> m_PendingEditorPresentMode;
+    std::string m_PresentationFeedback;
     Keire::ScenePlayState m_PlayResumeState = Keire::ScenePlayState::Stopped;
     std::unordered_set<Keire::AssetId> m_PlayEditorTouchedEntities;
     bool m_PlayStartPending = false;

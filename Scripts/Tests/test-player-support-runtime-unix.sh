@@ -54,11 +54,15 @@ for file in KeireRuntime Managed/Coral.Managed.dll Managed/Coral.Managed.deps.js
     write_fixture "$file"
 done
 chmod +x "$source_root/KeireRuntime"
+write_fixture KeireRuntime.pdb
+write_fixture KeireRuntime.ilk
 
 KEIRE_PLAYER_SUPPORT_RUNTIME_SOURCE="$source_root" \
 KEIRE_PLAYER_SUPPORT_RUNTIME_DESTINATION="$fixture/staged" \
     bash "$root/Scripts/Unix/player-support.sh"
 test ! -e "$fixture/staged/Managed/Dotnet/shared/Microsoft.NETCore.App/10.0.9"
+test -f "$fixture/staged/KeireRuntime.pdb"
+test ! -e "$fixture/staged/KeireRuntime.ilk"
 test -f "$fixture/staged/Managed/Dotnet/shared/Microsoft.NETCore.App/10.0.11/libcoreclr.so"
 for license in "${license_names[@]}"; do test -f "$fixture/staged/Licenses/$license"; done
 test "$(stat -c '%a' "$fixture/staged/KeireRuntime" 2>/dev/null || stat -f '%Lp' "$fixture/staged/KeireRuntime")" = 755

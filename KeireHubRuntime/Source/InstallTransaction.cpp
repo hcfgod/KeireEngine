@@ -369,7 +369,9 @@ namespace KeireHub
                 if (registration.Value())
                 {
                     return HubResult<std::optional<InstallReceipt>>::Failure(TransactionError(
-                        HubErrorCode::UnsafeInstallRoot, "Another registered installation must be removed first.",
+                        HubErrorCode::UnsafeInstallRoot,
+                        "An installation is already registered at the path below. Choose that folder to upgrade, or "
+                        "uninstall it from Windows Settings before choosing another folder.",
                         registration.Value()->Root));
                 }
                 return HubResult<std::optional<InstallReceipt>>::Success(std::nullopt);
@@ -384,7 +386,9 @@ namespace KeireHub
                 if (registration.Value())
                 {
                     return HubResult<std::optional<InstallReceipt>>::Failure(TransactionError(
-                        HubErrorCode::UnsafeInstallRoot, "Another registered installation must be removed first.",
+                        HubErrorCode::UnsafeInstallRoot,
+                        "An installation is already registered at the path below. Choose that folder to upgrade, or "
+                        "uninstall it from Windows Settings before choosing another folder.",
                         registration.Value()->Root));
                 }
                 return HubResult<std::optional<InstallReceipt>>::Success(std::nullopt);
@@ -850,6 +854,38 @@ namespace KeireHub
 
             const auto receiptPath = root / InstallReceiptFileName;
             const auto receiptStatus = std::filesystem::symlink_status(receiptPath, error);
+            if (error == std::errc::no_such_file_or_directory || (!error && !std::filesystem::exists(receiptStatus)))
+            {
+                // Interrupted moves can leave only directory scaffolding after the receipt has moved back.
+                // Inventory it without following links; removal still pins each path and requires it to be empty.
+                error.clear();
+                for (std::filesystem::recursive_directory_iterator iterator(root, error), end;
+                     iterator != end && !error; iterator.increment(error))
+                {
+                    const auto status = iterator->symlink_status(error);
+                    if (error)
+                        break;
+                    if (!std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+                    {
+                        return HubResult<CleanupTreeInventory>::Failure(
+                            TransactionError(HubErrorCode::DestinationConflict,
+                                             "Transaction content without an exact receipt was preserved instead of "
+                                             "recursively removed.",
+                                             iterator->path()));
+                    }
+                    result.Directories.push_back(iterator->path().lexically_relative(root));
+                }
+                if (error)
+                {
+                    return HubResult<CleanupTreeInventory>::Failure(
+                        TransactionError(HubErrorCode::IoRead, "A transaction cleanup tree could not be enumerated.",
+                                         root, error.message()));
+                }
+                std::ranges::sort(
+                    result.Directories, [](const auto& left, const auto& right)
+                    { return std::distance(left.begin(), left.end()) > std::distance(right.begin(), right.end()); });
+                return HubResult<CleanupTreeInventory>::Success(std::move(result));
+            }
             if (error || !std::filesystem::is_regular_file(receiptStatus))
             {
                 return HubResult<CleanupTreeInventory>::Failure(TransactionError(
@@ -1123,6 +1159,15 @@ namespace KeireHub
             return store;
         Detail::InstallMutationAuthority mutation;
         return RecoverExisting(mutation, request);
+    }
+
+    HubStatus PrepareInstallDestination(const InstallTransactionRequest& request)
+    {
+        if (const auto recovered = RecoverInstallTransaction(request); !recovered)
+            return recovered;
+        Detail::InstallMutationAuthority mutation;
+        auto classified = ClassifyDestination(mutation, request);
+        return classified ? HubStatus::Success() : HubStatus::Failure(classified.Error());
     }
 
     HubStatus VerifyInstalledPackage(const InstallTransactionRequest& request)

@@ -679,6 +679,14 @@ namespace Keire
         void SubmitRuntimeUiTarget(RuntimeUiRenderSubmission submission);
         void RequestGpuVfxPipelineWarmup();
 
+        /// Owner-thread only. No active mode exists for headless, closed, or recovering renderers.
+        [[nodiscard]] std::optional<RenderPresentMode> PresentMode() const;
+        /// Reports support on the current device/window, not merely recognition of the enum value.
+        [[nodiscard]] bool SupportsPresentMode(RenderPresentMode mode) const;
+        /// Owner-thread only. Drains accepted frames before changing the main-window swapchain.
+        /// Unsupported/invalid modes return false without fallback. Recovery/terminal failures propagate.
+        /// Changes requested during an immediate-mode UI frame return false; defer them to the next update.
+        [[nodiscard]] bool TrySetPresentMode(RenderPresentMode mode);
         [[nodiscard]] RenderMode Mode() const noexcept;
         [[nodiscard]] RenderFeatureCapabilities FeatureCapabilities() const noexcept;
         [[nodiscard]] RenderCapabilities Capabilities() const noexcept;

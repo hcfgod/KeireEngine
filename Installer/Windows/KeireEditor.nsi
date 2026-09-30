@@ -176,6 +176,18 @@ Section "${PRODUCT_NAME} (required)" MainSection
     SetOutPath "$PLUGINSDIR"
     File /oname=KeireInstallWorker.exe "${SOURCE_DIRECTORY}\bin\KeireInstallWorker.exe"
     !insertmacro KeireEditorTestTrace "embedded worker extracted"
+    DetailPrint "Checking the installation folder before extracting the Editor..."
+    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" prepare --product editor --root "$INSTDIR"'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
+    !insertmacro KeireEditorTestTrace "prepare exit=$0 output=$1"
+    StrCmp $0 "0" EditorDestinationReady
+    MessageBox MB_ICONSTOP|MB_OK \
+        "The Editor cannot be installed in this folder.$\r$\n$\r$\n$1$\r$\n$\r$\nNo new Editor payload was extracted. Restart setup after correcting the folder or installation." /SD IDOK
+    SetErrorLevel 1
+    Abort
+EditorDestinationReady:
     SetOutPath "$PLUGINSDIR\payload"
     File /r "${SOURCE_DIRECTORY}\*"
     !insertmacro KeireEditorTestTrace "payload extracted"

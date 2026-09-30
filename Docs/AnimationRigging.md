@@ -3,6 +3,20 @@
 Kéire treats model geometry, skeletons, semantic rigs, skin weights, clips, and Animator Controllers as separate assets.
 This keeps reimport, retargeting, prefab references, and cooked dependencies deterministic.
 
+## Playback Speed And Pausing
+
+Keep both speed controls: **Playback Speed** on the Animator controls the whole character, while **State Speed** in
+the controller adjusts an individual motion. These controls apply to clip-controller playback; Procedural Humanoid
+motion is driven by physics and its procedural profile. Their multipliers combine: Playback Speed 2 with State Speed 0.2 plays
+that motion at 0.4 times normal speed. Blend-tree child speed additionally adjusts its individual clip.
+
+Playback Speed 0 or C# `Animator.Pause()` freezes playback time and automatic transitions, retains pending triggers,
+and emits no animation events or root motion. The current pose is still evaluated, and IK/grounding can adapt to moving
+support surfaces. Restoring speed or clearing Paused resumes without replaying elapsed time. Explicit Play/CrossFade
+commands can still select a pose while paused. State Speed 0 holds a motion but permits controller transitions, which
+is useful for pose states; use the Animator control to pause the complete controller. Preview Speed is independent of
+these Play Mode controls and never rewrites authored speeds.
+
 ## Optional Imported-Model Regression Check
 
 The native test `downloaded rigging models preserve skeletons skinning clips and identity retargets` runs when

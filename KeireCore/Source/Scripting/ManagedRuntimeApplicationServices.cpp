@@ -1,4 +1,5 @@
 #include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
+#include "Keire/Rendering/RenderSystem.h"
 
 #include "Keire/Application.h"
 #include "Keire/BuildInfo.h"
@@ -137,6 +138,43 @@ namespace Keire::Detail
         return true;
     }
 
+    Keire::ManagedPresentationState ManagedRuntimeApplicationServices::ManagedPresentation() const noexcept
+    {
+        try
+        {
+            const auto renderer = m_Application ? m_Application->Renderer() : Ref<RenderSystem>{};
+            if (!renderer)
+                return {};
+            const auto mode = renderer->PresentMode();
+            Keire::ManagedPresentationState state;
+            if (mode)
+                state.Mode = static_cast<std::uint8_t>(*mode);
+            for (std::uint8_t candidate = 0; candidate < 3; ++candidate)
+                if (renderer->SupportsPresentMode(static_cast<Keire::RenderPresentMode>(candidate)))
+                    state.SupportedModes |= static_cast<std::uint8_t>(1U << candidate);
+            return state;
+        }
+        catch (...)
+        {
+            return {};
+        }
+    }
+
+    bool ManagedRuntimeApplicationServices::SetManagedPresentMode(const std::uint8_t mode) noexcept
+    {
+        if (mode > 2)
+            return false;
+        try
+        {
+            const auto renderer = m_Application ? m_Application->Renderer() : Ref<RenderSystem>{};
+            return renderer && renderer->TrySetPresentMode(static_cast<Keire::RenderPresentMode>(mode));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     ManagedScreenState ManagedRuntimeApplicationServices::ManagedScreen() const noexcept
     {
         try
@@ -156,7 +194,7 @@ namespace Keire::Detail
                     .Focused = window->Focused(),
                     .Visible = window->Visible(),
                     .Minimized = window->Minimized(),
-                    .VSync = m_Application->Specification().Render.PresentMode == RenderPresentMode::VSync};
+                    .VSync = ManagedPresentation().Mode <= 1};
         }
         catch (...)
         {

@@ -1175,11 +1175,14 @@ namespace KeireEditor
                     if (ui.InputText("Name", state->Name))
                         markChanged("Rename Animator State");
                     double speed = state->Speed;
-                    if (ui.DragScalar("Speed", speed, 0.01))
+                    if (ui.DragScalar("State Speed", speed, 0.01))
                     {
                         state->Speed = static_cast<float>(speed);
                         markChanged("Edit Animator State Speed");
                     }
+                    ui.SetTooltip("Multiplied by the Animator's Playback Speed. 0.2 plays at one-fifth speed; 2 plays "
+                                  "twice as fast. Zero holds this motion; use Animator Playback Speed = 0 to pause "
+                                  "the whole controller, including transitions.");
                     if (ui.Checkbox("Loop", state->Loop))
                         markChanged("Edit Animator State Looping");
                     if (ui.DragVector2("Graph Position", state->EditorPosition, 1.0F))

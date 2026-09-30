@@ -1789,6 +1789,12 @@ neighbors, and never recursively deletes the selected root. The real Editor and 
 pre-Application `--verify-installation` handler that revalidates the product's exact schema-2 package manifest and file
 inventory without creating preferences, projects, windows, singleton activation, or network clients. NSIS runs that
 handler with a bounded timeout while rollback is still possible. Linux and macOS installer authorities are unchanged.
+NSIS extracts only the worker before calling `prepare`: it recovers pending transactions, validates the destination,
+and can migrate a verified legacy installation before payload extraction. Installation repeats these checks; preparation
+does not grant lasting mutation authority. Receipt-less transaction scaffolding is removed only after a directory-only
+inventory and pinned empty-directory removals. Unknown files, links, and changed paths still prevent cleanup.
+Player Support excludes `.ilk` incremental linker caches; `.pdb` debugging symbols remain available in symbol-bearing
+configurations. Neither runtime execution nor packaged C# compilation uses the build machine's linker cache.
 
 A KeireCore prebuild step refreshes version and source-control identity under `Build/Generated` immediately before compilation, including tracked and untracked dirty state. The generator C-escapes configured strings and only rewrites the header when its content changes. Built-in rendering, skinning, and VFX headers are independently fingerprinted from their generator, compiler, and HLSL inputs. Cache misses use a repository-scoped inter-process lock, so parallel builds publish one complete header while waiters recheck and reuse it. Platform build launchers hold a checkout-wide lock while mutating the shared `Build` tree; compiler parallelism remains internal to that build, while another launcher waits instead of racing links, staging, or dependency publication. The compiler supplies configuration, compiler, platform, and architecture identity. Packaging regenerates identity and verifies the staged binary's commit prefix and dirty marker against its manifest. The resulting `Keire::BuildInfo` describes the binary itself rather than the machine inspecting it.
 
@@ -1844,6 +1850,12 @@ runtime graph stays flat by stable state ID so transitions can deterministically
 owns only an `AnimatorControllerDocument` draft and panel selection state. Drafts may be
 temporarily incomplete, but Save canonicalizes and validates the complete graph before atomically replacing the source;
 failed validation therefore cannot replace the last-good imported asset.
+
+The scene runtime multiplies simulation delta by Animator Playback Speed before evaluating state and clip multipliers.
+At zero speed or explicit pause it uses `AnimatorInstance::Update(delta, true)`: pose evaluation continues but time,
+automatic transitions, trigger consumption, events, and extracted root motion are frozen. Explicit commands remain
+available, and root-motion baselines follow the sampled pose to avoid a displacement on resume. The single-argument
+`Update(0)` contract remains unchanged for tools that intentionally evaluate immediate transitions without advancing time.
 
 Animator state presentation reuses `StableNodeGraphCanvas`; the panel maps serialized string IDs to deterministic local
 canvas IDs, then translates completed node drags, typed pin connections, cable deletion, and context actions back into
@@ -2190,3 +2202,16 @@ Opening a clip creates a separate in-memory document with one clip state; it nev
 document or its undo context. Standalone playback may sample onto a selected Animator with a different controller,
 without changing serialized component properties. Switching preview sources stops the prior pose; closing the panel,
 returning to the controller, or entering scene Play Mode releases the transient pose through the same cleanup path.
+
+### Runtime presentation mode changes
+
+`RenderSystem::PresentMode()` reports the actual active main-window swapchain mode; headless, closed, and recovering
+renderers report no mode. `SupportsPresentMode()` reports current device/window capabilities. SDL GPU exposes FIFO
+VSync, Mailbox, and Immediate; adaptive VSync, refresh divisors, and driver-controlled variable refresh are not invented
+as portable engine modes. Startup may fall back to VSync, but runtime `TrySetPresentMode()` rejects unsupported modes.
+
+These APIs require the application owner thread. A change retires accepted frames, dispatches the swapchain update to
+the renderer thread, waits for backend GPU work, and publishes the new mode only after success. Recovery recreates the
+last successfully selected mode. A request during immediate-mode UI authoring is rejected to avoid waiting on renderer
+packets that need the owner-held UI context lock; editor menus defer changes to the next update. A same-mode request is
+a successful no-op. The editor currently disables detached ImGui viewports, so its single presentation window is covered.

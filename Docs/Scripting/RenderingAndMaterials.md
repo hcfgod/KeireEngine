@@ -193,3 +193,41 @@ gameplay contract. Scripts can hold direct `ShaderGraph`, `ShaderGraphInstance`,
 compiled graph readiness without receiving or mutating the graph object. Render textures and custom render-pass
 scripting remain tracked in the
 [Managed API Capability Matrix](ManagedApiMatrix.md).
+
+## Presentation and VSync
+
+Use **Window > Presentation** in the editor to choose VSync (FIFO), Mailbox, or Off (Immediate).
+The checked item is the actual active mode; unsupported choices are disabled. The preference is saved
+for this project's editor on this computer. Unsupported requests leave the current mode intact. Failed
+switches display feedback in the menu; a rendering failure can make presentation unavailable. Check the
+Console for details and restart the editor if rendering failed. Changes apply at the next frame, so switching cannot interrupt an open UI frame.
+
+Game scripts can change presentation independently without modifying project settings or the editor's
+saved preference. Call from `Update` or another owner-thread gameplay callback:
+
+```csharp
+if (Screen.IsPresentModeSupported(PresentMode.Mailbox))
+{
+    if (!Screen.TrySetPresentMode(PresentMode.Mailbox))
+        Log.Warning("Presentation could not be changed this frame.");
+}
+```
+
+`Screen.PresentMode` reports the actual mode, and setting it throws if the request cannot be applied.
+`TrySetPresentMode` returns false when a change cannot be applied. Unsupported and temporarily unsafe
+requests preserve the current mode. A swapchain or other rendering failure may instead leave no usable
+presentation surface: check `Screen.PresentationAvailable` and the runtime log after failure. Invalid enum
+values throw `ArgumentOutOfRangeException` before native mutation.
+Changes during a UI drawing callback may be rejected; apply the request in the next `Update` instead.
+`Screen.PresentationAvailable` is false without an active GPU presentation surface (including headless runs).
+Reading `PresentMode` without a surface throws, while capability queries and `VSyncEnabled` return false.
+
+- `VSync`: FIFO presentation synchronized to refresh; frames can queue.
+- `Mailbox`: synchronized presentation that replaces queued frames with the newest frame, when supported.
+- `Immediate`: presents without waiting for refresh and may tear, when supported.
+
+`Screen.VSyncEnabled` is true for both VSync and Mailbox. Setting it to true selects FIFO VSync;
+setting it to false selects Immediate and throws when unavailable. Use `TrySetPresentMode` for a settings
+menu that should handle unsupported hardware without exceptions. Adaptive VSync, VRR, G-SYNC, and FreeSync
+are driver/display capabilities; the engine does not advertise them as selectable modes or guarantee that
+the desktop compositor or driver presents frames exactly as requested.

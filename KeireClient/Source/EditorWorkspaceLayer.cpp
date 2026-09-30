@@ -877,6 +877,8 @@ void EditorWorkspaceLayer::OnAttach()
             const auto editorSession = KeireEditor::LoadEditorSessionState(m_EditorSessionPath);
             const auto restoredScene = editorSession.LastScene;
             m_MaximizeGameOnPlay = editorSession.MaximizeGameOnPlay;
+            if (editorSession.PresentMode <= 2)
+                m_PendingEditorPresentMode = editorSession.PresentMode;
             const auto startupCandidate = restoredScene ? restoredScene : project->Descriptor().StartupScene;
             m_DefaultLitWarmupAttempted = false;
             m_DefaultLitWarmupReady = false;
@@ -1005,6 +1007,23 @@ void EditorWorkspaceLayer::OnAttach()
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
+    // Apply before UI BeginFrame: switching presentation drains render work that may need the UI frame lock.
+    if (m_PendingEditorPresentMode)
+    {
+        const auto mode = *m_PendingEditorPresentMode;
+        m_PendingEditorPresentMode.reset();
+        if (!SetManagedPresentMode(mode))
+            m_PresentationFeedback = ManagedPresentation().Mode <= 2
+                                         ? "Could not apply this mode. Check the active mode and Console for details."
+                                         : "Presentation is unavailable. Check the Console for rendering errors; "
+                                           "restart the editor if rendering failed.";
+        else if (!KeireEditor::SaveEditorSessionPresentMode(m_EditorSessionPath, mode))
+            m_PresentationFeedback = "Mode applied, but the editor preference could not be saved.";
+        else
+            m_PresentationFeedback.clear();
+        if (!m_PresentationFeedback.empty())
+            KEIRE_CLIENT_WARN("[Display] {}", m_PresentationFeedback);
+    }
     using Phase = KeireEditor::EditorWorkspaceUpdatePhase;
     using Disposition = KeireEditor::EditorWorkspaceUpdateDisposition;
 

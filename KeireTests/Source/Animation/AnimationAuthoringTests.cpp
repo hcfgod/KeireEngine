@@ -639,6 +639,66 @@ TEST_CASE("Animator publishes rotational root motion without reset or wrap disco
     CHECK(animator.DebugSnapshot()->MotionTrajectory.back().Time == doctest::Approx(1.1F));
 }
 
+TEST_CASE("Animator paused evaluation preserves triggers and freezes transitions and root motion")
+{
+    const auto skeletonId = Keire::AssetId::Parse("50000000-0000-4000-8000-000000000001");
+    const auto clipId = Keire::AssetId::Parse("50000000-0000-4000-8000-000000000002");
+    const auto clip = RotatingRootClip(skeletonId);
+    auto idle = ClipState("idle", "Idle", clipId);
+    auto run = ClipState("run", "Run", clipId);
+    Keire::AnimationTransition transition;
+    transition.Id = "start";
+    transition.DestinationId = "run";
+    transition.Destination = "Run";
+    transition.Duration = 1.0F;
+    transition.Conditions = {{"Go", Keire::AnimationConditionComparison::Equal, 0.0F, "go", 0, true}};
+    idle.Transitions.push_back(transition);
+    SUBCASE("crossfade progress freezes") {}
+    SUBCASE("instant transitions also remain pending") { idle.Transitions.front().Duration = 0.0F; }
+    const auto graph = Keire::CreateRef<Keire::AnimationGraphAsset>(
+        GraphWithBaseLayer({{"go", "Go", Keire::AnimationParameterType::Trigger}}, {idle, run}));
+    Keire::AnimatorInstance animator(TestSkeleton(), graph, [clip](Keire::AssetId) { return clip; });
+    animator.SetTrigger("Go");
+    const auto paused = animator.Update(1.0F, true);
+    CHECK(paused.State == "Idle");
+    CHECK(paused.NormalizedTime == 0.0F);
+    CHECK(paused.Events.empty());
+    CHECK(paused.RootMotion == Keire::Vector3{});
+    CHECK(paused.RootRotation == Keire::Quaternion{});
+    CHECK(animator.Trigger("Go"));
+    REQUIRE_FALSE(paused.LocalPose.empty());
+    const auto resumed = animator.Update(0.25F);
+    CHECK(resumed.State == "Run");
+    CHECK_FALSE(animator.Trigger("Go"));
+    const auto before = animator.CaptureCheckpoint();
+    const auto held = animator.Update(2.0F, true);
+    const auto after = animator.CaptureCheckpoint();
+    CHECK(held.NormalizedTime == doctest::Approx(resumed.NormalizedTime));
+    CHECK(held.RootRotation == Keire::Quaternion{});
+    CHECK(after.Layers.front().Time == before.Layers.front().Time);
+    if (before.Layers.front().Transition)
+    {
+        REQUIRE(after.Layers.front().Transition);
+        CHECK(after.Layers.front().Transition->Elapsed == before.Layers.front().Transition->Elapsed);
+    }
+    animator.Play("Run", {}, 0.5F);
+    const auto explicitPose = animator.Update(0.0F, true);
+    CHECK(explicitPose.NormalizedTime == doctest::Approx(0.5F));
+    CHECK(explicitPose.RootMotion == Keire::Vector3{});
+    CHECK(explicitPose.RootRotation == Keire::Quaternion{});
+    const auto moving = animator.Update(0.1F);
+    // The clip uses normalized linear quaternion interpolation, so its angular speed is not constant.
+    // Compare the same interval on an uninterrupted animator instead of assuming nine degrees per tenth second.
+    Keire::AnimatorInstance uninterrupted(TestSkeleton(), graph, [clip](Keire::AssetId) { return clip; });
+    uninterrupted.Play("Run", {}, 0.5F);
+    (void)uninterrupted.Update(0.0F);
+    const auto expected = uninterrupted.Update(0.1F);
+    CHECK(moving.RootRotation.X == doctest::Approx(expected.RootRotation.X));
+    CHECK(moving.RootRotation.Y == doctest::Approx(expected.RootRotation.Y));
+    CHECK(moving.RootRotation.Z == doctest::Approx(expected.RootRotation.Z));
+    CHECK(moving.RootRotation.W == doctest::Approx(expected.RootRotation.W));
+}
+
 TEST_CASE("Animation compression deterministically removes redundant keys within authored tolerances")
 {
     Keire::AnimationTrack linear;

@@ -1351,6 +1351,8 @@ namespace Keire::RenderBackend
         SDL_GPUDevice* Device = nullptr;
         std::array<SDL_GPUTimestampQuery*, 3> TimestampQueries{};
         SDL_GPUPresentMode PresentMode = SDL_GPU_PRESENTMODE_VSYNC;
+        std::atomic<std::uint8_t> PublishedPresentMode{255U};
+        std::atomic<std::uint8_t> SupportedPresentModes{0U};
         SDL_GPUTextureFormat ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
         SDL_GPUTextureFormat SceneColorFormat = SDL_GPU_TEXTUREFORMAT_R16G16B16A16_FLOAT;
         SDL_GPUTextureFormat DepthFormat = SDL_GPU_TEXTUREFORMAT_INVALID;

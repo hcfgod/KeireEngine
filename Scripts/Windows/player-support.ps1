@@ -196,7 +196,7 @@ function Copy-PlayerRuntimeClosure {
     Copy-PlayerSupportLicenses -Destination (Join-Path $Destination 'Licenses') -Architecture $TargetArchitecture
     Copy-WindowsPlayerRuntimeLibraries -Destination $Destination -Architecture $TargetArchitecture
     if ($IncludeSymbols) {
-        foreach ($symbol in @('KeireRuntime.pdb', 'KeireRuntime.ilk')) {
+        foreach ($symbol in @('KeireRuntime.pdb')) {
             $symbolPath = Join-Path $sourceRoot $symbol
             if (Test-Path -LiteralPath $symbolPath -PathType Leaf) {
                 Copy-FileIfChanged -Source $symbolPath -Destination (Join-Path $Destination $symbol)
@@ -574,7 +574,7 @@ try {
         Copy-PlayerRuntimeClosure -Source $source -Destination $destination `
             -IncludeSymbols ($variant.Name -ne 'Dist') -TargetArchitecture $ManifestArchitecture
         $symbols = @()
-        foreach ($symbol in @('KeireRuntime.pdb', 'KeireRuntime.ilk')) {
+        foreach ($symbol in @('KeireRuntime.pdb')) {
             if (Test-Path -LiteralPath (Join-Path $destination $symbol) -PathType Leaf) { $symbols += $symbol }
         }
         $configurationName = if ($variant.Name -eq 'Development') { 'development' } else { $variant.Name.ToLowerInvariant() }

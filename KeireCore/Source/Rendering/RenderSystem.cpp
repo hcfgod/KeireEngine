@@ -10,6 +10,7 @@
 #include "Keire/Ui/RuntimeUi.h"
 
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/UiContextAccessInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
@@ -21,6 +22,7 @@
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <imgui_impl_sdlgpu3.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <array>
@@ -590,6 +592,79 @@ namespace Keire
         state.Statistics.SavedAliasingBytes = snapshot.SavedAliasingBytes;
         return snapshot;
     }
+    std::optional<RenderPresentMode> RenderSystem::PresentMode() const
+    {
+        const auto& state = *m_Impl->State;
+        if (std::this_thread::get_id() != state.OwnerThread)
+            throw std::logic_error("RenderSystem::PresentMode must be called on the application owner thread.");
+        if (!state.Open || state.DeviceLifecycle.load(std::memory_order_acquire) != RenderDeviceState::Running)
+            return std::nullopt;
+        const auto mode = state.PublishedPresentMode.load(std::memory_order_acquire);
+        return mode <= static_cast<std::uint8_t>(RenderPresentMode::Immediate)
+                   ? std::optional(static_cast<RenderPresentMode>(mode))
+                   : std::nullopt;
+    }
+
+    bool RenderSystem::SupportsPresentMode(const RenderPresentMode mode) const
+    {
+        if (!PresentMode() || mode > RenderPresentMode::Immediate)
+            return false;
+        return (m_Impl->State->SupportedPresentModes.load(std::memory_order_acquire) &
+                (1U << static_cast<std::uint8_t>(mode))) != 0U;
+    }
+
+    bool RenderSystem::TrySetPresentMode(const RenderPresentMode mode)
+    {
+        if (!SupportsPresentMode(mode))
+            return false;
+        if (PresentMode() == mode)
+            return true;
+        auto& state = *m_Impl->State;
+        if (const auto context = state.EditorUiContextAccess.load(std::memory_order_acquire))
+        {
+            const auto contextLock = context->Acquire();
+            // UI callbacks retain this recursive guard until EndFrame. Waiting for earlier GPU packets here
+            // would deadlock their UI backend access, so callers must defer the request to the next update.
+            if (ImGui::GetCurrentContext()->WithinFrameScope)
+                return false;
+        }
+        state.Flush();
+        bool changed = false;
+        state.DispatchRender(
+            [&]
+            {
+                if (state.DeviceLifecycle.load(std::memory_order_acquire) != RenderDeviceState::Running ||
+                    !state.Device || !state.WindowClaimed)
+                    return;
+                const auto nativeMode = RenderBackend::ToSdlPresentMode(mode);
+                if (!SDL_WindowSupportsGPUPresentMode(state.Device, state.NativeWindow, nativeMode))
+                    return;
+                // Flush retires accepted frames; also drain backend/UI work before recreating the swapchain.
+                if (!SDL_WaitForGPUIdle(state.Device))
+                {
+                    const auto failure = std::make_exception_ptr(
+                        GpuDeviceLostError(state.DeviceLossDiagnostic("SDL_WaitForGPUIdle", LastSdlError())));
+                    state.RecordTerminalFailure(failure);
+                    std::rethrow_exception(failure);
+                }
+                if (!SDL_SetGPUSwapchainParameters(state.Device, state.NativeWindow, SDL_GPU_SWAPCHAINCOMPOSITION_SDR,
+                                                   nativeMode))
+                {
+                    // SDL may destroy the previous swapchain before reporting creation failure. Do not
+                    // advertise the old mode as usable or continue submitting into a broken swapchain.
+                    state.PublishedPresentMode.store(255U, std::memory_order_release);
+                    const auto failure = std::make_exception_ptr(GpuDeviceLostError(
+                        state.DeviceLossDiagnostic("SDL_SetGPUSwapchainParameters", LastSdlError())));
+                    state.RecordTerminalFailure(failure);
+                    std::rethrow_exception(failure);
+                }
+                state.PresentMode = nativeMode;
+                state.PublishedPresentMode.store(static_cast<std::uint8_t>(mode), std::memory_order_release);
+                changed = true;
+            });
+        return changed;
+    }
+
     bool RenderSystem::IsOpen() const noexcept { return m_Impl->State->Open; }
     void RenderSystem::Flush() { m_Impl->State->Flush(); }
     void RenderSystem::Close() noexcept { m_Impl->State->Close(); }

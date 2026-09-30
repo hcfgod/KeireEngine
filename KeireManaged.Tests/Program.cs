@@ -10,6 +10,7 @@ var tests = new (string Name, Action Run)[]
     ("Managed state v4 tags direct entity component and asset references", DirectReferenceStateContract),
     ("Managed serialization v4 custom values migrate and invoke callbacks transactionally",
      ManagedSerializationV4Tests.Run),
+    ("Screen presentation capabilities switching and lifetime", PresentationTests.Run),
     ("Runtime services order quarantine migrate and stop transactionally", RuntimeServiceTests.Run),
     ("Native service contracts validate the bounded source-module ABI", NativeServiceContractTests.Run),
     ("Managed serialization v3 preserves graphs nested dictionaries and transactions", ManagedSerializationV3Tests.Run),
@@ -1759,6 +1760,7 @@ file static unsafe class NativeFoundationFixture
 {
     private static double s_timeScale;
     private static byte s_paused;
+    private static byte s_presentMode;
     private static string s_persistentDataPath = string.Empty;
 
     public static int ExitCode { get; private set; }
@@ -1770,6 +1772,7 @@ file static unsafe class NativeFoundationFixture
     {
         s_timeScale = 1.0;
         s_paused = 0;
+        s_presentMode = 0;
         s_persistentDataPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "keire-native-foundation"));
         ExitCode = 0;
         LastWidth = 0;
@@ -1784,6 +1787,8 @@ file static unsafe class NativeFoundationFixture
         Keire.NativeFoundation.SetTimePausedIcall = &SetTimePaused;
         Keire.NativeFoundation.GetScreenStateIcall = &GetScreenState;
         Keire.NativeFoundation.SetScreenIcall = &SetScreen;
+        Keire.NativeFoundation.GetPresentationStateIcall = &GetPresentationState;
+        Keire.NativeFoundation.SetPresentModeIcall = &SetPresentMode;
     }
 
     public static void Uninstall()
@@ -1797,6 +1802,8 @@ file static unsafe class NativeFoundationFixture
         Keire.NativeFoundation.SetTimePausedIcall = null;
         Keire.NativeFoundation.GetScreenStateIcall = null;
         Keire.NativeFoundation.SetScreenIcall = null;
+        Keire.NativeFoundation.GetPresentationStateIcall = null;
+        Keire.NativeFoundation.SetPresentModeIcall = null;
     }
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly]
@@ -1866,6 +1873,18 @@ file static unsafe class NativeFoundationFixture
             MinimizedValue = 0,
             VSyncValue = 1
         };
+        return 1;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static ushort GetPresentationState() => (ushort)(0x0700 | s_presentMode);
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly]
+    private static byte SetPresentMode(byte mode)
+    {
+        if (mode > 2)
+            return 0;
+        s_presentMode = mode;
         return 1;
     }
 

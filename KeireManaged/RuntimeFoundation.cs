@@ -43,6 +43,14 @@ public readonly record struct Resolution(uint Width, uint Height, uint PixelWidt
 
 public readonly record struct ScreenRect(float X, float Y, float Width, float Height);
 
+/// <summary>Presentation choices reported by the active GPU surface. Mailbox synchronizes without a FIFO queue.</summary>
+public enum PresentMode : byte
+{
+    VSync,
+    Mailbox,
+    Immediate
+}
+
 public static class Screen
 {
     public static Resolution CurrentResolution
@@ -63,7 +71,54 @@ public static class Screen
     public static bool Focused => NativeFoundation.ScreenState.Focused;
     public static bool Visible => NativeFoundation.ScreenState.Visible;
     public static bool Minimized => NativeFoundation.ScreenState.Minimized;
-    public static bool VSyncEnabled => NativeFoundation.ScreenState.VSync;
+    /// <summary>False when there is no active presentation surface (for example, a headless player).</summary>
+    public static bool PresentationAvailable => (NativeFoundation.PresentationState & 255) <= 2;
+
+    /// <summary>The actual active mode. Changes affect this window only and are not persisted to project settings.</summary>
+    public static PresentMode PresentMode
+    {
+        get
+        {
+            byte mode = (byte)(NativeFoundation.PresentationState & 255);
+            if (mode > 2)
+                throw new InvalidOperationException("There is no active presentation surface.");
+            return (PresentMode)mode;
+        }
+        set => SetPresentMode(value);
+    }
+
+    /// <summary>True for FIFO VSync and Mailbox. Enabling selects VSync; disabling selects Immediate.</summary>
+    public static bool VSyncEnabled
+    {
+        get => PresentationAvailable && PresentMode != Keire.PresentMode.Immediate;
+        set => SetPresentMode(value ? Keire.PresentMode.VSync : Keire.PresentMode.Immediate);
+    }
+
+    public static bool IsPresentModeSupported(PresentMode mode)
+    {
+        ValidatePresentMode(mode);
+        return (NativeFoundation.PresentationState & (1 << (8 + (int)mode))) != 0;
+    }
+
+    /// <summary>Returns false if the mode cannot be applied. Unsupported requests preserve the current mode;
+    /// a rendering failure can make presentation unavailable. Check PresentationAvailable and the runtime log.</summary>
+    public static bool TrySetPresentMode(PresentMode mode)
+    {
+        ValidatePresentMode(mode);
+        return NativeFoundation.TrySetPresentMode(mode);
+    }
+
+    public static void SetPresentMode(PresentMode mode)
+    {
+        if (!TrySetPresentMode(mode))
+            throw new InvalidOperationException("The presentation mode could not be applied. Check Screen.IsPresentModeSupported, Screen.PresentationAvailable, and the runtime log for unsupported modes or rendering errors.");
+    }
+
+    private static void ValidatePresentMode(PresentMode mode)
+    {
+        if (!Enum.IsDefined(mode))
+            throw new ArgumentOutOfRangeException(nameof(mode));
+    }
     public static ScreenRect SafeArea
     {
         get

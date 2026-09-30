@@ -442,6 +442,17 @@ namespace Keire::RenderBackend
         if (!SDL_SetGPUSwapchainParameters(Device, NativeWindow, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, PresentMode))
             throw GpuDeviceLostError(DeviceLossDiagnostic("SDL_SetGPUSwapchainParameters", LastSdlError()));
 
+        std::uint8_t supportedPresentModes = 0U;
+        for (const auto mode : {RenderPresentMode::VSync, RenderPresentMode::Mailbox, RenderPresentMode::Immediate})
+        {
+            const auto nativeMode = ToSdlPresentMode(mode);
+            if (SDL_WindowSupportsGPUPresentMode(Device, NativeWindow, nativeMode))
+                supportedPresentModes |= static_cast<std::uint8_t>(1U << static_cast<std::uint8_t>(mode));
+            if (nativeMode == PresentMode)
+                PublishedPresentMode.store(static_cast<std::uint8_t>(mode), std::memory_order_release);
+        }
+        SupportedPresentModes.store(supportedPresentModes, std::memory_order_release);
+
         ColorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM_SRGB;
         const SDL_GPUTextureUsageFlags colorUsage = SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER;
         if (!SDL_GPUTextureSupportsFormat(Device, ColorFormat, SDL_GPU_TEXTURETYPE_2D, colorUsage))

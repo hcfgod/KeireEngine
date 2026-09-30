@@ -23,6 +23,8 @@ namespace Keire::Detail
         [[nodiscard]] bool SetManagedTimeScale(double scale) noexcept override;
         [[nodiscard]] bool ManagedTimePaused() const noexcept override;
         [[nodiscard]] bool SetManagedTimePaused(bool paused) noexcept override;
+        [[nodiscard]] ManagedPresentationState ManagedPresentation() const noexcept override;
+        [[nodiscard]] bool SetManagedPresentMode(std::uint8_t mode) noexcept override;
         [[nodiscard]] ManagedScreenState ManagedScreen() const noexcept override;
         [[nodiscard]] bool SetManagedScreen(std::uint32_t width, std::uint32_t height,
                                             ManagedScreenMode mode) noexcept override;

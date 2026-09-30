@@ -86,3 +86,44 @@ TEST_CASE("Editor session state fails closed for malformed or unsupported files"
     }
     CHECK(KeireEditor::LoadEditorSessionState(path) == KeireEditor::EditorSessionState{});
 }
+
+TEST_CASE("Editor presentation preferences preserve scene view settings and reject invalid modes")
+{
+    TemporaryDirectory directory;
+    const auto path = directory.Path / "EditorSession.state";
+    const auto scene = Keire::AssetId::Parse("60000000-0000-4000-8000-000000000006");
+    REQUIRE(KeireEditor::SaveEditorSessionState(path, {.LastScene = scene, .MaximizeGameOnPlay = true}));
+    for (std::uint8_t mode = 0; mode < 3; ++mode)
+    {
+        REQUIRE(KeireEditor::SaveEditorSessionPresentMode(path, mode));
+        REQUIRE(KeireEditor::SaveEditorSessionViewPreference(path, false));
+        const auto state = KeireEditor::LoadEditorSessionState(path);
+        CHECK(state.LastScene == scene);
+        CHECK(state.PresentMode == mode);
+        CHECK_FALSE(state.MaximizeGameOnPlay);
+    }
+    const auto previous = KeireEditor::LoadEditorSessionState(path);
+    CHECK_FALSE(KeireEditor::SaveEditorSessionPresentMode(path, 3));
+    CHECK_FALSE(KeireEditor::SaveEditorSessionState(path, {.PresentMode = 42}));
+    CHECK(KeireEditor::LoadEditorSessionState(path) == previous);
+    CHECK_FALSE(KeireEditor::SaveEditorSessionPresentMode({}, 0));
+    CHECK_FALSE(KeireEditor::SaveEditorSessionPresentMode(path / "blocked", 0));
+}
+
+TEST_CASE("Editor presentation preferences migrate schema two without inventing a requested mode")
+{
+    TemporaryDirectory directory;
+    const auto path = directory.Path / "EditorSession.state";
+    {
+        std::ofstream output(path);
+        output << "KEIRE_EDITOR_SESSION 2\nnone\n1\n";
+    }
+    const auto state = KeireEditor::LoadEditorSessionState(path);
+    CHECK(state.MaximizeGameOnPlay);
+    CHECK(state.PresentMode == 255);
+    {
+        std::ofstream output(path);
+        output << "KEIRE_EDITOR_SESSION 3\nnone\n1\n3\n";
+    }
+    CHECK(KeireEditor::LoadEditorSessionState(path) == KeireEditor::EditorSessionState{});
+}

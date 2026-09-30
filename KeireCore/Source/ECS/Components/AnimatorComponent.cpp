@@ -483,7 +483,19 @@ namespace Keire
              0.1,
              SkinnedMeshAsset::StaticType()},
             {"applyRootMotion", "Apply Root Motion", "Animation", ComponentPropertyKind::Boolean},
-            {"speed", "Speed", "Animation", ComponentPropertyKind::Scalar, false, -8.0, 8.0, 0.05},
+            {"speed",
+             "Playback Speed",
+             "Animation",
+             ComponentPropertyKind::Scalar,
+             false,
+             0.0,
+             8.0,
+             0.05,
+             {},
+             "Clip-controller multiplier for all states and transitions: 1 = normal, 0.2 = one-fifth speed, 2 = double "
+             "speed. "
+             "Multiplies each state's speed. 0 pauses playback, automatic transitions, events, and root motion; "
+             "grounding and IK continue to adapt. Procedural Humanoid motion follows physics and is unaffected."},
             {"footGrounding", "Foot Grounding", "Ground Adaptation", ComponentPropertyKind::Boolean},
             {"footAutomaticBoneMapping", "Automatic Bone Mapping", "Ground Adaptation", ComponentPropertyKind::Boolean},
             {"footAutomaticRaycastDistance", "Automatic Ray Distance", "Ground Adaptation",

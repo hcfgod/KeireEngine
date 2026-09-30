@@ -150,7 +150,7 @@ copy_player_runtime_closure() {
     fi
     copy_player_support_licenses "$license_destination" "$target_architecture"
     if [[ "$include_symbols" == true ]]; then
-        for symbol in KeireRuntime.pdb KeireRuntime.ilk; do
+        for symbol in KeireRuntime.pdb; do
             [[ -f "$source/$symbol" ]] && copy_file_if_changed "$source/$symbol" "$destination/$symbol"
         done
     fi

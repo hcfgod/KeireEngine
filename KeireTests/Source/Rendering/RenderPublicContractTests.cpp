@@ -1,15 +1,18 @@
 #include "Keire/Core.h"
 #include "KeireInternal/RenderInternal.h"
+#include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -232,4 +235,186 @@ TEST_CASE("Public render camera and environment contracts reject invalid values 
     CHECK(probe.AdditiveSceneValidationCompleted);
     CHECK(probe.SurfaceSampleValidationCompleted);
     CHECK(probe.UiMaterialTimeValidationCompleted);
+}
+
+TEST_CASE("present modes reject headless invalid closed and worker-thread requests without mutation")
+{
+    UseDummyVideoDriver();
+    Keire::Ref<Keire::RenderSystem> renderer;
+    class ProbeLayer final : public Keire::Layer
+    {
+      public:
+        explicit ProbeLayer(Keire::Ref<Keire::RenderSystem>& retained)
+            : Layer("Present mode rejection"), m_Renderer(retained)
+        {
+        }
+
+      protected:
+        void OnAttach() override
+        {
+            m_Renderer = Owner().Renderer();
+            REQUIRE(m_Renderer);
+            CHECK_FALSE(m_Renderer->PresentMode().has_value());
+            for (const auto mode : {Keire::RenderPresentMode::VSync, Keire::RenderPresentMode::Mailbox,
+                                    Keire::RenderPresentMode::Immediate, static_cast<Keire::RenderPresentMode>(255U)})
+            {
+                CHECK_FALSE(m_Renderer->SupportsPresentMode(mode));
+                CHECK_FALSE(m_Renderer->TrySetPresentMode(mode));
+                CHECK_FALSE(m_Renderer->PresentMode().has_value());
+            }
+            std::atomic<unsigned> rejected{0};
+            std::thread worker(
+                [&]
+                {
+                    try
+                    {
+                        (void)m_Renderer->PresentMode();
+                    }
+                    catch (const std::logic_error&)
+                    {
+                        ++rejected;
+                    }
+                    try
+                    {
+                        (void)m_Renderer->SupportsPresentMode(Keire::RenderPresentMode::VSync);
+                    }
+                    catch (const std::logic_error&)
+                    {
+                        ++rejected;
+                    }
+                    try
+                    {
+                        (void)m_Renderer->TrySetPresentMode(Keire::RenderPresentMode::Immediate);
+                    }
+                    catch (const std::logic_error&)
+                    {
+                        ++rejected;
+                    }
+                });
+            worker.join();
+            CHECK(rejected == 3U);
+            CHECK_FALSE(m_Renderer->PresentMode().has_value());
+            CHECK(m_Renderer->IsOpen());
+        }
+        void OnUpdate(const Keire::Time&) override { Owner().RequestExit(); }
+
+      private:
+        Keire::Ref<Keire::RenderSystem>& m_Renderer;
+    };
+    {
+        Keire::Application application(PublicRenderContractSpecification());
+        (void)application.PushLayer(std::make_unique<ProbeLayer>(renderer));
+        CHECK(application.Run() == 0);
+    }
+    REQUIRE(renderer);
+    CHECK_FALSE(renderer->IsOpen());
+    CHECK_FALSE(renderer->PresentMode().has_value());
+    CHECK_FALSE(renderer->SupportsPresentMode(Keire::RenderPresentMode::VSync));
+    CHECK_FALSE(renderer->TrySetPresentMode(Keire::RenderPresentMode::VSync));
+}
+
+namespace
+{
+    class PresentModeManagedServices final : public Keire::Detail::ManagedRuntimeApplicationServices
+    {
+      public:
+        PresentModeManagedServices() : ManagedRuntimeApplicationServices(false) {}
+        using ManagedRuntimeApplicationServices::BindManagedApplication;
+        using ManagedRuntimeApplicationServices::UnbindManagedApplication;
+        void WriteManagedLog(Keire::ManagedLogLevel, std::string_view) noexcept override {}
+        float ManagedDeltaTime() const noexcept override { return 0.0F; }
+        Keire::Vector2 ReadManagedInput(std::string_view) noexcept override { return {}; }
+
+      protected:
+        Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId = {}) const noexcept override { return {}; }
+        Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override { return {}; }
+    };
+
+    class PresentModeGpuLayer final : public Keire::Layer
+    {
+      public:
+        PresentModeGpuLayer() : Layer("Presentation mode GPU acceptance") {}
+
+      protected:
+        void OnAttach() override
+        {
+            m_Services.BindManagedApplication(Owner());
+            REQUIRE(Owner().Renderer());
+            if (const auto* requestedBackend = SDL_GetHint(SDL_HINT_GPU_DRIVER); requestedBackend && *requestedBackend)
+                CHECK(Owner().Renderer()->DeviceIdentity().Backend == requestedBackend);
+            REQUIRE(Owner().Renderer()->SupportsPresentMode(Keire::RenderPresentMode::VSync));
+            MESSAGE("Presentation GPU backend: ", Owner().Renderer()->DeviceIdentity().Backend);
+        }
+        void OnDetach() noexcept override { m_Services.UnbindManagedApplication(); }
+        void OnUpdate(const Keire::Time&) override
+        {
+            const auto renderer = Owner().Renderer();
+            REQUIRE(renderer->PresentMode().has_value());
+            const auto before = renderer->PresentMode();
+            CHECK_FALSE(renderer->TrySetPresentMode(static_cast<Keire::RenderPresentMode>(255U)));
+            CHECK(renderer->PresentMode() == before);
+            const auto mode = static_cast<Keire::RenderPresentMode>(m_Frame % 3U);
+            const auto supported = renderer->SupportsPresentMode(mode);
+            const auto managedBefore = m_Services.ManagedPresentation();
+            CHECK(managedBefore.Mode == static_cast<std::uint8_t>(*before));
+            CHECK(((managedBefore.SupportedModes & (1U << static_cast<std::uint8_t>(mode))) != 0U) == supported);
+            CHECK_FALSE(m_Services.SetManagedPresentMode(255U));
+            const bool throughManagedBinding = (m_Frame / 3U) % 2U != 0U;
+            const bool changed = throughManagedBinding
+                                     ? m_Services.SetManagedPresentMode(static_cast<std::uint8_t>(mode))
+                                     : renderer->TrySetPresentMode(mode);
+            constexpr const char* modeNames[]{"VSync", "Mailbox", "Immediate"};
+            MESSAGE("Presentation frame ", m_Frame, ": ", std::string(modeNames[static_cast<std::uint8_t>(mode)]),
+                    " supported=", supported, " switch=", changed,
+                    " binding=", std::string(throughManagedBinding ? "managed" : "native"));
+            CHECK(changed == supported);
+            CHECK(renderer->PresentMode() == (supported ? std::optional(mode) : before));
+            const auto managedAfter = m_Services.ManagedPresentation();
+            CHECK(managedAfter.Mode == static_cast<std::uint8_t>(*renderer->PresentMode()));
+            CHECK(managedAfter.SupportedModes == managedBefore.SupportedModes);
+            CHECK(m_Services.ManagedScreen().VSync == (managedAfter.Mode <= 1U));
+            if (supported)
+                CHECK(renderer->TrySetPresentMode(mode));
+            // Alternate modes across real submitted frames, including repeated swapchain recreation.
+            if (++m_Frame == 12U)
+            {
+                CHECK(renderer->TrySetPresentMode(Keire::RenderPresentMode::VSync));
+                Owner().RequestExit();
+            }
+        }
+        void OnUi(Keire::UiFrame&) override
+        {
+            const auto renderer = Owner().Renderer();
+            const auto before = renderer->PresentMode();
+            REQUIRE(before.has_value());
+            CHECK(renderer->TrySetPresentMode(*before));
+            for (const auto mode : {Keire::RenderPresentMode::VSync, Keire::RenderPresentMode::Mailbox,
+                                    Keire::RenderPresentMode::Immediate})
+                if (mode != *before)
+                {
+                    CHECK_FALSE(renderer->TrySetPresentMode(mode));
+                    CHECK_FALSE(m_Services.SetManagedPresentMode(static_cast<std::uint8_t>(mode)));
+                }
+            CHECK(renderer->PresentMode() == before);
+        }
+
+      private:
+        PresentModeManagedServices m_Services;
+        unsigned m_Frame = 0;
+    };
+} // namespace
+
+// Run separately with --no-skip and a real video driver. Tests every mode the active GPU reports.
+TEST_CASE("present modes GPU cycle supported swapchains across real frames" * doctest::skip())
+{
+    SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
+    REQUIRE(SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), "SDL_VIDEODRIVER"));
+    auto specification = PublicRenderContractSpecification();
+    specification.MainWindow.Visible = true;
+    specification.Render.Mode = Keire::RenderMode::Rendered;
+    specification.Render.EnableGpuValidation = true;
+    specification.Ui.Mode = Keire::UiMode::Rendered;
+    Keire::Application application(specification);
+    (void)application.PushLayer(std::make_unique<PresentModeGpuLayer>());
+    CHECK(application.Run() == 0);
 }

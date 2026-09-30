@@ -106,6 +106,10 @@ namespace KeireHub
     [[nodiscard]] HubResult<std::string> EncodeInstallReceipt(const InstallReceipt& receipt);
     [[nodiscard]] HubResult<InstallReceipt> ReadInstallReceipt(const std::filesystem::path& root);
 
+    // Prepares a destination before downloading or extracting a payload. Recovers interrupted transactions and
+    // migrates verified legacy registrations when needed. Installation repeats all checks before activation.
+    [[nodiscard]] HubStatus PrepareInstallDestination(const InstallTransactionRequest& request);
+
     // InstallPackageTransaction stages and validates the complete source, backs up only previously receipt-owned
     // files, activates the new inventory, writes registration, verifies the result, and commits. A fault callback may
     // intentionally leave a durable transaction, which RecoverInstallTransaction rolls back idempotently.

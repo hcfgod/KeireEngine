@@ -1,3 +1,4 @@
+#include "KeireClient/Editor/EditorSessionState.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
@@ -344,6 +345,28 @@ void EditorWorkspaceLayer::DrawMainMenu(Keire::UiFrame& ui, Keire::UiWorkspace& 
         }
         if (auto window = ui.BeginMenu("Window"); window)
         {
+            if (auto presentation = ui.BeginMenu("Presentation"); presentation)
+            {
+                const auto state = ManagedPresentation();
+                constexpr const char* labels[] = {"VSync (FIFO)", "Mailbox (low latency, tear-free)",
+                                                  "Off (Immediate, may tear)"};
+                ui.Text(state.Mode <= 2 ? "Checked mode is active." : "Presentation surface unavailable.");
+                ui.Text("Saved for this project's editor on this computer.");
+                for (std::uint8_t mode = 0; mode < 3; ++mode)
+                {
+                    const bool supported = (state.SupportedModes & (1U << mode)) != 0;
+                    const auto label =
+                        supported ? std::string(labels[mode]) : std::string(labels[mode]) + " (unsupported)";
+                    if (ui.MenuItem(label, state.Mode == mode, supported))
+                    {
+                        m_PendingEditorPresentMode = mode;
+                        m_PresentationFeedback = "Applying at the next frame...";
+                    }
+                }
+                if (!m_PresentationFeedback.empty())
+                    ui.Text(m_PresentationFeedback);
+                ui.Text("Adaptive / VRR modes are controlled by your driver and display.");
+            }
             if (auto packageManagement = ui.BeginMenu("Package Management"); packageManagement)
                 DrawPanelMenuItem(ui, m_PackageManagerPanel->Registration());
             ui.Separator();

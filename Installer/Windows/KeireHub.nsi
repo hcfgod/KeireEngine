@@ -239,6 +239,18 @@ Section "${PRODUCT_NAME} (required)" MainSection
     SetOutPath "$PLUGINSDIR"
     File /oname=KeireInstallWorker.exe "${SOURCE_DIRECTORY}\bin\KeireInstallWorker.exe"
     !insertmacro KeireHubTestTrace "embedded worker extracted"
+    DetailPrint "Checking the installation folder before extracting the Hub..."
+    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" prepare --product hub --root "$INSTDIR"'
+    Pop $0
+    Pop $1
+    DetailPrint "$1"
+    !insertmacro KeireHubTestTrace "prepare exit=$0 output=$1"
+    StrCmp $0 "0" HubDestinationReady
+    MessageBox MB_ICONSTOP|MB_OK \
+        "The Hub cannot be installed in this folder.$\r$\n$\r$\n$1$\r$\n$\r$\nNo new Hub payload was extracted. Restart setup after correcting the folder or installation." /SD IDOK
+    SetErrorLevel 1
+    Abort
+HubDestinationReady:
     SetOutPath "$PLUGINSDIR\payload"
     File /r "${SOURCE_DIRECTORY}\*"
     !insertmacro KeireHubTestTrace "payload extracted"

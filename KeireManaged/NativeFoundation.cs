@@ -43,6 +43,8 @@ internal static unsafe class NativeFoundation
     internal static delegate* unmanaged<byte, byte> SetTimePausedIcall;
     internal static delegate* unmanaged<NativeScreenState*, byte> GetScreenStateIcall;
     internal static delegate* unmanaged<uint, uint, byte, byte> SetScreenIcall;
+    internal static delegate* unmanaged<ushort> GetPresentationStateIcall;
+    internal static delegate* unmanaged<byte, byte> SetPresentModeIcall;
 #pragma warning restore CS0649
 
     internal static string ReadApplicationText(ApplicationText field)
@@ -133,6 +135,23 @@ internal static unsafe class NativeFoundation
         if (SetScreenIcall == null)
             throw Unbound();
         return SetScreenIcall(width, height, (byte)mode) != 0;
+    }
+
+    internal static ushort PresentationState
+    {
+        get
+        {
+            if (GetPresentationStateIcall == null)
+                throw Unbound();
+            return GetPresentationStateIcall();
+        }
+    }
+
+    internal static bool TrySetPresentMode(PresentMode mode)
+    {
+        if (SetPresentModeIcall == null)
+            throw Unbound();
+        return SetPresentModeIcall((byte)mode) != 0;
     }
 
     private static InvalidOperationException Unbound() => new("Kéire managed runtime foundation is not attached.");

@@ -145,6 +145,17 @@ namespace Keire::Detail
             return 1;
         }
 
+        [[nodiscard]] std::uint16_t GetPresentationState() noexcept
+        {
+            const auto state = ActiveServices ? ActiveServices->ManagedPresentation() : ManagedPresentationState{};
+            return static_cast<std::uint16_t>(state.Mode | (static_cast<std::uint16_t>(state.SupportedModes) << 8));
+        }
+
+        [[nodiscard]] std::uint8_t SetPresentMode(const std::uint8_t mode) noexcept
+        {
+            return ActiveServices && mode <= 2 && ActiveServices->SetManagedPresentMode(mode) ? 1 : 0;
+        }
+
         [[nodiscard]] std::uint8_t SetScreen(const std::uint32_t width, const std::uint32_t height,
                                              const std::uint8_t mode) noexcept
         {
@@ -175,6 +186,10 @@ namespace Keire::Detail
                                  reinterpret_cast<void*>(&SetTimePaused));
         assembly.AddInternalCall("Keire.NativeFoundation", "GetScreenStateIcall",
                                  reinterpret_cast<void*>(&GetScreenState));
+        assembly.AddInternalCall("Keire.NativeFoundation", "GetPresentationStateIcall",
+                                 reinterpret_cast<void*>(&GetPresentationState));
+        assembly.AddInternalCall("Keire.NativeFoundation", "SetPresentModeIcall",
+                                 reinterpret_cast<void*>(&SetPresentMode));
         assembly.AddInternalCall("Keire.NativeFoundation", "SetScreenIcall", reinterpret_cast<void*>(&SetScreen));
     }
 } // namespace Keire::Detail

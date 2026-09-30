@@ -97,7 +97,7 @@ namespace
             stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
             REQUIRE(stream.good());
         }
-        void AddAnimation()
+        void AddAnimation(const float stateSpeed = 1.0F)
         {
             std::filesystem::create_directories(Root / "Assets");
             Keire::AssetDatabaseSpecification specification;
@@ -132,6 +132,7 @@ namespace
             Keire::AnimationGraphDefinition graph;
             graph.EntryState = "Move";
             graph.States = {{"Move", clip->Id}};
+            graph.States.front().Speed = stateSpeed;
             Write("Controller.stepgraph", Keire::AnimationGraphAsset::Encode(graph));
             const auto imported = Database->ImportAll();
             const auto controller = Database->Find("Controller.stepgraph");
@@ -229,6 +230,46 @@ TEST_CASE("Paused scene stepping advances an ordinary animation graph exactly on
     fixture.Session->Update(0.5F);
     CHECK(animator->RuntimeDebugSnapshot()->Layers.front().NormalizedTime == doctest::Approx(before + 0.1F));
     CHECK(fixture.Session->State() == Keire::ScenePlayState::Paused);
+}
+
+TEST_CASE("Animator playback speed multiplies state speed and zero preserves live IK evaluation")
+{
+    for (const float stateSpeed : {0.0F, 0.2F, 2.0F})
+    {
+        StepFixture fixture;
+        fixture.AddAnimation(stateSpeed);
+        fixture.Character.GetComponent<Keire::AnimatorComponent>()->SetSpeed(0.0F);
+        fixture.Start();
+        const auto animator = fixture.Session->RuntimeScene()
+                                  ->FindEntity(fixture.Character.Id())
+                                  .GetComponent<Keire::AnimatorComponent>();
+        fixture.Session->Pause(false);
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        while ((!animator->RuntimeDebugSnapshot() || animator->RuntimeDebugSnapshot()->Layers.empty()) &&
+               std::chrono::steady_clock::now() < deadline)
+        {
+            (void)fixture.Assets->PumpCompletions();
+            fixture.Session->Update(0.0F);
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        REQUIRE(animator->RuntimeDebugSnapshot());
+        REQUIRE_FALSE(animator->RuntimeDebugSnapshot()->Layers.empty());
+        fixture.Session->Pause();
+        fixture.Probe->Calls.clear();
+        REQUIRE(fixture.Session->Step(0.1F));
+        CHECK(animator->RuntimeDebugSnapshot()->Layers.front().NormalizedTime == 0.0F);
+        CHECK(fixture.Probe->Calls == std::vector<std::string>{"FixedUpdate", "Update", "AnimatorIK", "LateUpdate"});
+        animator->SetSpeed(2.0F);
+        REQUIRE(fixture.Session->Step(0.1F));
+        CHECK(animator->RuntimeDebugSnapshot()->Layers.front().NormalizedTime == doctest::Approx(0.2F * stateSpeed));
+        animator->SetPaused(true);
+        REQUIRE(fixture.Session->Step(0.1F));
+        CHECK(animator->RuntimeDebugSnapshot()->Layers.front().NormalizedTime == doctest::Approx(0.2F * stateSpeed));
+        animator->SetPaused(false);
+        animator->SetSpeed(0.5F);
+        REQUIRE(fixture.Session->Step(0.1F));
+        CHECK(animator->RuntimeDebugSnapshot()->Layers.front().NormalizedTime == doctest::Approx(0.25F * stateSpeed));
+    }
 }
 
 TEST_CASE("Paused scene stepping presents the new physics pose without host interpolation drift")

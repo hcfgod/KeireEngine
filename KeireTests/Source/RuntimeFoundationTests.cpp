@@ -1,4 +1,5 @@
 #include "Keire/Core.h"
+#include "KeireInternal/Scripting/ManagedRuntimeApplicationServices.h"
 
 #include <doctest/doctest.h>
 
@@ -691,4 +692,27 @@ TEST_CASE("Component registry replacement is atomic and revisioned")
     CHECK(registry->Revision() == revisionBeforeFailure);
     CHECK_FALSE(registry->Contains(firstCycle));
     CHECK_FALSE(registry->Contains(secondCycle));
+}
+
+TEST_CASE("Managed presentation services reject changes without a bound application")
+{
+    class UnboundPresentationServices final : public Keire::Detail::ManagedRuntimeApplicationServices
+    {
+      public:
+        UnboundPresentationServices() : ManagedRuntimeApplicationServices(false) {}
+        void WriteManagedLog(Keire::ManagedLogLevel, std::string_view) noexcept override {}
+        float ManagedDeltaTime() const noexcept override { return 0.0F; }
+        Keire::Vector2 ReadManagedInput(std::string_view) noexcept override { return {}; }
+
+      protected:
+        Keire::Ref<Keire::Scene> ManagedRuntimeScene(Keire::AssetId = {}) const noexcept override { return {}; }
+        Keire::Ref<Keire::AssetSystem> ManagedRuntimeAssets() const noexcept override { return {}; }
+    };
+    UnboundPresentationServices services;
+    CHECK(services.ManagedPresentation().Mode == 255);
+    CHECK(services.ManagedPresentation().SupportedModes == 0);
+    for (const std::uint8_t mode : {std::uint8_t{0}, std::uint8_t{1}, std::uint8_t{2}, std::uint8_t{255}})
+        CHECK_FALSE(services.SetManagedPresentMode(mode));
+    CHECK(services.ManagedPresentation().Mode == 255);
+    CHECK(services.ManagedPresentation().SupportedModes == 0);
 }

@@ -708,10 +708,14 @@ namespace Keire
         PublishDebugSnapshot();
     }
 
-    AnimatorSample AnimatorInstance::Update(const float deltaSeconds)
+    AnimatorSample AnimatorInstance::Update(const float deltaSeconds) { return Update(deltaSeconds, false); }
+
+    AnimatorSample AnimatorInstance::Update(float deltaSeconds, const bool paused)
     {
         if (!std::isfinite(deltaSeconds) || deltaSeconds < 0.0F || deltaSeconds > 10.0F)
             throw std::invalid_argument("Animator delta time is invalid.");
+        if (paused)
+            deltaSeconds = 0.0F;
         const auto evaluationStart = std::chrono::steady_clock::now();
         std::uint32_t layersEvaluated = 0;
         std::uint32_t transitionsTested = 0;
@@ -789,7 +793,7 @@ namespace Keire
             if (!state)
                 throw std::logic_error("Animator runtime state is unavailable.");
 
-            if (!runtime.Transition)
+            if (!paused && !runtime.Transition)
             {
                 for (const auto& transition : state->Transitions)
                 {
@@ -929,14 +933,15 @@ namespace Keire
         const auto* baseState = FindState(baseLayer, baseRuntime.StateId);
         result.State = baseState ? baseState->Name : std::string{};
         result.NormalizedTime = baseRuntime.NormalizedTime;
-        result.Events = events;
+        if (!paused)
+            result.Events = events;
         m_State = result.State;
         m_Time = baseRuntime.Time;
         if (baseRootMotion && !result.LocalPose.empty())
         {
             const auto current = result.LocalPose.front();
             const auto& rootBind = m_Skeleton->Bones().front().BindPose;
-            if (!baseWrapped)
+            if (!paused && !baseWrapped)
             {
                 const auto previousTranslation =
                     m_HasPreviousRootRotation ? m_PreviousRoot.Translation : rootBind.Translation;

@@ -1,3 +1,4 @@
+#include "Keire/Rendering/RenderSystem.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
 #include "KeireClient/Editor/ManagedRuntimeSessionResolver.h"
@@ -475,6 +476,43 @@ bool EditorWorkspaceLayer::SetManagedTimePaused(const bool paused) noexcept
     return true;
 }
 
+Keire::ManagedPresentationState EditorWorkspaceLayer::ManagedPresentation() const noexcept
+{
+    try
+    {
+        const auto renderer = Owner().Renderer();
+        if (!renderer)
+            return {};
+        const auto mode = renderer->PresentMode();
+        Keire::ManagedPresentationState state;
+        if (mode)
+            state.Mode = static_cast<std::uint8_t>(*mode);
+        for (std::uint8_t candidate = 0; candidate < 3; ++candidate)
+            if (renderer->SupportsPresentMode(static_cast<Keire::RenderPresentMode>(candidate)))
+                state.SupportedModes |= static_cast<std::uint8_t>(1U << candidate);
+        return state;
+    }
+    catch (...)
+    {
+        return {};
+    }
+}
+
+bool EditorWorkspaceLayer::SetManagedPresentMode(const std::uint8_t mode) noexcept
+{
+    if (mode > 2)
+        return false;
+    try
+    {
+        const auto renderer = Owner().Renderer();
+        return renderer && renderer->TrySetPresentMode(static_cast<Keire::RenderPresentMode>(mode));
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+
 Keire::ManagedScreenState EditorWorkspaceLayer::ManagedScreen() const noexcept
 {
     try
@@ -495,7 +533,7 @@ Keire::ManagedScreenState EditorWorkspaceLayer::ManagedScreen() const noexcept
                 .Focused = window->Focused(),
                 .Visible = window->Visible(),
                 .Minimized = window->Minimized(),
-                .VSync = Owner().Specification().Render.PresentMode == Keire::RenderPresentMode::VSync};
+                .VSync = ManagedPresentation().Mode <= 1};
     }
     catch (...)
     {

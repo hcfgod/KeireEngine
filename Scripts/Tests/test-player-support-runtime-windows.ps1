@@ -64,7 +64,13 @@ try {
         Write-FixtureFile $file
     }
     $destination = Join-Path $fixture 'staged'
+    Write-FixtureFile 'KeireRuntime.pdb' 'debug-symbols'
+    Write-FixtureFile 'KeireRuntime.ilk' 'build-machine-link-cache'
     & $script -RuntimeClosureSource $source -RuntimeClosureDestination $destination
+    if (-not (Test-Path -LiteralPath (Join-Path $destination 'KeireRuntime.pdb')) -or
+        (Test-Path -LiteralPath (Join-Path $destination 'KeireRuntime.ilk'))) {
+        throw 'Player Support must retain debug symbols without shipping incremental linker caches.'
+    }
     if (-not (Test-Path (Join-Path $destination 'KeireRuntime.exe')) -or
         (Test-Path (Join-Path $destination 'Managed\Dotnet\shared\Microsoft.NETCore.App\10.0.9')) -or
         -not (Test-Path (Join-Path $destination 'Managed\Dotnet\shared\Microsoft.NETCore.App\10.0.11\coreclr.dll'))) {

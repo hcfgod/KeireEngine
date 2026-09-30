@@ -1,5 +1,5 @@
-#include "KeireInstallWorker/WorkerRegistration.h"
 #include "KeireInstallWorker/ShellIntegration.h"
+#include "KeireInstallWorker/WorkerRegistration.h"
 
 #include "KeireHubRuntime/InstallTransaction.h"
 #include <KeireHubRuntimeInternal/InstallTransactionInternal.h>
@@ -113,26 +113,25 @@ namespace
 int main(const int count, char** values)
 {
     const auto arguments = ParseArguments(count, values);
-    if (!arguments || (arguments->Command != "install" && arguments->Command != "install-deferred" &&
-                       arguments->Command != "commit" && arguments->Command != "verify" &&
-                       arguments->Command != "--verify-installation" && arguments->Command != "integrate" &&
-                       arguments->Command != "recover" && arguments->Command != "uninstall"))
+    if (!arguments ||
+        (arguments->Command != "install" && arguments->Command != "install-deferred" &&
+         arguments->Command != "commit" && arguments->Command != "verify" &&
+         arguments->Command != "--verify-installation" && arguments->Command != "integrate" &&
+         arguments->Command != "recover" && arguments->Command != "uninstall" && arguments->Command != "prepare"))
     {
-        std::cerr
-            << "Usage: KeireInstallWorker "
-               "<install|install-deferred|integrate|commit|--verify-installation|recover|uninstall> "
-               "--product <editor|hub> "
-               "--root <absolute-path> [--source <absolute-path>] "
-               "[--start-menu <0|1>] [--desktop <0|1>]\n";
+        std::cerr << "Usage: KeireInstallWorker "
+                     "<prepare|install|install-deferred|integrate|commit|--verify-installation|recover|uninstall> "
+                     "--product <editor|hub> "
+                     "--root <absolute-path> [--source <absolute-path>] "
+                     "[--start-menu <0|1>] [--desktop <0|1>]\n";
         return 64;
     }
     auto registrationStore = KeireInstallWorker::CreateProductRegistrationStore(arguments->Product);
-    KeireHub::InstallTransactionRequest request{
-        .Product = arguments->Product,
-        .SourceRoot = arguments->Source,
-        .DestinationRoot = arguments->Root,
-        .Registration = registrationStore,
-        .DeferCommit = arguments->Command == "install-deferred"};
+    KeireHub::InstallTransactionRequest request{.Product = arguments->Product,
+                                                .SourceRoot = arguments->Source,
+                                                .DestinationRoot = arguments->Root,
+                                                .Registration = registrationStore,
+                                                .DeferCommit = arguments->Command == "install-deferred"};
 #if defined(KEIRE_INSTALL_WORKER_FAULT_INJECTION)
     const auto fault = FaultPhase();
     request.ContinueAfterPhase = [fault](const KeireHub::InstallTransactionPhase phase)
@@ -149,6 +148,21 @@ int main(const int count, char** values)
             return KeireHub::HubStatus::Failure(active.Error());
         return KeireInstallWorker::ReconcileShellIntegrations(arguments->Product, active.Value());
     };
+
+    if (arguments->Command == "prepare")
+    {
+        if (const auto recovered = recoverAndReconcile(); !recovered)
+        {
+            PrintError(recovered.Error());
+            return 1;
+        }
+        if (const auto prepared = KeireHub::PrepareInstallDestination(request); !prepared)
+        {
+            PrintError(prepared.Error());
+            return 1;
+        }
+        return 0;
+    }
 
     if (arguments->Command == "install" || arguments->Command == "install-deferred")
     {
@@ -169,8 +183,7 @@ int main(const int count, char** values)
     if (arguments->Command == "integrate")
     {
         auto active = readRegistration();
-        if (!active || !active.Value() ||
-            active.Value()->Root.lexically_normal() != arguments->Root.lexically_normal())
+        if (!active || !active.Value() || active.Value()->Root.lexically_normal() != arguments->Root.lexically_normal())
         {
             if (!active)
                 PrintError(active.Error());
@@ -178,8 +191,7 @@ int main(const int count, char** values)
                 std::cerr << "The active registration does not match the shell-integration root.\n";
             return 1;
         }
-        auto previous = KeireHub::Detail::ReadPendingInstallPreviousRegistration(arguments->Root,
-                                                                                  arguments->Product);
+        auto previous = KeireHub::Detail::ReadPendingInstallPreviousRegistration(arguments->Root, arguments->Product);
         if (!previous)
         {
             PrintError(previous.Error());
@@ -206,8 +218,7 @@ int main(const int count, char** values)
                 std::cerr << "The pending installation registration is missing.\n";
             return 1;
         }
-        if (const auto integrated =
-                KeireInstallWorker::CommitShellIntegrations(arguments->Product, *active.Value());
+        if (const auto integrated = KeireInstallWorker::CommitShellIntegrations(arguments->Product, *active.Value());
             !integrated)
         {
             PrintError(integrated.Error());
@@ -256,8 +267,7 @@ int main(const int count, char** values)
             PrintError(result.Error());
             return 1;
         }
-        if (const auto removed =
-                KeireInstallWorker::RemoveShellIntegrations(arguments->Product, *active.Value());
+        if (const auto removed = KeireInstallWorker::RemoveShellIntegrations(arguments->Product, *active.Value());
             !removed)
         {
             PrintError(removed.Error());

@@ -387,7 +387,7 @@ namespace Keire
             {
                 if (state.Id.empty() || state.Id.size() > 512 || state.Name.empty() || state.Name.size() > 256 ||
                     !localIds.insert(state.Id).second || !stateIds.insert(state.Id).second ||
-                    !stateNames.insert(state.Name).second || !std::isfinite(state.Speed) || state.Speed == 0.0F ||
+                    !stateNames.insert(state.Name).second || !std::isfinite(state.Speed) ||
                     state.Motion.Type > AnimationMotionType::BlendTree2D || !Math::IsFinite(state.EditorPosition) ||
                     (!state.SubgraphId.empty() && !subgraphIds.contains(state.SubgraphId)))
                     throw std::invalid_argument("Animation graph contains an invalid state.");

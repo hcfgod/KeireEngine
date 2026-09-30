@@ -562,6 +562,9 @@ namespace Keire
             return m_DebugSnapshot;
         }
         [[nodiscard]] AnimatorSample Update(float deltaSeconds);
+        // Paused evaluation freezes time and automatic transitions, preserves triggers, and emits no events or
+        // root motion. It still samples a pose, including explicit Play/CrossFade commands.
+        [[nodiscard]] AnimatorSample Update(float deltaSeconds, bool paused);
         [[nodiscard]] AnimatorCheckpoint CaptureCheckpoint() const;
         void RestoreCheckpoint(const AnimatorCheckpoint& checkpoint);
         [[nodiscard]] bool Reload(Ref<const AnimationGraphAsset> graph);

@@ -296,6 +296,22 @@ try {
         -Operation "fresh-install"
     Assert-ExitCode -Actual $exit -Expected @(0) -Operation "$Product fresh NSIS install"
     Assert-Version -RootPath $installRoot -Version "1.0.0"
+    $freshTrace = Get-Content -LiteralPath "$installer1.trace.log" -Raw
+    if ($freshTrace.IndexOf('prepare exit=0') -lt 0 -or
+        $freshTrace.IndexOf('prepare exit=0') -gt $freshTrace.IndexOf('payload extracted')) {
+        throw "The $Product installer did not prepare its destination before extracting the payload."
+    }
+    $alternateRoot = Join-Path $caseRoot 'alternate-install'
+    $traceLength = (Get-Content -LiteralPath "$installer1.trace.log" -Raw).Length
+    $exit = Invoke-Installer -Path $installer1 -Arguments @('/S', "/D=$alternateRoot") `
+        -Operation 'reject-alternate-registered-installation'
+    if ($exit -eq 0 -or (Test-Path -LiteralPath $alternateRoot)) {
+        throw "The $Product installer accepted another folder while an installation was registered."
+    }
+    $rejectedTrace = (Get-Content -LiteralPath "$installer1.trace.log" -Raw).Substring($traceLength)
+    if (-not $rejectedTrace.Contains('prepare exit=1') -or $rejectedTrace.Contains('payload extracted')) {
+        throw "The $Product installer extracted its payload before rejecting a conflicting registered folder."
+    }
     if (@(Get-ChildItem -LiteralPath $shellRoot -Filter "*.lnk" -File -Recurse).Count -eq 0) {
         throw "The $Product worker-authority NSIS install did not publish its selected Start Menu link."
     }

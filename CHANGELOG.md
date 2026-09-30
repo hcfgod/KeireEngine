@@ -4,6 +4,17 @@
 
 ## 0.4.5 - 2026-09-30
 
+- Window > Presentation exposes supported VSync, Mailbox, and Immediate modes and remembers the editor preference.
+  Native and C# APIs query actual GPU support and change presentation modes at runtime, with explicit unavailable
+  results for headless players and unsupported modes.
+
+- Animator Playback Speed now pauses automatic transitions, events, and root motion at zero, while preserving valid
+  pose sampling and live IK. Inspector labels explain global playback and per-state speed multiplication.
+
+- Windows setup validates its destination before extracting the payload and explains how to upgrade an installation
+  registered in another folder. Interrupted installs recover empty nested backup directories without deleting unknown
+  files. Player Support omits incremental linker caches while retaining debugging symbols, reducing installer payloads.
+
 - Hub packages include only tracked template content, excluding generated caches and logs left by local previews.
 
 - Character Controllers recover shallow floor overlaps after spawning or teleporting, so walking no longer

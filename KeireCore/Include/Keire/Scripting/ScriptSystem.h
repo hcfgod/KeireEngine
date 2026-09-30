@@ -215,6 +215,12 @@ namespace Keire
         BorderlessFullscreen
     };
 
+    struct ManagedPresentationState
+    {
+        std::uint8_t Mode = 255; // No presentation surface. Otherwise matches RenderPresentMode.
+        std::uint8_t SupportedModes = 0;
+    };
+
     struct ManagedScreenState
     {
         std::uint32_t LogicalWidth = 0;
@@ -391,6 +397,8 @@ namespace Keire
         [[nodiscard]] virtual bool SetManagedTimeScale(double) noexcept { return false; }
         [[nodiscard]] virtual bool ManagedTimePaused() const noexcept { return false; }
         [[nodiscard]] virtual bool SetManagedTimePaused(bool) noexcept { return false; }
+        [[nodiscard]] virtual ManagedPresentationState ManagedPresentation() const noexcept { return {}; }
+        [[nodiscard]] virtual bool SetManagedPresentMode(std::uint8_t) noexcept { return false; }
         [[nodiscard]] virtual ManagedScreenState ManagedScreen() const noexcept { return {}; }
         [[nodiscard]] virtual bool SetManagedScreen(std::uint32_t, std::uint32_t, ManagedScreenMode) noexcept
         {
