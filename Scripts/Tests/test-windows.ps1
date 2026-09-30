@@ -1591,6 +1591,8 @@ Assert-True ($corePremake.Contains('prepare-generated-content.ps1') -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinDeferredGBuffer.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinDeferredLighting.hlsl')) -and
              (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinIrradyn.hlsl')) -and
+             $builtinShaderScript.Contains('BuiltinDepthVelocity') -and
+             (Test-Path (Join-Path (Get-RepositoryRoot) 'KeireCore\Shaders\BuiltinDepthVelocity.hlsl')) -and
              $builtinShaderScript.Contains('BuiltinDeferredGBuffer') -and
              $builtinShaderScript.Contains('BuiltinDeferredLighting') -and
              $builtinShaderScript.Contains('BuiltinIrradyn')) `

@@ -85,7 +85,21 @@ float3 ApplyTaa(const float2 uv, const float3 center)
     if (ToneMapParameters.w < 0.5F)
         return center;
 
-    const float2 velocity = VelocityTexture.SampleLevel(VelocitySampler, uv, 0.0F).xy;
+    // Extend foreground motion across the one-pixel silhouette neighborhood. Background zero velocity
+    // otherwise leaves stale edge history behind when a moving object reveals a pixel.
+    float2 velocity = VelocityTexture.SampleLevel(VelocitySampler, uv, 0.0F).xy;
+    [unroll]
+    for (int vy = -1; vy <= 1; ++vy)
+    {
+        [unroll]
+        for (int vx = -1; vx <= 1; ++vx)
+        {
+            const float2 candidate = VelocityTexture.SampleLevel(VelocitySampler,
+                ClampSceneUv(uv + ToneMapParameters.xy * float2(vx, vy)), 0.0F).xy;
+            if (dot(candidate, candidate) > dot(velocity, velocity))
+                velocity = candidate;
+        }
+    }
     const float2 previousUv = uv - velocity;
     if (any(previousUv <= 0.0F.xx) || any(previousUv >= 1.0F.xx))
         return center;

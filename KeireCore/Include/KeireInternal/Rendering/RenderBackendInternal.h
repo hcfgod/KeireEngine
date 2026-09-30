@@ -1,5 +1,4 @@
 #pragma once
-
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/Assets/LightingAssets.h"
@@ -55,7 +54,6 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
 struct ImDrawData;
 namespace Keire::Detail
 {
@@ -1307,6 +1305,7 @@ namespace Keire::RenderBackend
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthPipeline(bool depthBias);
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateToneMapPipeline();
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDeferredGBufferPipeline();
+        [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDepthVelocityPipeline();
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateDeferredLightingPipeline();
         [[nodiscard]] SDL_GPUGraphicsPipeline* CreateIrradynPipeline(bool additive);
         [[nodiscard]] bool EnsureDeferredPipelines();
@@ -1360,6 +1359,7 @@ namespace Keire::RenderBackend
         SDL_GPUGraphicsPipeline* SceneDepthPipeline = nullptr;
         SDL_GPUGraphicsPipeline* ToneMapPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DeferredGBufferPipeline = nullptr;
+        SDL_GPUGraphicsPipeline* DepthVelocityPipeline = nullptr;
         SDL_GPUGraphicsPipeline* DeferredLightingPipeline = nullptr;
         SDL_GPUGraphicsPipeline* IrradynTracePipeline = nullptr;
         SDL_GPUGraphicsPipeline* IrradynCompositePipeline = nullptr;

@@ -113,6 +113,12 @@ the published per-surface history with object/deformation velocity, and clamps h
 neighborhood. Once history passes that spatial validity check, expected sub-pixel edge luminance changes do not reject
 it again; this lets the Halton sequence converge instead of presenting its sample motion. History is rejected after
 discontinuities, resizes, path changes, or device recreation, and its weight decreases with screen-space velocity.
+Built-in and fallback meshes also write velocity from their current and previous world transforms and skinned
+vertices; batched instances retain their individual transform histories. The velocity pipeline shares deferred
+resource initialization, failure rollback, and device-recovery teardown.
+TAA selects the largest motion vector in the local 3x3 neighborhood before reprojection, extending foreground
+motion over silhouette pixels that would otherwise sample stationary background history. Color-neighborhood
+rejection remains active to reject unrelated history.
 Motion excludes the temporal jitter itself, and the frame graph keeps velocity live through tone mapping. Directional
 cascade fitting uses the unjittered projection so temporal samples cannot move shadow texel bounds. Reduced render
 scale is presented with spatial upscaling; it is not advertised as TAAU.

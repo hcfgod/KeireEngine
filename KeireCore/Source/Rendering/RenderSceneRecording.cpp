@@ -740,6 +740,8 @@ namespace Keire::RenderBackend
                         selectedPipeline = pipelines.Cube;
                     break;
                 case SceneDrawPhase::DeferredDepthVelocity:
+                    selectedPipeline = DepthVelocityPipeline;
+                    break;
                 case SceneDrawPhase::DeferredGBufferExtended:
                 case SceneDrawPhase::DeferredDecal:
                 case SceneDrawPhase::DeferredSky:
@@ -749,6 +751,41 @@ namespace Keire::RenderBackend
             if (!selectedPipeline)
                 continue;
             const auto instanceCount = batch.Count;
+            if (!material && phase == SceneDrawPhase::DeferredDepthVelocity)
+            {
+                SDL_BindGPUGraphicsPipeline(pass, selectedPipeline);
+                for (std::uint32_t instance = 0; instance < instanceCount; ++instance)
+                {
+                    const auto& instanceItem = *prepared.Draws[drawIndex + instance].Item;
+                    auto* current =
+                        instanceItem.SkinnedAssetVertices ? instanceItem.SkinnedAssetVertices : mesh.AssetVertices;
+                    auto* previous =
+                        instanceItem.PreviousSkinnedAssetVertices ? instanceItem.PreviousSkinnedAssetVertices : current;
+                    const std::array bindings{SDL_GPUBufferBinding{current, 0}, SDL_GPUBufferBinding{previous, 0}};
+                    SDL_BindGPUVertexBuffers(pass, 0, bindings.data(), static_cast<std::uint32_t>(bindings.size()));
+                    struct MotionUniforms final
+                    {
+                        Matrix4 CurrentMvp;
+                        Matrix4 PreviousMvp;
+                        Matrix4 Model;
+                        Matrix4 View;
+                        Matrix4 Projection;
+                        Vector4 Parameters;
+                    };
+                    const MotionUniforms motion{
+                        Math::Multiply(camera.Projection, Math::Multiply(camera.View, instanceItem.World)),
+                        Math::Multiply(packet.PreviousViewProjection, instanceItem.PreviousWorld),
+                        instanceItem.World,
+                        camera.View,
+                        camera.Projection,
+                        {batch.InstanceDataCount != 0U ? 1.0F : 0.0F, 0.0F, 0.0F, 0.0F}};
+                    SDL_PushGPUVertexUniformData(commands, 0, &motion, sizeof(motion));
+                    SDL_DrawGPUIndexedPrimitives(pass, draw.Submesh.IndexCount, 1U, draw.Submesh.FirstIndex, 0, 0U);
+                    ++Statistics.DrawCalls;
+                    Statistics.Triangles += draw.Submesh.IndexCount / 3U;
+                }
+                continue;
+            }
             const auto& spatial = surface.ActiveWorkset().SpatialSelection;
             const auto& visibility = surface.ActiveWorkset().GpuOcclusion;
             const bool selectionOwned =

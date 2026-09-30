@@ -1,5 +1,9 @@
 # Changelog
 
+- Built-in and fallback meshes now write camera, object, and skinning motion vectors for temporal anti-aliasing,
+  including individual transforms in batched draws. TAA extends motion across silhouette neighbors to reduce
+  uneven movement and stale edge history as objects reveal the background.
+
 - Automatic leg IK retains its knee bend side through near-straight animation reference reversals. Foot contact
   acquisition blends endpoint positions against the support plane, avoiding penetration caused by fading joint rotations.
 

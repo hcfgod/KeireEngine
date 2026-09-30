@@ -316,8 +316,8 @@ namespace Keire::RenderBackend
     {
         if (DeferredPipelinesAttempted)
         {
-            return DeferredGBufferPipeline && DeferredLightingPipeline && IrradynTracePipeline &&
-                   IrradynCompositePipeline && DeferredSampler;
+            return DepthVelocityPipeline && DeferredGBufferPipeline && DeferredLightingPipeline &&
+                   IrradynTracePipeline && IrradynCompositePipeline && DeferredSampler;
         }
         DeferredPipelinesAttempted = true;
         DeferredCapability.store(false, std::memory_order_release);
@@ -348,6 +348,7 @@ namespace Keire::RenderBackend
 
         try
         {
+            DepthVelocityPipeline = CreateDepthVelocityPipeline();
             DeferredGBufferPipeline = CreateDeferredGBufferPipeline();
             DeferredLightingPipeline = CreateDeferredLightingPipeline();
             IrradynTracePipeline = CreateIrradynPipeline(false);
@@ -386,6 +387,9 @@ namespace Keire::RenderBackend
             SDL_ReleaseGPUGraphicsPipeline(Device, IrradynCompositePipeline);
         if (IrradynTracePipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, IrradynTracePipeline);
+        if (DepthVelocityPipeline)
+            SDL_ReleaseGPUGraphicsPipeline(Device, DepthVelocityPipeline);
+        DepthVelocityPipeline = nullptr;
         if (DeferredGBufferPipeline)
             SDL_ReleaseGPUGraphicsPipeline(Device, DeferredGBufferPipeline);
         DeferredSampler = nullptr;

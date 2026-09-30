@@ -7,10 +7,11 @@ source "$cache_helper"
 compiler="$ROOT/Build/Tools/ShaderCompiler/KeireShaderCompiler"
 source_files=("$ROOT/KeireCore/Shaders/BuiltinUnlit.hlsl" "$ROOT/KeireCore/Shaders/BuiltinSky.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinGrid.hlsl" \
+  "$ROOT/KeireCore/Shaders/BuiltinDepthVelocity.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinShadow.hlsl" "$ROOT/KeireCore/Shaders/BuiltinToneMap.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinRuntimeUi.hlsl" "$ROOT/KeireCore/Shaders/BuiltinDeferredGBuffer.hlsl" \
   "$ROOT/KeireCore/Shaders/BuiltinDeferredLighting.hlsl" "$ROOT/KeireCore/Shaders/BuiltinIrradyn.hlsl")
-prefixes=(BuiltinUnlit BuiltinSky BuiltinGrid BuiltinShadow BuiltinToneMap BuiltinRuntimeUi \
+prefixes=(BuiltinUnlit BuiltinSky BuiltinGrid BuiltinDepthVelocity BuiltinShadow BuiltinToneMap BuiltinRuntimeUi \
   BuiltinDeferredGBuffer BuiltinDeferredLighting BuiltinIrradyn)
 include_files=("$ROOT/KeireCore/Shaders/BuiltinLighting.hlsli")
 generated="$ROOT/Build/Generated/Keire/BuiltinUnlitShaders.h"

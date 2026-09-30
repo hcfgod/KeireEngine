@@ -168,8 +168,8 @@ namespace
     class TemporalStabilityLayer final : public Keire::Layer
     {
       public:
-        explicit TemporalStabilityLayer(std::shared_ptr<TemporalStabilityResults> results)
-            : Layer("Temporal anti-aliasing stability"), m_Results(std::move(results))
+        explicit TemporalStabilityLayer(std::shared_ptr<TemporalStabilityResults> results, const bool moving = false)
+            : Layer("Temporal anti-aliasing stability"), m_Results(std::move(results)), m_Moving(moving)
         {
         }
 
@@ -181,7 +181,8 @@ namespace
                                                      Keire::ComponentRegistry::CreateDefault());
             auto object = m_Scene->CreateEntity("Static cube");
             m_Renderer = object.AddComponent<Keire::MeshRendererComponent>();
-            object.GetComponent<Keire::TransformComponent>()->SetLocalEulerAngles({17.0F, 31.0F, 9.0F});
+            m_Transform = object.GetComponent<Keire::TransformComponent>();
+            m_Transform->SetLocalEulerAngles({17.0F, 31.0F, 9.0F});
 
             Keire::RenderSurfaceSpecification surface;
             surface.Name = "Temporal anti-aliasing stability";
@@ -202,6 +203,7 @@ namespace
             if (m_Scene)
                 m_Scene->Close();
             m_Renderer.Reset();
+            m_Transform.Reset();
             m_View.Reset();
             m_Scene.Reset();
         }
@@ -226,6 +228,8 @@ namespace
                 return;
             }
 
+            if (m_Moving)
+                m_Transform->SetLocalPosition({-0.4F + 0.02F * static_cast<float>(m_FrameInPath), 0.0F, 0.0F});
             Keire::RenderEnvironmentSettings environment;
             environment.AmbientColor = {1.0F, 1.0F, 1.0F, 1.0F};
             environment.AmbientIntensity = 1.0F;
@@ -247,6 +251,8 @@ namespace
         Keire::Ref<Keire::MeshRendererComponent> m_Renderer;
         std::size_t m_PathIndex = 0U;
         std::size_t m_FrameInPath = 0U;
+        Keire::Ref<Keire::TransformComponent> m_Transform;
+        bool m_Moving = false;
         bool m_Submitted = false;
     };
 
@@ -355,5 +361,34 @@ TEST_CASE("static TAA output remains spatially stable in Forward+ and Deferred H
         INFO("TAA centroid Y motion: ", maximumY - minimumY);
         CHECK(maximumX - minimumX < 0.1F);
         CHECK(maximumY - minimumY < 0.1F);
+    }
+}
+
+TEST_CASE("moving TAA output advances continuously in Forward+ and Deferred Hybrid")
+{
+    const auto results = std::make_shared<TemporalStabilityResults>();
+    Keire::Application application(RenderTestSpecification());
+    (void)application.PushLayer(std::make_unique<TemporalStabilityLayer>(results, true));
+    REQUIRE(application.Run() == 0);
+    for (const auto& pathFrames : results->Frames)
+    {
+        REQUIRE(pathFrames.size() == 40U);
+        // Ignore history initialization; each subsequent frame advances by the same world-space distance.
+        // Reversals, frozen output and large jumps expose temporal history/motion-vector errors.
+        float minimumStep = std::numeric_limits<float>::max();
+        float maximumStep = std::numeric_limits<float>::lowest();
+        for (std::size_t index = 17U; index < pathFrames.size(); ++index)
+        {
+            REQUIRE(HasVisibleRgb(pathFrames[index]));
+            const auto previous = LuminanceCentroid(pathFrames[index - 1U]);
+            const auto current = LuminanceCentroid(pathFrames[index]);
+            const float step = previous.first - current.first;
+            minimumStep = std::min(minimumStep, step);
+            maximumStep = std::max(maximumStep, step);
+        }
+        INFO("Moving TAA centroid step range: ", minimumStep, " to ", maximumStep);
+        CHECK(minimumStep > 0.1F);
+        CHECK(maximumStep < 1.0F);
+        CHECK(maximumStep - minimumStep < 0.4F);
     }
 }
