@@ -1,5 +1,8 @@
 # Changelog
 
+- Procedural humanoid hip offsets and body rotations respect imported bone coordinate axes, preventing sideways
+  compression and twisting on rigs whose local axes differ from the model's upright axes.
+
 - Foot grounding checks the animated foot mesh against the support surface after solving, preventing pitching
   heels and animated toes from penetrating moving platforms despite valid ankle positions.
 - Unsupported knee stabilization removes unnecessary axial leg twist while preserving endpoints, avoiding

@@ -44,13 +44,33 @@ namespace
     class ProceduralRuntimeFixture final
     {
       public:
-        ProceduralRuntimeFixture()
+        explicit ProceduralRuntimeFixture(const bool rotatedImportRoot = false)
             : m_Root(std::filesystem::temp_directory_path() /
                      ("keire-procedural-runtime-" + Keire::AssetId::Generate().ToString()))
         {
             std::filesystem::create_directories(m_Root / "Assets");
 
-            const auto generated = Keire::GenerateRig(BoxMesh(), {});
+            auto generated = Keire::GenerateRig(BoxMesh(), {});
+            if (rotatedImportRoot)
+            {
+                const auto rotation = Keire::Math::EulerDegreesToQuaternion({90.0F, 0.0F, 0.0F});
+                const auto basis = Keire::Math::ComposeTransform({}, rotation, {1.0F, 1.0F, 1.0F});
+                const auto inverse = Keire::Math::Inverse(basis);
+                for (std::size_t index = 0; index < generated.Skeleton.size(); ++index)
+                {
+                    auto& bone = generated.Skeleton[index];
+                    auto local = Keire::Math::Multiply(Keire::Math::ComposeTransform(bone.BindPose.Translation,
+                                                                                     bone.BindPose.Rotation,
+                                                                                     bone.BindPose.Scale),
+                                                       basis);
+                    if (bone.Parent >= 0)
+                        local = Keire::Math::Multiply(inverse, local);
+                    REQUIRE(Keire::Math::DecomposeTransform(local, bone.BindPose.Translation, bone.BindPose.Rotation,
+                                                            bone.BindPose.Scale));
+                    bone.InverseBindPose = Keire::Math::Multiply(inverse, bone.InverseBindPose);
+                    generated.Rig.Bones[index].BindPose = bone.BindPose;
+                }
+            }
             m_Rig = generated.Rig;
             Write("Humanoid.testskeleton", Keire::SkeletonAsset::Encode(generated.Skeleton));
             Write("Humanoid.testrig", Keire::RigDefinitionAsset::Encode(generated.Rig));
@@ -327,4 +347,31 @@ TEST_CASE("Scene runtime procedural artifacts reuse warmed storage without reall
     fixture.Tick({0.0F, 0.0F, 2.0F * FixedDeltaSeconds}, {0.0F, 0.0F, 1.0F});
     CHECK(third->Revision == retainedRevision);
     CHECK(third->Pose.front().LocalTransform == retainedPelvis);
+}
+
+TEST_CASE("Scene runtime procedural motion is invariant under imported bone coordinate bases")
+{
+    ProceduralRuntimeFixture canonical;
+    ProceduralRuntimeFixture imported(true);
+    for (int tick = 0; tick < 150; ++tick)
+    {
+        const Keire::Vector3 displacement =
+            tick < 90 ? Keire::Vector3{0.0F, 0.0F, 1.4F * FixedDeltaSeconds} : Keire::Vector3{};
+        const Keire::Vector3 facing = tick > 110 ? Keire::Vector3{1.0F, 0.0F, 0.0F} : Keire::Vector3{0.0F, 0.0F, 1.0F};
+        canonical.Tick(displacement, facing);
+        imported.Tick(displacement, facing);
+        CHECK(canonical.Animator()->ProceduralState().State == imported.Animator()->ProceduralState().State);
+        for (const auto semantic :
+             {Keire::RigBoneSemantic::Pelvis, Keire::RigBoneSemantic::Head, Keire::RigBoneSemantic::LeftHand,
+              Keire::RigBoneSemantic::RightHand, Keire::RigBoneSemantic::LeftFoot, Keire::RigBoneSemantic::RightFoot})
+        {
+            CAPTURE(tick);
+            CAPTURE(static_cast<int>(semantic));
+            const auto expected = canonical.Bone(semantic).WorldPosition;
+            const auto actual = imported.Bone(semantic).WorldPosition;
+            CHECK(actual.X == doctest::Approx(expected.X).epsilon(0.002));
+            CHECK(actual.Y == doctest::Approx(expected.Y).epsilon(0.002));
+            CHECK(actual.Z == doctest::Approx(expected.Z).epsilon(0.002));
+        }
+    }
 }

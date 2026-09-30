@@ -19,6 +19,10 @@ High within 20 m, Medium within 50 m, and Low beyond 50 m while phase, state, an
 Do not enable the Animator's legacy automatic foot-grounding pass in procedural mode. Procedural legs own contact
 planning and IK exactly once; the Inspector reports the conflicting authored setting and ignores it.
 
+Confirm left/right limb semantics and the model's facing direction when importing a rig. Use a visual child rotation
+to align its authored forward direction with the controller. Bone-local axes may differ from model axes: procedural
+hip displacement is converted through the parent transform, and body rotations use the anatomical model basis.
+
 ## Gameplay Contract
 
 Submit intent during every fixed update. Desired velocity is an input, while the runtime uses the Character

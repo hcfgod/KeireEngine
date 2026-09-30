@@ -250,6 +250,29 @@ namespace Keire
             const auto leftLegLength = distance(leftUpper, leftLower) + distance(leftLower, leftFoot);
             const auto rightLegLength = distance(rightUpper, rightLower) + distance(rightLower, rightFoot);
             const auto legLength = std::max((leftLegLength + rightLegLength) * 0.5F, 0.001F);
+            const auto modelRight = RiggingDetail::Normalize(
+                RiggingDetail::Subtract(position(rightUpper), position(leftUpper)), {1.0F, 0.0F, 0.0F});
+            const auto modelForward =
+                RiggingDetail::Normalize(RiggingDetail::Cross(modelRight, {0.0F, 1.0F, 0.0F}), {0.0F, 0.0F, 1.0F});
+            const auto rotateInModel = [&](const std::uint32_t bone, const Vector3 degrees)
+            {
+                ModelBoneMatrices(*skeleton, pose, state.ModelMatrixScratch);
+                Quaternion parentRotation;
+                const auto parent = skeleton->Bones()[bone].Parent;
+                if (parent >= 0 && !RiggingDetail::MatrixRotation(
+                                       state.ModelMatrixScratch[static_cast<std::size_t>(parent)], parentRotation))
+                    return;
+                const auto anatomicalRotation = Math::EulerDegreesToQuaternion(degrees);
+                const auto vector =
+                    RiggingDetail::Add(RiggingDetail::Multiply(modelRight, anatomicalRotation.X),
+                                       RiggingDetail::Add(Vector3{0.0F, anatomicalRotation.Y, 0.0F},
+                                                          RiggingDetail::Multiply(modelForward, anatomicalRotation.Z)));
+                const Quaternion modelRotation{vector.X, vector.Y, vector.Z, anatomicalRotation.W};
+                const auto parentDelta = RiggingDetail::Multiply(
+                    RiggingDetail::Multiply(RiggingDetail::Conjugate(parentRotation), modelRotation), parentRotation);
+                pose[bone].Rotation =
+                    RiggingDetail::Normalize(RiggingDetail::Multiply(parentDelta, pose[bone].Rotation));
+            };
             const auto locomotionWeight =
                 motionState == ProceduralMotionState::Locomotion
                     ? Detail::ProceduralLocomotionPoseWeight(poseSpeed, profile.MinimumMovementSpeed, profile.WalkSpeed)
@@ -262,29 +285,39 @@ namespace Keire
                 profile.PelvisMotion.Evaluate(state.GaitPhase) * profile.PelvisBobRatio * legLength * locomotionWeight;
             const auto sway =
                 std::sin(state.GaitPhase * 6.28318530718F) * profile.PelvisSwayRatio * legLength * locomotionWeight;
-            pose[pelvis].Translation.X += sway;
-            pose[pelvis].Translation.Y +=
-                bob - profile.CrouchDepthRatio * legLength * state.ProceduralIntent.CrouchAmount;
+            const auto pelvisParent = skeleton->Bones()[pelvis].Parent;
+            const auto pelvisParentToModel = pelvisParent >= 0 ? bindMatrices[static_cast<std::size_t>(pelvisParent)]
+                                                               : Math::ComposeTransform({}, {}, {1.0F, 1.0F, 1.0F});
+            const auto modelToPelvisParent = Math::Inverse(pelvisParentToModel);
+            const auto translatePelvis = [&](const Vector3 modelDisplacement)
+            {
+                pose[pelvis].Translation = RiggingDetail::Add(
+                    pose[pelvis].Translation, Math::TransformDirection(modelToPelvisParent, modelDisplacement));
+            };
+            // Imported bone-local axes need not match the model's upright coordinate system.
+            translatePelvis(
+                {sway, bob - profile.CrouchDepthRatio * legLength * state.ProceduralIntent.CrouchAmount, 0.0F});
             const auto facingYaw = std::clamp(facingError, -profile.TurnStepDegrees, profile.TurnStepDegrees);
-            pose[pelvis].Rotation = RiggingDetail::Normalize(RiggingDetail::Multiply(
-                pose[pelvis].Rotation, Math::EulerDegreesToQuaternion({0.0F, facingYaw, 0.0F})));
+            rotateInModel(pelvis, {0.0F, facingYaw, 0.0F});
             if (motionState == ProceduralMotionState::Landing)
             {
                 const auto recovery = std::clamp(state.LandingElapsed / profile.LandingRecoveryTime, 0.0F, 1.0F);
-                pose[pelvis].Translation.Y -= profile.LandingCompression.Evaluate(recovery) *
-                                              profile.LandingCompressionRatio * legLength *
-                                              state.ProceduralState.LandingIntensity;
+                translatePelvis({0.0F,
+                                 -profile.LandingCompression.Evaluate(recovery) * profile.LandingCompressionRatio *
+                                     legLength * state.ProceduralState.LandingIntensity,
+                                 0.0F});
             }
             else if (motionState == ProceduralMotionState::Takeoff)
             {
-                pose[pelvis].Translation.Y -= profile.TakeoffCompressionRatio * legLength;
+                translatePelvis({0.0F, -profile.TakeoffCompressionRatio * legLength, 0.0F});
             }
             else if (!grounded)
             {
                 const auto airborneAmount = velocity.Y > 0.0F ? std::clamp(1.0F - velocity.Y / 8.0F, 0.0F, 1.0F) : 1.0F;
-                pose[pelvis].Translation.Y -= profile.AirborneTuck.Evaluate(airborneAmount) *
-                                              profile.AirborneTuckRatio * legLength * 0.25F *
-                                              (1.0F - state.PreLandingAmount);
+                translatePelvis({0.0F,
+                                 -profile.AirborneTuck.Evaluate(airborneAmount) * profile.AirborneTuckRatio *
+                                     legLength * 0.25F * (1.0F - state.PreLandingAmount),
+                                 0.0F});
             }
 
             const auto animatorTransform = entity.GetComponent<TransformComponent>();
@@ -305,7 +338,8 @@ namespace Keire
                               ? Vector3{state.RootAngularVelocityDegrees < 0.0F ? -1.0F : 1.0F, 0.0F, 0.0F}
                               : NormalizeHorizontal(localMotion, {0.0F, 0.0F, 1.0F});
             const auto directionalRatio = Detail::ProceduralDirectionalStrideRatio(
-                localMotion, profile.LateralStrideRatio, profile.BackwardStrideRatio);
+                {RiggingDetail::Dot(localMotion, modelRight), 0.0F, RiggingDetail::Dot(localMotion, modelForward)},
+                profile.LateralStrideRatio, profile.BackwardStrideRatio);
             const auto stride = motionState == ProceduralMotionState::Locomotion
                                     ? Detail::ProceduralStrideLength(
                                           modelSpeed, phaseRate, legLength, profile.StrideLengthRatio, directionalRatio,
@@ -313,8 +347,6 @@ namespace Keire
                                           profile.WalkCadence, profile.SprintCadence)
                                     : legLength * profile.StrideLengthRatio * directionalRatio * locomotionWeight;
 
-            const auto modelRight = RiggingDetail::Normalize(
-                RiggingDetail::Subtract(position(rightUpper), position(leftUpper)), {1.0F, 0.0F, 0.0F});
             const auto solveLeg = [&](const std::uint32_t upper, const std::uint32_t lower, const std::uint32_t foot,
                                       const float offset, const float side)
             {
@@ -341,7 +373,8 @@ namespace Keire
                                           (1.0F - state.PreLandingAmount) -
                                       profile.FallingExtensionRatio * state.PreLandingAmount;
                     target.Y += tuck * legLength;
-                    target.Z += profile.AirborneTuckRatio * legLength * 0.22F;
+                    target = RiggingDetail::Add(
+                        target, RiggingDetail::Multiply(modelForward, profile.AirborneTuckRatio * legLength * 0.22F));
                 }
                 const auto currentLateralOffset =
                     RiggingDetail::Dot(RiggingDetail::Subtract(currentFoot, currentPelvis), modelRight);
@@ -382,8 +415,7 @@ namespace Keire
                 const auto found = state.SemanticBoneIndices.find(bone);
                 if (found == state.SemanticBoneIndices.end())
                     return;
-                pose[found->second].Rotation = RiggingDetail::Normalize(
-                    RiggingDetail::Multiply(pose[found->second].Rotation, Math::EulerDegreesToQuaternion(degrees)));
+                rotateInModel(found->second, degrees);
             };
             const auto arm = profile.ArmSwing.Evaluate(state.GaitPhase) * profile.ArmSwingDegrees * locomotionWeight;
             const auto solveArm = [&](const RigBoneSemantic upperSemantic, const RigBoneSemantic lowerSemantic,

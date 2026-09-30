@@ -1862,6 +1862,8 @@ component-owned tuning, so cooking, catalog dependencies, validation, and hot re
 The scene-session header retains orchestration and cached state, while `SceneRuntimeProcedural.cpp` owns procedural
 advance and publication. Per-Animator pose, matrix, palette, grounding-request, and double-buffered debug storage is
 retained after warm-up; published debug snapshots are immutable even when a consumer holds an older snapshot.
+Procedural hip offsets are converted from model space into the pelvis parent's coordinates. Anatomical body rotations
+are conjugated through each current parent rotation before updating local poses, preserving imported bone bases.
 
 ## Skeletal Deformation And Rig Authoring
 
