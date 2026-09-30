@@ -114,7 +114,6 @@ namespace Keire
         request.PositionTolerance = Detail::WorldVerticalDistanceToModel(worldToModel, 0.01F);
         float totalLegLength = 0.0F;
         std::size_t legCount = 0;
-        float maximumGroundingBlend = 0.0F;
         std::array<bool, 2> unsupportedFeet{};
         Ref<const SkinnedMeshAsset> skin;
         Ref<const MeshAsset> skinMesh;
@@ -447,18 +446,14 @@ namespace Keire
             }
             grounded.Toe = toe->second;
             grounded.SupportWeight = smoothed->Blend;
-            const auto effectiveBlend = chainRuntimeWeight * smoothed->Blend;
-            maximumGroundingBlend = std::max(maximumGroundingBlend, effectiveBlend);
             request.Contacts.push_back(grounded);
         }
         if (!request.Contacts.empty())
         {
-            request.PelvisWeight *= maximumGroundingBlend;
             if (legCount != 0 && settings.LockPlantedFeet)
             {
                 const auto averageLegLength = totalLegLength / static_cast<float>(legCount);
-                request.MaximumHorizontalPelvisAdjustment =
-                    averageLegLength * horizontalPelvisRatio.value_or(0.25F) * maximumGroundingBlend;
+                request.MaximumHorizontalPelvisAdjustment = averageLegLength * horizontalPelvisRatio.value_or(0.25F);
                 request.PelvisSupportRadius = averageLegLength * 0.025F;
                 const auto chest = semantics.find(RigBoneSemantic::Chest);
                 const auto spine = semantics.find(RigBoneSemantic::Spine);
@@ -470,8 +465,7 @@ namespace Keire
                     request.Torso = spine->second;
                 if (request.Torso)
                 {
-                    request.PelvisRotationWeight =
-                        settings.Weight * settings.LeanCorrectionWeight * maximumGroundingBlend;
+                    request.PelvisRotationWeight = settings.Weight * settings.LeanCorrectionWeight;
                     request.MaximumPelvisRotationDegrees = settings.MaximumLeanCorrectionDegrees;
                 }
             }

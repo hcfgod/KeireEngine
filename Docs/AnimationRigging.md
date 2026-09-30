@@ -471,3 +471,7 @@ of its endpoint `Weight`. It defaults to 1 for existing native callers. Zero sup
 pull the pelvis. Values must be finite and within [0, 1]; invalid requests leave the pose unchanged. Automatic grounding
 uses its existing Response Time contact blend for support influence, so acquiring a second foot does not abruptly cap
 the correction from the existing support. This behavior also applies to Animator grounding configured through C#.
+
+Pelvis response uses each contact's support weight once in the grounding solver. The runtime keeps the authored
+pelvis weight and correction limits fixed during acquisition/release; it does not multiply them by another
+contact fade. This avoids accelerating body recovery when the last planted foot releases.

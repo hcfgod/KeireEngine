@@ -1,5 +1,8 @@
 # Changelog
 
+- Automatic grounding no longer fades pelvis weights and correction limits a second time outside the solver,
+  reducing abrupt body recovery when planted support releases.
+
 - Horizontal grounding preserves the animated pelvis-to-feet offset, preventing support changes from pulling
   authored strides toward bind-pose foot positions. Terrain-displaced contacts still rebalance the body.
 

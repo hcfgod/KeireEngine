@@ -3,6 +3,7 @@
 #include <doctest/doctest.h>
 
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -364,5 +365,31 @@ TEST_CASE("Foot grounding preserves a swinging endpoint while the pelvis follows
         CHECK(pose[6].WorldPosition.X == doctest::Approx(0.25F).epsilon(0.001F));
         CHECK(pose[6].WorldPosition.Y == doctest::Approx(0.4F).epsilon(0.001F));
         CHECK(pose[6].WorldPosition.Z == doctest::Approx(0.2F).epsilon(0.001F));
+    }
+}
+
+TEST_CASE("Runtime pelvis release applies contact support weight without an additional global fade")
+{
+    SupportFixture fixture(false, true);
+    fixture.Tick();
+    const float initialCorrection = fixture.Animator->RuntimeDebugSnapshot()->Pose[0].WorldPosition.Y - 2.0F;
+    REQUIRE(initialCorrection < -0.1F);
+    auto settings = fixture.Animator->FootGrounding();
+    settings.ResponseTime = 0.12F;
+    fixture.Animator->SetFootGrounding(settings);
+    fixture.Session->RuntimeScene()
+        ->FindEntity(fixture.Floor.Id())
+        .GetComponent<Keire::ColliderComponent>()
+        ->SetEnabled(false);
+    for (int frame = 1; frame <= 12; ++frame)
+    {
+        fixture.Tick();
+        CAPTURE(frame);
+        const auto blend = std::exp(-static_cast<float>(frame) / (60.0F * settings.ResponseTime));
+        // The endpoint approaches the sampled foot and its support weight fades independently.
+        // The runtime must not apply a third fade to the solver's pelvis weight.
+        const auto expected = initialCorrection * blend * blend;
+        const auto actual = fixture.Animator->RuntimeDebugSnapshot()->Pose[0].WorldPosition.Y - 2.0F;
+        CHECK(actual == doctest::Approx(expected).epsilon(0.0001F));
     }
 }
