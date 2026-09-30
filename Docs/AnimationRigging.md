@@ -242,6 +242,15 @@ nearest Character Controller hierarchy (including a capsule on an Animator paren
 **Maximum Ground Slope**, and lowers the pelvis when needed to reach valid contacts. Clip playback preserves authored
 horizontal body motion during foot locking and support transfer. Procedural locomotion can additionally request bounded
 horizontal balance through its profile's `MaximumHorizontalPelvisAdjustmentRatio`.
+For a grounded, stationary Character Controller, one unsupported foot also enables a gradual, bounded shift over
+the remaining support and a small extension of the hanging leg. A ray hit below the leg's reachable range does not
+count as support. A nearby reachable lower surface can be planted at rest without waiting for a walk-cycle landing.
+If the ankle probe is just outside an edge, standing grounding also searches within ten percent of leg length for
+nearby footing. It retains collision filtering and slope limits and chooses the closest valid surface.
+Walking or becoming airborne fades out this standing response, preserving authored locomotion.
+**Body Lean Correction** scales the response; zero disables it. This changes only the animated pose, not the controller
+capsule. Low-level C++ callers can set `FootGroundingRequest::BalanceOverSupport` to center over weighted contacts;
+the default preserves the sampled stance offset, and horizontal limits, support radius, and pelvis weight still apply.
 **Body Lean Correction** controls terrain tilt applied to the sampled pelvis-to-chest or pelvis-to-spine axis;
 **Maximum Lean Correction** bounds that change in degrees. Authored lean is preserved, including on flat ground
 throughout foot-contact acquisition and release. Zero weight disables terrain tilt; full weight applies the support

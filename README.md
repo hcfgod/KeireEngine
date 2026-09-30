@@ -706,6 +706,9 @@ reach diagnostics. Disabling every contact preserves the pose; invalid inputs st
 Partial contact weights fade pelvis support, and `PelvisWeight` scales translation and tilt together.
 Clip foot grounding preserves authored horizontal body motion during support transfers; procedural locomotion profiles
 can opt into horizontal balance with `MaximumHorizontalPelvisAdjustmentRatio`.
+At rest, a grounded Character Controller with one unsupported foot gradually shifts its animated hips toward the
+supporting leg and lets the hanging leg extend within its reach. Body Lean Correction controls this response;
+walking and airborne motion fade it out. C++ grounding requests can opt into support centering with `BalanceOverSupport`.
 For procedural humanoids, verify imported limb semantics and align the visual model's forward direction with its
 controller; rotated bone-local axes are handled by the procedural pose solver.
 Grounding retains its support anchor as a foot lifts, so Response Time releases pelvis support gradually on raised ground.

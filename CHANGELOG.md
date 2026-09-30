@@ -1,5 +1,10 @@
 # Changelog
 
+- Stationary clip-driven characters balance over their supported leg at ledges and relax the hanging leg,
+  including when a ground ray hits a floor beyond leg reach. Walking and airborne motion fade out this response.
+  Nearby standing probes find footing when an ankle is just outside the edge; reachable lower ground can be planted.
+  Low-level foot grounding adds an opt-in `BalanceOverSupport` mode with existing distance and weight limits.
+
 - Procedural pose smoothing and toe roll run before foot contact and gameplay IK, preserving final constraints.
   The smoothing history excludes contact corrections so pelvis offsets do not feed back into later gait poses.
 - Procedural knee poles retain anatomical forward while backing up or strafing, avoiding reverse knee bends.

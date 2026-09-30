@@ -251,6 +251,9 @@ namespace Keire
         float PelvisRotationWeight = 0.0F;
         float MaximumPelvisRotationDegrees = 0.0F;
         float PositionTolerance = 0.01F;
+        // Center the pelvis over weighted supports instead of preserving the sampled stance offset.
+        // Horizontal adjustment still obeys its distance limit, support radius, and PelvisWeight.
+        bool BalanceOverSupport = false;
     };
 
     struct FootGroundingResult

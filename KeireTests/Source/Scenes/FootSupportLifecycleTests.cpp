@@ -236,6 +236,82 @@ namespace
         Keire::Ref<Keire::MeshAsset> SourceMesh;
     };
 } // namespace
+
+TEST_CASE("Standing clip grounding balances over one supported foot without shifting walking poses")
+{
+    SupportFixture fixture;
+    auto scene = fixture.Session->RuntimeScene();
+    const auto floor = scene->FindEntity(fixture.Floor.Id());
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({-0.6F, -0.45F, 0.0F});
+    floor.GetComponent<Keire::ColliderComponent>()->SetHalfExtent({0.6F, 0.5F, 5.0F});
+    SUBCASE("The unsupported foot has no ray hit") {}
+    SUBCASE("The supporting ankle is just outside the ledge")
+    {
+        floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({-0.9F, -0.45F, 0});
+    }
+    SUBCASE("The unsupported foot sees ground beyond leg reach")
+    {
+        auto lowerFloor = scene->CreateEntity("Lower floor");
+        lowerFloor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -1.5F, 0});
+        lowerFloor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5, 0.5F, 5});
+    }
+    fixture.Animator->SetRuntimeFootGroundingWeight(0.0F);
+    fixture.Tick();
+    fixture.Animator->SetRuntimeFootGroundingWeight(1.0F);
+    auto character = scene->FindEntity(fixture.Character.Id());
+    const auto controller = character.AddComponent<Keire::CharacterControllerComponent>();
+    // Exercise the animation stage against a deterministic post-physics standing state.
+    controller->ApplyRuntimeState(1, true, {0, 1, 0}, {});
+    for (int tick = 0; tick < 90; ++tick)
+        fixture.Session->Update(1.0F / 60.0F, 1.0F);
+    INFO(fixture.Animator->RuntimeDiagnostic());
+    REQUIRE(fixture.Animator->RuntimeDiagnostic().empty());
+    CHECK(fixture.Animator->RuntimeDebugSnapshot()->Pose[0].WorldPosition.X < -0.05F);
+    CHECK(fixture.FootY() >= 0.049F);
+
+    controller->ApplyRuntimeState(1, true, {0, 1, 0}, {0, 0, 2});
+    for (int tick = 0; tick < 90; ++tick)
+        fixture.Session->Update(1.0F / 60.0F, 1.0F);
+    CHECK(fixture.Animator->RuntimeDebugSnapshot()->Pose[0].WorldPosition.X == doctest::Approx(0.0F).epsilon(0.005));
+    CHECK(fixture.FootY() >= 0.049F);
+
+    controller->ApplyRuntimeState(1, false, {0, 1, 0}, {});
+    for (int tick = 0; tick < 90; ++tick)
+        fixture.Session->Update(1.0F / 60.0F, 1.0F);
+    CHECK(fixture.Animator->RuntimeDebugSnapshot()->Pose[0].WorldPosition.X == doctest::Approx(0.0F).epsilon(0.005));
+}
+
+TEST_CASE("Standing clip grounding reaches lower support without forcing a walking swing to plant")
+{
+    for (const bool standing : {false, true})
+    {
+        SupportFixture fixture;
+        auto scene = fixture.Session->RuntimeScene();
+        const auto floor = scene->FindEntity(fixture.Floor.Id());
+        floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({-0.6F, -0.45F, 0});
+        floor.GetComponent<Keire::ColliderComponent>()->SetHalfExtent({0.6F, 0.5F, 5});
+        auto lowerFloor = scene->CreateEntity("Reachable lower floor");
+        lowerFloor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -0.65F, 0});
+        lowerFloor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5, 0.5F, 5});
+        fixture.Animator->SetRuntimeFootGroundingWeight(0);
+        fixture.Tick();
+        fixture.Animator->SetRuntimeFootGroundingWeight(1);
+        auto character = scene->FindEntity(fixture.Character.Id());
+        const auto controller = character.AddComponent<Keire::CharacterControllerComponent>();
+        controller->ApplyRuntimeState(1, true, {0, 1, 0}, {0, 0, standing ? 0.0F : 2.0F});
+        for (int tick = 0; tick < 90; ++tick)
+            fixture.Session->Update(1.0F / 60.0F, 1.0F);
+        CAPTURE(standing);
+        INFO(fixture.Animator->RuntimeDiagnostic());
+        REQUIRE(fixture.Animator->RuntimeDiagnostic().empty());
+        const auto& pose = fixture.Animator->RuntimeDebugSnapshot()->Pose;
+        CHECK(pose[6].WorldPosition.Y == doctest::Approx(standing ? -0.15F : 0.0F).epsilon(0.005));
+        CHECK(fixture.FootY() >= 0.049F);
+        if (standing)
+            CHECK(pose[0].WorldPosition.Y < 1.9F);
+    }
+}
+
 TEST_CASE("Foot contact trace logs transitions without logging steady planted frames")
 {
     KeireTests::LogFixture logs("foot-contact-trace");

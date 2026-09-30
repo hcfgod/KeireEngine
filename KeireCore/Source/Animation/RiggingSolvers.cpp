@@ -376,7 +376,7 @@ namespace Keire
             const auto world = WorldMatrices(skeleton, working);
             if (request.MaximumHorizontalPelvisAdjustment > 0.0F)
             {
-                // Preserve the authored stride; only terrain displacement should rebalance the body.
+                // Preserve the authored stride unless the caller explicitly requests standing support centering.
                 Vector3 sampledFootCenter;
                 Vector3 targetFootCenter;
                 for (const auto& contact : supportContacts)
@@ -392,7 +392,9 @@ namespace Keire
                 }
                 const auto sampledPelvis = Math::TransformPoint(sampledWorld[*request.Pelvis], {});
                 const auto currentPelvis = Math::TransformPoint(world[*request.Pelvis], {});
-                const auto desiredPelvis = Add(targetFootCenter, Subtract(sampledPelvis, sampledFootCenter));
+                const auto desiredPelvis = request.BalanceOverSupport
+                                               ? targetFootCenter
+                                               : Add(targetFootCenter, Subtract(sampledPelvis, sampledFootCenter));
                 const Vector3 towardSupportedPose{desiredPelvis.X - currentPelvis.X, 0.0F,
                                                   desiredPelvis.Z - currentPelvis.Z};
                 const auto distance = Length(towardSupportedPose);

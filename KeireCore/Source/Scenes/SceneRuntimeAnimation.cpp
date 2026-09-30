@@ -658,10 +658,26 @@ namespace Keire
                 },
                 [&]
                 {
+                    const auto characterRoot = Detail::FindCharacterControllerRoot(entity);
+                    const auto character = characterRoot ? characterRoot.GetComponent<CharacterControllerComponent>()
+                                                         : Ref<CharacterControllerComponent>{};
+                    const auto motion = character ? character->RuntimeState() : CharacterControllerRuntimeState{};
+                    const auto horizontalSpeed =
+                        std::sqrt(motion.Velocity.X * motion.Velocity.X + motion.Velocity.Z * motion.Velocity.Z);
+                    const auto balanceTarget =
+                        motion.Grounded ? std::clamp(1.0F - horizontalSpeed / 0.3F, 0.0F, 1.0F) : 0.0F;
+                    state->StandingFootBalance +=
+                        (balanceTarget - state->StandingFootBalance) * (1.0F - std::exp(-deltaSeconds / 0.15F));
+                    const auto balance = state->StandingFootBalance * animator->FootGrounding().LeanCorrectionWeight;
+                    const std::optional<float> horizontalBalance =
+                        balance > 0.001F ? std::optional{0.12F * balance} : std::nullopt;
+                    const std::optional<float> unsupportedDrop =
+                        balance > 0.001F ? std::optional{0.10F * balance} : std::nullopt;
                     return ApplyFootGrounding(entity, *skeleton, animator->FootGrounding(),
                                               animator->RuntimeFootGroundingWeight(), animator->SkinnedMesh(),
                                               deltaSeconds, sample.LocalPose, state->BoneIndices,
-                                              state->SemanticBoneIndices, *state);
+                                              state->SemanticBoneIndices, *state, horizontalBalance, std::nullopt,
+                                              std::nullopt, unsupportedDrop, true);
                 });
             if (!ikDiagnostics.empty())
                 animator->SetRuntimeDiagnostic(ikDiagnostics);

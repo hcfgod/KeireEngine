@@ -170,6 +170,8 @@ namespace Keire
             FootPlantRuntimeState LeftFootPlantState;
             FootPlantRuntimeState RightFootPlantState;
             std::size_t UnreachableFootCount = 0;
+            float StandingFootBalance = 0.0F;
+            float StandingSupportBalance = 0.0F;
             AssetId FootClearanceMesh;
             std::uint64_t FootClearanceSkinRevision = 0;
             std::uint64_t FootClearanceMeshRevision = 0;
@@ -370,7 +372,8 @@ namespace Keire
             const std::optional<float> horizontalPelvisRatio = std::nullopt,
             const std::optional<float> maximumFootRotationDegrees = std::nullopt,
             const std::optional<std::array<float, 2>> proceduralFootWeights = std::nullopt,
-            const std::optional<float> unsupportedFootDropRatio = std::nullopt);
+            const std::optional<float> unsupportedFootDropRatio = std::nullopt,
+            const bool balanceOnlyUnsupported = false);
 
         static void ApplyRootMotion(const Entity& entity, const AnimatorSample& sample, AnimatorComponent& animator);
 

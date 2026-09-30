@@ -15,7 +15,7 @@ namespace Keire
         const std::map<RigBoneSemantic, std::uint32_t>& semantics, AnimationRuntimeState& runtimeState,
         const std::optional<float> horizontalPelvisRatio, const std::optional<float> maximumFootRotationDegrees,
         const std::optional<std::array<float, 2>> proceduralFootWeights,
-        const std::optional<float> unsupportedFootDropRatio)
+        const std::optional<float> unsupportedFootDropRatio, const bool balanceOnlyUnsupported)
     {
         const auto clearContacts = [&]
         {
@@ -26,6 +26,7 @@ namespace Keire
             runtimeState.LeftFootPlantState = {};
             runtimeState.RightFootPlantState = {};
             runtimeState.UnreachableFootCount = 0;
+            runtimeState.StandingSupportBalance = 0.0F;
         };
         if (!settings.Enabled || runtimeWeight <= std::numeric_limits<float>::epsilon())
         {
@@ -247,12 +248,48 @@ namespace Keire
             {
                 raycastDistance = std::max(raycastDistance, legLength * 1.1F);
             }
-            const auto hits = PhysicsWorldService->RayCast({.Origin = origin,
-                                                            .Direction = {0.0F, -1.0F, 0.0F},
-                                                            .MaximumDistance = settings.RaycastHeight + raycastDistance,
-                                                            .Mask = settings.CollisionMask,
-                                                            .IncludeTriggers = false,
-                                                            .Layer = queryLayer});
+            auto hits = PhysicsWorldService->RayCast({.Origin = origin,
+                                                      .Direction = {0.0F, -1.0F, 0.0F},
+                                                      .MaximumDistance = settings.RaycastHeight + raycastDistance,
+                                                      .Mask = settings.CollisionMask,
+                                                      .IncludeTriggers = false,
+                                                      .Layer = queryLayer});
+            if (balanceOnlyUnsupported && runtimeState.StandingFootBalance > 0.9F &&
+                horizontalPelvisRatio.value_or(0.0F) > 0.0F &&
+                (!resolvedLockedSupport || footWorld.Y - plantRuntime.SurfacePosition.Y > legLength * 0.15F))
+            {
+                // A capsule can remain supported with an ankle just beyond the edge. Search only a
+                // small foot-sized neighborhood at rest; walking must retain its authored swing path.
+                constexpr std::array<Vector3, 8> directions{{{1, 0, 0},
+                                                             {-1, 0, 0},
+                                                             {0, 0, 1},
+                                                             {0, 0, -1},
+                                                             {0.7071F, 0, 0.7071F},
+                                                             {-0.7071F, 0, 0.7071F},
+                                                             {0.7071F, 0, -0.7071F},
+                                                             {-0.7071F, 0, -0.7071F}}};
+                for (const auto radius : {legLength * 0.05F, legLength * 0.10F})
+                {
+                    for (const auto direction : directions)
+                    {
+                        const auto nearby = PhysicsWorldService->RayCast(
+                            {.Origin = {origin.X + direction.X * radius, origin.Y, origin.Z + direction.Z * radius},
+                             .Direction = {0, -1, 0},
+                             .MaximumDistance = settings.RaycastHeight + raycastDistance,
+                             .Mask = settings.CollisionMask,
+                             .IncludeTriggers = false,
+                             .Layer = queryLayer});
+                        for (const auto& candidate : nearby)
+                        {
+                            if (candidate.Position.Y <= footWorld.Y + settings.MaximumPelvisAdjustment)
+                                hits.push_back(candidate);
+                        }
+                    }
+                }
+                std::ranges::stable_sort(
+                    hits, [&](const auto& left, const auto& right)
+                    { return distance(footWorld, left.Position) < distance(footWorld, right.Position); });
+            }
             const auto hit = std::ranges::find_if(
                 hits,
                 [&](const auto& candidate)
@@ -388,7 +425,12 @@ namespace Keire
                         {
                             plantRuntime.AwaitingAnimationPlant = false;
                         }
-                        const auto forced = forcePlantCandidate || separation < -settings.ReleaseDistance;
+                        const auto standingReach =
+                            balanceOnlyUnsupported && runtimeState.StandingFootBalance > 0.9F &&
+                            horizontalPelvisRatio.value_or(0.0F) > 0.0F && separation > settings.PlantDistance &&
+                            distance(upperWorld, candidateWorld) <= legLength + settings.MaximumPelvisAdjustment;
+                        const auto forced =
+                            forcePlantCandidate || separation < -settings.ReleaseDistance || standingReach;
                         if (forced)
                         {
                             if (!Detail::ForceAutomaticFootPlant(candidateWorld, candidateNormal, plantState))
@@ -467,6 +509,11 @@ namespace Keire
                 }
             }
 
+            if (balanceOnlyUnsupported && unsupportedFootDropRatio && !footTarget && hit != hits.end() &&
+                distance(upperWorld, hit->Position) > legLength + settings.MaximumPelvisAdjustment)
+            {
+                unsupportedFeet[chainIndex] = true;
+            }
             std::optional<Vector3> desiredWorldTarget;
             if (footTarget && contact && targetNormalWorld)
                 desiredWorldTarget = Math::TransformPoint(modelToWorld, *footTarget);
@@ -559,14 +606,22 @@ namespace Keire
             grounded.SupportPosition = Math::TransformPoint(worldToModel, smoothing.Position);
             request.Contacts.push_back(grounded);
         }
+        if (balanceOnlyUnsupported)
+        {
+            const auto target = unsupportedFeet[0] != unsupportedFeet[1] ? horizontalPelvisRatio.value_or(0.0F) : 0.0F;
+            runtimeState.StandingSupportBalance +=
+                (target - runtimeState.StandingSupportBalance) * (1.0F - std::exp(-deltaSeconds / 0.15F));
+        }
         if (!request.Contacts.empty())
         {
             if (legCount != 0 && settings.LockPlantedFeet)
             {
                 const auto averageLegLength = totalLegLength / static_cast<float>(legCount);
-                // Clip playback owns horizontal body motion. Rebalancing toward locked feet would drag
-                // an in-place animation backward at each support transfer. Procedural motion opts in explicitly.
-                request.MaximumHorizontalPelvisAdjustment = averageLegLength * horizontalPelvisRatio.value_or(0.0F);
+                // Walking preserves its stance offset; standing balance fades toward the remaining support.
+                const auto balanceRatio =
+                    balanceOnlyUnsupported ? runtimeState.StandingSupportBalance : horizontalPelvisRatio.value_or(0.0F);
+                request.MaximumHorizontalPelvisAdjustment = averageLegLength * balanceRatio;
+                request.BalanceOverSupport = balanceOnlyUnsupported && balanceRatio > 0.0F;
                 request.PelvisSupportRadius = averageLegLength * 0.025F;
                 const auto chest = semantics.find(RigBoneSemantic::Chest);
                 const auto spine = semantics.find(RigBoneSemantic::Spine);
@@ -587,6 +642,8 @@ namespace Keire
             for (std::size_t chainIndex = 0; chainIndex < chains.size(); ++chainIndex)
             {
                 const auto& chain = chains[chainIndex];
+                if (unsupportedFeet[chainIndex])
+                    continue;
                 if (std::ranges::any_of(request.Contacts, [&](const auto& value) { return value.Foot == *chain[2]; }))
                     continue;
                 const auto chainWeight =

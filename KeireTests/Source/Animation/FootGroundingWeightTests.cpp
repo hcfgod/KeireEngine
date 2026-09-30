@@ -57,6 +57,31 @@ TEST_CASE("Pelvis support release is independent of the blended foot endpoint")
     }
 }
 
+TEST_CASE("Standing balance centers over active support within its limit and weight")
+{
+    for (const float weight : {0.0F, 0.25F, 1.0F})
+    {
+        GroundingFixture fixture;
+        fixture.Request.BalanceOverSupport = true;
+        fixture.Request.MaximumHorizontalPelvisAdjustment = 0.15F;
+        fixture.Request.PelvisWeight = weight;
+        const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+        REQUIRE(result);
+        CHECK(result->HorizontalPelvisAdjustment.X == doctest::Approx(-0.15F * weight));
+        CHECK(result->HorizontalPelvisAdjustment.Z == doctest::Approx(0.0F));
+        if (weight == 1.0F)
+            CHECK(result->UnreachableFeet == 0);
+    }
+
+    GroundingFixture fixture;
+    fixture.Request.BalanceOverSupport = true;
+    fixture.Request.Contacts.front().Weight = 0.0F;
+    const auto original = fixture.Pose;
+    const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+    REQUIRE(result);
+    CHECK(fixture.Pose == original);
+}
+
 TEST_CASE("Invalid support anchors reject grounding without changing the pose")
 {
     GroundingFixture fixture;
