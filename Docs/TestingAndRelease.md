@@ -1,5 +1,12 @@
 # Testing And Release
 
+The current source version is 0.4.5. Its Windows packages are being validated before signed publication;
+0.4.4 remains the active Windows download until that gate completes. Historical platform evidence below
+retains its original version and scope.
+
+Hub packaging copies tracked template content only. Local template preview caches and logs are excluded from
+the distribution without deleting them from the checkout.
+
 ## Asset Validation
 
 Asset changes require the focused `AssetTests.cpp` coverage plus Debug, DebugASan, and Release runs. The tests exercise

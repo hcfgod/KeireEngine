@@ -5,7 +5,7 @@ authoring, runtime, scripting, packaging, and release workflows implemented by t
 [Kéire documentation site](https://keireengine.duckdns.org/docs/) is generated from these exact Markdown files; GitHub
 and the website therefore present one maintained body of documentation rather than parallel copies.
 
-Kéire is currently version 0.4.4 and pre-1.0. Immutable signed catalog sequence 18 publishes the active Windows
+Kéire is currently version 0.4.5 and pre-1.0. Windows 0.4.5 publication is being validated. Signed catalog sequence 18 still publishes the Windows
 x86-64 0.4.4 Editor and Hub packages while retaining the independently validated Linux x86-64 0.4.2 packages. Guides
 describe the checked-in implementation and identify unfinished work honestly. Roadmap
 material is labeled as roadmap material and does not redefine the supported API or activate a release.
@@ -33,11 +33,14 @@ structural and API drift; they do not establish that every prose claim or UI wor
 | Package a game or SDK | [Desktop Player Builds](PlayerBuilds.md) | [Package Archives](PackageArchives.md), [Testing and Release](TestingAndRelease.md) |
 | Investigate a diagnostic | [Structured Diagnostics](Diagnostics/README.md) | The matching `KEIRE-*` remediation page |
 | Collect support evidence | [Diagnostic Bundles](DiagnosticBundles.md) | Preview the sanitized local archive before sharing it manually |
-| Assess release maturity | [Production Readiness Review](ProductionReadinessReview.md) | [Performance Gates](PerformanceGates.md), [Maintainability](Maintainability.md) |
+| Assess release maturity | [Current acceptance evidence](CurrentAcceptanceEvidence.md) | Source-specific evidence and remaining acceptance requirements. |
+| [September 29 engine and editor review](Reviews/2026-09-29-engine-editor-review.md) | Source-specific evidence and remaining acceptance requirements. |
+| [September 29 remediation handoff](Reviews/2026-09-29-remediation-handoff.md) | Source-specific evidence and remaining acceptance requirements. |
+| [Production Readiness Review](ProductionReadinessReview.md) | [Performance Gates](PerformanceGates.md), [Maintainability](Maintainability.md) |
 
 ## Complete Guide Library
 
-All 101 published guides and progress records are listed below in the same groups used by the documentation website.
+All 104 published guides and progress records are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -153,6 +156,9 @@ All 101 published guides and progress records are listed below in the same group
 | [Asset Packages and Project Package Manager](AssetPackages.md) | Deterministic project-content packages, registry mounts, selective imports, executable-code consent, and recovery. |
 | [Diagnostic Bundles](DiagnosticBundles.md) | Local collection, exact frozen preview, privacy redaction, section opt-outs, and atomic archive publication. |
 | [Marketplace Launch Runbook](MarketplaceLaunch.md) | Staging state, feature flags, ordered public-launch gates, and required go/no-go evidence. |
+| [Current acceptance evidence](CurrentAcceptanceEvidence.md) | Source-specific evidence and remaining acceptance requirements. |
+| [September 29 engine and editor review](Reviews/2026-09-29-engine-editor-review.md) | Source-specific evidence and remaining acceptance requirements. |
+| [September 29 remediation handoff](Reviews/2026-09-29-remediation-handoff.md) | Source-specific evidence and remaining acceptance requirements. |
 | [Production Readiness Review](ProductionReadinessReview.md) | Evidence-based subsystem grades, known gaps, release blockers, and closure criteria. |
 | [Maintainability Boundaries](Maintainability.md) | First-party source budgets, exclusions, decomposition seams, and enforcement. |
 

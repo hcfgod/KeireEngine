@@ -1944,6 +1944,28 @@ try {
 finally {
     Remove-Item $trackedSampleStage -Recurse -Force -ErrorAction SilentlyContinue
 }
+$hubContentFixture = [IO.Path]::GetFullPath((Join-Path ([IO.Path]::GetTempPath()) ("hub-content-copy-" + [guid]::NewGuid().ToString("N"))))
+try {
+    $payload = Join-Path $hubContentFixture "KeireHubContent\Templates\Payloads\Sandbox"
+    New-Item -ItemType Directory -Force $payload | Out-Null
+    Set-Content (Join-Path $payload "README.md") "Tracked template"
+    & git -C $hubContentFixture init --quiet
+    & git -C $hubContentFixture add KeireHubContent
+    if ($LASTEXITCODE -ne 0) { throw "Hub content fixture could not be tracked." }
+    New-Item -ItemType Directory -Force (Join-Path $payload "Library"), (Join-Path $payload "Logs") | Out-Null
+    Set-Content (Join-Path $payload "Logs\editor.log") "Local editor output"
+    $copiedContent = Join-Path $hubContentFixture "stage"
+    Copy-WindowsTrackedTree $hubContentFixture "KeireHubContent" $copiedContent
+    Assert-True (Test-Path (Join-Path $copiedContent "Templates\Payloads\Sandbox\README.md")) "Hub template source is packaged"
+    Assert-True (-not (Test-Path (Join-Path $copiedContent "Templates\Payloads\Sandbox\Library"))) "Empty generated template directories are excluded"
+    Assert-WindowsPackageGeneratedDataFree $copiedContent
+    Assert-True ($hubPackageScript.Contains('Copy-WindowsTrackedTree $Root "KeireHubContent"')) "Hub packages use tracked content"
+}
+finally {
+    $fixtureTempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+    if (-not $hubContentFixture.StartsWith($fixtureTempPrefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Unsafe Hub fixture cleanup path." }
+    Remove-Item -LiteralPath $hubContentFixture -Recurse -Force -ErrorAction SilentlyContinue
+}
 Write-Host ("Fast Windows script checks completed in {0:N2}s." -f $started.Elapsed.TotalSeconds)
 }
 

@@ -1766,6 +1766,20 @@ copy_tracked_tree "$ROOT" Samples/KeireSandbox "$tracked_sample_stage"
 assert_true test -f "$tracked_sample_stage/ProjectSettings/Project.keireproject"
 assert_true assert_package_generated_data_free "$tracked_sample_stage"
 rm -rf "$tracked_sample_stage"
+hub_content_fixture="$(mktemp -d)"
+hub_payload="$hub_content_fixture/KeireHubContent/Templates/Payloads/Sandbox"
+mkdir -p "$hub_payload"
+printf 'Tracked template\n' > "$hub_payload/README.md"
+git -C "$hub_content_fixture" init --quiet
+git -C "$hub_content_fixture" add KeireHubContent
+mkdir -p "$hub_payload/Library" "$hub_payload/Logs"
+printf 'Local editor output\n' > "$hub_payload/Logs/editor.log"
+copy_tracked_tree "$hub_content_fixture" KeireHubContent "$hub_content_fixture/stage"
+assert_true test -f "$hub_content_fixture/stage/Templates/Payloads/Sandbox/README.md"
+assert_false test -d "$hub_content_fixture/stage/Templates/Payloads/Sandbox/Library"
+assert_true assert_package_generated_data_free "$hub_content_fixture/stage"
+assert_true grep -Fq 'copy_tracked_tree "$ROOT" KeireHubContent' "$ROOT/Scripts/Unix/package-hub.sh"
+rm -rf "$hub_content_fixture"
 printf 'Fast Unix script checks completed in %ss.\n' "$((SECONDS - started))"
 fi
 

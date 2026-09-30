@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+## 0.4.5 - 2026-09-30
+
+- Hub packages include only tracked template content, excluding generated caches and logs left by local previews.
+
 - Character Controllers recover shallow floor overlaps after spawning or teleporting, so walking no longer
   remains blocked until the player jumps. Recovery is bounded and respects overhead obstructions.
 
@@ -249,7 +255,6 @@
 All notable Kéire changes are documented here. The format follows Keep a Changelog, and releases use semantic
 versions.
 
-## Unreleased
 
 - Refresh clean Inspector import settings after Rigging Studio edits while preserving conflicting drafts; show failed
   imports and prevent baking from unapplied or failed settings.

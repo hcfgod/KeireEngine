@@ -1,5 +1,9 @@
 # Getting Started
 
+The current source version is 0.4.5. Its Windows packages are being validated before signed publication;
+0.4.4 remains the active Windows download until that gate completes. Historical platform evidence below
+retains its original version and scope.
+
 This guide takes a fresh checkout to a verified local Kéire build. Repository launchers are the supported interface;
 they resolve tools, verify locked dependencies, generate build files, and select compatible compiler settings.
 

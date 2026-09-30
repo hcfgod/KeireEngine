@@ -1,5 +1,9 @@
 # Kéire Hub
 
+The current source version is 0.4.5. Its Windows packages are being validated before signed publication;
+0.4.4 remains the active Windows download until that gate completes. Historical platform evidence below
+retains its original version and scope.
+
 `KeireHub` is the normal product entrypoint and is packaged independently from versioned editor installations. The Hub
 owns project discovery, editor selection, templates, signed distribution catalogs, package tasks, local learning
 content, licenses, notifications, and user preferences. It does not own project files and never bypasses an editor's

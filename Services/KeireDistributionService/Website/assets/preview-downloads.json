@@ -1,10 +1,10 @@
 {
   "schemaVersion": 2,
   "releaseStatus": {
-    "state": "active",
-    "version": "0.4.4",
+    "state": "preparing",
+    "version": "0.4.5",
     "activeCatalogVersion": "0.4.4",
-    "message": "Kéire 0.4.4 Windows packages are active in signed catalog sequence 18; independently validated 0.4.2 Linux packages remain available."
+    "message": "Windows 0.4.5 packages are undergoing release validation. Signed catalog sequence 18 remains active; independently validated Linux 0.4.2 packages remain available."
   },
   "packages": []
 }

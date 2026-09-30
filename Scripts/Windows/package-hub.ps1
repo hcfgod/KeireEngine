@@ -88,8 +88,7 @@ $installWorkerText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes(
 if ($installWorkerText.Contains("KEIRE_INSTALL_WORKER_INTERRUPT_AFTER")) {
     throw "The Dist install worker contains test-only fault injection."
 }
-Get-ChildItem -LiteralPath (Join-Path $Root "KeireHubContent") -Force |
-    Copy-Item -Destination (Join-Path $stage "content") -Recurse
+Copy-WindowsTrackedTree $Root "KeireHubContent" (Join-Path $stage "content")
 Copy-WindowsTrackedTree $Root "Docs" (Join-Path $stage "Docs")
 Copy-WindowsTrackedTree $Root "Samples/KeireSandbox" (Join-Path $stage "Samples\KeireSandbox") `
     -AdditionalRelativeFiles (Get-WindowsKeireSandboxUiPackageFiles)
