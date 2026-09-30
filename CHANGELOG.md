@@ -1,5 +1,8 @@
 # Changelog
 
+- Horizontal grounding preserves the animated pelvis-to-feet offset, preventing support changes from pulling
+  authored strides toward bind-pose foot positions. Terrain-displaced contacts still rebalance the body.
+
 - Released foot contacts now use the configured response time once, removing a duplicate positional fade that
   doubled the release rate and made step transitions abrupt.
 

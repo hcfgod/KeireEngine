@@ -261,3 +261,42 @@ TEST_CASE("Foot grounding lowers the pelvis only when a support exceeds leg reac
     CHECK(lowered->PelvisAdjustment == doctest::Approx(-0.2F + std::sqrt(4.0F - 0.64F) - 2.0F));
     CHECK(lowered->UnreachableFeet == 0);
 }
+
+TEST_CASE("Authored strides do not shift the pelvis as matching ground supports change")
+{
+    for (const float phase : {-25.0F, -10.0F, 10.0F, 25.0F})
+    {
+        for (const float support : {0.0F, 0.01F, 0.25F, 0.5F, 1.0F})
+        {
+            CAPTURE(phase);
+            CAPTURE(support);
+            GroundingFixture fixture;
+            fixture.Request.Torso.reset();
+            fixture.Pose[1].Rotation = Keire::Math::EulerDegreesToQuaternion({phase, 0.0F, 0.0F});
+            fixture.Pose[4].Rotation = Keire::Math::EulerDegreesToQuaternion({-phase, 0.0F, 0.0F});
+            std::vector<Keire::Matrix4> models;
+            for (std::size_t index = 0; index < fixture.Pose.size(); ++index)
+            {
+                const auto& bone = fixture.Pose[index];
+                const auto local = Keire::Math::ComposeTransform(bone.Translation, bone.Rotation, bone.Scale);
+                const auto parent = fixture.Skeleton.Bones()[index].Parent;
+                models.push_back(parent < 0 ? local : Keire::Math::Multiply(models[parent], local));
+            }
+            for (auto& contact : fixture.Request.Contacts)
+            {
+                contact.Position = Keire::Math::TransformPoint(models[contact.Foot], {});
+                contact.Normal = {0.0F, 1.0F, 0.0F};
+                contact.Weight = 1.0F;
+                contact.RotationWeight = 0.0F;
+            }
+            fixture.Request.Contacts[1].SupportWeight = support;
+            const auto pelvis = fixture.Pose[0].Translation;
+            const auto result = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+            REQUIRE(result);
+            CHECK(result->HorizontalPelvisAdjustment.X == doctest::Approx(0.0F).epsilon(0.00001F));
+            CHECK(result->HorizontalPelvisAdjustment.Z == doctest::Approx(0.0F).epsilon(0.00001F));
+            CHECK(fixture.Pose[0].Translation.X == doctest::Approx(pelvis.X));
+            CHECK(fixture.Pose[0].Translation.Z == doctest::Approx(pelvis.Z));
+        }
+    }
+}

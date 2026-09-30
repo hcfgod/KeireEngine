@@ -375,30 +375,32 @@ namespace Keire
             const auto world = WorldMatrices(skeleton, working);
             if (request.MaximumHorizontalPelvisAdjustment > 0.0F)
             {
-                Vector3 bindFootCenter;
+                // Preserve the authored stride; only terrain displacement should rebalance the body.
+                Vector3 sampledFootCenter;
                 Vector3 targetFootCenter;
                 for (const auto& contact : supportContacts)
                 {
                     const auto normalizedWeight = contact.Weight * contact.SupportWeight / totalSupportWeight;
-                    bindFootCenter = Add(bindFootCenter,
-                                         Multiply(Math::TransformPoint(bindWorld[contact.Foot], {}), normalizedWeight));
+                    sampledFootCenter =
+                        Add(sampledFootCenter,
+                            Multiply(Math::TransformPoint(sampledWorld[contact.Foot], {}), normalizedWeight));
                     targetFootCenter =
                         Add(targetFootCenter,
                             Multiply(Add(contact.Position, Multiply(Normalize(contact.Normal), request.FootHeight)),
                                      normalizedWeight));
                 }
-                const auto bindPelvis = Math::TransformPoint(bindWorld[*request.Pelvis], {});
+                const auto sampledPelvis = Math::TransformPoint(sampledWorld[*request.Pelvis], {});
                 const auto currentPelvis = Math::TransformPoint(world[*request.Pelvis], {});
-                const auto desiredPelvis = Add(targetFootCenter, Subtract(bindPelvis, bindFootCenter));
-                const Vector3 towardBindNeutral{desiredPelvis.X - currentPelvis.X, 0.0F,
-                                                desiredPelvis.Z - currentPelvis.Z};
-                const auto distance = Length(towardBindNeutral);
+                const auto desiredPelvis = Add(targetFootCenter, Subtract(sampledPelvis, sampledFootCenter));
+                const Vector3 towardSupportedPose{desiredPelvis.X - currentPelvis.X, 0.0F,
+                                                  desiredPelvis.Z - currentPelvis.Z};
+                const auto distance = Length(towardSupportedPose);
                 if (distance > request.PelvisSupportRadius)
                 {
                     const auto correction =
                         std::min(distance - request.PelvisSupportRadius, request.MaximumHorizontalPelvisAdjustment) *
                         pelvisBlend;
-                    result.HorizontalPelvisAdjustment = Multiply(Normalize(towardBindNeutral), correction);
+                    result.HorizontalPelvisAdjustment = Multiply(Normalize(towardSupportedPose), correction);
                 }
             }
 

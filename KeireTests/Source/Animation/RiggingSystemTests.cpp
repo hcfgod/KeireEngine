@@ -701,7 +701,7 @@ TEST_CASE("Foot grounding restores a discovered toe control to its planted bind 
     CHECK(RotationDot(pose[4].Rotation, bones[4].BindPose.Rotation) > 0.9999F);
 }
 
-TEST_CASE("Foot grounding restores the rig's bind-neutral pelvis offset over two planted feet")
+TEST_CASE("Foot grounding follows terrain displacement over two planted feet")
 {
     const std::vector<Keire::SkeletonBone> bones{{"Pelvis", -1, {{0.0F, 2.0F, 0.5F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
                                                  {"LeftUpper", 0, {{-0.2F, 0.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
