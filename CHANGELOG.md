@@ -1,5 +1,8 @@
 # Changelog
 
+- Character Controllers recover shallow floor overlaps after spawning or teleporting, so walking no longer
+  remains blocked until the player jumps. Recovery is bounded and respects overhead obstructions.
+
 - Stationary clip-driven characters balance over their supported leg at ledges and relax the hanging leg,
   including when a ground ray hits a floor beyond leg reach. Walking and airborne motion fade out this response.
   Nearby standing probes find footing when an ankle is just outside the edge; reachable lower ground can be planted.

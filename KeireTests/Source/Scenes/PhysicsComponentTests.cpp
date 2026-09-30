@@ -181,6 +181,65 @@ TEST_CASE("character landing preserves fall distance and allows grounded walking
     scene->Close();
 }
 
+TEST_CASE("character shallow spawn overlap recovers without needing a jump")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Spawn overlap"));
+    auto floor = scene->CreateEntity("Landing platform");
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.035F, 0.0F});
+    floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5.0F, 0.035F, 5.0F});
+    auto player = scene->CreateEntity("Player");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.95F, 0.0F});
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.28F, 1.8F, 0.3F, 0.02F);
+    bool recoveryAllowed = true;
+    SUBCASE("contact at the inset capsule boundary") {}
+    SUBCASE("slightly deeper overlap")
+    {
+        player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.94F, 0.0F});
+    }
+    SUBCASE("a low ceiling prevents upward recovery")
+    {
+        auto ceiling = scene->CreateEntity("Ceiling");
+        ceiling.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.91F, 0.0F});
+        ceiling.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5.0F, 0.05F, 5.0F});
+        recoveryAllowed = false;
+    }
+    SUBCASE("deeply embedded capsules do not teleport out")
+    {
+        player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.9F, 0.0F});
+        recoveryAllowed = false;
+    }
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    const auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    const auto transform = runtimePlayer.GetComponent<Keire::TransformComponent>();
+    for (int frame = 0; frame < 60; ++frame)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0225F}));
+        session->FixedUpdate(1.0F / 60.0F);
+        REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+    }
+    if (recoveryAllowed)
+    {
+        CHECK(transform->LocalPosition().Z == doctest::Approx(1.35F).epsilon(0.005));
+        CHECK(transform->LocalPosition().Y == doctest::Approx(0.97F).epsilon(0.002));
+    }
+    else
+    {
+        CHECK(transform->LocalPosition().Z == doctest::Approx(0.0F));
+        CHECK(transform->LocalPosition().Y == player.GetComponent<Keire::TransformComponent>()->LocalPosition().Y);
+    }
+    CHECK(motor->Grounded());
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
 TEST_CASE("character presentation keeps current body yaw and camera pitch between physics ticks")
 {
     auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());

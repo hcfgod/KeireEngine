@@ -320,6 +320,29 @@ namespace Keire
                      .Layer = character->Layer(),
                      .IgnoreBody = state.Body});
             };
+
+            // A spawn or teleport can put the inset capsule on or slightly inside
+            // the floor. Its zero-distance horizontal sweep then repeatedly hits
+            // that same floor without making progress. Recover only shallow,
+            // walkable contact, with an unobstructed upward path and a bounded
+            // downward probe; this must not become an extra step or ceiling bypass.
+            const auto recoveryHeight = std::max(0.002F, padding * 2.0F);
+            if (const auto support = cast(current, {0.0F, -recoveryHeight, 0.0F});
+                support && support->Distance < padding - 0.0001F && support->Normal.Y >= slopeNormal)
+            {
+                const Vector3 upward{0.0F, recoveryHeight, 0.0F};
+                if (!cast(current, upward))
+                {
+                    const auto elevated = add(current, upward);
+                    if (const auto landing = cast(elevated, {0.0F, -recoveryHeight, 0.0F});
+                        landing && landing->Normal.Y >= slopeNormal && landing->Distance >= padding)
+                    {
+                        const auto correction = recoveryHeight - (landing->Distance - padding);
+                        if (correction > 0.0001F && correction <= recoveryHeight)
+                            current.Y += correction;
+                    }
+                }
+            }
             const auto moveAndSlide = [&](Vector3 movement, const bool slideAlongSurface)
             {
                 for (std::size_t iteration = 0; iteration < 4; ++iteration)
