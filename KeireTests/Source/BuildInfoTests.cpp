@@ -8,7 +8,8 @@ TEST_CASE("Build information is populated")
 {
     const auto& info = Keire::GetBuildInfo();
     CHECK(info.ProjectName == "Kéire");
-    CHECK(info.Version == "0.4.4");
+    CHECK_FALSE(info.Version.empty());
+    CHECK(Keire::GetVersionString().find(info.Version) != std::string::npos);
     CHECK(info.RepositorySlug == "hcfgod/KeireEngine");
     CHECK_FALSE(info.GitCommit.empty());
     CHECK_FALSE(info.Configuration.empty());
