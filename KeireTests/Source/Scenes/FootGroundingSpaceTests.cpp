@@ -233,3 +233,20 @@ TEST_CASE("Foot grounding discovers unnamed toe controls from skin influence and
     REQUIRE(toe);
     CHECK(*toe == 2);
 }
+
+TEST_CASE("Foot grounding recognizes weighted toes below a high ankle pivot")
+{
+    const std::vector<Keire::SkeletonBone> bones{{"ankle", -1, {{0.0F, 0.08F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                                 {"joint_5", 0, {{0.0F, -0.065F, 0.03F}, {}, {1.0F, 1.0F, 1.0F}}, {}}};
+    std::vector<Keire::SkinVertexInfluence8> influences(1);
+    influences[0].Count = 1;
+    influences[0].Bones[0] = 1;
+    influences[0].Weights[0] = 1.0F;
+    const Keire::SkeletonAsset skeleton(bones);
+    const Keire::SkinnedMeshAsset skin(Keire::AssetId::Generate(), Keire::AssetId::Generate(), influences,
+                                       Keire::SkinningMethod::LinearBlend);
+    const auto toe = Keire::Detail::AutomaticFootToeBone(skeleton, &skin, 0);
+    REQUIRE(toe);
+    CHECK(*toe == 1);
+    CHECK_FALSE(Keire::Detail::AutomaticFootToeBone(skeleton, nullptr, 0));
+}

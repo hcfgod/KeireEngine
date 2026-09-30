@@ -231,6 +231,8 @@ namespace Keire
         float Weight = 1.0F;
         float RotationWeight = 1.0F;
         std::optional<std::uint32_t> Toe;
+        // Pelvis support influence, independent of endpoint IK weight during contact acquisition/release.
+        float SupportWeight = 1.0F;
     };
 
     struct FootGroundingRequest

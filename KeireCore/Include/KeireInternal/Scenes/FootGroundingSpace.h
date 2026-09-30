@@ -284,7 +284,7 @@ namespace Keire::Detail
             const auto deltaY = position.Y - footPosition.Y;
             const auto deltaZ = position.Z - footPosition.Z;
             const auto planarDistance = std::sqrt(deltaX * deltaX + deltaZ * deltaZ);
-            if (planarDistance <= 0.00001F || std::abs(deltaY) > planarDistance * 1.5F)
+            if (planarDistance <= 0.00001F)
                 continue;
             const auto name = normalizedName(skeleton.Bones()[candidate].Name);
             const auto namedToe = name.find("toe") != std::string::npos || name.find("ball") != std::string::npos ||
@@ -292,7 +292,9 @@ namespace Keire::Detail
             const auto priority = namedToe                     ? std::size_t{0}
                                   : directlyDeforms[candidate] ? std::size_t{1}
                                                                : std::size_t{2};
-            if (skin && priority == 2)
+            // High ankle pivots can place a weighted toe mostly below the ankle. Apply the geometric
+            // fallback only when neither naming nor skin influence identifies a toe control.
+            if (priority == 2 && (skin || std::abs(deltaY) > planarDistance * 1.5F))
                 continue;
             const auto depth = depthFromFoot(candidate);
             if (priority < bestPriority || (priority == bestPriority && depth < bestDepth))

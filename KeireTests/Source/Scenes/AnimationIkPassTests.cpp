@@ -365,3 +365,23 @@ TEST_CASE("Named animation IK reports each failed goal and still solves independ
         Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {goals.data(), 1}, pose, indices, std::nullopt).empty());
     CHECK(pose == before);
 }
+
+TEST_CASE("Automatic foot grounding release uses one response blend at every frame rate")
+{
+    for (const int rate : {30, 60, 144})
+    {
+        CAPTURE(rate);
+        Keire::Detail::AutomaticFootGroundingSmoothingState state;
+        const Keire::Vector3 normal{0.0F, 1.0F, 0.0F};
+        REQUIRE(
+            Keire::Detail::UpdateAutomaticFootGroundingSmoothing({Keire::Vector3{}}, {normal}, {}, 0.0F, 0.0F, state));
+        for (int frame = 0; frame < rate; ++frame)
+        {
+            const auto target = Keire::Detail::UpdateAutomaticFootGroundingSmoothing(
+                {}, {}, {0.0F, 1.0F, 0.0F}, 1.0F / static_cast<float>(rate), 1.0F, state);
+            REQUIRE(target);
+            const auto elapsed = static_cast<float>(frame + 1) / static_cast<float>(rate);
+            CHECK(target->Position.Y == doctest::Approx(1.0F - std::exp(-elapsed)).epsilon(0.0001F));
+        }
+    }
+}

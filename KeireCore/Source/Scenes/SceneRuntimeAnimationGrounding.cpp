@@ -115,7 +115,6 @@ namespace Keire
         float totalLegLength = 0.0F;
         std::size_t legCount = 0;
         float maximumGroundingBlend = 0.0F;
-        float minimumGroundingBlend = 1.0F;
         std::array<bool, 2> unsupportedFeet{};
         Ref<const SkinnedMeshAsset> skin;
         Ref<const MeshAsset> skinMesh;
@@ -447,9 +446,9 @@ namespace Keire
                           .first;
             }
             grounded.Toe = toe->second;
+            grounded.SupportWeight = smoothed->Blend;
             const auto effectiveBlend = chainRuntimeWeight * smoothed->Blend;
             maximumGroundingBlend = std::max(maximumGroundingBlend, effectiveBlend);
-            minimumGroundingBlend = std::min(minimumGroundingBlend, effectiveBlend);
             request.Contacts.push_back(grounded);
         }
         if (!request.Contacts.empty())
@@ -459,7 +458,7 @@ namespace Keire
             {
                 const auto averageLegLength = totalLegLength / static_cast<float>(legCount);
                 request.MaximumHorizontalPelvisAdjustment =
-                    averageLegLength * horizontalPelvisRatio.value_or(0.25F) * minimumGroundingBlend;
+                    averageLegLength * horizontalPelvisRatio.value_or(0.25F) * maximumGroundingBlend;
                 request.PelvisSupportRadius = averageLegLength * 0.025F;
                 const auto chest = semantics.find(RigBoneSemantic::Chest);
                 const auto spine = semantics.find(RigBoneSemantic::Spine);
@@ -472,9 +471,33 @@ namespace Keire
                 if (request.Torso)
                 {
                     request.PelvisRotationWeight =
-                        settings.Weight * settings.LeanCorrectionWeight * minimumGroundingBlend;
+                        settings.Weight * settings.LeanCorrectionWeight * maximumGroundingBlend;
                     request.MaximumPelvisRotationDegrees = settings.MaximumLeanCorrectionDegrees;
                 }
+            }
+            // Keep swing endpoints in sampled model space while the pelvis follows the planted leg.
+            // Otherwise acquiring a contact abruptly removes the pelvis displacement inherited by that foot.
+            for (std::size_t chainIndex = 0; chainIndex < chains.size(); ++chainIndex)
+            {
+                const auto& chain = chains[chainIndex];
+                if (std::ranges::any_of(request.Contacts, [&](const auto& value) { return value.Foot == *chain[2]; }))
+                    continue;
+                const auto chainWeight =
+                    proceduralFootWeights ? std::clamp((*proceduralFootWeights)[chainIndex], 0.0F, 1.0F) : 1.0F;
+                if (chainWeight <= std::numeric_limits<float>::epsilon())
+                    continue;
+                const auto foot = Math::TransformPoint(modelBones[*chain[2]], {});
+                const auto knee = Math::TransformPoint(modelBones[*chain[1]], {});
+                FootGroundContact swing{*chain[0],
+                                        *chain[1],
+                                        *chain[2],
+                                        foot,
+                                        gravityUpModel,
+                                        knee,
+                                        settings.Weight * runtimeWeight * chainWeight,
+                                        0.0F};
+                swing.SupportWeight = 0.0F;
+                request.Contacts.push_back(swing);
             }
             const auto solved = SolveFootGrounding(skeleton, localPose, request);
             if (!solved)

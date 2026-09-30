@@ -291,6 +291,7 @@ namespace Keire
                 Length(contact.Normal) <= Epsilon || !Math::IsFinite(contact.Pole) || !std::isfinite(contact.Weight) ||
                 contact.Weight < 0.0F || contact.Weight > 1.0F || !std::isfinite(contact.RotationWeight) ||
                 contact.RotationWeight < 0.0F || contact.RotationWeight > 1.0F ||
+                !std::isfinite(contact.SupportWeight) || contact.SupportWeight < 0.0F || contact.SupportWeight > 1.0F ||
                 (contact.Toe &&
                  (*contact.Toe >= localPose.size() || !IsDescendantOf(skeleton, *contact.Toe, contact.Foot) ||
                   !toes.insert(*contact.Toe).second)))
@@ -326,14 +327,17 @@ namespace Keire
         }
 
         FootGroundingResult result;
-        if (request.Pelvis && request.PelvisWeight > 0.0F)
+        auto supportContacts =
+            activeContacts | std::views::filter([](const FootGroundContact& contact)
+                                                { return contact.Weight * contact.SupportWeight > 0.0F; });
+        if (request.Pelvis && request.PelvisWeight > 0.0F && !supportContacts.empty())
         {
             float totalSupportWeight = 0.0F;
             float maximumSupportWeight = 0.0F;
-            for (const auto& contact : activeContacts)
+            for (const auto& contact : supportContacts)
             {
-                totalSupportWeight += contact.Weight;
-                maximumSupportWeight = std::max(maximumSupportWeight, contact.Weight);
+                totalSupportWeight += contact.Weight * contact.SupportWeight;
+                maximumSupportWeight = std::max(maximumSupportWeight, contact.Weight * contact.SupportWeight);
             }
             const auto pelvisBlend = request.PelvisWeight * maximumSupportWeight;
             if (request.Torso && request.PelvisRotationWeight > 0.0F && request.MaximumPelvisRotationDegrees > 0.0F)
@@ -343,9 +347,10 @@ namespace Keire
                 const auto bindPelvis = Math::TransformPoint(bindWorld[*request.Pelvis], {});
                 const auto bindTorso = Math::TransformPoint(bindWorld[*request.Torso], {});
                 Vector3 averageNormal;
-                for (const auto& contact : activeContacts)
+                for (const auto& contact : supportContacts)
                     averageNormal =
-                        Add(averageNormal, Multiply(Normalize(contact.Normal), contact.Weight / totalSupportWeight));
+                        Add(averageNormal, Multiply(Normalize(contact.Normal),
+                                                    contact.Weight * contact.SupportWeight / totalSupportWeight));
                 averageNormal = Normalize(averageNormal);
                 const auto slopeRotation = FromTo({0.0F, 1.0F, 0.0F}, averageNormal);
                 const auto desiredTorsoDirection = Rotate(slopeRotation, Normalize(Subtract(bindTorso, bindPelvis)));
@@ -368,25 +373,13 @@ namespace Keire
             }
 
             const auto world = WorldMatrices(skeleton, working);
-            float requestedAdjustment = 0.0F;
-            for (const auto& contact : activeContacts)
-            {
-                const auto current = Math::TransformPoint(world[contact.Foot], {});
-                const auto target = Add(contact.Position, Multiply(Normalize(contact.Normal), request.FootHeight));
-                const auto correction =
-                    std::clamp(target.Y - current.Y, -request.MaximumPelvisAdjustment, 0.0F) * contact.Weight;
-                requestedAdjustment = std::min(requestedAdjustment, correction);
-            }
-            result.PelvisAdjustment =
-                std::clamp(requestedAdjustment, -request.MaximumPelvisAdjustment, 0.0F) * request.PelvisWeight;
-
             if (request.MaximumHorizontalPelvisAdjustment > 0.0F)
             {
                 Vector3 bindFootCenter;
                 Vector3 targetFootCenter;
-                for (const auto& contact : activeContacts)
+                for (const auto& contact : supportContacts)
                 {
-                    const auto normalizedWeight = contact.Weight / totalSupportWeight;
+                    const auto normalizedWeight = contact.Weight * contact.SupportWeight / totalSupportWeight;
                     bindFootCenter = Add(bindFootCenter,
                                          Multiply(Math::TransformPoint(bindWorld[contact.Foot], {}), normalizedWeight));
                     targetFootCenter =
@@ -408,6 +401,27 @@ namespace Keire
                     result.HorizontalPelvisAdjustment = Multiply(Normalize(towardBindNeutral), correction);
                 }
             }
+
+            float requestedAdjustment = 0.0F;
+            for (const auto& contact : supportContacts)
+            {
+                const auto upper = Math::TransformPoint(world[contact.UpperLeg], {});
+                const auto lower = Math::TransformPoint(world[contact.LowerLeg], {});
+                const auto foot = Math::TransformPoint(world[contact.Foot], {});
+                const auto reach = Length(Subtract(lower, upper)) + Length(Subtract(foot, lower));
+                const auto target = Add(contact.Position, Multiply(Normalize(contact.Normal), request.FootHeight));
+                const auto movedUpper = Add(upper, result.HorizontalPelvisAdjustment);
+                const auto dx = target.X - movedUpper.X;
+                const auto dz = target.Z - movedUpper.Z;
+                const auto verticalReach = std::sqrt(std::max(reach * reach - dx * dx - dz * dz, 0.0F));
+                // A bent animated leg can reach below its sampled ankle without lowering the body.
+                // Lower only enough to fit the target inside the leg's reach after horizontal correction.
+                const auto correction =
+                    std::clamp(target.Y + verticalReach - movedUpper.Y, -request.MaximumPelvisAdjustment, 0.0F) *
+                    contact.Weight * contact.SupportWeight;
+                requestedAdjustment = std::min(requestedAdjustment, correction);
+            }
+            result.PelvisAdjustment = requestedAdjustment * request.PelvisWeight;
 
             auto localAdjustment = Add(result.HorizontalPelvisAdjustment, {0.0F, result.PelvisAdjustment, 0.0F});
             const auto parent = skeleton.Bones()[*request.Pelvis].Parent;
@@ -439,8 +453,11 @@ namespace Keire
                 return std::nullopt;
             const auto surfaceAlignment = FromTo(sampledSoleNormals[contactIndex], normal);
             const auto desiredFootRotation = Multiply(surfaceAlignment, sampledFootRotations[contactIndex]);
-            if (!SetBoneModelRotation(skeleton, working, contact.Foot, desiredFootRotation,
-                                      contact.Weight * contact.RotationWeight))
+            // Leg IK changes the inherited ankle rotation. Terrain influence must blend from the
+            // sampled model-space orientation, not from that solver-induced rotation.
+            const auto blendedFootRotation =
+                Nlerp(sampledFootRotations[contactIndex], desiredFootRotation, contact.Weight * contact.RotationWeight);
+            if (!SetBoneModelRotation(skeleton, working, contact.Foot, blendedFootRotation, 1.0F))
                 return std::nullopt;
             if (contact.Toe)
             {

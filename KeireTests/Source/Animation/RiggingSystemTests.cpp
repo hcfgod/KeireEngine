@@ -506,8 +506,9 @@ TEST_CASE("Foot grounding adapts pelvis and legs transactionally to validated co
     const auto solved = Keire::SolveFootGrounding(skeleton, pose, request);
     REQUIRE(solved);
     CHECK(solved->SolvedFeet == 1);
-    CHECK(solved->PelvisAdjustment == doctest::Approx(-0.5F));
-    CHECK(pose.front().Translation.Y == doctest::Approx(-0.5F));
+    // This target is already reachable from the hip; foot displacement alone must not lower the pelvis.
+    CHECK(solved->PelvisAdjustment == doctest::Approx(0.0F));
+    CHECK(pose.front().Translation.Y == doctest::Approx(0.0F));
     CHECK(pose[1].Rotation != Keire::Quaternion{});
 
     const auto lastGood = pose;

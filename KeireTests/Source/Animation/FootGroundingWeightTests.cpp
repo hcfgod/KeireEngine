@@ -165,3 +165,99 @@ TEST_CASE("Unreachable foot targets retain limit diagnostics at partial blend we
         CHECK(result->MaximumPositionError > fixture.Request.PositionTolerance);
     }
 }
+
+TEST_CASE("Acquiring support fades pelvis influence independently of full foot IK")
+{
+    GroundingFixture fixture;
+    fixture.Request.Contacts[0].Position = {-0.25F, 0.0F, 0.3F};
+    fixture.Request.Contacts[1].Position = {0.25F, 0.0F, -0.3F};
+    fixture.Request.Contacts[1].Normal = {0.0F, 1.0F, 0.0F};
+    fixture.Request.Contacts[1].Weight = 1.0F;
+    fixture.Request.Contacts[1].SupportWeight = 0.0F;
+    auto previous = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+    REQUIRE(previous);
+    CHECK(previous->SolvedFeet == 2);
+    CHECK(previous->HorizontalPelvisAdjustment.Z == doctest::Approx(0.3F));
+    const auto bindPose = [&]
+    {
+        std::vector<Keire::BoneTransform> pose;
+        for (const auto& bone : fixture.Skeleton.Bones())
+            pose.push_back(bone.BindPose);
+        return pose;
+    };
+    for (int frame = 1; frame <= 100; ++frame)
+    {
+        fixture.Pose = bindPose();
+        fixture.Request.Contacts[1].SupportWeight = static_cast<float>(frame) / 100.0F;
+        const auto current = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+        REQUIRE(current);
+        CHECK(current->SolvedFeet == 2);
+        CHECK(std::abs(current->HorizontalPelvisAdjustment.Z - previous->HorizontalPelvisAdjustment.Z) < 0.006F);
+        previous = current;
+    }
+    CHECK(previous->HorizontalPelvisAdjustment.Z == doctest::Approx(0.0F));
+    for (auto& contact : fixture.Request.Contacts)
+        contact.SupportWeight = 0.0F;
+    fixture.Pose = bindPose();
+    const auto unsupported = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+    REQUIRE(unsupported);
+    CHECK(unsupported->SolvedFeet == 2);
+    CHECK(unsupported->HorizontalPelvisAdjustment == Keire::Vector3{});
+    CHECK(unsupported->PelvisAdjustment == 0.0F);
+    for (const float invalid : {-0.1F, 1.1F, std::numeric_limits<float>::quiet_NaN()})
+    {
+        fixture.Request.Contacts[0].SupportWeight = invalid;
+        const auto original = fixture.Pose;
+        CHECK_FALSE(Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request));
+        CHECK(fixture.Pose == original);
+    }
+}
+
+TEST_CASE("Foot grounding preserves sampled foot orientation when terrain rotation is disabled")
+{
+    GroundingFixture fixture;
+    fixture.Request.Contacts.resize(1);
+    fixture.Request.Contacts[0].Position = {-0.25F, 0.3F, 0.4F};
+    fixture.Request.Contacts[0].RotationWeight = 0.0F;
+    fixture.Request.Pelvis.reset();
+    fixture.Request.Torso.reset();
+    const auto sampledRotation = Keire::Math::EulerDegreesToQuaternion({25.0F, 10.0F, 0.0F});
+    fixture.Pose[3].Rotation = sampledRotation;
+    REQUIRE(Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request));
+    Keire::Matrix4 model;
+    for (std::size_t index = 0; index <= 3; ++index)
+    {
+        const auto& bone = fixture.Pose[index];
+        const auto local = Keire::Math::ComposeTransform(bone.Translation, bone.Rotation, bone.Scale);
+        model = index == 0 ? local : Keire::Math::Multiply(model, local);
+    }
+    Keire::Vector3 translation;
+    Keire::Vector3 scale;
+    Keire::Quaternion rotation;
+    REQUIRE(Keire::Math::DecomposeTransform(model, translation, rotation, scale));
+    const auto dot = rotation.X * sampledRotation.X + rotation.Y * sampledRotation.Y + rotation.Z * sampledRotation.Z +
+                     rotation.W * sampledRotation.W;
+    CHECK(std::abs(dot) == doctest::Approx(1.0F).epsilon(0.00001F));
+}
+
+TEST_CASE("Foot grounding lowers the pelvis only when a support exceeds leg reach")
+{
+    GroundingFixture fixture;
+    fixture.Request.Contacts.resize(1);
+    fixture.Request.Torso.reset();
+    fixture.Request.MaximumHorizontalPelvisAdjustment = 0.0F;
+    fixture.Pose[2].Rotation = Keire::Math::EulerDegreesToQuaternion({60.0F, 0.0F, 0.0F});
+    fixture.Request.Contacts[0].Position = {-0.25F, 0.1F, 0.1F};
+    const auto sampled = fixture.Pose;
+    const auto reachable = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+    REQUIRE(reachable);
+    CHECK(reachable->PelvisAdjustment == doctest::Approx(0.0F));
+    CHECK(reachable->UnreachableFeet == 0);
+    fixture.Pose = sampled;
+    fixture.Request.MaximumPelvisAdjustment = 0.5F;
+    fixture.Request.Contacts[0].Position = {-0.25F, -0.2F, 0.8F};
+    const auto lowered = Keire::SolveFootGrounding(fixture.Skeleton, fixture.Pose, fixture.Request);
+    REQUIRE(lowered);
+    CHECK(lowered->PelvisAdjustment == doctest::Approx(-0.2F + std::sqrt(4.0F - 0.64F) - 2.0F));
+    CHECK(lowered->UnreachableFeet == 0);
+}

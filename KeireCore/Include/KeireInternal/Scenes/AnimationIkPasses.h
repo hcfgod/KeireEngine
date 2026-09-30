@@ -183,9 +183,7 @@ namespace Keire::Detail
                 state = {};
                 return std::nullopt;
             }
-            state.Position = {state.Position.X + (sampledPosition.X - state.Position.X) * responseBlend,
-                              state.Position.Y + (sampledPosition.Y - state.Position.Y) * responseBlend,
-                              state.Position.Z + (sampledPosition.Z - state.Position.Z) * responseBlend};
+            // Fade from the last contact once; moving its anchor as well doubles the release rate.
             state.Blend *= 1.0F - responseBlend;
             if (state.Blend <= 0.001F)
             {

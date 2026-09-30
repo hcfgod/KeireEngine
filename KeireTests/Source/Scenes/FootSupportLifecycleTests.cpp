@@ -17,14 +17,14 @@ namespace
 {
     struct SupportFixture
     {
-        explicit SupportFixture(const bool restrictLayers = false)
+        explicit SupportFixture(const bool restrictLayers = false, const bool airborneRight = false)
         {
             Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
             Character = Scene->CreateEntity("Character");
             Floor = Scene->CreateEntity("Support");
-            Floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -.45F, 0});
+            Floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, airborneRight ? -.7F : -.45F, 0});
             Floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5, .5F, 5});
-            AddAnimation();
+            AddAnimation(airborneRight);
             Keire::PhysicsSystemSpecification physics;
             physics.Mode = Keire::PhysicsMode::Enabled;
             if (restrictLayers)
@@ -75,7 +75,7 @@ namespace
             stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
             REQUIRE(stream.good());
         }
-        void AddAnimation()
+        void AddAnimation(const bool airborneRight)
         {
             std::filesystem::create_directories(Root / "Assets");
             Keire::AssetDatabaseSpecification specification;
@@ -94,14 +94,18 @@ namespace
             importer(".supportclip", Keire::AnimationClipAsset::StaticType());
             importer(".supportgraph", Keire::AnimationGraphAsset::StaticType());
             Database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
-            Write("Rig.supportskeleton", Keire::SkeletonAsset::Encode(std::vector<Keire::SkeletonBone>{
-                                             {"Hips", -1, {{0, 2, 0}, {}, {1, 1, 1}}, {}},
-                                             {"LeftUpLeg", 0, {{-.25F, 0, 0}, {}, {1, 1, 1}}, {}},
-                                             {"LeftLeg", 1, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
-                                             {"LeftFoot", 2, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
-                                             {"RightUpLeg", 0, {{.25F, 0, 0}, {}, {1, 1, 1}}, {}},
-                                             {"RightLeg", 4, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
-                                             {"RightFoot", 5, {{0, -1, 0}, {}, {1, 1, 1}}, {}}}));
+            Write("Rig.supportskeleton",
+                  Keire::SkeletonAsset::Encode(std::vector<Keire::SkeletonBone>{
+                      {"Hips", -1, {{0, 2, 0}, {}, {1, 1, 1}}, {}},
+                      {"LeftUpLeg", 0, {{-.25F, 0, 0}, {}, {1, 1, 1}}, {}},
+                      {"LeftLeg", 1, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
+                      {"LeftFoot", 2, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
+                      {"RightUpLeg",
+                       0,
+                       {{.25F, airborneRight ? .4F : 0.0F, airborneRight ? .2F : 0.0F}, {}, {1, 1, 1}},
+                       {}},
+                      {"RightLeg", 4, {{0, -1, 0}, {}, {1, 1, 1}}, {}},
+                      {"RightFoot", 5, {{0, -1, 0}, {}, {1, 1, 1}}, {}}}));
             (void)Database->ImportAll();
             const auto skeleton = Database->Find("Rig.supportskeleton");
             REQUIRE(skeleton);
@@ -136,6 +140,11 @@ namespace
             grounding.AutomaticBoneMapping = false;
             grounding.FootOffset = 0;
             grounding.ResponseTime = 0;
+            if (airborneRight)
+            {
+                grounding.PlantDistance = 0.25F;
+                grounding.ReleaseDistance = 0.3F;
+            }
             animator->SetFootGrounding(grounding);
         }
 
@@ -338,5 +347,22 @@ TEST_CASE("Animator grounding diagnostics clear after repair or disabling the fa
         fixture.Tick();
         CHECK(fixture.Animator->RuntimeDiagnostic().empty());
         CHECK(fixture.FootY() == doctest::Approx(disable ? 0.0F : .05F).epsilon(.005));
+    }
+}
+
+TEST_CASE("Foot grounding preserves a swinging endpoint while the pelvis follows lower support")
+{
+    SupportFixture fixture(false, true);
+    for (int frame = 0; frame < 30; ++frame)
+    {
+        fixture.Tick();
+        const auto& pose = fixture.Animator->RuntimeDebugSnapshot()->Pose;
+        CAPTURE(frame);
+        CHECK(pose[0].WorldPosition.Y < 1.95F);
+        CHECK(pose[3].WorldPosition.Y >= -0.201F);
+        CHECK(pose[3].WorldPosition.Y <= -0.19F);
+        CHECK(pose[6].WorldPosition.X == doctest::Approx(0.25F).epsilon(0.001F));
+        CHECK(pose[6].WorldPosition.Y == doctest::Approx(0.4F).epsilon(0.001F));
+        CHECK(pose[6].WorldPosition.Z == doctest::Approx(0.2F).epsilon(0.001F));
     }
 }

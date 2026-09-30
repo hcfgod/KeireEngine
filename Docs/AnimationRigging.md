@@ -285,11 +285,19 @@ through it. Deep penetrations are recovered in the same frame. This
 corrects contact-phase sliding, but it does not turn an animation without a usable gait into a complete procedural
 locomotion system. **Response Time (Seconds)** smooths contact acquisition, platform movement, lower-surface handoff,
 normal changes, contact influence, and release back to the sampled animation with an elapsed-time response that is independent
-of frame rate. Zero selects immediate response. Upward surface motion is clamped along the contact normal in the same
+of frame rate. Release fades from the last contact toward the animated endpoint once, using that same response
+time; it does not also move the stored contact toward the animation. Zero selects immediate response. Upward surface motion is clamped along the contact normal in the same
 frame so a smoother response cannot push the sole through an approaching platform; its lateral motion and rotation
 remain filtered. Automatic toe discovery uses semantic names when present and skin influence plus bind topology
-otherwise; while planted, the toe root blends back to its neutral bind rotation so the forefoot rests with the
+otherwise. Weighted or explicitly named toes remain eligible when a high ankle pivot places them mostly below the
+ankle; the height-to-length heuristic applies only to unnamed, unweighted fallback bones. While planted, the toe root blends back to its neutral bind rotation so the forefoot rests with the
 ankle-aligned sole instead of retaining an animated upward curl.
+Terrain rotation blends from the sampled model-space foot orientation, so changing the leg bend does not introduce
+an extra ankle twist. While another foot supports the pelvis, swing endpoints retain their sampled model-space
+positions (within leg reach) instead of inheriting the pelvis correction and snapping away from it at contact.
+Vertical pelvis correction uses the target distance and available leg reach after horizontal adjustment. A reachable
+target does not lower the body merely because the sampled ankle is higher; this preserves knee flexion and avoids
+exaggerated body recovery when that contact releases.
 
 Contact acquisition blends the foot endpoint before solving the leg and keeps that endpoint above the active support
 plane. At full authored Position Weight, reachable contacts therefore do not sink below their target while influence
@@ -455,3 +463,11 @@ failing grounding pass clears its warning on the next update; unresolved failure
 out; a deliberately partial solve is not itself a leg-limit failure. At full contact weight, the final solved
 position must meet `PositionTolerance`. `MaximumPositionError` always measures the actual final distance to the
 target, including the residual distance intentionally retained by partial blending.
+
+### Contact support and endpoint influence
+
+`FootGroundContact.SupportWeight` controls how strongly a solved foot supports pelvis position and lean, independently
+of its endpoint `Weight`. It defaults to 1 for existing native callers. Zero support still permits foot IK, but does not
+pull the pelvis. Values must be finite and within [0, 1]; invalid requests leave the pose unchanged. Automatic grounding
+uses its existing Response Time contact blend for support influence, so acquiring a second foot does not abruptly cap
+the correction from the existing support. This behavior also applies to Animator grounding configured through C#.

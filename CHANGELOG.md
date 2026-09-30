@@ -1,5 +1,20 @@
 # Changelog
 
+- Released foot contacts now use the configured response time once, removing a duplicate positional fade that
+  doubled the release rate and made step transitions abrupt.
+
+- Grounding lowers the pelvis only when support targets exceed leg reach, avoiding unnecessary body drops
+  caused by the height of an animated, bent leg.
+
+- Foot grounding preserves animated swing endpoints during pelvis correction and blends ankle alignment from
+  the sampled orientation, preventing solver-induced foot rotation at low terrain rotation weights.
+
+- Automatic foot grounding recognizes weighted toes beneath high ankle pivots, allowing planted toe correction
+  on imported rigs whose ankle-to-toe offset is steeper than the geometric fallback.
+
+- Foot grounding fades each contact's pelvis support independently from endpoint IK, preventing a newly acquired
+  foot from abruptly reducing the other foot's pelvis correction. Native `FootGroundContact.SupportWeight` defaults to 1.
+
 - Built-in and fallback meshes now write camera, object, and skinning motion vectors for temporal anti-aliasing,
   including individual transforms in batched draws. TAA extends motion across silhouette neighbors to reduce
   uneven movement and stale edge history as objects reveal the background.
