@@ -60,6 +60,8 @@ const files = await collectFiles(outputRoot);
 const outputFiles = new Set(files.map((file) => path.resolve(file)));
 const htmlFiles = files.filter((file) => file.endsWith(".html"));
 const serverRoutePrefixes = ["account/", "health/", "marketplace/", "publisher/"];
+// Immutable installer bytes are served by Caddy, independently of the Astro output directory.
+const hostedInstallerPath = /^preview-downloads\/keire-editor-windows-x86_64-\d+\.\d+\.\d+-[a-f0-9]{16}-setup\.exe(?:\.sha256)?$/;
 let mermaidDiagramCount = 0;
 assert(htmlFiles.length >= allDocSources.length + 2, "Documentation output is missing a landing page, guide page, or branded 404 page.");
 
@@ -101,7 +103,8 @@ for (const htmlPath of htmlFiles) {
         }
         const target = path.resolve(outputRoot, ...relative.split("/"));
         assert(target.startsWith(`${path.resolve(outputRoot)}${path.sep}`), `Documentation link escapes the output root in ${htmlPath}: ${value}`);
-        if (!outputFiles.has(target) && serverRoutePrefixes.some((prefix) => relative.startsWith(prefix))) {
+        if (!outputFiles.has(target) && (serverRoutePrefixes.some((prefix) => relative.startsWith(prefix)) ||
+            hostedInstallerPath.test(relative))) {
             continue;
         }
         assert(outputFiles.has(target), `Broken documentation link in ${htmlPath}: ${value}`);

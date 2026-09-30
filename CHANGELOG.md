@@ -4,6 +4,9 @@
 
 ## 0.4.5 - 2026-09-30
 
+- Windows package validation waits for the GUI runtime smoke process to finish and checks its actual exit code
+  before releasing temporary content, preventing false success and orphaned validation processes.
+
 - Window > Presentation exposes supported VSync, Mailbox, and Immediate modes and remembers the editor preference.
   Native and C# APIs query actual GPU support and change presentation modes at runtime, with explicit unavailable
   results for headless players and unsupported modes.

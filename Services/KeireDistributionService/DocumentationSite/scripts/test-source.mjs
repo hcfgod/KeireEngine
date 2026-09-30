@@ -346,7 +346,7 @@ for (const contract of [
     "DEB for Ubuntu or Debian",
     "RPM for Fedora, Rocky Linux, and openSUSE",
     "The current EXE is not Authenticode-signed",
-    "Users of older Hub versions need to download and run 0.4.4 manually",
+    "Users of older Hub versions need to download and run 0.4.5 manually",
     "Linux packages are validated independently of Windows",
 ]) {
     assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
@@ -357,7 +357,7 @@ for (const contract of [
     "unknown-publisher warning",
     "Verify the displayed SHA-256",
     "Older in-app updaters require an Authenticode signature",
-    "Download and run 0.4.4 manually",
+    "Download and run 0.4.5 manually",
     "<dt>Native signing</dt><dd>Not Authenticode-signed</dd>",
 ]) {
     assert(windowsDownloadsPage.includes(contract),

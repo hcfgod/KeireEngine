@@ -5,6 +5,7 @@ $started = [Diagnostics.Stopwatch]::StartNew()
 $runFast = $Suite -in @("All", "Fast")
 $runIntegration = $Suite -in @("All", "Integration")
 if ($runFast) { & (Join-Path $PSScriptRoot "test-run-routing-windows.ps1") }
+if ($runFast) { & (Join-Path $PSScriptRoot "test-package-runtime-wait-windows.ps1") }
 $Windows = Resolve-Path (Join-Path $PSScriptRoot "..\Windows")
 . (Join-Path $Windows "common.ps1")
 

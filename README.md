@@ -66,8 +66,7 @@ systems and cooked content selected by a project.
 Kéire is currently **version 0.4.5 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.5 is the current source; Windows packages are being validated for publication. The active Windows
-release remains 0.4.4 in immutable catalog sequence 18. The same signed
+Version 0.4.5 is the active Windows release in immutable signed catalog sequence 19. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
 
@@ -308,6 +307,9 @@ from the Editor distribution folder. You can also launch directly through `Scrip
 19 and 20 launch the staged Editor and Hub; options 7 and 8 update those stages after source changes.
 Player exports prefer the Editor's bundled Build Support when compatible, so a same-version module installed by an
 older development build cannot override it. Installed modules remain the fallback for other targets or configurations.
+
+Windows packaging captures and waits for the runtime smoke process, including cold shader warmup, before checking its
+exit code and cleaning up validation content. A failed, timed-out, or unavailable process result stops packaging.
 
 Supported build configurations are `Debug`, `Release`, `Profile`, `Dist`, `DebugASan`, `DebugUBSan`, `DebugTSan`, and `Coverage`.
 `Release` and `Profile` explicitly enable speed optimization, including `/O2` for MSVC builds.

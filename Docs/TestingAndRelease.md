@@ -1,8 +1,7 @@
 # Testing And Release
 
-The current source version is 0.4.5. Its Windows packages are being validated before signed publication;
-0.4.4 remains the active Windows download until that gate completes. Historical platform evidence below
-retains its original version and scope.
+Windows 0.4.5 is published through signed catalog sequence 19. The catalog retains independently validated
+Linux 0.4.2 packages. Historical platform evidence below retains its original version and scope.
 
 Hub packaging copies tracked template content only. Local template preview caches and logs are excluded from
 the distribution without deleting them from the checkout.
@@ -171,7 +170,7 @@ Stable Linux editor catalog packages are produced from a clean detached release 
 baseline container (glibc 2.34 and GCC Toolset 12). Headless release validation uses Xvfb with Mesa Vulkan for the
 packaged runtime GPU smoke. Do not relabel an artifact built against a newer glibc as a general Linux release.
 
-Kéire 0.4.4 is the current Windows release through signed snapshot `release-0.4.4-sequence-18-611b191e`, which was
+Kéire 0.4.4 was published through signed snapshot `release-0.4.4-sequence-18-611b191e`, which was
 published, activated, and validated before the website state changed. The Windows catalog contains the 0.4.1, 0.4.2,
 and 0.4.4 Editor and Hub records; the Linux catalog retains both earlier Editor versions plus distinct DEB and RPM Hub
 records for each version. The 0.4.4 Windows Debug and Dist suites, SDK consumers, D3D12/Vulkan rendered-output suites,

@@ -341,8 +341,15 @@ try {
 Initialize-KeireOrdinaryChildDirectory -Root $Root -Path $runtimeValidationRoot `
     -Description "Packaged runtime validation snapshot"
 Copy-Item -LiteralPath $runtimeContent -Destination $runtimeExecutionContent -Recurse -Force
-& (Join-Path $stage "bin\$runtimeName.exe") --content $runtimeExecutionContent --frames 12
-if ($LASTEXITCODE -ne 0) { throw "Packaged runtime smoke failed with exit code $LASTEXITCODE." }
+$runtimeSmokeResult = Invoke-WindowsExecutableCapture -Path (Join-Path $stage "bin\$runtimeName.exe") `
+    -Arguments @("--content", $runtimeExecutionContent, "--frames", "12") `
+    -Timeout ([TimeSpan]::FromMinutes(6))
+if ($runtimeSmokeResult.StandardOutput) { [Console]::Out.Write($runtimeSmokeResult.StandardOutput) }
+if ($runtimeSmokeResult.StandardError) { [Console]::Error.Write($runtimeSmokeResult.StandardError) }
+if ($null -eq $runtimeSmokeResult.ExitCode) { throw "Packaged runtime smoke did not report an exit code." }
+if ($runtimeSmokeResult.ExitCode -ne 0) {
+    throw "Packaged runtime smoke failed with exit code $($runtimeSmokeResult.ExitCode)."
+}
 $runtimeValidationOutput = Join-Path $runtimeValidationRoot "additive-runtime-report.json"
 $runtimeValidationResult = $null
 $runtimeValidationStartedAt = [DateTime]::MinValue

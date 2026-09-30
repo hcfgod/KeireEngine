@@ -446,4 +446,10 @@ namespace Keire::RenderBackend
             return PublishedGpuOcclusionDiagnostics;
         }
     };
+
+    struct RenderSurfaceRegistryEntry final
+    {
+        std::shared_ptr<RenderSurfaceState> State;
+        bool Current = true;
+    };
 } // namespace Keire::RenderBackend

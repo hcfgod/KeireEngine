@@ -1070,12 +1070,6 @@ namespace Keire::RenderBackend
         Color ClearColor;
     };
 
-    struct RenderSurfaceRegistryEntry final
-    {
-        std::shared_ptr<RenderSurfaceState> State;
-        bool Current = true;
-    };
-
     struct RenderSharedState final : public std::enable_shared_from_this<RenderSharedState>, public RenderPipelineState
     {
         RenderSharedState(RenderSpecification specification, Ref<WindowSystem> windows, Ref<Window> window,

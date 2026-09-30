@@ -1,8 +1,7 @@
 # Kéire Hub
 
-The current source version is 0.4.5. Its Windows packages are being validated before signed publication;
-0.4.4 remains the active Windows download until that gate completes. Historical platform evidence below
-retains its original version and scope.
+Windows 0.4.5 is published through signed catalog sequence 19. The catalog retains independently validated
+Linux 0.4.2 packages. Historical platform evidence below retains its original version and scope.
 
 `KeireHub` is the normal product entrypoint and is packaged independently from versioned editor installations. The Hub
 owns project discovery, editor selection, templates, signed distribution catalogs, package tasks, local learning
@@ -375,7 +374,7 @@ separately. After the replacement Hub has been distributed and the transition po
 public key is a separate release decision. Packaging overrides may supply an operating-system path-separated
 `KEIRE_DISTRIBUTION_TRUSTED_KEYS` list during an overlap; the legacy singular key variable remains supported.
 
-The active stable snapshot published on 2026-09-20 is `release-0.4.4-sequence-18-611b191e`. Its Windows x86-64 catalog
+The historical stable snapshot published on 2026-09-20 is `release-0.4.4-sequence-18-611b191e`. Its Windows x86-64 catalog
 contains the 0.4.1, 0.4.2, and 0.4.4 Editor and Hub records; its Linux x86-64 catalog retains both earlier Editor
 versions plus distinct DEB and RPM Hub records for each version. The native Windows EXE and Linux RPM are catalog/hash
 verified but do not carry Authenticode or RPM GPG signatures. Sequence 18 passed publisher validation plus live
