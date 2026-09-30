@@ -375,3 +375,47 @@ TEST_CASE("Scene runtime procedural motion is invariant under imported bone coor
         }
     }
 }
+
+TEST_CASE("Scene runtime procedural pose smoothing preserves final IK constraints")
+{
+    ProceduralRuntimeFixture fixture(true);
+    const auto upper = fixture.Bone(Keire::RigBoneSemantic::LeftUpperArm);
+    const auto lower = fixture.Bone(Keire::RigBoneSemantic::LeftLowerArm);
+    const auto hand = fixture.Bone(Keire::RigBoneSemantic::LeftHand);
+    const Keire::Vector3 target{hand.WorldPosition.X, hand.WorldPosition.Y + 0.12F, hand.WorldPosition.Z + 0.08F};
+    fixture.Animator()->SetTwoBoneIk("contact-order", upper.Name, lower.Name, hand.Name, target, lower.WorldPosition,
+                                     1.0F, Keire::AnimatorIkSpace::Model);
+    fixture.Tick({}, {0.0F, 0.0F, 1.0F});
+    const auto actual = fixture.Bone(Keire::RigBoneSemantic::LeftHand).WorldPosition;
+    CHECK(actual.X == doctest::Approx(target.X).epsilon(0.001));
+    CHECK(actual.Y == doctest::Approx(target.Y).epsilon(0.001));
+    CHECK(actual.Z == doctest::Approx(target.Z).epsilon(0.001));
+}
+
+TEST_CASE("Scene runtime procedural knees retain anatomical bend during reverse and lateral travel")
+{
+    ProceduralRuntimeFixture fixture;
+    for (const auto direction : {Keire::Vector3{0.0F, 0.0F, 1.0F}, Keire::Vector3{0.0F, 0.0F, -1.0F},
+                                 Keire::Vector3{1.0F, 0.0F, 0.0F}, Keire::Vector3{-1.0F, 0.0F, 0.0F}})
+    {
+        for (int tick = 0; tick < 90; ++tick)
+        {
+            fixture.Tick({direction.X * FixedDeltaSeconds, 0.0F, direction.Z * FixedDeltaSeconds}, {0.0F, 0.0F, 1.0F});
+            for (const bool left : {true, false})
+            {
+                const auto hip =
+                    fixture.Bone(left ? Keire::RigBoneSemantic::LeftUpperLeg : Keire::RigBoneSemantic::RightUpperLeg)
+                        .WorldPosition;
+                const auto knee =
+                    fixture.Bone(left ? Keire::RigBoneSemantic::LeftLowerLeg : Keire::RigBoneSemantic::RightLowerLeg)
+                        .WorldPosition;
+                const auto foot =
+                    fixture.Bone(left ? Keire::RigBoneSemantic::LeftFoot : Keire::RigBoneSemantic::RightFoot)
+                        .WorldPosition;
+                CAPTURE(tick);
+                CAPTURE(left);
+                CHECK(knee.Z >= (hip.Z + foot.Z) * 0.5F - 0.005F);
+            }
+        }
+    }
+}

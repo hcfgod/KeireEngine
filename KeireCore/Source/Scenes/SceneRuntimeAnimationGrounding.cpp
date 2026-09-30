@@ -959,6 +959,7 @@ namespace Keire
             state.PreviousProceduralPose = state.BindProceduralPose;
             state.CurrentProceduralPose = state.BindProceduralPose;
             state.TargetProceduralPose = state.BindProceduralPose;
+            state.SmoothedProceduralBasePose = state.BindProceduralPose;
             state.PublishedProceduralPose = state.BindProceduralPose;
             ModelBoneMatrices(*skeleton, state.BindProceduralPose, state.BindModelMatrices);
             state.ModelMatrixScratch.resize(skeleton->Bones().size());

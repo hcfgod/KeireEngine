@@ -402,8 +402,9 @@ namespace Keire
                     hipToTarget = RiggingDetail::Multiply(hipToTarget, constrainedDistance / targetDistance);
                     target = RiggingDetail::Add(hip, hipToTarget);
                 }
+                // Knees follow anatomical forward, including while backing up or strafing.
                 const auto forward =
-                    Vector3{hip.X + localMotion.X * legLength, knee.Y, hip.Z + localMotion.Z * legLength};
+                    Vector3{hip.X + modelForward.X * legLength, knee.Y, hip.Z + modelForward.Z * legLength};
                 (void)SolveTwoBoneIkCached(*skeleton, pose, {upper, lower, foot, target, forward, 1.0F},
                                            state.ModelMatrixScratch);
             };
@@ -481,6 +482,50 @@ namespace Keire
             rotateBone(RigBoneSemantic::Neck, {0.0F, lookYaw * 0.35F, 0.0F});
             rotateBone(RigBoneSemantic::Head, {0.0F, lookYaw * 0.65F, 0.0F});
 
+            if (grounded && locomotionWeight > 0.0F)
+            {
+                const auto rollFoot = [&](const std::uint32_t foot, const float phaseOffset)
+                {
+                    const auto toe = state.FootToeBones.find(foot);
+                    if (toe == state.FootToeBones.end() || !toe->second)
+                        return;
+                    auto phase = state.GaitPhase + phaseOffset;
+                    phase -= std::floor(phase);
+                    const auto roll = profile.FootRoll.Evaluate(phase) * 18.0F * locomotionWeight;
+                    rotateInModel(*toe->second, {roll, 0.0F, 0.0F});
+                };
+                rollFoot(leftFoot, 0.0F);
+                rollFoot(rightFoot, 0.5F);
+            }
+            else if (Detail::ShouldResetProceduralFootContacts(grounded, motionState))
+            {
+                state.LeftFootIkState = {};
+                state.RightFootIkState = {};
+                state.LeftFootGroundingSmoothingState = {};
+                state.RightFootGroundingSmoothingState = {};
+                state.LeftFootPlantState = {};
+                state.RightFootPlantState = {};
+            }
+
+            // Smooth the unconstrained pose before contact IK; later smoothing can pull solved soles below terrain.
+            const auto poseBlend = Detail::ProceduralResponseBlend(deltaSeconds, profile.PoseResponseTime);
+            for (std::size_t index = 0; index < pose.size(); ++index)
+            {
+                const auto& previous = state.SmoothedProceduralBasePose[index];
+                const auto target = pose[index];
+                auto& current = pose[index];
+                current.Translation = {
+                    previous.Translation.X + (target.Translation.X - previous.Translation.X) * poseBlend,
+                    previous.Translation.Y + (target.Translation.Y - previous.Translation.Y) * poseBlend,
+                    previous.Translation.Z + (target.Translation.Z - previous.Translation.Z) * poseBlend};
+                current.Scale = {previous.Scale.X + (target.Scale.X - previous.Scale.X) * poseBlend,
+                                 previous.Scale.Y + (target.Scale.Y - previous.Scale.Y) * poseBlend,
+                                 previous.Scale.Z + (target.Scale.Z - previous.Scale.Z) * poseBlend};
+                current.Rotation = RiggingDetail::Nlerp(previous.Rotation, target.Rotation, poseBlend);
+            }
+            // Contact corrections must not accumulate into the next tick's unconstrained gait.
+            std::ranges::copy(pose, state.SmoothedProceduralBasePose.begin());
+
             if (grounded && motionState != ProceduralMotionState::Takeoff)
             {
                 AnimatorFootGroundingSettings grounding;
@@ -515,32 +560,6 @@ namespace Keire
                     animator->SetRuntimeDiagnostic(diagnostic);
             }
 
-            if (grounded && locomotionWeight > 0.0F)
-            {
-                const auto rollFoot = [&](const std::uint32_t foot, const float phaseOffset)
-                {
-                    const auto toe = state.FootToeBones.find(foot);
-                    if (toe == state.FootToeBones.end() || !toe->second)
-                        return;
-                    auto phase = state.GaitPhase + phaseOffset;
-                    phase -= std::floor(phase);
-                    const auto roll = profile.FootRoll.Evaluate(phase) * 18.0F * locomotionWeight;
-                    pose[*toe->second].Rotation = RiggingDetail::Normalize(RiggingDetail::Multiply(
-                        pose[*toe->second].Rotation, Math::EulerDegreesToQuaternion({roll, 0.0F, 0.0F})));
-                };
-                rollFoot(leftFoot, 0.0F);
-                rollFoot(rightFoot, 0.5F);
-            }
-            else if (Detail::ShouldResetProceduralFootContacts(grounded, motionState))
-            {
-                state.LeftFootIkState = {};
-                state.RightFootIkState = {};
-                state.LeftFootGroundingSmoothingState = {};
-                state.RightFootGroundingSmoothingState = {};
-                state.LeftFootPlantState = {};
-                state.RightFootPlantState = {};
-            }
-
             Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
             const auto overrideDiagnostic = Detail::EvaluateIndependentAnimationIkPasses(
                 [&] { return ApplyIkGoals(entity, *skeleton, *animator, pose, state.BoneIndices); },
@@ -551,21 +570,7 @@ namespace Keire
                 });
             if (!overrideDiagnostic.empty())
                 animator->SetRuntimeDiagnostic(overrideDiagnostic);
-            const auto poseBlend = Detail::ProceduralResponseBlend(deltaSeconds, profile.PoseResponseTime);
-            for (std::size_t index = 0; index < pose.size(); ++index)
-            {
-                const auto& previous = state.PreviousProceduralPose[index];
-                const auto& target = pose[index];
-                auto& current = state.CurrentProceduralPose[index];
-                current.Translation = {
-                    previous.Translation.X + (target.Translation.X - previous.Translation.X) * poseBlend,
-                    previous.Translation.Y + (target.Translation.Y - previous.Translation.Y) * poseBlend,
-                    previous.Translation.Z + (target.Translation.Z - previous.Translation.Z) * poseBlend};
-                current.Scale = {previous.Scale.X + (target.Scale.X - previous.Scale.X) * poseBlend,
-                                 previous.Scale.Y + (target.Scale.Y - previous.Scale.Y) * poseBlend,
-                                 previous.Scale.Z + (target.Scale.Z - previous.Scale.Z) * poseBlend};
-                current.Rotation = RiggingDetail::Nlerp(previous.Rotation, target.Rotation, poseBlend);
-            }
+            std::ranges::copy(pose, state.CurrentProceduralPose.begin());
             state.ProceduralState.LeftFootPlanted = state.LeftFootPlantState.Plant.Locked;
             state.ProceduralState.RightFootPlanted = state.RightFootPlantState.Plant.Locked;
             animator->SetRuntimeProceduralState(state.ProceduralState);

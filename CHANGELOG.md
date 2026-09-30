@@ -1,5 +1,9 @@
 # Changelog
 
+- Procedural pose smoothing and toe roll run before foot contact and gameplay IK, preserving final constraints.
+  The smoothing history excludes contact corrections so pelvis offsets do not feed back into later gait poses.
+- Procedural knee poles retain anatomical forward while backing up or strafing, avoiding reverse knee bends.
+
 - Procedural humanoid hip offsets and body rotations respect imported bone coordinate axes, preventing sideways
   compression and twisting on rigs whose local axes differ from the model's upright axes.
 

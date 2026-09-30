@@ -1864,6 +1864,9 @@ advance and publication. Per-Animator pose, matrix, palette, grounding-request, 
 retained after warm-up; published debug snapshots are immutable even when a consumer holds an older snapshot.
 Procedural hip offsets are converted from model space into the pelvis parent's coordinates. Anatomical body rotations
 are conjugated through each current parent rotation before updating local poses, preserving imported bone bases.
+Procedural base-pose smoothing has its own cached history, separate from the constrained prior/current presentation
+poses. Toe roll and base smoothing precede contact IK and gameplay overrides; contact offsets never feed back into
+the next base pose.
 
 ## Skeletal Deformation And Rig Authoring
 

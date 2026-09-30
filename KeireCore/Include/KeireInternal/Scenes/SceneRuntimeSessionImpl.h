@@ -180,6 +180,7 @@ namespace Keire
             std::vector<BoneTransform> PreviousProceduralPose;
             std::vector<BoneTransform> CurrentProceduralPose;
             std::vector<BoneTransform> TargetProceduralPose;
+            std::vector<BoneTransform> SmoothedProceduralBasePose;
             std::vector<BoneTransform> PublishedProceduralPose;
             std::vector<Matrix4> BindModelMatrices;
             std::vector<Matrix4> ModelMatrixScratch;
