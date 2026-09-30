@@ -252,6 +252,12 @@ with the contact normal. The bind pose defines the rig's neutral sole independen
 axes, so imported feet flatten animated toe-up pitch without folding and retain the correct clearance after rotation.
 For skinned characters, clearance also includes foot- and toe-weighted bind-mesh vertices, so thick boots and armored
 soles rest above the hit surface even when their visible geometry extends below every foot joint.
+Grounding also checks the final animated foot/toe geometry against the probed support plane and corrects
+remaining penetration while preserving foot orientation and leg lengths. This covers pitching heels and
+animated toes that extend beyond bind-pose clearance. Corrections respect grounding weights and limb reach;
+unreachable poses still require appropriate pelvis limits or animation authoring.
+The mesh check retains a small positive clearance margin and softens the onset before contact, avoiding
+numerical penetration and reducing sudden knee flexion when an almost straight leg approaches the surface.
 The authored **Sole Offset** is a minimum/fallback clearance rather than an additional lift: automatic boot thickness
 replaces it when larger, preventing the two values from stacking into a visible hover. Each leg also preserves the
 sampled animation's knee bend plane while reaching its vertical contact, so grounding does not pull a knee toward a
@@ -554,6 +560,8 @@ Unsupported correction rotates the sampled bend around the hip-to-foot axis inst
 solver's reach margin. This preserves the authored endpoint and avoids a minimum-bend jump as a nearly straight
 leg returns to its valid bend side. Regression coverage checks partial-weight endpoint/orientation preservation
 and bounds raised- and moving-ground knee speed in the imported walking fixture.
+Axial twist introduced by this bend-plane correction is removed from the thigh and calf while retaining
+their endpoints, preventing large visible hip twists when a nearly straight sampled bend changes sides.
 The unsupported foot's orientation is restored through its full parent transform, including nonuniform ancestor
 scale. Rotated, uniformly scaled, nonuniformly scaled, and reflected parent fixtures verify active partial/full
 correction, retained endpoints and segment lengths, and the complete foot transform.

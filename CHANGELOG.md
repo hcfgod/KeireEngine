@@ -1,5 +1,10 @@
 # Changelog
 
+- Foot grounding checks the animated foot mesh against the support surface after solving, preventing pitching
+  heels and animated toes from penetrating moving platforms despite valid ankle positions.
+- Unsupported knee stabilization removes unnecessary axial leg twist while preserving endpoints, avoiding
+  sudden hip/upper-leg mesh flips near full extension.
+
 - Rigging Studio can preview imported animation clips directly from Generated runtime assets, without baking
   a copy or creating an Animator Controller first.
 

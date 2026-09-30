@@ -1,5 +1,6 @@
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireInternal/Scenes/AnimationNamedIkGoals.h"
+#include "KeireInternal/Scenes/FootMeshSurface.h"
 
 #include "Keire/Scenes/Scene.h"
 
@@ -12,6 +13,53 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+TEST_CASE("Foot mesh clearance measures animated toes in world space for both skinning methods")
+{
+    using namespace Keire;
+    std::vector<SkeletonBone> bones(3);
+    bones[0].Name = "Foot";
+    bones[1].Name = "Toe";
+    bones[1].Parent = 0;
+    bones[2].Name = "Other";
+    SkeletonAsset skeleton(bones);
+    std::vector<MeshVertex> vertices(3);
+    vertices[0].Position = {0, 0, 0};
+    vertices[1].Position = {0, 0, 0.2F};
+    vertices[2].Position = {0, -10, 0};
+    MeshAsset mesh(vertices, {0, 1, 2}, {{0, -10, 0}, {0, 0, 0.2F}});
+    std::vector<SkinVertexInfluence8> influences(3);
+    for (std::uint16_t index = 0; index < 3; ++index)
+    {
+        influences[index].Count = 1;
+        influences[index].Bones[0] = index;
+        influences[index].Weights[0] = 1;
+    }
+    for (const auto method : {SkinningMethod::LinearBlend, SkinningMethod::DualQuaternion})
+    {
+        CAPTURE(method);
+        SkinnedMeshAsset skin(AssetId::Generate(), AssetId::Generate(), influences, method);
+        auto surface = Detail::BuildFootMeshSurface(skeleton, skin, mesh, 0);
+        REQUIRE(surface.Vertices.size() == 2);
+        CHECK(Detail::BuildFootMeshSurface(skeleton, skin, mesh, 99).Vertices.empty());
+        std::array<Matrix4, 3> palette{};
+        CHECK(Detail::FootMeshSurfacePenetration(surface, palette, {}, {}, {0, 1, 0}) == 0);
+        CHECK(Detail::FootMeshSurfacePenetration(surface, palette, {}, {}, {0, 1, 0}, 0, 0.02F) ==
+              doctest::Approx(0.005F));
+        palette[1] = Math::ComposeTransform({}, Math::EulerDegreesToQuaternion({30, 0, 0}), {1, 1, 1});
+        CHECK(Detail::FootMeshSurfacePenetration(surface, palette, {}, {}, {0, 1, 0}) == doctest::Approx(0.1F));
+        const auto transform =
+            Math::ComposeTransform({3, 4, 5}, Math::EulerDegreesToQuaternion({0, 0, 45}), {-1, 2, 1});
+        const auto normal = Detail::TransformFootSupportNormal(Math::Inverse(transform), {0, 1, 0});
+        REQUIRE(normal);
+        CHECK(Detail::FootMeshSurfacePenetration(surface, palette, transform, {3, 4, 5}, *normal) ==
+              doctest::Approx(0.2F));
+        palette[1] = Math::ComposeTransform({0, 0.3F, 0}, {}, {1, 1, 1});
+        CHECK(Detail::FootMeshSurfacePenetration(surface, palette, {}, {}, {0, 1, 0}) == 0);
+    }
+    Detail::FootMeshSurface empty;
+    CHECK(Detail::FootMeshSurfacePenetration(empty, {}, {}, {}, {0, 1, 0}) == 0);
+}
 
 TEST_CASE("Automatic foot grounding recognizes character hierarchy colliders")
 {

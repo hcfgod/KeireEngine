@@ -1,3 +1,4 @@
+#include "Keire/Animation/Skinning.h"
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireTests/TestSupport.h"
 
@@ -43,8 +44,11 @@ namespace
         explicit SupportFixture(const bool restrictLayers = false, const bool airborneRight = false,
                                 const float supportElevation = 0.0F,
                                 Keire::Ref<Keire::SkeletonAsset> sourceSkeleton = {},
-                                Keire::Ref<Keire::AnimationClipAsset> sourceClip = {})
-            : SourceSkeleton(std::move(sourceSkeleton)), SourceClip(std::move(sourceClip))
+                                Keire::Ref<Keire::AnimationClipAsset> sourceClip = {},
+                                Keire::Ref<Keire::SkinnedMeshAsset> sourceSkin = {},
+                                Keire::Ref<Keire::MeshAsset> sourceMesh = {})
+            : SourceSkeleton(std::move(sourceSkeleton)), SourceClip(std::move(sourceClip)),
+              SourceSkin(std::move(sourceSkin)), SourceMesh(std::move(sourceMesh))
         {
             Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
             Character = Scene->CreateEntity("Character");
@@ -123,6 +127,8 @@ namespace
             importer(".supportskeleton", Keire::SkeletonAsset::StaticType());
             importer(".supportclip", Keire::AnimationClipAsset::StaticType());
             importer(".supportgraph", Keire::AnimationGraphAsset::StaticType());
+            importer(".supportmesh", Keire::MeshAsset::StaticType());
+            importer(".supportskin", Keire::SkinnedMeshAsset::StaticType());
             Database = Keire::CreateRef<Keire::AssetDatabase>(std::move(specification));
             if (SourceSkeleton)
                 Write("Rig.supportskeleton", Keire::SkeletonAsset::Encode(SourceSkeleton->Bones()));
@@ -142,6 +148,15 @@ namespace
             (void)Database->ImportAll();
             const auto skeleton = Database->Find("Rig.supportskeleton");
             REQUIRE(skeleton);
+            if (SourceSkin && SourceMesh)
+            {
+                Write("Rig.supportmesh", Keire::MeshAsset::Encode(SourceMesh->Vertices(), SourceMesh->Indices()));
+                (void)Database->ImportAll();
+                const auto mesh = Database->Find("Rig.supportmesh");
+                REQUIRE(mesh);
+                Write("Rig.supportskin", Keire::SkinnedMeshAsset::Encode(
+                                             mesh->Id, skeleton->Id, SourceSkin->Influences8(), SourceSkin->Method()));
+            }
             Keire::AnimationTrack track;
             track.Bone = 0;
             track.Keys = {{0.0F, {{0, 2, 0}, {}, {1, 1, 1}}}, {1.0F, {{0, 2, 0}, {}, {1, 1, 1}}}};
@@ -167,10 +182,17 @@ namespace
             assets.DevelopmentCatalog = imported.CatalogPath;
             assets.WorkerCount = 1;
             assets.Decoders = {Keire::CreateSkeletonAssetDecoder(), Keire::CreateAnimationClipAssetDecoder(),
-                               Keire::CreateAnimationGraphAssetDecoder(), Keire::CreateSkinnedMeshAssetDecoder()};
+                               Keire::CreateAnimationGraphAssetDecoder(), Keire::CreateSkinnedMeshAssetDecoder(),
+                               Keire::CreateMeshAssetDecoder()};
             Assets = Keire::CreateRef<Keire::AssetSystem>(std::move(assets));
             const auto animator = Character.AddComponent<Keire::AnimatorComponent>();
             animator->SetSkeleton(skeleton->Id);
+            if (SourceSkin && SourceMesh)
+            {
+                const auto skin = Database->Find("Rig.supportskin");
+                REQUIRE(skin);
+                animator->SetSkinnedMesh(skin->Id);
+            }
             animator->SetGraph(controller->Id);
             animator->SetApplyRootMotion(false);
             Keire::AnimatorFootGroundingSettings grounding;
@@ -210,6 +232,8 @@ namespace
         Keire::Ref<Keire::AnimatorComponent> Animator;
         Keire::Ref<Keire::SkeletonAsset> SourceSkeleton;
         Keire::Ref<Keire::AnimationClipAsset> SourceClip;
+        Keire::Ref<Keire::SkinnedMeshAsset> SourceSkin;
+        Keire::Ref<Keire::MeshAsset> SourceMesh;
     };
 } // namespace
 TEST_CASE("Foot contact trace logs transitions without logging steady planted frames")
@@ -1217,4 +1241,163 @@ TEST_CASE("Shared-scene IK actors isolate goals and recover independently after 
         CHECK(fixture.Animator->RuntimeDiagnostic().empty());
         CHECK(fixture.FootY() == doctest::Approx(0.05F).epsilon(0.005F));
     }
+}
+
+TEST_CASE("Animated foot mesh stays above moving support throughout the walking cycle" *
+          doctest::skip(!std::filesystem::is_regular_file("Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb")))
+{
+    const auto path = std::filesystem::absolute("Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb");
+    if (!std::filesystem::exists(path))
+    {
+        MESSAGE("Optional CesiumMan fixture is unavailable.");
+        return;
+    }
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    REQUIRE(input.is_open());
+    std::vector<std::byte> bytes(static_cast<std::size_t>(input.tellg()));
+    input.seekg(0);
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    REQUIRE(input.good());
+    Keire::AssetImportContext context;
+    context.Asset = Keire::AssetId::Generate();
+    context.SourcePath = path;
+    context.RelativePath = path.filename();
+    context.ImportSettings["materialImport"] = std::string("none");
+    context.ImportSettings["rigSource"] = std::string("embedded");
+    std::map<std::string, Keire::AssetId> identities;
+    context.ResolveSubAssetId = [&identities](const std::string_view key)
+    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+    const auto imported = Keire::CreateMeshAssetImporter().ContextualImport(context, bytes);
+    const auto find = [&](const Keire::AssetTypeId type)
+    {
+        const auto found = std::ranges::find(imported.SubAssets, type, &Keire::AssetGeneratedSubAsset::Type);
+        REQUIRE(found != imported.SubAssets.end());
+        return found->Bytes;
+    };
+    const auto skeleton = Keire::SkeletonAsset::Decode(find(Keire::SkeletonAsset::StaticType()));
+    const auto clip = Keire::AnimationClipAsset::Decode(find(Keire::AnimationClipAsset::StaticType()));
+    const auto skin = Keire::SkinnedMeshAsset::Decode(find(Keire::SkinnedMeshAsset::StaticType()));
+    const auto mesh = Keire::MeshAsset::Decode(imported.Bytes);
+    int hz = 60;
+    float elevation = 0.08F;
+    float slope = 0;
+    bool grounding = true;
+    SUBCASE("Raised support at 60 Hz") {}
+    SUBCASE("Raised support at 30 Hz") { hz = 30; }
+    SUBCASE("Raised support at 144 Hz") { hz = 144; }
+    SUBCASE("Flat support") { elevation = 0; }
+    SUBCASE("Sloped support") { slope = 10; }
+    SUBCASE("Authored motion reference") { grounding = false; }
+    CAPTURE(hz);
+    CAPTURE(elevation);
+    CAPTURE(slope);
+    SupportFixture fixture(false, false, 0.03F, skeleton, clip, skin, mesh);
+    auto settings = fixture.Animator->FootGrounding();
+    settings.FootOffset = 0.02F;
+    settings.Enabled = grounding;
+    fixture.Animator->SetFootGrounding(settings);
+    const auto support = fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id());
+    const auto transform = support.GetComponent<Keire::TransformComponent>();
+    const auto supportRotation = Keire::Math::EulerDegreesToQuaternion({0, 0, slope});
+    transform->SetLocalRotation(supportRotation);
+    const auto normal =
+        Keire::Math::TransformDirection(Keire::Math::ComposeTransform({}, supportRotation, {1, 1, 1}), {0, 1, 0});
+    std::vector<Keire::Matrix4> matrices(skeleton->Bones().size()), palette(matrices.size());
+    std::vector<Keire::MeshVertex> deformed(mesh->Vertices().size());
+    float worstClearance = 1.0F;
+    float maximumPelvisSpeed = 0;
+    Keire::Vector3 previousPelvis;
+    int worstFrame = 0;
+    float maximumThighStep = 0;
+    float maximumCalfStep = 0;
+    int worstThighFrame = 0;
+    std::array<Keire::Quaternion, 4> previousThighs{};
+    std::array<float, 2> previousFlexion{};
+    float maximumFlexionStep = 0;
+    const std::array<std::string, 4> legBones{"leg_joint_L_1", "leg_joint_R_1", "leg_joint_L_2", "leg_joint_R_2"};
+    for (int frame = 0; frame < 6 * hz; ++frame)
+    {
+        const auto phase = static_cast<float>(frame) / static_cast<float>(hz) * 1.256637F;
+        const float surface = elevation + 0.04F * std::sin(phase);
+        const Keire::Vector3 surfacePoint{0.06F * std::sin(phase), surface, 0};
+        transform->SetLocalPosition(
+            Keire::Detail::IkSubtract(surfacePoint, {normal.X * 0.5F, normal.Y * 0.5F, normal.Z * 0.5F}));
+        (void)fixture.Assets->PumpCompletions();
+        fixture.Tick(1.0F / static_cast<float>(hz));
+        const auto& pose = fixture.Animator->RuntimeDebugSnapshot()->Pose;
+        for (std::size_t bone = 0; bone < pose.size(); ++bone)
+        {
+            const auto& local = pose[bone].LocalTransform;
+            matrices[bone] = Keire::Math::ComposeTransform(local.Translation, local.Rotation, local.Scale);
+            const auto& definition = skeleton->Bones()[bone];
+            if (definition.Parent >= 0)
+                matrices[bone] = Keire::Math::Multiply(matrices[definition.Parent], matrices[bone]);
+            palette[bone] = Keire::Math::Multiply(matrices[bone], definition.InverseBindPose);
+        }
+        Keire::SkinMeshCpu(mesh->Vertices(), skin->Influences8(), palette, skin->Method(), deformed);
+        float lowest = 1000;
+        for (const auto& vertex : deformed)
+        {
+            REQUIRE(Keire::Math::IsFinite(vertex.Position));
+            lowest = std::min(lowest,
+                              Keire::Detail::IkDot(Keire::Detail::IkSubtract(vertex.Position, surfacePoint), normal));
+        }
+        if (frame > hz / 2 && lowest < worstClearance)
+        {
+            worstClearance = lowest;
+            worstFrame = frame;
+        }
+        const auto pelvisBone =
+            std::ranges::find(pose, std::string("Skeleton_torso_joint_1"), [](const auto& bone) { return bone.Name; });
+        const auto pelvis = pelvisBone->WorldPosition;
+        if (frame > hz / 2)
+            maximumPelvisSpeed = std::max(
+                maximumPelvisSpeed, Keire::Detail::IkVectorLength(Keire::Detail::IkSubtract(pelvis, previousPelvis)) *
+                                        static_cast<float>(hz));
+        previousPelvis = pelvis;
+        for (std::size_t leg = 0; leg < 2; ++leg)
+        {
+            const auto prefix = std::string(leg == 0 ? "leg_joint_L_" : "leg_joint_R_");
+            const auto joint = [&](const char* suffix)
+            {
+                return std::ranges::find(pose, prefix + suffix, [](const auto& bone) { return bone.Name; })
+                    ->WorldPosition;
+            };
+            const auto upper = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(joint("2"), joint("1")));
+            const auto lower = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(joint("3"), joint("2")));
+            const auto flexion = std::acos(std::clamp(Keire::Detail::IkDot(upper, lower), -1.0F, 1.0F)) * 57.2957795F;
+            if (frame > hz / 2)
+                maximumFlexionStep = std::max(maximumFlexionStep, std::abs(flexion - previousFlexion[leg]));
+            previousFlexion[leg] = flexion;
+        }
+        for (std::size_t leg = 0; leg < legBones.size(); ++leg)
+        {
+            const auto thigh = std::ranges::find(pose, legBones[leg], [](const auto& bone) { return bone.Name; });
+            const auto rotation = thigh->LocalTransform.Rotation;
+            const auto& previous = previousThighs[leg];
+            const float dot = std::abs(rotation.X * previous.X + rotation.Y * previous.Y + rotation.Z * previous.Z +
+                                       rotation.W * previous.W);
+            const float step = 2.0F * std::acos(std::min(dot, 1.0F)) * 57.2957795F;
+            if (frame > hz / 2 && leg < 2 && step > maximumThighStep)
+            {
+                maximumThighStep = step;
+                worstThighFrame = frame;
+            }
+            if (frame > hz / 2 && leg >= 2)
+                maximumCalfStep = std::max(maximumCalfStep, step);
+            previousThighs[leg] = rotation;
+        }
+    }
+    MESSAGE("Maximum thigh rotation step=" << maximumThighStep << " frame=" << worstThighFrame);
+    MESSAGE("Maximum knee flexion step=" << maximumFlexionStep);
+    CHECK(maximumThighStep * static_cast<float>(hz) <= 720.0F);
+    // Knee flexion combines the motion of both segments; retain a separate bound from hip swing.
+    CHECK(maximumCalfStep * static_cast<float>(hz) <= 1440.0F);
+    CHECK(maximumFlexionStep * static_cast<float>(hz) <= 1440.0F);
+    MESSAGE("Actual skinned mesh minimum clearance=" << worstClearance << " worst frame=" << worstFrame
+                                                     << " maximum pelvis speed=" << maximumPelvisSpeed);
+    if (grounding)
+        CHECK(worstClearance >= 0.0F);
+    // Includes the authored vertical gait plus support acquisition/release, not just platform velocity.
+    CHECK(maximumPelvisSpeed < 0.75F);
 }

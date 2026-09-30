@@ -24,6 +24,7 @@
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireInternal/Scenes/CharacterGrounding.h"
 #include "KeireInternal/Scenes/FootGroundingSpace.h"
+#include "KeireInternal/Scenes/FootMeshSurface.h"
 
 #include <algorithm>
 #include <array>
@@ -173,6 +174,7 @@ namespace Keire
             std::uint64_t FootClearanceSkinRevision = 0;
             std::uint64_t FootClearanceMeshRevision = 0;
             std::map<std::uint32_t, std::optional<float>> FootMeshClearances;
+            std::map<std::uint32_t, Detail::FootMeshSurface> FootMeshSurfaces;
             std::map<std::uint32_t, std::optional<std::uint32_t>> FootToeBones;
             std::vector<BoneTransform> BindProceduralPose;
             std::vector<BoneTransform> PreviousProceduralPose;

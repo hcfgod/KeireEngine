@@ -150,6 +150,7 @@ namespace Keire
                     runtimeState.FootClearanceSkinRevision = skinHandle.Revision();
                     runtimeState.FootClearanceMeshRevision = meshHandle.Revision();
                     runtimeState.FootMeshClearances.clear();
+                    runtimeState.FootMeshSurfaces.clear();
                     runtimeState.FootToeBones.clear();
                 }
             }
@@ -161,6 +162,7 @@ namespace Keire
             const auto z = right.Z - left.Z;
             return std::sqrt(x * x + y * y + z * z);
         };
+        std::array<std::optional<Detail::ModelFootGroundContact>, 2> surfacePlanes;
         for (std::size_t chainIndex = 0; chainIndex < chains.size(); ++chainIndex)
         {
             const auto& chain = chains[chainIndex];
@@ -272,6 +274,8 @@ namespace Keire
             std::optional<Vector3> targetNormalWorld;
             std::optional<Vector3> clearanceWorld;
             std::optional<Vector3> clearanceNormalWorld;
+            if (hit != hits.end())
+                surfacePlanes[chainIndex] = Detail::ModelFootGroundContact{hit->Position, hit->Normal};
             if (resolvedLockedSupport && hit != hits.end() &&
                 Detail::ShouldReplaceAutomaticFootSupport(plantRuntime.SurfacePosition, plantRuntime.SurfaceNormal,
                                                           hit->Position))
@@ -630,6 +634,60 @@ namespace Keire
                 LogLevel::Trace, LogMessage("[IK] entity={} reach-limit cleared reason=no-contacts", entity.Id()));
             runtimeState.UnreachableFootCount = 0;
         }
+        // Bind-pose ankle clearance does not bound a pitching heel or an animated toe. Measure the
+        // final deformed sole and correct only penetration, preserving the solved foot orientation.
+        // Cached foot-only vertices avoid skinning the full character for each contact query.
+        if (skin && skinMesh)
+        {
+            for (std::size_t leg = 0; leg < chains.size(); ++leg)
+            {
+                if (!surfacePlanes[leg])
+                    continue;
+                const auto& chain = chains[leg];
+                const float weight =
+                    settings.Weight * runtimeWeight * (proceduralFootWeights ? (*proceduralFootWeights)[leg] : 1.0F);
+                if (weight <= 0)
+                    continue;
+                auto found = runtimeState.FootMeshSurfaces.find(*chain[2]);
+                if (found == runtimeState.FootMeshSurfaces.end())
+                    found = runtimeState.FootMeshSurfaces
+                                .emplace(*chain[2], Detail::BuildFootMeshSurface(skeleton, *skin, *skinMesh, *chain[2]))
+                                .first;
+                for (int iteration = 0; iteration < 3; ++iteration)
+                {
+                    ModelBoneMatrices(skeleton, localPose, runtimeState.ModelMatrixScratch);
+                    const auto& matrices = runtimeState.ModelMatrixScratch;
+                    runtimeState.SkinPaletteCache.resize(matrices.size());
+                    for (std::size_t boneIndex = 0; boneIndex < matrices.size(); ++boneIndex)
+                        runtimeState.SkinPaletteCache[boneIndex] =
+                            Math::Multiply(matrices[boneIndex], skeleton.Bones()[boneIndex].InverseBindPose);
+                    const auto& plane = *surfacePlanes[leg];
+                    const float penetration = Detail::FootMeshSurfacePenetration(
+                        found->second, runtimeState.SkinPaletteCache, modelToWorld, plane.Position, plane.Normal,
+                        0.001F, iteration == 0 ? 0.02F : 0.0F);
+                    if (penetration <= 0.0F)
+                        break;
+                    Vector3 position, scale;
+                    Quaternion rotation;
+                    if (!Math::DecomposeTransform(matrices[*chain[2]], position, rotation, scale))
+                        break;
+                    const auto amount = penetration + 0.00005F;
+                    const Vector3 worldCorrection{plane.Normal.X * amount, plane.Normal.Y * amount,
+                                                  plane.Normal.Z * amount};
+                    const auto correctionModel = Math::TransformDirection(worldToModel, worldCorrection);
+                    const Vector3 target{position.X + correctionModel.X, position.Y + correctionModel.Y,
+                                         position.Z + correctionModel.Z};
+                    const auto knee = Math::TransformPoint(matrices[*chain[1]], {});
+                    TwoBoneIkRequest correction{*chain[0], *chain[1], *chain[2], target, knee, weight};
+                    correction.EndRotation = rotation;
+                    correction.EndRotationWeight = 1.0F;
+                    if (!SolveTwoBoneIkCached(skeleton, localPose, correction, runtimeState.ModelMatrixScratch))
+                        return "Foot surface clearance could not solve the configured leg chain.";
+                    if (weight < 1.0F)
+                        break;
+                }
+            }
+        }
         // Stabilization must also span frames without ground contacts. Keep authored endpoints and
         // pelvis motion; only the knee's bend plane is corrected, with no support or foot rotation.
         if (request.Contacts.empty() && settings.KneeStability > 0.0F)
@@ -657,8 +715,8 @@ namespace Keire
                 if (Detail::IkDot(sampledBend, Detail::IkSubtract(pole, upperLeg)) >= 0.0F)
                     continue;
                 const auto sampledFootMatrix = matrices[*chain[2]];
-                // Rotate the existing bend around its endpoint axis. Re-solving near extension
-                // introduces a minimum bend that pops away when the authored bend becomes valid.
+                // Move the authored bend around its endpoint axis without twisting the entire thigh.
+                // Preserve its radius rather than introducing a minimum bend near full extension.
                 const auto from = Detail::IkNormalize(sampledBend);
                 const auto to =
                     Detail::IkNormalize(Detail::IkProjectOntoPlane(Detail::IkSubtract(pole, upperLeg), axis));
@@ -667,6 +725,7 @@ namespace Keire
                 const auto sine = std::sin(angle * 0.5F);
                 const Quaternion rotation{axis.X * sine, axis.Y * sine, axis.Z * sine, std::cos(angle * 0.5F)};
                 const auto originalRootRotation = localPose[*chain[0]].Rotation;
+                const auto originalMiddleRotation = localPose[*chain[1]].Rotation;
                 const auto originalFootRotation = localPose[*chain[2]].Rotation;
                 const auto restoreFootOrientation = [&]
                 {
@@ -692,11 +751,43 @@ namespace Keire
                         return false;
                     }
                 };
-                if (!RiggingDetail::ApplyBoneModelRotationDelta(skeleton, localPose, *chain[0], rotation,
-                                                                settings.Weight * runtimeWeight * chainWeight) ||
-                    !restoreFootOrientation())
+                bool corrected = RiggingDetail::ApplyBoneModelRotationDelta(
+                    skeleton, localPose, *chain[0], rotation, settings.Weight * runtimeWeight * chainWeight);
+                if (corrected)
+                {
+                    ModelBoneMatrices(skeleton, localPose, runtimeState.ModelMatrixScratch);
+                    const auto correctedMiddle = runtimeState.ModelMatrixScratch[*chain[1]];
+                    const auto& rootScale = localPose[*chain[0]].Scale;
+                    const auto& offset = localPose[*chain[1]].Translation;
+                    const Vector3 scaledOffset{offset.X * rootScale.X, offset.Y * rootScale.Y, offset.Z * rootScale.Z};
+                    const auto beforeDirection = RiggingDetail::Rotate(originalRootRotation, scaledOffset);
+                    const auto afterDirection = RiggingDetail::Rotate(localPose[*chain[0]].Rotation, scaledOffset);
+                    localPose[*chain[0]].Rotation = RiggingDetail::Multiply(
+                        RiggingDetail::FromTo(beforeDirection, afterDirection), originalRootRotation);
+                    ModelBoneMatrices(skeleton, localPose, runtimeState.ModelMatrixScratch);
+                    // Transfer the discarded axial twist to the child so its model-space pose and
+                    // the foot endpoint stay unchanged, including under scaled rig ancestors.
+                    const auto desiredMiddle =
+                        Math::Multiply(Math::Inverse(runtimeState.ModelMatrixScratch[*chain[0]]), correctedMiddle);
+                    Vector3 translation, scale;
+                    Quaternion middleRotation;
+                    corrected = Math::DecomposeTransform(desiredMiddle, translation, middleRotation, scale);
+                    if (corrected)
+                    {
+                        const auto& middleScale = localPose[*chain[1]].Scale;
+                        const auto& footOffset = localPose[*chain[2]].Translation;
+                        const Vector3 middleOffset{footOffset.X * middleScale.X, footOffset.Y * middleScale.Y,
+                                                   footOffset.Z * middleScale.Z};
+                        localPose[*chain[1]].Rotation = RiggingDetail::Multiply(
+                            RiggingDetail::FromTo(RiggingDetail::Rotate(originalMiddleRotation, middleOffset),
+                                                  RiggingDetail::Rotate(middleRotation, middleOffset)),
+                            originalMiddleRotation);
+                    }
+                }
+                if (!corrected || !restoreFootOrientation())
                 {
                     localPose[*chain[0]].Rotation = originalRootRotation;
+                    localPose[*chain[1]].Rotation = originalMiddleRotation;
                     localPose[*chain[2]].Rotation = originalFootRotation;
                     return "Foot grounding could not stabilize the unsupported leg.";
                 }
