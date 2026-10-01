@@ -346,7 +346,7 @@ for (const contract of [
     "DEB for Ubuntu or Debian",
     "RPM for Fedora, Rocky Linux, and openSUSE",
     "The current EXE is not Authenticode-signed",
-    "Users of older Hub versions need to download and run 0.4.6 manually",
+    "Users of older Hub versions need to download and run 0.4.7 manually",
     "Linux packages are validated independently of Windows",
 ]) {
     assert(downloadsPage.includes(contract), `Downloads page is missing current platform contract: ${contract}`);
@@ -357,7 +357,7 @@ for (const contract of [
     "unknown-publisher warning",
     "Verify the displayed SHA-256",
     "Older in-app updaters require an Authenticode signature",
-    "Download and run 0.4.6 manually",
+    "Download and run 0.4.7 manually",
     "<dt>Native signing</dt><dd>Not Authenticode-signed</dd>",
 ]) {
     assert(windowsDownloadsPage.includes(contract),
@@ -625,22 +625,26 @@ assert(changelogFeed.includes('Content-Type": "application/rss+xml; charset=utf-
     changelogFeed.includes("releaseNotes.filter((release) => release.published).map"),
     "The changelog RSS endpoint must publish the canonical release archive.");
 
+// Hub-only releases do not advance the published Editor or managed API contract.
+const publishedEditorVersion = "0.4.6";
+assert(windowsDownloadsPage.includes(`Download Editor ${publishedEditorVersion} for Windows x86-64`),
+    "Publisher compatibility boundary must match the available Windows Editor download.");
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");
 assert(!publisherPage.includes("offline signing") && publisherPage.includes("queued metadata signing"),
     "Publisher copy must describe the automatic metadata-only publication workflow.");
-assert(publisherPage.includes(`name="minimumEngineVersion" value="${projectVersion}"`) &&
-    publisherPage.includes(`name="managedApiVersion" value="${projectVersion}"`),
-    "Publisher release defaults must target the current source/API version without changing its wire protocol.");
+assert(publisherPage.includes(`name="minimumEngineVersion" value="${publishedEditorVersion}"`) &&
+    publisherPage.includes(`name="managedApiVersion" value="${publishedEditorVersion}"`),
+    "Publisher defaults must target the published Editor/API version, independently of Hub-only releases.");
 const marketplacePage = await readFile(path.join(siteRoot, "Source", "pages", "marketplace", "index.astro"), "utf8");
 const marketplacePolicy = await readFile(
     path.join(siteRoot, "Source", "pages", "policies", "marketplace", "index.astro"), "utf8");
 const publisherPolicy = await readFile(
     path.join(siteRoot, "Source", "pages", "policies", "publisher", "index.astro"), "utf8");
 assert(marketplacePage.includes("Browse free assets, tools, and examples for Kéire") &&
-    marketplacePolicy.includes(`Free products in Kéire ${projectVersion}`) &&
-    marketplacePolicy.includes(`zero minor-unit price for Kéire ${projectVersion}`) &&
-    publisherPolicy.includes(`Native plugins remain prohibited for Kéire ${projectVersion}`),
-    "Marketplace and publisher policy copy must identify the current product version without changing deployed services.");
+    marketplacePolicy.includes(`Free products in Kéire ${publishedEditorVersion}`) &&
+    marketplacePolicy.includes(`zero minor-unit price for Kéire ${publishedEditorVersion}`) &&
+    publisherPolicy.includes(`Native plugins remain prohibited for Kéire ${publishedEditorVersion}`),
+    "Marketplace and publisher policy copy must identify the published Editor version without changing deployed services.");
 for (const contract of [
     'import { Upload } from "tus-js-client"',
     'import { sha256 } from "@noble/hashes/sha2.js"',

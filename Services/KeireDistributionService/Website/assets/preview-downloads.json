@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "releaseStatus": {
     "state": "active",
-    "version": "0.4.6",
-    "activeCatalogVersion": "0.4.6",
-    "message": "Windows 0.4.6 is active in signed catalog sequence 20. Independently validated Linux 0.4.2 packages remain available."
+    "version": "0.4.7",
+    "activeCatalogVersion": "0.4.7",
+    "message": "Windows Hub 0.4.7 is active; Editor 0.4.6 remains available in signed catalog sequence 21. Independently validated Linux 0.4.2 packages remain available."
   },
   "packages": []
 }

@@ -1,6 +1,6 @@
 # Kéire Production Readiness Review
 
-Windows 0.4.6 is published through signed catalog sequence 20. Historical platform evidence below
+Windows Hub 0.4.7 is published through signed catalog sequence 21; Windows Editor remains at 0.4.6. Historical platform evidence below
 retains its original version and scope; this historical review is not a certification of the current release.
 
 Review date: 2026-08-25
