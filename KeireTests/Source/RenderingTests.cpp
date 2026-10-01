@@ -969,7 +969,7 @@ TEST_CASE("Sandbox pyramid triangle winding agrees with its authored outward nor
 TEST_CASE("model importer exposes explicit animation source routing")
 {
     const auto importer = Keire::CreateMeshAssetImporter();
-    CHECK(importer.Version == 25);
+    CHECK(importer.Version == 26);
     const auto content =
         std::ranges::find(importer.ImportOptions, std::string("contentType"), &Keire::AssetImportOptionDescriptor::Key);
     REQUIRE(content != importer.ImportOptions.end());

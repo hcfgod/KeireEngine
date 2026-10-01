@@ -243,7 +243,7 @@ namespace Keire
     {
         if (space != AnimatorIkSpace::Model && space != AnimatorIkSpace::World &&
             space != AnimatorIkSpace::PresentationWorld)
-            throw std::invalid_argument("Animator IK space must be Model or World.");
+            throw std::invalid_argument("Animator IK space must be Model, World, or PresentationWorld.");
         if (name.empty() || name.size() > 256)
             throw std::invalid_argument("Animator IK goal names must contain 1..256 characters.");
         if (chain.size() < 2 || chain.size() > 256)
