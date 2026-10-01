@@ -24,7 +24,7 @@ internal static class AnimatorIkValidation
         Vector(target, nameof(target));
         if (!float.IsFinite(weight) || weight < 0 || weight > 1)
             throw new ArgumentOutOfRangeException(nameof(weight), "IK weight must be finite and between 0 and 1.");
-        if (space != AnimatorIkSpace.Model && space != AnimatorIkSpace.World)
+        if (space != AnimatorIkSpace.Model && space != AnimatorIkSpace.World && space != AnimatorIkSpace.PresentationWorld)
             throw new ArgumentOutOfRangeException(nameof(space), "IK space must be Model or World.");
     }
 }

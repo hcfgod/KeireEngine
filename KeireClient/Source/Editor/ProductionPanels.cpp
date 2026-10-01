@@ -884,6 +884,41 @@ void EditorWorkspaceLayer::DrawProfiler(Keire::UiFrame& ui)
         }
 
         const auto latestSummary = profiler->LatestSummary();
+        auto& sustained = profilerState.Sustained;
+        const auto startSustained = [&](double seconds)
+        {
+            try
+            {
+                sustained.Start(seconds, latestSummary, 2, profilerState.SustainedRendererTelemetry);
+                profilerState.SustainedError.clear();
+            }
+            catch (const std::exception& error)
+            {
+                profilerState.SustainedError = std::string("Capture could not start: ") + error.what();
+            }
+        };
+        ui.Text("Sustained capture: " + std::string(sustained.Label()));
+        if (!profilerState.SustainedError.empty())
+            ui.Text(profilerState.SustainedError);
+        ui.Text("2-second warmup; application frames, not displayed FPS. Capacity: 50,000 frames.");
+        if (sustained.Active())
+            ui.Text("Recorded: " + std::to_string(sustained.ElapsedMicroseconds() / 1e6) + " seconds; " +
+                    std::to_string(sustained.Frames().size()) + " summary samples.");
+        if (!sustained.Active())
+        {
+            (void)ui.Checkbox("Include asynchronous renderer telemetry (adds observation cost)",
+                              profilerState.SustainedRendererTelemetry);
+            if (ui.Button("Start 10-second capture") && latestSummary.Sequence != 0)
+                startSustained(10);
+            ui.SameLine();
+            if (ui.Button("Start 30-second capture") && latestSummary.Sequence != 0)
+                startSustained(30);
+            if (!sustained.Frames().empty() && ui.Button("Copy sustained CSV"))
+                Owner().Windows()->SetClipboardText(sustained.Csv());
+        }
+        else if (ui.Button("Stop sustained capture"))
+            sustained.Stop();
+
         constexpr double refreshIntervalMicroseconds = 100'000.0;
         if (!profilerState.Paused && (profilerState.CachedFrame.Sequence == 0 ||
                                       latestSummary.StartMicroseconds - profilerState.CachedFrame.StartMicroseconds >=

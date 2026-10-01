@@ -16,6 +16,7 @@ Speed. See [animation workflows](Docs/AnimationRigging.md).
 In Play Mode, the Animator's **Playback Speed** multiplies each controller state's **State Speed**: 0.2 is one-fifth
 speed and 2 is double speed. Playback Speed 0 pauses all animation playback and automatic transitions while grounding
 and IK remain responsive. State Speed 0 holds only that state's motion; transitions can still leave it.
+For IK troubleshooting, opt-in [animation diagnostics](Docs/AnimationRigging.md) can compare named targets with final published bone endpoints.
 
 UI button and label text respects authored padding in runtime draw commands, including scaled and rotated elements.
 Use padding on controls for text clearance and on their containers for spacing around child controls.
@@ -63,7 +64,7 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.4.6 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.4.7 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
 Version 0.4.6 is the active Windows release in immutable signed catalog sequence 20. The same signed
@@ -166,6 +167,11 @@ Kéire already includes substantial, integrated engine and authoring foundations
   every supported AA mode, complete cooked render-setting parity, and weighted soft-shadow filtering,
   importer-independent semantic auto-rigging, target-driven arm IK, bilateral foot grounding, zero-clip procedural
   humanoid locomotion, presentation interpolation, VFX authoring, and performance gates.
+  Standalone players and editor Play Mode both interpolate physics presentation between fixed ticks; gameplay
+  queries use simulation geometry rather than interpolated visuals. Ray, capsule, and sphere queries see same-tick
+  authored static/kinematic support changes without advancing simulation or consuming queued character movement.
+  Custom fixed-step movers can opt into transform interpolation and presentation-space IK through C++ or C#;
+  see [animation and rigging](Docs/AnimationRigging.md) for the coordinate-space contract.
 - Input actions and rebinding, physics, navigation, configurable mono/stereo/5.1/7.1 audio output, typed live Mix
   Console authoring, stable mixer routing, spatial sources, listener/camera fallback, priority-blended Reverb Zones,
   managed audio controls, replay/diagnostic foundations, and profiling.
@@ -430,6 +436,10 @@ and typed values. Project Settings selects the asset and stable map enabled at t
 and `Gamepad` controls provide frame-snapshot direct polling when an action abstraction is unnecessary.
 
 Start with [C# Scripting](Docs/Scripting/README.md), then use the
+task-based [Workflow Map](Docs/Scripting/WorkflowMap.md) and
+[Cookbook](Docs/Scripting/Cookbook.md) for scene setup and compile-checked examples. Exact overloads are listed in the
+[Runtime Member Reference](Docs/Scripting/RuntimeReference.md) and
+[Editor Member Reference](Docs/Scripting/EditorReference.md). Use the
 [Managed API Index](Docs/Scripting/ApiIndex.md) as the compact API map and the
 [Managed API Capability Matrix](Docs/Scripting/ManagedApiMatrix.md) for production status and planned parity work.
 The managed API is intentionally distinct from the internal native-hosting layer.
@@ -542,7 +552,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 104 guides and progress records grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 109 guides and progress records grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.6 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
@@ -569,6 +579,9 @@ should begin with the [Kéire 0.4.6 User Manual](Docs/Manual/README.md):
 - [Marketplace Launch Runbook](Docs/MarketplaceLaunch.md)
 - [C# Scripting](Docs/Scripting/README.md), [Profiling](Docs/Profiling.md),
   [Performance Gates](Docs/PerformanceGates.md), and [Testing and Release](Docs/TestingAndRelease.md)
+
+The Profiler supports bounded 10/30-second application-loop captures with warmup and deferred CSV export; see
+[Profiling](Docs/Profiling.md#sustained-normal-editor-capture) for timing semantics and measurement limits.
 
 Repository Markdown is canonical. The public Starlight site synchronizes the complete inventory, renders Mermaid
 diagrams to responsive accessible SVG at build time, and adds navigation, full-text search, page outlines, and mobile
@@ -694,10 +707,13 @@ generated skeleton and named animation clips. For custom creatures, choose **Cus
 authored bone names without humanoid mapping. Apply or revert pending settings before retargeting. Partial mappings
 require review of omitted tracks; failed imports show their diagnostics and preserve the last good preview. See
 [Animation and Rigging](Docs/AnimationRigging.md) for custom creatures, IK and retargeting limitations.
+Humanoid mapping checks the hierarchy of generic joint chains and leaves ambiguous chains unmapped. Refresh models
+with mesh importer version 26 to regenerate older inferred rigs, then review bone names before baking new clips.
 Use **Animation Retargeting → Edit bone mappings** to repair unmatched tracks by choosing target bones explicitly.
 Overrides apply to the current source/target selection; the baked clip stores the resulting animation.
 Asset refreshes preserve those mapping drafts and validate them again against reloaded rigs.
-Use **Save Mapping** to retain the manual bone pairs in the project's `Config/RetargetMappings` folder.
+Use **Save Mapping** above the collapsible bone list to retain the manual bone pairs in the project's
+`Config/RetargetMappings` folder. **Load Saved Mapping** is available beside it even when the list is collapsed.
 Saving rejects stale bone names and preserves the previous preset until those pairs are repaired.
 
 **Load Saved Mapping** reuses them for another clip from the same source and target skeletons, including after restart;
@@ -709,6 +725,9 @@ While Play mode is paused, **Step** advances one complete frame so animation gra
 FABRIK at zero weight leaves the authored pose unchanged, allowing a goal to fade out without altering bone rotations.
 For grounding investigations, Trace-level Core logs report contact transitions, support changes, release reasons,
 and reach-limit recovery without repeating steady states. See [grounding diagnostics](Docs/AnimationRigging.md#contact-support-and-endpoint-influence).
+For bounded Info-level samples, launch with `KEIRE_FOOT_CONTACT_DIAGNOSTICS` set to the exact Animator entity name.
+Pair `[FootContact]` and `[FootContactSolved]` by entity, frame, and foot to inspect contact decisions and solved bone
+endpoints. These records do not certify final skinned-mesh clearance.
 The optional imported walking regression can also export per-frame poses and matching contact logs through
 `KEIRE_IK_TEST_TRACE_DIRECTORY`; it covers multiple update rates and moving or disappearing supports.
 Straight chains can bend toward closer collinear targets using a deterministic initial bend in the root's frame.

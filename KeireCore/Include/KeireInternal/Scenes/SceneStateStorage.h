@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Keire/ECS/Components/CharacterControllerComponent.h"
+#include "Keire/ECS/Components/ColliderComponent.h"
+#include "Keire/ECS/Components/RigidBodyComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "KeireInternal/SceneState.h"
 #include "KeireInternal/Scenes/SceneHierarchyCache.h"
@@ -150,14 +153,48 @@ namespace Keire::Detail
                                                      : DynamicRefCast<TransformComponent>(*found);
         }
 
+        [[nodiscard]] static bool PhysicsComponent(const ComponentTypeId type) noexcept
+        {
+            return type == ColliderComponent::StaticType() || type == RigidBodyComponent::StaticType() ||
+                   type == CharacterControllerComponent::StaticType();
+        }
+
+        void InvalidatePhysicsHierarchy(const EntityId root)
+        {
+            bool affected = false;
+            Hierarchy.VisitSubtree(
+                root, Order, [this](const EntityId id) { return ParentOf(id); },
+                [&](const EntityId id)
+                {
+                    const auto has = [&](const ComponentTypeId type)
+                    {
+                        const auto pool = ComponentPools.find(type);
+                        return pool != ComponentPools.end() && pool->second.contains(id);
+                    };
+                    affected = affected || has(ColliderComponent::StaticType()) ||
+                               has(CharacterControllerComponent::StaticType());
+                });
+            if (affected)
+                ++PhysicsRevision;
+        }
+
         void IndexComponent(const EntityId owner, const Ref<Component>& component)
         {
             ComponentPools[component->Type()][owner].push_back(component);
+            if (PhysicsComponent(component->Type()))
+                ++PhysicsRevision;
+            if (const auto transform = DynamicRefCast<TransformComponent>(component);
+                transform && transform->FixedPresentationInterpolation())
+                FixedPresentationEntities.insert(owner);
             LifecycleComponentsDirty = true;
         }
 
         void UnindexComponent(const EntityId owner, const Ref<Component>& component)
         {
+            if (PhysicsComponent(component->Type()))
+                ++PhysicsRevision;
+            if (component->Type() == TransformComponent::StaticType())
+                FixedPresentationEntities.erase(owner);
             const auto pool = ComponentPools.find(component->Type());
             if (pool == ComponentPools.end())
                 return;
@@ -246,6 +283,7 @@ namespace Keire::Detail
         SceneIdentityIndex NameIndex;
         SceneIdentityIndex TagIndex;
         std::unordered_map<ComponentTypeId, std::unordered_map<EntityId, std::vector<Ref<Component>>>> ComponentPools;
+        std::set<EntityId> FixedPresentationEntities;
         std::vector<EntityId> Order;
         SceneHierarchyCache Hierarchy;
         WeakRef<SceneState> Self;
@@ -258,6 +296,7 @@ namespace Keire::Detail
         std::size_t TraversalDepth = 0;
         mutable bool LifecycleComponentsDirty = true;
         bool Open = true;
+        std::uint64_t PhysicsRevision = 1;
         bool Dirty = false;
         bool Playing = false;
     };

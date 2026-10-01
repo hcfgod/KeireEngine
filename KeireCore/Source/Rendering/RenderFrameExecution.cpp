@@ -809,6 +809,7 @@ namespace Keire::RenderBackend
                 std::chrono::duration<float, std::milli>(frame->PresentedAt - frame->RenderStartedAt).count();
             frame->Timeline.SubmitToPresentMilliseconds =
                 std::chrono::duration<float, std::milli>(frame->PresentedAt - frame->SubmittedAt).count();
+            Statistics.RenderCpuMilliseconds = frame->Timeline.RenderCpuMilliseconds;
             Statistics.SubmitToPresentMilliseconds = frame->Timeline.SubmitToPresentMilliseconds;
             PublishStatistics();
             ActiveFrame.reset();

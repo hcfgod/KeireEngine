@@ -50,8 +50,22 @@ try {
     if (!progressResults.some(entry => String(entry.url) === "/docs/reference/revamp-compute-compiler-lane/")) {
         throw new Error("Pagefind omitted the compute compiler progress record.");
     }
+    for (const [query, route] of [
+        ["Choose An API By Task", "workflow-map"],
+        ["Fixed Step Action Movement", "cookbook"],
+        ["SetProceduralLocomotion", "runtime-reference"],
+        ["EditorExtensionLifetime", "editor-reference"],
+        ["ComputeBufferBinding", "compute"],
+    ]) {
+        const scriptingResponse = await search.search(query);
+        const scriptingResults = await Promise.all((scriptingResponse?.results ?? []).map(entry => entry.data()));
+        if (!scriptingResults.some(entry => String(entry.url) === `/docs/reference/scripting/${route}/`)) {
+            throw new Error(`Pagefind omitted the new scripting guide '${route}' for '${query}'.`);
+        }
+    }
     await search.destroy();
     console.log(`Pagefind search validation passed with ${response.results.length} result(s); first result: ${result.meta.title}. Progress record search passed.`);
+    console.log("All five new scripting guides are discoverable through website search.");
 } finally {
     globalThis.fetch = nativeFetch;
 }

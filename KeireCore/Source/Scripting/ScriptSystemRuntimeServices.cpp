@@ -4,6 +4,36 @@
 
 namespace Keire
 {
+    std::uint8_t ScriptSystem::Impl::RuntimeGetFixedPresentationInterpolation(const std::uint64_t world,
+                                                                              const std::uint64_t high,
+                                                                              const std::uint64_t low) noexcept
+    {
+        const auto entity = ResolveRuntimeEntity(world, high, low);
+        const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+        return transform && transform->FixedPresentationInterpolation() ? 1 : 0;
+    }
+
+    std::uint8_t ScriptSystem::Impl::RuntimeSetFixedPresentationInterpolation(const std::uint64_t world,
+                                                                              const std::uint64_t high,
+                                                                              const std::uint64_t low,
+                                                                              const std::uint8_t enabled) noexcept
+    {
+        try
+        {
+            const auto entity = ResolveRuntimeEntity(world, high, low);
+            if (const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{})
+            {
+                transform->SetFixedPresentationInterpolation(enabled != 0);
+                return 1;
+            }
+        }
+        catch (...)
+        {
+            // Managed callers receive an explicit failure without unwinding across the native ABI.
+        }
+        return 0;
+    }
+
     [[nodiscard]] Vector3 ScriptSystem::Impl::RuntimeGetLocalScale(const std::uint64_t world, const std::uint64_t high,
                                                                    const std::uint64_t low) noexcept
     {

@@ -19,7 +19,8 @@ namespace Keire::Detail
     ApplyNamedAnimationIkGoals(const SkeletonAsset& skeleton, const std::span<const AnimatorIkGoal> goals,
                                const std::span<BoneTransform> localPose,
                                const std::map<std::string, std::uint32_t, std::less<>>& indices,
-                               const std::optional<Matrix4>& worldToModel)
+                               const std::optional<Matrix4>& worldToModel,
+                               const std::optional<Matrix4>& presentationWorldToModel = std::nullopt)
     {
         std::string diagnostics;
         for (const auto& goal : goals)
@@ -37,12 +38,14 @@ namespace Keire::Detail
                 }
                 auto target = goal.Target;
                 auto pole = goal.Pole;
-                if (goal.Space == AnimatorIkSpace::World)
+                if (goal.Space == AnimatorIkSpace::World || goal.Space == AnimatorIkSpace::PresentationWorld)
                 {
-                    if (!worldToModel)
+                    const auto& inverse =
+                        goal.Space == AnimatorIkSpace::PresentationWorld ? presentationWorldToModel : worldToModel;
+                    if (!inverse)
                         return "IK goal '" + goal.Name + "' could not resolve the Animator world transform.";
-                    target = Math::TransformPoint(*worldToModel, target);
-                    pole = Math::TransformPoint(*worldToModel, pole);
+                    target = Math::TransformPoint(*inverse, target);
+                    pole = Math::TransformPoint(*inverse, pole);
                 }
                 bool solved = false;
                 if (goal.Solver == AnimatorIkSolver::TwoBone && chain.size() == 3)

@@ -16,6 +16,7 @@ namespace Keire::Detail
         std::function<ManagedBehaviourInstanceId(ComponentTypeId, std::string_view, Entity)> Create;
         std::function<void(ManagedBehaviourInstanceId, ManagedBehaviourCallback, float)> Invoke;
         std::function<void(ManagedBehaviourInstanceId, const AnimationEventMessage&)> AnimationEvent;
+        std::function<void(ManagedBehaviourInstanceId, const AnimationIkMessage&)> AnimatorIk;
         std::function<void(ManagedBehaviourInstanceId, const ProceduralMotionEvent&)> ProceduralMotionEvent;
         std::function<void(ManagedBehaviourInstanceId, PhysicsContactPhase, const PhysicsContactMessage&)>
             PhysicsContact;

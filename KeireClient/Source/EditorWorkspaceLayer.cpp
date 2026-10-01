@@ -1011,6 +1011,26 @@ void EditorWorkspaceLayer::OnAttach()
 
 void EditorWorkspaceLayer::OnUpdate(const Keire::Time& time)
 {
+    if (auto& capture = m_ReplayProfilingCoordinator->Profiler().Sustained; capture.Active())
+    {
+        if (const auto profiler = Owner().GetProfiler(); profiler && profiler->IsOpen())
+        {
+            const auto summary = profiler->LatestSummary();
+            if (capture.Observe(summary) && capture.RendererTelemetryEnabled())
+            {
+                const auto renderer = Owner().Renderer();
+                if (renderer && renderer->IsOpen())
+                {
+                    const auto statistics = renderer->Statistics();
+                    capture.ObserveRenderer(summary.Sequence, &statistics);
+                }
+                else
+                    capture.ObserveRenderer(summary.Sequence, nullptr);
+            }
+        }
+        else
+            capture.Stop();
+    }
     // Apply before UI BeginFrame: switching presentation drains render work that may need the UI frame lock.
     if (m_PendingEditorPresentMode)
     {

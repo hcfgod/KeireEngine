@@ -1,9 +1,24 @@
 # C# Scripting
 
-Kéire 0.4.4 gameplay scripting targets .NET 10 and C# 14. Scripts use canonical managed objects rather than public
+Kéire gameplay scripting targets .NET 10 and C# 14. Scripts use canonical managed objects rather than public
 native handles: `Entity` represents a scene object, concrete `Component` subclasses represent attached functionality,
 and `Asset` subclasses represent project content. Unassigned references are `null`; destroyed scene wrappers remain
 non-null and report `IsValid == false`.
+
+## Find What You Need
+
+| Your starting point | Go here |
+| --- | --- |
+| I have never written a Kéire script | [First script walkthrough](GettingStarted.md#your-first-play-mode-check) |
+| I know what I want to build | [Workflow map](WorkflowMap.md#choose-an-api-by-task) |
+| I want an example I can adapt | [Cookbook with compile-checked sources](Cookbook.md) |
+| I know a type or method name | [API index](ApiIndex.md), [runtime members](RuntimeReference.md), [Editor members](EditorReference.md) |
+| My script is not working | [Troubleshooting](AsyncReloadAndDiagnostics.md#troubleshooting) |
+| I need to know whether a feature exists | [Capability matrix](ManagedApiMatrix.md) |
+
+Start with one Behaviour and one scene. Add Inspector references, then choose the relevant engine service.
+The guides explain setup and runtime contracts; the member references preserve exact overloads and parameter names.
+They describe this checkout, so an installed package from an older build may expose fewer members.
 
 ## Minimal Behaviour
 
@@ -19,26 +34,25 @@ public sealed class Mover : Behaviour
     [Range(0.0, 20.0)]
     private float _speed = 5.0f;
 
-    [SerializeField, StableFieldId("122572ac-2a47-42e2-9bc6-c4309a517ca6")]
-    private AudioSource? _audioSource;
-
-    protected override void Awake()
-    {
-        _audioSource ??= GetComponent<AudioSource>();
-    }
-
     protected override void Update()
     {
         Keyboard? keyboard = Input.Keyboard.Current;
         Vector2 input = new(keyboard?.dKey.IsPressed == true ? 1.0f : keyboard?.aKey.IsPressed == true ? -1.0f : 0.0f,
                             keyboard?.wKey.IsPressed == true ? 1.0f : keyboard?.sKey.IsPressed == true ? -1.0f : 0.0f);
-        Transform.LocalPosition += new Vector3(input.X, 0.0f, input.Y) * (_speed * Time.DeltaTime);
+        Vector3 direction = new(input.X, 0.0f, input.Y);
+        if (direction.LengthSquared > 1.0f)
+            direction = direction.Normalized;
+        Transform.Position += direction * (_speed * Time.DeltaTime);
     }
 }
 ```
 
 The class name must match the filename. `StableComponentId` preserves the script component's identity in scenes and
 prefabs. Keep `StableFieldId` unchanged when a serialized field is renamed.
+
+Save this as `Assets/Mover.cs`, wait for the build, and attach it to a visible scene entity. Press WASD in Play Mode.
+It moves in world X/Z axes and does not perform collision detection. For rebindable, collision-aware movement use the
+[action motor recipe](Cookbook.md#fixed-step-action-movement).
 
 ## Direct Inspector References
 
@@ -77,6 +91,8 @@ state serialization; collection authoring is currently available for persistent 
 | Guide | Use it for |
 | --- | --- |
 | [Getting Started](GettingStarted.md) | Assemblies, IDE generation, compilation, and attachment |
+| [Workflow Map](WorkflowMap.md) | Choose an API by task, callback, lifetime, and player workflow |
+| [Cookbook](Cookbook.md) | Complete examples with scene setup, expected results, and extension notes |
 | [Behaviours And Lifecycle](BehavioursAndLifecycle.md) | Callback timing, reentrancy, cleanup, reload, and exceptions |
 | [Serialization And The Inspector](SerializationAndInspector.md) | Field eligibility, direct references, stable IDs, and migration |
 | [Managed Extensibility](ManagedExtensibility.md) | Custom values, runtime services, native contracts, Editor SDK, importers, tools, and build hooks |
@@ -90,6 +106,9 @@ state serialization; collection authoring is currently available for persistent 
 | [UI And Events](UiAndEvents.md) | UI Builder, retained documents/styles/panels, managed controls, events, and target modes |
 | [Async, Reload, And Diagnostics](AsyncReloadAndDiagnostics.md) | `Job`, cancellation, hot reload, failures, and diagnostics |
 | [Managed API Index](ApiIndex.md) | Compact type and method lookup |
+| [Runtime Member Reference](RuntimeReference.md) | Declared public runtime members and protected extension points |
+| [Editor Member Reference](EditorReference.md) | Declared public Editor SDK members and protected extension points |
+| [GPU Compute](Compute.md) | Host program registration, dispatch, readback, ownership, and bounds |
 
 ## Sources Of Truth
 

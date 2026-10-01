@@ -116,6 +116,10 @@ namespace Keire
 
       private:
         friend class SceneObjectHandle;
+        friend class SceneRuntimeSession;
+        [[nodiscard]] std::uint64_t PhysicsRevision() const;
+        // Runtime opt-ins only; avoids scanning every Transform when none use custom interpolation.
+        [[nodiscard]] std::vector<Entity> FixedPresentationEntities() const;
         class Impl;
         [[nodiscard]] std::optional<SceneObjectDefinition> SnapshotObject(AssetId id) const;
         std::unique_ptr<Impl> m_Impl;

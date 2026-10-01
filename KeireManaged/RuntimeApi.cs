@@ -334,7 +334,8 @@ public static class Navigation
 public enum AnimatorIkSpace : byte
 {
     Model,
-    World
+    World,
+    PresentationWorld
 }
 
 [StableAssetTypeId("4b454952-4541-4e49-4d43-4c4950000001")]

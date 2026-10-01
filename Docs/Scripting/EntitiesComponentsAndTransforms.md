@@ -1,8 +1,19 @@
 # Entities, Components, And Transforms
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 `Entity` is a sealed reference object for one scene object in one runtime world. Repeated lookup of the same stable
 identity returns the same wrapper during a runtime generation. An unassigned reference is `null`; after destruction,
 the existing wrapper remains non-null and `IsValid` becomes false.
+
+## On This Page
+
+- [Component Lookup](#component-lookup)
+- [Adding And Removing](#adding-and-removing)
+- [Hierarchy And Activation](#hierarchy-and-activation)
+- [Transform](#transform)
+- [Cloning And Prefabs](#cloning-and-prefabs)
+- [Built-In Components](#built-in-components)
 
 ## Component Lookup
 

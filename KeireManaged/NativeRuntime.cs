@@ -389,6 +389,8 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3> GetPresentationWorldPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetPresentationWorldRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, void> ResetPresentationInterpolationIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte> GetFixedPresentationInterpolationIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, byte, byte> SetFixedPresentationInterpolationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion> GetWorldRotationIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Vector3, void> SetWorldPositionIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, Quaternion, void> SetWorldRotationIcall;
@@ -936,6 +938,19 @@ internal static unsafe class NativeRuntime
         GetPresentationWorldRotationIcall(entity.World, entity.Id.High, entity.Id.Low);
     internal static void ResetPresentationInterpolation(Entity entity) =>
         ResetPresentationInterpolationIcall(entity.World, entity.Id.High, entity.Id.Low);
+    internal static bool GetFixedPresentationInterpolation(Entity entity)
+    {
+        if (GetFixedPresentationInterpolationIcall == null)
+            throw new InvalidOperationException("Fixed presentation interpolation requires a compatible active runtime.");
+        return GetFixedPresentationInterpolationIcall(entity.World, entity.Id.High, entity.Id.Low) != 0;
+    }
+    internal static void SetFixedPresentationInterpolation(Entity entity, bool enabled)
+    {
+        if (SetFixedPresentationInterpolationIcall == null)
+            throw new InvalidOperationException("Fixed presentation interpolation requires a compatible active runtime.");
+        if (SetFixedPresentationInterpolationIcall(entity.World, entity.Id.High, entity.Id.Low, enabled ? (byte)1 : (byte)0) == 0)
+            throw new InvalidOperationException("Cannot change fixed presentation interpolation for this entity.");
+    }
     internal static void SetWorldPosition(Entity entity, Vector3 value) => SetWorldPositionIcall(entity.World,
                                                                                                  entity.Id.High,
                                                                                                  entity.Id.Low, value);

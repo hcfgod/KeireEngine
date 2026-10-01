@@ -475,23 +475,30 @@ namespace Keire
     [[nodiscard]] std::string
     SceneRuntimeSession::Impl::ApplyIkGoals(const Entity& entity, const SkeletonAsset& skeleton,
                                             const AnimatorComponent& animator, std::span<BoneTransform> localPose,
-                                            const std::map<std::string, std::uint32_t, std::less<>>& indices)
+                                            const std::map<std::string, std::uint32_t, std::less<>>& indices,
+                                            const bool presentationEvaluation)
     {
         if (animator.IkGoals().empty())
             return {};
 
         std::optional<Matrix4> worldToModel;
+        std::optional<Matrix4> presentationWorldToModel;
         if (const auto transform = entity.GetComponent<TransformComponent>())
         {
             try
             {
                 worldToModel = Math::Inverse(transform->WorldMatrix());
+                presentationWorldToModel =
+                    presentationEvaluation ? Math::Inverse(transform->PresentationWorldMatrix()) : worldToModel;
             }
             catch (const std::exception&)
             {
             }
         }
-        return Detail::ApplyNamedAnimationIkGoals(skeleton, animator.IkGoals(), localPose, indices, worldToModel);
+        if (presentationEvaluation && NamedIkInspection.Enabled())
+            NamedIkInspection.Capture(entity, animator, indices, worldToModel, presentationWorldToModel);
+        return Detail::ApplyNamedAnimationIkGoals(skeleton, animator.IkGoals(), localPose, indices, worldToModel,
+                                                  presentationWorldToModel);
     }
 
     void SceneRuntimeSession::Impl::SynchronizeAnimation(const float deltaSeconds)
@@ -649,7 +656,9 @@ namespace Keire
                 animator->SetRuntimeDiagnostic("Negative Animator speed is not supported and is treated as zero.");
             const bool playbackPaused = animator->Paused() || speed == 0.0F;
             auto sample = state->Instance->Update(playbackPaused ? 0.0F : deltaSeconds * speed, playbackPaused);
-            Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
+            Runtime->DispatchAnimatorIk(
+                entity.Id(),
+                {.LayerWeight = 1.0F, .InterpolationAlpha = PresentationInterpolationAlpha, .IsFixedUpdate = false});
             const auto ikDiagnostics = Detail::EvaluateIndependentAnimationIkPasses(
                 [&] { return ApplyIkGoals(entity, *skeleton, *animator, sample.LocalPose, state->BoneIndices); },
                 [&]
@@ -690,6 +699,8 @@ namespace Keire
                 debugSnapshot = FinalPoseDebugSnapshot(*skeleton, sample.LocalPose, debugSnapshot);
             animator->SetRuntimeDebugSnapshot(std::move(debugSnapshot));
             ApplyRootMotion(entity, sample, *animator);
+            if (NamedIkInspection.Enabled())
+                NamedIkInspection.Published(entity, *animator);
             for (const auto& event : sample.Events)
                 Runtime->DispatchAnimationEvent(entity.Id(),
                                                 {event.Name, sample.NormalizedTime, 0, 0.0F, event.Payload});

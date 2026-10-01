@@ -13,9 +13,11 @@
 #include "KeireRuntimeInternal/ManagedWorldRuntime.h"
 #include "KeireRuntimeInternal/RuntimeAdditiveValidation.h"
 #include "KeireRuntimeInternal/RuntimeCommandLine.h"
+#include "KeireRuntimeInternal/RuntimeFrameTiming.h"
 #include "KeireRuntimeInternal/RuntimeRenderBenchmark.h"
 #include "KeireRuntimeInternal/RuntimeReplayCheckpoint.h"
 #include "KeireRuntimeInternal/RuntimeSceneRendering.h"
+#include "KeireRuntimeInternal/RuntimeShutdown.h"
 #include "KeireRuntimeInternal/RuntimeUiInput.h"
 
 #include <nlohmann/json.hpp>
@@ -355,6 +357,7 @@ namespace
             catch (...)
             {
             }
+            KeireRuntime::StopRuntimeSessions(RuntimeWorld(), m_Runtime);
             if (const auto scripts = Owner().Scripts())
                 scripts->SetRuntimeServices(nullptr);
             UnbindManagedWorld();
@@ -450,7 +453,7 @@ namespace
             if (!world)
                 throw std::runtime_error("The scene runtime world is unavailable.");
             world->SetPresentationViewport(static_cast<float>(width), static_cast<float>(height));
-            world->Update(static_cast<float>(time.DeltaTime().Seconds()));
+            KeireRuntime::UpdateRuntimeWorldFrame(*world, time);
             if (m_Runtime->State() == Keire::ScenePlayState::Faulted)
                 throw std::runtime_error("Startup scene runtime failed: " + m_Runtime->Diagnostic().Message);
             m_AdditiveValidation.Update(Owner(), world, static_cast<float>(width), static_cast<float>(height));

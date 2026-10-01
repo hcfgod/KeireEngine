@@ -609,6 +609,11 @@ namespace KeireEditor
                 bool mappingChanged = m_MappingDraft.Select(m_SourceClip, model->Id);
                 if (mappingChanged)
                     m_MappingMessage.clear();
+                if (const auto database = m_Controller.RiggingStudioDatabase())
+                    mappingChanged |= Detail::DrawRetargetMappingActions(
+                        ui, theme, database->Specification().ProjectRoot, sourceAnimation.Skeleton,
+                        targetAnimation.Skeleton, *sourceSkeleton, *targetSkeleton, m_MappingDraft.Overrides,
+                        m_MappingMessage, m_MappingMessageError);
                 if (auto mappingEditor = ui.BeginTreeNode("Edit bone mappings"); mappingEditor)
                 {
                     ui.TextWrapped("Choose a target bone for each source track that needs repair. Automatic restores "
@@ -644,6 +649,7 @@ namespace KeireEditor
                                 std::erase_if(m_MappingDraft.Overrides, [&sourceName](const auto& item)
                                               { return item.SourceBone == sourceName; });
                                 mappingChanged = true;
+                                m_MappingMessage.clear();
                             }
                             for (const auto& targetBone : targetSkeleton->Bones())
                                 if (RetargetBoneMatchesFilter(targetBone.Name, m_MappingDraft.TargetFilter) &&
@@ -653,16 +659,10 @@ namespace KeireEditor
                                                   { return item.SourceBone == sourceName; });
                                     m_MappingDraft.Overrides.push_back({sourceName, targetBone.Name});
                                     mappingChanged = true;
+                                    m_MappingMessage.clear();
                                 }
                         }
                     }
-                    if (mappingChanged)
-                        m_MappingMessage.clear();
-                    if (const auto database = m_Controller.RiggingStudioDatabase())
-                        mappingChanged |= Detail::DrawRetargetMappingActions(
-                            ui, theme, database->Specification().ProjectRoot, sourceAnimation.Skeleton,
-                            targetAnimation.Skeleton, *sourceSkeleton, *targetSkeleton, m_MappingDraft.Overrides,
-                            m_MappingMessage, m_MappingMessageError);
                 }
                 if (inputsChanged || mappingChanged)
                 {

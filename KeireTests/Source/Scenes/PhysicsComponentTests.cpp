@@ -4,6 +4,9 @@
 
 #include <doctest/doctest.h>
 
+#include <algorithm>
+#include <cmath>
+
 TEST_CASE("character vertical grounding stops instead of creating downhill motion")
 {
     constexpr Keire::Vector3 downward{0.0F, -0.5F, 0.0F};
@@ -366,6 +369,433 @@ TEST_CASE("turning a character preserves its collision body across physics ticks
     body->SetLocalScale({1.1F, 1.1F, 1.1F});
     session->FixedUpdate(1.0F / 60.0F);
     CHECK(motor->RuntimeState().Generation > resizedGeneration);
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("character grounding uses current authored moving support geometry")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Moving support"));
+    auto platform = scene->CreateEntity("Lift");
+    platform.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.2F, 0.0F});
+    platform.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({2.0F, 0.2F, 2.0F});
+    SUBCASE("script moved static collider") {}
+    SUBCASE("authored kinematic collider")
+    {
+        platform.AddComponent<Keire::RigidBodyComponent>()->SetMotion(Keire::PhysicsMotionType::Kinematic);
+    }
+    auto player = scene->CreateEntity("Player");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.32F, 0.0F});
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.28F, 1.8F, 0.3F, 0.02F);
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto runtimePlatform = session->RuntimeScene()->FindEntity(platform.Id());
+    const auto support = runtimePlatform.GetComponent<Keire::TransformComponent>();
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    const auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    const auto transform = runtimePlayer.GetComponent<Keire::TransformComponent>();
+    constexpr float step = 1.0F / 60.0F;
+    int missedGround = 0;
+    float maximumHeightError = 0.0F;
+    for (int tick = 0; tick < 840; ++tick)
+    {
+        const float height = 0.2F + 0.3F * std::sin(static_cast<float>(tick + 1) * step * 0.7F);
+        support->SetLocalPosition({0.0F, height, 0.0F});
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+        session->FixedUpdate(step);
+        REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+        if (tick >= 120)
+        {
+            missedGround += !motor->Grounded();
+            maximumHeightError = std::max(maximumHeightError, std::abs(transform->LocalPosition().Y - height - 1.1F));
+        }
+    }
+    CHECK(missedGround == 0);
+    CHECK(maximumHeightError < 0.002F);
+    REQUIRE(motor->QueueDesiredMovement({0.0F, 0.1F, 0.0F}));
+    session->FixedUpdate(step);
+    CHECK_FALSE(motor->Grounded());
+    for (int tick = 0; tick < 20; ++tick)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+        session->FixedUpdate(step);
+    }
+    REQUIRE(motor->Grounded());
+    // Leaving the finite platform must not retain support beyond the existing grace interval.
+    REQUIRE(motor->QueueDesiredMovement({3.0F, -0.03F, 0.0F}));
+    session->FixedUpdate(step);
+    for (int tick = 0; tick < 5; ++tick)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+        session->FixedUpdate(step);
+    }
+    CHECK_FALSE(motor->Grounded());
+    transform->SetLocalPosition({0.0F, support->LocalPosition().Y + 1.1F, 0.0F});
+    REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+    session->FixedUpdate(step);
+    REQUIRE(motor->Grounded());
+    runtimePlatform.GetComponent<Keire::ColliderComponent>()->SetEnabled(false);
+    for (int tick = 0; tick < 5; ++tick)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+        session->FixedUpdate(step);
+    }
+    CHECK_FALSE(motor->Grounded());
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("character movement refreshes descendant collider queries in the same physics tick")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Character attachments"));
+    auto player = scene->CreateEntity("Player");
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.28F, 1.8F, 0.3F, 0.02F);
+    auto child = scene->CreateEntity("Attached sensor");
+    child.SetParent(player, false);
+    child.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 3.0F, 0.0F});
+    const auto collider = child.AddComponent<Keire::ColliderComponent>();
+    collider->SetHalfExtent({0.2F, 0.2F, 0.2F});
+    SUBCASE("solid child") {}
+    SUBCASE("trigger child") { collider->SetTrigger(true); }
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    const auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    REQUIRE(motor->QueueDesiredMovement({1.0F, 0.0F, 0.0F}));
+    session->FixedUpdate(1.0F / 60.0F);
+    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+    CHECK(runtimePlayer.GetComponent<Keire::TransformComponent>()->LocalPosition().X == doctest::Approx(1.0F));
+    CHECK(motor->RuntimeState().Velocity.X == doctest::Approx(60.0F));
+    const auto atNewPosition =
+        session->RayCast({.Origin = {1.0F, 4.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}, .MaximumDistance = 2.0F});
+    CHECK(std::ranges::any_of(atNewPosition, [&](const auto& hit) { return hit.Entity == child.Id(); }));
+    const auto atOldPosition =
+        session->RayCast({.Origin = {0.0F, 4.0F, 0.0F}, .Direction = {0.0F, -1.0F, 0.0F}, .MaximumDistance = 2.0F});
+    CHECK_FALSE(std::ranges::any_of(atOldPosition, [&](const auto& hit) { return hit.Entity == child.Id(); }));
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("character traverses authored step height boundary without exceeding it")
+{
+    float stepHeight = 0.30F;
+    bool shouldClimb = true;
+    bool ceiling = false;
+    SUBCASE("exact boundary") {}
+    SUBCASE("lower step") { stepHeight = 0.26F; }
+    SUBCASE("over configured height")
+    {
+        stepHeight = 0.31F;
+        shouldClimb = false;
+    }
+    SUBCASE("blocked headroom")
+    {
+        ceiling = true;
+        shouldClimb = false;
+    }
+    for (const float speed : {0.6F, 1.35F, 3.0F})
+    {
+        for (const float direction : {-1.0F, 1.0F})
+            for (const float angle : {0.0F, 45.0F, 90.0F})
+            {
+                const float x = std::sin(angle * 3.14159265358979323846F / 180.0F) * direction;
+                const float z = std::cos(angle * 3.14159265358979323846F / 180.0F) * direction;
+                const auto progress = [&](const Keire::Vector3 value) { return value.X * x + value.Z * z; };
+                INFO("step=" << stepHeight << " speed=" << speed << " direction=" << direction << " angle=" << angle);
+                auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                            Keire::SceneAsset::EmptyDefinition("Step boundary"));
+                auto floor = scene->CreateEntity("Floor");
+                floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, -0.5F, 0.0F});
+                floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5.0F, 0.5F, 5.0F});
+                auto plinth = scene->CreateEntity("Plinth");
+                plinth.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, stepHeight * .5F, 0.0F});
+                plinth.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({.75F, stepHeight * .5F, .75F});
+                if (ceiling)
+                {
+                    auto roof = scene->CreateEntity("Ceiling");
+                    roof.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.95F, 0.0F});
+                    roof.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({2.0F, .05F, 2.0F});
+                }
+                auto player = scene->CreateEntity("Player");
+                player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({-1.8F * x, .9F, -1.8F * z});
+                auto authoredMotor = player.AddComponent<Keire::CharacterControllerComponent>();
+                authoredMotor->ConfigureCapsule(.28F, 1.8F, .30F, .02F);
+                authoredMotor->SetMaximumSlopeDegrees(50.0F);
+                Keire::PhysicsSystemSpecification specification;
+                specification.Mode = Keire::PhysicsMode::Enabled;
+                auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+                auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                            Keire::Ref<Keire::AudioSystem>{}, physics);
+                session->Play();
+                auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+                auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+                auto transform = runtimePlayer.GetComponent<Keire::TransformComponent>();
+                for (int tick = 0; tick < 240; ++tick)
+                {
+                    const auto before = transform->LocalPosition();
+                    const float forward = tick < 6 ? 0.0F : speed / 60.0F;
+                    REQUIRE(motor->QueueDesiredMovement({forward * x, -.03F, forward * z}));
+                    session->FixedUpdate(1.0F / 60.0F);
+                    REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+                    CHECK(std::abs(progress(transform->LocalPosition()) - progress(before)) <=
+                          std::abs(forward) + .0001F);
+                    CHECK(transform->LocalPosition().Y - before.Y <= .3001F);
+                    if (progress(transform->LocalPosition()) > -.2F)
+                        break;
+                }
+                const auto position = transform->LocalPosition();
+                INFO("result=" << position.Y << "," << position.Z);
+                if (shouldClimb)
+                {
+                    CHECK(progress(position) > -.2F);
+                    CHECK(position.Y == doctest::Approx(.9F + stepHeight).epsilon(.003));
+                }
+                else
+                    CHECK(progress(position) < -.74F);
+                session->Stop();
+                physics->Close();
+                scene->Close();
+            }
+    }
+}
+
+TEST_CASE("character step following does not create support over a void")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Void"));
+    auto floor = scene->CreateEntity("Floor edge");
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -.5F, -1});
+    floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({2, .5F, 1});
+    auto player = scene->CreateEntity("Player");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, .9F, -.5F});
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(.28F, 1.8F, .3F, .02F);
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    auto transform = runtimePlayer.GetComponent<Keire::TransformComponent>();
+    for (int tick = 0; tick < 90; ++tick)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0, -.03F, .0225F}));
+        session->FixedUpdate(1.0F / 60.0F);
+        CHECK(transform->LocalPosition().Y <= .9001F);
+        if (transform->LocalPosition().Z > .5F)
+            CHECK_FALSE(motor->Grounded());
+    }
+    CHECK(transform->LocalPosition().Y < .5F);
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("character carries an idle rider through rigid authored support motion")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Rigid carry"));
+    auto platform = scene->CreateEntity("Support");
+    platform.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({2.0F, 0.2F, 2.0F});
+    SUBCASE("script moved static support") {}
+    SUBCASE("script moved kinematic support")
+    {
+        platform.AddComponent<Keire::RigidBodyComponent>()->SetMotion(Keire::PhysicsMotionType::Kinematic);
+    }
+    auto player = scene->CreateEntity("Rider");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({-0.95F, 1.12F, 0.7F});
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.28F, 1.8F, 0.3F, 0.02F);
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto support = session->RuntimeScene()->FindEntity(platform.Id()).GetComponent<Keire::TransformComponent>();
+    const auto rider = session->RuntimeScene()->FindEntity(player.Id());
+    const auto transform = rider.GetComponent<Keire::TransformComponent>();
+    const auto motor = rider.GetComponent<Keire::CharacterControllerComponent>();
+    constexpr float dt = 1.0F / 60.0F;
+    for (int tick = 0; tick < 6; ++tick)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+        session->FixedUpdate(dt);
+    }
+    REQUIRE(motor->Grounded());
+    const auto initial = transform->WorldPosition();
+    float maximumError = 0.0F;
+    int unsupported = 0;
+    for (int tick = 0; tick < 480; ++tick)
+    {
+        const float phase = static_cast<float>(tick + 1) * dt;
+        support->SetLocalPosition(
+            {0.3F * std::sin(phase), 0.15F * std::sin(phase * 2.0F), 0.2F * std::sin(phase * 0.7F)});
+        support->SetLocalEulerAngles({0.0F, 20.0F * std::sin(phase), 0.0F});
+        // No input at all: support carry must not depend on artificial downward movement.
+        session->FixedUpdate(dt);
+        REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+        const auto local =
+            Keire::Math::TransformPoint(Keire::Math::Inverse(support->WorldMatrix()), transform->WorldPosition());
+        const float dx = local.X - initial.X, dy = local.Y - initial.Y, dz = local.Z - initial.Z;
+        maximumError = std::max(maximumError, std::sqrt(dx * dx + dy * dy + dz * dz));
+        unsupported += !motor->Grounded();
+    }
+    CHECK(maximumError < 0.002F);
+    CHECK(unsupported == 0);
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("character support carry invalidates stale anchors and respects collision")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(),
+                                                Keire::SceneAsset::EmptyDefinition("Carry lifecycle"));
+    auto platform = scene->CreateEntity("Support");
+    platform.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({3.0F, 0.2F, 3.0F});
+    auto player = scene->CreateEntity("Rider");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.12F, 0.0F});
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.28F, 1.8F, 0.3F, 0.02F);
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    auto runtimePlatform = session->RuntimeScene()->FindEntity(platform.Id());
+    const auto support = runtimePlatform.GetComponent<Keire::TransformComponent>();
+    auto rider = session->RuntimeScene()->FindEntity(player.Id());
+    const auto transform = rider.GetComponent<Keire::TransformComponent>();
+    const auto motor = rider.GetComponent<Keire::CharacterControllerComponent>();
+    constexpr float dt = 1.0F / 60.0F;
+    for (int tick = 0; tick < 6; ++tick)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+        session->FixedUpdate(dt);
+    }
+    REQUIRE(motor->Grounded());
+    float expectedX = 0.0F;
+    Keire::Ref<Keire::ColliderComponent> retainedCollider;
+    SUBCASE("jump detaches before support carry") { REQUIRE(motor->QueueDesiredMovement({0.0F, 0.1F, 0.0F})); }
+    SUBCASE("rider teleport")
+    {
+        transform->SetWorldPosition({1.0F, 1.1F, 0.0F});
+        expectedX = 1.0F;
+    }
+    SUBCASE("rider reset") { transform->ResetPresentationInterpolation(); }
+    SUBCASE("support reset") { support->ResetPresentationInterpolation(); }
+    SUBCASE("support disabled") { runtimePlatform.GetComponent<Keire::ColliderComponent>()->SetEnabled(false); }
+    SUBCASE("support removed while retained component remains alive")
+    {
+        retainedCollider = runtimePlatform.GetComponent<Keire::ColliderComponent>();
+        REQUIRE(runtimePlatform.RemoveComponent<Keire::ColliderComponent>());
+        session->RuntimeScene()->Update(0.0F);
+        runtimePlatform.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({3.0F, 0.2F, 3.0F});
+        CHECK(retainedCollider);
+    }
+    SUBCASE("controller disable reenables without stale carry")
+    {
+        motor->SetEnabled(false);
+        session->FixedUpdate(dt);
+        motor->SetEnabled(true);
+    }
+    SUBCASE("controller replacement")
+    {
+        REQUIRE(rider.RemoveComponent<Keire::CharacterControllerComponent>());
+        session->RuntimeScene()->Update(0.0F);
+        rider.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.28F, 1.8F, 0.3F, 0.02F);
+    }
+    SUBCASE("rider reparent") { rider.SetParent(session->RuntimeScene()->CreateEntity("New parent")); }
+    SUBCASE("support reparent")
+    {
+        runtimePlatform.SetParent(session->RuntimeScene()->CreateEntity("New support parent"));
+    }
+    SUBCASE("support shape changed")
+    {
+        runtimePlatform.GetComponent<Keire::ColliderComponent>()->SetHalfExtent({2.5F, 0.2F, 3.0F});
+    }
+    SUBCASE("support becomes trigger") { runtimePlatform.GetComponent<Keire::ColliderComponent>()->SetTrigger(true); }
+    SUBCASE("rider inherits support transform without double carry")
+    {
+        rider.SetParent(runtimePlatform);
+        session->FixedUpdate(dt);
+        expectedX = 0.2F;
+    }
+    SUBCASE("carry is swept into a wall")
+    {
+        auto wall = session->RuntimeScene()->CreateEntity("Wall");
+        wall.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.5F, 1.0F, 0.0F});
+        wall.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({0.1F, 2.0F, 2.0F});
+        support->SetLocalPosition({1.0F, 0.0F, 0.0F});
+        session->FixedUpdate(dt);
+        CHECK(transform->WorldPosition().X <= 0.121F);
+        CHECK(transform->WorldPosition().X >= 0.1F);
+        expectedX = transform->WorldPosition().X;
+        support->SetLocalPosition({0.2F, 0.0F, 0.0F});
+        support->ResetPresentationInterpolation();
+    }
+    support->SetLocalPosition({0.2F, 0.0F, 0.0F});
+    session->FixedUpdate(dt);
+    CHECK(transform->WorldPosition().X == doctest::Approx(expectedX).epsilon(0.0001F));
+    CHECK(transform->WorldRotation() == Keire::Quaternion{});
+    session->Stop();
+    physics->Close();
+    scene->Close();
+}
+
+TEST_CASE("character carries dynamic support motion without consuming the physics step")
+{
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Dynamic carry"));
+    auto platform = scene->CreateEntity("Support");
+    platform.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({3.0F, 0.2F, 3.0F});
+    auto body = platform.AddComponent<Keire::RigidBodyComponent>();
+    body->SetUseGravity(false);
+    body->SetLinearVelocity({0.3F, 0.0F, 0.0F});
+    auto player = scene->CreateEntity("Rider");
+    player.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 1.12F, 0.0F});
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.28F, 1.8F, 0.3F, 0.02F);
+    Keire::PhysicsSystemSpecification specification;
+    specification.Mode = Keire::PhysicsMode::Enabled;
+    auto physics = Keire::CreateRef<Keire::PhysicsSystem>(specification);
+    auto session = Keire::CreateRef<Keire::SceneRuntimeSession>(scene, Keire::Ref<Keire::AssetSystem>{},
+                                                                Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    const auto support = session->RuntimeScene()->FindEntity(platform.Id()).GetComponent<Keire::TransformComponent>();
+    const auto rider = session->RuntimeScene()->FindEntity(player.Id());
+    const auto transform = rider.GetComponent<Keire::TransformComponent>();
+    const auto motor = rider.GetComponent<Keire::CharacterControllerComponent>();
+    constexpr float dt = 1.0F / 60.0F;
+    for (int tick = 0; tick < 6; ++tick)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.03F, 0.0F}));
+        session->FixedUpdate(dt);
+    }
+    REQUIRE(motor->Grounded());
+    const auto initialOffset = transform->WorldPosition().X - support->WorldPosition().X;
+    float maximumError = 0.0F;
+    for (int tick = 0; tick < 180; ++tick)
+    {
+        session->FixedUpdate(dt);
+        maximumError =
+            std::max(maximumError, std::abs(transform->WorldPosition().X - support->WorldPosition().X - initialOffset));
+    }
+    CHECK(maximumError < 0.002F);
+    CHECK(transform->WorldPosition().X > 0.8F);
+    CHECK(motor->Grounded());
     session->Stop();
     physics->Close();
     scene->Close();

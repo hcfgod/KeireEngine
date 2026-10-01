@@ -3,6 +3,7 @@
 #include "Keire/ECS/Components/MeshRendererComponent.h"
 #include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Scenes/Scene.h"
+#include "KeireInternal/FileSystem.h"
 #include "KeireInternal/RenderInternal.h"
 #include "KeireRenderTests/RenderedOutputTestSupport.h"
 
@@ -12,9 +13,13 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -390,5 +395,67 @@ TEST_CASE("moving TAA output advances continuously in Forward+ and Deferred Hybr
         CHECK(minimumStep > 0.1F);
         CHECK(maximumStep < 1.0F);
         CHECK(maximumStep - minimumStep < 0.4F);
+    }
+}
+
+// This opt-in comparison records with the baseline executable, then compares every pixel with the candidate.
+// Neither mode writes files during the normal render suite.
+TEST_CASE("TAA readback preserves a recorded baseline" * doctest::skip())
+{
+    const char* recordDirectory = SDL_getenv("KEIRE_TAA_RECORD_DIRECTORY");
+    const char* compareDirectory = SDL_getenv("KEIRE_TAA_COMPARE_DIRECTORY");
+    if (!recordDirectory && !compareDirectory)
+    {
+        MESSAGE("Set KEIRE_TAA_RECORD_DIRECTORY or KEIRE_TAA_COMPARE_DIRECTORY for paired image validation.");
+        return;
+    }
+    REQUIRE((recordDirectory != nullptr) != (compareDirectory != nullptr));
+    const auto directory = Keire::Detail::PathFromUtf8(recordDirectory ? recordDirectory : compareDirectory);
+    REQUIRE_FALSE(directory.empty());
+    if (recordDirectory)
+        std::filesystem::create_directories(directory);
+    for (const bool moving : {false, true})
+    {
+        const auto results = std::make_shared<TemporalStabilityResults>();
+        {
+            Keire::Application application(RenderTestSpecification());
+            (void)application.PushLayer(std::make_unique<TemporalStabilityLayer>(results, moving));
+            REQUIRE(application.Run() == 0);
+        }
+        for (std::size_t path = 0; path < results->Frames.size(); ++path)
+        {
+            const auto& frames = results->Frames[path];
+            REQUIRE(frames.size() == 40U);
+            const auto output = directory / ((moving ? std::string("moving-") : std::string("static-")) +
+                                             std::to_string(path) + ".rgba8");
+            std::vector<std::uint8_t> actual;
+            for (const auto& frame : frames)
+            {
+                REQUIRE(frame.size() == SurfaceSize * SurfaceSize * 4U);
+                actual.insert(actual.end(), frame.begin(), frame.end());
+            }
+            if (recordDirectory)
+            {
+                REQUIRE_FALSE(std::filesystem::exists(output));
+                std::ofstream stream(output, std::ios::binary);
+                REQUIRE(stream.good());
+                stream.write(reinterpret_cast<const char*>(actual.data()), static_cast<std::streamsize>(actual.size()));
+                REQUIRE(stream.good());
+            }
+            else
+            {
+                REQUIRE(std::filesystem::file_size(output) == actual.size());
+                std::ifstream stream(output, std::ios::binary);
+                REQUIRE(stream.good());
+                const std::vector<std::uint8_t> expected{std::istreambuf_iterator<char>(stream),
+                                                         std::istreambuf_iterator<char>()};
+                REQUIRE(expected.size() == actual.size());
+                std::size_t different = 0U;
+                for (std::size_t index = 0; index < actual.size(); ++index)
+                    different += actual[index] != expected[index] ? 1U : 0U;
+                INFO("mode=", moving ? "moving" : "static", " path=", path, " differing bytes=", different);
+                CHECK(different == 0U);
+            }
+        }
     }
 }

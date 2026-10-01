@@ -1,5 +1,7 @@
 # Assets And ScriptableObjects
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 All scripting-visible native assets derive from `Asset`. Declare the asset class directly; there is no
 `AssetReference<T>` authoring wrapper in 0.4.0.
 
@@ -16,6 +18,14 @@ All scripting-visible native assets derive from `Asset`. Declare the asset class
 Unassigned or unresolved assets are `null`. Persistent assets have stable `AssetId` identity, and repeated resolution
 of the same type and ID returns the canonical managed wrapper for the runtime generation. `AssetId` remains available
 for diagnostics and native interoperability, but ordinary gameplay and Inspector workflows use the asset object.
+
+## On This Page
+
+- [Prefabs](#prefabs)
+- [Explicit Runtime Residency](#explicit-runtime-residency)
+- [ScriptableObject](#scriptableobject)
+- [Serialization And Dependencies](#serialization-and-dependencies)
+- [Constructors](#constructors)
 
 ## Prefabs
 
@@ -44,7 +54,7 @@ private AssetLoadOperation<Material>? _load;
 protected override void OnEnable()
 {
     if (_surface is not null)
-        _load = Assets.LoadRuntime(_surface, AssetPriority.High);
+        _load = Assets.LoadRuntime(_surface, AssetLoadPriority.High);
 }
 
 protected override void OnDisable()
@@ -54,8 +64,14 @@ protected override void OnDisable()
 }
 ```
 
-`AssetLoadOperation<T>` can be yielded or awaited. It is a generation-scoped lease, not a native resource pointer.
+`AssetLoadOperation<T>` can be yielded from a coroutine or waited on with
+`await operation.WaitUntilReadyAsync(LifetimeToken)`. It is a generation-scoped lease, not a native resource pointer.
 Disposal is idempotent, and retiring the managed generation releases outstanding operations.
+
+`IsDone` includes failure and cancellation; check `IsReady` or call `RequireReady()` before consuming the result.
+An async wait's cancellation token cancels waiting. Dispose the lease to release its residency ownership. Retain leases
+in fields when they must outlive a method, and release them before reload as well as on disable. See the complete
+[resident audio recipe](Cookbook.md#explicit-audio-residency) for symmetric acquisition and release.
 
 ## ScriptableObject
 

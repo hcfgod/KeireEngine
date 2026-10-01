@@ -1,7 +1,30 @@
 # Gameplay Services
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 The managed runtime exposes focused static façades for frame time, input, physics, navigation, prefabs, VFX, cursor
 state, diagnostics, and profiling. These APIs validate identity and arguments before crossing the native boundary.
+
+## On This Page
+
+- [Application And Player Preferences](#application-and-player-preferences)
+- [Time](#time)
+- [Screen](#screen)
+- [Input](#input)
+- [Entities And Scene Queries](#entities-and-scene-queries)
+- [Physics Queries](#physics-queries)
+- [Character Controller](#character-controller)
+- [Rigid Bodies](#rigid-bodies)
+- [Collision And Trigger Callbacks](#collision-and-trigger-callbacks)
+- [Navigation](#navigation)
+- [Prefab Instantiation](#prefab-instantiation)
+- [VFX](#vfx)
+- [Cursor Ownership](#cursor-ownership)
+- [Logging And Debug Drawing](#logging-and-debug-drawing)
+- [Profiling](#profiling)
+- [Math Values](#math-values)
+- [Game-Owned Gameplay Systems](#game-owned-gameplay-systems)
+- [Runtime lighting quality](#runtime-lighting-quality)
 
 ## Application And Player Preferences
 
@@ -222,7 +245,7 @@ than writing the player Transform directly:
 
 ```csharp
 CharacterController? motor = GetComponent<CharacterController>();
-if (!motor.IsValid)
+if (motor is not { IsValid: true })
     return;
 
 Vector3 horizontal = (Entity.Transform.Forward * move.Y + Entity.Transform.Right * move.X) * speed;
@@ -247,7 +270,7 @@ yawing FPS root; `LocalRotation` remains available for pitch and recoil.
 
 ```csharp
 RigidBody? body = GetComponent<RigidBody>();
-if (body.IsValid)
+if (body is { IsValid: true })
 {
     body.UseGravity = true;
     body.Continuous = true;
@@ -492,6 +515,27 @@ Quaternion facing = Quaternion.Euler(pitchDegrees, yawDegrees);
 ```
 
 Vector normalization returns zero for a near-zero vector. `Vector3.Lerp` clamps its amount to `[0, 1]`.
+
+`Vector3.Up`, `Right`, and `Forward` are positive Y, X, and Z. An entity's Transform directions include its world
+rotation, so use `Transform.Forward` for the entity's heading rather than assuming world Z. Values are immutable
+records; assign a whole value or use `with` to change components. `Quaternion.Identity` represents no rotation;
+`default(Quaternion)` is all zeroes and is not a usable rotation for APIs requiring a nonzero quaternion.
+`Quaternion.Euler` takes degrees in pitch/yaw/roll order. Quaternion multiplication composes rotations, and
+`rotation * vector` rotates a vector. Normalize valid rotations before using them for direction calculations.
+
+| Value/helper | Use | Constraint |
+| --- | --- | --- |
+| `LengthSquared` | Compare distance or speed without a square root | Compare to the square of the threshold |
+| `Normalized` | Direction independent of distance | A zero direction is still rejected by raycasts |
+| `Vector3.Dot` | Alignment or projection | Normalize both arguments when expecting a cosine |
+| `Vector3.Cross` | Perpendicular direction | Parallel inputs produce zero |
+| `Vector3.Reflect` | Reflect a direction about a surface | Supply a unit surface normal |
+| `Vector3.Lerp`, `Color.Lerp` | Bounded interpolation | Amount is clamped to `0..1` |
+| `Color(r, g, b, a)` | Color values | Alpha defaults to one; the consuming API determines HDR limits |
+
+Kéire math values are different types from `System.Numerics` values. Convert components explicitly when using a
+library that expects those types. The complete operators and constructors are in the
+[runtime reference](RuntimeReference.md#keirevector3).
 
 ## Game-Owned Gameplay Systems
 

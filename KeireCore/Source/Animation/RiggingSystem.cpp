@@ -243,17 +243,53 @@ namespace Keire
                     {RigBoneSemantic::TailTip, "TailTip", 18, {0.0F, 0.69F, -0.72F}}};
         }
 
-        [[nodiscard]] std::string NormalizeBoneName(const std::string_view name)
+        [[nodiscard]] std::vector<std::string> BoneNameTokens(const std::string_view name)
         {
-            std::string result;
-            result.reserve(name.size());
+            std::vector<std::string> tokens;
+            std::string token;
             for (const auto character : name)
             {
                 const auto value = static_cast<unsigned char>(character);
                 if (std::isalnum(value) != 0)
-                    result.push_back(static_cast<char>(std::tolower(value)));
+                    token.push_back(static_cast<char>(std::tolower(value)));
+                else if (!token.empty())
+                {
+                    tokens.push_back(std::move(token));
+                    token.clear();
+                }
             }
+            if (!token.empty())
+                tokens.push_back(std::move(token));
+            return tokens;
+        }
+
+        [[nodiscard]] std::string NormalizeBoneName(const std::string_view name)
+        {
+            std::string result;
+            for (const auto& token : BoneNameTokens(name))
+                result += token == "l" ? "left" : token == "r" ? "right" : token;
             return result;
+        }
+
+        // Numbered joint labels describe hierarchy rather than anatomy. Do not classify
+        // each segment as an upper arm or calf before examining the complete chain.
+        [[nodiscard]] std::string JointFamily(const std::string_view name)
+        {
+            const auto tokens = BoneNameTokens(name);
+            if (std::ranges::find(tokens, "joint") == tokens.end())
+                return {};
+            // Anatomical qualifiers win over generic family labels, even when an
+            // exporter adds the word joint and a numeric suffix.
+            for (const auto qualifier :
+                 {"upper", "lower", "fore",     "front",    "rear",  "hind",  "hip",    "hips", "pelvis", "head",
+                  "chest", "spine", "shoulder", "clavicle", "hand",  "wrist", "elbow",  "foot", "ankle",  "toe",
+                  "thigh", "calf",  "shin",     "knee",     "femur", "tibia", "fibula", "talus"})
+                if (std::ranges::find(tokens, qualifier) != tokens.end())
+                    return {};
+            for (const auto family : {"arm", "leg", "torso", "neck"})
+                if (std::ranges::find(tokens, family) != tokens.end())
+                    return family;
+            return {};
         }
 
         [[nodiscard]] bool ContainsAny(const std::string_view value,
@@ -277,6 +313,8 @@ namespace Keire
 
         [[nodiscard]] BoneSide DetectBoneSide(const std::string_view name) noexcept
         {
+            if (Contains(name, "left") && Contains(name, "right"))
+                return BoneSide::None;
             constexpr std::array<std::string_view, 16> leftMarkers{
                 "lupper", "llower", "larm",   "lhand",  "lleg",   "lfoot", "lthigh", "lcalf",
                 "lshin",  "lwrist", "lfemur", "ltibia", "lankle", "lknee", "lhip",   "ltalus"};
@@ -463,6 +501,78 @@ namespace Keire
                                     : 0.0F;
             const auto delta = Subtract(point, Add(start, Multiply(segment, amount)));
             return Dot(delta, delta);
+        }
+
+        void InferJointFamilies(const SkeletonAsset& skeleton, RigDefinition& result,
+                                std::unordered_set<RigBoneSemantic>& assigned)
+        {
+            const auto infer = [&](const std::string_view family, const BoneSide side,
+                                   const std::initializer_list<RigBoneSemantic> semantics,
+                                   const std::size_t expectedCount)
+            {
+                std::vector<std::uint32_t> members;
+                for (std::uint32_t index = 0; index < skeleton.Bones().size(); ++index)
+                    if (JointFamily(skeleton.Bones()[index].Name) == family &&
+                        DetectBoneSide(NormalizeBoneName(skeleton.Bones()[index].Name)) == side)
+                        members.push_back(index);
+                if (members.size() != expectedCount)
+                    return;
+                const auto isMember = [&](const std::int32_t index)
+                {
+                    return index >= 0 && std::ranges::find(members, static_cast<std::uint32_t>(index)) != members.end();
+                };
+                std::vector<std::uint32_t> chain;
+                for (const auto index : members)
+                    if (!isMember(skeleton.Bones()[index].Parent))
+                        chain.push_back(index);
+                if (chain.size() != 1)
+                    return;
+                const auto parent = skeleton.Bones()[chain.front()].Parent;
+                const auto parentSemantic = family == "torso" ? RigBoneSemantic::Root
+                                            : family == "leg" ? RigBoneSemantic::Pelvis
+                                                              : RigBoneSemantic::Chest;
+                if (parent < 0 || result.Bones[static_cast<std::size_t>(parent)].Semantic != parentSemantic)
+                    return;
+                while (chain.size() < members.size())
+                {
+                    std::optional<std::uint32_t> child;
+                    for (const auto index : members)
+                        if (skeleton.Bones()[index].Parent == static_cast<std::int32_t>(chain.back()))
+                        {
+                            if (child)
+                                return;
+                            child = index;
+                        }
+                    if (!child)
+                        return;
+                    chain.push_back(*child);
+                }
+                for (const auto semantic : semantics)
+                    if (assigned.contains(semantic))
+                        return;
+                for (const auto index : chain)
+                    if (result.Bones[index].Semantic != RigBoneSemantic::None)
+                        return;
+                std::size_t offset = 0;
+                for (const auto semantic : semantics)
+                {
+                    auto& bone = result.Bones[chain[offset++]];
+                    bone.Semantic = semantic;
+                    bone.Required = true;
+                    assigned.insert(semantic);
+                }
+            };
+            infer("torso", BoneSide::None, {RigBoneSemantic::Pelvis, RigBoneSemantic::Spine, RigBoneSemantic::Chest},
+                  3);
+            infer("neck", BoneSide::None, {RigBoneSemantic::Neck, RigBoneSemantic::Head}, 2);
+            infer("arm", BoneSide::Left,
+                  {RigBoneSemantic::LeftUpperArm, RigBoneSemantic::LeftLowerArm, RigBoneSemantic::LeftHand}, 3);
+            infer("arm", BoneSide::Right,
+                  {RigBoneSemantic::RightUpperArm, RigBoneSemantic::RightLowerArm, RigBoneSemantic::RightHand}, 3);
+            infer("leg", BoneSide::Left,
+                  {RigBoneSemantic::LeftUpperLeg, RigBoneSemantic::LeftLowerLeg, RigBoneSemantic::LeftFoot}, 4);
+            infer("leg", BoneSide::Right,
+                  {RigBoneSemantic::RightUpperLeg, RigBoneSemantic::RightLowerLeg, RigBoneSemantic::RightFoot}, 4);
         }
 
         struct InferredLegChain final
@@ -708,6 +818,8 @@ namespace Keire
                 const auto& bone = skeleton.Bones()[index];
                 if ((bone.Name.find("_$AssimpFbx$_") != std::string::npos) != helpers)
                     continue;
+                if (profile == RigProfileType::Humanoid && !JointFamily(bone.Name).empty())
+                    continue;
                 const auto normalized = NormalizeBoneName(bone.Name);
                 const auto semantic = profile == RigProfileType::Quadruped ? ClassifyQuadrupedBone(normalized, assigned)
                                                                            : ClassifyHumanoidBone(normalized, assigned);
@@ -722,7 +834,13 @@ namespace Keire
         inferPass(true);
 
         if (profile == RigProfileType::Humanoid)
-            InferUnnamedHumanoidLegs(skeleton, result, assigned);
+        {
+            InferJointFamilies(skeleton, result, assigned);
+            const bool namedLegs =
+                std::ranges::any_of(skeleton.Bones(), [](const auto& bone) { return JointFamily(bone.Name) == "leg"; });
+            if (!namedLegs)
+                InferUnnamedHumanoidLegs(skeleton, result, assigned);
+        }
 
         if (!assigned.contains(RigBoneSemantic::Root))
         {

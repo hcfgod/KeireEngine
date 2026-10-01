@@ -42,7 +42,8 @@ namespace Keire
     enum class AnimatorIkSpace : std::uint8_t
     {
         Model,
-        World
+        World,
+        PresentationWorld
     };
 
     enum class AnimatorIkSolver : std::uint8_t

@@ -1,3 +1,4 @@
+#include "KeireRuntimeInternal/RuntimeFrameTiming.h"
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
@@ -251,4 +252,49 @@ TEST_CASE("Scene load polling and cancellation are thread-safe while scene servi
         });
     closedWorker.join();
     CHECK(closedServiceRejectedWorker.load());
+}
+
+TEST_CASE("standalone runtime frame routing interpolates character presentation without advancing physics")
+{
+    RuntimeWorldFixture fixture;
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto player = scene->CreateEntity("Player");
+    player.AddComponent<Keire::CharacterControllerComponent>()->ConfigureCapsule(0.35F, 1.8F, 0.35F, 0.04F);
+    auto child = scene->CreateEntity("Visual", player);
+    child.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0.0F, 0.5F, 0.0F});
+    auto physics =
+        Keire::CreateRef<Keire::PhysicsSystem>(Keire::PhysicsSystemSpecification{.Mode = Keire::PhysicsMode::Enabled});
+    auto session =
+        Keire::CreateRef<Keire::SceneRuntimeSession>(scene, fixture.Assets, Keire::Ref<Keire::AudioSystem>{}, physics);
+    session->Play();
+    REQUIRE(fixture.World->Adopt(session));
+    const auto runtimePlayer = session->RuntimeScene()->FindEntity(player.Id());
+    const auto motor = runtimePlayer.GetComponent<Keire::CharacterControllerComponent>();
+    const auto transform = runtimePlayer.GetComponent<Keire::TransformComponent>();
+    const auto visual = session->RuntimeScene()->FindEntity(child.Id()).GetComponent<Keire::TransformComponent>();
+    fixture.World->FixedUpdate(0.02F);
+    const auto previous = transform->WorldPosition();
+    REQUIRE(motor->QueueDesiredMovement({0.0F, 0.0F, 0.2F}));
+    fixture.World->FixedUpdate(0.02F);
+    const auto current = transform->WorldPosition();
+    REQUIRE(current.Z > previous.Z);
+    Keire::Time clock({.FixedDeltaTime = Keire::TimeStep::FromSeconds(0.02)});
+    for (const double expectedAlpha : {0.25, 0.5, 0.75})
+    {
+        clock.AdvanceFrame(Keire::TimeStep::FromSeconds(0.005));
+        REQUIRE(clock.PendingFixedSteps() == 0);
+        REQUIRE(clock.InterpolationAlpha() == doctest::Approx(expectedAlpha));
+        KeireRuntime::UpdateRuntimeWorldFrame(*fixture.World, clock);
+        const auto expected = previous.Z + (current.Z - previous.Z) * static_cast<float>(expectedAlpha);
+        CHECK(transform->PresentationWorldPosition().Z == doctest::Approx(expected));
+        CHECK(visual->PresentationWorldPosition().Z == doctest::Approx(expected));
+        CHECK(transform->WorldPosition().Z == doctest::Approx(current.Z));
+    }
+    transform->SetLocalPosition({0.0F, 1.0F, 10.0F});
+    transform->ResetPresentationInterpolation();
+    KeireRuntime::UpdateRuntimeWorldFrame(*fixture.World, clock);
+    CHECK(transform->PresentationWorldPosition().Z == doctest::Approx(10.0F));
+    fixture.World->Close();
+    physics->Close();
+    scene->Close();
 }

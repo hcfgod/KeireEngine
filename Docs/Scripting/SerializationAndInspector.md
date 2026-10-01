@@ -1,8 +1,21 @@
 # Serialization And The Inspector
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Kéire writes managed-state format v4 and retains readers for v1, v2, and v3 state. State is attached to a behaviour,
 prefab, scene, or persistent managed-data asset; the Inspector edits the same stable-field representation used by
 save/load, duplication, prefab instantiation, hot reload, undo/redo, and Play Mode Changes.
+
+## On This Page
+
+- [Field Eligibility](#field-eligibility)
+- [Supported Values](#supported-values)
+- [Reference Graphs](#reference-graphs)
+- [Direct References](#direct-references)
+- [Stable IDs](#stable-ids)
+- [Custom Atomic Values And Callbacks](#custom-atomic-values-and-callbacks)
+- [Reference Records](#reference-records)
+- [Inspector Attributes](#inspector-attributes)
 
 ## Field Eligibility
 

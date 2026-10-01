@@ -1,7 +1,20 @@
 # Rendering And Materials From C#
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Managed rendering uses stable entity and asset identities. Scripts can configure scene Cameras, Mesh Renderers, and
 lights without receiving a native component, GPU resource, material definition, or graphics handle.
+
+## On This Page
+
+- [Components](#components)
+- [Cameras](#cameras)
+- [Meshes And Material Slots](#meshes-and-material-slots)
+- [Material Property Blocks](#material-property-blocks)
+- [Dynamic Material Instances](#dynamic-material-instances)
+- [Global Material Parameter Collections](#global-material-parameter-collections)
+- [Lights](#lights)
+- [Presentation and VSync](#presentation-and-vsync)
 
 ## Components
 
@@ -26,6 +39,8 @@ orthographic size, clip planes, and clear color:
 
 ```csharp
 Camera? camera = GetComponent<Camera>();
+if (camera is not { IsValid: true })
+    return;
 camera.Projection = CameraProjection.Perspective;
 camera.VerticalFieldOfView = 72.0f;
 camera.NearPlane = 0.05f;
@@ -82,6 +97,8 @@ private Material? _detailMaterial;
 protected override void Awake()
 {
     MeshRenderer? renderer = GetComponent<MeshRenderer>();
+    if (renderer is not { IsValid: true })
+        return;
     renderer.Mesh = _mesh;
     renderer.Materials = [_bodyMaterial, _detailMaterial];
     renderer.Visible = true;
@@ -147,12 +164,13 @@ private MaterialParameterCollectionInstance? _weatherRuntime;
 
 protected override void Start()
 {
-    _weatherRuntime = GlobalMaterialParameters.Open(_weather);
+    if (_weather is { IsValid: true })
+        _weatherRuntime = GlobalMaterialParameters.Open(_weather);
 }
 
 protected override void Update()
 {
-    if (_weatherRuntime.IsReady)
+    if (_weatherRuntime is { IsReady: true })
         _weatherRuntime.SetFloat("Rain", 0.65f);
 }
 ```

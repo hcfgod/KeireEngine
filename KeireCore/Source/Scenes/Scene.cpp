@@ -62,6 +62,11 @@ namespace Keire
         AssetId SceneState::Asset() const noexcept { return m_Impl->AssetValue; }
         bool SceneState::IsOpen() const noexcept { return m_Impl->Open; }
         bool SceneState::Dirty() const noexcept { return m_Impl->Dirty; }
+        std::uint64_t SceneState::PhysicsRevision() const
+        {
+            RequireOwner("PhysicsRevision");
+            return m_Impl->PhysicsRevision;
+        }
 
         void SceneState::MarkDirty() noexcept
         {
@@ -194,6 +199,28 @@ namespace Keire
             return result;
         }
 
+        std::vector<Entity> SceneState::FixedPresentationEntities() const
+        {
+            RequireOwner("FixedPresentationEntities");
+            std::vector<Entity> result;
+            result.reserve(m_Impl->FixedPresentationEntities.size());
+            for (const auto id : m_Impl->FixedPresentationEntities)
+                if (Contains(id))
+                    result.push_back(Entity(m_Impl->Self, id));
+            return result;
+        }
+
+        void SceneState::SetFixedPresentationInterpolation(const EntityId id, const bool enabled)
+        {
+            RequireOwner("SetFixedPresentationInterpolation");
+            if (!Contains(id))
+                throw std::invalid_argument("Fixed presentation requires a live entity.");
+            if (enabled)
+                m_Impl->FixedPresentationEntities.insert(id);
+            else
+                m_Impl->FixedPresentationEntities.erase(id);
+        }
+
         Entity SceneState::Find(const EntityId id) const noexcept
         {
             return Contains(id) ? Entity(m_Impl->Self, id) : Entity{};
@@ -213,20 +240,35 @@ namespace Keire
             {
                 const auto native = m_Impl->Registry.create();
                 Impl::EntityRecord record{id, parent, std::move(name), true};
-                transform->Attach(m_Impl->Self, id);
-                record.Components.push_back(transform);
-                m_Impl->Registry.emplace<Impl::EntityRecord>(native, std::move(record));
-                m_Impl->Entities.emplace(id, native);
-                m_Impl->IndexIdentity(id, *m_Impl->Find(id));
-                m_Impl->IndexComponent(id, transform);
-                m_Impl->Order.push_back(id);
-                m_Impl->Hierarchy.Invalidate();
-                m_Impl->Dirty = true;
-                if (m_Impl->Playing)
+                try
                 {
-                    transform->InvokeAwake();
-                    if (ActiveInHierarchy(id) && transform->Enabled())
-                        transform->InvokeEnable();
+                    transform->Attach(m_Impl->Self, id);
+                    record.Components.push_back(transform);
+                    m_Impl->Registry.emplace<Impl::EntityRecord>(native, std::move(record));
+                    m_Impl->Entities.emplace(id, native);
+                    m_Impl->IndexIdentity(id, *m_Impl->Find(id));
+                    m_Impl->IndexComponent(id, transform);
+                    m_Impl->Order.push_back(id);
+                    m_Impl->Hierarchy.Invalidate();
+                    m_Impl->Dirty = true;
+                    if (m_Impl->Playing)
+                    {
+                        transform->InvokeAwake();
+                        if (ActiveInHierarchy(id) && transform->Enabled())
+                            transform->InvokeEnable();
+                    }
+                }
+                catch (...)
+                {
+                    m_Impl->UnindexComponent(id, transform);
+                    if (const auto* attached = m_Impl->Find(id))
+                        m_Impl->UnindexIdentity(id, *attached);
+                    m_Impl->Entities.erase(id);
+                    std::erase(m_Impl->Order, id);
+                    m_Impl->Registry.destroy(native);
+                    m_Impl->Hierarchy.Invalidate();
+                    transform->Detach();
+                    throw;
                 }
             };
             commit();
@@ -626,6 +668,7 @@ namespace Keire
             if (record->Layer == layer)
                 return;
             record->Layer = layer;
+            m_Impl->InvalidatePhysicsHierarchy(id);
             SynchronizeEntityLayer(id);
             m_Impl->Dirty = true;
         }
@@ -722,6 +765,7 @@ namespace Keire
             if (record->Active == active)
                 return;
             record->Active = active;
+            m_Impl->InvalidatePhysicsHierarchy(id);
             m_Impl->Dirty = true;
             if (m_Impl->Playing)
             {
@@ -799,6 +843,8 @@ namespace Keire
                 transform->SetLocalRotation(rotation);
                 transform->SetLocalScale(scale);
             }
+            m_Impl->Transform(id)->ResetPresentationInterpolation();
+            m_Impl->InvalidatePhysicsHierarchy(id);
             m_Impl->Dirty = true;
         }
 
@@ -850,14 +896,14 @@ namespace Keire
                 auto* target = m_Impl->Find(id);
                 if (!target)
                     return;
-                component->Attach(m_Impl->Self, id);
-                target->Components.push_back(component);
-                m_Impl->IndexComponent(id, component);
-                SynchronizeEntityLayer(id);
-                m_Impl->Dirty = true;
-                if (m_Impl->Playing)
+                try
                 {
-                    try
+                    component->Attach(m_Impl->Self, id);
+                    target->Components.push_back(component);
+                    m_Impl->IndexComponent(id, component);
+                    SynchronizeEntityLayer(id);
+                    m_Impl->Dirty = true;
+                    if (m_Impl->Playing)
                     {
                         component->InvokePrepare();
                         if (ActiveInHierarchy(id))
@@ -867,13 +913,13 @@ namespace Keire
                                 component->InvokeEnable();
                         }
                     }
-                    catch (...)
-                    {
-                        m_Impl->UnindexComponent(id, component);
-                        std::erase(target->Components, component);
-                        component->Detach();
-                        throw;
-                    }
+                }
+                catch (...)
+                {
+                    m_Impl->UnindexComponent(id, component);
+                    std::erase(target->Components, component);
+                    component->Detach();
+                    throw;
                 }
             };
             commit();
@@ -1016,6 +1062,8 @@ namespace Keire
             if (!component.IsAttached() || component.Enabled() == enabled)
                 return;
             component.ApplyEnabled(enabled);
+            if (Impl::PhysicsComponent(component.Type()))
+                ++m_Impl->PhysicsRevision;
             m_Impl->Dirty = true;
             if (m_Impl->Playing)
             {
@@ -1032,7 +1080,12 @@ namespace Keire
                 return;
             m_Impl->Dirty = true;
             if (component.Type() == TransformComponent::StaticType())
+            {
                 m_Impl->MarkWorldDirty(component.Owner().Id());
+                m_Impl->InvalidatePhysicsHierarchy(component.Owner().Id());
+            }
+            else if (Impl::PhysicsComponent(component.Type()))
+                ++m_Impl->PhysicsRevision;
         }
         Matrix4 SceneState::WorldMatrix(const EntityId id) const
         {
@@ -1273,6 +1326,7 @@ namespace Keire
             m_Impl->NameIndex.clear();
             m_Impl->TagIndex.clear();
             m_Impl->ComponentPools.clear();
+            m_Impl->FixedPresentationEntities.clear();
             m_Impl->Order.clear();
             m_Impl->Hierarchy.Clear();
             m_Impl->Open = false;

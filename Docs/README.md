@@ -28,7 +28,12 @@ structural and API drift; they do not establish that every prose claim or UI wor
 | Build or evaluate Kéire | [Getting Started](GettingStarted.md) | [Project Hub](ProjectHub.md), [Testing and Release](TestingAndRelease.md) |
 | Understand engine ownership | [Architecture](Architecture.md) | [Runtime Lifecycle](RuntimeLifecycle.md), [ECS and Components](ECSAndComponents.md) |
 | Author a project | [Project System](ProjectSystem.md) | [Scene Authoring](SceneAuthoring.md), [Asset Browser](AssetBrowser.md), [Unified Graph Authoring](GraphAuthoring.md) |
-| Write C# gameplay | [C# Scripting](Scripting/README.md) | [Scripting Getting Started](Scripting/GettingStarted.md), [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md), [Managed API Index](Scripting/ApiIndex.md) |
+| Write C# gameplay | [Scripting Workflow Map](Scripting/WorkflowMap.md) | Choose the API, callback, lifetime, and setup for each supported scripting workflow. |
+| [C# Scripting Cookbook](Scripting/Cookbook.md) | Adapt compile-checked examples for movement, interactions, spawning, assets, scenes, UI, and jobs. |
+| [Runtime API Member Reference](Scripting/RuntimeReference.md) | Search runtime types, methods, properties, events, defaults, and subclass callbacks. |
+| [Editor API Member Reference](Scripting/EditorReference.md) | Search Editor extension types and exact member signatures. |
+| [GPU Compute From C#](Scripting/Compute.md) | Dispatch host-registered programs with explicit buffers, readback, and resource ownership. |
+| [C# Scripting](Scripting/README.md) | [Scripting Getting Started](Scripting/GettingStarted.md), [Scenes and Render Settings](Scripting/ScenesAndRenderSettings.md), [Managed API Index](Scripting/ApiIndex.md) |
 | Build rendering content | [Asset Pipeline](AssetPipeline.md) | [Rendering](Rendering.md), [Shaders and Materials](ShadersAndMaterials.md), [VFX](Vfx.md) |
 | Package a game or SDK | [Desktop Player Builds](PlayerBuilds.md) | [Package Archives](PackageArchives.md), [Testing and Release](TestingAndRelease.md) |
 | Investigate a diagnostic | [Structured Diagnostics](Diagnostics/README.md) | The matching `KEIRE-*` remediation page |
@@ -40,7 +45,7 @@ structural and API drift; they do not establish that every prose claim or UI wor
 
 ## Complete Guide Library
 
-All 104 published guides and progress records are listed below in the same groups used by the documentation website.
+All 109 published guides and progress records are listed below in the same groups used by the documentation website.
 
 ### Start Here
 

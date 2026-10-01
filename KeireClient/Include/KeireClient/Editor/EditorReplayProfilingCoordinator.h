@@ -2,6 +2,7 @@
 
 #include "Keire/Core.h"
 #include "KeireClient/Editor/EditorWorkspaceLifecycleCoordinator.h"
+#include "KeireClient/Editor/SustainedProfilerCapture.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -44,6 +45,9 @@ namespace KeireEditor
 
     struct EditorProfilerState final
     {
+        SustainedProfilerCapture Sustained;
+        bool SustainedRendererTelemetry = false;
+        std::string SustainedError;
         bool Paused = false;
         bool ShowAllManagedCallbacks = false;
         bool ShowAllHotspots = false;

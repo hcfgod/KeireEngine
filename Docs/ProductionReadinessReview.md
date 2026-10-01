@@ -22,7 +22,7 @@ validated workflow, and a validated preview is not equivalent to a production-pr
 Version 0.4.4 is the current source and Windows publication target. Its validation is tracked separately from this
 review's immutable 0.4.2 sequence-17 evidence; no 0.4.2 Windows or Linux artifact is relabeled as the new release.
 
-As of September 30, 2026, the publication inventory contains 104 guides and progress records, including 13 material/shader
+As of September 30, 2026, the publication inventory contains 109 guides and progress records, including 13 material/shader
 records and the current acceptance and September 29 review records. This documentation repair does not change the historical readiness
 scores or establish the remaining implementation and validation gates as complete.
 

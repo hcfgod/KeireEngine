@@ -173,6 +173,8 @@ namespace Keire
     struct AnimationIkMessage
     {
         float LayerWeight = 1.0F;
+        float InterpolationAlpha = 1.0F;
+        bool IsFixedUpdate = false;
     };
 
     enum class PhysicsContactPhase : std::uint8_t

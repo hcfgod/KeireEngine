@@ -453,3 +453,34 @@ TEST_CASE("managed lighting quality presets preserve environment and reject inva
     CHECK_FALSE(Keire::Detail::ApplyManagedLightingQuality(unchanged, 255));
     CHECK(unchanged == initial);
 }
+
+TEST_CASE("dynamic resolution fallback includes published render CPU cost")
+{
+    Keire::RenderStatistics statistics;
+    statistics.RenderCpuMilliseconds = 40.0F;
+    statistics.SubmitToPresentMilliseconds = 0.2F;
+    CHECK(Keire::Internal::DynamicResolutionController::EstimateFrameCost(statistics) == 40.0F);
+    Keire::RenderEnvironmentSettings settings;
+    settings.RequestedDynamicResolution = Keire::DynamicResolutionMode::Automatic;
+    settings.MinimumDynamicResolutionScale = 0.6F;
+    settings.DynamicResolutionTargetMilliseconds = 16.667F;
+    Keire::RenderFeatureCapabilities capabilities;
+    capabilities.DynamicResolution = true;
+    const auto selection = Keire::ResolveRenderFeatureSelection(settings, capabilities);
+    Keire::Internal::DynamicResolutionController controller;
+    for (std::uint64_t frame = 1; frame <= 8; ++frame)
+    {
+        statistics.Frame = frame;
+        (void)controller.Update(settings, selection, statistics);
+    }
+    const auto reduced = controller.Scale();
+    CHECK(reduced < 1.0F);
+    CHECK(reduced >= 0.6F);
+    CHECK(controller.Update(settings, selection, statistics) == reduced);
+    statistics.GpuCompletionLatencyMilliseconds = 8.0F;
+    statistics.OutstandingFrames = 2;
+    CHECK(Keire::Internal::DynamicResolutionController::EstimateFrameCost(statistics) == 4.0F);
+    statistics.GpuTimingSupported = true;
+    statistics.GpuFrameMilliseconds = 3.0F;
+    CHECK(Keire::Internal::DynamicResolutionController::EstimateFrameCost(statistics) == 3.0F);
+}

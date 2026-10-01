@@ -1,8 +1,25 @@
 # UI Toolkit And Events From C#
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Kéire UI Toolkit is a retained visual-tree system. UI structure, styling, and presentation policy are separate
 assets, and a scene references them through one `UIDocument` component. The Editor shell remains ImGui; UI Toolkit is
 for game and tool content authored by a project.
+
+## On This Page
+
+- [Asset Model](#asset-model)
+- [UI Builder Workflow](#ui-builder-workflow)
+- [Viewport Contract](#viewport-contract)
+- [Managed Visual Trees](#managed-visual-trees)
+- [Events](#events)
+- [Data Binding](#data-binding)
+- [Custom Controls](#custom-controls)
+- [Virtualized Collections](#virtualized-collections)
+- [Styles, Transitions, And Render Targets](#styles-transitions-and-render-targets)
+- [Runtime And Recovery Ownership](#runtime-and-recovery-ownership)
+- [Current Limits](#current-limits)
+- [Legacy Scene UI](#legacy-scene-ui)
 
 ## Asset Model
 

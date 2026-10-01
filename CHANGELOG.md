@@ -2,6 +2,64 @@
 
 ## Unreleased
 
+## 0.4.7 - 2026-10-01
+
+- Reuse identical TAA center samples while preserving clamped edge sampling and temporal neighborhood behavior.
+
+- Published renderer statistics now include the completed frame's render CPU duration, restoring the CPU-cost
+  fallback used by dynamic resolution when GPU timing and completion estimates are unavailable.
+
+- The render thread polls completed GPU frames before its idle wait so already-ready frame slots can unblock
+  admission without an extra polling delay.
+
+- Collider shape, center, half-extent and trigger reads from C# avoid rebuilding serialized property bags,
+  preserving the existing property types and invalid-entity behavior.
+
+- Added bounded 10/30-second editor application-frame recordings with explicit warmup, sequence/overflow validation
+  and deferred CSV export for sustained performance measurements. Optional asynchronous renderer observations retain
+  independent renderer/GPU frame IDs without changing the default capture sampling cost.
+
+- Expanded scripting documentation with a task-based workflow map, compile-checked cookbook, GPU compute guide,
+  searchable runtime and Editor member references, and source-synchronized reference validation.
+
+- Scene physics queries see same-tick authored static/kinematic support changes without advancing simulation or
+  recreating pose-only bodies. Disabled rigid bodies leave enabled colliders as static geometry until re-enabled.
+
+- Added opt-in final named-IK endpoint diagnostics to distinguish requested targets from published bone positions.
+
+- Swinging humanoid feet retain surface clearance without prematurely replanting on raised or moving ground,
+  preventing a tangential snap while the previous contact is still fading out.
+
+- Grounded character controllers follow translating and rotating supports through collision-aware carry, preserving caller-owned facing and detaching on jumps or invalidated support.
+
+- Preserved managed shutdown logging and scene access during player OnDisable/OnDestroy callbacks.
+
+- Foot planting separates authored lift and replant from carrier motion, preventing moving platforms from falsely releasing stationary feet while preserving genuine lift and support-travel safeguards.
+
+- Character controllers can step onto a walkable ledge exactly at their configured step height by verifying its actual top-face normal, while retaining height, headroom, and movement bounds.
+
+- Character controllers now query current moving-platform geometry before movement, preventing false airborne states on descending authored static or kinematic lifts while preserving same-tick child collider and trigger updates.
+
+- Rigging Studio keeps saved-mapping actions above the collapsible bone list, making reuse across source clips
+  accessible without scrolling through every track. Save/load replacement guidance remains visible.
+
+- Humanoid rig inference preserves delimited left/right markers and resolves generic joint chains by validated
+  hierarchy instead of guessing their anatomy from numbered names. Ambiguous named leg chains stay unmapped.
+  Mesh importer version 26 regenerates cached inferred rigs; existing baked clips remain unchanged.
+
+- Added runtime-only opt-in interpolation for custom fixed-step transforms, presentation-space named IK targets,
+  and IK callback timing information in C++ and C#. Existing simulation-space IK behavior remains unchanged.
+
+- Reconcile interrupted walking foot plants gradually after a grounded character settles on static support, so
+  returning to idle no longer requires a jump to clear stale horizontal anchors or swing-acquisition history.
+
+- Added opt-in, rate-limited foot-contact logging for diagnosing sampled versus locked support during grounding.
+  Paired post-grounding records expose release decisions, reach limits, solved bone endpoints, and early exits
+  without changing contact selection or requiring verbose logging for the whole engine.
+
+- Standalone players now use the fixed-step interpolation remainder for scene presentation, matching Play Mode and
+  avoiding character/camera movement snapping to the latest physics tick between rendered frames.
+
 ## 0.4.6 - 2026-09-30
 
 - Fixed the UI Builder Inspector at narrow and floating widths by stacking labeled fields, wrapping descriptive text,

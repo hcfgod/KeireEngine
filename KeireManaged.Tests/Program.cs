@@ -1,5 +1,6 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("Fixed presentation opt-in and IK evaluation context preserve managed contracts", FixedPresentationTests.Run),
     ("IK validates arguments before submitting native goal updates", AnimatorIkTests.Run),
     ("FPS modules preserve movement, jump, landing, and look contracts", FirstPersonControllerTests.Run),
     ("Compute rejects invalid ownership and keeps disposed resources inert", ComputeTests.Run),

@@ -1,5 +1,7 @@
 # Managed API Capability Matrix
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 This matrix tracks the supported C# gameplay surface and the remaining parity work. Kéire borrows familiar workflow
 ideas from Unity and Unreal without copying their object models: scripts remain `Behaviour` components, native objects
 stay behind stable value handles, and every ownership or thread boundary is explicit.
@@ -9,6 +11,11 @@ Status meanings:
 - **Production** — supported by the native runtime, documented, and covered by focused tests.
 - **Partial** — useful production functionality exists, with named gaps still to close.
 - **Planned** — intentionally absent from the supported managed contract today.
+
+## On This Page
+
+- [Presentation Gap Audit](#presentation-gap-audit)
+- [Compatibility Direction](#compatibility-direction)
 
 ## Presentation Gap Audit
 

@@ -596,6 +596,21 @@ namespace Keire::RenderBackend
                     RenderQueueItem item;
                     {
                         std::unique_lock lock(RenderQueueMutex);
+                        if (!StopRenderQueue && RenderQueue.empty() && !DeviceLost)
+                        {
+                            // Retirement returns admission slots under this mutex. Poll before sleeping so an
+                            // already-signaled fence does not wait for work that admission itself prevents.
+                            lock.unlock();
+                            try
+                            {
+                                CollectCompletedFrames(false);
+                            }
+                            catch (...)
+                            {
+                                HandleRenderThreadFailure(std::current_exception());
+                            }
+                            lock.lock();
+                        }
                         RenderQueueReady.wait_for(lock, std::chrono::milliseconds(1),
                                                   [&] { return StopRenderQueue || !RenderQueue.empty(); });
                         if (StopRenderQueue && RenderQueue.empty())
@@ -624,17 +639,6 @@ namespace Keire::RenderBackend
                     RenderQueueSpace.notify_one();
                     if (item.Work)
                         item.Work();
-                    else if (!DeviceLost)
-                    {
-                        try
-                        {
-                            CollectCompletedFrames(false);
-                        }
-                        catch (...)
-                        {
-                            HandleRenderThreadFailure(std::current_exception());
-                        }
-                    }
                     CollectRetiredSurfaceEpochs();
                 }
             });

@@ -697,6 +697,11 @@ references, missing references, cycles, and runtime-to-editor dependencies are r
 Successful build status retains runtime/editor assembly paths in dependency order from that generation. Reload uses
 that snapshot instead of rescanning edited assets or sorting DLL names, ensuring cross-assembly base types are loaded
 before derived types. Persistent solution/project files are derived authoring conveniences, not build authority.
+
+Frequently sampled collider shape, center, half-extent and trigger reads use direct native component getters.
+They retain the generic property ABI and failure semantics without allocating registration/property bags;
+other properties and all setters continue through the serialization-backed path. No cross-callback cache is retained.
+
 Each collectible managed load context receives its own Coral internal-call table. Calls cross an application-owned
 `IScriptRuntimeServices` boundary, retain only value handles, validate the currently executing script generation, and
 route gameplay logging, frame time, input actions, and transform access back to owner-thread engine services.
@@ -1897,6 +1902,11 @@ Procedural base-pose smoothing has its own cached history, separate from the con
 poses. Toe roll and base smoothing precede contact IK and gameplay overrides; contact offsets never feed back into
 the next base pose.
 
+Opt-in named-IK endpoint inspection is owned by the runtime session. It captures targets using the actual graph IK
+conversion matrices, pairs them with the resulting snapshot identity and pose generation, and observes final endpoints
+after LateUpdate. It releases pending entity and snapshot references on session reset and emits a bounded final summary.
+The disabled path performs no pose capture; this private diagnostic does not add managed API or renderer readback ownership.
+
 ## Skeletal Deformation And Rig Authoring
 
 `SkeletonAsset`, `RigDefinitionAsset`, `SkinnedMeshAsset`, and `AnimationClipAsset` are independent immutable assets.
@@ -1905,6 +1915,24 @@ references. Model import either preserves embedded skinning, generates a determi
 Embedded skeletons pass through deterministic semantic inference so authored Mixamo, Blender, Unreal, humanoid, biped,
 and quadruped names participate in the same retargeting and IK contracts. Unknown bones remain ordered, retained, and
 unclassified rather than being discarded.
+
+Editor Play Mode and standalone player frame routing both forward the application clock's interpolation remainder to
+the scene runtime world. Physics presentation interpolates the previous/current samples before managed Update and
+animation evaluation; simulation transforms remain authoritative for gameplay and grounding queries.
+
+Custom fixed-step movers can opt into local position/rotation presentation samples on their Transform. Samples are
+captured at fixed boundaries and composed with the parent's presentation transform, while character controllers and
+dynamic rigidbodies retain ownership of their existing interpolation. Scale remains current. The setting is runtime-only
+and off by default; teleports use the existing presentation reset contract.
+The scene owns a non-owning index of opted-in entity IDs, removed on component teardown and scene close. Sampling
+visits only that index. Attached setters enforce owner-thread access, including unchanged values; failed registration
+leaves the previous setting intact. Inactive entities clear their sample history rather than retaining a stale pose.
+
+Named IK keeps simulation-space `World` targets backward compatible. The opt-in `PresentationWorld` space instead
+converts targets through the actor's presentation transform during frame evaluation. IK callbacks expose the interpolation
+alpha and whether evaluation is a fixed procedural update; fixed evaluation uses current simulation coordinates and alpha
+one. Callers must sample body and target anchors at the same presentation time. Interpolating the body alone, or blending
+finished graph palettes, does not preserve a planted world-space contact.
 
 The scene runtime samples animation into local bone transforms, applies named IK goals, optionally performs scene-owned
 world-space ground raycasts and transactional model-space foot grounding, computes the palette, and then submits
@@ -1958,9 +1986,22 @@ in one process but failing in another.
 ## Physics Runtime And Authoring
 
 `SceneRuntimeSession` eagerly creates one `PhysicsWorld` for each Play or cooked scene. Its fixed boundary is gameplay
-`FixedUpdate`, incremental body/controller synchronization, Jolt stepping, dynamic Transform pullback, then stable
-contact dispatch. Body identities are generation-safe and never expose Jolt types. Layer/mask filtering is applied by
+`FixedUpdate`, incremental body/controller synchronization, character movement against the current authored support
+geometry, a second body synchronization for controller-moved descendant colliders, Jolt stepping, dynamic Transform
+pullback, character grounding, then stable contact dispatch. Synchronization
+precedes controller sweeps so moving static/kinematic supports cannot change position between movement and grounding. Body identities are generation-safe and never expose Jolt types. Layer/mask filtering is applied by
 the configured 32-slot collision matrix in body broad-phase filters and query paths.
+
+Character step landing distinguishes a rounded capsule-edge contact normal from the supporting surface normal. A
+bounded local downward ray may recover a walkable face only on the same body at the contact height. The landing
+surface rise is checked against the configured step height, and upward clearance plus forward collision checks remain
+mandatory; this does not add forward displacement or relax the slope limit.
+
+Foot planting retains its authored-animation low-point reference in actor/model space through lock release and awaiting
+replant, so carrier motion and actor transforms do not masquerade as authored foot lift. Contact anchors still follow
+the support, while the world-anchored support-travel reference and normal remain separate. References are refreshed when
+the authored low point changes and discarded on invalid or replaced support. This is private runtime state, with no
+public native or C# API change.
 
 The editor writes collider handle changes through `SceneDocument`, so a drag is one undoable authoring operation.
 `PhysicsDebugSnapshot` copies bounded body, contact, and query-ring state only when capture is enabled; the shipping
@@ -1970,12 +2011,30 @@ Managed ray and capsule casts plus sphere overlaps enter through owner-thread ru
 IDs back to stable scene entity IDs. Capsule self-filtering is applied as a native body filter so a cast can reach the
 next surface. Managed overlap copies are deterministic, unique, and capped at 256 entities inside one callback scope.
 
+After owner-thread and argument validation, scene queries synchronize authored static/kinematic geometry when a
+private physics mutation revision changes. Collider configuration, activation, hierarchy, and relevant ancestor
+transforms invalidate this revision; unrelated camera, naming, and presentation edits do not. Repeated queries reuse
+the synchronized revision. Pose-only static changes preserve body identity, and configuration replacements create the
+new body before retiring the old one. Failed synchronization does not mark the revision complete.
+Queries never step dynamics, consume controller input, update grounding/presentation, or dispatch contacts. Authored
+collider descendants still follow changed dynamic/controller ancestors. Disabling a Rigid Body leaves an enabled
+Collider as static geometry; re-enabling the Rigid Body resumes simulation at the next fixed boundary. Dynamic and
+controller initialization and asynchronous asset readiness remain fixed-boundary responsibilities.
+
 Character movement queues value displacements from scripts and consumes them at the scene physics boundary. The runtime
 uses closest-hit capsule casts with the controller body excluded, skin padding, bounded sweep/slide iterations,
 walkable-normal tests, and an up/forward/down stair transaction. Authored capsule height is total tip-to-tip height;
 Jolt receives the derived cylinder half-height. Ground state and resolved velocity are copied back to the component
 after stepping. Managed code receives only values through the concrete `CharacterController`; no Jolt shape or body handle
 crosses the scripting boundary.
+
+Grounded Character Controllers retain a support-local root anchor and transport it through the support's rigid pose,
+even without requested movement. Carry uses the normal capsule sweep/slide path, preserves gameplay-owned facing,
+and contributes to world-space resolved velocity. A positive requested vertical displacement detaches before carry.
+Collider/controller replacement, incompatible geometry, disabled support, parent changes, presentation resets, and
+external rider repositioning invalidate the anchor. Parented riders therefore do not receive duplicate transport.
+The support pose is captured before the physics step so dynamic support motion remains available to the next rider
+step instead of being consumed by post-step grounding. Actual walkable contact reacquires the anchor.
 
 Collision shape dimensions derived from world transforms are compared with a small relative floating-point tolerance.
 The installed dimensions remain the comparison baseline, so pure rotation preserves the live body's contacts while
@@ -1998,6 +2057,9 @@ without a fixed tick. Child presentation composes the interpolated parent with t
 camera target and skinned visual synchronized. Teleports explicitly reset interpolation, while body recreation, scene
 replacement, and Play initialization snap both samples. This bounded serial state belongs to `SceneRuntimeSession` and
 does not introduce a job-system or physics ownership dependency into Transform.
+
+Player teardown stops owned scene sessions while managed runtime services and world lookup remain available, so
+`OnDisable` and `OnDestroy` can read scene state and log. Services are detached afterward; world cleanup is idempotent.
 
 ## Managed Scripting
 

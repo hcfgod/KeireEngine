@@ -244,6 +244,38 @@ foot grounding for that frame.
 
 ## Ground Adaptation And Ragdolls
 
+After a CharacterController has settled at rest on static ground, automatic foot planting gradually reconciles
+old walking anchors with the current stance and reacquires an interrupted swing. This requires current grounded
+stationary motion as well as settled standing balance; walking and moving-support anchors retain their existing
+behavior. Each foot keeps its independently sampled support height, including slopes and split-height stances.
+
+For a bounded contact diagnostic run, set the process environment variable `KEIRE_FOOT_CONTACT_DIAGNOSTICS` to the
+exact Animator entity name before launching the editor or player (for example `Explorer Model`). Matching Animators
+emit `[FootContact]` information at most once per 0.2 simulation seconds, capped at 3,000 samples per Animator lifetime.
+Each sample includes the grounding-call frame, foot index, weight, standing balance, sampled world-space foot,
+locked target/support and surface height, and the current probe hit/support/position before contact selection.
+Support IDs can be matched against the scene's entity IDs. Zero-weight samples report contact-history clearing.
+Matching `[FootContactSolved]` records share the entity, frame, and foot index. They report contact-release decisions,
+the hip-to-anchor distance and reach budget, the submitted target, and ankle/toe positions after grounding. The outcome
+distinguishes a completed pass from reach, solver, clearance, or stabilization failures. Validity flags identify missing
+toes or unavailable signed distances to the sampled hit plane; placeholder zero values are not contact evidence.
+These positions measure bone endpoints after grounding, before any later animation passes. They do not measure final
+skinned-mesh clearance; a valid raised contact must not be classified as clipping from its height alone.
+Paused time does not generate repeated samples; long frames do
+not produce catch-up log bursts. Remove the variable and restart to disable; logs use the normal Info sink and no
+contact behavior changes. Duplicate matching entity names each have their own bounded budget.
+
+For graph-driven named IK, set `KEIRE_NAMED_IK_DIAGNOSTICS` to the exact Animator entity name before launch.
+`[NamedIkEndpoint]` records compare captured solver targets with the final published bone endpoints after LateUpdate.
+Model, simulation-world, and presentation-world targets use the same conversion matrices as the solver; reported
+presentation residuals include inherited transforms and scale. A separate original-world residual compares world-space
+goals with their submitted coordinates, exposing actor motion after goal capture. Goal weights, missing or stale
+publications, invalid inputs, and solver diagnostics remain separate observations. A partial-weight goal is not expected to reach its full target.
+Details are sampled every 0.2 seconds and on a new maximum endpoint error, capped at 3,000 lines per runtime session;
+cumulative counters inspect every
+published graph evaluation and `[NamedIkEndpointSummary]` includes a final shutdown summary. Remove the variable and
+restart to disable. This opt-in inspection does not measure skinned-mesh penetration or fixed procedural IK interpolation.
+
 Enable **Ground Adaptation** on an Animator component. Automatic bone mapping resolves the pelvis and both leg chains
 from the Humanoid/Biped semantic rig. It recognizes Mixamo, Unreal/Blender-style suffixes, 3ds Max-style side markers,
 and anatomical joint names such as femur, tibia, talus, humerus, radius, and carpal. When a biped uses opaque joint
@@ -428,6 +460,13 @@ Custom creatures retain their full hierarchy and animation even when no semantic
 bone map and use explicit bone names for custom IK. Quadruped inference also recognizes front limbs named UpperArm,
 ForeArm and Hand, and rear limbs named Leg01, Leg02 and Foot.
 
+Humanoid inference preserves delimited `L` and `R` markers in exporter names. Generic torso, neck, arm and leg
+joint families require complete, unbranched chains under the expected anatomical parent; numbered suffixes do
+not determine chain order. Explicit anatomical names retain priority. Ambiguous named leg chains stay unmapped
+instead of falling back to a geometric guess, so inspect the actual bone names as well as the mapped-track count.
+Mesh importer version 26 regenerates cached inferred rigs when the model is refreshed or imported. Previously
+baked retargeted clips are not rewritten; review their mappings and bake a new clip if they used incorrect roles.
+
 Suggested retarget clip names replace invalid filename characters, trim leading spaces, and shorten long imported
 labels at UTF-8 character boundaries to fit the 230-byte portable filename limit. Reserved device names receive
 an underscore prefix. You can still edit the suggestion before baking.
@@ -513,7 +552,9 @@ publishes a complete last-good result.
 
 Custom/imported mapping preserves authored bone names and hierarchy without inferring humanoid roles. Use it for spiders and other custom creatures; address IK chains by their bone names. Generating a custom skeleton requires an authored profile through the C++ API; the importer offers generation only for humanoid, biped, and quadruped profiles.
 
-In **Edit bone mappings**, **Save Mapping** writes the manual pairs to `Config/RetargetMappings` in the project.
+**Save Mapping** and **Load Saved Mapping** are beside the retarget source/output summary, above
+**Edit bone mappings**, so saved presets remain accessible when the bone list is collapsed.
+**Save Mapping** writes the manual pairs to `Config/RetargetMappings` in the project.
 The file is keyed by stable source/target skeleton IDs, so other clips from that pair can use **Load Saved Mapping**,
 even after restarting the editor. Include these configuration files in project version control when sharing mappings.
 Save replaces the previous mapping for that pair; Load replaces the current manual edits. Loading validates the file,
@@ -569,6 +610,9 @@ new limb geometry. Named gameplay goals remain assigned and are validated agains
 Swinging feet respect the probed surface clearance even while contact locking is suppressed. This corrects only
 normal penetration and adds no planted anchor or pelvis-support influence, preventing a late upward snap when a
 descending swing reaches raised ground without holding the foot down during its next lift.
+Penetration alone does not reacquire a planted anchor while the authored swing is still awaiting its low point.
+This keeps a fading contact from snapping sideways to a new anchor. Authored replanting and settled-idle
+reconciliation remain separate acquisition paths; normal clearance continues throughout the swing.
 The planted-contact regression runs two platform cycles at 30, 60, and 144 Hz with simultaneous translation, pitch,
 yaw, and roll. It checks support-relative anchor error, segment lengths, reach limits, and knee speed, and logs the
 maximum anchor error and knee speed for each rate. This controlled stance test complements the imported walking
@@ -643,3 +687,26 @@ Partial previews retain a warning because unmapped bones use their reference pos
 when the source clip or skeleton changes, including after reimport.
 For controllers with multiple clips, a missing clip or avatar mask takes priority over partial-mapping warnings.
 After repairing the missing dependency, preview shows any remaining mapping warning or clears the diagnostic.
+
+## Custom fixed-step movers and IK presentation
+
+For a scripted mover without physics-owned interpolation, set `Transform.FixedPresentationInterpolation = true`
+in `Awake`. This runtime-only option interpolates local position and rotation between fixed samples and composes them
+with the parent's presentation transform. Scale stays current. It does not replace character-controller or dynamic-body
+interpolation. Call `Transform.ResetPresentationInterpolation()` after a teleport; restore the previous opt-in setting
+when a component that owns the setting is disabled.
+
+`AnimationIkContext.InterpolationAlpha` describes the presentation sample time. `IsFixedUpdate` distinguishes fixed
+procedural evaluation, which reports alpha one and uses current simulation coordinates. Existing
+`AnimatorIkSpace.World` remains simulation-space. Use `AnimatorIkSpace.PresentationWorld` only when the submitted
+targets have been sampled at presentation time; that space converts through the actor's presentation transform during
+frame evaluation.
+
+Keep contact detection, obstacle probes, and authoritative step progression in fixed updates. Cache previous/current
+swing targets and support-local planted anchors. During the IK callback, sample the cached swing at the context alpha;
+reconstruct planted targets from the support's presentation transform. Submit those targets in presentation space.
+Do not raycast simulation terrain using an interpolated target, smooth only the root while retaining current-tick foot
+targets, or blend final graph palettes as a substitute for consistent contact timing.
+
+The native engine and managed assembly must both include these APIs. An older managed assembly or native runtime is
+not a supported combination for a game that opts into them.

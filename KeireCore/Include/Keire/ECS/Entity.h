@@ -81,6 +81,7 @@ namespace Keire
       private:
         friend class Scene;
         friend class Component;
+        friend class TransformComponent;
         friend class Detail::SceneState;
         Entity(WeakRef<Detail::SceneState> state, EntityId id) noexcept;
 

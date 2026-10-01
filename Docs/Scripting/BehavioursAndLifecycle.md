@@ -1,7 +1,23 @@
 # Behaviours And Lifecycle
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 A `Behaviour` is a managed component attached to one entity. Kéire invokes only callbacks that the type overrides,
 tracks update callback availability, and isolates a failing instance rather than taking down every script.
+
+## On This Page
+
+- [Callback Reference](#callback-reference)
+- [Entity And Enabled State](#entity-and-enabled-state)
+- [Choosing An Update Callback](#choosing-an-update-callback)
+- [Coroutines](#coroutines)
+- [Execution Order](#execution-order)
+- [Required Components](#required-components)
+- [Cleanup Is Part Of The Contract](#cleanup-is-part-of-the-contract)
+- [Reload Lifecycle](#reload-lifecycle)
+- [Async Lifetime](#async-lifetime)
+- [Exception Isolation](#exception-isolation)
+- [Delayed entity destruction and logging](#delayed-entity-destruction-and-logging)
 
 ## Callback Reference
 
@@ -18,9 +34,11 @@ tracks update callback availability, and isolates a failing instance rather than
 | `OnCollisionEnter/Stay/Exit()` | For ordered non-trigger physics contacts | Collision gameplay |
 | `OnTriggerEnter/Stay/Exit()` | For ordered trigger contacts | Volumes and detection |
 | `OnAnimationEvent()` | When an animation event crosses the playback cursor | Footsteps, effects, and gameplay markers |
+| `OnProceduralMotionEvent()` | When procedural motion publishes a typed event | Foot plants, takeoff, landing, and state changes |
 | `OnAnimatorIk()` | After pose sampling and before IK goals are solved | Submit frame-specific named IK goals |
 | `OnBeforeReload()` | Before the active managed context is migrated | Release old-context subscriptions and requests |
 | `OnAfterReload()` | After a candidate instance is hydrated and activated | Rebind runtime-only relationships |
+| `OnValidate()` | When managed authoring validation runs | Validate authored fields without starting gameplay |
 
 `Awake` and `Start` do not run again after a successful script reload. Use `OnAfterReload` for work that the replacement
 instance must reacquire.
@@ -43,7 +61,7 @@ when code does not already hold the behaviour instance:
 
 ```csharp
 PauseMenu? menu = Entity.GetComponent<PauseMenu>();
-if (menu.IsValid)
+if (menu is { IsValid: true })
     menu.Enabled = false;
 ```
 

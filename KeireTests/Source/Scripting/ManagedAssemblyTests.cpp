@@ -872,6 +872,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "[SerializeField] public bool DisableObserved = false; "
                "[SerializeField] public int RuntimeServiceTicks = -1; "
                "[SerializeField] public bool AnimatorIkObserved = false; "
+               "[SerializeField] public float AnimatorIkAlpha = -1; "
+               "[SerializeField] public bool AnimatorIkFixed = false; "
+               "[SerializeField] public bool PresentationOptInObserved = false; "
                "[SerializeField] public bool IkMissingAnimatorRejected = false; "
                "[SerializeField] public bool IkInvalidUpdateRejected = false; "
                "private Animator? ikAnimator; "
@@ -942,6 +945,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "animator.ClearIK(\"Hand \\u00e9\\U0001F590\"); animator.ClearIK(\"Spine\"); } } "
                "protected override void OnAnimatorIk(AnimationIkContext context) { "
                "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; "
+               "AnimatorIkAlpha = context.InterpolationAlpha; AnimatorIkFixed = context.IsFixedUpdate; "
+               "Transform.FixedPresentationInterpolation = true; "
+               "PresentationOptInObserved = Transform.FixedPresentationInterpolation; "
+               "Transform.FixedPresentationInterpolation = false; "
                "var animator = GetComponent<Animator>(); if (animator == null) { "
                "try { ikAnimator?.SetTwoBoneIK(\"Hand \\u00e9\\U0001F590\", \"Root\", \"Middle\", \"End\", "
                "default, default); } catch (System.InvalidOperationException) { "
@@ -1441,12 +1448,16 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     CHECK(std::get<bool>(disabledResults.at("DisableObserved")));
     runtimeComponent->SetEnabled(true);
 
-    CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = 0.625F}));
+    CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(
+        scriptedEntity.Id(), {.LayerWeight = 0.625F, .InterpolationAlpha = 0.35F, .IsFixedUpdate = true}));
     const auto ikResults = registration->Serialize(*runtimeComponent);
     REQUIRE(ikResults.contains("AnimatorIkObserved"));
     REQUIRE(ikResults.contains("AnimatorIkWeight"));
     CHECK(std::get<bool>(ikResults.at("AnimatorIkObserved")));
     CHECK(std::get<double>(ikResults.at("AnimatorIkWeight")) == doctest::Approx(0.625));
+    CHECK(std::get<double>(ikResults.at("AnimatorIkAlpha")) == doctest::Approx(0.35));
+    CHECK(std::get<bool>(ikResults.at("AnimatorIkFixed")));
+    CHECK(std::get<bool>(ikResults.at("PresentationOptInObserved")));
 
     const auto runtimeAnimator = runtimeEntity.AddComponent<Keire::AnimatorComponent>();
     REQUIRE(runtimeAnimator);

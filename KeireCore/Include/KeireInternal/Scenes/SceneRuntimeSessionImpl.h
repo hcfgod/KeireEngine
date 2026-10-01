@@ -23,8 +23,11 @@
 #include "KeireInternal/Animation/RiggingMath.h"
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireInternal/Scenes/CharacterGrounding.h"
+#include "KeireInternal/Scenes/FootContactDiagnostics.h"
 #include "KeireInternal/Scenes/FootGroundingSpace.h"
 #include "KeireInternal/Scenes/FootMeshSurface.h"
+#include "KeireInternal/Scenes/NamedIkDiagnostics.h"
+#include "KeireInternal/Scenes/SettledFootPlant.h"
 
 #include <algorithm>
 #include <array>
@@ -114,6 +117,7 @@ namespace Keire
       public:
         struct AnimationRuntimeState final
         {
+            Detail::FootContactDiagnostics ContactDiagnostics;
             struct FootPlantRuntimeState final
             {
                 Detail::AutomaticFootPlantState Plant;
@@ -124,9 +128,15 @@ namespace Keire
                 Vector3 SurfacePosition;
                 Vector3 SurfaceNormal{0.0F, 1.0F, 0.0F};
                 Vector3 ReleasePosition;
+                Vector3 SupportTravelNormal{0.0F, 1.0F, 0.0F};
+                // Authored lift stays in model space; support identity only owns its contact lifetime.
+                std::optional<EntityId> AnimationSupport;
+                std::optional<Detail::FootPlantSupportAnchor> AnimationModelAnchor;
                 Vector3 ReleaseNormal{0.0F, 1.0F, 0.0F};
                 Vector3 AnimationPlantPosition;
                 bool AwaitingAnimationPlant = false;
+                std::optional<EntityId> ReconciliationSupport;
+                Detail::SettledFootSupportState ReconciliationSupportState;
             };
 
             struct RetargetedClip final
@@ -214,6 +224,21 @@ namespace Keire
             std::uint64_t ProceduralTick = 0;
         };
 
+        struct CharacterSupportState final
+        {
+            EntityId Entity;
+            EntityId SupportParent;
+            EntityId RiderParent;
+            WeakRef<ColliderComponent> Collider;
+            WeakRef<CharacterControllerComponent> Controller;
+            PhysicsBodyDefinition Definition;
+            Matrix4 ReferenceWorld;
+            Vector3 LocalAnchor;
+            Vector3 ResolvedRiderPosition;
+            std::uint64_t RiderResetRevision = 0;
+            std::uint64_t SupportResetRevision = 0;
+        };
+
         struct PhysicsRuntimeState final
         {
             PhysicsBodyId Body;
@@ -229,6 +254,8 @@ namespace Keire
             std::shared_ptr<const CookedCollisionMesh> CookedCollision;
             Vector3 ColliderCenter;
             Vector3 WorldScale{1.0F, 1.0F, 1.0F};
+            Matrix4 MovementWorld;
+            CharacterSupportState CharacterSupport;
             Vector3 CharacterVelocity;
             float CharacterRequestedVerticalDisplacement = 0.0F;
             std::uint32_t CharacterMissedWalkableFrames = 0;
@@ -359,10 +386,10 @@ namespace Keire
                                                      const std::map<RigBoneSemantic, std::uint32_t>& semantics,
                                                      AnimationRuntimeState& runtimeState);
 
-        [[nodiscard]] static std::string ApplyIkGoals(const Entity& entity, const SkeletonAsset& skeleton,
-                                                      const AnimatorComponent& animator,
-                                                      std::span<BoneTransform> localPose,
-                                                      const std::map<std::string, std::uint32_t, std::less<>>& indices);
+        [[nodiscard]] std::string ApplyIkGoals(const Entity& entity, const SkeletonAsset& skeleton,
+                                               const AnimatorComponent& animator, std::span<BoneTransform> localPose,
+                                               const std::map<std::string, std::uint32_t, std::less<>>& indices,
+                                               bool presentationEvaluation = true);
 
         [[nodiscard]] std::string ApplyFootGrounding(
             const Entity& entity, const SkeletonAsset& skeleton, const AnimatorFootGroundingSettings& settings,
@@ -407,7 +434,11 @@ namespace Keire
         void SynchronizeAnimation(const float deltaSeconds);
         void AdvanceFrame(float deltaSeconds, float interpolationAlpha);
 
-        void ClearAnimation() noexcept { Animators.clear(); }
+        void ClearAnimation() noexcept
+        {
+            NamedIkInspection.Reset();
+            Animators.clear();
+        }
 
         [[nodiscard]] std::optional<VfxCollisionHit> QueryVfxCollision(const Vector3 start, const Vector3 end) const
         {
@@ -535,7 +566,8 @@ namespace Keire
         [[nodiscard]] std::optional<PhysicsBodyDefinition> BuildPhysicsDefinition(const Entity& entity,
                                                                                   PhysicsRuntimeState& state);
         void InitializePhysics();
-        void SynchronizePhysicsBodies();
+        void SynchronizePhysicsBodies(bool queryOnly = false);
+        void SynchronizePhysicsQueries();
         static void MoveTransformInWorld(const Entity& entity, TransformComponent& transform, Vector3 displacement);
         void ApplyCharacterMovement(float deltaSeconds);
         void UpdateCharacterGrounding();
@@ -545,6 +577,8 @@ namespace Keire
         void StepPhysics(float deltaSeconds);
         void CapturePhysicsPresentationSamples();
         void ApplyPhysicsPresentationInterpolation(float alpha);
+        void CaptureCustomFixedPresentation(bool begin);
+        void ApplyCustomFixedPresentation(float alpha);
         void ClearPhysics() noexcept;
 
         Ref<Scene> Edit;
@@ -559,8 +593,10 @@ namespace Keire
         ScenePlayState PlayState = ScenePlayState::Stopped;
         SceneRuntimeDiagnostic Failure;
         Ref<ScenePresentationRuntime> Presentation;
+        Detail::NamedIkDiagnostics NamedIkInspection;
         std::map<EntityId, std::unique_ptr<AnimationRuntimeState>> Animators;
         std::map<EntityId, PhysicsRuntimeState> PhysicsBodies;
+        std::uint64_t PhysicsQueryRevision = 0;
         std::map<EntityId, VfxRuntimeState> VfxEmitters;
         std::map<AssetId, AssetHandle<VfxSubgraphAsset>> VfxSubgraphs;
         std::map<AssetId, VfxMeshShapeState> VfxMeshShapes;

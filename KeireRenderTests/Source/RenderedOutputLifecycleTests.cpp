@@ -142,6 +142,8 @@ namespace
 
     struct PresentationOrderResults final
     {
+        bool IdleRetirementObserved = false;
+        Keire::RenderStatistics BeforeFlushStatistics;
         Keire::RenderStatistics Statistics;
         std::vector<Keire::RenderFrameTimeline> Timelines;
     };
@@ -210,8 +212,9 @@ namespace
     class PresentationOrderLayer final : public Keire::Layer
     {
       public:
-        explicit PresentationOrderLayer(PresentationOrderResults& results)
-            : Layer("Monotonic rendered presentation"), m_Results(results)
+        explicit PresentationOrderLayer(PresentationOrderResults& results, const bool observeIdleRetirement = false)
+            : Layer("Monotonic rendered presentation"), m_Results(results),
+              m_ObserveIdleRetirement(observeIdleRetirement)
         {
         }
 
@@ -241,6 +244,23 @@ namespace
                 ++m_Submitted;
                 return;
             }
+            if (m_ObserveIdleRetirement)
+            {
+                // Stay inside the owner callback: no subsequent EndFrame, dispatch, readback or Flush can
+                // supply queue work while the render thread retires the final actual GPU submissions.
+                const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+                do
+                {
+                    m_Results.BeforeFlushStatistics = renderer->Statistics();
+                    if (m_Results.BeforeFlushStatistics.RetiredFrames == frameCount &&
+                        m_Results.BeforeFlushStatistics.OutstandingFrames == 0U)
+                    {
+                        m_Results.IdleRetirementObserved = true;
+                        break;
+                    }
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                } while (std::chrono::steady_clock::now() < deadline);
+            }
             renderer->Flush();
             m_Results.Statistics = renderer->Statistics();
             m_Results.Timelines = renderer->RecentFrameTimelines();
@@ -257,6 +277,7 @@ namespace
 
       private:
         PresentationOrderResults& m_Results;
+        bool m_ObserveIdleRetirement = false;
         Keire::Ref<Keire::Scene> m_Scene;
         Keire::Ref<Keire::RenderView> m_View;
         std::uint32_t m_Submitted = 0U;
@@ -1518,6 +1539,28 @@ TEST_CASE("rendered depths one through three publish every accepted frame in mon
             CHECK_FALSE(results.Timelines[index].Cancelled);
             CHECK(results.Timelines[index].SubmitToPresentMilliseconds >= 0.0F);
         }
+    }
+}
+
+TEST_CASE("rendered idle GPU completion retires every slot without further submission or Flush")
+{
+    for (const auto depth : {1U, 2U, 3U})
+    {
+        CAPTURE(depth);
+        PresentationOrderResults results;
+        auto specification = RenderTestSpecification();
+        specification.Render.MaximumFramesInFlight = depth;
+        Keire::Application application(specification);
+        (void)application.PushLayer(std::make_unique<PresentationOrderLayer>(results, true));
+        CHECK(application.Run() == 0);
+        CHECK(results.IdleRetirementObserved);
+        CHECK(results.BeforeFlushStatistics.AcceptedFrames == 12U);
+        CHECK(results.BeforeFlushStatistics.PresentedFrames == 12U);
+        CHECK(results.BeforeFlushStatistics.RetiredFrames == 12U);
+        CHECK(results.BeforeFlushStatistics.CancelledFrames == 0U);
+        CHECK(results.BeforeFlushStatistics.OutstandingFrames == 0U);
+        CHECK(results.Statistics.RetiredFrames == results.BeforeFlushStatistics.RetiredFrames);
+        CHECK(results.Statistics.FramesInFlightHighWaterMark <= depth);
     }
 }
 

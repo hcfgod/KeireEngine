@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -417,4 +418,84 @@ TEST_CASE("present modes GPU cycle supported swapchains across real frames" * do
     Keire::Application application(specification);
     (void)application.PushLayer(std::make_unique<PresentModeGpuLayer>());
     CHECK(application.Run() == 0);
+}
+
+namespace
+{
+    struct RenderCpuPublicationProbe final
+    {
+        Keire::RenderStatistics Statistics;
+        std::vector<Keire::RenderFrameTimeline> Timelines;
+        bool Flushed = false;
+    };
+
+    class RenderCpuPublicationLayer final : public Keire::Layer
+    {
+      public:
+        explicit RenderCpuPublicationLayer(RenderCpuPublicationProbe& probe)
+            : Layer("Render CPU publication"), m_Probe(probe)
+        {
+        }
+
+      protected:
+        void OnUpdate(const Keire::Time&) override
+        {
+            if (++m_Frames == 8U)
+                Owner().RequestExit();
+        }
+        void OnDetach() noexcept override
+        {
+            try
+            {
+                const auto renderer = Owner().Renderer();
+                renderer->Flush();
+                m_Probe.Statistics = renderer->Statistics();
+                m_Probe.Timelines = renderer->RecentFrameTimelines();
+                m_Probe.Flushed = true;
+            }
+            catch (...)
+            {
+                // The test asserts successful capture outside noexcept teardown.
+            }
+        }
+
+      private:
+        RenderCpuPublicationProbe& m_Probe;
+        unsigned m_Frames = 0;
+    };
+} // namespace
+
+TEST_CASE("render CPU GPU publication matches its exact retired frame at depths one through three" * doctest::skip())
+{
+    SDL_ResetHint(SDL_HINT_VIDEO_DRIVER);
+    REQUIRE(SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), "SDL_VIDEODRIVER"));
+    for (const auto depth : {1U, 2U, 3U})
+    {
+        CAPTURE(depth);
+        auto specification = PublicRenderContractSpecification();
+        specification.MainWindow.Visible = true;
+        specification.Render.Mode = Keire::RenderMode::Rendered;
+        specification.Render.MaximumFramesInFlight = depth;
+        specification.Render.EnableGpuValidation = true;
+        specification.Ui.Mode = Keire::UiMode::Rendered;
+        RenderCpuPublicationProbe probe;
+        {
+            Keire::Application application(specification);
+            (void)application.PushLayer(std::make_unique<RenderCpuPublicationLayer>(probe));
+            CHECK(application.Run() == 0);
+        }
+        REQUIRE(probe.Flushed);
+        REQUIRE(probe.Statistics.Frame != 0);
+        CHECK(probe.Statistics.OutstandingFrames == 0);
+        const auto found =
+            std::ranges::find(probe.Timelines, probe.Statistics.Frame, &Keire::RenderFrameTimeline::Frame);
+        REQUIRE(found != probe.Timelines.end());
+        CHECK_FALSE(found->Cancelled);
+        CHECK(found->Presented);
+        CHECK(std::isfinite(probe.Statistics.RenderCpuMilliseconds));
+        CHECK(probe.Statistics.RenderCpuMilliseconds > 0.0F);
+        CHECK(probe.Statistics.RenderCpuMilliseconds == found->RenderCpuMilliseconds);
+        CHECK(probe.Statistics.SubmitToPresentMilliseconds == found->SubmitToPresentMilliseconds);
+        CHECK(probe.Statistics.RenderCpuMilliseconds >= probe.Statistics.SubmitToPresentMilliseconds);
+    }
 }

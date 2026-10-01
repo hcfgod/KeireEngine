@@ -595,6 +595,12 @@ public sealed class Transform : Component
     }
     public Vector3 PresentationPosition => NativeRuntime.GetPresentationWorldPosition(Entity);
     public Quaternion PresentationRotation => NativeRuntime.GetPresentationWorldRotation(Entity);
+    /// <summary>Runtime-only interpolation for fixed-step position and rotation; physics-owned presentation takes precedence.</summary>
+    public bool FixedPresentationInterpolation
+    {
+        get => NativeRuntime.GetFixedPresentationInterpolation(Entity);
+        set => NativeRuntime.SetFixedPresentationInterpolation(Entity, value);
+    }
     public Vector3 Forward => Rotation * Vector3.Forward;
     public Vector3 Right => Rotation * Vector3.Right;
     public Vector3 Up => Rotation * Vector3.Up;

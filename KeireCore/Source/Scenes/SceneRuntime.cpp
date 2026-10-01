@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <chrono>
 #include <cmath>
 #include <exception>
@@ -336,6 +337,13 @@ namespace Keire
         std::vector<ScenePhysicsQueryHit> result;
         if (!m_Impl->PhysicsWorldService)
             return result;
+        const auto directionSquared = query.Direction.X * query.Direction.X + query.Direction.Y * query.Direction.Y +
+                                      query.Direction.Z * query.Direction.Z;
+        if (!Math::IsFinite(query.Origin) || !Math::IsFinite(query.Direction) ||
+            !std::isfinite(query.MaximumDistance) || query.MaximumDistance <= 0 ||
+            directionSquared <= std::numeric_limits<float>::epsilon() || !std::has_single_bit(query.Layer))
+            throw std::invalid_argument("Physics ray query is invalid.");
+        m_Impl->SynchronizePhysicsQueries();
         for (const auto& hit : m_Impl->PhysicsWorldService->RayCast(query))
         {
             const auto entity = m_Impl->EntityForBody(hit.Body);
@@ -351,6 +359,15 @@ namespace Keire
         m_Impl->RequireOwner("CastCapsule");
         if (!m_Impl->PhysicsWorldService)
             return std::nullopt;
+        const auto displacementSquared = query.Displacement.X * query.Displacement.X +
+                                         query.Displacement.Y * query.Displacement.Y +
+                                         query.Displacement.Z * query.Displacement.Z;
+        if (!Math::IsFinite(query.Origin) || !Math::IsFinite(query.Rotation) || !Math::IsFinite(query.Displacement) ||
+            !std::isfinite(query.Radius) || query.Radius <= 0 || !std::isfinite(query.Height) ||
+            query.Height < 2 * query.Radius || displacementSquared <= std::numeric_limits<float>::epsilon() ||
+            !std::has_single_bit(query.Layer))
+            throw std::invalid_argument("Physics capsule cast is invalid.");
+        m_Impl->SynchronizePhysicsQueries();
         auto candidate = query;
         if (ignoredEntity)
         {
@@ -369,6 +386,10 @@ namespace Keire
         std::vector<EntityId> result;
         if (!m_Impl->PhysicsWorldService)
             return result;
+        if (!Math::IsFinite(query.Center) || !std::isfinite(query.Radius) || query.Radius <= 0 ||
+            !std::has_single_bit(query.Layer))
+            throw std::invalid_argument("Physics sphere overlap is invalid.");
+        m_Impl->SynchronizePhysicsQueries();
         auto candidate = query;
         if (ignoredEntity)
         {
@@ -468,13 +489,19 @@ namespace Keire
             return false;
         if (!std::isfinite(fixedDeltaSeconds) || fixedDeltaSeconds <= 0.0F)
             throw std::invalid_argument("Scene step delta must be finite and positive.");
-        m_Impl->Invoke("FixedUpdate", [&] { m_Impl->Runtime->FixedUpdate(fixedDeltaSeconds); });
+        m_Impl->Invoke("Fixed presentation begin", [&] { m_Impl->CaptureCustomFixedPresentation(true); });
+        if (m_Impl->PlayState != ScenePlayState::Faulted)
+            m_Impl->Invoke("FixedUpdate", [&] { m_Impl->Runtime->FixedUpdate(fixedDeltaSeconds); });
         if (m_Impl->PlayState != ScenePlayState::Faulted)
             m_Impl->Invoke("Physics", [&] { m_Impl->StepPhysics(fixedDeltaSeconds); });
         if (m_Impl->PlayState != ScenePlayState::Faulted)
             m_Impl->Invoke("Procedural Animation", [&] { m_Impl->AdvanceProceduralAnimation(fixedDeltaSeconds); });
         if (m_Impl->PlayState != ScenePlayState::Faulted)
-            m_Impl->AdvanceFrame(fixedDeltaSeconds, 1.0F);
+        {
+            m_Impl->Invoke("Fixed presentation capture", [&] { m_Impl->CaptureCustomFixedPresentation(false); });
+            if (m_Impl->PlayState != ScenePlayState::Faulted)
+                m_Impl->AdvanceFrame(fixedDeltaSeconds, 1.0F);
+        }
         return m_Impl->PlayState != ScenePlayState::Faulted;
     }
 
@@ -483,11 +510,15 @@ namespace Keire
         m_Impl->RequireOwner("FixedUpdate");
         if (m_Impl->PlayState == ScenePlayState::Playing)
         {
-            m_Impl->Invoke("FixedUpdate", [&] { m_Impl->Runtime->FixedUpdate(deltaSeconds); });
+            m_Impl->Invoke("Fixed presentation begin", [&] { m_Impl->CaptureCustomFixedPresentation(true); });
+            if (m_Impl->PlayState != ScenePlayState::Faulted)
+                m_Impl->Invoke("FixedUpdate", [&] { m_Impl->Runtime->FixedUpdate(deltaSeconds); });
             if (m_Impl->PlayState != ScenePlayState::Faulted)
                 m_Impl->Invoke("Physics", [&] { m_Impl->StepPhysics(deltaSeconds); });
             if (m_Impl->PlayState != ScenePlayState::Faulted)
                 m_Impl->Invoke("Procedural Animation", [&] { m_Impl->AdvanceProceduralAnimation(deltaSeconds); });
+            if (m_Impl->PlayState != ScenePlayState::Faulted)
+                m_Impl->Invoke("Fixed presentation capture", [&] { m_Impl->CaptureCustomFixedPresentation(false); });
         }
     }
 
@@ -502,15 +533,61 @@ namespace Keire
             m_Impl->AdvanceFrame(deltaSeconds, interpolationAlpha);
     }
 
+    void SceneRuntimeSession::Impl::CaptureCustomFixedPresentation(const bool begin)
+    {
+        for (const auto entity : Runtime->FixedPresentationEntities())
+        {
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!transform || !transform->FixedPresentationInterpolation())
+                continue;
+            const auto rigidBody = entity.GetComponent<RigidBodyComponent>();
+            const auto character = entity.GetComponent<CharacterControllerComponent>();
+            const auto collider = entity.GetComponent<ColliderComponent>();
+            const bool physicsOwned =
+                (character && character->Enabled()) ||
+                (collider && collider->Enabled() && rigidBody && rigidBody->Motion() == PhysicsMotionType::Dynamic);
+            if (!entity.ActiveInHierarchy() || physicsOwned)
+                transform->ClearRuntimeFixedPresentation();
+            else if (begin)
+                transform->BeginRuntimeFixedPresentationSample();
+            else
+                transform->EndRuntimeFixedPresentationSample();
+        }
+    }
+
+    void SceneRuntimeSession::Impl::ApplyCustomFixedPresentation(const float alpha)
+    {
+        for (const auto entity : Runtime->FixedPresentationEntities())
+        {
+            const auto transform = entity.GetComponent<TransformComponent>();
+            if (!transform || !transform->FixedPresentationInterpolation())
+                continue;
+            const auto rigidBody = entity.GetComponent<RigidBodyComponent>();
+            const auto character = entity.GetComponent<CharacterControllerComponent>();
+            const auto collider = entity.GetComponent<ColliderComponent>();
+            const bool physicsOwned =
+                (character && character->Enabled()) ||
+                (collider && collider->Enabled() && rigidBody && rigidBody->Motion() == PhysicsMotionType::Dynamic);
+            if (!entity.ActiveInHierarchy() || physicsOwned)
+                transform->ClearRuntimeFixedPresentation();
+            else
+                transform->ApplyRuntimeFixedPresentation(alpha);
+        }
+    }
+
     void SceneRuntimeSession::Impl::AdvanceFrame(const float deltaSeconds, const float interpolationAlpha)
     {
         PresentationInterpolationAlpha = interpolationAlpha;
         ApplyPhysicsPresentationInterpolation(interpolationAlpha);
-        Invoke("Update", [&] { Runtime->Update(deltaSeconds); });
+        Invoke("Fixed presentation", [&] { ApplyCustomFixedPresentation(interpolationAlpha); });
+        if (PlayState != ScenePlayState::Faulted)
+            Invoke("Update", [&] { Runtime->Update(deltaSeconds); });
         if (PlayState != ScenePlayState::Faulted)
             Invoke("Animation", [&] { SynchronizeAnimation(deltaSeconds); });
         if (PlayState != ScenePlayState::Faulted)
             Invoke("LateUpdate", [&] { Runtime->LateUpdate(); });
+        if (NamedIkInspection.Enabled())
+            Invoke("Named IK inspection", [&] { NamedIkInspection.Observe(deltaSeconds); });
         if (PlayState != ScenePlayState::Faulted)
             Invoke("VFX", [&] { SynchronizeVfx(deltaSeconds); });
         if (Presentation && PlayState != ScenePlayState::Faulted)

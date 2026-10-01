@@ -85,6 +85,9 @@ float3 ApplyTaa(const float2 uv, const float3 center)
     if (ToneMapParameters.w < 0.5F)
         return center;
 
+    // Reuse the existing center only at identical UVs; retain the clamped edge sample otherwise.
+    const bool centerUvUnchanged = all(ClampSceneUv(uv) == uv);
+
     // Extend foreground motion across the one-pixel silhouette neighborhood. Background zero velocity
     // otherwise leaves stale edge history behind when a moving object reveals a pixel.
     float2 velocity = VelocityTexture.SampleLevel(VelocitySampler, uv, 0.0F).xy;
@@ -94,6 +97,8 @@ float3 ApplyTaa(const float2 uv, const float3 center)
         [unroll]
         for (int vx = -1; vx <= 1; ++vx)
         {
+            if (vx == 0 && vy == 0 && centerUvUnchanged)
+                continue;
             const float2 candidate = VelocityTexture.SampleLevel(VelocitySampler,
                 ClampSceneUv(uv + ToneMapParameters.xy * float2(vx, vy)), 0.0F).xy;
             if (dot(candidate, candidate) > dot(velocity, velocity))
@@ -112,6 +117,8 @@ float3 ApplyTaa(const float2 uv, const float3 center)
         [unroll]
         for (int x = -1; x <= 1; ++x)
         {
+            if (x == 0 && y == 0 && centerUvUnchanged)
+                continue;
             const float3 sampleValue = SampleToneMapped(ClampSceneUv(uv + ToneMapParameters.xy * float2(x, y)));
             neighborhoodMinimum = min(neighborhoodMinimum, sampleValue);
             neighborhoodMaximum = max(neighborhoodMaximum, sampleValue);

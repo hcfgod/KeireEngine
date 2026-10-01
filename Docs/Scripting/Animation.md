@@ -1,8 +1,25 @@
 # Animation From C#
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Managed animation controls Animator Controller states, parameters, layers, playback state, events, procedural
 locomotion intent/state, and named IK goals. Scripts refer to engine-owned assets and scene components; they do not own
 skeletons, clips, motion profiles, or native animator instances.
+
+## On This Page
+
+- [Animation Graph Prerequisites](#animation-graph-prerequisites)
+- [Animation Asset References](#animation-asset-references)
+- [Animator Component](#animator-component)
+- [Playback Arguments](#playback-arguments)
+- [Parameters](#parameters)
+- [Layers](#layers)
+- [Animation Events](#animation-events)
+- [Procedural Humanoid Locomotion](#procedural-humanoid-locomotion)
+- [Two-Bone IK](#two-bone-ik)
+- [FABRIK IK](#fabrik-ik)
+- [Runtime Foot Grounding Weight](#runtime-foot-grounding-weight)
+- [Complete Animation-Graph Controller Pattern](#complete-animation-graph-controller-pattern)
 
 ## Animation Graph Prerequisites
 

@@ -294,6 +294,10 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeGetPresentationWorldRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ResetPresentationInterpolationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeResetPresentationInterpolation));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetFixedPresentationInterpolationIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetFixedPresentationInterpolation));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetFixedPresentationInterpolationIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetFixedPresentationInterpolation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "GetWorldRotationIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeGetWorldRotation));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "SetWorldPositionIcall",

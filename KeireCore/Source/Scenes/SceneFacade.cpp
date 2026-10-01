@@ -47,6 +47,7 @@ namespace Keire
     void Scene::SetName(std::string name) { m_Impl->State->SetName(std::move(name)); }
     bool Scene::IsOpen() const noexcept { return m_Impl->State->IsOpen(); }
     bool Scene::Dirty() const noexcept { return m_Impl->State->Dirty(); }
+    std::uint64_t Scene::PhysicsRevision() const { return m_Impl->State->PhysicsRevision(); }
     void Scene::MarkDirty() noexcept { m_Impl->State->MarkDirty(); }
     void Scene::MarkSaved() noexcept { m_Impl->State->MarkSaved(); }
     std::size_t Scene::ObjectCount() const noexcept { return m_Impl->State->Count(); }
@@ -121,6 +122,7 @@ namespace Keire
     }
 
     std::vector<Entity> Scene::Entities() const { return m_Impl->State->Entities(); }
+    std::vector<Entity> Scene::FixedPresentationEntities() const { return m_Impl->State->FixedPresentationEntities(); }
     Entity Scene::FindEntity(const EntityId id) const noexcept { return m_Impl->State->Find(id); }
     Entity Scene::CreateEntity(std::string name, const Entity& parent)
     {

@@ -1,7 +1,17 @@
 # Scenes And Render Settings
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Kéire exposes scene replacement and render-environment control through value-only managed APIs. Scene operations never
 expose a native `Scene` pointer, and runtime render changes never mutate the authored project settings document.
+
+## On This Page
+
+- [Inspect The Runtime World](#inspect-the-runtime-world)
+- [Load, Activate, And Unload Scenes](#load-activate-and-unload-scenes)
+- [Query Scopes And Persistent Objects](#query-scopes-and-persistent-objects)
+- [Runtime Render Environment](#runtime-render-environment)
+- [Failure And Lifetime Rules](#failure-and-lifetime-rules)
 
 ## Inspect The Runtime World
 
@@ -9,8 +19,8 @@ expose a native `Scene` pointer, and runtime render changes never mutate the aut
 bounded snapshot of the scenes owned by the current runtime context.
 
 ```csharp
-Scene active = SceneManager.ActiveScene;
-if (active.IsValid)
+Scene? active = SceneManager.ActiveScene;
+if (active is { IsValid: true })
     Debug.Log($"Active scene: {active.Asset}");
 ```
 
@@ -35,6 +45,8 @@ public sealed class LevelExit : Behaviour
 
     private IEnumerator ChangeLevel()
     {
+        if (_destination is not { IsValid: true })
+            yield break;
         SceneLoadOperation load = SceneManager.LoadSceneAsync(_destination, SceneLoadMode.Additive);
         yield return load;
 
@@ -44,7 +56,7 @@ public sealed class LevelExit : Behaviour
             yield break;
         }
 
-        if (!SceneManager.SetActiveScene(load.Scene))
+        if (load.Scene is not { IsLoaded: true } scene || !SceneManager.SetActiveScene(scene))
             Debug.Error("The loaded scene could not be queued for activation.");
     }
 }

@@ -1,7 +1,22 @@
 # Audio From C#
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Managed audio supports typed clip and mixer references, stateful Audio Source control, one-call playback options, and
 playback status. Audio data and native voices remain engine-owned.
+
+## On This Page
+
+- [Import And Scene Setup](#import-and-scene-setup)
+- [Reference Audio Correctly](#reference-audio-correctly)
+- [Stateful Audio Source](#stateful-audio-source)
+- [Playback Patterns](#playback-patterns)
+- [Audio Playback Options](#audio-playback-options)
+- [Mixer And Bus References](#mixer-and-bus-references)
+- [Listener And Reverb Zone Control](#listener-and-reverb-zone-control)
+- [Animation-Driven Audio](#animation-driven-audio)
+- [UI Audio](#ui-audio)
+- [Common Errors](#common-errors)
 
 ## Import And Scene Setup
 

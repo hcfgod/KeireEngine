@@ -46,9 +46,9 @@ namespace
                                 Keire::Ref<Keire::SkeletonAsset> sourceSkeleton = {},
                                 Keire::Ref<Keire::AnimationClipAsset> sourceClip = {},
                                 Keire::Ref<Keire::SkinnedMeshAsset> sourceSkin = {},
-                                Keire::Ref<Keire::MeshAsset> sourceMesh = {})
+                                Keire::Ref<Keire::MeshAsset> sourceMesh = {}, const float sourceSpeed = 1.0F)
             : SourceSkeleton(std::move(sourceSkeleton)), SourceClip(std::move(sourceClip)),
-              SourceSkin(std::move(sourceSkin)), SourceMesh(std::move(sourceMesh))
+              SourceSkin(std::move(sourceSkin)), SourceMesh(std::move(sourceMesh)), SourceSpeed(sourceSpeed)
         {
             Scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
             Character = Scene->CreateEntity("Character");
@@ -172,7 +172,7 @@ namespace
             REQUIRE(clip);
             Keire::AnimationGraphDefinition graph;
             graph.EntryState = "Move";
-            graph.States = {{"Move", clip->Id}};
+            graph.States = {{"Move", clip->Id, SourceSpeed}};
             Write("Controller.supportgraph", Keire::AnimationGraphAsset::Encode(graph));
             const auto imported = Database->ImportAll();
             const auto controller = Database->Find("Controller.supportgraph");
@@ -234,6 +234,7 @@ namespace
         Keire::Ref<Keire::AnimationClipAsset> SourceClip;
         Keire::Ref<Keire::SkinnedMeshAsset> SourceSkin;
         Keire::Ref<Keire::MeshAsset> SourceMesh;
+        float SourceSpeed = 1.0F;
     };
 } // namespace
 
@@ -725,24 +726,37 @@ TEST_CASE("Reachable planted feet resist horizontal stance drift without repeate
 
 TEST_CASE("Raised support does not suppress a deliberate foot lift or reacquire a swinging foot")
 {
-    SupportFixture fixture(false, false, 0.1F);
+    // Sample an authored pelvis lift; moving the actor Transform represents carrier motion instead.
+    Keire::AnimationTrack lift;
+    lift.Bone = 0;
+    lift.Keys = {{0.0F, {{0, 2, 0}, {}, {1, 1, 1}}}, {1.0F, {{0, 3, 0}, {}, {1, 1, 1}}}};
+    const auto clip = Keire::AnimationClipAsset::Decode(
+        Keire::AnimationClipAsset::Encode(Keire::AssetId::Generate(), 1.0F, std::span(&lift, 1), {}, false));
+    SupportFixture fixture(false, false, 0.1F, {}, clip);
+    fixture.Animator->SetSpeed(0);
+    fixture.Animator->Play("Move", {}, 0);
+    fixture.Tick();
     const auto transform =
         fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id()).GetComponent<Keire::TransformComponent>();
     for (const float z : {0.0F, 0.05F, 0.1F})
     {
-        transform->SetLocalPosition({0.0F, 0.22F, z});
+        transform->SetLocalPosition({0.0F, 0.0F, z});
+        fixture.Animator->Play("Move", {}, 0.22F);
         fixture.Tick();
-        CHECK(fixture.FootY() + 0.22F == doctest::Approx(0.22F).epsilon(0.001F));
+        CHECK(fixture.FootY() == doctest::Approx(0.22F).epsilon(0.001F));
     }
-    transform->SetLocalPosition({0.0F, 0.07F, 0.1F});
-    fixture.Tick();
-    CHECK(fixture.FootY() + 0.07F == doctest::Approx(0.15F).epsilon(0.001F));
     transform->SetLocalPosition({0.0F, 0.0F, 0.1F});
+    fixture.Animator->Play("Move", {}, 0.07F);
     fixture.Tick();
     CHECK(fixture.FootY() == doctest::Approx(0.15F).epsilon(0.001F));
-    transform->SetLocalPosition({0.0F, 0.22F, 0.1F});
+    transform->SetLocalPosition({0.0F, 0.0F, 0.1F});
+    fixture.Animator->Play("Move", {}, 0);
     fixture.Tick();
-    CHECK(fixture.FootY() + 0.22F == doctest::Approx(0.22F).epsilon(0.001F));
+    CHECK(fixture.FootY() == doctest::Approx(0.15F).epsilon(0.001F));
+    transform->SetLocalPosition({0.0F, 0.0F, 0.1F});
+    fixture.Animator->Play("Move", {}, 0.22F);
+    fixture.Tick();
+    CHECK(fixture.FootY() == doctest::Approx(0.22F).epsilon(0.001F));
 }
 
 TEST_CASE("Unsupported knee stabilization respects disabled controls and partial grounding weight")
@@ -1176,12 +1190,19 @@ TEST_CASE("Repairing grounding after an invalid mapping acquires contacts at the
 
 TEST_CASE("Descending swing respects raised clearance without a late forced-plant jump")
 {
+    Keire::AnimationTrack lift;
+    lift.Bone = 0;
+    lift.Keys = {{0.0F, {{0, 2, 0}, {}, {1, 1, 1}}}, {1.0F, {{0, 3, 0}, {}, {1, 1, 1}}}};
+    const auto clip = Keire::AnimationClipAsset::Decode(
+        Keire::AnimationClipAsset::Encode(Keire::AssetId::Generate(), 1.0F, std::span(&lift, 1), {}, false));
+    // A swing is authored motion relative to the actor; actor translation represents carrier travel.
     for (const int hz : {30, 60, 144})
         for (const float response : {0.0F, 0.12F})
         {
             CAPTURE(hz);
             CAPTURE(response);
-            SupportFixture fixture(false, false, 0.1F);
+            SupportFixture fixture(false, false, 0.1F, {}, clip);
+            fixture.Animator->SetSpeed(0);
             auto settings = fixture.Animator->FootGrounding();
             settings.ResponseTime = response;
             settings.PlantDistance = 0.015F;
@@ -1189,16 +1210,17 @@ TEST_CASE("Descending swing respects raised clearance without a late forced-plan
             fixture.Animator->SetFootGrounding(settings);
             const auto actor = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
             const auto transform = actor.GetComponent<Keire::TransformComponent>();
-            transform->SetLocalPosition({0.0F, 0.22F, 0.0F});
+            fixture.Animator->Play("Move", {}, .22F);
             for (int frame = 0; frame < hz; ++frame)
                 fixture.Tick(1.0F / static_cast<float>(hz));
-            float previousY = fixture.FootY() + 0.22F;
+            float previousY = fixture.FootY();
             for (int frame = 1; frame <= hz; ++frame)
             {
                 CAPTURE(frame);
                 const float fraction = static_cast<float>(frame) / static_cast<float>(hz);
                 const float y = 0.22F - 0.14F * fraction;
-                transform->SetLocalPosition({0.0F, y, 0.1F * fraction});
+                transform->SetLocalPosition({0.0F, 0.0F, 0.1F * fraction});
+                fixture.Animator->Play("Move", {}, y);
                 fixture.Tick(1.0F / static_cast<float>(hz));
                 const auto foot = Keire::Math::TransformPoint(
                     transform->WorldMatrix(), fixture.Animator->RuntimeDebugSnapshot()->Pose[3].WorldPosition);
@@ -1208,10 +1230,11 @@ TEST_CASE("Descending swing respects raised clearance without a late forced-plan
                 CHECK(std::abs(foot.Y - previousY) <= 0.2F / static_cast<float>(hz) + 0.0051F);
                 previousY = foot.Y;
             }
-            transform->SetLocalPosition({0.0F, 0.22F, 0.2F});
+            transform->SetLocalPosition({0.0F, 0.0F, 0.2F});
+            fixture.Animator->Play("Move", {}, .22F);
             for (int frame = 0; frame < hz; ++frame)
                 fixture.Tick(1.0F / static_cast<float>(hz));
-            CHECK(fixture.FootY() + 0.22F == doctest::Approx(0.22F).epsilon(0.005F));
+            CHECK(fixture.FootY() == doctest::Approx(0.22F).epsilon(0.005F));
         }
 }
 TEST_CASE("Recovering an unavailable skinned mesh acquires foot contacts at the current actor position")
@@ -1319,161 +1342,579 @@ TEST_CASE("Shared-scene IK actors isolate goals and recover independently after 
     }
 }
 
+namespace
+{
+    void CheckAnimatedFootMesh(const bool actualGame)
+    {
+        const auto path =
+            std::filesystem::absolute(actualGame ? "Build/Validation/AsterReachPoseFixture/CesiumMan.glb"
+                                                 : "Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb");
+        if (!std::filesystem::exists(path))
+        {
+            MESSAGE("Optional CesiumMan fixture is unavailable.");
+            return;
+        }
+        std::ifstream input(path, std::ios::binary | std::ios::ate);
+        REQUIRE(input.is_open());
+        std::vector<std::byte> bytes(static_cast<std::size_t>(input.tellg()));
+        input.seekg(0);
+        input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        REQUIRE(input.good());
+        Keire::AssetImportContext context;
+        context.Asset = Keire::AssetId::Generate();
+        context.SourcePath = path;
+        context.RelativePath = path.filename();
+        context.ImportSettings["materialImport"] = std::string("none");
+        context.ImportSettings["rigSource"] = std::string("embedded");
+        std::map<std::string, Keire::AssetId> identities;
+        context.ResolveSubAssetId = [&identities](const std::string_view key)
+        { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
+        const auto imported = Keire::CreateMeshAssetImporter().ContextualImport(context, bytes);
+        const auto find = [&](const Keire::AssetTypeId type)
+        {
+            const auto found = std::ranges::find(imported.SubAssets, type, &Keire::AssetGeneratedSubAsset::Type);
+            REQUIRE(found != imported.SubAssets.end());
+            return found->Bytes;
+        };
+        const auto skeleton = Keire::SkeletonAsset::Decode(find(Keire::SkeletonAsset::StaticType()));
+        const auto read = [](const std::filesystem::path& source)
+        {
+            std::ifstream stream(source, std::ios::binary | std::ios::ate);
+            REQUIRE(stream.is_open());
+            std::vector<std::byte> contents(static_cast<std::size_t>(stream.tellg()));
+            stream.seekg(0);
+            stream.read(reinterpret_cast<char*>(contents.data()), static_cast<std::streamsize>(contents.size()));
+            REQUIRE(stream.good());
+            return contents;
+        };
+        const auto clip = Keire::AnimationClipAsset::Decode(
+            actualGame ? read("Build/Validation/AsterReachPoseFixture/HumanJog_Cesium_QA.keireanim")
+                       : find(Keire::AnimationClipAsset::StaticType()));
+        const auto skin = Keire::SkinnedMeshAsset::Decode(find(Keire::SkinnedMeshAsset::StaticType()));
+        const auto mesh = Keire::MeshAsset::Decode(imported.Bytes);
+        int hz = 60;
+        float elevation = 0.08F;
+        float slope = 0;
+        bool grounding = true;
+        bool movingSupport = true;
+        bool horizontalMotion = true;
+        bool verticalMotion = true;
+        SUBCASE("Raised support at 60 Hz") {}
+        SUBCASE("Raised support at 30 Hz") { hz = 30; }
+        SUBCASE("Raised support at 144 Hz") { hz = 144; }
+        SUBCASE("Flat support") { elevation = 0; }
+        SUBCASE("Sloped support") { slope = 10; }
+        SUBCASE("Authored motion reference") { grounding = false; }
+        if (actualGame)
+        {
+            SUBCASE("Authored raised reference at 30 Hz")
+            {
+                grounding = false;
+                hz = 30;
+            }
+            SUBCASE("Authored raised reference at 144 Hz")
+            {
+                grounding = false;
+                hz = 144;
+            }
+            SUBCASE("Authored sloped reference")
+            {
+                grounding = false;
+                slope = 10;
+            }
+            SUBCASE("Static flat support")
+            {
+                elevation = 0;
+                movingSupport = false;
+            }
+            SUBCASE("Static raised support") { movingSupport = false; }
+            SUBCASE("Static sloped support")
+            {
+                slope = 10;
+                movingSupport = false;
+            }
+        }
+        if (actualGame)
+        {
+            SUBCASE("Vertical only sloped support")
+            {
+                slope = 10;
+                horizontalMotion = false;
+            }
+            SUBCASE("Horizontal only sloped support")
+            {
+                slope = 10;
+                verticalMotion = false;
+            }
+            SUBCASE("Authored vertical only sloped reference")
+            {
+                slope = 10;
+                horizontalMotion = false;
+                grounding = false;
+            }
+            SUBCASE("Authored horizontal only sloped reference")
+            {
+                slope = 10;
+                verticalMotion = false;
+                grounding = false;
+            }
+        }
+        CAPTURE(grounding);
+        CAPTURE(movingSupport);
+        CAPTURE(hz);
+        CAPTURE(elevation);
+        CAPTURE(slope);
+        float playbackSpeed = 1.0F;
+        if (actualGame)
+        {
+            const auto graph = Keire::AnimationGraphAsset::Decode(
+                read("Build/Validation/AsterReachPoseFixture/ExplorerLocomotion.keireanimgraph"));
+            REQUIRE(graph->Definition().Layers.size() == 1);
+            const auto& states = graph->Definition().Layers[0].States;
+            const auto run = std::ranges::find(states, std::string("Run"), &Keire::AnimationStateDefinition::Name);
+            REQUIRE(run != states.end());
+            const auto metadata =
+                KeireTests::ReadFile("Build/Validation/AsterReachPoseFixture/HumanJog_Cesium_QA.keireanim.keiremeta");
+            REQUIRE(metadata.find(run->Motion.Clip.ToString()) != std::string::npos);
+            playbackSpeed = run->Speed;
+            CHECK(playbackSpeed == doctest::Approx(.75F));
+        }
+        CAPTURE(playbackSpeed);
+        std::string traceDirectory;
+#if defined(_WIN32)
+        char* environmentValue = nullptr;
+        std::size_t environmentSize = 0;
+        (void)_dupenv_s(&environmentValue, &environmentSize, "KEIRE_IK_TEST_TRACE_DIRECTORY");
+        const std::unique_ptr<char, decltype(&std::free)> ownedEnvironment(environmentValue, &std::free);
+        if (ownedEnvironment)
+            traceDirectory = ownedEnvironment.get();
+#else
+        if (const auto value = std::getenv("KEIRE_IK_TEST_TRACE_DIRECTORY"))
+            traceDirectory = value;
+#endif
+        std::unique_ptr<KeireTests::LogFixture> contactLogs;
+        std::ofstream poseTrace;
+        const auto traceName = "run-hz" + std::to_string(hz) + "-slope" + std::to_string(slope) + "-elev" +
+                               std::to_string(elevation) + "-ground" + std::to_string(grounding) + "-moving" +
+                               std::to_string(movingSupport) + "-x" + std::to_string(horizontalMotion) + "-y" +
+                               std::to_string(verticalMotion);
+        if (actualGame && !traceDirectory.empty())
+        {
+            std::filesystem::create_directories(traceDirectory);
+            contactLogs = std::make_unique<KeireTests::LogFixture>("run-contact-reference");
+            contactLogs->Config.Level = Keire::LogLevel::Trace;
+            Keire::Log::Initialize(contactLogs->Config);
+            poseTrace.open(std::filesystem::path(traceDirectory) / (traceName + ".csv"));
+            REQUIRE(poseTrace.is_open());
+            poseTrace.precision(9);
+            poseTrace
+                << "frame,leg,normalizedTime,supportX,supportY,pelvisX,pelvisY,pelvisZ,hipX,hipY,hipZ,kneeX,kneeY,"
+                   "kneeZ,ankleX,ankleY,ankleZ,thighX,thighY,thighZ,thighW,calfX,calfY,calfZ,calfW,clearance\n";
+        }
+        SupportFixture fixture(false, false, 0.03F, skeleton, clip, skin, mesh, playbackSpeed);
+        auto settings = fixture.Animator->FootGrounding();
+        settings.FootOffset = 0.02F;
+        settings.Enabled = grounding;
+        if (actualGame)
+        {
+            auto definition =
+                Keire::SceneAsset::Decode(read("Build/Validation/AsterReachPoseFixture/StarterScene.keirescene"))
+                    ->Definition();
+            const auto model = std::ranges::find(definition.Objects, std::string("Explorer Model"),
+                                                 &Keire::SceneObjectDefinition::Name);
+            REQUIRE(model != definition.Objects.end());
+            auto object = *model;
+            object.Parent = {};
+            definition.Objects = {object};
+            definition.PrefabInstances.clear();
+            definition.PrefabOverrides.clear();
+            auto sourceScene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), definition);
+            const auto sourceModel = sourceScene->QueryName("Explorer Model");
+            REQUIRE(sourceModel.size() == 1);
+            settings = sourceModel[0].GetComponent<Keire::AnimatorComponent>()->FootGrounding();
+            CHECK(settings.FootOffset == doctest::Approx(.008F));
+            CHECK(settings.ResponseTime == doctest::Approx(.045F));
+            CHECK(settings.MaximumPelvisAdjustment == doctest::Approx(.14F));
+            const auto character = fixture.Session->RuntimeScene()
+                                       ->FindEntity(fixture.Character.Id())
+                                       .GetComponent<Keire::TransformComponent>();
+            character->SetLocalScale(object.Transform.Scale);
+            character->SetLocalRotation(object.Transform.Rotation);
+            CHECK(object.Transform.Scale == Keire::Vector3{1.25F, 1.25F, 1.25F});
+            sourceScene->Close();
+        }
+        settings.Enabled = grounding;
+        fixture.Animator->SetFootGrounding(settings);
+        const auto support = fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id());
+        const auto transform = support.GetComponent<Keire::TransformComponent>();
+        const auto supportRotation = Keire::Math::EulerDegreesToQuaternion({0, 0, slope});
+        transform->SetLocalRotation(supportRotation);
+        const auto normal =
+            Keire::Math::TransformDirection(Keire::Math::ComposeTransform({}, supportRotation, {1, 1, 1}), {0, 1, 0});
+
+        if (actualGame)
+        {
+            auto reset = settings;
+            reset.Enabled = false;
+            fixture.Animator->SetFootGrounding(reset);
+            fixture.Animator->Play("Move", {}, 0);
+            fixture.Session->Update(0, 1);
+            transform->SetLocalPosition(
+                Keire::Detail::IkSubtract({0, elevation, 0}, {normal.X * .5F, normal.Y * .5F, normal.Z * .5F}));
+            fixture.Session->FixedUpdate(1.0F / 60.0F);
+            fixture.Animator->SetFootGrounding(settings);
+            fixture.Animator->Play("Move", {}, 0);
+            fixture.Session->Update(0, 1);
+            REQUIRE(fixture.Animator->RuntimeDebugSnapshot()->Layers[0].NormalizedTime == doctest::Approx(0));
+        }
+        std::vector<Keire::MeshVertex> deformed(mesh->Vertices().size());
+        float worstClearance = 1.0F;
+        float maximumPelvisSpeed = 0;
+        Keire::Vector3 previousPelvis;
+        int worstFrame = 0;
+        float maximumThighStep = 0;
+        float maximumCalfStep = 0;
+        int worstThighFrame = 0;
+        std::array<Keire::Quaternion, 4> previousThighs{};
+        std::array<float, 2> previousFlexion{};
+        float maximumFlexionStep = 0;
+        const std::array<std::string, 4> legBones{"leg_joint_L_1", "leg_joint_R_1", "leg_joint_L_2", "leg_joint_R_2"};
+        double accumulator = 0;
+        float fixedTime = 0;
+        for (int frame = 0; frame < 6 * hz; ++frame)
+        {
+            const auto placeSupport = [&](const float time)
+            {
+                const auto phase = movingSupport ? time * 1.256637F : 0.0F;
+                const float surface = elevation + (verticalMotion ? 0.04F * std::sin(phase) : 0);
+                const Keire::Vector3 point{horizontalMotion ? 0.06F * std::sin(phase) : 0, surface, 0};
+                transform->SetLocalPosition(
+                    Keire::Detail::IkSubtract(point, {normal.X * .5F, normal.Y * .5F, normal.Z * .5F}));
+                return point;
+            };
+            if (contactLogs)
+                Keire::Log::GetCoreLogger().Write(Keire::LogLevel::Trace,
+                                                  Keire::LogMessage("[PoseFixture] frame={} begin", frame));
+            (void)fixture.Assets->PumpCompletions();
+            Keire::Vector3 surfacePoint;
+            if (actualGame)
+            {
+                accumulator += 1.0 / static_cast<double>(hz);
+                while (accumulator + 1e-9 >= 1.0 / 60.0)
+                {
+                    fixedTime += 1.0F / 60.0F;
+                    surfacePoint = placeSupport(fixedTime);
+                    fixture.Session->FixedUpdate(1.0F / 60.0F);
+                    accumulator -= 1.0 / 60.0;
+                }
+                surfacePoint = placeSupport(fixedTime);
+                fixture.Session->Update(1.0F / static_cast<float>(hz),
+                                        std::clamp(static_cast<float>(accumulator * 60.0), 0.0F, 1.0F));
+                REQUIRE(fixture.Session->State() == Keire::ScenePlayState::Playing);
+            }
+            else
+            {
+                surfacePoint = placeSupport(static_cast<float>(frame) / static_cast<float>(hz));
+                fixture.Tick(1.0F / static_cast<float>(hz));
+            }
+            if (actualGame)
+            {
+                INFO(fixture.Animator->RuntimeDiagnostic());
+                REQUIRE(fixture.Animator->RuntimeDiagnostic().empty());
+                const auto expectedPhase = std::fmod((static_cast<float>(frame) + 1.0F) / static_cast<float>(hz) *
+                                                         playbackSpeed / clip->Duration(),
+                                                     1.0F);
+                const auto phaseError =
+                    std::abs(fixture.Animator->RuntimeDebugSnapshot()->Layers[0].NormalizedTime - expectedPhase);
+                CHECK(std::min(phaseError, std::abs(phaseError - 1.0F)) < .0001F);
+            }
+            const auto& pose = fixture.Animator->RuntimeDebugSnapshot()->Pose;
+            REQUIRE(fixture.Animator->SkinPalette().size() == skeleton->Bones().size());
+            Keire::SkinMeshCpu(mesh->Vertices(), skin->Influences8(), fixture.Animator->SkinPalette(), skin->Method(),
+                               deformed);
+            const auto world = fixture.Session->RuntimeScene()
+                                   ->FindEntity(fixture.Character.Id())
+                                   .GetComponent<Keire::TransformComponent>()
+                                   ->PresentationWorldMatrix();
+            float lowest = 1000;
+            for (const auto& vertex : deformed)
+            {
+                REQUIRE(Keire::Math::IsFinite(vertex.Position));
+                lowest = std::min(
+                    lowest, Keire::Detail::IkDot(Keire::Detail::IkSubtract(
+                                                     Keire::Math::TransformPoint(world, vertex.Position), surfacePoint),
+                                                 normal));
+            }
+            if (frame > hz / 2 && lowest < worstClearance)
+            {
+                worstClearance = lowest;
+                worstFrame = frame;
+            }
+            const auto pelvisBone = std::ranges::find(pose, std::string("Skeleton_torso_joint_1"),
+                                                      [](const auto& bone) { return bone.Name; });
+            const auto pelvis = Keire::Math::TransformPoint(world, pelvisBone->WorldPosition);
+            if (frame > hz / 2)
+                maximumPelvisSpeed =
+                    std::max(maximumPelvisSpeed,
+                             Keire::Detail::IkVectorLength(Keire::Detail::IkSubtract(pelvis, previousPelvis)) *
+                                 static_cast<float>(hz));
+            previousPelvis = pelvis;
+            for (std::size_t leg = 0; leg < 2; ++leg)
+            {
+                const auto prefix = std::string(leg == 0 ? "leg_joint_L_" : "leg_joint_R_");
+                const auto joint = [&](const char* suffix)
+                {
+                    return std::ranges::find(pose, prefix + suffix, [](const auto& bone) { return bone.Name; })
+                        ->WorldPosition;
+                };
+                const auto upper = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(joint("2"), joint("1")));
+                const auto lower = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(joint("3"), joint("2")));
+                const auto flexion =
+                    std::acos(std::clamp(Keire::Detail::IkDot(upper, lower), -1.0F, 1.0F)) * 57.2957795F;
+                if (frame > hz / 2)
+                    maximumFlexionStep = std::max(maximumFlexionStep, std::abs(flexion - previousFlexion[leg]));
+                previousFlexion[leg] = flexion;
+                if (poseTrace.is_open())
+                {
+                    const auto bone = [&](const char* suffix) -> const auto&
+                    { return *std::ranges::find(pose, prefix + suffix, [](const auto& item) { return item.Name; }); };
+                    const auto hip = Keire::Math::TransformPoint(world, joint("1"));
+                    const auto knee = Keire::Math::TransformPoint(world, joint("2"));
+                    const auto ankle = Keire::Math::TransformPoint(world, joint("3"));
+                    const auto q = bone("1").LocalTransform.Rotation;
+                    const auto c = bone("2").LocalTransform.Rotation;
+                    poseTrace << frame << ',' << leg << ','
+                              << fixture.Animator->RuntimeDebugSnapshot()->Layers[0].NormalizedTime << ','
+                              << surfacePoint.X << ',' << surfacePoint.Y << ',' << pelvis.X << ',' << pelvis.Y << ','
+                              << pelvis.Z << ',' << hip.X << ',' << hip.Y << ',' << hip.Z << ',' << knee.X << ','
+                              << knee.Y << ',' << knee.Z << ',' << ankle.X << ',' << ankle.Y << ',' << ankle.Z << ','
+                              << q.X << ',' << q.Y << ',' << q.Z << ',' << q.W << ',' << c.X << ',' << c.Y << ',' << c.Z
+                              << ',' << c.W << ',' << lowest << '\n';
+                }
+            }
+            for (std::size_t leg = 0; leg < legBones.size(); ++leg)
+            {
+                const auto thigh = std::ranges::find(pose, legBones[leg], [](const auto& bone) { return bone.Name; });
+                const auto rotation = thigh->LocalTransform.Rotation;
+                const auto& previous = previousThighs[leg];
+                const float dot = std::abs(rotation.X * previous.X + rotation.Y * previous.Y + rotation.Z * previous.Z +
+                                           rotation.W * previous.W);
+                const float step = 2.0F * std::acos(std::min(dot, 1.0F)) * 57.2957795F;
+                if (frame > hz / 2 && leg < 2 && step > maximumThighStep)
+                {
+                    maximumThighStep = step;
+                    worstThighFrame = frame;
+                }
+                if (frame > hz / 2 && leg >= 2)
+                    maximumCalfStep = std::max(maximumCalfStep, step);
+                previousThighs[leg] = rotation;
+            }
+        }
+        MESSAGE("Maximum thigh rotation step=" << maximumThighStep << " frame=" << worstThighFrame);
+        MESSAGE("Maximum knee flexion step=" << maximumFlexionStep);
+        if (!actualGame)
+        {
+            CHECK(maximumThighStep * static_cast<float>(hz) <= 720.0F);
+            // Knee flexion combines the motion of both segments; retain a separate bound from hip swing.
+            CHECK(maximumCalfStep * static_cast<float>(hz) <= 1440.0F);
+            CHECK(maximumFlexionStep * static_cast<float>(hz) <= 1440.0F);
+        }
+        MESSAGE("Actual skinned mesh minimum clearance=" << worstClearance << " worst frame=" << worstFrame
+                                                         << " maximum pelvis speed=" << maximumPelvisSpeed);
+        if (grounding)
+            CHECK(worstClearance >= 0.0F);
+        // Includes the authored vertical gait plus support acquisition/release, not just platform velocity.
+        if (!actualGame)
+            CHECK(maximumPelvisSpeed < 0.75F);
+        if (contactLogs)
+        {
+            Keire::Log::GetCoreLogger().Write(Keire::LogLevel::Trace, Keire::LogMessage("pose-fixture-complete"));
+            const auto log =
+                AwaitLog(contactLogs->Directory / contactLogs->Config.CoreLogFile, "pose-fixture-complete");
+            std::ofstream saved(std::filesystem::path(traceDirectory) / (traceName + ".log"));
+            saved << log;
+            REQUIRE(saved.good());
+        }
+    }
+
+} // namespace
 TEST_CASE("Animated foot mesh stays above moving support throughout the walking cycle" *
           doctest::skip(!std::filesystem::is_regular_file("Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb")))
 {
-    const auto path = std::filesystem::absolute("Build/Validation/RiggingModels/CesiumMan/CesiumMan.glb");
-    if (!std::filesystem::exists(path))
-    {
-        MESSAGE("Optional CesiumMan fixture is unavailable.");
-        return;
-    }
-    std::ifstream input(path, std::ios::binary | std::ios::ate);
-    REQUIRE(input.is_open());
-    std::vector<std::byte> bytes(static_cast<std::size_t>(input.tellg()));
-    input.seekg(0);
-    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-    REQUIRE(input.good());
-    Keire::AssetImportContext context;
-    context.Asset = Keire::AssetId::Generate();
-    context.SourcePath = path;
-    context.RelativePath = path.filename();
-    context.ImportSettings["materialImport"] = std::string("none");
-    context.ImportSettings["rigSource"] = std::string("embedded");
-    std::map<std::string, Keire::AssetId> identities;
-    context.ResolveSubAssetId = [&identities](const std::string_view key)
-    { return identities.try_emplace(std::string(key), Keire::AssetId::Generate()).first->second; };
-    const auto imported = Keire::CreateMeshAssetImporter().ContextualImport(context, bytes);
-    const auto find = [&](const Keire::AssetTypeId type)
-    {
-        const auto found = std::ranges::find(imported.SubAssets, type, &Keire::AssetGeneratedSubAsset::Type);
-        REQUIRE(found != imported.SubAssets.end());
-        return found->Bytes;
-    };
-    const auto skeleton = Keire::SkeletonAsset::Decode(find(Keire::SkeletonAsset::StaticType()));
-    const auto clip = Keire::AnimationClipAsset::Decode(find(Keire::AnimationClipAsset::StaticType()));
-    const auto skin = Keire::SkinnedMeshAsset::Decode(find(Keire::SkinnedMeshAsset::StaticType()));
-    const auto mesh = Keire::MeshAsset::Decode(imported.Bytes);
-    int hz = 60;
-    float elevation = 0.08F;
-    float slope = 0;
-    bool grounding = true;
-    SUBCASE("Raised support at 60 Hz") {}
-    SUBCASE("Raised support at 30 Hz") { hz = 30; }
-    SUBCASE("Raised support at 144 Hz") { hz = 144; }
-    SUBCASE("Flat support") { elevation = 0; }
-    SUBCASE("Sloped support") { slope = 10; }
-    SUBCASE("Authored motion reference") { grounding = false; }
-    CAPTURE(hz);
-    CAPTURE(elevation);
-    CAPTURE(slope);
-    SupportFixture fixture(false, false, 0.03F, skeleton, clip, skin, mesh);
+    CheckAnimatedFootMesh(false);
+}
+TEST_CASE(
+    "Aster Reach Run retargeted jog skinned clearance with scene grounding at render rates" *
+    doctest::skip(
+        !std::filesystem::is_regular_file("Build/Validation/AsterReachPoseFixture/CesiumMan.glb") ||
+        !std::filesystem::is_regular_file("Build/Validation/AsterReachPoseFixture/HumanJog_Cesium_QA.keireanim") ||
+        !std::filesystem::is_regular_file("Build/Validation/AsterReachPoseFixture/StarterScene.keirescene") ||
+        !std::filesystem::is_regular_file("Build/Validation/AsterReachPoseFixture/ExplorerLocomotion.keireanimgraph") ||
+        !std::filesystem::is_regular_file(
+            "Build/Validation/AsterReachPoseFixture/HumanJog_Cesium_QA.keireanim.keiremeta")))
+{
+    CheckAnimatedFootMesh(true);
+}
+
+TEST_CASE("Moving support carry does not release a stationary authored foot")
+{
+    KeireTests::LogFixture logs("support-animation-reference");
+    logs.Config.Level = Keire::LogLevel::Trace;
+    Keire::Log::Initialize(logs.Config);
+    SupportFixture fixture;
+    bool rotate = false;
+    bool carry = true;
+    SUBCASE("Vertical carry") {}
+    SUBCASE("Support moves beneath stationary actor") { carry = false; }
+    SUBCASE("Vertical carry and support rotation") { rotate = true; }
     auto settings = fixture.Animator->FootGrounding();
-    settings.FootOffset = 0.02F;
-    settings.Enabled = grounding;
+    settings.PlantDistance = 0.015F;
+    settings.ReleaseDistance = 0.035F;
     fixture.Animator->SetFootGrounding(settings);
-    const auto support = fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id());
-    const auto transform = support.GetComponent<Keire::TransformComponent>();
-    const auto supportRotation = Keire::Math::EulerDegreesToQuaternion({0, 0, slope});
-    transform->SetLocalRotation(supportRotation);
-    const auto normal =
-        Keire::Math::TransformDirection(Keire::Math::ComposeTransform({}, supportRotation, {1, 1, 1}), {0, 1, 0});
-    std::vector<Keire::Matrix4> matrices(skeleton->Bones().size()), palette(matrices.size());
-    std::vector<Keire::MeshVertex> deformed(mesh->Vertices().size());
-    float worstClearance = 1.0F;
-    float maximumPelvisSpeed = 0;
-    Keire::Vector3 previousPelvis;
-    int worstFrame = 0;
-    float maximumThighStep = 0;
-    float maximumCalfStep = 0;
-    int worstThighFrame = 0;
-    std::array<Keire::Quaternion, 4> previousThighs{};
-    std::array<float, 2> previousFlexion{};
-    float maximumFlexionStep = 0;
-    const std::array<std::string, 4> legBones{"leg_joint_L_1", "leg_joint_R_1", "leg_joint_L_2", "leg_joint_R_2"};
-    for (int frame = 0; frame < 6 * hz; ++frame)
+    const auto floor = fixture.Session->RuntimeScene()->FindEntity(fixture.Floor.Id());
+    const auto actor = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+    for (int tick = 0; tick < 60; ++tick)
+        fixture.Tick();
+    for (int tick = 0; tick < 840; ++tick)
     {
-        const auto phase = static_cast<float>(frame) / static_cast<float>(hz) * 1.256637F;
-        const float surface = elevation + 0.04F * std::sin(phase);
-        const Keire::Vector3 surfacePoint{0.06F * std::sin(phase), surface, 0};
-        transform->SetLocalPosition(
-            Keire::Detail::IkSubtract(surfacePoint, {normal.X * 0.5F, normal.Y * 0.5F, normal.Z * 0.5F}));
-        (void)fixture.Assets->PumpCompletions();
-        fixture.Tick(1.0F / static_cast<float>(hz));
-        const auto& pose = fixture.Animator->RuntimeDebugSnapshot()->Pose;
-        for (std::size_t bone = 0; bone < pose.size(); ++bone)
-        {
-            const auto& local = pose[bone].LocalTransform;
-            matrices[bone] = Keire::Math::ComposeTransform(local.Translation, local.Rotation, local.Scale);
-            const auto& definition = skeleton->Bones()[bone];
-            if (definition.Parent >= 0)
-                matrices[bone] = Keire::Math::Multiply(matrices[definition.Parent], matrices[bone]);
-            palette[bone] = Keire::Math::Multiply(matrices[bone], definition.InverseBindPose);
-        }
-        Keire::SkinMeshCpu(mesh->Vertices(), skin->Influences8(), palette, skin->Method(), deformed);
-        float lowest = 1000;
-        for (const auto& vertex : deformed)
-        {
-            REQUIRE(Keire::Math::IsFinite(vertex.Position));
-            lowest = std::min(lowest,
-                              Keire::Detail::IkDot(Keire::Detail::IkSubtract(vertex.Position, surfacePoint), normal));
-        }
-        if (frame > hz / 2 && lowest < worstClearance)
-        {
-            worstClearance = lowest;
-            worstFrame = frame;
-        }
-        const auto pelvisBone =
-            std::ranges::find(pose, std::string("Skeleton_torso_joint_1"), [](const auto& bone) { return bone.Name; });
-        const auto pelvis = pelvisBone->WorldPosition;
-        if (frame > hz / 2)
-            maximumPelvisSpeed = std::max(
-                maximumPelvisSpeed, Keire::Detail::IkVectorLength(Keire::Detail::IkSubtract(pelvis, previousPelvis)) *
-                                        static_cast<float>(hz));
-        previousPelvis = pelvis;
-        for (std::size_t leg = 0; leg < 2; ++leg)
-        {
-            const auto prefix = std::string(leg == 0 ? "leg_joint_L_" : "leg_joint_R_");
-            const auto joint = [&](const char* suffix)
-            {
-                return std::ranges::find(pose, prefix + suffix, [](const auto& bone) { return bone.Name; })
-                    ->WorldPosition;
-            };
-            const auto upper = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(joint("2"), joint("1")));
-            const auto lower = Keire::Detail::IkNormalize(Keire::Detail::IkSubtract(joint("3"), joint("2")));
-            const auto flexion = std::acos(std::clamp(Keire::Detail::IkDot(upper, lower), -1.0F, 1.0F)) * 57.2957795F;
-            if (frame > hz / 2)
-                maximumFlexionStep = std::max(maximumFlexionStep, std::abs(flexion - previousFlexion[leg]));
-            previousFlexion[leg] = flexion;
-        }
-        for (std::size_t leg = 0; leg < legBones.size(); ++leg)
-        {
-            const auto thigh = std::ranges::find(pose, legBones[leg], [](const auto& bone) { return bone.Name; });
-            const auto rotation = thigh->LocalTransform.Rotation;
-            const auto& previous = previousThighs[leg];
-            const float dot = std::abs(rotation.X * previous.X + rotation.Y * previous.Y + rotation.Z * previous.Z +
-                                       rotation.W * previous.W);
-            const float step = 2.0F * std::acos(std::min(dot, 1.0F)) * 57.2957795F;
-            if (frame > hz / 2 && leg < 2 && step > maximumThighStep)
-            {
-                maximumThighStep = step;
-                worstThighFrame = frame;
-            }
-            if (frame > hz / 2 && leg >= 2)
-                maximumCalfStep = std::max(maximumCalfStep, step);
-            previousThighs[leg] = rotation;
-        }
+        const auto height = 0.3F * std::sin(static_cast<float>(tick + 1) / 60.0F * 0.7F);
+        floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -0.45F + height, 0});
+        const auto rotation = Keire::Math::EulerDegreesToQuaternion(
+            {0, 0, rotate ? 4.0F * std::sin(static_cast<float>(tick + 1) / 60.0F) : 0.0F});
+        floor.GetComponent<Keire::TransformComponent>()->SetLocalRotation(rotation);
+        const auto world = floor.GetComponent<Keire::TransformComponent>()->WorldMatrix();
+        actor.GetComponent<Keire::TransformComponent>()->SetLocalPosition(
+            carry ? Keire::Math::TransformPoint(world, {0, 0.45F, 0}) : Keire::Vector3{});
+        actor.GetComponent<Keire::TransformComponent>()->SetLocalRotation(carry ? rotation : Keire::Quaternion{});
+        fixture.Tick();
     }
-    MESSAGE("Maximum thigh rotation step=" << maximumThighStep << " frame=" << worstThighFrame);
-    MESSAGE("Maximum knee flexion step=" << maximumFlexionStep);
-    CHECK(maximumThighStep * static_cast<float>(hz) <= 720.0F);
-    // Knee flexion combines the motion of both segments; retain a separate bound from hip swing.
-    CHECK(maximumCalfStep * static_cast<float>(hz) <= 1440.0F);
-    CHECK(maximumFlexionStep * static_cast<float>(hz) <= 1440.0F);
-    MESSAGE("Actual skinned mesh minimum clearance=" << worstClearance << " worst frame=" << worstFrame
-                                                     << " maximum pelvis speed=" << maximumPelvisSpeed);
-    if (grounding)
-        CHECK(worstClearance >= 0.0F);
-    // Includes the authored vertical gait plus support acquisition/release, not just platform velocity.
-    CHECK(maximumPelvisSpeed < 0.75F);
+    Keire::Log::GetCoreLogger().Write(Keire::LogLevel::Trace, Keire::LogMessage("release-baseline-end"));
+    const auto text = AwaitLog(logs.Directory / logs.Config.CoreLogFile, "release-baseline-end");
+    REQUIRE(text.find("foot=0 planted") != std::string::npos);
+    REQUIRE(text.find("foot=1 planted") != std::string::npos);
+    CHECK(text.find("released lift=true") == std::string::npos);
+}
+
+TEST_CASE("Moving support release reference follows true lift through replant and support replacement")
+{
+    KeireTests::LogFixture logs("support-animation-replant");
+    logs.Config.Level = Keire::LogLevel::Trace;
+    Keire::Log::Initialize(logs.Config);
+    Keire::AnimationTrack lift;
+    lift.Bone = 0;
+    lift.Keys = {{0.0F, {{0, 2, 0}, {}, {1, 1, 1}}},
+                 {0.25F, {{0, 2.1F, 0}, {}, {1, 1, 1}}},
+                 {0.75F, {{0, 2.1F, 0}, {}, {1, 1, 1}}},
+                 {1.0F, {{0, 2, 0}, {}, {1, 1, 1}}}};
+    const auto clip = Keire::AnimationClipAsset::Decode(
+        Keire::AnimationClipAsset::Encode(Keire::AssetId::Generate(), 1.0F, std::span(&lift, 1), {}, false));
+    SupportFixture fixture(false, false, 0, {}, clip);
+    fixture.Animator->SetSpeed(0);
+    fixture.Animator->Play("Move", {}, 0);
+    auto settings = fixture.Animator->FootGrounding();
+    settings.PlantDistance = 0.015F;
+    settings.ReleaseDistance = 0.035F;
+    fixture.Animator->SetFootGrounding(settings);
+    const auto scene = fixture.Session->RuntimeScene();
+    auto floor = scene->FindEntity(fixture.Floor.Id());
+    const auto actor = scene->FindEntity(fixture.Character.Id());
+    const auto path = logs.Directory / logs.Config.CoreLogFile;
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -0.5F, 0});
+    fixture.Animator->SetRuntimeFootGroundingWeight(0);
+    fixture.Tick();
+    fixture.Animator->SetRuntimeFootGroundingWeight(1);
+    for (int tick = 0; tick < 30; ++tick)
+        fixture.Tick();
+    floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -0.3F, 0});
+    actor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, 0.2F, 0});
+    fixture.Tick();
+    // The sampled foot lifts relative to the carrier; subsequent carrier travel must not erase the lift.
+    fixture.Animator->Play("Move", {}, 0.5F);
+    fixture.Tick();
+    const auto lifted = AwaitLog(path, "foot=1 released lift=true");
+    REQUIRE(lifted.find("foot=0 released lift=true") != std::string::npos);
+    REQUIRE(lifted.find("foot=1 released lift=true") != std::string::npos);
+    for (int tick = 1; tick <= 60; ++tick)
+    {
+        const float height = 0.2F + static_cast<float>(tick) * 0.005F;
+        floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, -0.5F + height, 0});
+        actor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, height, 0});
+        fixture.Tick();
+    }
+    Keire::Log::GetCoreLogger().Write(Keire::LogLevel::Trace, Keire::LogMessage("held-lift-end"));
+    const auto held = AwaitLog(path, "held-lift-end");
+    CHECK(held.substr(lifted.size()).find(" planted ") == std::string::npos);
+    SUBCASE("Same moving support") {}
+    SUBCASE("Disabled then restored support")
+    {
+        floor.GetComponent<Keire::ColliderComponent>()->SetEnabled(false);
+        fixture.Tick();
+        floor.GetComponent<Keire::ColliderComponent>()->SetEnabled(true);
+    }
+    SUBCASE("Trigger then restored support")
+    {
+        floor.GetComponent<Keire::ColliderComponent>()->SetTrigger(true);
+        fixture.Tick();
+        floor.GetComponent<Keire::ColliderComponent>()->SetTrigger(false);
+    }
+    SUBCASE("Replaced support entity")
+    {
+        floor.GetComponent<Keire::ColliderComponent>()->SetEnabled(false);
+        floor = scene->CreateEntity("Replacement");
+        floor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, 0.0F, 0});
+        floor.AddComponent<Keire::ColliderComponent>()->SetHalfExtent({5, 0.5F, 5});
+    }
+    fixture.Animator->Play("Move", {}, 0);
+    actor.GetComponent<Keire::TransformComponent>()->SetLocalPosition({0, 0.5F, 0});
+    for (int tick = 0; tick < 5; ++tick)
+        fixture.Tick();
+    const auto replanted = AwaitLog(path, "foot=1 planted", held.size()).substr(held.size());
+    CHECK(replanted.find("foot=0 planted") != std::string::npos);
+    CHECK(replanted.find("foot=1 planted") != std::string::npos);
+    CHECK(fixture.FootY() + 0.5F == doctest::Approx(0.5F).epsilon(0.005F));
+}
+
+TEST_CASE("Swing penetration preserves clearance without reacquiring a fading foot plant")
+{
+    KeireTests::LogFixture logs("swing-penetration-replant");
+    logs.Config.Level = Keire::LogLevel::Trace;
+    Keire::Log::Initialize(logs.Config);
+    Keire::AnimationTrack lift;
+    lift.Bone = 0;
+    lift.Keys = {{0.0F, {{0, 2, 0}, {}, {1, 1, 1}}}, {1.0F, {{0, 3, 0}, {}, {1, 1, 1}}}};
+    const auto clip = Keire::AnimationClipAsset::Decode(
+        Keire::AnimationClipAsset::Encode(Keire::AssetId::Generate(), 1.0F, std::span(&lift, 1), {}, false));
+    SupportFixture fixture(false, false, 0.1F, {}, clip);
+    auto settings = fixture.Animator->FootGrounding();
+    settings.ResponseTime = .12F;
+    settings.PlantDistance = .015F;
+    settings.ReleaseDistance = .035F;
+    fixture.Animator->SetFootGrounding(settings);
+    fixture.Animator->SetSpeed(0);
+    fixture.Animator->Play("Move", {}, 0);
+    for (int tick = 0; tick < 30; ++tick)
+        fixture.Tick();
+    fixture.Animator->Play("Move", {}, .22F);
+    fixture.Tick();
+    Keire::Log::GetCoreLogger().Write(Keire::LogLevel::Trace, Keire::LogMessage("swing-penetration-begin"));
+    const auto start = AwaitLog(logs.Directory / logs.Config.CoreLogFile, "swing-penetration-begin").size();
+    fixture.Session->RuntimeScene()
+        ->FindEntity(fixture.Character.Id())
+        .GetComponent<Keire::TransformComponent>()
+        ->SetLocalPosition({0, 0, .2F});
+    fixture.Animator->Play("Move", {}, .07F);
+    fixture.Tick();
+    CHECK(fixture.FootY() >= .15F - .000001F);
+    CHECK(fixture.Animator->RuntimeDiagnostic().empty());
+    Keire::Log::GetCoreLogger().Write(Keire::LogLevel::Trace, Keire::LogMessage("swing-penetration-end"));
+    const auto swing = AwaitLog(logs.Directory / logs.Config.CoreLogFile, "swing-penetration-end", start).substr(start);
+    CHECK(swing.find("planted forced=") == std::string::npos);
+    const auto replantStart = start + swing.size();
+    fixture.Animator->Play("Move", {}, 0);
+    fixture.Tick();
+    Keire::Log::GetCoreLogger().Write(Keire::LogLevel::Trace, Keire::LogMessage("swing-replant-end"));
+    const auto replanted =
+        AwaitLog(logs.Directory / logs.Config.CoreLogFile, "swing-replant-end", replantStart).substr(replantStart);
+    CHECK(replanted.find("planted forced=") != std::string::npos);
+    CHECK(fixture.FootY() >= .15F - .000001F);
 }

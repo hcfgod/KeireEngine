@@ -3,6 +3,7 @@
 #include "Keire/ECS/Entity.h"
 #include "Keire/Scenes/SceneAsset.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -28,6 +29,7 @@ namespace Keire::Detail
         [[nodiscard]] AssetId Asset() const noexcept;
         [[nodiscard]] bool IsOpen() const noexcept;
         [[nodiscard]] bool Dirty() const noexcept;
+        [[nodiscard]] std::uint64_t PhysicsRevision() const;
         void MarkDirty() noexcept;
         void MarkSaved() noexcept;
         [[nodiscard]] std::string Name() const;
@@ -43,6 +45,8 @@ namespace Keire::Detail
         [[nodiscard]] AssetId BakedLighting() const;
         void SetBakedLighting(AssetId asset);
         [[nodiscard]] std::vector<Entity> Entities() const;
+        [[nodiscard]] std::vector<Entity> FixedPresentationEntities() const;
+        void SetFixedPresentationInterpolation(EntityId id, bool enabled);
         [[nodiscard]] Entity Find(EntityId id) const noexcept;
         [[nodiscard]] Entity Create(std::string name, EntityId parent = {});
         [[nodiscard]] Entity Duplicate(EntityId id);

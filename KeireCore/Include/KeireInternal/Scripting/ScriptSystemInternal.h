@@ -483,6 +483,10 @@ namespace Keire
 
         static void RuntimeResetPresentationInterpolation(const std::uint64_t world, const std::uint64_t high,
                                                           const std::uint64_t low) noexcept;
+        [[nodiscard]] static std::uint8_t
+        RuntimeGetFixedPresentationInterpolation(std::uint64_t world, std::uint64_t high, std::uint64_t low) noexcept;
+        static std::uint8_t RuntimeSetFixedPresentationInterpolation(std::uint64_t world, std::uint64_t high,
+                                                                     std::uint64_t low, std::uint8_t enabled) noexcept;
 
         static void RuntimeCloneEntity(const std::uint64_t world, const std::uint64_t high, const std::uint64_t low,
                                        std::uint64_t* resultHigh, std::uint64_t* resultLow) noexcept;
@@ -669,7 +673,7 @@ namespace Keire
                                                     const ComponentTypeId componentType) const;
 
         void InvokeInstance(const std::uint64_t id, const ManagedBehaviourCallback callback,
-                            const float deltaSeconds = 0.0F);
+                            const float deltaSeconds = 0.0F, const AnimationIkMessage* ikContext = nullptr);
 
         void InvokeAnimationEvent(const std::uint64_t id, const AnimationEventMessage& event);
 

@@ -82,7 +82,7 @@ internal static unsafe class AnimatorIkTests
             }
             Chain(Enumerable.Repeat("Bone", 256).ToArray(), iterations: 1024, tolerance: float.Epsilon);
             Check(_calls == 26, "Every accepted update must be submitted exactly once.");
-            foreach (var space in new[] { AnimatorIkSpace.Model, AnimatorIkSpace.World })
+            foreach (var space in new[] { AnimatorIkSpace.Model, AnimatorIkSpace.World, AnimatorIkSpace.PresentationWorld })
             {
                 var target = new Vector3(-7.5f, 2.25f, 11);
                 var pole = new Vector3(3, -4, 5);

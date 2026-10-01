@@ -6,6 +6,38 @@
 
 namespace Keire
 {
+    namespace
+    {
+        // A capsule's rounded bottom reports a contact normal across a box edge, not the top face normal.
+        // Only recover the face normal when a tiny local probe confirms the SAME body's surface at that edge.
+        [[nodiscard]] Vector3 CharacterSupportNormal(PhysicsWorld& world, const PhysicsQueryHit& hit,
+                                                     const float minimumNormal, const std::uint32_t mask,
+                                                     const std::uint32_t layer)
+        {
+            if (hit.Normal.Y >= minimumNormal)
+                return hit.Normal;
+            const auto planar = std::sqrt(hit.Normal.X * hit.Normal.X + hit.Normal.Z * hit.Normal.Z);
+            if (planar <= 0.000001F)
+                return hit.Normal;
+            constexpr float inset = 0.001F;
+            const Vector3 probe{hit.Position.X - hit.Normal.X / planar * inset, hit.Position.Y + 0.01F,
+                                hit.Position.Z - hit.Normal.Z / planar * inset};
+            const auto surfaces = world.RayCast({.Origin = probe,
+                                                 .Direction = {0.0F, -1.0F, 0.0F},
+                                                 .MaximumDistance = 0.02F,
+                                                 .Mask = mask,
+                                                 .IncludeTriggers = false,
+                                                 .Layer = layer});
+            for (const auto& surface : surfaces)
+            {
+                if (surface.Body == hit.Body && surface.Normal.Y >= minimumNormal &&
+                    std::abs(surface.Position.Y - hit.Position.Y) <= 0.002F)
+                    return surface.Normal;
+            }
+            return hit.Normal;
+        }
+    } // namespace
+
     bool SceneRuntimeSession::Impl::SameCollision(const std::shared_ptr<const CookedCollisionMesh>& first,
                                                   const std::shared_ptr<const CookedCollisionMesh>& second) noexcept
     {
@@ -29,9 +61,7 @@ namespace Keire
                                       sameDimension(first.HalfExtent.Z, second.HalfExtent.Z) &&
                                       sameDimension(first.Radius, second.Radius) &&
                                       sameDimension(first.Height, second.Height);
-        const bool transformMatches = first.Motion != PhysicsMotionType::Static ||
-                                      (first.Position == second.Position && first.Rotation == second.Rotation);
-        return transformMatches && first.Motion == second.Motion && first.Shape == second.Shape &&
+        return first.Motion == second.Motion && first.Shape == second.Shape &&
                first.LinearVelocity == second.LinearVelocity && shapeSizeMatches && first.Mass == second.Mass &&
                first.Layer == second.Layer && first.Mask == second.Mask && first.Trigger == second.Trigger &&
                first.Continuous == second.Continuous && first.UseGravity == second.UseGravity &&
@@ -51,7 +81,9 @@ namespace Keire
         if ((!collider && !useCharacter) || !transform || (!useCharacter && !collider->Enabled()) ||
             !entity.ActiveInHierarchy())
             return std::nullopt;
-        const auto rigidBody = entity.GetComponent<RigidBodyComponent>();
+        auto rigidBody = entity.GetComponent<RigidBodyComponent>();
+        if (rigidBody && !rigidBody->Enabled())
+            rigidBody.Reset();
 
         Vector3 worldPosition;
         Quaternion worldRotation;
@@ -170,10 +202,17 @@ namespace Keire
         CapturePhysicsPresentationSamples();
     }
 
-    void SceneRuntimeSession::Impl::SynchronizePhysicsBodies()
+    void SceneRuntimeSession::Impl::SynchronizePhysicsQueries()
+    {
+        if (PhysicsWorldService && Runtime && PhysicsQueryRevision != Runtime->PhysicsRevision())
+            SynchronizePhysicsBodies(true);
+    }
+
+    void SceneRuntimeSession::Impl::SynchronizePhysicsBodies(const bool queryOnly)
     {
         if (!PhysicsWorldService || !Runtime)
             return;
+        const auto revision = Runtime->PhysicsRevision();
         std::set<EntityId> candidates;
         for (const auto& entity : Runtime->Query<ColliderComponent>())
             candidates.emplace(entity.Id());
@@ -184,6 +223,17 @@ namespace Keire
         {
             const auto entity = Runtime->FindEntity(entityId);
             seen.emplace(entityId);
+            // Queries expose authored support geometry, not a partially advanced controller or dynamic body.
+            // The normal fixed-step pass is unconditional and remains responsible for those definitions/assets.
+            const auto rigid = entity.GetComponent<RigidBodyComponent>();
+            const auto character = entity.GetComponent<CharacterControllerComponent>();
+            const auto collider = entity.GetComponent<ColliderComponent>();
+            const bool characterEnabled = character && character->Enabled();
+            const bool eligible = entity.ActiveInHierarchy() && entity.GetComponent<TransformComponent>() &&
+                                  (characterEnabled || (collider && collider->Enabled()));
+            if (queryOnly && eligible &&
+                (characterEnabled || (rigid && rigid->Enabled() && rigid->Motion() == PhysicsMotionType::Dynamic)))
+                continue;
             auto& state = PhysicsBodies[entityId];
             const auto definition = BuildPhysicsDefinition(entity, state);
             if (!definition)
@@ -194,14 +244,36 @@ namespace Keire
                     state.Body = {};
                 }
                 state.HasDefinition = false;
+                state.CharacterSupport = {};
                 continue;
             }
             if (!state.Body || !state.HasDefinition || !SamePhysicsDefinition(state.Definition, *definition))
             {
+                // The guard borrows this session's live world only for the installation transaction.
+                struct Replacement final
+                {
+                    PhysicsWorld& World;
+                    PhysicsBodyId Body;
+                    ~Replacement() noexcept
+                    {
+                        if (Body)
+                        {
+                            try
+                            {
+                                World.DestroyBody(Body);
+                            }
+                            catch (...)
+                            {
+                            } // Preserve an installation failure during rollback.
+                        }
+                    }
+                } replacement{*PhysicsWorldService, PhysicsWorldService->CreateBody(*definition)};
                 if (state.Body)
                     PhysicsWorldService->DestroyBody(state.Body);
-                state.Body = PhysicsWorldService->CreateBody(*definition);
+                state.Body = replacement.Body;
+                replacement.Body = {};
                 state.Definition = *definition;
+                state.CharacterSupport = {};
                 state.CharacterRequestedVerticalDisplacement = 0.0F;
                 state.CharacterMissedWalkableFrames = 0;
                 ++state.Generation;
@@ -210,9 +282,22 @@ namespace Keire
             }
             else if (definition->Motion == PhysicsMotionType::Kinematic)
             {
-                PhysicsWorldService->SetKinematicTarget(state.Body, definition->Position, definition->Rotation);
+                if (state.Definition.Position != definition->Position ||
+                    state.Definition.Rotation != definition->Rotation)
+                    PhysicsWorldService->SetKinematicTarget(state.Body, definition->Position, definition->Rotation);
                 if (definition->UseGravity != state.Definition.UseGravity)
                     PhysicsWorldService->SetGravityEnabled(state.Body, definition->UseGravity);
+            }
+            else if (definition->Motion == PhysicsMotionType::Static &&
+                     (state.Definition.Position != definition->Position ||
+                      state.Definition.Rotation != definition->Rotation))
+            {
+                auto pose = PhysicsWorldService->TryGetBody(state.Body);
+                if (!pose)
+                    throw std::runtime_error("Authored physics body is unavailable.");
+                pose->Position = definition->Position;
+                pose->Rotation = definition->Rotation;
+                PhysicsWorldService->SetBodyState(state.Body, *pose);
             }
             // Keep the installed shape dimensions as the comparison baseline. Tiny authored scale increments
             // must eventually rebuild once their cumulative change exceeds the round-off tolerance.
@@ -231,6 +316,7 @@ namespace Keire
             else
                 ++iterator;
         }
+        PhysicsQueryRevision = revision;
     }
 
     void SceneRuntimeSession::Impl::MoveTransformInWorld(const Entity& entity, TransformComponent& transform,
@@ -274,12 +360,6 @@ namespace Keire
             }
             auto& state = runtimeState->second;
             state.CharacterRequestedVerticalDisplacement = displacement.Y;
-            if (displacement == Vector3{})
-            {
-                state.CharacterVelocity = {};
-                continue;
-            }
-
             Vector3 start;
             Quaternion rotation;
             Vector3 scale;
@@ -298,6 +378,40 @@ namespace Keire
             const auto hasResolvableDisplacement = [&](const Vector3 value) noexcept
             { return dot(value, value) > std::numeric_limits<float>::epsilon(); };
 
+            std::optional<Vector3> carryTarget;
+            auto& carried = state.CharacterSupport;
+            if (carried.Entity)
+            {
+                const auto support = Runtime->FindEntity(carried.Entity);
+                const auto collider = support ? support.GetComponent<ColliderComponent>() : Ref<ColliderComponent>{};
+                const auto supportTransform =
+                    support ? support.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                const auto supportState = PhysicsBodies.find(carried.Entity);
+                bool eligible = character->Grounded() && displacement.Y <= 0.0F &&
+                                carried.Controller.Lock() == character && entity.Parent().Id() == carried.RiderParent &&
+                                transform->PresentationResetRevision() == carried.RiderResetRevision &&
+                                length(subtract(start, carried.ResolvedRiderPosition)) < 0.00001F && support &&
+                                support.ActiveInHierarchy() && collider && collider->Enabled() &&
+                                !collider->Trigger() && carried.Collider.Lock() == collider &&
+                                support.Parent().Id() == carried.SupportParent && supportTransform &&
+                                supportTransform->PresentationResetRevision() == carried.SupportResetRevision &&
+                                supportState != PhysicsBodies.end() && supportState->second.HasDefinition &&
+                                supportState->second.Body;
+                if (eligible)
+                {
+                    auto previousDefinition = carried.Definition;
+                    auto currentDefinition = supportState->second.Definition;
+                    // Static authored motion rebuilds the backend body. Preserve component identity while
+                    // still rejecting shape/filter/material changes and actual component replacement.
+                    previousDefinition.Position = currentDefinition.Position;
+                    previousDefinition.Rotation = currentDefinition.Rotation;
+                    eligible = SamePhysicsDefinition(previousDefinition, currentDefinition);
+                    if (eligible)
+                        carryTarget = Math::TransformPoint(supportTransform->WorldMatrix(), carried.LocalAnchor);
+                }
+                if (!eligible)
+                    carried = {};
+            }
             const auto padding = std::min(character->SkinWidth(), state.Definition.Radius * 0.5F);
             const auto castRadius = state.Definition.Radius - padding;
             const auto castHeight = state.Definition.Height - padding * 2.0F;
@@ -364,6 +478,10 @@ namespace Keire
                 }
             };
 
+            // Carry is collision-resolved separately from caller input. Recovery may already have
+            // supplied upward support motion, so sweep toward the anchor rather than adding it twice.
+            if (carryTarget)
+                moveAndSlide(subtract(*carryTarget, current), true);
             const Vector3 horizontal{displacement.X, 0.0F, displacement.Z};
             bool stepped = false;
             if (character->Grounded() && character->StepHeight() > 0.0F && hasResolvableDisplacement(horizontal))
@@ -381,11 +499,19 @@ namespace Keire
                             const auto forward = add(elevated, horizontal);
                             const Vector3 downward{0.0F, -(upwardDistance + padding + 0.05F), 0.0F};
                             const auto landing = cast(forward, downward);
-                            if (landing && landing->Normal.Y >= slopeNormal)
+                            if (landing)
                             {
-                                const auto downDistance = std::max(0.0F, landing->Distance - padding);
-                                current = add(forward, {0.0F, -downDistance, 0.0F});
-                                stepped = true;
+                                const auto normal = CharacterSupportNormal(*PhysicsWorldService, *landing, slopeNormal,
+                                                                           character->Mask(), character->Layer());
+                                const auto footHeight = current.Y - state.Definition.Height * 0.5F;
+                                const auto rise = landing->Position.Y - footHeight;
+                                if (normal.Y >= slopeNormal && rise >= -0.0001F &&
+                                    rise <= character->StepHeight() + 0.0001F)
+                                {
+                                    const auto downDistance = std::max(0.0F, landing->Distance - padding);
+                                    current = add(forward, {0.0F, -downDistance, 0.0F});
+                                    stepped = true;
+                                }
                             }
                         }
                     }
@@ -453,10 +579,11 @@ namespace Keire
                  .IncludeTriggers = false,
                  .Layer = character->Layer(),
                  .IgnoreBody = state->second.Body});
-            if (hit && hit->Normal.Y >= minimumNormal)
+            if (hit)
             {
-                hasWalkableHit = true;
-                normal = hit->Normal;
+                normal = CharacterSupportNormal(*PhysicsWorldService, *hit, minimumNormal, character->Mask(),
+                                                character->Layer());
+                hasWalkableHit = normal.Y >= minimumNormal;
             }
             const auto previous = character->RuntimeState();
             const bool grounded = Detail::ResolveCharacterGrounded(hasWalkableHit, previous.Grounded,
@@ -464,6 +591,33 @@ namespace Keire
                                                                    state->second.CharacterMissedWalkableFrames);
             if (grounded && !hasWalkableHit)
                 normal = previous.GroundNormal;
+            state->second.CharacterSupport = {};
+            if (grounded && hasWalkableHit)
+            {
+                const auto supportId = EntityForBody(hit->Body);
+                const auto support = supportId ? Runtime->FindEntity(*supportId) : Entity{};
+                const auto collider = support ? support.GetComponent<ColliderComponent>() : Ref<ColliderComponent>{};
+                const auto supportTransform =
+                    support ? support.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+                if (collider && collider->Enabled() && !collider->Trigger() && supportTransform)
+                {
+                    const auto& supportState = PhysicsBodies.at(*supportId);
+                    auto& carried = state->second.CharacterSupport;
+                    carried.Entity = *supportId;
+                    carried.SupportParent = support.Parent().Id();
+                    carried.RiderParent = entity.Parent().Id();
+                    carried.Collider = collider;
+                    carried.Controller = character;
+                    carried.Definition = supportState.Definition;
+                    // A dynamic support advances after character movement. Keep the movement-time
+                    // reference so its just-resolved motion is carried on the next fixed tick.
+                    carried.ReferenceWorld = supportState.MovementWorld;
+                    carried.LocalAnchor = Math::TransformPoint(Math::Inverse(carried.ReferenceWorld), worldPosition);
+                    carried.ResolvedRiderPosition = worldPosition;
+                    carried.RiderResetRevision = transform->PresentationResetRevision();
+                    carried.SupportResetRevision = supportTransform->PresentationResetRevision();
+                }
+            }
             character->ApplyRuntimeState(state->second.Generation, grounded, normal, state->second.CharacterVelocity);
         }
     }
@@ -541,7 +695,23 @@ namespace Keire
     {
         if (!PhysicsWorldService)
             return;
+        // Gameplay may move or disable a support this tick. Movement and grounding
+        // must query the same current authored geometry, including kinematic targets.
+        SynchronizePhysicsBodies();
+        for (auto& [id, state] : PhysicsBodies)
+        {
+            const auto entity = Runtime->FindEntity(id);
+            const auto transform = entity ? entity.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
+            if (transform)
+                state.MovementWorld = transform->WorldMatrix();
+            const auto character =
+                entity ? entity.GetComponent<CharacterControllerComponent>() : Ref<CharacterControllerComponent>{};
+            if (!character || !character->Enabled())
+                state.CharacterSupport = {};
+        }
         ApplyCharacterMovement(deltaSeconds);
+        // Controller movement also moves descendant colliders through the Transform hierarchy.
+        // Refresh those bodies before contact generation, as the original post-movement pass did.
         SynchronizePhysicsBodies();
         PhysicsWorldService->Step(deltaSeconds);
         PullDynamicBodies();
@@ -634,6 +804,7 @@ namespace Keire
     void SceneRuntimeSession::Impl::ClearPhysics() noexcept
     {
         PhysicsBodies.clear();
+        PhysicsQueryRevision = 0;
         if (PhysicsWorldService)
         {
             try

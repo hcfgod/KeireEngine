@@ -116,6 +116,21 @@ namespace Keire::Detail
     {
         try
         {
+            // Snapshot consumers read these independently; avoid constructing an entire serialized property bag.
+            if (type == ColliderComponent::StaticType() &&
+                (key == "shape" || key == "center" || key == "halfExtent" || key == "trigger"))
+            {
+                const auto collider = entity ? entity.GetComponent<ColliderComponent>() : Ref<ColliderComponent>{};
+                if (!collider)
+                    return false;
+                if (key == "shape")
+                    return Write(static_cast<std::int64_t>(collider->Shape()), destination);
+                if (key == "center")
+                    return Write(collider->Center(), destination);
+                if (key == "halfExtent")
+                    return Write(collider->HalfExtent(), destination);
+                return Write(collider->Trigger(), destination);
+            }
             const auto registration = Registration(type);
             const auto component = entity ? entity.GetComponent(type) : Ref<Component>{};
             if (!registration || !component)

@@ -1,6 +1,8 @@
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireInternal/Scenes/AnimationNamedIkGoals.h"
+#include "KeireInternal/Scenes/FootContactDiagnostics.h"
 #include "KeireInternal/Scenes/FootMeshSurface.h"
+#include "KeireInternal/Scenes/SettledFootPlant.h"
 
 #include "Keire/Scenes/Scene.h"
 
@@ -9,6 +11,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -621,4 +624,177 @@ TEST_CASE("Automatic foot grounding release uses one response blend at every fra
             CHECK(target->Position.Y == doctest::Approx(1.0F - std::exp(-elapsed)).epsilon(0.0001F));
         }
     }
+}
+
+TEST_CASE("foot contact diagnostic sampling is bounded across pauses stalls and invalid delta")
+{
+    Keire::Detail::FootContactDiagnostics diagnostic;
+    REQUIRE(diagnostic.Sample(0.0F));
+    CHECK_FALSE(diagnostic.Sample(0.0F));
+    CHECK_FALSE(diagnostic.Sample(-1.0F));
+    CHECK_FALSE(diagnostic.Sample(std::numeric_limits<float>::quiet_NaN()));
+    CHECK_FALSE(diagnostic.Sample(std::numeric_limits<float>::infinity()));
+    CHECK_FALSE(diagnostic.Sample(0.1F));
+    CHECK(diagnostic.Sample(0.1F));
+    CHECK(diagnostic.Sample(10.0F));
+    CHECK_FALSE(diagnostic.Sample(0.0F));
+    CHECK(diagnostic.Samples == 3);
+    while (diagnostic.Samples < 3000)
+        REQUIRE(diagnostic.Sample(0.2F));
+    CHECK_FALSE(diagnostic.Sample(10.0F));
+    CHECK(diagnostic.Samples == 3000);
+    CHECK(diagnostic.Frame > diagnostic.Samples);
+}
+
+TEST_CASE("Named presentation IK uses presentation inverse without changing legacy world goals")
+{
+    const Keire::SkeletonAsset skeleton({{"Root", -1, {{}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"Middle", 0, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}},
+                                         {"End", 1, {{0.0F, 1.0F, 0.0F}, {}, {1.0F, 1.0F, 1.0F}}, {}}});
+    const std::map<std::string, std::uint32_t, std::less<>> indices{{"Root", 0}, {"Middle", 1}, {"End", 2}};
+    std::vector<Keire::BoneTransform> bind;
+    for (const auto& bone : skeleton.Bones())
+        bind.push_back(bone.BindPose);
+    const auto simulation = Keire::Math::ComposeTransform({12.0F, 0.0F, 0.0F}, {}, {2.0F, 2.0F, 2.0F});
+    const auto presentation = Keire::Math::ComposeTransform(
+        {10.0F, 0.0F, 0.0F}, Keire::Math::EulerDegreesToQuaternion({0.0F, 45.0F, 0.0F}), {2.0F, 2.0F, 2.0F});
+    for (const auto solver : {Keire::AnimatorIkSolver::TwoBone, Keire::AnimatorIkSolver::Fabrik})
+    {
+        Keire::AnimatorIkGoal goal{.Name = "contact",
+                                   .Solver = solver,
+                                   .Space = Keire::AnimatorIkSpace::Model,
+                                   .Bones = {"Root", "Middle", "End"},
+                                   .Target = {0.7F, 1.2F, 0.25F},
+                                   .Pole = {0.0F, 0.0F, 1.0F},
+                                   .MaximumIterations = 128,
+                                   .Tolerance = 0.0001F};
+        auto expected = bind;
+        REQUIRE(Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {&goal, 1}, expected, indices, {}).empty());
+        for (const auto space : {Keire::AnimatorIkSpace::World, Keire::AnimatorIkSpace::PresentationWorld})
+        {
+            auto converted = goal;
+            converted.Space = space;
+            const auto world = space == Keire::AnimatorIkSpace::World ? simulation : presentation;
+            converted.Target = Keire::Math::TransformPoint(world, goal.Target);
+            converted.Pole = Keire::Math::TransformPoint(world, goal.Pole);
+            auto pose = bind;
+            REQUIRE(Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {&converted, 1}, pose, indices,
+                                                              Keire::Math::Inverse(simulation),
+                                                              Keire::Math::Inverse(presentation))
+                        .empty());
+            for (std::size_t index = 0; index < pose.size(); ++index)
+            {
+                const auto a =
+                    Keire::Math::ComposeTransform(pose[index].Translation, pose[index].Rotation, pose[index].Scale);
+                const auto b = Keire::Math::ComposeTransform(expected[index].Translation, expected[index].Rotation,
+                                                             expected[index].Scale);
+                for (std::size_t element = 0; element < a.Elements.size(); ++element)
+                    CHECK(a.Elements[element] == doctest::Approx(b.Elements[element]).epsilon(0.0002F));
+            }
+            if (space == Keire::AnimatorIkSpace::PresentationWorld)
+            {
+                auto missing = bind;
+                CHECK_FALSE(Keire::Detail::ApplyNamedAnimationIkGoals(skeleton, {&converted, 1}, missing, indices,
+                                                                      Keire::Math::Inverse(simulation))
+                                .empty());
+                CHECK(missing == bind);
+            }
+        }
+    }
+}
+
+TEST_CASE("Settled idle reconciles interrupted walking contacts without moving support or gait drift")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    CHECK(IsSettledFootPlant(true, {}, 1.0F, true));
+    CHECK_FALSE(IsSettledFootPlant(false, {}, 1.0F, true));
+    CHECK_FALSE(IsSettledFootPlant(true, {0.1F, 0, 0}, 1.0F, true));
+    CHECK_FALSE(IsSettledFootPlant(true, {}, 0.9F, true));
+    CHECK_FALSE(IsSettledFootPlant(true, {}, 1.0F, false));
+    AutomaticFootPlantState locked{{0.0596984F, 0.107264F, 0.0802419F}, {0, 1, 0}, true};
+    const Vector3 candidate{-0.101565F, 0.107264F, 0.301462F};
+    bool awaiting = true;
+    const auto original = locked.Position;
+    REQUIRE(ReconcileSettledFootPlant(true, candidate, {0, 1, 0}, {0, 0.9F, 0}, 1.2F, 1.0F / 60, awaiting, locked));
+    CHECK_FALSE(awaiting);
+    CHECK(IkVectorLength(IkSubtract(locked.Position, original)) < 0.03F);
+    CHECK(IkVectorLength(IkSubtract(locked.Position, candidate)) > 0.2F);
+    for (int i = 0; i < 180; ++i)
+        REQUIRE(ReconcileSettledFootPlant(true, candidate, {0, 1, 0}, {0, 0.9F, 0}, 1.2F, 1.0F / 60, awaiting, locked));
+    CHECK(IkVectorLength(IkSubtract(locked.Position, candidate)) < 0.00001F);
+    const auto settledPosition = locked.Position;
+    awaiting = true;
+    CHECK_FALSE(ReconcileSettledFootPlant(false, {1, 0, 1}, {0, 1, 0}, {}, 2, 0.1F, awaiting, locked));
+    CHECK(awaiting);
+    CHECK(locked.Position.X == settledPosition.X);
+    CHECK(locked.Position.Z == settledPosition.Z);
+    CHECK_FALSE(ReconcileSettledFootPlant(true, {10, 0, 0}, {0, 1, 0}, {}, 1, 0.1F, awaiting, locked));
+    CHECK_FALSE(ReconcileSettledFootPlant(true, candidate, {0, 1, 0}, {}, 1, 0, awaiting, locked));
+    CHECK(awaiting);
+}
+
+TEST_CASE("Settled idle acquires an interrupted swing and preserves each support height and slope")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    for (const auto height : {0.107264F, 0.147264F, 0.407264F})
+    {
+        AutomaticFootPlantState foot{};
+        bool awaiting = true;
+        const Vector3 candidate{0.1F, height, 0.2F};
+        REQUIRE(ReconcileSettledFootPlant(true, candidate, {0, 1, 0.2F}, {0, 0.9F, 0}, 1.2F, 0.016F, awaiting, foot));
+        CHECK(foot.Locked);
+        CHECK_FALSE(awaiting);
+        CHECK(foot.Position.Y == height);
+        CHECK(foot.Normal.Z > 0.19F);
+        REQUIRE(ReconcileSettledFootPlant(true, candidate, {0, 1, 0.2F}, {0, 0.9F, 0}, 1.2F, 0.016F, awaiting, foot));
+        CHECK(foot.Position.X == candidate.X);
+        CHECK(foot.Position.Y == candidate.Y);
+        CHECK(foot.Position.Z == candidate.Z);
+    }
+}
+
+TEST_CASE("Settled support observation rejects script moved static colliders including paused apex frames")
+{
+    using namespace Keire;
+    using namespace Keire::Detail;
+    SettledFootSupportState support;
+    Matrix4 world;
+    CHECK_FALSE(ObserveSettledFootSupport(world, 0.016F, support));
+    for (int frame = 0; frame < 40; ++frame)
+        (void)ObserveSettledFootSupport(world, 0.016F, support);
+    CHECK(ObserveSettledFootSupport(world, 0.016F, support));
+    // Motion type can remain Static while a Behaviour drives the support transform.
+    for (int frame = 1; frame <= 120; ++frame)
+    {
+        world.Elements[13] = std::sin(static_cast<float>(frame) * 0.05F);
+        CHECK_FALSE(ObserveSettledFootSupport(world, 0.016F, support));
+        // Multiple rendered frames or an apex can observe the identical fixed pose.
+        CHECK_FALSE(ObserveSettledFootSupport(world, 0.008F, support));
+    }
+    world.Elements[0] = 0.9F;
+    CHECK_FALSE(ObserveSettledFootSupport(world, 0.016F, support));
+    for (int frame = 0; frame < 40; ++frame)
+        (void)ObserveSettledFootSupport(world, 0.016F, support);
+    CHECK(ObserveSettledFootSupport(world, 0.016F, support));
+    CHECK_FALSE(ObserveSettledFootSupport(world, 0.0F, support));
+}
+
+TEST_CASE("foot contact endpoint diagnostics use signed normalized planes and reject invalid measurements")
+{
+    const auto above = Keire::Detail::FootContactPlaneDistance({1, 3, 2}, {0, 1, 0}, {0, 4, 0});
+    REQUIRE(above);
+    CHECK(*above == doctest::Approx(2.0F));
+    const auto below = Keire::Detail::FootContactPlaneDistance({0, -1, 0}, {}, {0, 2, 0});
+    REQUIRE(below);
+    CHECK(*below == doctest::Approx(-1.0F));
+    const auto slope = Keire::Detail::FootContactPlaneDistance({1, 1, 0}, {}, {1, 1, 0});
+    REQUIRE(slope);
+    CHECK(*slope == doctest::Approx(std::sqrt(2.0F)));
+    CHECK_FALSE(Keire::Detail::FootContactPlaneDistance({}, {}, {}));
+    const auto invalid = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(Keire::Detail::FootContactPlaneDistance({invalid, 0, 0}, {}, {0, 1, 0}));
+    CHECK_FALSE(Keire::Detail::FootContactPlaneDistance({}, {0, invalid, 0}, {0, 1, 0}));
+    CHECK_FALSE(Keire::Detail::FootContactPlaneDistance({}, {}, {0, 1, invalid}));
 }

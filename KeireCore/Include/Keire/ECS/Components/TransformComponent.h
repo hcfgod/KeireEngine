@@ -46,8 +46,19 @@ namespace Keire
         void SetRuntimePresentationWorldMatrix(Matrix4 value);
         // Interpolate character translation while retaining current gameplay rotation and scale.
         void SetRuntimePresentationWorldPosition(Vector3 value);
+        // Runtime-only opt-in for transforms authored at fixed simulation boundaries.
+        // Physics-owned character/dynamic presentation retains precedence.
+        [[nodiscard]] bool FixedPresentationInterpolation() const noexcept { return m_FixedPresentationInterpolation; }
+        void SetFixedPresentationInterpolation(bool enabled);
+        void BeginRuntimeFixedPresentationSample();
+        void EndRuntimeFixedPresentationSample();
+        void ApplyRuntimeFixedPresentation(float alpha);
+        void ClearRuntimeFixedPresentation() noexcept;
         void ResetPresentationInterpolation() noexcept;
         void Reset();
+
+      protected:
+        void OnDisable() override { ResetPresentationInterpolation(); }
 
       private:
         friend ComponentRegistration CreateTransformComponentRegistration();
@@ -58,6 +69,15 @@ namespace Keire
         bool m_HasPresentationWorldMatrix = false;
         bool m_PresentationPositionOnly = false;
         std::uint64_t m_PresentationResetRevision = 0;
+        bool m_FixedPresentationInterpolation = false;
+        bool m_HasFixedSamples = false;
+        bool m_HasFixedPresentation = false;
+        EntityId m_FixedParent;
+        Vector3 m_PreviousFixedPosition;
+        Vector3 m_CurrentFixedPosition;
+        Quaternion m_PreviousFixedRotation;
+        Quaternion m_CurrentFixedRotation;
+        Matrix4 m_FixedPresentationLocal;
     };
 
     [[nodiscard]] KEIRE_API ComponentRegistration CreateTransformComponentRegistration();

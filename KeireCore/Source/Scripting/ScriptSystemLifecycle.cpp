@@ -62,6 +62,12 @@ namespace Keire
             if (found != Instances.end() && found->second.Object.IsValid())
                 InvokeInstance(found->first, callback, deltaSeconds);
         };
+        ComponentCallbacks->AnimatorIk =
+            [this](const ManagedBehaviourInstanceId instance, const AnimationIkMessage& context)
+        {
+            if (Open.load(std::memory_order_acquire))
+                InvokeInstance(instance.Value(), ManagedBehaviourCallback::AnimatorIk, context.LayerWeight, &context);
+        };
         ComponentCallbacks->AnimationEvent =
             [this](const ManagedBehaviourInstanceId instance, const AnimationEventMessage& event)
         {
@@ -492,7 +498,7 @@ namespace Keire
     }
 
     void ScriptSystem::Impl::InvokeInstance(const std::uint64_t id, const ManagedBehaviourCallback callback,
-                                            const float deltaSeconds)
+                                            const float deltaSeconds, const AnimationIkMessage* ikContext)
     {
         const auto found = Instances.find(id);
         if (found == Instances.end() || !found->second.Object.IsValid())
@@ -554,7 +560,18 @@ namespace Keire
                 Invoke(instance.Object, "RuntimeAfterReload");
                 break;
             case ManagedBehaviourCallback::AnimatorIk:
-                Invoke(instance.Object, "RuntimeAnimatorIk", deltaSeconds);
+                if (ikContext)
+                {
+                    ++ManagedInteropCalls;
+                    const RuntimeScope scope(*this);
+                    ClearRuntimeException();
+                    instance.Object.InvokeMethod("RuntimeAnimatorIkEvaluation", ikContext->LayerWeight,
+                                                 ikContext->InterpolationAlpha,
+                                                 static_cast<std::uint8_t>(ikContext->IsFixedUpdate));
+                    ThrowRuntimeException();
+                }
+                else
+                    Invoke(instance.Object, "RuntimeAnimatorIk", deltaSeconds);
                 break;
             case ManagedBehaviourCallback::ProceduralMotionEvent:
                 throw std::logic_error("Procedural motion events require an event payload.");

@@ -314,7 +314,7 @@ namespace Keire
         try
         {
             const auto animator = RuntimeAnimator(world, high, low);
-            if (!animator || space > static_cast<std::uint8_t>(AnimatorIkSpace::World))
+            if (!animator || space > static_cast<std::uint8_t>(AnimatorIkSpace::PresentationWorld))
                 return 0;
             animator->SetTwoBoneIk(static_cast<std::string>(goal), static_cast<std::string>(root),
                                    static_cast<std::string>(middle), static_cast<std::string>(end), target, pole,
@@ -335,7 +335,7 @@ namespace Keire
         try
         {
             const auto animator = RuntimeAnimator(world, high, low);
-            if (!animator || space > static_cast<std::uint8_t>(AnimatorIkSpace::World))
+            if (!animator || space > static_cast<std::uint8_t>(AnimatorIkSpace::PresentationWorld))
                 return 0;
             const auto encoded = static_cast<std::string>(encodedBones);
             std::vector<std::string> bones;

@@ -23,6 +23,8 @@ namespace
     {
         std::vector<std::string> Calls;
         std::string ThrowAt;
+        bool MoveInFixed = false;
+        std::vector<Keire::AnimationIkMessage> IkContexts;
     };
 
     class StepProbe final : public Keire::Component
@@ -37,10 +39,29 @@ namespace
         }
 
       protected:
-        void FixedUpdate(float) override { Record("FixedUpdate"); }
+        void Awake() override
+        {
+            if (m_State->ThrowAt == "Awake")
+                Record("Awake");
+        }
+        void FixedUpdate(float) override
+        {
+            Record("FixedUpdate");
+            if (m_State->MoveInFixed)
+            {
+                const auto transform = Owner().GetComponent<Keire::TransformComponent>();
+                auto position = transform->LocalPosition();
+                position.X += 2.0F;
+                transform->SetLocalPosition(position);
+            }
+        }
         void Update(float) override { Record("Update"); }
         void LateUpdate() override { Record("LateUpdate"); }
-        void OnAnimatorIk(const Keire::AnimationIkMessage&) override { Record("AnimatorIK"); }
+        void OnAnimatorIk(const Keire::AnimationIkMessage& context) override
+        {
+            m_State->IkContexts.push_back(context);
+            Record("AnimatorIK");
+        }
 
       private:
         void Record(const std::string& phase)
@@ -292,6 +313,7 @@ TEST_CASE("Paused scene stepping presents the new physics pose without host inte
         fixture.Start();
         const auto entity = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
         const auto transform = entity.GetComponent<Keire::TransformComponent>();
+        transform->SetFixedPresentationInterpolation(true);
         if (characterController)
             REQUIRE(
                 entity.GetComponent<Keire::CharacterControllerComponent>()->QueueDesiredMovement({0.0F, 0.0F, 0.2F}));
@@ -304,4 +326,194 @@ TEST_CASE("Paused scene stepping presents the new physics pose without host inte
         CHECK(transform->PresentationWorldPosition().Z == doctest::Approx(current.Z));
         CHECK(fixture.Session->State() == Keire::ScenePlayState::Paused);
     }
+}
+
+TEST_CASE("Custom fixed presentation preserves simulation and samples zero multiple ticks and reset")
+{
+    StepFixture fixture;
+    fixture.Probe->MoveInFixed = true;
+    fixture.Start();
+    const auto entity = fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id());
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    transform->SetFixedPresentationInterpolation(true);
+    fixture.Session->Pause(false);
+    fixture.Session->Update(0.0F, 0.25F);
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(0.0F));
+    fixture.Session->FixedUpdate(0.02F);
+    fixture.Session->Update(0.0F, 0.25F);
+    CHECK(transform->WorldPosition().X == doctest::Approx(2.0F));
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(0.5F));
+    fixture.Session->Update(0.0F, 0.75F);
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(1.5F));
+    fixture.Session->FixedUpdate(0.02F);
+    fixture.Session->FixedUpdate(0.02F);
+    fixture.Session->Update(0.0F, 0.5F);
+    CHECK(transform->WorldPosition().X == doctest::Approx(6.0F));
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(5.0F));
+    transform->SetWorldPosition({100.0F, 0.0F, 0.0F});
+    transform->ResetPresentationInterpolation();
+    fixture.Session->Update(0.0F, 0.0F);
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(100.0F));
+    fixture.Session->Pause();
+    REQUIRE(fixture.Session->Step(0.02F));
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(102.0F));
+    fixture.Session->Update(0.0F, 0.0F);
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(102.0F));
+    transform->SetFixedPresentationInterpolation(false);
+    CHECK(transform->PresentationWorldPosition() == transform->WorldPosition());
+}
+
+TEST_CASE("Custom fixed presentation composes parent poses and rejects invalid alpha without mutation")
+{
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    const auto parent = scene->CreateEntity("carrier");
+    auto child = scene->CreateEntity("rider");
+    child.SetParent(parent, false);
+    const auto carrier = parent.GetComponent<Keire::TransformComponent>();
+    const auto rider = child.GetComponent<Keire::TransformComponent>();
+    rider->SetLocalPosition({1.0F, 0.0F, 0.0F});
+    for (const auto& transform : {carrier, rider})
+    {
+        transform->SetFixedPresentationInterpolation(true);
+        transform->BeginRuntimeFixedPresentationSample();
+    }
+    carrier->SetLocalPosition({10.0F, 0.0F, 0.0F});
+    rider->SetLocalPosition({3.0F, 0.0F, 0.0F});
+    for (const auto& transform : {carrier, rider})
+    {
+        transform->EndRuntimeFixedPresentationSample();
+        transform->ApplyRuntimeFixedPresentation(0.5F);
+    }
+    CHECK(rider->WorldPosition().X == doctest::Approx(13.0F));
+    CHECK(rider->PresentationWorldPosition().X == doctest::Approx(7.0F));
+    CHECK_THROWS_AS(rider->ApplyRuntimeFixedPresentation(std::numeric_limits<float>::quiet_NaN()),
+                    std::invalid_argument);
+    CHECK(rider->PresentationWorldPosition().X == doctest::Approx(7.0F));
+    child.SetParent({}, true);
+    CHECK(rider->PresentationWorldPosition().X == doctest::Approx(13.0F));
+    scene->Close();
+}
+
+TEST_CASE("Animation graph IK context carries presentation alpha while paused step uses current time")
+{
+    StepFixture fixture;
+    fixture.AddAnimation();
+    fixture.Start();
+    fixture.Session->Pause(false);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (fixture.Probe->IkContexts.empty() && std::chrono::steady_clock::now() < deadline)
+    {
+        (void)fixture.Assets->PumpCompletions();
+        fixture.Session->Update(0.0F, 0.35F);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE_FALSE(fixture.Probe->IkContexts.empty());
+    CHECK(fixture.Probe->IkContexts.back().InterpolationAlpha == doctest::Approx(0.35F));
+    CHECK_FALSE(fixture.Probe->IkContexts.back().IsFixedUpdate);
+    fixture.Session->Pause();
+    REQUIRE(fixture.Session->Step(0.02F));
+    CHECK(fixture.Probe->IkContexts.back().InterpolationAlpha == doctest::Approx(1.0F));
+    CHECK_FALSE(fixture.Probe->IkContexts.back().IsFixedUpdate);
+}
+
+TEST_CASE("Custom fixed presentation opt-in leaves physics override and quaternion rotation intact")
+{
+    const auto transform = Keire::CreateRef<Keire::TransformComponent>();
+    transform->SetRuntimePresentationWorldPosition({9.0F, 0.0F, 0.0F});
+    const auto revision = transform->PresentationResetRevision();
+    transform->SetFixedPresentationInterpolation(true);
+    CHECK(transform->PresentationResetRevision() == revision);
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(9.0F));
+    transform->ResetPresentationInterpolation();
+    transform->BeginRuntimeFixedPresentationSample();
+    transform->SetLocalEulerAngles({0.0F, 90.0F, 0.0F});
+    transform->EndRuntimeFixedPresentationSample();
+    transform->ApplyRuntimeFixedPresentation(0.5F);
+    const auto forward = Keire::Math::TransformDirection(transform->PresentationWorldMatrix(), {0.0F, 0.0F, 1.0F});
+    CHECK(forward.X == doctest::Approx(0.70710678F));
+    CHECK(forward.Z == doctest::Approx(0.70710678F));
+    CHECK(transform->LocalEulerAngles().Y == doctest::Approx(90.0F));
+    transform->SetFixedPresentationInterpolation(false);
+    CHECK(transform->PresentationWorldMatrix() == transform->WorldMatrix());
+}
+
+TEST_CASE("Custom fixed presentation opt-ins survive detached toggles and reject foreign thread mutation")
+{
+    auto detached = Keire::CreateRef<Keire::TransformComponent>();
+    detached->SetFixedPresentationInterpolation(true);
+    CHECK(detached->FixedPresentationInterpolation());
+    auto scene = Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition());
+    auto entity = scene->CreateEntity("custom mover");
+    const auto transform = entity.GetComponent<Keire::TransformComponent>();
+    bool rejected = false;
+    std::thread foreign(
+        [&]
+        {
+            try
+            {
+                transform->SetFixedPresentationInterpolation(true);
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
+        });
+    foreign.join();
+    CHECK(rejected);
+    CHECK_FALSE(transform->FixedPresentationInterpolation());
+    rejected = false;
+    std::thread sameValue(
+        [&]
+        {
+            try
+            {
+                transform->SetFixedPresentationInterpolation(false);
+            }
+            catch (const std::logic_error&)
+            {
+                rejected = true;
+            }
+        });
+    sameValue.join();
+    CHECK(rejected);
+    transform->SetFixedPresentationInterpolation(true);
+    CHECK(scene->DestroyEntity(entity.Id()));
+    CHECK_NOTHROW(transform->SetFixedPresentationInterpolation(false));
+    auto survivor = scene->CreateEntity("retained").GetComponent<Keire::TransformComponent>();
+    survivor->SetFixedPresentationInterpolation(true);
+    scene->Close();
+    CHECK_NOTHROW(survivor->SetFixedPresentationInterpolation(false));
+}
+
+TEST_CASE("Custom fixed presentation remains available with a disabled character controller")
+{
+    StepFixture fixture;
+    fixture.Probe->MoveInFixed = true;
+    fixture.Character.AddComponent<Keire::CharacterControllerComponent>()->SetEnabled(false);
+    fixture.Start();
+    const auto transform =
+        fixture.Session->RuntimeScene()->FindEntity(fixture.Character.Id()).GetComponent<Keire::TransformComponent>();
+    transform->SetFixedPresentationInterpolation(true);
+    fixture.Session->Pause(false);
+    fixture.Session->FixedUpdate(0.02F);
+    fixture.Session->Update(0.0F, 0.5F);
+    CHECK(transform->WorldPosition().X == doctest::Approx(2.0F));
+    CHECK(transform->PresentationWorldPosition().X == doctest::Approx(1.0F));
+}
+
+TEST_CASE("Scene component publication rolls back and preserves an Awake failure")
+{
+    StepFixture fixture;
+    fixture.Start();
+    auto runtime = fixture.Session->RuntimeScene();
+    auto entity = runtime->CreateEntity("rejected component");
+    const auto before = runtime->Query<StepProbe>().size();
+    fixture.Probe->ThrowAt = "Awake";
+    CHECK_THROWS_WITH_AS(entity.AddComponent<StepProbe>(), "step probe failure", std::runtime_error);
+    CHECK_FALSE(entity.GetComponent<StepProbe>());
+    CHECK(runtime->Query<StepProbe>().size() == before);
+    CHECK(entity.GetComponent<Keire::TransformComponent>());
+    fixture.Probe->ThrowAt.clear();
+    CHECK_NOTHROW((void)entity.AddComponent<StepProbe>());
+    CHECK(runtime->Query<StepProbe>().size() == before + 1);
 }

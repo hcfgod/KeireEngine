@@ -59,7 +59,11 @@ namespace Keire::Detail
 
     void ManagedBehaviourComponent::OnAnimatorIk(const AnimationIkMessage& context)
     {
-        Invoke(ManagedBehaviourCallback::AnimatorIk, context.LayerWeight);
+        const auto callbacks = m_Callbacks.lock();
+        if (callbacks && m_Instance && callbacks->AnimatorIk)
+            callbacks->AnimatorIk(m_Instance, context);
+        else
+            Invoke(ManagedBehaviourCallback::AnimatorIk, context.LayerWeight);
     }
 
     void ManagedBehaviourComponent::OnCollisionEnter(const PhysicsContactMessage& contact)

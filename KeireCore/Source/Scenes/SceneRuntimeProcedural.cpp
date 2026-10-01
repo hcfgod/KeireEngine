@@ -560,9 +560,10 @@ namespace Keire
                     animator->SetRuntimeDiagnostic(diagnostic);
             }
 
-            Runtime->DispatchAnimatorIk(entity.Id(), {.LayerWeight = 1.0F});
+            Runtime->DispatchAnimatorIk(entity.Id(),
+                                        {.LayerWeight = 1.0F, .InterpolationAlpha = 1.0F, .IsFixedUpdate = true});
             const auto overrideDiagnostic = Detail::EvaluateIndependentAnimationIkPasses(
-                [&] { return ApplyIkGoals(entity, *skeleton, *animator, pose, state.BoneIndices); },
+                [&] { return ApplyIkGoals(entity, *skeleton, *animator, pose, state.BoneIndices, false); },
                 [&]
                 {
                     return ApplyAuthoredArmIk(entity, *skeleton, *animator, pose, state.BoneIndices,

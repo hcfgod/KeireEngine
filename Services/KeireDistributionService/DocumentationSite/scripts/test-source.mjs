@@ -152,7 +152,7 @@ assert(fallbackLanding.includes(`<span data-doc-count>${allDocSources.length} do
     "Fallback documentation count is stale.");
 for (const [fragment, count] of [
     ["user-manual", 18], ["getting-projects", 5], ["editor-authoring", 11], ["engine-systems", 13], ["assets-builds", 4],
-    ["vfx", 4], ["csharp", 16], ["production", 12], ["material-shader-progress", 13], ["diagnostics", 5],
+    ["vfx", 4], ["csharp", 21], ["production", 12], ["material-shader-progress", 13], ["diagnostics", 5],
 ]) {
     assert(new RegExp(`<a href="#${fragment}">[^<]*<span>[^<]+</span><b>${count}</b></a>`).test(fallbackLanding),
     `Fallback documentation category count is stale: ${fragment}.`);

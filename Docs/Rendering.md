@@ -435,3 +435,19 @@ directional and local-light shadow maps, GPU-consumed Forward+ light lists, inst
 backgrounds, an RGBA16F/ACES pipeline, and the editor grid through a dedicated submission thread. Runtime
 reflection-probe capture and custom raw GPU passes remain later milestones; imported reflection probes already
 participate in same-frame spatial visibility and per-draw selection.
+
+### Render CPU timing publication
+
+`RenderStatistics.RenderCpuMilliseconds` describes the statistics frame's render-thread execution through successful
+logical presentation publication, including recording, swapchain acquisition waits, and submission. It is published
+with that frame's `SubmitToPresentMilliseconds`; it is neither GPU execution time nor scanout latency. Completed
+`RenderFrameTimeline` records can be joined by their exact `Frame` ID after `Flush`. Dynamic resolution uses the CPU
+value only after its GPU timestamp and completion-latency estimates are unavailable. Retirement of an older frame must
+not overwrite this current-frame CPU value.
+
+
+### TAA center reuse validation
+
+The TAA neighborhood loops reuse their initialized center when clamping leaves its UV exactly unchanged. Edge UVs retain the original clamped sample; motion-vector maximum selection keeps its strict comparison and neighbor order.
+
+The optional `TAA readback preserves a recorded baseline` render test records 40 static and 40 moving frames in both Forward+ and Deferred Hybrid. Set `KEIRE_TAA_RECORD_DIRECTORY` only for the baseline executable, then `KEIRE_TAA_COMPARE_DIRECTORY` only for the candidate executable, and run that test with `--no-skip`. It requires byte-identical RGBA output; recording refuses to overwrite existing files. These fixtures cover history initialization and moving silhouettes, not every material, resize or skinned-animation combination. Use separate directories for each GPU backend. Normal test runs write no comparison artifacts.

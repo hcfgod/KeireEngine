@@ -1,8 +1,22 @@
 # Getting Started With C# Scripting
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Kéire compiles project scripts into managed assemblies and publishes each successful build as an immutable generation.
 A failed build never replaces the last working generation, so Play Mode can continue using the last-good scripts while
 you correct diagnostics.
+
+## On This Page
+
+- [Prerequisites](#prerequisites)
+- [Organize Scripts Freely](#organize-scripts-freely)
+- [Assembly Definitions](#assembly-definitions)
+- [Create A Behaviour](#create-a-behaviour)
+- [Your First Play Mode Check](#your-first-play-mode-check)
+- [Build And Attach](#build-and-attach)
+- [IDE Projects](#ide-projects)
+- [Build Output And Last-Good Behavior](#build-output-and-last-good-behavior)
+- [First-Script Checklist](#first-script-checklist)
 
 ## Prerequisites
 
@@ -132,11 +146,11 @@ namespace MyGame;
 public sealed class LightSwitch : Behaviour
 {
     [SerializeField, StableFieldId("0bce4b90-da78-4c6d-969c-03807d71504c")]
-    private Entity _light;
+    private Entity? _light = null;
 
     protected override void Update()
     {
-        if (Input.Pressed("ToggleLight") && _light.Id.IsValid)
+        if (Input.Keyboard.Current?.lKey.WasPressedThisFrame == true && _light is { IsValid: true })
             _light.Active = !_light.Active;
     }
 }
@@ -152,6 +166,23 @@ Important conventions:
 
 The editor-generated script command supplies IDs automatically. When writing a file manually, generate real UUIDs and
 keep them stable after the script has been attached or serialized.
+
+## Your First Play Mode Check
+
+1. Open a project and save a scene containing a camera and a visible lit object.
+2. Create `Assets/LightSwitch.cs` with the class above. The direct **L** key makes this first test independent of
+   an authored action map. Use Input Actions once you need rebinding or gamepad support.
+3. Wait for the managed build to succeed. Fix Console/build diagnostics before testing the new code.
+4. Add a separate controller entity and attach `LightSwitch` through **Add Component > Scripts** or a script drag.
+5. Drag the light's entity from the Hierarchy into the script's Light field. Keep the controller outside that light's
+   hierarchy so disabling the target does not also disable the script receiving the next key press.
+6. Enter Play Mode, focus the game input view, and press **L**. The assigned entity's local active state toggles.
+7. Stop Play Mode. Runtime mutations are session state; save authored scene changes explicitly through the Editor
+   workflow when you want them in the project.
+
+If nothing happens, verify input focus, assignment, active hierarchy, enabled state, and the running generation.
+An unassigned target is intentionally ignored. A target under an inactive parent remains inactive in hierarchy
+even if its local `Active` flag becomes true. Continue with the [cookbook](Cookbook.md) for actions, physics, and UI.
 
 ## Build And Attach
 

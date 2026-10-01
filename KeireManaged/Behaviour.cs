@@ -5,7 +5,11 @@ namespace Keire;
 
 public readonly record struct CollisionContact(Entity Other, Vector3 Point, Vector3 Normal, float Impulse, bool Trigger);
 public readonly record struct AnimationEvent(string Name, float NormalizedTime, int Integer, float Scalar, string Text);
-public readonly record struct AnimationIkContext(float LayerWeight);
+public readonly record struct AnimationIkContext(float LayerWeight)
+{
+    public float InterpolationAlpha { get; init; } = 1.0f;
+    public bool IsFixedUpdate { get; init; }
+}
 public enum ProceduralMotionEventType : byte
 {
     FootLift,
@@ -244,6 +248,12 @@ public abstract class Behaviour : Component
             true);
     public void RuntimeAnimatorIk(float layerWeight) =>
         InvokeWithContext(() => OnAnimatorIk(new AnimationIkContext(layerWeight)), true);
+    public void RuntimeAnimatorIkEvaluation(float layerWeight, float interpolationAlpha, byte isFixedUpdate) =>
+        InvokeWithContext(() => OnAnimatorIk(new AnimationIkContext(layerWeight)
+        {
+            InterpolationAlpha = interpolationAlpha,
+            IsFixedUpdate = isFixedUpdate != 0
+        }), true);
     public void RuntimeProceduralMotionEvent(byte type, byte foot, byte state, float phase, float intensity,
                                              Vector3 contactPosition, Vector3 contactNormal, ulong supportHigh,
                                              ulong supportLow, ulong materialHigh, ulong materialLow) =>

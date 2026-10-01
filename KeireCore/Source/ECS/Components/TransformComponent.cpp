@@ -2,6 +2,7 @@
 
 #include "KeireInternal/SceneState.h"
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 
@@ -103,8 +104,9 @@ namespace Keire
         }
         const auto parent = Parent();
         const auto parentTransform = parent ? parent.GetComponent<TransformComponent>() : Ref<TransformComponent>{};
-        return parentTransform ? Math::Multiply(parentTransform->PresentationWorldMatrix(), LocalMatrix())
-                               : LocalMatrix();
+        const auto local =
+            m_HasFixedPresentation && m_FixedParent == parent.Id() ? m_FixedPresentationLocal : LocalMatrix();
+        return parentTransform ? Math::Multiply(parentTransform->PresentationWorldMatrix(), local) : local;
     }
 
     Vector3 TransformComponent::WorldPosition() const
@@ -198,9 +200,74 @@ namespace Keire
         m_PresentationPositionOnly = true;
     }
 
+    void TransformComponent::SetFixedPresentationInterpolation(const bool enabled)
+    {
+        const auto owner = Owner();
+        if (const auto state = owner.m_State.Lock())
+            state->SetFixedPresentationInterpolation(owner.Id(), enabled);
+        if (m_FixedPresentationInterpolation == enabled)
+            return;
+        m_FixedPresentationInterpolation = enabled;
+        ClearRuntimeFixedPresentation();
+    }
+
+    void TransformComponent::ClearRuntimeFixedPresentation() noexcept
+    {
+        m_HasFixedSamples = false;
+        m_HasFixedPresentation = false;
+    }
+
+    void TransformComponent::BeginRuntimeFixedPresentationSample()
+    {
+        const auto parent = Parent().Id();
+        if (!m_HasFixedSamples || m_FixedParent != parent)
+        {
+            m_CurrentFixedPosition = m_LocalPosition;
+            m_CurrentFixedRotation = m_LocalRotation;
+            m_FixedParent = parent;
+            m_HasFixedSamples = true;
+        }
+        m_PreviousFixedPosition = m_CurrentFixedPosition;
+        m_PreviousFixedRotation = m_CurrentFixedRotation;
+    }
+
+    void TransformComponent::EndRuntimeFixedPresentationSample()
+    {
+        if (!m_HasFixedSamples || m_FixedParent != Parent().Id())
+            BeginRuntimeFixedPresentationSample();
+        m_CurrentFixedPosition = m_LocalPosition;
+        m_CurrentFixedRotation = m_LocalRotation;
+    }
+
+    void TransformComponent::ApplyRuntimeFixedPresentation(const float alpha)
+    {
+        if (!std::isfinite(alpha) || alpha < 0.0F || alpha > 1.0F)
+            throw std::invalid_argument("Fixed presentation alpha must be finite and in the range 0..1.");
+        if (!m_FixedPresentationInterpolation || !m_HasFixedSamples || m_FixedParent != Parent().Id())
+        {
+            m_HasFixedPresentation = false;
+            return;
+        }
+        const Vector3 position{
+            m_PreviousFixedPosition.X + (m_CurrentFixedPosition.X - m_PreviousFixedPosition.X) * alpha,
+            m_PreviousFixedPosition.Y + (m_CurrentFixedPosition.Y - m_PreviousFixedPosition.Y) * alpha,
+            m_PreviousFixedPosition.Z + (m_CurrentFixedPosition.Z - m_PreviousFixedPosition.Z) * alpha};
+        auto current = m_CurrentFixedRotation;
+        const auto previous = m_PreviousFixedRotation;
+        if (previous.X * current.X + previous.Y * current.Y + previous.Z * current.Z + previous.W * current.W < 0.0F)
+            current = {-current.X, -current.Y, -current.Z, -current.W};
+        const auto rotation = Math::Normalize(
+            {previous.X + (current.X - previous.X) * alpha, previous.Y + (current.Y - previous.Y) * alpha,
+             previous.Z + (current.Z - previous.Z) * alpha, previous.W + (current.W - previous.W) * alpha});
+        // Keep current scale: interpolating signed scales can create singular transforms.
+        m_FixedPresentationLocal = Math::ComposeTransform(position, rotation, m_LocalScale);
+        m_HasFixedPresentation = true;
+    }
+
     void TransformComponent::ResetPresentationInterpolation() noexcept
     {
         m_HasPresentationWorldMatrix = false;
+        ClearRuntimeFixedPresentation();
         ++m_PresentationResetRevision;
         for (const auto& child : Children())
         {

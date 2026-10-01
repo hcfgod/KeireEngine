@@ -1,7 +1,25 @@
 # Async, Reload, And Diagnostics
 
+[Scripting home](README.md) · [Workflow map](WorkflowMap.md) · [Cookbook](Cookbook.md) · [API index](ApiIndex.md)
+
 Managed scripting is built around last-good generations. Async work, reload state, runtime-only registrations, and
 failure handling should all preserve that boundary.
+
+## On This Page
+
+- [The Behaviour Synchronization Context](#the-behaviour-synchronization-context)
+- [Managed Jobs](#managed-jobs)
+- [Lifetime Cancellation](#lifetime-cancellation)
+- [Adding Your Own Cancellation](#adding-your-own-cancellation)
+- [Do Not Retain Old-Generation Objects](#do-not-retain-old-generation-objects)
+- [Persistent And Reload-Only State](#persistent-and-reload-only-state)
+- [Transactional Reload](#transactional-reload)
+- [Callback Exceptions](#callback-exceptions)
+- [Logging](#logging)
+- [Profiling Managed Work](#profiling-managed-work)
+- [Build Diagnostics](#build-diagnostics)
+- [Troubleshooting](#troubleshooting)
+- [Handoff Checklist For A Script Change](#handoff-checklist-for-a-script-change)
 
 ## The Behaviour Synchronization Context
 
@@ -237,8 +255,10 @@ duration. An empty overridden update still incurs managed callback participation
 
 ## Build Diagnostics
 
-The editor watches stable `.cs` and `.keireasm` changes and builds after a short debounce. A newer edit cancels an
-obsolete build. Build failures never overwrite the last-good generation.
+The editor watches `.cs`, `.keireasm`, `.asmref`, and managed `.dll` changes and builds after a short debounce.
+Edits arriving during a build are combined into a follow-up build; queued Play waits for the latest requested
+generation. Build failures never overwrite the last-good generation. See
+[build and attach](GettingStarted.md#build-and-attach) for the current publication workflow.
 
 When a change appears not to run:
 
