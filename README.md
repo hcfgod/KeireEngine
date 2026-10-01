@@ -63,10 +63,10 @@ a project-first authoring workflow. The Kéire Hub manages projects and installe
 native scene, asset, rendering, scripting, profiling, and player-build workflows; and the runtime ships only the
 systems and cooked content selected by a project.
 
-Kéire is currently **version 0.4.5 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
+Kéire is currently **version 0.4.6 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Version 0.4.5 is the active Windows release in immutable signed catalog sequence 19. The same signed
+Version 0.4.6 is the active Windows release in immutable signed catalog sequence 20. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
 
@@ -543,7 +543,7 @@ output and reject stale or build-mismatched reports.
 ## Documentation
 
 The [documentation library](Docs/README.md) contains 104 guides and progress records grouped around real tasks. Project authors
-should begin with the [Kéire 0.4.5 User Manual](Docs/Manual/README.md):
+should begin with the [Kéire 0.4.6 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),
   [C# Scripting Fundamentals](Docs/Manual/ScriptingFundamentals.md), and

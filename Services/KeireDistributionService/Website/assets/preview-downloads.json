@@ -2,9 +2,9 @@
   "schemaVersion": 2,
   "releaseStatus": {
     "state": "active",
-    "version": "0.4.5",
-    "activeCatalogVersion": "0.4.5",
-    "message": "Windows 0.4.5 is active in signed catalog sequence 19. Independently validated Linux 0.4.2 packages remain available."
+    "version": "0.4.6",
+    "activeCatalogVersion": "0.4.6",
+    "message": "Windows 0.4.6 is active in signed catalog sequence 20. Independently validated Linux 0.4.2 packages remain available."
   },
   "packages": []
 }

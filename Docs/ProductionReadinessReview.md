@@ -1,8 +1,7 @@
 # Kéire Production Readiness Review
 
-The current source version is 0.4.5. Its Windows packages are being validated before signed publication;
-0.4.4 remains the active Windows download until that gate completes. Historical platform evidence below
-retains its original version and scope.
+Windows 0.4.6 is published through signed catalog sequence 20. Historical platform evidence below
+retains its original version and scope; this historical review is not a certification of the current release.
 
 Review date: 2026-08-25
 
