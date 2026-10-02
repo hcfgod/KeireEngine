@@ -4,7 +4,7 @@
     "state": "active",
     "version": "0.4.7",
     "activeCatalogVersion": "0.4.7",
-    "message": "Windows Hub 0.4.7 is active; Editor 0.4.6 remains available in signed catalog sequence 21. Independently validated Linux 0.4.2 packages remain available."
+    "message": "Windows Hub and Editor 0.4.7 are active in signed catalog sequence 22. Independently validated Linux 0.4.2 packages remain available."
   },
   "packages": []
 }

@@ -1,6 +1,6 @@
 # Kéire Hub
 
-Windows Hub 0.4.7 is published through signed catalog sequence 21; Windows Editor remains at 0.4.6. The catalog retains independently validated
+Windows Hub and Editor 0.4.7 are published through signed catalog sequence 22. The catalog retains independently validated
 Linux 0.4.2 packages. Historical platform evidence below retains its original version and scope.
 
 `KeireHub` is the normal product entrypoint and is packaged independently from versioned editor installations. The Hub

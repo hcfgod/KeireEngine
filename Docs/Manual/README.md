@@ -5,7 +5,7 @@ day-to-day Editor workflow, introduces the supported C# gameplay API, and ends w
 deliberately separate from the engine-maintainer material in [Architecture](../Architecture.md).
 
 Kéire 0.4.7 is a pre-1.0 Windows release. Use the Hub's installed versions and component status
-when deciding what can be launched or built; signed catalog sequence 21 publishes Windows Hub 0.4.7, retains Windows Editor 0.4.6, and
+when deciding what can be launched or built; signed catalog sequence 22 publishes Windows Hub and Editor 0.4.7 and
 retains the independently validated 0.4.2 Linux packages.
 
 ## Follow The Learning Path

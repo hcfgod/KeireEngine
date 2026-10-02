@@ -625,8 +625,8 @@ assert(changelogFeed.includes('Content-Type": "application/rss+xml; charset=utf-
     changelogFeed.includes("releaseNotes.filter((release) => release.published).map"),
     "The changelog RSS endpoint must publish the canonical release archive.");
 
-// Hub-only releases do not advance the published Editor or managed API contract.
-const publishedEditorVersion = "0.4.6";
+// The published Editor version owns the package and managed API compatibility defaults.
+const publishedEditorVersion = "0.4.7";
 assert(windowsDownloadsPage.includes(`Download Editor ${publishedEditorVersion} for Windows x86-64`),
     "Publisher compatibility boundary must match the available Windows Editor download.");
 const publisherPage = await readFile(path.join(siteRoot, "Source", "pages", "publisher", "index.astro"), "utf8");
