@@ -6,6 +6,14 @@ Linux 0.4.2 packages. Historical platform evidence below retains its original ve
 Hub packaging copies tracked template content only. Local template preview caches and logs are excluded from
 the distribution without deleting them from the checkout.
 
+Spider pose replays under `Build/Validation/AsterReachSpiderPose` are optional local integration fixtures. The original
+schema-1 route contains two unreachable ankle targets and an upper-leg mesh intersection. Its pinned negative
+regression verifies those witnesses and the solver's bounded response; it is not a passing gameplay route. Corrected
+captures retain strict reach, endpoint, vertex, and triangle checks. Run the complete-terrain replay explicitly with
+`--test-case="Spider captured posed mesh against complete terrain snapshots" --no-skip` from an isolated directory
+containing the paired target, terrain, scene, rig, clip, and mesh inputs. Keep capture hashes and replay output together;
+a passing sampled replay does not establish continuous collision safety or fix the experimental game's recovery logic.
+
 ## Asset Validation
 
 Asset changes require the focused `AssetTests.cpp` coverage plus Debug, DebugASan, and Release runs. The tests exercise

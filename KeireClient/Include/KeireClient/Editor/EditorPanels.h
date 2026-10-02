@@ -344,6 +344,8 @@ namespace KeireEditor
             bool WholeComponent = false;
         };
 
+        void DrawAddComponentMenu(Keire::UiFrame& ui, const Keire::Entity& entity, SceneDocument& sceneDocument,
+                                  const Keire::Ref<Keire::Scene>& scene);
         [[nodiscard]] bool DrawComponentMenu(Keire::UiFrame& ui, const Keire::Entity& entity,
                                              const Keire::Ref<Keire::Component>& component,
                                              const Keire::ComponentRegistration& registration,

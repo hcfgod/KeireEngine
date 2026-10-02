@@ -26,7 +26,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <optional>
@@ -51,19 +50,6 @@ namespace
                 result.push_back(Keire::AssetId::Parse(line));
         }
         return result;
-    }
-
-    [[nodiscard]] bool ContainsCaseInsensitive(const std::string_view value, const std::string_view query)
-    {
-        if (query.empty())
-            return true;
-        const auto found = std::ranges::search(value, query,
-                                               [](const char left, const char right)
-                                               {
-                                                   return std::tolower(static_cast<unsigned char>(left)) ==
-                                                          std::tolower(static_cast<unsigned char>(right));
-                                               });
-        return !found.empty();
     }
 
 } // namespace
@@ -1472,28 +1458,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                     }
                 }
             }
-            ui.Spacing();
-            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
-            if (auto add = ui.BeginCombo("##AddComponent", "Add Component..."); add)
-            {
-                ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
-                (void)ui.InputTextWithHint("##ComponentSearch", "Search scripts and components", m_ComponentSearch);
-                for (const auto& registration : scene->Components()->Registrations())
-                {
-                    if (IsRetiredSceneUiComponent(registration.Type))
-                        continue;
-                    if (!ContainsCaseInsensitive(registration.Name, m_ComponentSearch) &&
-                        !ContainsCaseInsensitive(registration.Category, m_ComponentSearch))
-                        continue;
-                    const bool canAdd = registration.Removable &&
-                                        (registration.AllowMultiple || !entity.HasComponent(registration.Type));
-                    if (ui.MenuItem(registration.Category + "/" + registration.Name, false, canAdd))
-                    {
-                        m_Controller.RecordInspectorUndo();
-                        (void)sceneDocument.AddComponent(entity.Id(), registration.Type);
-                    }
-                }
-            }
+            DrawAddComponentMenu(ui, entity, sceneDocument, scene);
             ui.TextColored(theme.MutedText, "Drop a C# script here to attach it");
             if (auto target = ui.BeginDragTarget(); target)
             {

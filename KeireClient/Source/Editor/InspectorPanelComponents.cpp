@@ -1,17 +1,66 @@
 #include "KeireClient/Editor/EditorPanels.h"
 
 #include "KeireClient/Editor/AssetPicker.h"
+#include "KeireClient/Editor/InspectorComponentUtilities.h"
 #include "KeireClient/Editor/InspectorPropertyEditor.h"
 #include "KeireClient/Editor/InspectorPropertyVisibility.h"
 #include "KeireClient/Editor/PropertyDrawerRegistry.h"
 #include "KeireClient/Editor/SceneDocument.h"
 
+#include <algorithm>
+#include <cctype>
 #include <exception>
 #include <optional>
+#include <ranges>
 #include <string>
+#include <string_view>
+#include <utility>
+
+namespace
+{
+    [[nodiscard]] bool ContainsCaseInsensitive(const std::string_view value, const std::string_view query)
+    {
+        if (query.empty())
+            return true;
+        const auto found = std::ranges::search(value, query,
+                                               [](const char left, const char right)
+                                               {
+                                                   return std::tolower(static_cast<unsigned char>(left)) ==
+                                                          std::tolower(static_cast<unsigned char>(right));
+                                               });
+        return !found.empty();
+    }
+} // namespace
 
 namespace KeireEditor
 {
+    void InspectorPanel::DrawAddComponentMenu(Keire::UiFrame& ui, const Keire::Entity& entity,
+                                              SceneDocument& sceneDocument, const Keire::Ref<Keire::Scene>& scene)
+    {
+        ui.Spacing();
+        ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+        if (auto add = ui.BeginCombo("##AddComponent", "Add Component..."); add)
+        {
+            ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
+            (void)ui.InputTextWithHint("##ComponentSearch", "Search scripts and components", m_ComponentSearch);
+            for (const auto& registration : scene->Components()->Registrations())
+            {
+                if (IsRetiredSceneUiComponent(registration.Type))
+                    continue;
+                if (!ContainsCaseInsensitive(registration.Name, m_ComponentSearch) &&
+                    !ContainsCaseInsensitive(registration.Category, m_ComponentSearch))
+                    continue;
+                const bool canAdd =
+                    registration.Removable && (registration.AllowMultiple || !entity.HasComponent(registration.Type));
+                if (ui.MenuItem(registration.Category + "/" + registration.Name, false, canAdd))
+                {
+                    m_Controller.RecordInspectorUndo();
+                    (void)sceneDocument.AddComponent(entity.Id(), registration.Type);
+                }
+            }
+        }
+    }
+
     bool InspectorPanel::DrawComponentMenu(Keire::UiFrame& ui, const Keire::Entity& entity,
                                            const Keire::Ref<Keire::Component>& component,
                                            const Keire::ComponentRegistration& registration,
