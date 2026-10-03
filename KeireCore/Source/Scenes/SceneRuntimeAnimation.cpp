@@ -517,6 +517,7 @@ namespace Keire
                 state = std::make_unique<AnimationRuntimeState>();
             // Diagnostics describe this evaluation, so repaired settings must not retain an old failure.
             animator->SetRuntimeDiagnostic({});
+            animator->SetRuntimeLimbResults({});
             const auto resetIkContacts = [&]
             {
                 // Resuming evaluation must acquire contacts at the current actor position.
@@ -691,11 +692,15 @@ namespace Keire
                 });
             if (!ikDiagnostics.empty())
                 animator->SetRuntimeDiagnostic(ikDiagnostics);
+            const auto limbDiagnostic = ApplyLimbGoals(entity, skeleton, *animator, sample.LocalPose, *state);
+            if (!limbDiagnostic.empty())
+                animator->SetRuntimeDiagnostic(ikDiagnostics.empty() ? limbDiagnostic
+                                                                     : ikDiagnostics + '\n' + limbDiagnostic);
             const auto palette = SkinPalette(*skeleton, sample.LocalPose);
             animator->SetRuntimePose(sample.State, sample.NormalizedTime, state->Instance->Playing(), palette);
             auto debugSnapshot = state->Instance->DebugSnapshot();
-            if (!animator->IkGoals().empty() || animator->LeftArmIk().Enabled || animator->RightArmIk().Enabled ||
-                animator->FootGrounding().Enabled)
+            if (!animator->IkGoals().empty() || !animator->LimbIkTargets().empty() || animator->LeftArmIk().Enabled ||
+                animator->RightArmIk().Enabled || animator->FootGrounding().Enabled)
                 debugSnapshot = FinalPoseDebugSnapshot(*skeleton, sample.LocalPose, debugSnapshot);
             animator->SetRuntimeDebugSnapshot(std::move(debugSnapshot));
             ApplyRootMotion(entity, sample, *animator);

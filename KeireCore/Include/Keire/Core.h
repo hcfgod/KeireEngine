@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/Animation/AnimationSystem.h"
+#include "Keire/Animation/LimbRig.h"
 #include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/Animation/RiggingSystem.h"
 #include "Keire/Animation/Skinning.h"

@@ -535,6 +535,14 @@ public sealed class Animator : Component
                             AnimatorIkSpace space = AnimatorIkSpace.World) =>
         AnimatorApi.SetFabrikIK(Entity, goal, bones, target, weight, maximumIterations, tolerance, space);
     public bool ClearIK(string goal) => AnimatorApi.ClearIK(Entity, goal);
+    /// <summary>Targets a stable limb ID in the Animator's assigned Rig Definition asset. Saved native bend limits apply.</summary>
+    public void SetLimbIK(LimbId limb, Vector3 target, Vector3 pole, float weight = 1.0f,
+                          AnimatorIkSpace space = AnimatorIkSpace.World, bool enabled = true) =>
+        NativeRuntime.SetAnimatorLimbIk(Entity, limb, target, pole, weight, space, enabled);
+    public bool ClearLimbIK(LimbId limb) => NativeRuntime.ClearAnimatorLimbIk(Entity, limb);
+    /// <summary>Returns the most recently evaluated result. Endpoint and distances are in skeleton model space.</summary>
+    public bool TryGetLimbIKResult(LimbId limb, out LimbIkResult result) =>
+        NativeRuntime.TryGetAnimatorLimbResult(Entity, limb, out result);
 }
 
 internal static class AnimatorApi

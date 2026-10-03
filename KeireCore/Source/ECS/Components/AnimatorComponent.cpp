@@ -78,6 +78,8 @@ namespace Keire
 
     void AnimatorComponent::SetSkeleton(const AssetId skeleton)
     {
+        if (m_Skeleton != skeleton)
+            ClearLimbIk();
         m_Skeleton = skeleton;
         NotifyChanged();
     }
@@ -104,6 +106,8 @@ namespace Keire
 
     void AnimatorComponent::SetRigDefinition(const AssetId rig)
     {
+        if (m_RigDefinition != rig)
+            ClearLimbIk();
         m_RigDefinition = rig;
         NotifyChanged();
     }
@@ -285,6 +289,40 @@ namespace Keire
 
     void AnimatorComponent::ClearIk() noexcept { m_IkGoals.clear(); }
 
+    void AnimatorComponent::SetLimbIk(const LimbTarget target, const AnimatorIkSpace space)
+    {
+        if (target.Id.Value == 0 || !Math::IsFinite(target.Position) || !Math::IsFinite(target.Pole) ||
+            !std::isfinite(target.Weight) || target.Weight < 0.0F || target.Weight > 1.0F ||
+            space > AnimatorIkSpace::PresentationWorld)
+            throw std::invalid_argument("Limb IK needs a nonzero ID, finite goal, weight 0..1, and valid space.");
+        const auto found = std::ranges::find_if(m_LimbTargets, [&](const AnimatorLimbTarget& existing)
+                                                { return existing.Target.Id == target.Id; });
+        if (found != m_LimbTargets.end())
+            *found = {target, space};
+        else
+        {
+            if (m_LimbTargets.size() >= 256)
+                throw std::invalid_argument("Animator supports at most 256 runtime limb targets.");
+            m_LimbTargets.push_back({target, space});
+        }
+        m_LimbResults.clear();
+    }
+
+    bool AnimatorComponent::ClearLimbIk(const LimbId id) noexcept
+    {
+        const auto removed =
+            std::erase_if(m_LimbTargets, [&](const AnimatorLimbTarget& target) { return target.Target.Id == id; });
+        if (removed != 0)
+            m_LimbResults.clear();
+        return removed != 0;
+    }
+
+    void AnimatorComponent::ClearLimbIk() noexcept
+    {
+        m_LimbTargets.clear();
+        m_LimbResults.clear();
+    }
+
     void AnimatorComponent::SetFootGrounding(AnimatorFootGroundingSettings settings)
     {
         const std::array<std::string_view, 7> bones{settings.Pelvis,   settings.LeftUpperLeg,  settings.LeftLowerLeg,
@@ -408,6 +446,7 @@ namespace Keire
 
     void AnimatorComponent::ClearRuntimePose() noexcept
     {
+        ClearLimbIk();
         m_CurrentState.clear();
         m_NormalizedTime = 0.0F;
         m_RuntimePlaying = false;

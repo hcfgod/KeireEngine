@@ -1,5 +1,10 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("Asset-bound limb goals preserve the native bridge contract", BoundLimbBridgeTests.Run),
+    ("Generic limb gait scheduling preserves support recovery and atomic admission", LimbGaitSchedulerTests.Run),
+    ("Reusable named limb goals preserve ownership validation and native submission", LimbIkRigTests.Run),
+    ("Limb contacts transport rigid supports and report loss and recovery", LimbContactTests.Run),
+    ("Generic limb support polygons preserve geometry margins and failure contracts", LimbSupportBalanceTests.Run),
     ("Fixed presentation opt-in and IK evaluation context preserve managed contracts", FixedPresentationTests.Run),
     ("IK validates arguments before submitting native goal updates", AnimatorIkTests.Run),
     ("FPS modules preserve movement, jump, landing, and look contracts", FirstPersonControllerTests.Run),

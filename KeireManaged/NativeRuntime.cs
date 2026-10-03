@@ -379,6 +379,11 @@ internal static unsafe class NativeRuntime
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, NativeString, Vector3, float, uint, float,
         byte, byte> SetAnimatorFabrikIkIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte> ClearAnimatorIkIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, uint, Vector3, Vector3, float, byte, byte, byte>
+        SetAnimatorLimbIkIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, uint, byte> ClearAnimatorLimbIkIcall;
+    internal static delegate* unmanaged<ulong, ulong, ulong, uint, Vector3*, float*, float*, byte*, byte*, byte>
+        GetAnimatorLimbResultIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, float*, byte> TryGetAnimatorFloatIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, int*, byte> TryGetAnimatorIntegerIcall;
     internal static delegate* unmanaged<ulong, ulong, ulong, NativeString, byte*, byte> TryGetAnimatorBooleanIcall;
@@ -885,6 +890,43 @@ internal static unsafe class NativeRuntime
         AnimatorIkValidation.Name(goal, nameof(goal));
         using NativeString nativeGoal = goal;
         return ClearAnimatorIkIcall(entity.World, entity.Id.High, entity.Id.Low, nativeGoal) != 0;
+    }
+
+    internal static void SetAnimatorLimbIk(Entity entity, LimbId limb, Vector3 target, Vector3 pole, float weight,
+                                         AnimatorIkSpace space, bool enabled)
+    {
+        if (!limb.IsValid)
+            throw new ArgumentException("A limb requires a nonzero persistent ID.", nameof(limb));
+        AnimatorIkValidation.Goal("limb", target, weight, space);
+        AnimatorIkValidation.Vector(pole, nameof(pole));
+        if (SetAnimatorLimbIkIcall == null)
+            throw new NotSupportedException("This engine runtime does not support asset-bound limb IK.");
+        RequireAnimatorResult(SetAnimatorLimbIkIcall(entity.World, entity.Id.High, entity.Id.Low, limb.Value,
+            target, pole, weight, (byte)space, enabled ? (byte)1 : (byte)0));
+    }
+
+    internal static bool ClearAnimatorLimbIk(Entity entity, LimbId limb)
+    {
+        if (!limb.IsValid)
+            throw new ArgumentException("A limb requires a nonzero persistent ID.", nameof(limb));
+        if (ClearAnimatorLimbIkIcall == null)
+            throw new NotSupportedException("This engine runtime does not support asset-bound limb IK.");
+        return ClearAnimatorLimbIkIcall(entity.World, entity.Id.High, entity.Id.Low, limb.Value) != 0;
+    }
+
+    internal static bool TryGetAnimatorLimbResult(Entity entity, LimbId limb, out LimbIkResult result)
+    {
+        if (!limb.IsValid)
+            throw new ArgumentException("A limb requires a nonzero persistent ID.", nameof(limb));
+        if (GetAnimatorLimbResultIcall == null)
+            throw new NotSupportedException("This engine runtime does not support asset-bound limb IK.");
+        Vector3 endpoint = default;
+        float positionError = 0, reachError = 0;
+        byte status = 0, jointLimited = 0;
+        bool found = GetAnimatorLimbResultIcall(entity.World, entity.Id.High, entity.Id.Low, limb.Value,
+            &endpoint, &positionError, &reachError, &status, &jointLimited) != 0;
+        result = found ? new(limb, (LimbIkSolveStatus)status, endpoint, positionError, reachError, jointLimited != 0) : default;
+        return found;
     }
 
     internal static bool TryGetAnimatorFloat(Entity entity, string parameter, out float value)

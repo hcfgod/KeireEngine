@@ -44,6 +44,8 @@ namespace KeireEditor
                 ui.SameLine();
             if (ui.Button("Stop", buttonSize))
                 preview.Stop();
+            if (ui.Button("Step 1/60 s", buttonSize))
+                preview.StepFrame();
             float timeline = preview.NormalizedTime;
             ui.Text("Timeline");
             ui.SetNextItemWidth(width);

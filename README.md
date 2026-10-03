@@ -721,6 +721,9 @@ it replaces current manual edits only after validation succeeds.
 C# IK setters report invalid arguments by parameter before changing goals; clear a behaviour's persistent goals in
 `OnDisable` when they should stop with that behaviour.
 Native C++ IK setters also reject unknown coordinate spaces without changing existing goals.
+The unreleased [creature limb APIs](Docs/Scripting/Animation.md#reusable-creature-limbs-and-contacts) provide stable limb
+IDs, reusable named-chain goals, independent contact tracking, support-loss/recovery events, and geometric support
+assessment. Their documented layers keep terrain probing and gait policy separate from pose solving.
 While Play mode is paused, **Step** advances one complete frame so animation graphs and scripted IK can be inspected frame by frame.
 FABRIK at zero weight leaves the authored pose unchanged, allowing a goal to fade out without altering bone rotations.
 For grounding investigations, Trace-level Core logs report contact transitions, support changes, release reasons,

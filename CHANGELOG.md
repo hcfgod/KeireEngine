@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Added reusable native limb binding and transactional pose solving with stable limb IDs and explicit outcome
+  diagnostics, plus managed named-limb goal adapters, per-contact rigid support tracking and events, and geometric
+  support-polygon assessment and grouped gait scheduling without humanoid assumptions.
+- Explicit limb definitions can be saved in schema-2 rig assets and driven through the native-backed C#
+  `Animator.SetLimbIK`, `ClearLimbIK`, and `TryGetLimbIKResult` API. Two-bone bend limits constrain partial blends;
+  asset and skeleton reloads invalidate cached bindings. Existing schema-1 rig assets remain supported.
+- Rigging Studio can inspect custom root-to-tip chains and display their published joints in Scene view. Animation
+  previews can advance one 1/60-second frame while paused. Custom chains support editable solver settings,
+  explicit-name mirroring, asset creation/loading, and undoable saved-rig assignment to an Animator.
+
 ## 0.4.7 - 2026-10-01
 
 - Reuse identical TAA center samples while preserving clamped edge sampling and temporal neighborhood behavior.

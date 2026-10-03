@@ -378,6 +378,17 @@ namespace Keire
         [[nodiscard]] static std::uint8_t RuntimeClearAnimatorIk(const std::uint64_t world, const std::uint64_t high,
                                                                  const std::uint64_t low,
                                                                  const Coral::String goal) noexcept;
+        [[nodiscard]] static std::uint8_t RuntimeSetAnimatorLimbIk(std::uint64_t world, std::uint64_t high,
+                                                                   std::uint64_t low, std::uint32_t id, Vector3 target,
+                                                                   Vector3 pole, float weight, std::uint8_t space,
+                                                                   std::uint8_t enabled) noexcept;
+        [[nodiscard]] static std::uint8_t RuntimeClearAnimatorLimbIk(std::uint64_t world, std::uint64_t high,
+                                                                     std::uint64_t low, std::uint32_t id) noexcept;
+        [[nodiscard]] static std::uint8_t RuntimeGetAnimatorLimbResult(std::uint64_t world, std::uint64_t high,
+                                                                       std::uint64_t low, std::uint32_t id,
+                                                                       Vector3* endpoint, float* positionError,
+                                                                       float* reachError, std::uint8_t* status,
+                                                                       std::uint8_t* jointLimited) noexcept;
 
         [[nodiscard]] static std::uint8_t RuntimeTryGetAnimatorFloat(const std::uint64_t world,
                                                                      const std::uint64_t high, const std::uint64_t low,

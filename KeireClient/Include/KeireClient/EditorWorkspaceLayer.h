@@ -200,6 +200,8 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] const Keire::Time& SceneViewportTime() const noexcept override;
     [[nodiscard]] bool SceneViewportPlayReviewActive() const noexcept override;
     [[nodiscard]] Keire::VfxRenderSnapshot SceneViewportEditVfx() const override;
+    void DrawSceneViewportRigChain(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene, Keire::EntityId selected,
+                                   const Keire::RenderCamera& camera, Keire::UiItemRect viewport) override;
     void ActivateSceneViewportHistory() noexcept override;
     void RestoreSceneViewportRecovery() override;
     void DiscardSceneViewportRecovery() noexcept override;
@@ -408,6 +410,14 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] std::string_view RiggingStudioStatus() const noexcept override;
     void ApplyRiggingStudioSettings(Keire::AssetId asset, const Keire::AssetImportSettings& settings) override;
     void CreateRiggingStudioRetarget(std::string_view name, std::vector<std::byte> bytes) override;
+    void CreateRiggingStudioLimbRig(std::string_view name, std::vector<std::byte> bytes) override;
+    KeireEditor::LimbRigAssignmentProgress AssignRiggingStudioLimbRig(Keire::AssetId asset) override;
+    void CancelRiggingStudioLimbAssignment() noexcept override;
+    KeireEditor::LimbRigAssignmentGuard m_LimbAssignment;
+    Keire::AssetHandle<Keire::RigDefinitionAsset> m_AssignmentRig;
+    Keire::AssetHandle<Keire::SkinnedMeshAsset> m_AssignmentSkin;
+    Keire::AssetHandle<Keire::SkeletonAsset> m_AssignmentSkeleton;
+    Keire::AssetId m_AssignmentSkeletonId;
     void RevealRiggingStudioAsset(Keire::AssetId asset) override;
     void PreviewRiggingStudioClip(Keire::AssetId asset) override;
     void ReportRiggingStudioError(std::string message) noexcept override;

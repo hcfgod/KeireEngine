@@ -47,6 +47,7 @@ unchanged.
    - `Humanoid` maps a conventional human skeleton.
    - `Biped` uses the two-legged profile without requiring human-specific authoring.
    - `Quadruped` maps front/rear legs, paws or hooves, spine, head, and tail.
+   - `Custom / imported names` keeps arbitrary creature bones available for explicit limb authoring.
 5. Choose four or eight maximum influences and linear-blend or dual-quaternion skinning.
 6. Choose an **Animation Compression** preset. `Balanced` is the default; `None`, `Light`, and `Aggressive` trade
    key count for increasingly large translation, rotation, and scale error tolerances.
@@ -74,6 +75,85 @@ request.Skinning = Keire::SkinningMethod::DualQuaternion;
 request.MaximumInfluences = 8;
 const auto result = Keire::GenerateRig(mesh, request);
 ```
+
+## Author Explicit Creature Limbs In Rigging Studio
+
+An explicit limb uses ordered imported bone names and a stable numeric ID. It does not need humanoid semantics.
+Use these chains for spiders, other creatures, and custom appendages while retaining the model's existing skeleton,
+skin, and animation clips. The chain solver handles bone poses; it does not choose footholds, coordinate a gait,
+query terrain, or balance the creature's body automatically.
+
+1. Select the imported model in **Rigging Studio**, then expand **Custom limb chain inspector**.
+2. Use **Bone filter**, **Chain root**, and **Chain tip** to choose one contiguous limb. The tip must descend from
+   the root. The inspector lists the ordered bones, segment lengths, and maximum bind reach. Lengths include skeleton
+   ancestor scale and exclude the scene entity transform. Joint limits and terrain can reduce usable reach.
+3. Expand **Author reusable limb rig**. Enter **Limb name** and **Stable limb ID**. IDs must be nonzero and unique
+   within the rig; scripts address the limb by that ID. **Add / update selected limb** replaces a draft entry with
+   the same ID, so keep existing IDs stable when revising a rig.
+4. Choose **Two bone** for exactly three bones, or **FABRIK** for two or more bones. Set **Contact radius** and
+   **Tolerance** in model units, and **Maximum solver iterations** between 1 and 1024. Contact radius is metadata for
+   contact planning; it does not enable collision queries in the pose solver.
+5. For Two bone, optionally enable **Bend limits** and **Preferred bend direction**. Bend angles describe the angle
+   between segment directions: 0 degrees is straight and 180 degrees is folded back. Minimum must not exceed maximum.
+   The preferred direction is a nonzero model-space direction relative to the chain root. FABRIK currently rejects
+   both settings; disable them before adding a FABRIK limb.
+6. Choose **Add / update selected limb**. Validation checks bone names, contiguous hierarchy, finite nonzero segments,
+   settings, duplicate IDs/names, and independence from other limb branches before changing the draft. Use **Select**
+   beside an existing draft entry to restore its endpoints and settings; **Remove** removes only that draft entry.
+
+To create the opposite limb, expand **Mirror using explicit bone-name tokens**. Enter the exact source and destination
+tokens, a different ID, and a distinct name. For example, `Left` to `Right` works only when every selected source bone
+contains `Left` exactly once and every resulting `Right` bone exists in a valid independent chain. Matching is case
+sensitive. **Validate and add mirrored limb** changes nothing if validation fails. This operation maps names; it does
+not generate bones or infer a geometric reflection plane. It clears the preferred bend direction, which must be set
+explicitly for the opposite limb when needed.
+
+### Save, Reload, And Assign A Limb Rig
+
+Enter **Rig asset name**, then choose **Save as new limb rig asset**. Creation uses the asset worker and the normal
+asset undo workflow. The workspace status reports completion or failure. The new `.keirerig` appears in the current
+Project folder; an existing name receives a numeric suffix. Imported runtime rig assets are not overwritten.
+
+Drafts are retained per skeleton during the editor session but are not saved across editor restarts. Saving writes a
+separate asset copy; subsequent draft edits do not update that saved copy automatically. **Load saved limb rig** loads
+compatible explicit limbs from a saved asset and replaces the current draft. Choose **Select** on an entry to edit its
+settings. Saving an edited draft creates another asset copy.
+Loading completes automatically; draft mutations are disabled while the request is pending. **Cancel rig load** keeps
+the current draft. Switching models or reloading the target skeleton cancels pending adoption, and a failed or
+incompatible load leaves the draft unchanged with a diagnostic.
+
+To use a saved rig, select a scene entity with an Animator and skinned mesh, stop scene Play Mode, and use
+**Load saved limb rig** to choose the saved asset. Then choose **Assign loaded rig to selected Animator**. This workflow
+requires **Animator Pose Source = Animation Graph** and validates the limb definitions against the selected entity's
+actual skin skeleton before changing anything. Assignment records scene undo and marks the scene dirty; save the scene
+to retain it. Assignment uses the loaded saved asset, not unsaved draft changes. Scripts still supply runtime limb goals;
+assigning a rig alone does not start procedural locomotion. See [the scripting animation API](Scripting/Animation.md).
+If assignment dependencies are still loading, assignment waits and completes automatically. **Cancel rig assignment**
+leaves the scene unchanged. Pending assignment is cancelled if the selected scene/entity, Animator, assigned skin,
+authored skeleton, existing rig reference, or Edit Mode context changes. Undo is recorded only after all dependencies
+have loaded and compatibility has been validated; a loading status is not an error.
+Closing or collapsing the limb authoring view cancels pending assignment rather than applying it after reopening.
+
+Explicit limb definitions use rig schema version 2 and preserve solver settings, limits, and preferred directions.
+Legacy schema version 1 rigs remain readable and retain their existing semantic chains. Version 1 cannot store explicit
+limbs, and older editors that only understand version 1 cannot read the new assets. Do not reduce a saved limb rig's
+schema version by editing its source.
+
+### Inspect The Published Pose And Step An Animation
+
+Enable **Show chain in Scene view** after choosing valid endpoints. Select a scene entity using the same skeleton,
+then preview an animation or run scene Play Mode. Cyan joints and segments follow the Animator's published pose;
+the yellow line connects the root to the tip. The overlay uses the entity's presentation transform, is clipped to
+Scene view, and remains visible through surfaces. It is a pose diagnostic, not proof that a leg clears the terrain.
+Missing poses, incompatible skeletons, and skeleton reloads produce actionable messages in the chain inspector.
+Keep Rigging Studio visible while using the overlay. Reopen the inspector and reselect endpoints after a skeleton reload.
+
+In Animation Clip Preview or Animator Controller preview, **Step 1/60 s** pauses playback and advances by one sixtieth
+of a second of preview evaluation time. It does not multiply that step by **Preview Speed**; authored motion settings
+still affect the evaluated animation. Further frames remain paused until another step or Play/Preview is requested.
+This steps the editor animation preview, not the scene's physics simulation or a scripted creature's full gait.
+Seeking, restarting, or stopping clears pending steps. Preview and stepping use temporary poses and do not save pose
+changes into the scene, clip, or controller.
 
 ## Inspect And Retarget
 

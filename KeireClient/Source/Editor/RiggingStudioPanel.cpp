@@ -149,6 +149,15 @@ namespace KeireEditor
 
     void RiggingStudioPanel::Draw(Keire::UiFrame& ui)
     {
+        if (!m_LimbAuthoringWasDrawn && m_AssigningLimbRig)
+        {
+            m_Controller.CancelRiggingStudioLimbAssignment();
+            m_AssigningLimbRig = {};
+            m_LimbAuthoringMessage =
+                "Assignment cancelled because limb authoring was closed. No scene changes were made.";
+            m_LimbAuthoringError = false;
+        }
+        m_LimbAuthoringWasDrawn = false;
         if (auto panel = ui.BeginPanel(m_Registration); panel)
         {
             const auto records = m_Controller.RiggingStudioRecords();
@@ -211,6 +220,14 @@ namespace KeireEditor
             if (m_DraftAsset != model->Id)
             {
                 m_DraftAsset = model->Id;
+                m_ShowChainOverlay = false;
+                m_ChainOverlayDiagnostic.clear();
+                m_LimbAuthoringMessage.clear();
+                m_LoadedLimbRig = {};
+                m_AssigningLimbRig = {};
+                m_Controller.CancelRiggingStudioLimbAssignment();
+                m_PendingLimbRig.Cancel();
+                m_PendingLimbRigHandle = {};
                 m_Message.clear();
                 m_MessageError = false;
                 m_ReviewedPartialMapping = false;
@@ -400,6 +417,7 @@ namespace KeireEditor
                 ui.TextColored(theme.MutedText, m_Controller.RiggingStudioStatus());
 
             ui.Separator();
+            DrawChainInspector(ui, *model);
             if (auto generated = ui.BeginTreeNode(
                     "Generated runtime assets (" + std::to_string(model->SubAssets.size()) + ")", true);
                 generated)
@@ -457,7 +475,7 @@ namespace KeireEditor
                                     ui.TextColoredWrapped(
                                         theme.Warning,
                                         "No semantic chains were inferred. Imported animation is preserved; "
-                                        "use explicit bone names for custom IK.");
+                                        "use the Custom limb chain inspector to author explicit chains for custom IK.");
                                 if (auto mapping = ui.BeginTreeNode("Semantic bone map", false); mapping)
                                 {
                                     for (const auto& bone : rig->Definition().Bones)

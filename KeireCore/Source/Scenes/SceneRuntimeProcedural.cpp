@@ -609,6 +609,10 @@ namespace Keire
                 pose[index].Rotation = RiggingDetail::Nlerp(previous.Rotation, current.Rotation, alpha);
             }
         }
+        // Constrained limbs are evaluated on the interpolated pose, so interpolation cannot violate a bend limit.
+        const auto limbDiagnostic = ApplyLimbGoals(entity, skeleton, animator, pose, state);
+        if (!limbDiagnostic.empty())
+            animator.SetRuntimeDiagnostic(limbDiagnostic);
         SkinPalette(*skeleton, pose, state.PublishedModelMatrices, state.SkinPaletteCache);
         animator.SetRuntimePose(std::string(ProceduralMotionStateName(state.ProceduralState.State)), state.GaitPhase,
                                 true, state.SkinPaletteCache);

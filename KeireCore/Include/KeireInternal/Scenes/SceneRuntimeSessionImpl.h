@@ -21,6 +21,7 @@
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Animation/ProceduralPoseMath.h"
 #include "KeireInternal/Animation/RiggingMath.h"
+#include "KeireInternal/Scenes/AnimationBoundLimbGoals.h"
 #include "KeireInternal/Scenes/AnimationIkPasses.h"
 #include "KeireInternal/Scenes/CharacterGrounding.h"
 #include "KeireInternal/Scenes/FootContactDiagnostics.h"
@@ -159,6 +160,9 @@ namespace Keire
             AssetHandle<SkeletonAsset> SkeletonHandle;
             AssetHandle<ProceduralMotionProfileAsset> ProceduralProfileHandle;
             AssetHandle<RigDefinitionAsset> RigDefinitionHandle;
+            AssetId LimbRigAsset;
+            AssetHandle<RigDefinitionAsset> LimbRigHandle;
+            Detail::AnimationLimbBindingCache LimbBinding;
             std::map<AssetId, AssetHandle<AnimationClipAsset>> Clips;
             std::map<AssetId, RetargetedClip> RetargetedClips;
             std::map<AssetId, AssetHandle<AvatarMaskAsset>> Masks;
@@ -390,6 +394,9 @@ namespace Keire
                                                const AnimatorComponent& animator, std::span<BoneTransform> localPose,
                                                const std::map<std::string, std::uint32_t, std::less<>>& indices,
                                                bool presentationEvaluation = true);
+        [[nodiscard]] std::string ApplyLimbGoals(const Entity& entity, Ref<const SkeletonAsset> skeleton,
+                                                 AnimatorComponent& animator, std::span<BoneTransform> pose,
+                                                 AnimationRuntimeState& state, bool presentationEvaluation = true);
 
         [[nodiscard]] std::string ApplyFootGrounding(
             const Entity& entity, const SkeletonAsset& skeleton, const AnimatorFootGroundingSettings& settings,

@@ -746,6 +746,13 @@ namespace Keire
             result += bone.Name.size();
         for (const auto& chain : m_Definition.Chains)
             result += chain.Name.size() + chain.Bones.size() * sizeof(RigBoneSemantic);
+        result += m_Definition.Limbs.size() * sizeof(LimbDefinition);
+        for (const auto& limb : m_Definition.Limbs)
+        {
+            result += limb.Name.size() + limb.Bones.size() * sizeof(std::string);
+            for (const auto& name : limb.Bones)
+                result += name.size();
+        }
         return result;
     }
 
@@ -753,8 +760,10 @@ namespace Keire
 
     void ValidateRigDefinition(const RigDefinition& definition)
     {
-        if (definition.SchemaVersion != 1)
+        if (definition.SchemaVersion != 1 && definition.SchemaVersion != 2)
             throw std::invalid_argument("Unsupported rig-definition schema version.");
+        if (definition.SchemaVersion == 1 && !definition.Limbs.empty())
+            throw std::invalid_argument("Explicit limb chains require rig-definition schema version 2.");
         if (definition.MaximumInfluences != 4 && definition.MaximumInfluences != 8)
             throw std::invalid_argument("Rig definitions support exactly four or eight influences.");
         if (definition.Bones.empty() || definition.Bones.size() > std::numeric_limits<std::uint16_t>::max())
@@ -784,6 +793,15 @@ namespace Keire
             for (const auto semantic : chain.Bones)
                 if (!semantics.contains(semantic))
                     throw std::invalid_argument("Rig chains may only reference declared semantic bones.");
+        }
+        if (!definition.Limbs.empty())
+        {
+            std::vector<SkeletonBone> bones;
+            bones.reserve(definition.Bones.size());
+            for (const auto& bone : definition.Bones)
+                bones.push_back({bone.Name, bone.Parent, bone.BindPose, {}});
+            const BoundLimbRig validated(CreateRef<SkeletonAsset>(std::move(bones)), definition.Limbs);
+            (void)validated;
         }
     }
 
@@ -918,6 +936,26 @@ namespace Keire
                 bones.push_back(SemanticName(semantic));
             root["chains"].push_back({{"name", chain.Name}, {"bones", std::move(bones)}});
         }
+        if (definition.SchemaVersion >= 2)
+        {
+            root["limbs"] = Json::array();
+            for (const auto& limb : definition.Limbs)
+            {
+                Json encoded{{"id", limb.Id.Value},
+                             {"name", limb.Name},
+                             {"bones", limb.Bones},
+                             {"solver", limb.Solver == LimbSolver::TwoBone ? "twoBone" : "fabrik"},
+                             {"contactRadius", limb.ContactRadius},
+                             {"tolerance", limb.Tolerance},
+                             {"maximumIterations", limb.MaximumIterations}};
+                if (limb.BendLimits)
+                    encoded["bendLimits"] = {{"minimumDegrees", limb.BendLimits->MinimumDegrees},
+                                             {"maximumDegrees", limb.BendLimits->MaximumDegrees}};
+                if (limb.PreferredBendDirection)
+                    encoded["preferredBendDirection"] = EncodeVector(*limb.PreferredBendDirection);
+                root["limbs"].push_back(std::move(encoded));
+            }
+        }
         const auto text = root.dump(2);
         return {reinterpret_cast<const std::byte*>(text.data()),
                 reinterpret_cast<const std::byte*>(text.data() + text.size())};
@@ -928,6 +966,9 @@ namespace Keire
         const auto root = Json::parse(reinterpret_cast<const char*>(bytes.data()),
                                       reinterpret_cast<const char*>(bytes.data() + bytes.size()));
         RigDefinition definition;
+        const auto& schema = root.at("schemaVersion");
+        if (!schema.is_number_unsigned() || (schema.get<std::uint64_t>() != 1 && schema.get<std::uint64_t>() != 2))
+            throw std::invalid_argument("Unsupported rig-definition schema version.");
         definition.SchemaVersion = root.at("schemaVersion").get<std::uint32_t>();
         definition.Profile = ParseProfile(root.at("profile").get<std::string>());
         definition.Skinning = root.value("skinning", "linearBlend") == "dualQuaternion" ? SkinningMethod::DualQuaternion
@@ -955,6 +996,34 @@ namespace Keire
             for (const auto& semantic : encoded.at("bones"))
                 chain.Bones.push_back(ParseSemantic(semantic.get<std::string>()));
             definition.Chains.push_back(std::move(chain));
+        }
+        for (const auto& encoded : root.value("limbs", Json::array()))
+        {
+            LimbDefinition limb;
+            const auto readUnsigned = [](const Json& value)
+            {
+                if (!value.is_number_unsigned() ||
+                    value.get<std::uint64_t>() > std::numeric_limits<std::uint32_t>::max())
+                    throw std::invalid_argument("Limb IDs and iteration counts must be unsigned 32-bit integers.");
+                return value.get<std::uint32_t>();
+            };
+            limb.Id.Value = readUnsigned(encoded.at("id"));
+            limb.Name = encoded.at("name").get<std::string>();
+            limb.Bones = encoded.at("bones").get<std::vector<std::string>>();
+            const auto solver = encoded.at("solver").get<std::string>();
+            if (solver != "twoBone" && solver != "fabrik")
+                throw std::invalid_argument("Unknown explicit limb solver; choose twoBone or fabrik.");
+            limb.Solver = solver == "twoBone" ? LimbSolver::TwoBone : LimbSolver::Fabrik;
+            limb.ContactRadius = encoded.value("contactRadius", 0.02F);
+            limb.Tolerance = encoded.value("tolerance", 0.001F);
+            limb.MaximumIterations =
+                encoded.contains("maximumIterations") ? readUnsigned(encoded.at("maximumIterations")) : 12U;
+            if (encoded.contains("bendLimits"))
+                limb.BendLimits = LimbBendLimits{encoded.at("bendLimits").at("minimumDegrees").get<float>(),
+                                                 encoded.at("bendLimits").at("maximumDegrees").get<float>()};
+            if (encoded.contains("preferredBendDirection"))
+                limb.PreferredBendDirection = DecodeVector(encoded.at("preferredBendDirection"));
+            definition.Limbs.push_back(std::move(limb));
         }
         ValidateRigDefinition(definition);
         return CreateRef<RigDefinitionAsset>(std::move(definition));

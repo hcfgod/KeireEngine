@@ -569,6 +569,8 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
             [this](const Keire::AssetId asset) { m_Controller.OpenSceneViewportUiDocument(asset); }, resolvePoseBounds);
         if (gizmo.SelectionActivated)
             m_Controller.SelectSceneViewportEntity(gizmo.Selection.Value(), ui.ControlDown());
+        m_Controller.DrawSceneViewportRigChain(ui, renderScene, Keire::EntityId(document.Selection()), camera,
+                                               imageRect);
         if (imageState.Hovered && !pointerBlocked && pointer.LeftPressed)
         {
             if (gizmo.PointerConsumed)

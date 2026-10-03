@@ -18,6 +18,7 @@ skeletons, clips, motion profiles, or native animator instances.
 - [Procedural Humanoid Locomotion](#procedural-humanoid-locomotion)
 - [Two-Bone IK](#two-bone-ik)
 - [FABRIK IK](#fabrik-ik)
+- [Reusable Creature Limbs And Contacts](#reusable-creature-limbs-and-contacts)
 - [Runtime Foot Grounding Weight](#runtime-foot-grounding-weight)
 - [Complete Animation-Graph Controller Pattern](#complete-animation-graph-controller-pattern)
 
@@ -302,6 +303,79 @@ protected override void OnDisable()
         animator.ClearIK("LookHand");
 }
 ```
+
+## Reusable Creature Limbs And Contacts
+
+For authored creature rigs, save explicit limbs in a schema-2 `.keirerig` asset and assign that asset to the Animator.
+Each limb has a stable nonzero ID, an ordered bone chain, a solver, and its own settings. The runtime resolves names
+against the loaded skeleton and caches the binding by asset and skeleton revision. Reloading an invalid rig drops the
+old binding and reports a diagnostic instead of solving with stale bone indices. Legacy humanoid schema-1 assets remain
+supported; adding explicit limbs requires schema 2.
+
+Submit a saved limb's target from `OnAnimatorIk` with `Animator.SetLimbIK`. Match the coordinates to the callback:
+use simulation world coordinates with `AnimatorIkSpace.World` in fixed evaluation, and presentation world coordinates
+with `AnimatorIkSpace.PresentationWorld` in presentation evaluation. `AnimatorIkSpace.Model` accepts skeleton-local
+coordinates. For example, a target already expressed in model space can be submitted as:
+
+```csharp
+animator.SetLimbIK(new LimbId(1), targetInModelSpace, poleInModelSpace,
+                   weight: 1.0f, space: AnimatorIkSpace.Model);
+```
+
+Targets persist until cleared with `ClearLimbIK(id)` or runtime pose state is reset. Clear owned targets on disable.
+`TryGetLimbIKResult(id, out result)` reads the most recently published result, including solve status, model-space
+endpoint, residual, and whether a joint limit intervened. Submission is not proof of a solved pose or terrain clearance.
+The compile-checked [AssetBoundLimbGoal example](Examples/AssetBoundLimbGoal.cs) shows target and pole entities with
+matching callback coordinates and cleanup. For editable, persistent behaviour fields, serialize the stable ID as a
+`uint` and construct a `LimbId` when submitting it; the readonly runtime wrapper is not an Inspector field type.
+The example also clears the previous goal when you change the selected ID during Play.
+Two-bone limbs support a bend-angle range and preferred bend direction; limits also apply to partially blended goals.
+FABRIK supports longer chains, but general per-joint constraints are not implemented and constrained FABRIK definitions
+are rejected explicitly. Independent limbs cannot have interacting ancestor/descendant roots.
+
+The unreleased creature APIs are additive. `LimbId` identifies a limb within its rig; use stable nonzero values that
+survive a renamed display label. `LimbIkDefinition` copies and validates ordered bone names once. `LimbIkRig` groups
+these definitions under a unique Animator goal namespace and submits targets through the existing named-goal bridge.
+It supports any number of authored legs up to its documented bound, without left/right or humanoid semantics.
+
+See the compile-checked [CreatureLimbGoal example](Examples/CreatureLimbGoal.cs). Bind the definitions on enable,
+submit targets in `OnAnimatorIk`, and clear the rig's persistent goals on disable while the Animator is alive.
+Each rig instance must own a distinct goal namespace on its Animator. Managed definition validation cannot verify
+the loaded skeleton's ancestry; native evaluation remains responsible for that check. A successful submission is not
+a solved-pose or collision-clearance result. The convenience wrapper does not apply native `BoundLimbRig` constraints.
+
+`LimbContactTracker` is a separate simulation-thread object for each supporting foot, hand, or other contact. The caller
+performs terrain probing and reach admission, then calls `Plant` with the support entity, rigid world pose, contact point,
+and normal. `UpdateSupport` transports the local anchor and normal through that same support's new pose. Missing or
+changed supports, invalid rotations, and excessive per-tick translation/rotation release the contact immediately.
+Bounds apply to the anchor as well as the platform center, so a small rotation about a distant pivot cannot silently
+drag a foot. Scale changes require explicit loss and a fresh probe; rigid transport does not infer changing scale.
+
+Subscribe to `Changed` for `Planted`, `Lifted`, `SupportLost`, and `Recovered` events. Events contain the stable limb ID,
+support ID, world point, normal, and loss reason. State commits before callbacks; exceptions propagate and do not undo
+the committed contact. Callbacks may read the contact but cannot recursively mutate it. Stable updates and repeated
+releases emit no duplicate events. Keep retained subscriptions
+within the owning behaviour's lifetime. Losing support requires fresh admission; it never becomes a planted contact
+merely because the old target is still within reach.
+
+`LimbSupportBalance.Evaluate` projects confirmed support points and an authored balance point (or actual center of mass)
+onto an explicit support plane along the supplied up direction. It returns a convex-hull safety-margin assessment for
+up to 64 distinct limbs without allocations. Omit swinging and lost contacts. Two point contacts and collinear contacts
+have no support area; finite foot shapes must be modelled by the caller. This geometric assessment does not model
+friction or dynamic balance and must not replace an existing controller's support policy using a guessed body point.
+
+`LimbGaitScheduler` groups up to 64 stable limb IDs into preferred and fallback step groups. Seed it with confirmed
+contacts using `Initialize`, supply fresh step and landing-admission masks to `TryBeginStep`, and call `CompletePlant`
+only after a confirmed landing. Call `LoseContact` as soon as support disappears. Minimum total support and optional
+region requirements prevent a voluntary lift from removing too many planted contacts. An optional group-admission
+mask can add caller-owned reach or geometric balance checks. The scheduler owns neither physics nor swing timing;
+it does not turn timer completion into a confirmed foothold. The spider example uses the same reusable scheduler
+with its existing alternating groups and side-support policy.
+
+These layers do not choose terrain, invent footholds, or move a character body automatically. Keep probing, contact
+admission, gait scheduling, body adjustment, and pose evaluation as explicit stages with matching simulation/presentation
+coordinates. Use the matching new managed assembly and native runtime together; do not copy development DLLs into a
+published editor installation.
 
 ## Runtime Foot Grounding Weight
 

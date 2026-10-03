@@ -119,6 +119,16 @@ TEST_CASE("Animator preview keeps authored skeleton settings and clears rejected
         preview.Seek(0.5F);
         preview.Synchronize(document, controller, assets);
         CHECK(Keire::SceneAsset::Encode(scene->Snapshot()) == before);
+        preview.PlaybackSpeed = 3.0F;
+        preview.StepFrame();
+        preview.Synchronize(document, controller, assets);
+        CHECK_FALSE(preview.Playing);
+        CHECK(preview.NormalizedTime == doctest::Approx(0.5F + 1.0F / 60.0F));
+        CHECK(animator->SkinPalette().front().Elements[12] == doctest::Approx(1.0F + 2.0F / 60.0F));
+        CHECK(Keire::SceneAsset::Encode(scene->Snapshot()) == before);
+        const auto steppedTime = preview.NormalizedTime;
+        preview.Synchronize(document, controller, assets);
+        CHECK(preview.NormalizedTime == steppedTime);
         preview.Stop();
         CHECK(animator->SkinPalette().empty());
         CHECK(Keire::SceneAsset::Encode(scene->Snapshot()) == before);

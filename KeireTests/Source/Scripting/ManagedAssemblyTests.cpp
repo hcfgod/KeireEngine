@@ -877,6 +877,10 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "[SerializeField] public bool PresentationOptInObserved = false; "
                "[SerializeField] public bool IkMissingAnimatorRejected = false; "
                "[SerializeField] public bool IkInvalidUpdateRejected = false; "
+               "[SerializeField] public bool LimbResultObserved = false; "
+               "[SerializeField] public bool LimbMissingResultObserved = false; "
+               "[SerializeField] public bool LimbInvalidUpdateRejected = false; "
+               "[SerializeField] public bool LimbMissingAnimatorRejected = false; "
                "private Animator? ikAnimator; "
                "[SerializeField, Min(0.0), Max(1.0), InspectorStep(0.05)] "
                "public float AnimatorIkWeight = -1.0f; "
@@ -942,7 +946,8 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "zone.BlendDistance == 2.0f && zone.ReverbSend == 0.75f && zone.Priority == 3; } } "
                "protected override void OnDisable() { DisableObserved = !Enabled; "
                "var animator = GetComponent<Animator>(); if (animator != null) { "
-               "animator.ClearIK(\"Hand \\u00e9\\U0001F590\"); animator.ClearIK(\"Spine\"); } } "
+               "animator.ClearIK(\"Hand \\u00e9\\U0001F590\"); animator.ClearIK(\"Spine\"); "
+               "for (uint id = 41; id <= 43; ++id) animator.ClearLimbIK(new LimbId(id)); } } "
                "protected override void OnAnimatorIk(AnimationIkContext context) { "
                "AnimatorIkObserved = true; AnimatorIkWeight = context.LayerWeight; "
                "AnimatorIkAlpha = context.InterpolationAlpha; AnimatorIkFixed = context.IsFixedUpdate; "
@@ -952,8 +957,20 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
                "var animator = GetComponent<Animator>(); if (animator == null) { "
                "try { ikAnimator?.SetTwoBoneIK(\"Hand \\u00e9\\U0001F590\", \"Root\", \"Middle\", \"End\", "
                "default, default); } catch (System.InvalidOperationException) { "
-               "IkMissingAnimatorRejected = true; } return; } "
+               "IkMissingAnimatorRejected = true; } "
+               "try { ikAnimator?.SetLimbIK(new LimbId(41), default, default); } "
+               "catch (System.InvalidOperationException) { LimbMissingAnimatorRejected = true; } return; } "
                "ikAnimator = animator; var target = new Vector3(context.LayerWeight, 2, 3); "
+               "if (animator.TryGetLimbIKResult(new LimbId(41), out var limbResult)) { "
+               "LimbResultObserved = limbResult.Id.Value == 41 && "
+               "limbResult.Status == LimbIkSolveStatus.JointLimited && limbResult.JointLimited && "
+               "limbResult.EndPosition == new Vector3(1, 2, 3) && limbResult.PositionError == 0.25f && "
+               "limbResult.ReachError == 0; } "
+               "LimbMissingResultObserved = !animator.TryGetLimbIKResult(new LimbId(999), out _); "
+               "for (byte space = 0; space < 3; ++space) animator.SetLimbIK(new LimbId((uint)(41 + space)), "
+               "target, new Vector3(4, 5, 6), context.LayerWeight, (AnimatorIkSpace)space, space != 2); "
+               "try { animator.SetLimbIK(new LimbId(41), new Vector3(float.NaN, 0, 0), default); } "
+               "catch (System.ArgumentOutOfRangeException) { LimbInvalidUpdateRejected = true; } "
                "animator.SetTwoBoneIK(\"Hand \\u00e9\\U0001F590\", \"Root\", \"Middle\", \"End\", target, "
                "new Vector3(0, 0, 1), context.LayerWeight, AnimatorIkSpace.Model); "
                "animator.SetFabrikIK(\"Spine\", new[] { \"Pelvis\", \"Spine\", \"Head\" }, "
@@ -1464,6 +1481,9 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
     for (int frame = 0; frame < 24; ++frame)
     {
         const float weight = static_cast<float>(frame) / 23.0F;
+        // Published-result ABI proof uses the actual native component, not a replacement managed function pointer.
+        runtimeAnimator->SetRuntimeLimbResults(
+            {{{41}, Keire::LimbSolveStatus::JointLimited, {1, 2, 3}, 0.25F, 0.0F, true}});
         CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = weight}));
         const auto goals = runtimeAnimator->IkGoals();
         REQUIRE(goals.size() == 2);
@@ -1484,27 +1504,49 @@ TEST_CASE("Managed runtime reload is transactional and preserves retained state"
         CHECK(goals[1].Tolerance == doctest::Approx(0.002F));
         const auto results = registration->Serialize(*runtimeComponent);
         CHECK(std::get<bool>(results.at("IkInvalidUpdateRejected")));
+        CHECK(std::get<bool>(results.at("LimbResultObserved")));
+        CHECK(std::get<bool>(results.at("LimbMissingResultObserved")));
+        CHECK(std::get<bool>(results.at("LimbInvalidUpdateRejected")));
+        const auto limbGoals = runtimeAnimator->LimbIkTargets();
+        REQUIRE(limbGoals.size() == 3);
+        for (std::uint32_t index = 0; index < 3; ++index)
+        {
+            CHECK(limbGoals[index].Target.Id == Keire::LimbId{41 + index});
+            CHECK(limbGoals[index].Target.Position == Keire::Vector3{weight, 2, 3});
+            CHECK(limbGoals[index].Target.Pole == Keire::Vector3{4, 5, 6});
+            CHECK(limbGoals[index].Target.Weight == doctest::Approx(weight));
+            CHECK(limbGoals[index].Space == static_cast<Keire::AnimatorIkSpace>(index));
+            CHECK(limbGoals[index].Target.Enabled == (index != 2));
+        }
     }
     runtimeComponent->SetEnabled(false);
     CHECK(runtimeAnimator->IkGoals().empty());
+    CHECK(runtimeAnimator->LimbIkTargets().empty());
+    CHECK(runtimeAnimator->RuntimeLimbResults().empty());
     runtimeComponent->SetEnabled(true);
     CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = 0.5F}));
     CHECK(runtimeAnimator->IkGoals().size() == 2);
+    CHECK(runtimeAnimator->LimbIkTargets().size() == 3);
     REQUIRE(runtimeEntity.RemoveComponent<Keire::AnimatorComponent>());
     CHECK_NOTHROW(play->FixedUpdate(1.0F / 60.0F));
     REQUIRE_FALSE(runtimeEntity.HasComponent<Keire::AnimatorComponent>());
     CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = 0.5F}));
     const auto missingAnimatorResults = registration->Serialize(*runtimeComponent);
     CHECK(std::get<bool>(missingAnimatorResults.at("IkMissingAnimatorRejected")));
+    CHECK(std::get<bool>(missingAnimatorResults.at("LimbMissingAnimatorRejected")));
     const auto replacementAnimator = runtimeEntity.AddComponent<Keire::AnimatorComponent>();
     REQUIRE(replacementAnimator);
     CHECK(replacementAnimator->IkGoals().empty());
+    CHECK(replacementAnimator->LimbIkTargets().empty());
     CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimatorIk(scriptedEntity.Id(), {.LayerWeight = 0.25F}));
     REQUIRE(replacementAnimator->IkGoals().size() == 2);
     CHECK(replacementAnimator->IkGoals()[0].Target == Keire::Vector3{0.25F, 2.0F, 3.0F});
     CHECK(replacementAnimator->IkGoals()[0].Weight == doctest::Approx(0.25F));
+    REQUIRE(replacementAnimator->LimbIkTargets().size() == 3);
+    CHECK(replacementAnimator->LimbIkTargets()[0].Target.Position == Keire::Vector3{0.25F, 2, 3});
     runtimeComponent->SetEnabled(false);
     CHECK(replacementAnimator->IkGoals().empty());
+    CHECK(replacementAnimator->LimbIkTargets().empty());
     runtimeComponent->SetEnabled(true);
 
     CHECK_NOTHROW(play->RuntimeScene()->DispatchAnimationEvent(

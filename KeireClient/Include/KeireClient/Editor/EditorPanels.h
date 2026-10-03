@@ -67,6 +67,10 @@ namespace KeireEditor
         [[nodiscard]] virtual const Keire::Time& SceneViewportTime() const noexcept = 0;
         [[nodiscard]] virtual bool SceneViewportPlayReviewActive() const noexcept = 0;
         [[nodiscard]] virtual Keire::VfxRenderSnapshot SceneViewportEditVfx() const = 0;
+        virtual void DrawSceneViewportRigChain(Keire::UiFrame&, const Keire::Ref<Keire::Scene>&, Keire::EntityId,
+                                               const Keire::RenderCamera&, Keire::UiItemRect)
+        {
+        }
         virtual void ActivateSceneViewportHistory() noexcept = 0;
         virtual void RestoreSceneViewportRecovery() = 0;
         virtual void DiscardSceneViewportRecovery() noexcept = 0;

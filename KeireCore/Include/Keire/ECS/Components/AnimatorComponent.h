@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/Animation/LimbRig.h"
 #include "Keire/Animation/ProceduralMotion.h"
 #include "Keire/ECS/Component.h"
 
@@ -8,6 +9,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Keire
@@ -50,6 +52,12 @@ namespace Keire
     {
         TwoBone,
         Fabrik
+    };
+
+    struct AnimatorLimbTarget
+    {
+        LimbTarget Target;
+        AnimatorIkSpace Space = AnimatorIkSpace::World;
     };
 
     struct AnimatorIkGoal
@@ -166,6 +174,13 @@ namespace Keire
         [[nodiscard]] bool ClearIk(std::string_view name) noexcept;
         void ClearIk() noexcept;
         [[nodiscard]] std::span<const AnimatorIkGoal> IkGoals() const noexcept { return m_IkGoals; }
+        // Runtime-only goals for the stable IDs in RigDefinition().Limbs; applied after existing IK passes.
+        void SetLimbIk(LimbTarget target, AnimatorIkSpace space = AnimatorIkSpace::World);
+        [[nodiscard]] bool ClearLimbIk(LimbId id) noexcept;
+        void ClearLimbIk() noexcept;
+        [[nodiscard]] std::span<const AnimatorLimbTarget> LimbIkTargets() const noexcept { return m_LimbTargets; }
+        [[nodiscard]] std::span<const LimbSolveResult> RuntimeLimbResults() const noexcept { return m_LimbResults; }
+        void SetRuntimeLimbResults(std::vector<LimbSolveResult> results) { m_LimbResults = std::move(results); }
         [[nodiscard]] const AnimatorFootGroundingSettings& FootGrounding() const noexcept { return m_FootGrounding; }
         void SetFootGrounding(AnimatorFootGroundingSettings settings);
         [[nodiscard]] float RuntimeFootGroundingWeight() const noexcept { return m_RuntimeFootGroundingWeight; }
@@ -207,6 +222,8 @@ namespace Keire
         std::uint64_t m_PoseGeneration = 0;
         std::vector<AnimatorCommand> m_RuntimeCommands;
         std::vector<AnimatorIkGoal> m_IkGoals;
+        std::vector<AnimatorLimbTarget> m_LimbTargets;
+        std::vector<LimbSolveResult> m_LimbResults;
         AnimatorFootGroundingSettings m_FootGrounding;
         float m_RuntimeFootGroundingWeight = 1.0F;
         AnimatorLimbIkSettings m_LeftArmIk;

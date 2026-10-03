@@ -38,6 +38,7 @@ namespace KeireEditor
         bool Playing = false;
         bool RestartRequested = true;
         std::optional<float> SeekRequested;
+        float StepSecondsRequested = 0.0F;
         float NormalizedTime = 0.0F;
         float PlaybackSpeed = 1.0F;
         std::chrono::steady_clock::time_point LastTick;
@@ -118,6 +119,7 @@ namespace KeireEditor
             Active = false;
             Playing = false;
             SeekRequested.reset();
+            StepSecondsRequested = 0.0F;
             Diagnostic.clear();
             PreviewLayer.clear();
             PreviewStateId.clear();
@@ -137,6 +139,7 @@ namespace KeireEditor
             Playing = true;
             RestartRequested = true;
             SeekRequested.reset();
+            StepSecondsRequested = 0.0F;
             LastTick = std::chrono::steady_clock::now();
         }
 
@@ -145,6 +148,15 @@ namespace KeireEditor
             Active = true;
             Playing = false;
             SeekRequested = std::clamp(normalizedTime, 0.0F, 1.0F);
+            StepSecondsRequested = 0.0F;
+        }
+
+        void StepFrame() noexcept
+        {
+            Active = true;
+            Playing = false;
+            StepSecondsRequested = std::min(StepSecondsRequested + 1.0F / 60.0F, 1.0F);
+            LastTick = std::chrono::steady_clock::now();
         }
 
         [[nodiscard]] Keire::Ref<const Keire::AnimationClipAsset>
@@ -475,6 +487,12 @@ namespace KeireEditor
                     sample = Instance->Update(0.0F);
                 }
                 SeekRequested.reset();
+                sampled = true;
+            }
+            if (StepSecondsRequested > 0.0F)
+            {
+                sample = Instance->Update(StepSecondsRequested);
+                StepSecondsRequested = 0.0F;
                 sampled = true;
             }
             else if (Playing)

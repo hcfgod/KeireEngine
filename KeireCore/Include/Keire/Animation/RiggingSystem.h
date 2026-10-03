@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Keire/Animation/LimbRig.h"
 #include "Keire/Animation/Skinning.h"
 #include "Keire/Api.h"
 #include "Keire/Assets/AssetPipeline.h"
@@ -87,6 +88,8 @@ namespace Keire
         std::uint8_t MaximumInfluences = 4;
         std::vector<RigBoneDefinition> Bones;
         std::vector<RigChainDefinition> Chains;
+        // Schema 2 explicit chains. Independent of the optional semantic mapping profile.
+        std::vector<LimbDefinition> Limbs;
     };
 
     class KEIRE_API RigDefinitionAsset final : public Asset

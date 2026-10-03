@@ -15,12 +15,9 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
-#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
-#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -238,6 +235,8 @@ namespace KeireEditor
                 if (ui.Button("Stop"))
                     m_Preview->Stop();
                 ui.SameLine();
+                if (ui.Button("Step 1/60 s"))
+                    m_Preview->StepFrame();
                 if (ui.Button("Preview Graph"))
                 {
                     m_Preview->PreviewLayer.clear();

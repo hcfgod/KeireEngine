@@ -232,6 +232,12 @@ namespace Keire
                                            reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorFabrikIk));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "ClearAnimatorIkIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeClearAnimatorIk));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "SetAnimatorLimbIkIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeSetAnimatorLimbIk));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "ClearAnimatorLimbIkIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeClearAnimatorLimbIk));
+                managedApi.AddInternalCall("Keire.NativeRuntime", "GetAnimatorLimbResultIcall",
+                                           reinterpret_cast<void*>(&Impl::RuntimeGetAnimatorLimbResult));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "TryGetAnimatorFloatIcall",
                                            reinterpret_cast<void*>(&Impl::RuntimeTryGetAnimatorFloat));
                 managedApi.AddInternalCall("Keire.NativeRuntime", "TryGetAnimatorIntegerIcall",

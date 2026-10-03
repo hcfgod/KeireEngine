@@ -306,6 +306,70 @@ namespace Keire
         }
     }
 
+    std::uint8_t ScriptSystem::Impl::RuntimeSetAnimatorLimbIk(const std::uint64_t world, const std::uint64_t high,
+                                                              const std::uint64_t low, const std::uint32_t id,
+                                                              const Vector3 target, const Vector3 pole,
+                                                              const float weight, const std::uint8_t space,
+                                                              const std::uint8_t enabled) noexcept
+    {
+        try
+        {
+            const auto animator = RuntimeAnimator(world, high, low);
+            if (!animator || space > static_cast<std::uint8_t>(AnimatorIkSpace::PresentationWorld) || enabled > 1)
+                return 0;
+            animator->SetLimbIk({{id}, target, pole, weight, enabled != 0}, static_cast<AnimatorIkSpace>(space));
+            return 1;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
+    std::uint8_t ScriptSystem::Impl::RuntimeClearAnimatorLimbIk(const std::uint64_t world, const std::uint64_t high,
+                                                                const std::uint64_t low,
+                                                                const std::uint32_t id) noexcept
+    {
+        try
+        {
+            const auto animator = RuntimeAnimator(world, high, low);
+            return animator && animator->ClearLimbIk({id}) ? 1 : 0;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
+    std::uint8_t ScriptSystem::Impl::RuntimeGetAnimatorLimbResult(const std::uint64_t world, const std::uint64_t high,
+                                                                  const std::uint64_t low, const std::uint32_t id,
+                                                                  Vector3* endpoint, float* positionError,
+                                                                  float* reachError, std::uint8_t* status,
+                                                                  std::uint8_t* jointLimited) noexcept
+    {
+        try
+        {
+            const auto animator = RuntimeAnimator(world, high, low);
+            if (!animator || !endpoint || !positionError || !reachError || !status || !jointLimited)
+                return 0;
+            const auto results = animator->RuntimeLimbResults();
+            const auto found =
+                std::ranges::find_if(results, [id](const LimbSolveResult& result) { return result.Id.Value == id; });
+            if (found == results.end())
+                return 0;
+            *endpoint = found->EndPosition;
+            *positionError = found->PositionError;
+            *reachError = found->ReachError;
+            *status = static_cast<std::uint8_t>(found->Status);
+            *jointLimited = found->JointLimited ? 1 : 0;
+            return 1;
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+
     [[nodiscard]] std::uint8_t ScriptSystem::Impl::RuntimeSetAnimatorTwoBoneIk(
         const std::uint64_t world, const std::uint64_t high, const std::uint64_t low, const Coral::String goal,
         const Coral::String root, const Coral::String middle, const Coral::String end, const Vector3 target,

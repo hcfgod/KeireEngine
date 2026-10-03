@@ -138,6 +138,27 @@ This is a generated declaration catalog, not a replacement for the workflow guid
 - [`Keire.LightingQuality`](#keirelightingquality)
 - [`Keire.LightingSet`](#keirelightingset)
 - [`Keire.LightingTextureArray`](#keirelightingtexturearray)
+- [`Keire.LimbContactEvent`](#keirelimbcontactevent)
+- [`Keire.LimbContactEventKind`](#keirelimbcontacteventkind)
+- [`Keire.LimbContactTracker`](#keirelimbcontacttracker)
+- [`Keire.LimbGaitGroup`](#keirelimbgaitgroup)
+- [`Keire.LimbGaitScheduler`](#keirelimbgaitscheduler)
+- [`Keire.LimbId`](#keirelimbid)
+- [`Keire.LimbIkDefinition`](#keirelimbikdefinition)
+- [`Keire.LimbIkResult`](#keirelimbikresult)
+- [`Keire.LimbIkRig`](#keirelimbikrig)
+- [`Keire.LimbIkSolveStatus`](#keirelimbiksolvestatus)
+- [`Keire.LimbIkSolver`](#keirelimbiksolver)
+- [`Keire.LimbIkTarget`](#keirelimbiktarget)
+- [`Keire.LimbSupportBalance`](#keirelimbsupportbalance)
+- [`Keire.LimbSupportBalanceResult`](#keirelimbsupportbalanceresult)
+- [`Keire.LimbSupportBalanceStatus`](#keirelimbsupportbalancestatus)
+- [`Keire.LimbSupportContinuity`](#keirelimbsupportcontinuity)
+- [`Keire.LimbSupportLoss`](#keirelimbsupportloss)
+- [`Keire.LimbSupportMotion`](#keirelimbsupportmotion)
+- [`Keire.LimbSupportPoint`](#keirelimbsupportpoint)
+- [`Keire.LimbSupportPose`](#keirelimbsupportpose)
+- [`Keire.LimbSupportRequirement`](#keirelimbsupportrequirement)
 - [`Keire.Log`](#keirelog)
 - [`Keire.LogLevel`](#keireloglevel)
 - [`Keire.ManagedMigrationContext`](#keiremanagedmigrationcontext)
@@ -421,6 +442,9 @@ public sealed class Animator : Component
     public void SetTwoBoneIK(string goal, string rootBone, string middleBone, string endBone, Vector3 target, Vector3 pole, float weight = 1.0f, AnimatorIkSpace space = AnimatorIkSpace.World);
     public void SetFabrikIK(string goal, IReadOnlyList<string> bones, Vector3 target, float weight = 1.0f, uint maximumIterations = 12, float tolerance = 0.001f, AnimatorIkSpace space = AnimatorIkSpace.World);
     public bool ClearIK(string goal);
+    public void SetLimbIK(LimbId limb, Vector3 target, Vector3 pole, float weight = 1.0f, AnimatorIkSpace space = AnimatorIkSpace.World, bool enabled = true);
+    public bool ClearLimbIK(LimbId limb);
+    public bool TryGetLimbIKResult(LimbId limb, out LimbIkResult result);
 }
 ```
 
@@ -2561,6 +2585,284 @@ Sources: [NativeAssets.cs](../../KeireManaged/NativeAssets.cs)
 [StableAssetTypeId("4b454952-454c-5441-5252-415900000001")]
 public sealed class LightingTextureArray : Asset
 {
+}
+```
+
+## Keire.LimbContactEvent
+
+Sources: [LimbContacts.cs](../../KeireManaged/LimbContacts.cs)
+
+```csharp
+public readonly record struct LimbContactEvent(LimbId Limb, LimbContactEventKind Kind, EntityId Support, Vector3 Position, Vector3 Normal, LimbSupportLoss Reason)
+{
+}
+```
+
+## Keire.LimbContactEventKind
+
+Sources: [LimbContacts.cs](../../KeireManaged/LimbContacts.cs)
+
+```csharp
+public enum LimbContactEventKind : byte
+{
+    Planted,
+    Lifted,
+    SupportLost,
+    Recovered
+}
+```
+
+## Keire.LimbContactTracker
+
+Sources: [LimbContacts.cs](../../KeireManaged/LimbContacts.cs)
+
+```csharp
+public sealed class LimbContactTracker
+{
+    public LimbId Limb { get; }
+    public bool IsPlanted { get; private set; }
+    public EntityId Support { get; private set; }
+    public Vector3 Position { get; private set; }
+    public Vector3 Normal { get; private set; }
+    public event Action<LimbContactEvent>? Changed;
+    public LimbContactTracker(LimbId limb);
+    public void Plant(EntityId support, LimbSupportPose pose, Vector3 worldPosition, Vector3 worldNormal);
+    public bool UpdateSupport(EntityId support, LimbSupportPose pose, LimbSupportContinuity limits);
+    public bool LoseSupport(LimbSupportLoss reason);
+    public void Lift();
+}
+```
+
+## Keire.LimbGaitGroup
+
+Sources: [LimbGaitScheduler.cs](../../KeireManaged/LimbGaitScheduler.cs)
+
+```csharp
+public sealed class LimbGaitGroup
+{
+    public IReadOnlyList<LimbId> Limbs { get; }
+    public LimbGaitGroup(params LimbId[] limbs);
+}
+```
+
+## Keire.LimbGaitScheduler
+
+Sources: [LimbGaitScheduler.cs](../../KeireManaged/LimbGaitScheduler.cs)
+
+```csharp
+public sealed class LimbGaitScheduler
+{
+    public const int MaximumLimbs;
+    public const int MaximumGroups;
+    public IReadOnlyList<LimbId> Limbs { get; }
+    public int SupportingCount { get; private set; }
+    public int SwingingCount { get; private set; }
+    public int GroupCount { get; }
+    public LimbGaitScheduler(ReadOnlySpan<LimbId> limbs, IReadOnlyList<LimbGaitGroup> preferredGroups, IReadOnlyList<LimbGaitGroup> fallbackGroups, int minimumPlanted, IReadOnlyList<LimbSupportRequirement>? supportRequirements = null, bool preferredRequiresAllPlanted = true);
+    public void Initialize(ReadOnlySpan<bool> planted);
+    public bool IsPlanted(LimbId limb);
+    public bool IsSwinging(LimbId limb);
+    public void CompletePlant(LimbId limb);
+    public void LoseContact(LimbId limb);
+    public int CopyRecoveryCandidates(Span<LimbId> destination);
+    public int TryBeginStep(ReadOnlySpan<bool> needsStep, ReadOnlySpan<bool> safeLanding, Span<LimbId> selected, ReadOnlySpan<bool> groupAdmission = default);
+}
+```
+
+## Keire.LimbId
+
+Sources: [LimbIkRig.cs](../../KeireManaged/LimbIkRig.cs)
+
+```csharp
+public readonly record struct LimbId(uint Value)
+{
+    public bool IsValid { get; }
+}
+```
+
+## Keire.LimbIkDefinition
+
+Sources: [LimbIkRig.cs](../../KeireManaged/LimbIkRig.cs)
+
+```csharp
+public sealed class LimbIkDefinition
+{
+    public LimbId Id { get; }
+    public string Name { get; }
+    public IReadOnlyList<string> Bones { get; }
+    public LimbIkSolver Solver { get; }
+    public uint MaximumIterations { get; }
+    public float Tolerance { get; }
+    public LimbIkDefinition(LimbId id, string name, IEnumerable<string> bones, LimbIkSolver solver = LimbIkSolver.Fabrik, uint maximumIterations = 32, float tolerance = 0.001f);
+}
+```
+
+## Keire.LimbIkResult
+
+Sources: [LimbIkResult.cs](../../KeireManaged/LimbIkResult.cs)
+
+```csharp
+public readonly record struct LimbIkResult(LimbId Id, LimbIkSolveStatus Status, Vector3 EndPosition, float PositionError, float ReachError, bool JointLimited)
+{
+}
+```
+
+## Keire.LimbIkRig
+
+Sources: [LimbIkRig.cs](../../KeireManaged/LimbIkRig.cs)
+
+```csharp
+public sealed class LimbIkRig
+{
+    public IReadOnlyList<LimbIkDefinition> Limbs { get; }
+    public LimbIkRig(Animator animator, string goalNamespace, IEnumerable<LimbIkDefinition> limbs);
+    public void SetTarget(LimbId limb, LimbIkTarget target);
+    public bool Clear(LimbId limb);
+    public void ClearAll();
+}
+```
+
+## Keire.LimbIkSolveStatus
+
+Sources: [LimbIkResult.cs](../../KeireManaged/LimbIkResult.cs)
+
+```csharp
+public enum LimbIkSolveStatus : byte
+{
+    Disabled,
+    Solved,
+    Blended,
+    Unreachable,
+    NotConverged,
+    InvalidInput,
+    JointLimited
+}
+```
+
+## Keire.LimbIkSolver
+
+Sources: [LimbIkRig.cs](../../KeireManaged/LimbIkRig.cs)
+
+```csharp
+public enum LimbIkSolver : byte
+{
+    TwoBone,
+    Fabrik
+}
+```
+
+## Keire.LimbIkTarget
+
+Sources: [LimbIkRig.cs](../../KeireManaged/LimbIkRig.cs)
+
+```csharp
+public readonly record struct LimbIkTarget(Vector3 Position, Vector3 Pole, float Weight = 1, AnimatorIkSpace Space = AnimatorIkSpace.World)
+{
+}
+```
+
+## Keire.LimbSupportBalance
+
+Sources: [LimbSupportBalance.cs](../../KeireManaged/LimbSupportBalance.cs)
+
+```csharp
+public static class LimbSupportBalance
+{
+    public const int MaximumContacts;
+    public static LimbSupportBalanceResult Evaluate(ReadOnlySpan<LimbSupportPoint> contacts, Vector3 bodyPosition, Vector3 planeOrigin, Vector3 planeNormal, Vector3 upDirection, float safetyMargin = 0);
+}
+```
+
+## Keire.LimbSupportBalanceResult
+
+Sources: [LimbSupportBalance.cs](../../KeireManaged/LimbSupportBalance.cs)
+
+```csharp
+public readonly record struct LimbSupportBalanceResult(LimbSupportBalanceStatus Status, int HullVertexCount, double MinimumEdgeClearance, float SafetyMargin)
+{
+    public bool IsSupported { get; }
+}
+```
+
+## Keire.LimbSupportBalanceStatus
+
+Sources: [LimbSupportBalance.cs](../../KeireManaged/LimbSupportBalance.cs)
+
+```csharp
+public enum LimbSupportBalanceStatus
+{
+    InsufficientSupportArea,
+    OutsideSafetyMargin,
+    Supported
+}
+```
+
+## Keire.LimbSupportContinuity
+
+Sources: [LimbContacts.cs](../../KeireManaged/LimbContacts.cs)
+
+```csharp
+public readonly record struct LimbSupportContinuity(float MaximumTranslation, float MaximumRotationDegrees)
+{
+    public static LimbSupportContinuity Default { get; }
+}
+```
+
+## Keire.LimbSupportLoss
+
+Sources: [LimbContacts.cs](../../KeireManaged/LimbContacts.cs)
+
+```csharp
+public enum LimbSupportLoss : byte
+{
+    None,
+    MissingOrChangedSupport,
+    DiscontinuousMotion,
+    Unreachable
+}
+```
+
+## Keire.LimbSupportMotion
+
+Sources: [LimbContacts.cs](../../KeireManaged/LimbContacts.cs)
+
+```csharp
+public static class LimbSupportMotion
+{
+    public static bool TryTransportAnchor(LimbSupportPose previous, LimbSupportPose current, Vector3 localAnchor, LimbSupportContinuity limits, out Vector3 worldAnchor);
+}
+```
+
+## Keire.LimbSupportPoint
+
+Sources: [LimbSupportBalance.cs](../../KeireManaged/LimbSupportBalance.cs)
+
+```csharp
+public readonly record struct LimbSupportPoint(LimbId Limb, Vector3 Position)
+{
+}
+```
+
+## Keire.LimbSupportPose
+
+Sources: [LimbContacts.cs](../../KeireManaged/LimbContacts.cs)
+
+```csharp
+public readonly record struct LimbSupportPose(Vector3 Position, Quaternion Rotation)
+{
+}
+```
+
+## Keire.LimbSupportRequirement
+
+Sources: [LimbGaitScheduler.cs](../../KeireManaged/LimbGaitScheduler.cs)
+
+```csharp
+public sealed class LimbSupportRequirement
+{
+    public IReadOnlyList<LimbId> Limbs { get; }
+    public int MinimumPlanted { get; }
+    public LimbSupportRequirement(int minimumPlanted, params LimbId[] limbs);
 }
 ```
 
