@@ -325,6 +325,9 @@ animator.SetLimbIK(new LimbId(1), targetInModelSpace, poleInModelSpace,
 Targets persist until cleared with `ClearLimbIK(id)` or runtime pose state is reset. Clear owned targets on disable.
 `TryGetLimbIKResult(id, out result)` reads the most recently published result, including solve status, model-space
 endpoint, residual, and whether a joint limit intervened. Submission is not proof of a solved pose or terrain clearance.
+Submit targets in `OnAnimatorIk`, then inspect this frame's results in `LateUpdate`, after animation evaluation.
+Results are cleared before the IK callback and whenever targets change; a query returns `false` before evaluation,
+while dependencies are unavailable, or after clearing a target. Do not interpret a missing result as a successful solve.
 The compile-checked [AssetBoundLimbGoal example](Examples/AssetBoundLimbGoal.cs) shows target and pole entities with
 matching callback coordinates and cleanup. For editable, persistent behaviour fields, serialize the stable ID as a
 `uint` and construct a `LimbId` when submitting it; the readonly runtime wrapper is not an Inspector field type.

@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdlib>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace
@@ -36,7 +37,18 @@ namespace
         ManagedConsumerApplication() : Application(BuildSpecification()) {}
 
       protected:
-        void OnInitialize() override { (void)PushLayer(std::make_unique<ManagedUiLayer>()); }
+        void OnInitialize() override
+        {
+            // This is the C++ managed-entrypoint consumer; exercise the native Animator contract here.
+            Keire::AnimatorComponent animator;
+            animator.SetLimbIk({{7}, {1, 2, 3}, {0, 0, 1}, 0.5F}, Keire::AnimatorIkSpace::Model);
+            const auto goals = animator.LimbIkTargets();
+            if (goals.size() != 1 || goals[0].Target.Id != Keire::LimbId{7} || goals[0].Target.Weight != 0.5F ||
+                goals[0].Space != Keire::AnimatorIkSpace::Model || !animator.ClearLimbIk({7}) ||
+                !animator.LimbIkTargets().empty())
+                throw std::runtime_error("SDK Animator limb goal validation failed.");
+            (void)PushLayer(std::make_unique<ManagedUiLayer>());
+        }
 
       private:
         static Keire::ApplicationSpecification BuildSpecification()

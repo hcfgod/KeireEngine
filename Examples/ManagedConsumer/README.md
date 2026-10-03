@@ -3,7 +3,8 @@
 This package-only example validates both sides of the managed SDK contract. The C++ consumer defines Kéire's
 command-line description and application factory without defining `main`. Linking only `Keire::Core` proves that the
 SDK's static Core archive supplies the managed entrypoint, resolves the client contract, and carries the private Dear
-ImGui archive and SDL dependency transitively.
+ImGui archive and SDL dependency transitively. Its smoke run also checks the native Animator's stable-ID limb goal
+submission and clearing API.
 
 `ManagedApiConsumer.csproj` compiles `ManagedPresentationAssets.cs` against the packaged `Keire.Managed.dll`. The
 example demonstrates typed Audio, Material, Shader Graph, Material Graph, and VFX residency leases with explicit

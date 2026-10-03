@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -40,6 +41,32 @@ namespace
         const auto result = Keire::SolveFootGrounding(skeleton, pose, request);
         return result && result->SolvedFeet == 1 && std::abs(result->PelvisAdjustment + 0.1F) < 0.0001F &&
                result->MaximumPositionError <= request.PositionTolerance;
+    }
+
+    bool ValidateCreatureLimb()
+    {
+        const auto skeleton = Keire::CreateRef<Keire::SkeletonAsset>(
+            std::vector<Keire::SkeletonBone>{{"Root", -1}, {"Knee", 0, {{0, -1, 0}}}, {"Foot", 1, {{0, -1, 0}}}});
+        Keire::LimbDefinition definition;
+        definition.Id = {7};
+        definition.Name = "Creature leg";
+        definition.Bones = {"Root", "Knee", "Foot"};
+        definition.BendLimits = Keire::LimbBendLimits{60, 120};
+        const std::array definitions{definition};
+        Keire::BoundLimbRig rig(skeleton, definitions);
+        std::vector<Keire::BoneTransform> pose;
+        for (const auto& bone : skeleton->Bones())
+            pose.push_back(bone.BindPose);
+        std::array<Keire::LimbTarget, 1> targets{{{{7}, {0, -1.99F, 0}, {0, 0, 1}}}};
+        std::vector<Keire::LimbSolveResult> results;
+        if (!rig.Solve(pose, targets, results) || results.size() != 1 ||
+            results[0].Status != Keire::LimbSolveStatus::JointLimited || !results[0].JointLimited ||
+            std::abs(results[0].EndPosition.Y + std::sqrt(3.0F)) > 0.001F || results[0].ReachError != 0)
+            return false;
+        const auto before = pose;
+        targets[0].Id = {999};
+        return !rig.Solve(pose, targets, results) && pose == before && results.size() == 1 &&
+               results[0].Status == Keire::LimbSolveStatus::InvalidInput;
     }
 } // namespace
 
@@ -93,7 +120,7 @@ int main(const int argc, char* argv[])
                    time.FrameCount() != 1 || uiSpecification.Mode != Keire::UiMode::Headless || !scene ||
                    scene->Definition().SchemaVersion != Keire::CurrentSceneSchemaVersion ||
                    scene->Definition().Objects.size() != 1 || scene->Definition().Objects.front().Layer != 7 ||
-                   !ValidateGroundingContact()
+                   !ValidateGroundingContact() || !ValidateCreatureLimb()
                ? 1
                : 0;
 }

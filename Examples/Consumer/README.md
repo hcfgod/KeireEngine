@@ -11,5 +11,6 @@ cmake --build Build
 The package provides the imported `Keire::Core` target with its C++20 and include-directory requirements plus the
 private Dear ImGui archive, SDL static target, and platform libraries in transitive link order. This low-level consumer
 still links only `Keire::Core`, supplies its own `main`, and exercises public ownership, event, time, configuration, and
-window APIs. The adjacent managed consumer separately validates KeireCore's packaged entrypoint and
+window APIs, plus constrained creature-limb solving and transactional rejection of invalid limb targets. The adjacent
+managed consumer separately validates KeireCore's packaged entrypoint and
 application-factory contract.

@@ -2,6 +2,8 @@
 
 #include "Keire/Animation/AnimationSystem.h"
 #include "Keire/Api.h"
+#include "Keire/Math/Math.h"
+#include "Keire/Ref.h"
 
 #include <cstdint>
 #include <optional>

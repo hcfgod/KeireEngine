@@ -1964,6 +1964,28 @@ The managed foot-grounding multiplier is runtime-only component state: it scales
 weights without notifying authoring observers or changing serialized data. A zero multiplier resets transient contact
 and support locks before the grounding pass, allowing controllers to disable terrain adaptation while airborne.
 
+Explicit creature limbs are independent of semantic humanoid profiles. Schema-v2 `RigDefinitionAsset` data stores stable
+limb IDs, contiguous ordered bone names, solver settings, and optional two-bone constraints; schema-v1 assets retain
+their existing interpretation. `BoundLimbRig` retains an immutable skeleton reference, resolves definitions once, and
+owns mutable scratch pose storage. Its returned definition spans borrow that instance's lifetime, and concurrent solves
+on one instance require external synchronization. Targets and diagnostic results are values in skeleton model space.
+Invalid batches leave the caller's pose unchanged. The solver owns no terrain queries, physics bodies, gait state, or
+support contacts; contact planning and body support remain separate from geometric pose solving.
+
+The scene animation runtime owns the bound-limb cache and rebuilds it when rig or skeleton asset revisions change.
+Failed reloads discard stale mappings. Stable-ID limb goals live on the Animator, and replacing its rig clears those
+goals so an old ID cannot silently address a different rig. The limb pass converts world or presentation-world goals
+through the corresponding actor transform and runs before skin-palette publication, including after procedural pose
+interpolation. No editor draft or managed object owns the runtime solver.
+
+Rigging Studio keeps explicit limb drafts per skeleton and saves validated copies through the undoable asset operation
+service. Asynchronous loading retains typed asset handles and replaces a draft only after complete compatibility
+validation. Assigning a saved rig captures the selected scene, entity, Animator, and original asset identities while
+dependencies load; a changed selection, skeleton, component, edit mode, or closed authoring context cancels the request.
+Validation precedes the undo record and component mutation, so waiting, cancellation, and rejected assets do not change
+the scene. The chain overlay borrows the currently published skin pose and presentation transform; it never writes the
+pose. Fixed preview stepping belongs to the paused preview controller and is cleared by seek, restart, or stop.
+
 Controller node positions are optional schema-v2 authoring metadata and never affect runtime evaluation. Project-panel
 clip drops resolve through typed asset records before creating states. Undo commands retain complete graph values but
 are scoped to the open asset identity, preventing stale document commands from mutating a newly opened controller.

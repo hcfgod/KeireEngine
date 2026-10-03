@@ -15,6 +15,7 @@ public sealed class AssetBoundLimbGoal : Behaviour
     private Entity? _pole = null;
     private Animator? _animator;
     private LimbId _activeLimb;
+    public LimbIkResult? LatestResult { get; private set; }
 
     protected override void OnEnable() => _animator = GetComponent<Animator>();
 
@@ -42,11 +43,19 @@ public sealed class AssetBoundLimbGoal : Behaviour
         _animator.SetLimbIK(_activeLimb, target, pole, space: space);
     }
 
+    protected override void LateUpdate()
+    {
+        // OnAnimatorIk submits goals; publication happens afterward. Read this frame's outcome here.
+        LatestResult = _animator is { IsValid: true } && _activeLimb.IsValid &&
+                       _animator.TryGetLimbIKResult(_activeLimb, out var result) ? result : null;
+    }
+
     protected override void OnDisable()
     {
         if (_animator is { IsValid: true } && _activeLimb.IsValid)
             _animator.ClearLimbIK(_activeLimb);
         _activeLimb = default;
         _animator = null;
+        LatestResult = null;
     }
 }
