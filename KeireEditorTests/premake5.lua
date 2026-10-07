@@ -126,4 +126,3 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     LinkKeireCore()
     dependson { AssetWorkerTarget }
     LinkSDL3()
-
