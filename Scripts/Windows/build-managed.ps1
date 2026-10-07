@@ -2,8 +2,11 @@
 param()
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "common.ps1")
 $root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
-$dotnet = Join-Path $root "Build\Dependencies\dotnet-sdk\dotnet.exe"
+$dependencyLock = Get-DependencyLock
+# The analyzer must load in the compiler shipped with the Editor, even when the build machine has a newer SDK.
+$dotnet = Join-Path $root "Build\Tools\dotnet\$($dependencyLock.DOTNET_SDK_VERSION)\dotnet.exe"
 $project = Join-Path $root "KeireEditorManaged\Keire.Editor.Managed.csproj"
 $generatorProject = Join-Path $root "KeireManaged.Generators\Keire.Managed.Generators.csproj"
 $sourceRoots = @(
@@ -36,7 +39,8 @@ if ((Test-Path -LiteralPath $assembly -PathType Leaf) -and
     $newerInput = $managedInputs | Where-Object {
         $_.LastWriteTimeUtc -gt $assemblyWriteTime
     } | Select-Object -First 1
-    $wrapperIsNewer = (Get-Item -LiteralPath $PSCommandPath).LastWriteTimeUtc -gt $assemblyWriteTime
+    $wrapperIsNewer = (Get-Item -LiteralPath $PSCommandPath).LastWriteTimeUtc -gt $assemblyWriteTime -or
+        (Get-Item -LiteralPath (Join-Path $root 'Config/Dependencies.lock')).LastWriteTimeUtc -gt $assemblyWriteTime
     if (-not $newerInput -and -not $wrapperIsNewer) {
         Write-Host "==> Managed runtime API is current"
         $global:LASTEXITCODE = 0
@@ -45,7 +49,7 @@ if ((Test-Path -LiteralPath $assembly -PathType Leaf) -and
 }
 
 if (-not (Test-Path -LiteralPath $dotnet -PathType Leaf)) {
-    throw "The bundled .NET SDK is missing: $dotnet"
+    throw "The locked Editor .NET SDK is missing: $dotnet. Run Scripts/Windows/dotnet.ps1 first."
 }
 
 & $dotnet build $project --nologo --configuration Release --output $output `

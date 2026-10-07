@@ -1553,10 +1553,15 @@ Assert-True ($windowsRun.Contains('[Diagnostics.ProcessStartInfo]::new()') -and
 $managedFixture = Join-Path ([IO.Path]::GetTempPath()) ("keire-managed-build-" + [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force (Join-Path $managedFixture "Scripts\Windows"),
+        (Join-Path $managedFixture "Config"),
         (Join-Path $managedFixture "KeireManaged"), (Join-Path $managedFixture "KeireEditorManaged"),
         (Join-Path $managedFixture "KeireManaged.Generators"),
         (Join-Path $managedFixture "Build\Managed") | Out-Null
     Copy-Item (Join-Path $Windows "build-managed.ps1") (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
+    Copy-Item (Join-Path $Windows "common.ps1") (Join-Path $managedFixture "Scripts\Windows\common.ps1")
+    $managedLock = Join-Path $managedFixture "Config\Dependencies.lock"
+    Copy-Item (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") $managedLock
+    (Get-Item $managedLock).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-3)
     $managedSource = Join-Path $managedFixture "KeireManaged\RuntimeApi.cs"
     $managedAssembly = Join-Path $managedFixture "Build\Managed\Keire.Managed.dll"
     $managedEditorAssembly = Join-Path $managedFixture "Build\Managed\Keire.Editor.Managed.dll"
@@ -1577,6 +1582,11 @@ try {
     $global:LASTEXITCODE = 37
     & (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
     Assert-Equal $LASTEXITCODE 0 "Current managed runtime API launcher exit code"
+    (Get-Item $managedLock).LastWriteTimeUtc = [DateTime]::UtcNow
+    Assert-Throws {
+        & (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")
+    } "Changed bundled SDK invalidates managed output cache"
+    (Get-Item $managedLock).LastWriteTimeUtc = [DateTime]::UtcNow.AddMinutes(-3)
     (Get-Item $managedSource).LastWriteTimeUtc = [DateTime]::UtcNow
     Assert-Throws {
         & (Join-Path $managedFixture "Scripts\Windows\build-managed.ps1")

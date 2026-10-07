@@ -150,6 +150,11 @@ else {
     Write-Host "==> Reusing the staged .NET SDK for development testing"
 }
 
+Invoke-CheckedWindowsCommand {
+    & (Join-Path $Root 'Scripts/Tests/test-packaged-analyzer-windows.ps1') `
+        -SdkRoot $dotnetDestination -ManagedRoot (Join-Path $stage 'bin/Managed')
+} "Packaged source generator compiler compatibility"
+
 $sdkManifest = Get-Content -LiteralPath (Join-Path $stage "build-manifest.json") -Raw | ConvertFrom-Json
 if ($sdkManifest.configuration -ne "Dist" -or $sdkManifest.platform -ne "Windows") {
     throw "The editor package source manifest is not a Windows Dist build."

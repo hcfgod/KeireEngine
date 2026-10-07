@@ -1446,9 +1446,7 @@ namespace
         KeireHub::HubProductUi m_ProductUi;
         KeireHub::HubProjectsUi m_ProjectsUi;
         KeireHub::HubProjectUpgradeUi m_ProjectUpgradeUi;
-        KeireHub::EditorProcessTracker m_EditorProcesses{
-            [](const std::uint64_t processId, const std::filesystem::path& executable)
-            { return KeireHub::ProbeEditorProcess(processId, executable); }};
+        KeireHub::EditorProcessTracker m_EditorProcesses{KeireHub::ProbeEditorProcess};
         KeireHub::HubUpdateHandoffWorkflow m_HubUpdateHandoff;
         KeireHub::HubMaintenanceWorkflow m_Maintenance;
         KeireHub::TaskNotificationTracker m_TaskNotifications;

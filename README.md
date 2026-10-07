@@ -292,6 +292,11 @@ installation may request administrator authorization.
 The launchers regenerate project files when required and start the Hub by default. Run `Scripts/project.bat` on
 Windows or `bash Scripts/project.sh` on Unix without a command to use the interactive menu.
 
+Windows builds the managed API and source generator with the locked SDK installed by
+`Scripts/Windows/dotnet.ps1`, matching the SDK shipped in Editor installers. Newer compatible SDKs remain supported
+for development. Editor packaging compiles a probe with its staged compiler and generator to catch incompatibilities
+before creating an installer.
+
 To open an existing project directly on Windows:
 
 ```powershell

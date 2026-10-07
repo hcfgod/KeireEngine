@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Windows managed API and source generators build with the locked Editor SDK, preventing installed projects from
+  failing with CS9057 when the build machine has a newer compiler. Packaging compiles a probe with the staged SDK
+  and analyzer before producing an installer.
+
 - Opening the Editor without command-line arguments opens the Hub project picker instead of exiting silently.
   Installer launch, shortcuts, and direct executable launches share this behavior; explicit project arguments
   continue to open their requested project.

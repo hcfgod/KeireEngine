@@ -1039,6 +1039,11 @@ managed incremental generator accepts only the bounded value ABI and emits typed
 exact descriptor match including versions, parameters, span bounds, structured result, and thread affinity. Raw
 pointers and unmanaged ownership never cross this boundary.
 
+Windows managed API builds use the locked Editor SDK rather than the machine-selected SDK: source generators
+reference Roslyn from their build SDK and cannot load in an older compiler. Dependency-lock changes invalidate the
+managed build cache. Windows Editor packaging compiles an isolated probe with the staged SDK and analyzer before
+archiving; this catches CS9057 even when development smoke tests use a newer compatible compiler.
+
 Audio playback crosses `IScriptRuntimeServices` as a value request containing the validated clip asset ID, output bus,
 gain, pitch, priority, loop/spatial flags, and attenuation distances. The Play adapter creates or updates the scene
 Audio Source and presentation runtime at the safe boundary. Editor-only asset preview uses a separately tracked voice
