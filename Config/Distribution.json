@@ -7,6 +7,13 @@
     {
       "schemaVersion": 1,
       "algorithm": "Ed25519",
+      "keyId": "ed25519-fddcb31bb3a04a934c812bb9aa7ad971",
+      "publicKey": "Eg3wt0P4FkzLU2ZmqT7yD900zFtsO2vF9mUYUGiW0ss=",
+      "fingerprint": "sha256:fddcb31bb3a04a934c812bb9aa7ad971dcbedecc38ad96dd95998262bfe76b05"
+    },
+    {
+      "schemaVersion": 1,
+      "algorithm": "Ed25519",
       "keyId": "ed25519-a671edca5727bd85a6e2fabb8cffc104",
       "publicKey": "of4J7IiHETbsxu2i+VVEaCMMXMmsf5U9boovWpMEXfA=",
       "fingerprint": "sha256:a671edca5727bd85a6e2fabb8cffc104b7511707f45a5db2e52469da5cb93251"
