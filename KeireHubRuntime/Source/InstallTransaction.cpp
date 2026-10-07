@@ -366,7 +366,7 @@ namespace KeireHub
                 auto registration = ReadRegistration(request);
                 if (!registration)
                     return HubResult<std::optional<InstallReceipt>>::Failure(registration.Error());
-                if (registration.Value())
+                if (registration.Value() && !SamePath(registration.Value()->Root, request.DestinationRoot))
                 {
                     return HubResult<std::optional<InstallReceipt>>::Failure(TransactionError(
                         HubErrorCode::UnsafeInstallRoot,
@@ -383,7 +383,7 @@ namespace KeireHub
                 auto registration = ReadRegistration(request);
                 if (!registration)
                     return HubResult<std::optional<InstallReceipt>>::Failure(registration.Error());
-                if (registration.Value())
+                if (registration.Value() && !SamePath(registration.Value()->Root, request.DestinationRoot))
                 {
                     return HubResult<std::optional<InstallReceipt>>::Failure(TransactionError(
                         HubErrorCode::UnsafeInstallRoot,

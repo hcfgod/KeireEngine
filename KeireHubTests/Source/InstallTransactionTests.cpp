@@ -956,6 +956,42 @@ TEST_CASE("install worker preserves a conflicting ancestor and reports a registe
     CHECK(KeireHubTests::ReadText(blockingFile) == "preserve user file");
 }
 
+TEST_CASE("install worker reinstalls a missing registered destination and preserves registration on failure")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    TestRegistrationStore registration;
+    const auto source = CreatePackage(temporary.Path(), InstallProduct::Editor, "6.0.0", "payload");
+    const auto destination = temporary.Path() / "editor";
+    const auto request = Request(InstallProduct::Editor, source, destination, registration);
+    REQUIRE(InstallPackageTransaction(request));
+    const auto original = *registration.Value;
+    std::filesystem::remove_all(destination);
+    SUBCASE("missing directory") {}
+    SUBCASE("empty directory") { std::filesystem::create_directory(destination); }
+    SUBCASE("registration write failure") { registration.FailNextWrite = true; }
+    REQUIRE(PrepareInstallDestination(Request(InstallProduct::Editor, {}, destination, registration)));
+    REQUIRE(registration.Value);
+    CHECK(registration.Value->InstallationId == original.InstallationId);
+    CHECK_FALSE(
+        PrepareInstallDestination(Request(InstallProduct::Editor, {}, temporary.Path() / "other", registration)));
+    const bool failWrite = registration.FailNextWrite;
+    const auto installed = InstallPackageTransaction(request);
+    if (failWrite)
+    {
+        REQUIRE_FALSE(installed);
+        REQUIRE(registration.Value);
+        CHECK(registration.Value->InstallationId == original.InstallationId);
+        CHECK(registration.Value->ReceiptSha256 == original.ReceiptSha256);
+        CHECK_FALSE(std::filesystem::exists(destination / "bin" / "app.exe"));
+    }
+    else
+    {
+        REQUIRE(installed);
+        CHECK(VerifyInstalledPackage(request));
+        CHECK(KeireHubTests::ReadText(destination / "bin" / "app.exe") == "payload");
+    }
+}
+
 TEST_CASE("install worker prepares destinations before extracting a payload")
 {
     KeireHubTests::TemporaryDirectory temporary;

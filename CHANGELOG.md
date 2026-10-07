@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Setup can reinstall at its registered location when that folder is missing or empty. Failed reinstalls restore
+  the previous registration; choosing another folder still requires resolving the existing installation first.
+
 - Installer preparation accepts destinations with missing parent folders without creating them. Installation creates
   ordinary parent folders safely; existing product registrations still direct users to the correct upgrade folder.
 
