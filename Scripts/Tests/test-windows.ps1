@@ -1815,7 +1815,8 @@ Assert-True ($packageScript.Contains('ManagedApiConsumer.csproj') -and
     "Packaged managed API consumer compilation"
 $editorPackageScript = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
 Assert-True ($editorPackageScript.Contains('-Configuration Dist') -and $editorPackageScript.Contains('-StageOnly') -and
-    $editorPackageScript.Contains('Build\Dependencies\dotnet-sdk') -and
+    $editorPackageScript.Contains('Get-WindowsEditorBundledSdk $Root $dependencyLock.DOTNET_SDK_VERSION') -and
+    $editorPackageScript.Contains('test-packaged-analyzer-windows.ps1') -and
     $editorPackageScript.Contains('Build\Distributions') -and
     $editorPackageScript.Contains('Assert-WindowsEditorPackageStage') -and
     $editorPackageScript.Contains('editor-package.json') -and
