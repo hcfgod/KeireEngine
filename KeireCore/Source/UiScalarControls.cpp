@@ -1,4 +1,5 @@
 #include "Keire/Ui.h"
+#include "KeireInternal/UiNumericExpression.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -370,7 +371,9 @@ namespace Keire
         if (!(minimum < maximum))
             throw std::invalid_argument("SliderFloat minimum must be less than maximum.");
         const std::string safeLabel(label);
-        return ImGui::SliderFloat(safeLabel.c_str(), &value, minimum, maximum);
+        return Detail::DrawNumericExpression(
+            safeLabel.c_str(), value, ImGuiDataType_Float, "%.3f", &minimum, &maximum,
+            [&](auto& candidate) { return ImGui::SliderFloat(safeLabel.c_str(), &candidate, minimum, maximum); });
     }
 
     bool UiFrame::SliderInt(std::string_view label, int& value, const int minimum, const int maximum)
@@ -379,7 +382,9 @@ namespace Keire
         if (minimum > maximum)
             throw std::invalid_argument("SliderInt minimum must not exceed maximum.");
         const std::string safeLabel(label);
-        return ImGui::SliderInt(safeLabel.c_str(), &value, minimum, maximum);
+        return Detail::DrawNumericExpression(
+            safeLabel.c_str(), value, ImGuiDataType_S32, "%d", &minimum, &maximum,
+            [&](auto& candidate) { return ImGui::SliderInt(safeLabel.c_str(), &candidate, minimum, maximum); });
     }
 
     bool UiFrame::DragUnsignedInteger(const std::string_view label, std::uint64_t& value, const double speed,
@@ -392,8 +397,13 @@ namespace Keire
         const std::string safeLabel(label);
         const auto* minimumValue = minimum ? &*minimum : nullptr;
         const auto* maximumValue = maximum ? &*maximum : nullptr;
-        return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_U64, &value, static_cast<float>(speed), minimumValue,
-                                 maximumValue, "%llu");
+        return Detail::DrawNumericExpression(
+            safeLabel.c_str(), value, ImGuiDataType_U64, "%llu", minimumValue, maximumValue,
+            [&](auto& candidate)
+            {
+                return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_U64, &candidate, static_cast<float>(speed),
+                                         minimumValue, maximumValue, "%llu");
+            });
     }
 
     bool UiFrame::SliderInteger(const std::string_view label, std::int64_t& value, const std::int64_t minimum,
@@ -403,7 +413,12 @@ namespace Keire
         if (label.empty() || minimum >= maximum)
             throw std::invalid_argument("SliderInteger requires a label and an increasing range.");
         const std::string safeLabel(label);
-        return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_S64, &value, &minimum, &maximum, "%lld");
+        return Detail::DrawNumericExpression(safeLabel.c_str(), value, ImGuiDataType_S64, "%lld", &minimum, &maximum,
+                                             [&](auto& candidate)
+                                             {
+                                                 return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_S64,
+                                                                            &candidate, &minimum, &maximum, "%lld");
+                                             });
     }
 
     bool UiFrame::SliderUnsignedInteger(const std::string_view label, std::uint64_t& value, const std::uint64_t minimum,
@@ -413,7 +428,12 @@ namespace Keire
         if (label.empty() || minimum >= maximum)
             throw std::invalid_argument("SliderUnsignedInteger requires a label and an increasing range.");
         const std::string safeLabel(label);
-        return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_U64, &value, &minimum, &maximum, "%llu");
+        return Detail::DrawNumericExpression(safeLabel.c_str(), value, ImGuiDataType_U64, "%llu", &minimum, &maximum,
+                                             [&](auto& candidate)
+                                             {
+                                                 return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_U64,
+                                                                            &candidate, &minimum, &maximum, "%llu");
+                                             });
     }
 
     bool UiFrame::SliderScalar(const std::string_view label, double& value, const double minimum, const double maximum)
@@ -422,7 +442,12 @@ namespace Keire
         if (label.empty() || !std::isfinite(minimum) || !std::isfinite(maximum) || minimum >= maximum)
             throw std::invalid_argument("SliderScalar requires a label and a finite increasing range.");
         const std::string safeLabel(label);
-        return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_Double, &value, &minimum, &maximum, "%.6g");
+        return Detail::DrawNumericExpression(safeLabel.c_str(), value, ImGuiDataType_Double, "%.6g", &minimum, &maximum,
+                                             [&](auto& candidate)
+                                             {
+                                                 return ImGui::SliderScalar(safeLabel.c_str(), ImGuiDataType_Double,
+                                                                            &candidate, &minimum, &maximum, "%.6g");
+                                             });
     }
 
     bool UiFrame::InputTextMultiline(const std::string_view label, std::string& value, const std::uint32_t visibleLines)

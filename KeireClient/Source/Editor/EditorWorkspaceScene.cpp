@@ -25,6 +25,7 @@
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/SceneTransitionCoordinator.h"
+#include "KeireClient/Editor/SceneViewportLayout.h"
 #include "KeireClient/Editor/ShaderGraphPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
 #include "KeireClient/Editor/ViewportInputRouting.h"
@@ -1350,14 +1351,18 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
                                                    : "Game camera: none | clear and runtime UI only (Play)");
 
         const auto available = ui.ContentAvailable();
-        auto previewSize = available;
         constexpr std::array aspectRatios{0.0F, 16.0F / 9.0F, 16.0F / 10.0F, 4.0F / 3.0F};
         const float requestedAspect = aspectRatios[static_cast<std::size_t>(m_GameAspect)];
-        if (requestedAspect > 0.0F)
+        const auto drawableSize = KeireEditor::CalculateGameViewportPreviewSize(available, requestedAspect);
+        if (!drawableSize)
         {
-            previewSize.Width = std::min(available.Width, available.Height * requestedAspect);
-            previewSize.Height = previewSize.Width / requestedAspect;
+            SetGameViewportInputActive(false);
+            KeireEditor::CancelRuntimeUiPointer(m_PlayRuntimeWorld, m_GameRuntimeUiPointer);
+            m_GameLogicalViewportSize = {};
+            m_GameViewportRect = {};
+            return;
         }
+        const auto previewSize = *drawableSize;
         const float aspect = previewSize.Width / std::max(previewSize.Height, 1.0F);
         Keire::RenderCamera camera;
         if (selected)

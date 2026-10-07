@@ -1,5 +1,6 @@
 var tests = new (string Name, Action Run)[]
 {
+    ("Transform aliases and axis-angle rotation preserve composition validation and identity", TransformRotationTests.Run),
     ("Asset-bound limb goals preserve the native bridge contract", BoundLimbBridgeTests.Run),
     ("Generic limb gait scheduling preserves support recovery and atomic admission", LimbGaitSchedulerTests.Run),
     ("Reusable named limb goals preserve ownership validation and native submission", LimbIkRigTests.Run),

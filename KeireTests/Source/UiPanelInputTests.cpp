@@ -1,13 +1,104 @@
 #include "Keire/Core.h"
+#include "KeireInternal/NumericExpression.h"
 #include "KeireInternal/UiInputInternal.h"
+#include "KeireInternal/UiNumericExpression.h"
+#include "KeireInternal/UiStickySection.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
+
+TEST_CASE("numeric field expressions evaluate complete finite arithmetic")
+{
+    CHECK(Keire::Detail::EvaluateNumericExpression("0.35 / 2").value() == doctest::Approx(0.175));
+    CHECK(Keire::Detail::EvaluateNumericExpression("2 + 3 * 4").value() == doctest::Approx(14));
+    CHECK(Keire::Detail::EvaluateNumericExpression("-(2 + 3) * 4").value() == doctest::Approx(-20));
+    CHECK(Keire::Detail::EvaluateNumericExpression("1e-3 * 2").value() == doctest::Approx(0.002));
+    for (const auto text : {"", "0.35 /", "1 / 0", "1garbage", "nan", "inf", "1e309", "(2 + 3", "2 ** 3"})
+        CHECK_FALSE(Keire::Detail::EvaluateNumericExpression(text));
+    CHECK_FALSE(Keire::Detail::EvaluateNumericExpression(std::string(257, '1')));
+    CHECK_FALSE(Keire::Detail::EvaluateNumericExpression(std::string(34, '-') + "1"));
+    CHECK(Keire::Detail::EvaluateNumericField<std::int64_t>("9223372036854775807").value() ==
+          std::numeric_limits<std::int64_t>::max());
+    CHECK_FALSE(Keire::Detail::EvaluateNumericField<std::int64_t>("9223372036854775808"));
+    CHECK_FALSE(Keire::Detail::EvaluateNumericField<int>("3/2"));
+    CHECK(Keire::Detail::EvaluateNumericField<int>("6/2").value() == 3);
+}
+
+TEST_CASE("sticky component titles pin and yield to the following section")
+{
+    CHECK_FALSE(Keire::Detail::StickySectionTop(120, 200, 100, 24));
+    CHECK_FALSE(Keire::Detail::StickySectionTop(20, 80, 100, 24));
+    CHECK(Keire::Detail::StickySectionTop(20, 200, 100, 24).value() == doctest::Approx(100));
+    CHECK(Keire::Detail::StickySectionTop(20, 110, 100, 24).value() == doctest::Approx(86));
+    CHECK_FALSE(Keire::Detail::StickySectionTop(20, 200, 100, 0));
+}
+
+TEST_CASE("numeric controls evaluate pasted expressions without publishing invalid prefixes")
+{
+    const auto previous = ImGui::GetCurrentContext();
+    const auto context = ImGui::CreateContext();
+    struct Cleanup
+    {
+        ImGuiContext* Context;
+        ImGuiContext* Previous;
+        ~Cleanup()
+        {
+            ImGui::DestroyContext(Context);
+            ImGui::SetCurrentContext(Previous);
+        }
+    } cleanup{context, previous};
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.DisplaySize = {640, 480};
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;
+    double value = 0.8;
+    const double minimum = 0;
+    const double maximum = 1;
+    ImGuiID field = 0;
+    const auto frame = [&](const bool activate)
+    {
+        Keire::Detail::UiBackendNewFrame();
+        ImGui::SetNextWindowSize({400, 200});
+        ImGui::Begin("Expression fixture");
+        field = ImGui::GetID("Value");
+        if (activate)
+        {
+            context->NavActivateId = field;
+            context->NavActivateFlags = ImGuiActivateFlags_PreferInput;
+        }
+        (void)Keire::Detail::DrawNumericExpression(
+            "Value", value, ImGuiDataType_Double, "%.6g", &minimum, &maximum, [&](auto& candidate)
+            { return ImGui::DragScalar("Value", ImGuiDataType_Double, &candidate, 0.1F, &minimum, &maximum, "%.6g"); });
+        ImGui::End();
+        ImGui::EndFrame();
+    };
+    frame(false);
+    frame(true);
+    REQUIRE(ImGui::GetInputTextState(field));
+    const auto paste = [&](const char* expression)
+    {
+        ImGui::GetInputTextState(field)->SelectAll();
+        io.AddInputCharactersUTF8(expression);
+        frame(false);
+    };
+    paste("0.35 / 2");
+    CHECK(value == doctest::Approx(0.175));
+    paste("0.9 / ");
+    CHECK(value == doctest::Approx(0.175));
+    paste("1/0");
+    CHECK(value == doctest::Approx(0.175));
+    paste("(0.35 + 0.05) / 2");
+    CHECK(value == doctest::Approx(0.2));
+    paste("4");
+    CHECK(value == doctest::Approx(0.2));
+}
 
 namespace
 {
@@ -409,6 +500,58 @@ TEST_CASE("floating UI panels accept queued collapse drag and close input")
         PanelInputApplication application(fastClick);
         CHECK(application.Run() == 0);
     }
+}
+
+TEST_CASE("sticky component titles survive scrolling inside an Inspector card")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    bool checked = false;
+    class StickyCardLayer final : public Keire::Layer
+    {
+      public:
+        explicit StickyCardLayer(bool& checked) : Layer("Sticky card"), m_Checked(checked) {}
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            ImGui::SetNextWindowPos({0, 0});
+            ui.SetNextWindowSize({400, 300});
+            auto window = ui.BeginWindow("Inspector fixture");
+            const auto start = ui.CursorScreenPosition().Y;
+            ImGuiWindow* child = nullptr;
+            {
+                auto card = ui.BeginChild("Component card", {280, 140}, true);
+                child = ImGui::GetCurrentWindow();
+                ui.Text("Component");
+                ImGui::Dummy({200, 600});
+                ImGui::SetScrollY(60);
+            }
+            const auto before = child->DrawList->VtxBuffer.Size;
+            ui.StickySectionTitle("Component", start, ui.CursorScreenPosition().Y);
+            if (++m_Frame >= 3)
+            {
+                CHECK(ImGui::GetScrollY() == 0);
+                CHECK(child->Scroll.y > 0);
+                REQUIRE(child->DrawList->VtxBuffer.Size > before);
+                CHECK(child->DrawList->VtxBuffer[before].pos.y == doctest::Approx(child->InnerClipRect.Min.y));
+                m_Checked = true;
+                Owner().RequestExit();
+            }
+        }
+
+      private:
+        bool& m_Checked;
+        int m_Frame = 0;
+    };
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.TargetFrameRate = 0;
+    specification.Ui.Mode = Keire::UiMode::Headless;
+    specification.Ui.LayoutPath.clear();
+    Keire::Application application(specification);
+    (void)application.PushLayer(std::make_unique<StickyCardLayer>(checked));
+    CHECK(application.Run() == 0);
+    CHECK(checked);
 }
 
 TEST_CASE("constrained floating panel routes continuous wheel input to its scroll child")

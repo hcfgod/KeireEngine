@@ -642,6 +642,96 @@ namespace KeireEditor
         return component;
     }
 
+    std::size_t SceneDocument::AddComponents(const std::span<const Keire::AssetId> entities,
+                                             const Keire::ComponentTypeId type)
+    {
+        const auto scene = ActiveScene();
+        const auto registration = scene ? scene->Components()->Find(type) : std::nullopt;
+        if (!registration || !registration->Removable)
+            throw std::invalid_argument("Select an addable component in the active scene.");
+        std::vector<Keire::EntityId> targets;
+        for (const auto id : entities)
+        {
+            const auto target = scene->FindEntity(Keire::EntityId(id));
+            if (!target)
+                throw std::invalid_argument("Every selected entity must belong to the active scene.");
+            if ((registration->AllowMultiple || !target.HasComponent(type)) &&
+                std::ranges::find(targets, target.Id()) == targets.end())
+                targets.push_back(target.Id());
+        }
+        std::vector<std::pair<Keire::EntityId, Keire::Ref<Keire::Component>>> added;
+        added.reserve(targets.size());
+        std::vector<std::vector<Keire::Ref<Keire::Component>>> originals;
+        originals.reserve(targets.size());
+        for (const auto target : targets)
+            originals.push_back(scene->FindEntity(target).GetComponents());
+        try
+        {
+            for (const auto target : targets)
+            {
+                // Record ownership before fitting so a failed fit cannot leave an untracked component behind.
+                auto entity = scene->FindEntity(target);
+                auto component = entity.AddComponent(type);
+                if (!component)
+                    throw std::runtime_error("The component factory did not create a component.");
+                added.emplace_back(target, component);
+                FitNewPhysicsComponentToBuiltinMesh(entity, component);
+            }
+        }
+        catch (...)
+        {
+            // Required components may have been inserted before a factory failed.
+            for (std::size_t index = targets.size(); index > 0; --index)
+            {
+                auto target = scene->FindEntity(targets[index - 1]);
+                const auto current = target.GetComponents();
+                for (auto it = current.rbegin(); it != current.rend(); ++it)
+                    if (std::ranges::find(originals[index - 1], *it) == originals[index - 1].end())
+                    {
+                        try
+                        {
+                            (void)target.RemoveComponent(*it);
+                        }
+                        catch (...)
+                        { /* Preserve the original authoring failure. */
+                        }
+                    }
+            }
+            throw;
+        }
+        return added.size();
+    }
+
+    void SceneDocument::RemoveComponents(const std::span<const Keire::AssetId> entities,
+                                         const Keire::ComponentTypeId type, const std::size_t ordinal)
+    {
+        const auto scene = ActiveScene();
+        const auto registration = scene ? scene->Components()->Find(type) : std::nullopt;
+        if (!registration || !registration->Removable)
+            throw std::invalid_argument("This component cannot be removed.");
+        std::vector<std::pair<Keire::EntityId, Keire::Ref<Keire::Component>>> targets;
+        for (const auto id : entities)
+        {
+            const auto target = scene->FindEntity(Keire::EntityId(id));
+            const auto component = target ? ComponentAtOrdinal(target, type, ordinal) : nullptr;
+            if (!component)
+                throw std::invalid_argument("Removing components requires a common instance on every selected entity.");
+            for (const auto& other : target.GetComponents())
+            {
+                const auto otherRegistration = scene->Components()->Find(other->Type());
+                if (other != component && otherRegistration &&
+                    std::ranges::find(otherRegistration->RequiredComponents, type) !=
+                        otherRegistration->RequiredComponents.end())
+                    throw std::invalid_argument(
+                        "A selected entity has another component that requires this component.");
+            }
+            if (std::ranges::none_of(targets, [&](const auto& entry) { return entry.first == target.Id(); }))
+                targets.emplace_back(target.Id(), component);
+        }
+        for (const auto& [entity, component] : targets)
+            RemoveComponent(entity, component);
+    }
+
     void SceneDocument::RemoveComponent(const Keire::EntityId entity, const Keire::ComponentTypeId type)
     {
         const auto scene = ActiveScene();

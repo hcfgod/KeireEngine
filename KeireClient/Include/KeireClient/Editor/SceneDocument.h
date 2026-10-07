@@ -76,6 +76,10 @@ namespace KeireEditor
         void SetTransform(Keire::EntityId entity, const TransformValues& values);
         void SetTransforms(std::span<const Keire::AssetId> entities, const TransformValues& values);
         [[nodiscard]] Keire::Ref<Keire::Component> AddComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
+        // Adds only missing singleton components; repeated component types receive one instance per entity.
+        [[nodiscard]] std::size_t AddComponents(std::span<const Keire::AssetId> entities, Keire::ComponentTypeId type);
+        void RemoveComponents(std::span<const Keire::AssetId> entities, Keire::ComponentTypeId type,
+                              std::size_t ordinal = 0);
         void RemoveComponent(Keire::EntityId entity, Keire::ComponentTypeId type);
         void RemoveComponent(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component);
         void MoveComponentBefore(Keire::EntityId entity, const Keire::Ref<Keire::Component>& component,

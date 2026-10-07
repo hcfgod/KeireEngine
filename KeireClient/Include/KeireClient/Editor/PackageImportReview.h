@@ -23,6 +23,8 @@ namespace KeireEditor
         [[nodiscard]] bool ConsumeOpenRequest() noexcept;
         [[nodiscard]] const std::string& DisplayName() const noexcept { return m_DisplayName; }
         [[nodiscard]] const Keire::ProjectAssetImportPlan& Plan() const noexcept { return m_Plan; }
+        [[nodiscard]] const Keire::ProjectAssetImportRequest& Request() const noexcept { return m_Request; }
+        void Update(Keire::ProjectAssetImportRequest request, Keire::ProjectAssetImportPlan plan);
         [[nodiscard]] PackageImportConfirmation Confirm();
 
       private:

@@ -6,6 +6,13 @@
 
 namespace KeireEditor
 {
+    bool DrawSelectionComponentRemovalMenu(Keire::UiFrame& ui, const bool removable)
+    {
+        // Auto-sized popups cannot infer a stable width from text wrapped to that same width.
+        ui.Text("Applies to all selected entities.");
+        return ui.MenuItem("Remove from Selection", false, removable);
+    }
+
     [[nodiscard]] std::string JoinEntityTags(const std::span<const std::string> tags)
     {
         std::string result;

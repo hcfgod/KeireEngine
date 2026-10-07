@@ -80,14 +80,16 @@ if ($IncludeEditorApi -and -not (Test-Path -LiteralPath $managedGeneratorAssembl
     throw "The Keire.Managed.Generators analyzer is missing."
 }
 
-$hostFxr = Get-ChildItem (Join-Path $dotnetRoot "host\fxr") -Directory -ErrorAction SilentlyContinue |
-    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-$coreRuntime = Get-ChildItem (Join-Path $dotnetRoot "shared\Microsoft.NETCore.App") -Directory -ErrorAction SilentlyContinue |
-    Where-Object { Test-Path $_.FullName } |
-    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-if (-not $hostFxr -or -not $coreRuntime) {
-    throw "The bundled .NET hostfxr or CoreCLR runtime is missing."
+$runtimeConfig = Get-Content -LiteralPath (Join-Path $coralDirectory "Coral.Managed.runtimeconfig.json") -Raw |
+    ConvertFrom-Json
+$framework = $runtimeConfig.runtimeOptions.framework
+if ($framework.name -ne 'Microsoft.NETCore.App' -or $framework.version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "The managed host must declare a stable Microsoft.NETCore.App runtime version."
 }
+$requiredRuntime = [version]$framework.version
+$runtime = Get-CompatibleDotnetRuntime -Directory $dotnetRoot -RequiredVersion $requiredRuntime
+$hostFxr = $runtime.HostFxr
+$coreRuntime = $runtime.CoreRuntime
 
 $managedDirectory = Join-Path $targetDirectory "Managed"
 $bundledRoot = Join-Path $managedDirectory "Dotnet"

@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -27,8 +28,9 @@ namespace KeireEditor
         PackageManagerPanel& operator=(const PackageManagerPanel&) = delete;
 
         void Attach(Keire::UiWorkspace& workspace);
-        [[nodiscard]] bool Initialize(const std::filesystem::path& projectRoot,
-                                      const std::filesystem::path& executable);
+        [[nodiscard]] bool
+        Initialize(const std::filesystem::path& projectRoot, const std::filesystem::path& executable,
+                   std::function<void(const Keire::ProjectAssetImportRequest&)> settingsImported = {});
         void Shutdown() noexcept;
         void Draw(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
@@ -57,6 +59,7 @@ namespace KeireEditor
         void DrawLocalPackages(Keire::UiFrame& ui, const Keire::UiThemeDefinition& theme);
 
         Keire::UiPanelRegistration m_Registration;
+        std::function<void(const Keire::ProjectAssetImportRequest&)> m_SettingsImported;
         std::unique_ptr<Keire::ProjectPackageManager> m_Manager;
         std::unique_ptr<Keire::ProjectAssetPackageImporter> m_AssetImporter;
         std::unique_ptr<KeireHub::MarketplaceCacheStore> m_MarketplaceCache;

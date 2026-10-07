@@ -6,6 +6,7 @@
 #include "KeireInternal/UiInternal.h"
 #include "KeireInternal/UiLayoutInternal.h"
 #include "KeireInternal/UiRenderBackendInternal.h"
+#include "KeireInternal/UiStickySection.h"
 #include "KeireInternal/UiThemeInternal.h"
 #include "KeireInternal/UiWindowFlags.h"
 #include "KeireInternal/WindowInternal.h"
@@ -247,6 +248,39 @@ namespace Keire
     UiFrame::~UiFrame() = default;
 
     void UiFrame::RequireActive(const char* operation) const { m_Impl->RequireActive(operation); }
+    void UiFrame::StickySectionTitle(const std::string_view title, const float sectionStartY, const float sectionEndY)
+    {
+        RequireActive("StickySectionTitle");
+        auto* window = ImGui::GetCurrentWindow();
+        auto clip = window->InnerClipRect;
+        const float height = ImGui::GetFrameHeight();
+        auto top = Detail::StickySectionTop(sectionStartY, sectionEndY, clip.Min.y, height);
+        // Inspector cards are child windows, rendered after their parent. Append the title to the card's draw list
+        // so its opaque background cannot cover the pinned title, while retaining the normal window z-order.
+        auto* draw = window->DrawList;
+        for (auto* child : window->DC.ChildWindows)
+            if (child->Pos.y >= sectionStartY - 1.0F && child->Pos.y < sectionEndY &&
+                child->Pos.y + child->Size.y > clip.Min.y)
+            {
+                draw = child->DrawList;
+                // Fixed-height cards can scroll independently while the Inspector itself stays still.
+                if (child->Scroll.y > 0.0F)
+                {
+                    clip = child->InnerClipRect;
+                    top = Detail::StickySectionTop(child->DC.CursorStartPos.y, child->DC.CursorMaxPos.y, clip.Min.y,
+                                                   height);
+                }
+                break;
+            }
+        if (!top || title.empty())
+            return;
+        draw->PushClipRect(clip.Min, clip.Max, true);
+        draw->AddRectFilled({clip.Min.x, *top}, {clip.Max.x, *top + height}, ImGui::GetColorU32(ImGuiCol_WindowBg));
+        draw->AddLine({clip.Min.x, *top + height}, {clip.Max.x, *top + height}, ImGui::GetColorU32(ImGuiCol_Border));
+        draw->AddText({clip.Min.x + ImGui::GetStyle().FramePadding.x, *top + ImGui::GetStyle().FramePadding.y},
+                      ImGui::GetColorU32(ImGuiCol_Text), title.data(), title.data() + title.size());
+        draw->PopClipRect();
+    }
     UiWindowScope UiFrame::BeginWindow(std::string_view title, bool* open, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginWindow");

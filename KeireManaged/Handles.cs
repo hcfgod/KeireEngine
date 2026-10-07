@@ -448,6 +448,8 @@ public abstract class Component : EngineObject, IEquatable<Component>
 
     public Entity Entity { get; internal set; }
     public Transform Transform => Entity.Transform;
+    /// <summary>Convenience alias for <see cref="Transform"/> on attached components and behaviours.</summary>
+    public Transform transform => Transform;
     public override string Name { get => Entity.Name; set => Entity.Name = value; }
     public ComponentTypeId Type => ComponentType.Of(GetType());
     public override bool IsValid => Entity.IsValid && NativeRuntime.ComponentExists(Entity, Type);
@@ -610,6 +612,22 @@ public sealed class Transform : Component
     {
         ValidateRotation(rotation, nameof(rotation));
         Rotation = (worldSpace ? rotation * Rotation : Rotation * rotation).Normalized;
+    }
+    /// <summary>Rotates by degrees around a finite, nonzero axis, normalized automatically.
+    /// The axis is in the object's local orientation unless <paramref name="worldSpace"/> is true.</summary>
+    public void Rotate(Vector3 axis, float angleDegrees, bool worldSpace = false)
+    {
+        ValidateFinite(axis, nameof(axis));
+        if (!float.IsFinite(angleDegrees))
+            throw new ArgumentOutOfRangeException(nameof(angleDegrees), "Rotation angle must be finite.");
+        // Double intermediates support every finite float axis without squared-length overflow or underflow.
+        double length = Math.Sqrt((double)axis.X * axis.X + (double)axis.Y * axis.Y + (double)axis.Z * axis.Z);
+        if (length == 0.0)
+            throw new ArgumentException("Rotation axis must be nonzero.", nameof(axis));
+        double halfAngle = ((double)angleDegrees % 360.0) * (Math.PI / 360.0);
+        double scale = Math.Sin(halfAngle) / length;
+        Rotate(new Quaternion((float)(axis.X * scale), (float)(axis.Y * scale),
+                              (float)(axis.Z * scale), (float)Math.Cos(halfAngle)), worldSpace);
     }
     public void ResetPresentationInterpolation() => NativeRuntime.ResetPresentationInterpolation(Entity);
 

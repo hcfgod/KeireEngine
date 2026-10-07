@@ -18,6 +18,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+$BuildJobs = Get-BuildParallelJobs
 
 function Enter-KeireBuildLock {
     param([Parameter(Mandatory = $true)][string]$RepositoryRoot)
@@ -37,6 +38,7 @@ function Exit-KeireBuildLock {
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $BuildTimer = [Diagnostics.Stopwatch]::StartNew()
+Write-Host "==> Native build parallelism: $BuildJobs jobs (KEIRE_BUILD_JOBS)"
 $BuildSucceeded = $false
 $BuildProfileBinaryLog = $null
 # Direct builds and project.ps1 must acquire shared locks in the same order.
@@ -80,6 +82,9 @@ function Initialize-KeireGeneratedBuild {
         if (-not $requiresGeneration) {
             $expectedStamp = "$Generator|$Architecture|$Toolset|$CompilerCache|$([bool]$CI)|$toolchainIdentity|$(Get-ProjectGenerationFingerprint $Root)"
             $requiresGeneration = (Get-Content -LiteralPath $stamp -Raw).Trim() -ne $expectedStamp
+            # Other generators share the dependency install paths, even when this generator's stamp is unchanged.
+            $requiresGeneration = $requiresGeneration -or -not (Test-WindowsDependencyToolchain `
+                -Root $Root -Architecture $Architecture -Toolset $Toolset -ToolchainIdentity $toolchainIdentity)
         }
     }
 
@@ -119,7 +124,7 @@ switch ($Generator) {
         $platform = Get-MSBuildPlatform $Architecture
         Write-Host "==> Building $Target $Configuration for $Architecture with $Generator"
         $msbuildArguments = @(
-            (Join-Path $Root $solutionName), "/m", "/t:$Target", "/p:Configuration=$Configuration",
+            (Join-Path $Root $solutionName), "/m:$BuildJobs", "/p:CL_MPCount=1", "/t:$Target", "/p:Configuration=$Configuration",
             "/p:Platform=$platform", "/p:VCTargetsPath=$($environment.VCTargetsPath)"
         )
         $hostArchitecture = if ($env:PROCESSOR_ARCHITEW6432) {
@@ -136,8 +141,15 @@ switch ($Generator) {
             $BuildProfileBinaryLog = Join-Path $profileDirectory "latest-$Generator-$Target-$Configuration.binlog"
             $msbuildArguments += "/bl:$BuildProfileBinaryLog"
         }
-        & $environment.MSBuild @msbuildArguments
-        if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE." }
+        # Premake emits raw /MP in AdditionalOptions, so CL_MPCount alone cannot cap it.
+        # _CL_ is appended by cl.exe after those options; prevent nested compiler fan-out.
+        $previousCompilerOptions = $env:_CL_
+        try {
+            $env:_CL_ = "$previousCompilerOptions /MP1".Trim()
+            & $environment.MSBuild @msbuildArguments
+            if ($LASTEXITCODE -ne 0) { throw "MSBuild failed with exit code $LASTEXITCODE." }
+        }
+        finally { $env:_CL_ = $previousCompilerOptions }
         break
     }
     "ninja" {
@@ -147,7 +159,7 @@ switch ($Generator) {
         # the generators' fingerprints keep unchanged builds cheap and preserve generated-header timestamps.
         & (Join-Path $PSScriptRoot "prepare-generated-content.ps1")
         Write-Host "==> Building $Target $Configuration for $Architecture with Ninja"
-        $ninjaArguments = @("-C", $Root, "-f", "build.ninja")
+        $ninjaArguments = @("-j", "$BuildJobs", "-C", $Root, "-f", "build.ninja")
         if ($ProfileBuild) { $ninjaArguments += @("-d", "stats") }
         $ninjaArguments += "$($Target)_$Configuration"
         & (Get-NinjaExecutable) @ninjaArguments
@@ -168,7 +180,7 @@ switch ($Generator) {
         }
         if (-not $make) { throw "GNU Make was not found in PATH or a standard MSYS2 installation." }
         Write-Host "==> Building $Target $Configuration for $Architecture with GNU Make"
-        & $make.Source -C $Root "config=$($Configuration.ToLowerInvariant())" $Target
+        & $make.Source -j $BuildJobs -C $Root "config=$($Configuration.ToLowerInvariant())" $Target
         if ($LASTEXITCODE -ne 0) { throw "GNU Make failed with exit code $LASTEXITCODE." }
         break
     }

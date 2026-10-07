@@ -1151,6 +1151,26 @@ TEST_CASE("project settings document validates saves and owns one-step edit hist
     edited.RequestedGlobalIllumination = static_cast<Keire::GlobalIlluminationMode>(255U);
     CHECK_THROWS_AS(document.Update(edited), std::invalid_argument);
 
+    // A committed package import refreshes rendering without discarding pending authoring edits.
+    auto pendingAuthoring = document.AuthoringSettings();
+    pendingAuthoring.Audio.MixSampleRate = 44100;
+    document.UpdateAuthoring(pendingAuthoring);
+    auto importedRendering = document.Settings();
+    importedRendering.Exposure = 3.0F;
+    Keire::SaveRenderEnvironmentSettings(root, importedRendering);
+    document.CommitEdit();
+    document.Update(Keire::LoadRenderEnvironmentSettings(root));
+    document.CommitEdit("Import rendering settings");
+    CHECK(document.AuthoringSettings() == pendingAuthoring);
+    CHECK(document.Settings() == importedRendering);
+    CHECK(undo->Undo());
+    CHECK(document.Settings().Exposure == doctest::Approx(1.5F));
+    CHECK(document.AuthoringSettings() == pendingAuthoring);
+    CHECK(undo->Redo());
+    document.Save();
+    CHECK(Keire::LoadRenderEnvironmentSettings(root) == importedRendering);
+    CHECK(Keire::LoadProjectAuthoringSettings(root) == pendingAuthoring);
+
     document.Close();
     undo->Close();
     undoService->Close();
@@ -1356,10 +1376,19 @@ TEST_CASE("marketplace asset imports require an explicit valid review confirmati
                                  .ProjectPath = "Assets/new.asset",
                                  .Disposition = Keire::ProjectAssetImportDisposition::Install});
     review.Prepare("Creator Pack", request, validPlan);
+    CHECK(review.ConsumeOpenRequest());
+    request.ApplyRenderingSettings = true;
+    request.DefaultInput = Keire::AssetId::Generate();
+    review.Update(request, validPlan);
+    CHECK_FALSE(review.ConsumeOpenRequest());
+    CHECK(review.Request().DefaultInput == request.DefaultInput);
     const auto confirmation = review.Confirm();
     CHECK(confirmation.DisplayName == "Creator Pack");
     CHECK(confirmation.Request.Archive == request.Archive);
+    CHECK(confirmation.Request.ApplyRenderingSettings);
+    CHECK(confirmation.Request.DefaultInput == request.DefaultInput);
     CHECK_FALSE(review.Active());
+    CHECK_THROWS_AS(review.Update(request, validPlan), std::logic_error);
 }
 
 TEST_CASE("VFX Emitter inspector edits exposed typed parameters and removes stale overrides")

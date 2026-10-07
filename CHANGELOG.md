@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Game panels wait for a drawable viewport before constructing their camera projection, preventing startup failures
+  when restoring a temporarily zero-sized dock layout.
+- Windows bootstrap restores the locked FFmpeg submodule required by generation, matching Unix setup.
+- Windows bootstrap installs the checksum-verified pinned .NET SDK in a versioned build-tools directory, preserving
+  system SDK installations and validating the payload before publication.
+- Windows Coral builds accept newer stable SDKs in the supported .NET major/minor line, selecting the newest
+  compatible installation together with its native host pack. `KEIRE_DOTNET_SDK=locked` selects the pinned fallback.
+
+- Windows dependency preparation recovers an empty patched-source cache while retaining its old directory;
+  malformed nonempty caches produce actionable diagnostics. Isolated PowerShell regressions cover recovery,
+  verified reuse, preservation and rejection of junction-backed cache paths.
+
+- Inspector component add/remove actions support multi-selection, preserve existing singleton values, validate
+  required-component removals before mutation, and roll back failed batch additions. Scrolled component sections
+  retain their titles; numeric text entry evaluates arithmetic expressions with bounds and finite-value validation.
+- Multi-selection component menus keep stable sizing when opened, and component titles remain visible when
+  scrolling inside a component card as well as through the Inspector.
+
+- C# components and behaviours expose a `transform` convenience alias and `Transform.Rotate(axis, angleDegrees,
+  worldSpace)` with normalized finite axes and explicit local/world composition; existing Transform and quaternion APIs remain compatible.
+
+- Asset import review offers explicit rendering-settings and default-input adoption, with schema validation and
+  transactional rollback. Unsupported settings are skipped; adopted project configuration survives package removal.
+
 - Added reusable native limb binding and transactional pose solving with stable limb IDs and explicit outcome
   diagnostics, plus managed named-limb goal adapters, per-contact rigid support tracking and events, and geometric
   support-polygon assessment and grouped gait scheduling without humanoid assumptions.

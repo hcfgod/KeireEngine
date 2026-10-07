@@ -6,6 +6,10 @@ $runFast = $Suite -in @("All", "Fast")
 $runIntegration = $Suite -in @("All", "Integration")
 if ($runFast) { & (Join-Path $PSScriptRoot "test-run-routing-windows.ps1") }
 if ($runFast) { & (Join-Path $PSScriptRoot "test-package-runtime-wait-windows.ps1") }
+if ($runFast) { & (Join-Path $PSScriptRoot "test-patched-dependency-cache-windows.ps1") }
+if ($runFast) { & (Join-Path $PSScriptRoot "test-build-parallelism-windows.ps1") }
+if ($runFast) { & (Join-Path $PSScriptRoot "test-pinned-dotnet-windows.ps1") }
+if ($runFast) { & (Join-Path $PSScriptRoot "test-dotnet-sdk-selection-windows.ps1") }
 $Windows = Resolve-Path (Join-Path $PSScriptRoot "..\Windows")
 . (Join-Path $Windows "common.ps1")
 
@@ -598,6 +602,7 @@ try {
     Copy-Item (Join-Path $Windows "build.ps1") (Join-Path $fixtureWindows "build.ps1")
     @'
 $ErrorActionPreference = "Stop"
+function Get-BuildParallelJobs { return 2 }
 function Get-ProjectConfig {
     return [pscustomobject]@{
         PROJECT_IDENTIFIER = "BuildOrderFixture"
@@ -937,6 +942,8 @@ Assert-Equal $lock.FFMPEG_COMMIT "89153eb701d372f54a5d7d29de5067abc09e11d3" "FFm
 Assert-Equal $lock.LIBSODIUM_COMMIT "77e1ce5d6dee871c49ef211222ba18ef0c486bda" "libsodium lock"
 Assert-Equal $lock.TRACY_COMMIT "05cceee0df3b8d7c6fa87e9638af311dbabc63cb" "Tracy lock"
 $vendorScript = Get-Content (Join-Path $Windows "vendor.ps1") -Raw
+Assert-True ($vendorScript.Contains('Vendor/ffmpeg') -and $vendorScript.Contains('$Lock.FFMPEG_URL') -and
+             $vendorScript.Contains('$Lock.FFMPEG_COMMIT')) "FFmpeg bootstrap uses locked source"
 $vendorUpdateScript = Get-Content (Join-Path $Windows "vendor-update.ps1") -Raw
 Assert-True ($vendorScript.Contains('Vendor/imgui') -and $vendorScript.Contains('$Lock.IMGUI_COMMIT')) "Dear ImGui vendor mapping"
 Assert-True ($vendorScript.Contains('Scripts\Premake\DearImGui.lua') -and $vendorScript.Contains('imgui_impl_sdlgpu3.cpp')) "Dear ImGui integration validation"
@@ -1064,9 +1071,10 @@ Assert-True ($unixCoralScript.Contains('xcrun --sdk macosx --show-sdk-path') -an
     "macOS Coral cache identity and configuration use the same selected SDK"
 Assert-True ($coralScript.Contains('Get-Command dotnet -CommandType Application') -and
              $coralScript.Contains('$env:DOTNET_ROOT = $DotnetSdk.Root') -and
-             $coralScript.Contains('$selectedVersion -eq $Version') -and
+             $coralScript.Contains('$selectedVersion -in $reportedVersions') -and
+             $coralScript.Contains('Test-KeireCompatibleSdkVersion') -and
              $coralScript.Contains('"-DDOTNET_EXE=$DotnetExecutable"')) `
-    "Coral resolves and configures the exact pinned SDK when it is available through PATH"
+    "Coral resolves compatible SDKs from one canonical root and configures that exact executable"
 Assert-True ($coralScript.Contains('Microsoft.NETCoreSdk.BundledVersions.props') -and
              $coralScript.Contains('AppHostPackVersion') -and
              $coralScript.Contains('RuntimeIdentifier = $runtimeIdentifier') -and

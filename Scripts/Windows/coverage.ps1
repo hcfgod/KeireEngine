@@ -2,6 +2,7 @@
 param([string]$Architecture = "", [switch]$CI, [switch]$Update, [switch]$Generate)
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+Get-BuildParallelJobs | Out-Null
 $Root = Get-RepositoryRoot; $Project = Get-ProjectConfig
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 $outputArchitecture = Get-ArchitectureOutputName $Architecture

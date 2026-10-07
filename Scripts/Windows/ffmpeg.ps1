@@ -10,6 +10,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+$BuildJobs = Get-BuildParallelJobs
 . (Join-Path $PSScriptRoot "ffmpeg-runtime-contract.ps1")
 
 $Root = Get-RepositoryRoot
@@ -279,7 +280,7 @@ Copy-Item -LiteralPath $ZlibLibrary -Destination (Join-Path $ZlibLinkDirectory "
 $ZlibIncludeDirectoryBash = Convert-ToBashPath $ZlibIncludeDirectory
 $ZlibLinkDirectoryBash = Convert-ToBashPath $ZlibLinkDirectory
 $DebugOptions = "--disable-debug"
-$Jobs = [Math]::Max(1, [Environment]::ProcessorCount)
+$Jobs = $BuildJobs
 $Configure = @(
     "--prefix='$InstallBash'",
     "--toolchain=msvc",

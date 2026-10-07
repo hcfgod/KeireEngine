@@ -55,6 +55,9 @@ namespace Keire
         std::string ExpectedArchiveSha256;
         bool RequireMarketplaceSignature = true;
         bool AllowExecutableCode = false;
+        // Explicit per-import choices; omitted settings never change the project configuration.
+        bool ApplyRenderingSettings = false;
+        AssetId DefaultInput;
     };
 
     struct ProjectAssetImportPlanEntry
@@ -81,6 +84,8 @@ namespace Keire
         std::vector<ProjectAssetImportPlanEntry> Entries;
         std::vector<ProjectAssetImportConflict> Conflicts;
         bool ContainsExecutableCode = false;
+        bool HasRenderingSettings = false;
+        std::vector<std::filesystem::path> UnsupportedSettings;
 
         [[nodiscard]] bool Valid() const noexcept { return Conflicts.empty(); }
     };

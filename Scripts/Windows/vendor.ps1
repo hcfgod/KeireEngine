@@ -16,7 +16,8 @@ $Dependencies = @(
     @{ Name = "glm"; Path = "Vendor/glm"; Url = $Lock.GLM_URL; Commit = $Lock.GLM_COMMIT },
     @{ Name = "SDL_shadercross"; Path = "Vendor/SDL_shadercross"; Url = $Lock.SDL_SHADERCROSS_URL; Commit = $Lock.SDL_SHADERCROSS_COMMIT },
     @{ Name = "assimp"; Path = "Vendor/assimp"; Url = $Lock.ASSIMP_URL; Commit = $Lock.ASSIMP_COMMIT },
-    @{ Name = "stb"; Path = "Vendor/stb"; Url = $Lock.STB_URL; Commit = $Lock.STB_COMMIT }
+    @{ Name = "stb"; Path = "Vendor/stb"; Url = $Lock.STB_URL; Commit = $Lock.STB_COMMIT },
+    @{ Name = "ffmpeg"; Path = "Vendor/ffmpeg"; Url = $Lock.FFMPEG_URL; Commit = $Lock.FFMPEG_COMMIT }
 )
 if ($IncludeProfileDependencies) {
     $Dependencies += @{

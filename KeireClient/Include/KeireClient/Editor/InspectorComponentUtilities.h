@@ -11,6 +11,7 @@
 
 namespace KeireEditor
 {
+    [[nodiscard]] bool DrawSelectionComponentRemovalMenu(Keire::UiFrame& ui, bool removable);
     [[nodiscard]] std::string JoinEntityTags(std::span<const std::string> tags);
     [[nodiscard]] std::optional<std::vector<std::string>> ParseEntityTags(std::string_view text);
 

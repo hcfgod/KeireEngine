@@ -37,6 +37,12 @@ the Project search so the selected asset remains visible.
 
 Property-only materials retain incompatible shader overrides in the Inspector's **Inactive Overrides** section.
 The Inspector reserves scrollbar space so asset previews remain stable when resizing the panel or changing selections.
+With multiple entities selected, **Add Component to Selection** adds missing singleton components without replacing
+existing values; the component menu removes the matching instance from the selection. Component titles remain visible
+while scrolling through their fields. Ctrl-click or double-click numeric fields to type or paste arithmetic such as
+`0.35 / 2` or `(2 + 3) * 4`; scalar, vector-axis and slider inputs support `+`, `-`, `*`, `/` and parentheses.
+Invalid, non-finite and out-of-range expressions leave the value unchanged. Integer fields require an integral result;
+full-width integer literals are preserved exactly, while integer arithmetic is limited to the exact double integer range.
 Restore the matching shader to recover them, or use **Remove Inactive Overrides** for explicit, undoable cleanup.
 Material variants expose a searchable Parent field even when their existing parent is missing. Parent changes reject
 inheritance cycles before saving; property, parent, keyword, and reset edits participate in asset undo/redo.
@@ -128,6 +134,11 @@ dismissed individually, and the task center can clear all finished work at once.
 hides its recovery record durably while preserving the exact journal identity needed by a later Retry or Remove action.
 Marketplace Asset Import packages open a verified file-and-conflict review in the Editor before the user confirms any
 project writes; executable-code consent and keep-local conflict choices are applied during that preflight.
+The import review can optionally adopt packaged rendering settings and an imported input-action asset as the
+project default (activating its first action map). Both choices are off by default; unsupported project settings
+are listed and skipped. Invalid supported settings fail before publication, and failures restore the original files.
+Adopted settings and default-input assets belong to the project and survive package removal. The Editor refreshes
+its committed descriptor and rendering state immediately; the default input is activated on the next Play session.
 When an externally managed Editor was intentionally rebuilt or replaced in place, its Installs card exposes **Refresh
 registration**. That action validates the new package manifest and complete file inventory before the Hub adopts the
 updated metadata; unrequested on-disk changes remain reported as damaged.
@@ -214,6 +225,12 @@ Windows PowerShell with Ninja and MSVC:
 ./Scripts/project.ps1 test -Generator ninja -Configuration Debug -Toolset msc
 ./Scripts/project.ps1 run -Generator ninja -Configuration Debug -Toolset msc
 ```
+
+Windows bootstrap installs a checksum-verified fallback .NET SDK under `Build/Tools/dotnet/<version>` without
+changing system SDK installations. Coral selects the newest installed stable SDK in the supported major/minor
+line, at or above `DOTNET_SDK_VERSION` in `Config/Dependencies.lock`. Set `KEIRE_DOTNET_SDK=locked` to use the
+exact pinned SDK for reproducible builds; the default is `auto`. Preview SDKs and different major/minor versions
+are not selected automatically. The SDK, native host pack and build-cache identity stay tied to the selected root.
 
 Linux with distro-aware setup, Ninja, and GCC:
 

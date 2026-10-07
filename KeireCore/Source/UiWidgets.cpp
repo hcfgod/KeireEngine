@@ -1,4 +1,5 @@
 #include "Keire/Ui.h"
+#include "KeireInternal/UiNumericExpression.h"
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -159,8 +160,13 @@ namespace Keire
         const std::string safeLabel(label);
         const auto* minimumValue = minimum ? &*minimum : nullptr;
         const auto* maximumValue = maximum ? &*maximum : nullptr;
-        return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_S64, &value, static_cast<float>(speed), minimumValue,
-                                 maximumValue, "%lld");
+        return Detail::DrawNumericExpression(
+            safeLabel.c_str(), value, ImGuiDataType_S64, "%lld", minimumValue, maximumValue,
+            [&](auto& candidate)
+            {
+                return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_S64, &candidate, static_cast<float>(speed),
+                                         minimumValue, maximumValue, "%lld");
+            });
     }
 
     bool UiFrame::DragScalar(const std::string_view label, double& value, const double speed,
@@ -172,8 +178,13 @@ namespace Keire
         const std::string safeLabel(label);
         const auto* minimumValue = minimum ? &*minimum : nullptr;
         const auto* maximumValue = maximum ? &*maximum : nullptr;
-        return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_Double, &value, static_cast<float>(speed),
-                                 minimumValue, maximumValue, "%.6g");
+        return Detail::DrawNumericExpression(
+            safeLabel.c_str(), value, ImGuiDataType_Double, "%.6g", minimumValue, maximumValue,
+            [&](auto& candidate)
+            {
+                return ImGui::DragScalar(safeLabel.c_str(), ImGuiDataType_Double, &candidate, static_cast<float>(speed),
+                                         minimumValue, maximumValue, "%.6g");
+            });
     }
 
     bool UiFrame::DragVector2(const std::string_view label, Vector2& value, const float speed)
@@ -182,7 +193,7 @@ namespace Keire
         if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
             throw std::invalid_argument("DragVector2 requires a label and a finite positive speed.");
         const std::string safeLabel(label);
-        return ImGui::DragFloat2(safeLabel.c_str(), &value.X, speed, 0.0F, 0.0F, "%.3f");
+        return Detail::DrawExpressionVector(safeLabel.c_str(), &value.X, 2, speed, "%.3f");
     }
 
     bool UiFrame::DragVector3(const std::string_view label, Vector3& value, const float speed)
@@ -212,7 +223,11 @@ namespace Keire
             ImGui::TextColored(color, "%s", axis);
             ImGui::SameLine();
             ImGui::SetNextItemWidth(width);
-            return ImGui::DragFloat((std::string("##") + axis).c_str(), &component, speed, 0.0F, 0.0F, "%.3f");
+            const auto id = std::string("##") + axis;
+            return Detail::DrawNumericExpression(
+                id.c_str(), component, ImGuiDataType_Float, "%.3f", static_cast<const float*>(nullptr),
+                static_cast<const float*>(nullptr),
+                [&](auto& candidate) { return ImGui::DragFloat(id.c_str(), &candidate, speed, 0.0F, 0.0F, "%.3f"); });
         };
 
         const auto& style = ImGui::GetStyle();
@@ -237,7 +252,7 @@ namespace Keire
         if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
             throw std::invalid_argument("DragVector4 requires a label and a finite positive speed.");
         const std::string safeLabel(label);
-        return ImGui::DragFloat4(safeLabel.c_str(), &value.X, speed, 0.0F, 0.0F, "%.3f");
+        return Detail::DrawExpressionVector(safeLabel.c_str(), &value.X, 4, speed, "%.3f");
     }
     bool UiFrame::DragQuaternion(const std::string_view label, Quaternion& value, const float speed)
     {
@@ -245,7 +260,9 @@ namespace Keire
         if (label.empty() || !std::isfinite(speed) || speed <= 0.0F)
             throw std::invalid_argument("DragQuaternion requires a label and a finite positive speed.");
         const std::string safeLabel(label);
-        return ImGui::DragFloat4(safeLabel.c_str(), &value.X, speed, -1.0F, 1.0F, "%.4f");
+        const float minimum = -1.0F;
+        const float maximum = 1.0F;
+        return Detail::DrawExpressionVector(safeLabel.c_str(), &value.X, 4, speed, "%.4f", &minimum, &maximum);
     }
     bool UiFrame::InputText(std::string_view label, std::string& value, const bool selectAllOnFocus)
     {

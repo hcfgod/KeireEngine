@@ -455,9 +455,43 @@ function Test-SemanticVersion {
     return $Version -match '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$'
 }
 
+# Match the Unix launcher policy; scheduling must not alter compiler provenance.
+function Get-BuildParallelJobs {
+    if (-not [string]::IsNullOrEmpty($env:KEIRE_BUILD_JOBS)) {
+        $jobs = 0
+        if ($env:KEIRE_BUILD_JOBS -cnotmatch '^[1-9][0-9]*$' -or
+            -not [int]::TryParse($env:KEIRE_BUILD_JOBS, [ref]$jobs)) {
+            throw "KEIRE_BUILD_JOBS must be a positive integer no greater than $([int]::MaxValue)."
+        }
+        return $jobs
+    }
+    return [Math]::Max(1, [Math]::Min(4, [Environment]::ProcessorCount))
+}
+
 function Get-RepositoryRoot { return (Resolve-Path (Join-Path $PSScriptRoot "..\..")) }
 function Get-ProjectConfig { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Project.conf") }
 function Get-DependencyLock { return Read-KeyValueFile (Join-Path (Get-RepositoryRoot) "Config\Dependencies.lock") }
+
+function Get-CompatibleDotnetRuntime {
+    param([string]$Directory, [version]$RequiredVersion)
+    $selectRuntime = {
+        param([string]$Relative, [string]$Library)
+        Get-ChildItem -LiteralPath (Join-Path $Directory $Relative) -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } |
+            Where-Object {
+                $version = [version]$_.Name
+                $version.Major -eq $RequiredVersion.Major -and $version.Minor -eq $RequiredVersion.Minor -and
+                $version -ge $RequiredVersion -and
+                (Test-Path -LiteralPath (Join-Path $_.FullName $Library) -PathType Leaf)
+            } | Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
+    }
+    $hostFxr = & $selectRuntime 'host\fxr' 'hostfxr.dll'
+    $coreRuntime = & $selectRuntime 'shared\Microsoft.NETCore.App' 'coreclr.dll'
+    if (-not $hostFxr -or -not $coreRuntime) {
+        throw "Stable .NET hostfxr and CoreCLR runtimes compatible with $RequiredVersion are missing from $Directory."
+    }
+    return [pscustomobject]@{ HostFxr = $hostFxr; CoreRuntime = $coreRuntime }
+}
 
 function Invoke-CheckedWindowsCommand {
     param(
@@ -1542,7 +1576,13 @@ function Enter-VSDeveloperEnvironment {
         return $environment
     }
 
-    $output = & $env:ComSpec /s /c "`"$($environment.VsDevCmd)`" -no_logo -arch=$targetArchitecture -host_arch=amd64 >nul && set"
+    # VsDevCmd otherwise inherits the previous installation's VCToolsInstallDir when switching versions in-process.
+    $resetEnvironment = ""
+    if ($env:VSCMD_VER -and $env:VisualStudioVersion -match '^(16|17|18)\.') {
+        $previousEnvironment = Get-VSBuildEnvironment ([int]$Matches[1])
+        $resetEnvironment = "call `"$($previousEnvironment.VsDevCmd)`" -no_logo -clean_env >nul && "
+    }
+    $output = & $env:ComSpec /s /c "${resetEnvironment}call `"$($environment.VsDevCmd)`" -no_logo -arch=$targetArchitecture -host_arch=amd64 >nul && set"
     if ($LASTEXITCODE -ne 0) {
         throw "Visual Studio developer environment setup failed with exit code $LASTEXITCODE."
     }
@@ -1667,6 +1707,17 @@ function Enter-WindowsToolEnvironment {
         "gcc" { Add-MSYS2ToPath | Out-Null }
     }
     return $resolved
+}
+
+function Test-WindowsDependencyToolchain {
+    param([string]$Root, [string]$Architecture, [string]$Toolset, [string]$ToolchainIdentity)
+
+    $outputArchitecture = Get-ArchitectureOutputName $Architecture
+    $path = Join-Path $Root "Build\Generated\windows-$outputArchitecture-dependencies.stamp"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $false }
+    $provenance = Get-Content -LiteralPath $path -Raw
+    return -not [string]::IsNullOrWhiteSpace($provenance) -and
+        $provenance.Trim() -eq "$Toolset|$ToolchainIdentity"
 }
 
 function Get-WindowsToolchainIdentity {

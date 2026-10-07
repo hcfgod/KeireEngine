@@ -175,6 +175,8 @@ namespace Keire
         [[nodiscard]] std::filesystem::path SceneRecoveryDirectory() const;
         [[nodiscard]] bool Writable() const noexcept;
         void Save(ProjectDescriptor descriptor);
+        // Refresh committed on-disk settings without writing over them. Identity cannot change.
+        void ReloadDescriptor();
 
       private:
         template <typename T, typename... Args> friend Ref<T> CreateRef(Args&&... args);

@@ -803,7 +803,25 @@ void EditorWorkspaceLayer::OnAttach()
     if (const auto project = Owner().GetProject())
     {
         m_RestoreProjectFocusFramesRemaining =
-            m_PackageManagerPanel->Initialize(project->Root(), m_ExecutablePath) ? 2U : 0U;
+            m_PackageManagerPanel->Initialize(
+                project->Root(), m_ExecutablePath,
+                [this](const Keire::ProjectAssetImportRequest& request)
+                {
+                    const auto activeProject = Owner().GetProject();
+                    if (!activeProject)
+                        throw std::logic_error("No project is open to refresh imported settings.");
+                    activeProject->ReloadDescriptor();
+                    if (request.ApplyRenderingSettings)
+                    {
+                        const auto settings = Keire::LoadRenderEnvironmentSettings(activeProject->Root());
+                        // Preserve unrelated authoring edits and their undo boundary.
+                        m_ProjectSettingsDocument->CommitEdit();
+                        m_ProjectSettingsDocument->Update(settings);
+                        m_ProjectSettingsDocument->CommitEdit("Import rendering settings");
+                    }
+                })
+                ? 2U
+                : 0U;
     }
     LoadTheme(workspace, workspace.ActiveTheme());
     m_ConsolePanel->CaptureEngineLogs(Owner().GetTime().FrameCount(), m_Theme);

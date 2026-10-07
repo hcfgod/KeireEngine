@@ -1,4 +1,6 @@
+#include "Keire/Assets/InputActionAsset.h"
 #include "Keire/Core.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "KeireTests/TestSupport.h"
 
 #include <doctest/doctest.h>
@@ -118,6 +120,44 @@ namespace
                     .ExpectedArchiveSha256 = package.ArchiveSha256};
         }
 
+        [[nodiscard]] Keire::ProjectAssetImportRequest SettingsPackage(const bool invalidRendering = false,
+                                                                       const bool invalidInput = false)
+        {
+            const auto payload = Root / "settings-payload";
+            std::filesystem::create_directories(payload / "Assets");
+            std::filesystem::create_directories(payload / "ProjectSettings");
+            Keire::SaveRenderEnvironmentSettings(payload, {});
+            if (invalidRendering)
+                Write(payload / "ProjectSettings/Rendering.keiresettings", "{\"schemaVersion\":999}");
+            Write(payload / "ProjectSettings/Project.keireproject", "do not replace project identity");
+            const auto bytes = Keire::InputActionAsset::Encode(Keire::InputActionAsset::GameplayDefinition());
+            {
+                std::ofstream stream(payload / "Assets/Controls.keireinput", std::ios::binary);
+                stream.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            }
+            if (invalidInput)
+                Write(payload / "Assets/Controls.keireinput", "invalid input data");
+            const auto type = Keire::InputActionAsset::StaticType();
+            Write(payload / "Assets/Controls.keireinput.keiremeta",
+                  "{\"id\":\"" + PrimaryId.ToString() + "\",\"type\":\"" + type.ToString() + "\"}");
+            Keire::AssetPackageManifest manifest;
+            manifest.PackageId = "com.keire.tests.settings-import";
+            manifest.Version = "1.0.0";
+            manifest.PublisherId = "keire.tests";
+            manifest.DisplayName = "Optional settings";
+            manifest.InstallKind = Keire::AssetPackageInstallKind::AssetImport;
+            manifest.Compatibility.MinimumEngineVersion = "0.3.1";
+            manifest.Assets = {{.Id = PrimaryId,
+                                .Type = type,
+                                .SourcePath = "Assets/Controls.keireinput",
+                                .MetadataPath = "Assets/Controls.keireinput.keiremeta"}};
+            manifest = Keire::InventoryAssetPackagePayload(std::move(manifest), payload);
+            const auto archive = Root / "settings.keireassetpackage";
+            static_cast<void>(
+                Keire::WriteAssetPackageArchive({.Manifest = manifest, .PayloadRoot = payload, .Output = archive}));
+            return {.Archive = archive, .RequireMarketplaceSignature = false};
+        }
+
         static void Write(const std::filesystem::path& path, const std::string& value)
         {
             std::ofstream stream(path, std::ios::binary | std::ios::trunc);
@@ -138,6 +178,120 @@ namespace
         Keire::Ref<Keire::Project> Project;
     };
 } // namespace
+
+TEST_CASE("asset package settings are explicit validated project-owned choices")
+{
+    ProjectAssetImportFixture fixture;
+    CHECK_FALSE(fixture.Project->Writable());
+    CHECK_THROWS_AS(fixture.Project->Save(fixture.Project->Descriptor()), std::logic_error);
+    fixture.Project = Keire::Project::Open(fixture.Project->Root(), Keire::ProjectOpenMode::Exclusive);
+    REQUIRE(fixture.Project->Writable());
+    auto request = fixture.SettingsPackage();
+    auto importer = fixture.Importer();
+    const auto descriptor = fixture.Project->Root() / "ProjectSettings/Project.keireproject";
+    const auto original = Keire::Project::Open(fixture.Project->Root())->Descriptor();
+    const auto rendering = fixture.Project->Root() / "ProjectSettings/Rendering.keiresettings";
+    ProjectAssetImportFixture::Write(rendering, "original rendering settings");
+    auto plan = importer.Preflight(request);
+    REQUIRE(plan.Valid());
+    CHECK(plan.HasRenderingSettings);
+    CHECK(plan.UnsupportedSettings == std::vector<std::filesystem::path>{"ProjectSettings/Project.keireproject"});
+    CHECK(plan.Entries.size() == 2);
+    static_cast<void>(importer.Import(request));
+    CHECK(KeireTests::ReadFile(rendering) == "original rendering settings");
+    CHECK(Keire::Project::Open(fixture.Project->Root())->Descriptor().DefaultInput == original.DefaultInput);
+    CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/ProjectSettings"));
+
+    request.ApplyRenderingSettings = true;
+    request.DefaultInput = fixture.PrimaryId;
+    plan = importer.Preflight(request);
+    REQUIRE(plan.Valid());
+    CHECK(plan.Entries.size() == 3);
+    const auto result = importer.Import(request);
+    const auto adopted = Keire::Project::Open(fixture.Project->Root())->Descriptor();
+    CHECK(adopted.Id == original.Id);
+    CHECK(adopted.Name == original.Name);
+    CHECK(adopted.StartupScene == original.StartupScene);
+    CHECK(adopted.DefaultInput == fixture.PrimaryId);
+    CHECK(adopted.DefaultInputMap == Keire::InputActionAsset::GameplayDefinition().ActionMaps.front().Id);
+    const auto committedDescriptor = KeireTests::ReadFile(descriptor);
+    fixture.Project->ReloadDescriptor();
+    CHECK(KeireTests::ReadFile(descriptor) == committedDescriptor);
+    CHECK(fixture.Project->Descriptor().DefaultInput == fixture.PrimaryId);
+    fixture.Project->Save(fixture.Project->Descriptor());
+    CHECK(Keire::Project::Open(fixture.Project->Root())->Descriptor().DefaultInput == fixture.PrimaryId);
+    CHECK_NOTHROW(Keire::LoadRenderEnvironmentSettings(fixture.Project->Root()));
+    CHECK(result.Receipt.Entries.size() == 2);
+    CHECK(std::ranges::none_of(result.Receipt.Entries, &Keire::ProjectAssetImportReceiptEntry::Owned));
+    static_cast<void>(importer.Remove(result.Receipt.PackageId));
+    CHECK(std::filesystem::exists(fixture.Project->Root() / "Assets/Controls.keireinput"));
+    CHECK(std::filesystem::exists(rendering));
+    CHECK(Keire::Project::Open(fixture.Project->Root())->Descriptor().DefaultInput == fixture.PrimaryId);
+}
+
+TEST_CASE("invalid optional package settings fail before publication")
+{
+    for (const bool renderingFailure : {false, true})
+    {
+        ProjectAssetImportFixture fixture;
+        auto request = fixture.SettingsPackage(renderingFailure, !renderingFailure);
+        request.ApplyRenderingSettings = true;
+        request.DefaultInput = fixture.PrimaryId;
+        auto importer = fixture.Importer();
+        const auto descriptor = fixture.Project->Root() / "ProjectSettings/Project.keireproject";
+        const auto before = KeireTests::ReadFile(descriptor);
+        CHECK_THROWS(importer.Import(request));
+        CHECK(KeireTests::ReadFile(descriptor) == before);
+        CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/Controls.keireinput"));
+    }
+}
+
+TEST_CASE("project descriptor refresh rejects corrupted or replaced identity without changing cached settings")
+{
+    ProjectAssetImportFixture fixture;
+    const auto path = fixture.Project->Root() / "ProjectSettings/Project.keireproject";
+    const auto original = fixture.Project->Descriptor();
+    auto text = KeireTests::ReadFile(path);
+    ProjectAssetImportFixture::Write(path, "invalid descriptor");
+    CHECK_THROWS(fixture.Project->ReloadDescriptor());
+    CHECK(fixture.Project->Descriptor().Id == original.Id);
+    const auto oldId = original.Id.ToString();
+    const auto position = text.find(oldId);
+    REQUIRE(position != std::string::npos);
+    text.replace(position, oldId.size(), Keire::AssetId::Generate().ToString());
+    ProjectAssetImportFixture::Write(path, text);
+    CHECK_THROWS(fixture.Project->ReloadDescriptor());
+    CHECK(fixture.Project->Descriptor().Id == original.Id);
+    CHECK(fixture.Project->Descriptor().DefaultInput == original.DefaultInput);
+    CHECK(KeireTests::ReadFile(path) == text);
+}
+
+TEST_CASE("optional package settings roll back with assets on publication failure")
+{
+    ProjectAssetImportFixture fixture;
+    auto request = fixture.SettingsPackage();
+    request.ApplyRenderingSettings = true;
+    request.DefaultInput = fixture.PrimaryId;
+    const auto rendering = fixture.Project->Root() / "ProjectSettings/Rendering.keiresettings";
+    ProjectAssetImportFixture::Write(rendering, "retain original rendering bytes");
+    const auto descriptor = fixture.Project->Root() / "ProjectSettings/Project.keireproject";
+    const auto before = KeireTests::ReadFile(descriptor);
+    Keire::ProjectAssetPackageImporter importer({.ProjectRoot = fixture.Project->Root(),
+                                                 .EngineVersion = "0.3.1",
+                                                 .Platform = "windows",
+                                                 .Architecture = "x86_64",
+                                                 .Events = [](const Keire::ProjectAssetImportEvent& event)
+                                                 {
+                                                     if (event.State == Keire::ProjectAssetImportState::Publishing &&
+                                                         event.Path == "ProjectSettings/Rendering.keiresettings")
+                                                         throw std::runtime_error(
+                                                             "injected settings publication failure");
+                                                 }});
+    CHECK_THROWS(importer.Import(request));
+    CHECK(KeireTests::ReadFile(rendering) == "retain original rendering bytes");
+    CHECK(KeireTests::ReadFile(descriptor) == before);
+    CHECK_FALSE(std::filesystem::exists(fixture.Project->Root() / "Assets/Controls.keireinput"));
+}
 
 TEST_CASE("asset package import resolves selected asset dependencies and writes a source-controlled receipt")
 {

@@ -172,18 +172,21 @@ function Copy-PlayerRuntimeClosure {
             throw "The player runtime closure contains an unexpected executable: $($rootExecutable.Name)"
         }
     }
+    foreach ($runtimeFamily in @('host\fxr', 'shared\Microsoft.NETCore.App')) {
+        foreach ($generation in Get-ChildItem -LiteralPath (Join-Path $sourceRoot "Managed\Dotnet\$runtimeFamily") `
+                -Force -Directory -ErrorAction SilentlyContinue) {
+            Assert-PlayerSupportDirectory -Path $generation.FullName | Out-Null
+        }
+    }
 
     New-Item -ItemType Directory -Path $Destination | Out-Null
     foreach ($relative in $required) {
         Copy-FileIfChanged -Source (Join-Path $sourceRoot $relative) -Destination (Join-Path $Destination $relative)
     }
-    $hostFxr = Get-ChildItem (Join-Path $sourceRoot 'Managed\Dotnet\host\fxr') -Force -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-    $coreRuntime = Get-ChildItem (Join-Path $sourceRoot 'Managed\Dotnet\shared\Microsoft.NETCore.App') -Force -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
-    if (-not $hostFxr -or -not $coreRuntime) {
-        throw 'The player runtime closure has no bundled hostfxr or CoreCLR generation.'
-    }
+    $runtime = Get-CompatibleDotnetRuntime -Directory (Join-Path $sourceRoot 'Managed\Dotnet') `
+        -RequiredVersion ([version](Get-DependencyLock).DOTNET_RUNTIME_VERSION)
+    $hostFxr = $runtime.HostFxr
+    $coreRuntime = $runtime.CoreRuntime
     Assert-PlayerSupportDirectory -Path $hostFxr.FullName | Out-Null
     Assert-PlayerSupportDirectory -Path $coreRuntime.FullName | Out-Null
     foreach ($runtimeFile in @('hostpolicy.dll', 'System.Private.CoreLib.dll')) {

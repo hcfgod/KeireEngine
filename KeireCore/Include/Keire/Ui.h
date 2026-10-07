@@ -720,6 +720,8 @@ namespace Keire
         void SetCursorScreenPosition(UiPosition position);
         /// Requests vertical scrolling to the last submitted item, including an offscreen item, next frame.
         void ScrollLastItemIntoView();
+        // Draws a noninteractive section title while its content crosses the viewport's top edge.
+        void StickySectionTitle(std::string_view title, float sectionStartY, float sectionEndY);
         void SetNextItemWidth(float width);
         void RequestKeyboardFocus();
         void AlignNextItemGroup(float alignment, float width);

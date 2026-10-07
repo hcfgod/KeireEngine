@@ -879,6 +879,11 @@ resolves registry dependency closure into an exact source-controlled lockfile, v
 owned global cache, mounts it read-only, and supports transactional embed/revert/remove. `ProjectAssetPackageImporter`
 owns dependency-aware selective imports, three-way update decisions, executable-code consent fingerprints,
 source-controlled receipts, safe removal, rollback journals, and interrupted-operation recovery.
+Optional rendering-settings and default-input adoption use that same journal. Supported documents are decoded before
+publication; project identity and unrelated descriptor fields are preserved. Adopted configuration is project-owned,
+so package removal retains its input assets. After commit, the Editor refreshes its cached descriptor through
+`Project::ReloadDescriptor` (validation without disk writes) and applies rendering to the settings document through
+an undo boundary that preserves unrelated authoring edits. Default input changes take effect on the next Play session.
 Authoring dependency closure maps generated subasset identities back to their source owners; manifests contain only
 top-level source IDs while copied metadata preserves stable subasset regeneration. Unknown identities fail with the
 dependent source path and both asset IDs instead of being ignored.

@@ -252,8 +252,8 @@ $compiler = if ($Toolset -eq "msc") {
 elseif ($Toolset -eq "clang") { "Clang $((& clang -dumpversion) -join '')" }
 else { "GCC $((& g++ -dumpfullversion -dumpversion) -join '')" }
 $commit = Get-GitHeadCommit $Root "unknown"
-$dotnetRuntimeVersion = (Get-ChildItem "$Root\Build\Dependencies\dotnet-sdk\shared\Microsoft.NETCore.App" -Directory |
-    Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1).Name
+$dotnetRuntimeVersion = (Get-CompatibleDotnetRuntime -Directory "$Root\Build\Dependencies\dotnet-sdk" `
+    -RequiredVersion ([version]$Lock.DOTNET_RUNTIME_VERSION)).CoreRuntime.Name
 $manifest = [ordered]@{ project=$Project.PROJECT_IDENTIFIER; version=$Project.PROJECT_VERSION; commit=$commit; dirty=$dirty; developmentArtifact=$developmentArtifact; platform="Windows"; architecture=$outputArchitecture; configuration=$Configuration; generator=$Generator; toolset=$Toolset; compiler=$compiler; spdlog=$Lock.SPDLOG_COMMIT; doctest=$Lock.DOCTEST_COMMIT; sdl=$Lock.SDL_COMMIT; json=$Lock.JSON_COMMIT; imgui=$Lock.IMGUI_COMMIT; zstd=$Lock.ZSTD_COMMIT; entt=$Lock.ENTT_COMMIT; glm=$Lock.GLM_COMMIT; sdlShadercross=$Lock.SDL_SHADERCROSS_COMMIT; dxc=$Lock.SDL_SHADERCROSS_DXC_COMMIT; spirvCross=$Lock.SDL_SHADERCROSS_SPIRV_CROSS_COMMIT; spirvHeaders=$Lock.SDL_SHADERCROSS_SPIRV_HEADERS_COMMIT; spirvTools=$Lock.SDL_SHADERCROSS_SPIRV_TOOLS_COMMIT; assimp=$Lock.ASSIMP_COMMIT; stb=$Lock.STB_COMMIT; jolt=$Lock.JOLT_COMMIT; recast=$Lock.RECAST_COMMIT; miniaudio=$Lock.MINIAUDIO_COMMIT; coral=$Lock.CORAL_COMMIT; dotnetRuntime=$dotnetRuntimeVersion }
 $manifest["sdlPatchDigest"] = $sdlPatchIdentity[1]
 $manifest["freeType"] = $Lock.FREETYPE_COMMIT

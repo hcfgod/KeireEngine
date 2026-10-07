@@ -26,6 +26,14 @@ namespace KeireEditor
         m_OpenRequested = false;
     }
 
+    void PackageImportReview::Update(Keire::ProjectAssetImportRequest request, Keire::ProjectAssetImportPlan plan)
+    {
+        if (!m_Active)
+            throw std::logic_error("No asset-package import is awaiting review.");
+        m_Request = std::move(request);
+        m_Plan = std::move(plan);
+    }
+
     bool PackageImportReview::ConsumeOpenRequest() noexcept
     {
         const bool requested = m_OpenRequested;

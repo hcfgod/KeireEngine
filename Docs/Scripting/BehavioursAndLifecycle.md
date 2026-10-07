@@ -56,6 +56,25 @@ public CancellationToken LifetimeToken { get; }
 `Entity` is assigned before lifecycle callbacks begin. `Entity.Active` controls the scene object's local active state;
 `Entity.ActiveInHierarchy` also accounts for its parents.
 
+Attached components and behaviours expose both `Transform` and the convenience alias `transform`, equivalent to
+`Entity.Transform`. For example, rotate an object at 90 degrees per scaled second:
+
+```csharp
+public float rotationSpeed = 90f;
+
+protected override void Update()
+{
+    transform.Rotate(Vector3.Up, rotationSpeed * Time.DeltaTime);
+}
+```
+
+`Rotate(Vector3 axis, float angleDegrees, bool worldSpace = false)` normalizes the axis and uses degrees.
+By default the axis follows the object's orientation; pass `worldSpace: true` to rotate around a fixed world axis.
+Positive rotation around `Vector3.Up` turns forward (+Z) toward right (+X). Negative angles reverse the turn.
+The axis must be finite and nonzero, even for a zero-degree rotation, and the angle must be finite; invalid input
+throws before changing the transform. The existing `Rotate(Quaternion rotation, bool worldSpace = false)` overload
+and PascalCase accessors remain available. Transform access requires an attached live entity.
+
 `Behaviour.Enabled` is synchronized with native component state. A component handle is an equivalent useful option
 when code does not already hold the behaviour instance:
 

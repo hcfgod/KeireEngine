@@ -2,6 +2,7 @@
 
 #include "KeireClient/Editor/EditorRendererCapabilities.h"
 
+#include "Keire/Assets/InputActionAsset.h"
 #include "Keire/BuildInfo.h"
 #include "Keire/PlatformDirectories.h"
 
@@ -149,9 +150,11 @@ namespace KeireEditor
     }
 
     bool PackageManagerPanel::Initialize(const std::filesystem::path& projectRoot,
-                                         const std::filesystem::path& executable)
+                                         const std::filesystem::path& executable,
+                                         std::function<void(const Keire::ProjectAssetImportRequest&)> settingsImported)
     {
         Shutdown();
+        m_SettingsImported = std::move(settingsImported);
         try
         {
             const auto cacheRoot = Keire::GetPreferenceDirectory() / "Hub" / "MarketplacePackages";
@@ -237,6 +240,7 @@ namespace KeireEditor
 
     void PackageManagerPanel::Shutdown() noexcept
     {
+        m_SettingsImported = {};
         m_Manager.reset();
         m_AssetImporter.reset();
         m_MarketplaceCache.reset();
@@ -567,6 +571,21 @@ namespace KeireEditor
         try
         {
             const auto result = m_AssetImporter->Import(confirmation.Request);
+            if (m_SettingsImported)
+            {
+                try
+                {
+                    m_SettingsImported(confirmation.Request);
+                }
+                catch (const std::exception& error)
+                {
+                    Refresh();
+                    m_Status = "Package imported successfully.";
+                    m_Error = std::string("The imported files are saved, but the Editor could not refresh settings: ") +
+                              error.what() + " Reopen the project before editing project settings.";
+                    return;
+                }
+            }
             Refresh();
             m_Status = "Imported " + std::to_string(result.Written.size()) + " file(s) from " +
                        confirmation.DisplayName + "; retained " + std::to_string(result.Retained.size()) +
@@ -596,6 +615,40 @@ namespace KeireEditor
             ui.TextColored(theme.MutedText, std::to_string(plan.Entries.size()) +
                                                 " planned file(s); no project files change until you "
                                                 "confirm.");
+            auto request = m_ImportReview.Request();
+            bool optionsChanged = false;
+            if (plan.HasRenderingSettings)
+                optionsChanged |= ui.Checkbox("Apply packaged rendering settings (replaces current settings)",
+                                              request.ApplyRenderingSettings);
+            for (const auto& asset : plan.Package.Manifest.Assets)
+            {
+                if (asset.Type != Keire::InputActionAsset::StaticType() ||
+                    std::ranges::find(plan.ResolvedAssets, asset.Id) == plan.ResolvedAssets.end())
+                    continue;
+                bool selected = request.DefaultInput == asset.Id;
+                if (ui.Checkbox("Use " + asset.SourcePath.generic_string() + " as project default input", selected))
+                {
+                    request.DefaultInput = selected ? asset.Id : Keire::AssetId{};
+                    optionsChanged = true;
+                }
+            }
+            ui.TextWrapped("Optional settings are off by default. Input adoption replaces the project's default input "
+                           "asset and activates its first action map on the next Play session.");
+            for (const auto& path : plan.UnsupportedSettings)
+                ui.TextWrapped("Settings not supported by asset import (skipped): " + path.generic_string());
+            if (optionsChanged)
+            {
+                try
+                {
+                    auto updated = m_AssetImporter->Preflight(request);
+                    m_ImportReview.Update(std::move(request), std::move(updated));
+                }
+                catch (const std::exception& error)
+                {
+                    m_Error = error.what();
+                }
+                return;
+            }
             if (plan.ContainsExecutableCode)
                 ui.TextColored(theme.Warning, "This package contains executable C# assemblies.");
             ui.Separator();

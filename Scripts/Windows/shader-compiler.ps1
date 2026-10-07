@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+$BuildJobs = Get-BuildParallelJobs
 
 $Root = Get-RepositoryRoot
 $Lock = Get-DependencyLock
@@ -98,7 +99,7 @@ Write-Host "==> Configuring the pinned host shader compiler"
     "-DCMAKE_MAKE_PROGRAM=$Ninja" @options
 if ($LASTEXITCODE -ne 0) { throw "KeireShaderCompiler configuration failed." }
 [IO.File]::WriteAllText($configureStamp, "$key`n", [Text.UTF8Encoding]::new($false))
-& cmake --build $cmakeCacheRoot --target install --parallel
+& cmake --build $cmakeCacheRoot --target install --parallel $BuildJobs
 if ($LASTEXITCODE -ne 0) { throw "KeireShaderCompiler build failed." }
 
 $builtCompiler = Get-ChildItem $installRoot -Filter shadercross.exe -File -Recurse | Select-Object -First 1

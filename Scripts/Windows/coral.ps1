@@ -9,23 +9,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+$BuildJobs = Get-BuildParallelJobs
 
 $Root = Get-RepositoryRoot
 $Lock = Get-DependencyLock
 $Architecture = if ($Architecture) { Normalize-Architecture $Architecture } else { Get-NativeArchitecture }
 
+function Test-KeireCompatibleSdkVersion {
+    param([string]$Candidate, [string]$Minimum, [ValidateSet('auto', 'locked')][string]$Policy = 'auto')
+    if ($Candidate -notmatch '^\d+\.\d+\.\d+$' -or $Minimum -notmatch '^\d+\.\d+\.\d+$') { return $false }
+    if ($Policy -eq 'locked') { return $Candidate -eq $Minimum }
+    $actual = [version]$Candidate
+    $required = [version]$Minimum
+    return $actual.Major -eq $required.Major -and $actual.Minor -eq $required.Minor -and $actual -ge $required
+}
+
 function Resolve-KeirePinnedDotnetSdk {
-    param([Parameter(Mandatory = $true)][string]$Version)
+    param([Parameter(Mandatory = $true)][string]$Version,
+        [ValidateSet('auto', 'locked')][string]$Policy = 'auto')
 
     if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
         throw "The locked .NET SDK version is invalid: $Version"
     }
     $candidates = [Collections.Generic.List[string]]::new()
+    $candidates.Add((Join-Path $Root "Build\Tools\dotnet\$Version\dotnet.exe"))
     $candidates.Add((Join-Path $env:LOCALAPPDATA "KeireTools\dotnet10\dotnet.exe"))
     $candidates.Add((Join-Path $Root "Build\Tools\dotnet10\dotnet.exe"))
     $pathCommand = Get-Command dotnet -CommandType Application -ErrorAction SilentlyContinue
     if ($pathCommand) { $candidates.Add($pathCommand.Source) }
 
+    $resolved = [Collections.Generic.List[object]]::new()
     foreach ($candidate in @($candidates | Select-Object -Unique)) {
         $executable = Get-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
         if (-not $executable -or $executable.PSIsContainer) { continue }
@@ -34,16 +47,17 @@ function Resolve-KeirePinnedDotnetSdk {
         $listing = @(& $executable.FullName --list-sdks 2>$null)
         $listingStatus = $LASTEXITCODE
         if ($listingStatus -ne 0) { continue }
-        $reportsPinnedSdk = $false
+        $reportedVersions = @()
         foreach ($line in $listing) {
-            if ($line -notmatch '^([^\s]+)\s+\[([^\[\]]+)\]\s*$' -or $Matches[1] -ne $Version) { continue }
+            if ($line -notmatch '^([^\s]+)\s+\[([^\[\]]+)\]\s*$') { continue }
+            $reportedVersion = $Matches[1]
             $reportedSdkRoot = [IO.Path]::GetFullPath($Matches[2]).TrimEnd('\', '/')
-            if ([string]::Equals($reportedSdkRoot, $expectedSdkRoot, [StringComparison]::OrdinalIgnoreCase)) {
-                $reportsPinnedSdk = $true
-                break
+            if ([string]::Equals($reportedSdkRoot, $expectedSdkRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                (Test-KeireCompatibleSdkVersion $reportedVersion $Version $Policy)) {
+                $reportedVersions += $reportedVersion
             }
         }
-        if (-not $reportsPinnedSdk) { continue }
+        if (-not $reportedVersions.Count) { continue }
 
         $savedDotnetRoot = $env:DOTNET_ROOT
         $savedMultilevelLookup = $env:DOTNET_MULTILEVEL_LOOKUP
@@ -65,15 +79,16 @@ function Resolve-KeirePinnedDotnetSdk {
             $env:DOTNET_ROOT = $savedDotnetRoot
             $env:DOTNET_MULTILEVEL_LOOKUP = $savedMultilevelLookup
         }
-        if ($selectedStatus -eq 0 -and $selectedVersion -eq $Version) {
-            return [pscustomobject]@{
+        if ($selectedStatus -eq 0 -and $selectedVersion -in $reportedVersions) {
+            $resolved.Add([pscustomobject]@{
                 Executable = $executable.FullName
                 Root = $dotnetRoot
-                Version = $Version
-            }
+                Version = $selectedVersion
+            })
         }
     }
-    throw "Coral requires the pinned .NET SDK $Version from one canonical installation."
+    if ($resolved.Count) { return $resolved | Sort-Object { [version]$_.Version } -Descending | Select-Object -First 1 }
+    throw "Coral requires a compatible .NET SDK (minimum $Version, policy $Policy) from one canonical installation. Run bootstrap prerequisites."
 }
 
 function Resolve-KeirePinnedNetHost {
@@ -183,7 +198,9 @@ else {
 }
 Assert-KeireLockedGitSource -Path $Source -ExpectedCommit $Lock.CORAL_COMMIT -Name "Coral"
 
-$DotnetSdk = Resolve-KeirePinnedDotnetSdk -Version $Lock.DOTNET_SDK_VERSION
+$sdkPolicy = if ($env:KEIRE_DOTNET_SDK) { $env:KEIRE_DOTNET_SDK } else { 'auto' }
+$DotnetSdk = Resolve-KeirePinnedDotnetSdk -Version $Lock.DOTNET_SDK_VERSION -Policy $sdkPolicy
+Write-Host "==> Coral uses .NET SDK $($DotnetSdk.Version) ($sdkPolicy)"
 $DotnetExecutable = $DotnetSdk.Executable
 $env:DOTNET_ROOT = $DotnetSdk.Root
 $env:DOTNET_MULTILEVEL_LOOKUP = "0"
@@ -274,7 +291,7 @@ try {
             "-DCMAKE_BUILD_TYPE=$Configuration" "-DCORAL_TESTING=OFF" "-DCORAL_EXAMPLE=OFF" `
             "-DDOTNET_EXE=$DotnetExecutable"
         if ($LASTEXITCODE -ne 0) { throw "Coral configuration failed." }
-        & cmake --build $NativeBuild --target Coral.Native --parallel
+        & cmake --build $NativeBuild --target Coral.Native --parallel $BuildJobs
         if ($LASTEXITCODE -ne 0) { throw "Coral build failed." }
         if (-not (Test-Path -LiteralPath (Join-Path $NativeBuild "Coral.Managed.dll"))) {
             throw "Coral build did not produce Coral.Managed.dll."

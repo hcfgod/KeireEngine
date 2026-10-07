@@ -77,6 +77,15 @@ try {
     foreach ($file in @("Coral.Managed.dll", "Coral.Managed.deps.json", "Coral.Managed.runtimeconfig.json")) {
         $file | Set-Content (Join-Path $fixture "Build\Dependencies\coral\Build\Release\$file") -Encoding ASCII
     }
+    '{"runtimeOptions":{"framework":{"name":"Microsoft.NETCore.App","version":"10.0.0"}}}' |
+        Set-Content (Join-Path $fixture "Build\Dependencies\coral\Build\Release\Coral.Managed.runtimeconfig.json") -Encoding ASCII
+    foreach ($otherVersion in @('11.0.1', '10.0.500-preview.1')) {
+        $otherHost = Join-Path $fixture "Build\Dependencies\dotnet-sdk\host\fxr\$otherVersion"
+        $otherRuntime = Join-Path $fixture "Build\Dependencies\dotnet-sdk\shared\Microsoft.NETCore.App\$otherVersion"
+        New-Item -ItemType Directory -Force -Path $otherHost, $otherRuntime | Out-Null
+        Set-Content (Join-Path $otherHost 'hostfxr.dll') 'wrong-runtime'
+        Set-Content (Join-Path $otherRuntime 'coreclr.dll') 'wrong-runtime'
+    }
     "managed-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Managed.dll") -Encoding ASCII
     "editor-api" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Editor.Managed.dll") -Encoding ASCII
     "generators" | Set-Content (Join-Path $fixture "Build\Managed\Keire.Managed.Generators.dll") -Encoding ASCII
@@ -103,6 +112,8 @@ try {
         -Configuration Release -Architecture x86_64 -Target KeireClient
 
     $target = Join-Path $fixture "Build\Bin\Release-windows-x86_64\KeireClient"
+    Assert-StagingState (-not (Test-Path (Join-Path $target 'Managed\Dotnet\shared\Microsoft.NETCore.App\11.0.1'))) `
+        "Staging selected an incompatible newer runtime."
     foreach ($relativePath in @("nethost.dll", "Managed\Coral.Managed.dll", "Managed\Keire.Managed.dll",
             "Managed\Dotnet\host\fxr\10.0.1\hostfxr.dll",
             "Managed\Dotnet\shared\Microsoft.NETCore.App\10.0.1\coreclr.dll")) {

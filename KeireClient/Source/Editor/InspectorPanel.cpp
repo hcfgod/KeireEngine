@@ -364,19 +364,18 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         m_ComponentClipboard =
                             ComponentClipboard{registration.Type, registration.Serialize(*component), true};
                     }
-                    if (!multiEditing)
-                        if (auto context = ui.BeginItemContextMenu("ComponentContext##" + unique); context)
-                            removed = DrawComponentMenu(ui, entity, component, registration, sceneDocument, scene);
+                    if (auto context = ui.BeginItemContextMenu("ComponentContext##" + unique); context)
+                        removed = DrawComponentMenu(ui, entity, component, registration, sceneDocument, scene);
                     (void)ui.TableNextColumn();
-                    if (!multiEditing &&
-                        ui.IconButton("ComponentMore##" + unique, Keire::UiIcon::More, false, {26.0F, 22.0F}))
+                    if (ui.IconButton("ComponentMore##" + unique, Keire::UiIcon::More, false, {26.0F, 22.0F}))
                     {
                         openMenu = true;
                     }
-                    if (!multiEditing && ui.LastItemState().Hovered)
-                        ui.SetTooltip("Component actions", {.Delayed = true});
-                    if (multiEditing)
-                        ui.TextColored(theme.MutedText, mixedValues ? "Common | Mixed values" : "Common");
+                    if (ui.LastItemState().Hovered)
+                        ui.SetTooltip(multiEditing
+                                          ? (mixedValues ? "Selection actions (mixed values)" : "Selection actions")
+                                          : "Component actions",
+                                      {.Delayed = true});
                 }
                 if (openMenu)
                     ui.OpenPopup(popupId);
@@ -394,6 +393,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 if (!displayedComponent || !commonComponent(displayedComponent))
                     continue;
                 editingComponentOrdinal = ComponentOrdinal(componentOrder, displayedComponent);
+                const auto componentStartY = ui.CursorScreenPosition().Y;
                 const auto displayedRegistration = scene->Components()->Find(displayedComponent->Type());
                 const bool mixedComponentValues =
                     multiEditing && displayedRegistration &&
@@ -1457,6 +1457,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         }
                     }
                 }
+                if (displayedRegistration)
+                    ui.StickySectionTitle(displayedRegistration->Name, componentStartY, ui.CursorScreenPosition().Y);
             }
             DrawAddComponentMenu(ui, entity, sceneDocument, scene);
             ui.TextColored(theme.MutedText, "Drop a C# script here to attach it");

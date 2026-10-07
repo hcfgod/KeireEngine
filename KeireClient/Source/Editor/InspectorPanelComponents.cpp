@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace
 {
@@ -37,9 +38,14 @@ namespace KeireEditor
     void InspectorPanel::DrawAddComponentMenu(Keire::UiFrame& ui, const Keire::Entity& entity,
                                               SceneDocument& sceneDocument, const Keire::Ref<Keire::Scene>& scene)
     {
+        const bool multiple = !m_Registration.Locked() && sceneDocument.Selections().size() > 1;
+        const auto selected =
+            multiple ? std::vector<Keire::AssetId>(sceneDocument.Selections().begin(), sceneDocument.Selections().end())
+                     : std::vector<Keire::AssetId>{entity.Id().Value()};
         ui.Spacing();
         ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
-        if (auto add = ui.BeginCombo("##AddComponent", "Add Component..."); add)
+        if (auto add = ui.BeginCombo("##AddComponent", multiple ? "Add Component to Selection..." : "Add Component...");
+            add)
         {
             ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
             (void)ui.InputTextWithHint("##ComponentSearch", "Search scripts and components", m_ComponentSearch);
@@ -50,12 +56,25 @@ namespace KeireEditor
                 if (!ContainsCaseInsensitive(registration.Name, m_ComponentSearch) &&
                     !ContainsCaseInsensitive(registration.Category, m_ComponentSearch))
                     continue;
-                const bool canAdd =
-                    registration.Removable && (registration.AllowMultiple || !entity.HasComponent(registration.Type));
+                const bool canAdd = registration.Removable &&
+                                    std::ranges::any_of(selected,
+                                                        [&](const auto id)
+                                                        {
+                                                            const auto target = scene->FindEntity(Keire::EntityId(id));
+                                                            return target && (registration.AllowMultiple ||
+                                                                              !target.HasComponent(registration.Type));
+                                                        });
                 if (ui.MenuItem(registration.Category + "/" + registration.Name, false, canAdd))
                 {
-                    m_Controller.RecordInspectorUndo();
-                    (void)sceneDocument.AddComponent(entity.Id(), registration.Type);
+                    try
+                    {
+                        m_Controller.RecordInspectorUndo("Add " + registration.Name + " to Selection");
+                        (void)sceneDocument.AddComponents(selected, registration.Type);
+                    }
+                    catch (const std::exception& error)
+                    {
+                        m_Controller.ReportInspectorAssetError(std::string("Could not add component: ") + error.what());
+                    }
                 }
             }
         }
@@ -69,6 +88,17 @@ namespace KeireEditor
         bool removed = false;
         try
         {
+            if (!m_Registration.Locked() && sceneDocument.Selections().size() > 1)
+            {
+                if (DrawSelectionComponentRemovalMenu(ui, registration.Removable))
+                {
+                    const auto ordinal = ComponentOrdinal(entity.GetComponents(), component);
+                    m_Controller.RecordInspectorUndo("Remove " + registration.Name + " from Selection");
+                    sceneDocument.RemoveComponents(sceneDocument.Selections(), registration.Type, ordinal);
+                    removed = true;
+                }
+                return removed;
+            }
             if (ui.MenuItem("Copy Component"))
                 m_ComponentClipboard = ComponentClipboard{registration.Type, registration.Serialize(*component), true};
             const auto copiedRegistration = m_ComponentClipboard && m_ComponentClipboard->WholeComponent

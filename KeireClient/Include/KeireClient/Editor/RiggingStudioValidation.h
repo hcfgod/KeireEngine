@@ -126,9 +126,9 @@ namespace KeireEditor
         if (result.empty())
             result = "Animation";
         constexpr std::string_view suffix = " Retargeted";
+        constexpr std::size_t maximum = 230 - suffix.size();
         const auto truncate = [&result]
         {
-            constexpr std::size_t maximum = 230 - suffix.size();
             if (result.size() <= maximum)
                 return;
             auto end = maximum;

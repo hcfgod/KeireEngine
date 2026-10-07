@@ -9,6 +9,27 @@
 #include <cmath>
 #include <limits>
 
+TEST_CASE("Game preview waits for drawable dock layout before constructing a projection")
+{
+    for (const float aspect : {0.0F, 16.0F / 9.0F, 1.0F})
+    {
+        CHECK_FALSE(KeireEditor::CalculateGameViewportPreviewSize({0.0F, 480.0F}, aspect));
+        CHECK_FALSE(KeireEditor::CalculateGameViewportPreviewSize({640.0F, -20.0F}, aspect));
+        CHECK_FALSE(
+            KeireEditor::CalculateGameViewportPreviewSize({std::numeric_limits<float>::quiet_NaN(), 480.0F}, aspect));
+        const auto size = KeireEditor::CalculateGameViewportPreviewSize({640.0F, 480.0F}, aspect);
+        REQUIRE(size);
+        CHECK(size->Width <= 640.0F);
+        CHECK(size->Height <= 480.0F);
+        CHECK_NOTHROW(Keire::Math::Perspective(75.0F, size->Width / size->Height, 0.05F, 1000.0F));
+        if (aspect > 0.0F)
+            CHECK(size->Width / size->Height == doctest::Approx(aspect));
+    }
+    CHECK_FALSE(KeireEditor::CalculateGameViewportPreviewSize({640.0F, 480.0F}, -1.0F));
+    CHECK_FALSE(
+        KeireEditor::CalculateGameViewportPreviewSize({640.0F, 480.0F}, std::numeric_limits<float>::infinity()));
+}
+
 TEST_CASE("Scene click and rectangle selection track animated bounds and stop fallback")
 {
     auto scene =

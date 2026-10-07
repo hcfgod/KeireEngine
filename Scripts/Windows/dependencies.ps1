@@ -9,6 +9,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+$BuildJobs = Get-BuildParallelJobs
 
 $Root = Get-RepositoryRoot
 $Lock = Get-DependencyLock
@@ -17,6 +18,7 @@ $Toolset = Resolve-WindowsToolset $Generator $Toolset
 $OutputArchitecture = Get-ArchitectureOutputName $Architecture
 $Ninja = Get-NinjaExecutable
 Enter-WindowsToolEnvironment $Generator $Toolset $Architecture | Out-Null
+$dependencyToolchainIdentity = Get-WindowsToolchainIdentity -Generator $Generator -Toolset $Toolset -Architecture $Architecture
 $Bridge = Join-Path $Root "Scripts\Dependencies\CMakeLists.txt"
 $bridgeFiles = @($Bridge, (Join-Path $Root "Scripts\Dependencies\RunAndCapture.cmake"))
 $bridgeHash = ($bridgeFiles | ForEach-Object {
@@ -24,6 +26,11 @@ $bridgeHash = ($bridgeFiles | ForEach-Object {
     }) -join ":"
 $WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "dependencies"
 try {
+
+$dependencyProvenanceStamp = Join-Path $Root "Build\Generated\windows-$OutputArchitecture-dependencies.stamp"
+if (Test-Path -LiteralPath $dependencyProvenanceStamp -PathType Leaf) {
+    Remove-Item -LiteralPath $dependencyProvenanceStamp -Force
+}
 
 function Get-LockedDependencySource {
     param([string]$Name, [string]$Url, [string]$Commit)
@@ -112,7 +119,10 @@ function Assert-PatchedDependencySource {
     if (-not $item -or -not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw "Patched $Name source is missing or unsafe: $Path"
     }
-    $head = ([string](& git -C $Path rev-parse HEAD)).Trim()
+    if (-not (Test-Path -LiteralPath (Join-Path $Path '.git') -PathType Container)) {
+        throw "Patched $Name source cache has no Git metadata: $Path. Preserve or move this cache and rerun generation."
+    }
+    $head = ((& git -C $Path rev-parse HEAD) -join '').Trim()
     if ($LASTEXITCODE -ne 0 -or $head -ne $Commit) {
         throw "Patched $Name source is not based on locked commit $Commit."
     }
@@ -181,7 +191,8 @@ function Get-PatchedDependencySource {
     $patchPrefix = if ($Name -eq "Assimp") { "ap" } else { "sp" }
     $patched = Get-KeireWorkspaceJunctionPath -BasePath $sourceBase `
         -Prefix "$patchPrefix-$commitPrefix-$digestPrefix" -RepositoryRoot $Root
-    if (Test-Path -LiteralPath $patched) {
+    if ((Test-Path -LiteralPath $patched) -and
+        @(Get-ChildItem -LiteralPath $patched -Force -ErrorAction Stop).Count -gt 0) {
         Assert-PatchedDependencySource $patched $Commit $Digest $PatchFiles -Name $Name
         return $patched
     }
@@ -192,6 +203,20 @@ function Get-PatchedDependencySource {
         -LockRelativePath ".locks\$dependencySlug-patched-$Commit-$digestPrefix.lock"
     $temporary = "$patched.tmp-$PID"
     try {
+        $existing = Get-Item -LiteralPath $patched -Force -ErrorAction SilentlyContinue
+        if ($existing -and $existing.PSIsContainer -and
+            -not ($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -and
+            @(Get-ChildItem -LiteralPath $patched -Force -ErrorAction Stop).Count -eq 0) {
+            # An interrupted checkout can leave an empty cache. Keep the directory for diagnosis;
+            # the new clone is still verified before it is published to the original path.
+            $cacheParent = [IO.Path]::GetFullPath((Split-Path -Parent $patched))
+            if ($cacheParent -ne [IO.Path]::GetFullPath($sourceBase)) {
+                throw "Patched dependency cache is outside its expected directory: $patched"
+            }
+            $retained = "$patched.empty-$([guid]::NewGuid().ToString('N'))"
+            Move-Item -LiteralPath $patched -Destination $retained
+            Write-Host "==> Rebuilding empty patched $Name cache (previous directory retained at '$retained')"
+        }
         if (Test-Path -LiteralPath $patched) {
             Assert-PatchedDependencySource $patched $Commit $Digest $PatchFiles -Name $Name
             return $patched
@@ -441,7 +466,7 @@ foreach ($configuration in @("Debug", "Release")) {
         "-DCMAKE_BUILD_TYPE=$configuration" `
         "-DCMAKE_INSTALL_PREFIX=$install" @options
     if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency configuration failed." }
-    & cmake --build $build --target install --parallel
+    & cmake --build $build --target install --parallel $BuildJobs
     if ($LASTEXITCODE -ne 0) { throw "Native $configuration dependency build failed." }
     Assert-SdlInputBackends $build $configuration
     Install-SodiumRuntime $install
@@ -604,6 +629,9 @@ DependencyManifest = {
 "@
 [IO.File]::WriteAllText((Join-Path $generated "Dependencies.lua"), $manifest, [Text.UTF8Encoding]::new($false))
 Write-Host "==> Dependency manifest generated"
+# Publish only after every dependency and the shared manifest are ready for this compiler.
+[IO.File]::WriteAllText($dependencyProvenanceStamp,
+    "$Toolset|$dependencyToolchainIdentity`n", [Text.UTF8Encoding]::new($false))
 }
 finally {
     Exit-KeireWorkspaceLock -Lock $WorkspaceLock

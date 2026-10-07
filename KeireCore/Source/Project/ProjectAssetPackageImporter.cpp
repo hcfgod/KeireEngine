@@ -1,6 +1,8 @@
 #include "Keire/Project/ProjectAssetPackageImporter.h"
 
+#include "Keire/Assets/InputActionAsset.h"
 #include "Keire/Project/ProjectPackageManager.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "KeireInternal/Assets/AssetInternal.h"
 #include "KeireInternal/FileSystem.h"
 
@@ -404,6 +406,18 @@ namespace Keire
         ProjectAssetImportPlan result;
         result.Package = InspectAssetPackageArchive(request.Archive, verification);
         const auto& manifest = result.Package.Manifest;
+        for (const auto& file : manifest.Files)
+        {
+            const auto path = PathText(file.Path);
+            if (path == "ProjectSettings/Rendering.keiresettings")
+                result.HasRenderingSettings = true;
+            else if (path.starts_with("ProjectSettings/"))
+                result.UnsupportedSettings.push_back(file.Path);
+        }
+        if (request.ApplyRenderingSettings && !result.HasRenderingSettings)
+            result.Conflicts.push_back({ProjectAssetImportConflictKind::Compatibility,
+                                        {},
+                                        "The package does not contain supported rendering settings."});
         if (manifest.InstallKind != AssetPackageInstallKind::AssetImport)
             throw std::invalid_argument("Only AssetImport packages can be imported into project Assets.");
 
@@ -458,6 +472,16 @@ namespace Keire
         }
         for (const auto& id : selected)
             result.ResolvedAssets.push_back(AssetId::Parse(id));
+        if (request.DefaultInput)
+        {
+            const auto input = assets.find(request.DefaultInput.ToString());
+            if (input == assets.end() || !selected.contains(request.DefaultInput.ToString()) ||
+                input->second->Type != InputActionAsset::StaticType() ||
+                input->second->SourcePath.extension() != ".keireinput")
+                result.Conflicts.push_back({ProjectAssetImportConflictKind::Compatibility,
+                                            {},
+                                            "Choose an input action asset included in this import."});
+        }
 
         std::set<std::string> includedFiles;
         if (manifest.Assets.empty() || request.SelectedAssets.empty())
@@ -486,16 +510,24 @@ namespace Keire
         }
 
         std::unordered_map<std::string, ProjectAssetImportReceiptEntry> previousEntries;
+        if (request.ApplyRenderingSettings)
+            includedFiles.insert("ProjectSettings/Rendering.keiresettings");
         if (previous)
             for (const auto& entry : previous->Entries)
                 previousEntries.emplace(PathText(entry.ProjectPath), entry);
 
         for (const auto& file : manifest.Files)
         {
+            const auto packagePath = PathText(file.Path);
+            const bool renderingSettings = packagePath == "ProjectSettings/Rendering.keiresettings";
+            if (packagePath.starts_with("ProjectSettings/") && (!renderingSettings || !request.ApplyRenderingSettings))
+                continue;
             if (!includedFiles.contains(PathText(file.Path)))
                 continue;
             ProjectAssetImportPlanEntry entry{
                 .PackagePath = file.Path, .ProjectPath = ProjectAssetPath(file.Path), .IncomingSha256 = file.Sha256};
+            if (renderingSettings)
+                entry.ProjectPath = file.Path;
             entry.RequiredDependency = std::ranges::any_of(selected, [&](const std::string& id)
                                                            { return !requested.empty() && !requested.contains(id); });
             const auto destination = Confined(m_Impl->Specification.ProjectRoot, entry.ProjectPath);
@@ -510,7 +542,7 @@ namespace Keire
                 entry.Disposition = ProjectAssetImportDisposition::ReuseIdentical;
             else if (resolution == ProjectAssetImportResolution::KeepLocal)
                 entry.Disposition = ProjectAssetImportDisposition::KeepLocal;
-            else if (resolution == ProjectAssetImportResolution::Replace ||
+            else if (renderingSettings || resolution == ProjectAssetImportResolution::Replace ||
                      (prior != previousEntries.end() && entry.LocalSha256 == prior->second.PackageSha256))
                 entry.Disposition = ProjectAssetImportDisposition::Replace;
             else if (resolution == ProjectAssetImportResolution::KeepLocal ||
@@ -603,6 +635,25 @@ namespace Keire
                                   .ExpectedArchiveSha256 = plan.Package.ArchiveSha256,
                                   .VerifySignature = m_Impl->Specification.VerifyMarketplaceSignature}}));
 
+            if (request.ApplyRenderingSettings)
+                static_cast<void>(LoadRenderEnvironmentSettings(extraction));
+            AssetId defaultInputMap;
+            if (request.DefaultInput)
+            {
+                const auto asset = std::ranges::find(manifest.Assets, request.DefaultInput, &AssetPackageAsset::Id);
+                const auto entry =
+                    std::ranges::find(plan.Entries, asset->SourcePath, &ProjectAssetImportPlanEntry::PackagePath);
+                if (entry == plan.Entries.end())
+                    throw std::runtime_error("The selected input action asset is not included in this import.");
+                const auto source = entry->Disposition == ProjectAssetImportDisposition::KeepLocal
+                                        ? Confined(m_Impl->Specification.ProjectRoot, entry->ProjectPath)
+                                        : Confined(extraction, entry->PackagePath);
+                const auto input = InputActionAsset::Decode(ReadBytes(source));
+                if (input->Definition().ActionMaps.empty())
+                    throw std::runtime_error("The selected input asset has no action map to activate.");
+                defaultInputMap = input->Definition().ActionMaps.front().Id;
+            }
+
             for (std::size_t index = 0; index < plan.Entries.size(); ++index)
             {
                 const auto& entry = plan.Entries[index];
@@ -666,8 +717,16 @@ namespace Keire
                     if (prior == priorEntries.end())
                         owned = false;
                 }
-                result.Receipt.Entries.push_back(
-                    {.ProjectPath = entry.ProjectPath, .PackageSha256 = entry.IncomingSha256, .Owned = owned});
+                // Adopted project settings belong to the project and survive package removal.
+                if (request.DefaultInput)
+                {
+                    const auto input = std::ranges::find(manifest.Assets, request.DefaultInput, &AssetPackageAsset::Id);
+                    if (entry.PackagePath == input->SourcePath || entry.PackagePath == input->MetadataPath)
+                        owned = false;
+                }
+                if (!PathText(entry.ProjectPath).starts_with("ProjectSettings/"))
+                    result.Receipt.Entries.push_back(
+                        {.ProjectPath = entry.ProjectPath, .PackageSha256 = entry.IncomingSha256, .Owned = owned});
                 m_Impl->Report(ProjectAssetImportState::Publishing, operationId, manifest.PackageId, entry.ProjectPath,
                                index + 1U, plan.Entries.size());
             }
@@ -678,6 +737,14 @@ namespace Keire
                 if (!updatedPaths.contains(path))
                     result.Receipt.Entries.push_back(entry);
             RaiseMinimumEngineVersion(m_Impl->Specification.ProjectRoot);
+            if (request.DefaultInput)
+            {
+                const auto descriptor = m_Impl->Specification.ProjectRoot / "ProjectSettings/Project.keireproject";
+                auto document = Json::parse(Detail::ReadTextFile(descriptor, MaximumReceiptBytes));
+                document["defaultInput"] = request.DefaultInput.ToString();
+                document["defaultInputMap"] = defaultInputMap.ToString();
+                Detail::WriteTextFileAtomically(descriptor, document.dump(2) + '\n');
+            }
             Detail::WriteTextFileAtomically(ReceiptPath(m_Impl->Specification.ProjectRoot, manifest.PackageId),
                                             EncodeProjectAssetImportReceipt(result.Receipt));
             journal["state"] = "committed";

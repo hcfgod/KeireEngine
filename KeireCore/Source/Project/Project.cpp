@@ -942,6 +942,14 @@ float4 PSMain(VertexOutput input) : SV_Target0
 
     bool Project::Writable() const noexcept { return m_Impl->OpenMode == ProjectOpenMode::Exclusive; }
 
+    void Project::ReloadDescriptor()
+    {
+        auto descriptor = Project::Open(m_Impl->RootPath, ProjectOpenMode::ReadOnly)->Descriptor();
+        if (descriptor.Id != m_Impl->Description.Id || descriptor.SchemaVersion != m_Impl->Description.SchemaVersion)
+            throw std::invalid_argument("Project identity and schema version are immutable.");
+        m_Impl->Description = std::move(descriptor);
+    }
+
     void Project::Save(ProjectDescriptor descriptor)
     {
         if (!Writable())

@@ -207,6 +207,30 @@ TEST_CASE("character landing preserves fall distance and allows grounded walking
     session->FixedUpdate(1.0F / 60.0F);
     CHECK(transform->LocalPosition().X == doctest::Approx(3.15F).epsilon(0.005));
     CHECK(transform->LocalPosition().Y == doctest::Approx(0.9F).epsilon(0.005));
+    // Sustained perpendicular input must not accumulate lateral drift along a flat wall.
+    const auto contact = transform->LocalPosition();
+    for (int frame = 0; frame < 300; ++frame)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.1F, -0.04F, 0.0F}));
+        session->FixedUpdate(1.0F / 60.0F);
+        REQUIRE(session->State() == Keire::ScenePlayState::Playing);
+        CHECK(std::abs(transform->LocalPosition().Z - contact.Z) < 0.001F);
+        CHECK(std::abs(transform->LocalPosition().X - contact.X) < 0.005F);
+    }
+    // Intentional oblique input still slides; releasing that input must stop the lateral motion.
+    for (int frame = 0; frame < 20; ++frame)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.1F, -0.04F, 0.05F}));
+        session->FixedUpdate(1.0F / 60.0F);
+    }
+    const auto stopped = transform->LocalPosition();
+    CHECK(stopped.Z > contact.Z + 0.9F);
+    for (int frame = 0; frame < 30; ++frame)
+    {
+        REQUIRE(motor->QueueDesiredMovement({0.0F, -0.04F, 0.0F}));
+        session->FixedUpdate(1.0F / 60.0F);
+        CHECK(std::abs(transform->LocalPosition().Z - stopped.Z) < 0.001F);
+    }
     session->Stop();
     physics->Close();
     scene->Close();

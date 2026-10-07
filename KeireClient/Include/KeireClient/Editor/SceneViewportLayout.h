@@ -3,11 +3,30 @@
 #include "Keire/Core.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <optional>
 
 namespace KeireEditor
 {
+    [[nodiscard]] inline std::optional<Keire::UiSize>
+    CalculateGameViewportPreviewSize(const Keire::UiSize available, const float requestedAspect) noexcept
+    {
+        // Restored dock tabs can have no drawable content during their first layout pass.
+        if (!std::isfinite(available.Width) || !std::isfinite(available.Height) || available.Width < 1.0F ||
+            available.Height < 1.0F || !std::isfinite(requestedAspect) || requestedAspect < 0.0F)
+            return std::nullopt;
+        auto size = available;
+        if (requestedAspect > 0.0F)
+        {
+            size.Width = std::min(available.Width, available.Height * requestedAspect);
+            size.Height = size.Width / requestedAspect;
+        }
+        if (size.Width < 1.0F || size.Height < 1.0F)
+            return std::nullopt;
+        return size;
+    }
+
     struct SceneViewportCenteredStateLayout final
     {
         Keire::UiItemRect Reservation;

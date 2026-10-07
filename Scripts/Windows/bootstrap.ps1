@@ -205,5 +205,6 @@ if ($InstallOptional) {
     foreach ($package in @("Ninja-build.Ninja", "LLVM.LLVM", "MSYS2.MSYS2")) { Invoke-WingetPackage $package }
 }
 
+& (Join-Path $PSScriptRoot "dotnet.ps1")
 & (Join-Path $PSScriptRoot "vendor.ps1")
 Write-Step "Windows prerequisites are ready for $Architecture"
