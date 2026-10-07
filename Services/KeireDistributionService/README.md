@@ -194,6 +194,15 @@ Each exact catalog/content document must name the generated key ID and contain a
 rejected; `--minimum-validity-hours` defaults to 24 and rejects documents too close to expiry. The same policy options
 are available on `sign`, `verify`, and `publish`.
 
+For a platform-specific key rollover, the publisher's `verify` and `publish` commands accept
+`--additional-public-key <trusted-key.json>`. Sign each platform's catalogs separately with a key its supported Hub
+installers trust, then combine their exact document bytes and detached signature entries in the prepared snapshot.
+Every document must match one of the two explicitly supplied keys and passes the same sequence, expiry, identity,
+and signature checks. This allows Windows to adopt a replacement key without stranding existing Linux installations.
+The single-key PowerShell and Unix wrappers remain unchanged; invoke the publisher directly for a mixed-key snapshot.
+Package archives embed their signing key ID: changing a catalog manifest's key ID alone is insufficient. Retained
+archives require matching headers and complete payload verification before publishing updated artifact hashes.
+
 Secret runners may supply canonical base64 PKCS#8 DER through a deliberately named process environment variable:
 `--private-key-env KEIRE_OFFLINE_RELEASE_KEY`. The secret is never accepted as a command-line value, never logged, and
 the publisher clears its own process copy immediately after reading it. A parent shell or secret runner remains

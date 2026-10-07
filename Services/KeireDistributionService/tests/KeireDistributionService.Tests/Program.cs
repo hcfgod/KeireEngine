@@ -14,6 +14,7 @@ internal static class Program
             ("publisher and snapshot validation", PublisherAndSnapshotValidationAsync),
             ("publisher staging move retry", PublisherStagingMoveRetryAsync),
             ("offline Ed25519 exact-byte signing", SigningTests.ExactByteSigningAsync),
+            ("mixed signing keys preserve verification and replay policy", SigningTests.MixedSigningKeysAsync),
             ("signed identity and replay policy", SigningTests.IdentityAndPolicyAsync),
             ("private-key sources and permissions", SigningTests.PrivateKeySourcesAndPermissionsAsync),
             ("live and not-ready health", LiveAndNotReadyHealthAsync),

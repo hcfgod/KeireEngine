@@ -71,6 +71,51 @@ internal static class SigningTests
         }
     }
 
+    public static Task MixedSigningKeysAsync()
+    {
+        string root = TestDistribution.CreateTemporaryRoot();
+        try
+        {
+            KeyFixture primary = CreateKey(root, "primary");
+            KeyFixture secondary = CreateKey(root, "secondary");
+            SigningSource current = CreateSource(root, "current", primary.PublicKey.KeyId, 100, s_Now.AddDays(30));
+            SigningSource retained = CreateSource(root, "retained", secondary.PublicKey.KeyId, 42, s_Now.AddDays(30));
+            string signatures = Path.Combine(current.Root, DistributionContract.SignaturesFileName);
+            string retainedSignatures = Path.Combine(retained.Root, DistributionContract.SignaturesFileName);
+            DistributionSigning.SignDirectory(current.Root, signatures, SigningKeySource.FromFile(primary.PrivateKeyPath), Policy());
+            DistributionSigning.SignDirectory(retained.Root, retainedSignatures, SigningKeySource.FromFile(secondary.PrivateKeyPath), Policy());
+            DistributionSignaturesManifest first = DistributionJson.DeserializeStrict<DistributionSignaturesManifest>(File.ReadAllBytes(signatures));
+            DistributionSignaturesManifest second = DistributionJson.DeserializeStrict<DistributionSignaturesManifest>(File.ReadAllBytes(retainedSignatures));
+            const string retainedPath = "content/en-US.json";
+            first.Documents.RemoveAll(document => document.Path == retainedPath);
+            first.Documents.Add(second.Documents.Single(document => document.Path == retainedPath));
+            File.WriteAllBytes(signatures, DistributionJson.Serialize(first));
+            string content = Path.Combine(current.Root, retainedPath);
+            File.Copy(Path.Combine(retained.Root, retainedPath), content, overwrite: true);
+            SigningResult result = DistributionSigning.VerifyDirectory(current.Root, signatures, primary.PublicKeyPath, Policy(40), secondary.PublicKeyPath);
+            TestAssert.Equal(2, result.DocumentCount, "Mixed-key verification omitted a signed document.");
+            TestAssert.Throws<InvalidDataException>(
+                () => DistributionSigning.VerifyDirectory(current.Root, signatures, primary.PublicKeyPath, Policy(40)),
+                "An undeclared second key was accepted.");
+            TestAssert.Throws<InvalidDataException>(
+                () => DistributionSigning.VerifyDirectory(current.Root, signatures, primary.PublicKeyPath, Policy(50), secondary.PublicKeyPath),
+                "The additional key bypassed the replay floor.");
+            string storage = Path.Combine(root, "published");
+            DistributionSigning.PublishVerified(current.Root, storage, "mixed", true, primary.PublicKeyPath, Policy(40), secondary.PublicKeyPath);
+            byte[] validContent = File.ReadAllBytes(content);
+            File.WriteAllBytes(content, [.. validContent, (byte)' ']);
+            TestAssert.Throws<InvalidDataException>(
+                () => DistributionSigning.PublishVerified(current.Root, storage, "tampered", true, primary.PublicKeyPath, Policy(40), secondary.PublicKeyPath),
+                "The additional key accepted modified signed bytes.");
+            TestAssert.Equal("mixed", SnapshotValidator.ValidateCurrent(storage).SnapshotId, "Failed publishing changed the active snapshot.");
+            return Task.CompletedTask;
+        }
+        finally
+        {
+            TestDistribution.DeleteTemporaryRoot(root);
+        }
+    }
+
     public static Task IdentityAndPolicyAsync()
     {
         string root = TestDistribution.CreateTemporaryRoot();

@@ -119,6 +119,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     externalincludedirs
     {
         VendorIncludeDirs.doctest,
+        VendorIncludeDirs.imgui,
         VendorIncludeDirs.json
     }
 
@@ -126,6 +127,3 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     dependson { AssetWorkerTarget }
     LinkSDL3()
 
-    filter "files:Source/InspectorComponentMenuTests.cpp"
-        externalincludedirs { VendorIncludeDirs.imgui }
-    filter {}

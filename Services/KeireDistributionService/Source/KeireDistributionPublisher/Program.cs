@@ -20,6 +20,7 @@ internal static class PublisherProgram
                             "--root",
                             "--snapshot",
                             "--public-key",
+                            "--additional-public-key",
                             "--minimum-sequence",
                             "--minimum-validity-hours",
                             "--activate");
@@ -29,7 +30,8 @@ internal static class PublisherProgram
                             commandLine.Require("--snapshot"),
                             commandLine.HasFlag("--activate"),
                             commandLine.Require("--public-key"),
-                            CreatePolicy(commandLine));
+                            CreatePolicy(commandLine),
+                            commandLine.Optional("--additional-public-key"));
                         Console.WriteLine($"Published immutable snapshot '{index.SnapshotId}'.");
                         return Task.FromResult(0);
                     }
@@ -74,13 +76,15 @@ internal static class PublisherProgram
                             "--source",
                             "--signatures",
                             "--public-key",
+                            "--additional-public-key",
                             "--minimum-sequence",
                             "--minimum-validity-hours");
                         SigningResult result = DistributionSigning.VerifyDirectory(
                             commandLine.Require("--source"),
                             commandLine.Require("--signatures"),
                             commandLine.Require("--public-key"),
-                            CreatePolicy(commandLine));
+                            CreatePolicy(commandLine),
+                            commandLine.Optional("--additional-public-key"));
                         Console.WriteLine($"Verified {result.DocumentCount} document(s) with key '{result.KeyId}'.");
                         return Task.FromResult(0);
                     }
@@ -183,9 +187,11 @@ internal static class PublisherProgram
                           (--private-key <external.pem> | --private-key-env <name>)
                           [--minimum-sequence <n>] [--minimum-validity-hours <hours>]
             verify        --source <directory> --signatures <signatures.json> --public-key <trusted-key.json>
+                          [--additional-public-key <trusted-key.json>]
                           [--minimum-sequence <n>] [--minimum-validity-hours <hours>]
             publish       --source <directory> --root <directory> --snapshot <id>
                           --public-key <trusted-key.json> [--activate]
+                          [--additional-public-key <trusted-key.json>]
                           [--minimum-sequence <n>] [--minimum-validity-hours <hours>]
             activate      --root <directory> --snapshot <id>
             validate      --root <directory>

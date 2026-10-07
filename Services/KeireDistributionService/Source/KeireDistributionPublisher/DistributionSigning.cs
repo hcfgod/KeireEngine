@@ -101,7 +101,8 @@ public static class DistributionSigning
         string sourceDirectory,
         string signaturesPath,
         string publicKeyPath,
-        SigningPolicy policy)
+        SigningPolicy policy,
+        string? additionalPublicKeyPath = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         string source = ValidateSourceDirectory(sourceDirectory);
@@ -109,6 +110,8 @@ public static class DistributionSigning
         IReadOnlyList<string> documents = EnumerateDocuments(source, signatures);
         Dictionary<string, SignedDocumentMetadata> signaturesByPath = LoadSignatures(signatures);
         LoadedPublicKey key = DistributionPublicKeys.Load(publicKeyPath);
+        LoadedPublicKey? additionalKey = additionalPublicKeyPath is null
+            ? null : DistributionPublicKeys.Load(additionalPublicKeyPath);
         foreach (string relativePath in documents)
         {
             if (!signaturesByPath.Remove(relativePath, out SignedDocumentMetadata? metadata))
@@ -117,7 +120,7 @@ public static class DistributionSigning
             }
 
             byte[] bytes = ReadDocument(source, relativePath);
-            VerifyDocument(bytes, relativePath, metadata, key, policy);
+            VerifyDocument(bytes, relativePath, metadata, key, policy, additionalKey);
         }
 
         if (signaturesByPath.Count != 0)
@@ -135,10 +138,13 @@ public static class DistributionSigning
         string snapshotId,
         bool activate,
         string publicKeyPath,
-        SigningPolicy policy)
+        SigningPolicy policy,
+        string? additionalPublicKeyPath = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         LoadedPublicKey key = DistributionPublicKeys.Load(publicKeyPath);
+        LoadedPublicKey? additionalKey = additionalPublicKeyPath is null
+            ? null : DistributionPublicKeys.Load(additionalPublicKeyPath);
         return SnapshotPublisher.Publish(
             sourceDirectory,
             storageRoot,
@@ -147,7 +153,7 @@ public static class DistributionSigning
             (path, relativePath, metadata) =>
             {
                 byte[] bytes = ReadDocumentFile(path, relativePath);
-                VerifyDocument(bytes, relativePath, metadata, key, policy);
+                VerifyDocument(bytes, relativePath, metadata, key, policy, additionalKey);
             });
     }
 
@@ -156,12 +162,18 @@ public static class DistributionSigning
         string relativePath,
         SignedDocumentMetadata metadata,
         LoadedPublicKey key,
-        SigningPolicy policy)
+        SigningPolicy policy,
+        LoadedPublicKey? additionalKey = null)
     {
         SnapshotValidator.ValidateSignature(metadata);
         SignedDocumentIdentity identity = SignedDocumentIdentity.Parse(bytes, relativePath);
         identity.ValidateMatches(metadata, relativePath);
         policy.Validate(identity, relativePath);
+        if (additionalKey is not null &&
+            string.Equals(metadata.KeyId, additionalKey.Document.KeyId, StringComparison.Ordinal))
+        {
+            key = additionalKey;
+        }
         if (!string.Equals(metadata.KeyId, key.Document.KeyId, StringComparison.Ordinal))
         {
             throw new InvalidDataException(

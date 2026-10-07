@@ -4,6 +4,8 @@
 
 - The Windows 0.4.7 patch adds the October 2026 distribution signing key to Hub trust. Existing Hub installations
   require a manual installation of the patched Hub before using catalogs signed by this replacement key.
+- Distribution publishing can explicitly trust a second public key during platform-specific signing-key rollovers,
+  preserving signature, identity, expiry, and sequence validation for every document.
 
 - Game panels wait for a drawable viewport before constructing their camera projection, preventing startup failures
   when restoring a temporarily zero-sized dock layout.
