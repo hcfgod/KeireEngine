@@ -5,6 +5,8 @@
 - Opening the Editor without command-line arguments opens the Hub project picker instead of exiting silently.
   Installer launch, shortcuts, and direct executable launches share this behavior; explicit project arguments
   continue to open their requested project.
+  Standalone Windows Editors also locate a separately installed Hub through its per-user registration, rather
+  than relying on the combined SDK/development folder layout.
 
 - Inspector rotation displays follow the actual Transform component, so stopping Play does not leave simulated
   full turns in the authored rotation fields. Continuous angle editing remains available on the same component.

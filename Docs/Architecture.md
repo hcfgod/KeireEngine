@@ -1116,6 +1116,10 @@ A bare Editor launch is handled by the client command hook before runtime initia
 Hub's Projects page and exits. The existing platform process boundary launches at desktop-user integrity with the
 Hub directory as its working directory, so setup's temporary directory is not retained. Explicit Editor arguments
 continue through their existing validation and project startup; generic help/version handling remains independent.
+Standalone Windows Editor packages intentionally exclude Hub. If no companion exists, the client resolves the
+per-user `keirehub` protocol registration to an absolute existing Hub executable. It parses only the executable,
+never runs the registered command through a shell, and supplies its own Projects navigation arguments. Missing
+or stale registration produces Hub installation guidance and the explicit-project alternative.
 
 `LayerStack` owns layer records and lifetimes, the overlay partition, pending structural operations, activation, traversal, and reverse-order teardown. Fixed and variable updates traverse bottom-to-top, while events traverse top-to-bottom. A depth-counted traversal guard keeps push/remove operations deferred through nested dispatch and callback re-entry until an application safe boundary. Ownership is unique, attachment is exactly once, automatic subscription creation is disabled once detachment begins, tokens disconnect before `OnDetach`, and shutdown detaches in reverse order before client shutdown and service teardown. `Application` coordinates safe boundaries and delegates its convenience layer methods to the stack.
 

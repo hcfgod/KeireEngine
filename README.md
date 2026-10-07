@@ -132,6 +132,8 @@ The Hub is the normal entry point. Direct editor launch remains available for au
 When adding an existing project, select its root folder containing `ProjectSettings/Project.keireproject`.
 Opening the Editor directly, from its shortcut, or after setup opens the Hub project picker. Command-line users
 can still open a specific project with `KeireClient --project <path>`.
+On Windows, separately installed Editors find Hub through its per-user installer registration. If Hub was moved
+or removed, reinstall Hub or use an explicit project path; the Editor does not need a duplicate bundled Hub.
 The folder dialog keeps invalid selections open with repair guidance; new projects refresh their displayed metadata
 automatically after creation.
 Its task and notification centers retain useful history across restarts; finished tasks and read notifications can be
