@@ -231,6 +231,8 @@ changing system SDK installations. Coral selects the newest installed stable SDK
 line, at or above `DOTNET_SDK_VERSION` in `Config/Dependencies.lock`. Set `KEIRE_DOTNET_SDK=locked` to use the
 exact pinned SDK for reproducible builds; the default is `auto`. Preview SDKs and different major/minor versions
 are not selected automatically. The SDK, native host pack and build-cache identity stay tied to the selected root.
+Windows Editor distributions bundle the checksum-verified SDK from the dependency lock, independently of that
+build-time selection. System-installed mobile workloads and unrelated SDK versions are not copied into the installer.
 
 Linux with distro-aware setup, Ninja, and GCC:
 

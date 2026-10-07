@@ -1,4 +1,5 @@
 $ErrorActionPreference = "Stop"
+& (Join-Path $PSScriptRoot "test-editor-dotnet-stage-windows.ps1")
 $Windows = Resolve-Path (Join-Path $PSScriptRoot "..\Windows")
 . (Join-Path $Windows "common.ps1")
 
@@ -41,11 +42,15 @@ if (-not ($launcher.Contains('"package-editor"') -and $launcher.Contains('$Confi
     throw "The Windows launcher does not expose the Dist editor package command."
 }
 $packager = Get-Content (Join-Path $Windows "package-editor.ps1") -Raw
-foreach ($contract in @("-Configuration Dist", "-StageOnly", "Build\Dependencies\dotnet-sdk",
+foreach ($contract in @("-Configuration Dist", "-StageOnly", "Get-WindowsEditorBundledSdk",
         "Build\Distributions", "Assert-WindowsEditorPackageStage", "write-package-manifest.py",
         "editor-package.json", "player-support.ps1", "InstalledLayoutRoot", "bin\BuildSupport",
         "Remove-KeireGeneratedDirectory", '$Project.CLIENT_TARGET', '(Join-Path $stage "third-party")')) {
     if (-not $packager.Contains($contract)) { throw "The Windows editor packager is missing '$contract'." }
+}
+if ($packager.Contains('Join-Path $Root "Build\Dependencies\dotnet-sdk"') -or
+    -not $packager.Contains('$dependencyLock.DOTNET_SDK_VERSION')) {
+    throw "Editor distributions must bundle the locked isolated SDK, not a machine SDK/workload installation."
 }
 if (-not $packager.Contains(
         'if ($DevelopmentStage -and (Test-Path -LiteralPath $playerSupportDestination -PathType Container))')) {

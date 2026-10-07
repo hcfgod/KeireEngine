@@ -66,6 +66,13 @@ and initial C# gameplay worked. Reopening after the scripting step exposed a sta
 
 ## Acceptance
 
+- Overnight release gate found that the build-selected .NET SDK junction pulled unrelated installed iOS workloads
+  into the Editor package, causing hidden installation verification to reject an entry. Packaging now selects the
+  isolated checksum-verified SDK from the dependency lock. Isolation, invalid-input rejection, junction rejection,
+  and source preservation passed in PowerShell 5.1 and 7. Full installer validation is being rerun.
+- Regenerated the runtime API reference for `transform` and axis/angle `Rotate`; website unit tests, compiled
+  manual examples, generated-reference checks, and changelog validation passed after correction.
+
 - User acceptance passed the listed editor checks, including package input adoption after reopening the
   updated Dist executable. The initially missing input prompt was reproduced in the installed 0.4.7 editor,
   which predates these changes. Release packaging and publication are the next gates.

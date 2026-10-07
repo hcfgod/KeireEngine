@@ -12,6 +12,8 @@
 - Windows bootstrap restores the locked FFmpeg submodule required by generation, matching Unix setup.
 - Windows bootstrap installs the checksum-verified pinned .NET SDK in a versioned build-tools directory, preserving
   system SDK installations and validating the payload before publication.
+- Windows Editor packaging uses that isolated locked SDK instead of copying the build-selected system SDK tree,
+  avoiding unrelated mobile workloads, unsafe linked entries, and unnecessary installer size.
 - Windows Coral builds accept newer stable SDKs in the supported .NET major/minor line, selecting the newest
   compatible installation together with its native host pack. `KEIRE_DOTNET_SDK=locked` selects the pinned fallback.
 

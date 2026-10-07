@@ -6,6 +6,11 @@ Linux 0.4.2 packages. Historical platform evidence below retains its original ve
 Hub packaging copies tracked template content only. Local template preview caches and logs are excluded from
 the distribution without deleting them from the checkout.
 
+Windows Editor packaging bundles the isolated .NET SDK archive selected by `Config/Dependencies.lock`.
+The SDK used to compile the engine can be newer, but its machine-wide workloads and other installed SDKs must
+not become release inputs. `test-editor-dotnet-stage-windows.ps1` covers this separation, missing inputs,
+junction rejection, and preservation of the original SDK tree.
+
 Spider pose replays under `Build/Validation/AsterReachSpiderPose` are optional local integration fixtures. The original
 schema-1 route contains two unreachable ankle targets and an upper-leg mesh intersection. Its pinned negative
 regression verifies those witnesses and the solver's bounded response; it is not a passing gameplay route. Corrected

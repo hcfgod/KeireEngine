@@ -1050,6 +1050,7 @@ public abstract class Component : EngineObject, IEquatable<Component>
     protected Component(Entity entity);
     public Entity Entity { get; internal set; }
     public Transform Transform { get; }
+    public Transform transform { get; }
     public override string Name { get; set; }
     public ComponentTypeId Type { get; }
     public override bool IsValid { get; }
@@ -4500,6 +4501,7 @@ public sealed class Transform : Component
     public Vector3 Up { get; }
     public void Translate(Vector3 translation, bool worldSpace = false);
     public void Rotate(Quaternion rotation, bool worldSpace = false);
+    public void Rotate(Vector3 axis, float angleDegrees, bool worldSpace = false);
     public void ResetPresentationInterpolation();
 }
 ```

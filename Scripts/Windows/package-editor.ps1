@@ -12,6 +12,24 @@ param(
 
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot "common.ps1")
+
+function Get-WindowsEditorBundledSdk {
+    param([string]$RepositoryRoot, [string]$Version)
+    if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid bundled .NET SDK version." }
+    $directory = Join-Path $RepositoryRoot "Build\Tools\dotnet\$Version"
+    $sdk = Join-Path $directory "sdk\$Version"
+    foreach ($path in @($directory, $sdk)) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "The bundled .NET SDK must be an isolated ordinary directory: $path"
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $directory 'dotnet.exe') -PathType Leaf)) {
+        throw "The bundled .NET SDK executable is missing: $directory"
+    }
+    return $directory
+}
+
 $Root = Get-RepositoryRoot
 $WorkspaceLock = Enter-KeireWorkspaceLock -RepositoryRoot $Root -CommandName "package-editor"
 try {
@@ -110,7 +128,13 @@ Copy-Item -LiteralPath $sodiumRuntime -Destination (Join-Path $stage "bin\libsod
 Copy-Item -LiteralPath $sodiumLicense `
     -Destination (Join-Path $stage "third-party\licenses\libsodium-LICENSE.txt") -Force
 
-$dotnetSource = Join-Path $Root "Build\Dependencies\dotnet-sdk"
+$dependencyLock = Get-DependencyLock
+Invoke-CheckedWindowsCommand {
+    & (Join-Path $PSScriptRoot "dotnet.ps1")
+} "Verified bundled .NET SDK preparation"
+# The build-selected SDK may be a junction to a system installation with unrelated workloads.
+# Distribution inputs come from the isolated, checksum-verified archive in the dependency lock.
+$dotnetSource = Get-WindowsEditorBundledSdk $Root $dependencyLock.DOTNET_SDK_VERSION
 $dotnetDestination = Join-Path $stage "bin\Managed\Dotnet"
 if (-not (Test-Path -LiteralPath (Join-Path $dotnetSource "dotnet.exe") -PathType Leaf)) {
     throw "The bundled .NET SDK is missing: $dotnetSource"
