@@ -1,5 +1,6 @@
 #include "Keire/Core.h"
 
+#include "KeireClient/Editor/EditorProjectPicker.h"
 #include "KeireClient/Editor/EditorWindowPlacement.h"
 #include "KeireClient/EditorWorkspaceLayer.h"
 
@@ -21,7 +22,8 @@ namespace
 {
     constexpr std::array ClientCommandLineOptions{
         Keire::ApplicationCommandLineOption{"--config <path>", "Load a specific client configuration file."},
-        Keire::ApplicationCommandLineOption{"--project <path>", "Open a Kéire editor project."},
+        Keire::ApplicationCommandLineOption{"--project <path>",
+                                            "Open a Kéire editor project; launch without arguments to choose in Hub."},
         Keire::ApplicationCommandLineOption{"--smoke-window", "Create a window, pump several iterations, and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-workspace", "Compose the editor workspace headlessly and exit."},
         Keire::ApplicationCommandLineOption{"--smoke-ui", "Render several UI frames and exit."},
@@ -122,6 +124,11 @@ namespace
 
     std::optional<int> HandleClientCommandWithoutApplication(const Keire::ApplicationCommandLineArguments& arguments)
     {
+        if (arguments.Size() == 1)
+        {
+            KeireEditor::OpenEditorProjectPicker(Keire::Detail::PathFromUtf8(arguments.Executable()));
+            return 0;
+        }
         constexpr std::string_view command = "--verify-installation";
         if (arguments.Size() == 2 && arguments[1] == command)
         {
@@ -457,7 +464,7 @@ namespace Keire
 {
     ApplicationCommandLineDescription GetApplicationCommandLineDescription() noexcept
     {
-        return {"--project <path> [--config <path>] [--smoke-window | --smoke-workspace | --smoke-ui | "
+        return {"[--project <path>] [--config <path>] [--smoke-window | --smoke-workspace | --smoke-ui | "
                 "--smoke-project | --smoke-play]",
                 ClientCommandLineOptions, HandleClientCommandWithoutApplication};
     }

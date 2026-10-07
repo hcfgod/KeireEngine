@@ -21,6 +21,7 @@ namespace KeireHub
     };
 
     [[nodiscard]] std::string Utf8Path(const std::filesystem::path& path);
+    [[nodiscard]] std::string ValidateHubOpenProjectFolder(const std::filesystem::path& path);
     [[nodiscard]] std::string Lower(std::string value);
     [[nodiscard]] const char* StatusLabel(Keire::ProjectStatus status) noexcept;
     [[nodiscard]] Keire::UiColor StatusColor(Keire::ProjectStatus status) noexcept;

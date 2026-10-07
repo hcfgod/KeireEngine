@@ -79,7 +79,7 @@ namespace KeireHub
         [[nodiscard]] std::string HumanBytes(const std::optional<std::uint64_t> bytes)
         {
             if (!bytes)
-                return "Scanning";
+                return "Not measured";
             constexpr std::array units{"B", "KiB", "MiB", "GiB", "TiB"};
             double value = static_cast<double>(*bytes);
             std::size_t unit = 0;

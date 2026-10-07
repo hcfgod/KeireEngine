@@ -15,6 +15,7 @@
 #include <limits>
 #include <ranges>
 #include <sstream>
+#include <system_error>
 
 #ifndef KEIRE_EDITOR_TARGET
 #define KEIRE_EDITOR_TARGET "KeireClient"
@@ -23,6 +24,31 @@
 namespace KeireHub
 {
     std::string Utf8Path(const std::filesystem::path& path) { return Keire::Detail::PathToUtf8(path); }
+
+    std::string ValidateHubOpenProjectFolder(const std::filesystem::path& path)
+    {
+        if (path.empty())
+            return "Choose a project folder first.";
+        std::error_code error;
+        const bool exists = std::filesystem::exists(path, error);
+        if (error)
+            return "The folder could not be read. Check its permissions and try again.";
+        if (!exists)
+            return "That folder does not exist. Browse to the project's current location.";
+        if (!std::filesystem::is_directory(path, error) || error)
+            return "Select the project folder, not a file.";
+        const auto marker = path / "ProjectSettings" / "Project.keireproject";
+        if (!std::filesystem::is_regular_file(marker, error))
+            return "This folder is not a Kéire project. Choose the folder containing "
+                   "ProjectSettings/Project.keireproject.";
+        const auto inspection = Keire::Project::InspectMetadata(path);
+        if (!inspection.HasIdentity() || inspection.Status == Keire::ProjectStatus::Invalid)
+            return "The project settings are invalid or unreadable. Restore or repair "
+                   "ProjectSettings/Project.keireproject, then try again.";
+        if (Keire::Project::IsLocked(inspection.Root))
+            return "This project is already open in another editor. Close that editor before opening it again.";
+        return {};
+    }
 
     void ReloadProjectRegistry(Keire::Ref<Keire::ProjectRegistry>& registry)
     {

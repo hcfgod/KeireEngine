@@ -1112,6 +1112,11 @@ Configuration is a separate typed boundary. nlohmann/json parses implementation-
 
 `Application` is an explicit, single-run orchestrator for logging, event/time services, the SDL window system, the primary window, and an application-bound `LayerStack`. Construction is side-effect free; `Run` initializes services in dependency order and unwinds them in reverse order even when client callbacks throw. The construction thread owns `Run` and layer mutations, while `RequestExit` is the cross-thread application control. KeireCore owns the executable entrypoint, dependency-free help/version handling, the top-level exception boundary, application lifetime, and the `Run` call. A managed client defines a static `GetApplicationCommandLineDescription` and `CreateApplication`, keeping option documentation and validation client-owned. Because the entrypoint is an unreferenced member of the static library, tests and low-level SDK consumers that define their own `main` do not pull it into their executables.
 
+A bare Editor launch is handled by the client command hook before runtime initialization: it opens the companion
+Hub's Projects page and exits. The existing platform process boundary launches at desktop-user integrity with the
+Hub directory as its working directory, so setup's temporary directory is not retained. Explicit Editor arguments
+continue through their existing validation and project startup; generic help/version handling remains independent.
+
 `LayerStack` owns layer records and lifetimes, the overlay partition, pending structural operations, activation, traversal, and reverse-order teardown. Fixed and variable updates traverse bottom-to-top, while events traverse top-to-bottom. A depth-counted traversal guard keeps push/remove operations deferred through nested dispatch and callback re-entry until an application safe boundary. Ownership is unique, attachment is exactly once, automatic subscription creation is disabled once detachment begins, tokens disconnect before `OnDetach`, and shutdown detaches in reverse order before client shutdown and service teardown. `Application` coordinates safe boundaries and delegates its convenience layer methods to the stack.
 
 ## UI Runtime
@@ -1174,6 +1179,8 @@ fall through to an implicit debug window. Scene and Game pass their own camera-l
 overlays. FPS, profiler categories, dispatch/indirect totals, recording timings, and CPU preparation remain one completed
 renderer-wide frame aggregate shared by both overlays.
 Continuous Inspector Transform drags use compact typed undo commands whose final value is updated as samples merge.
+The Euler display cache weakly identifies the inspected Transform instance. It keeps angle continuity for that instance
+and resets on runtime clones or restored editing components, without extending a scene or component lifetime.
 Play-mode origin tracking records only the edited Transform component, avoiding whole-scene snapshot, JSON encoding,
 and diff work on every pointer sample while preserving Editor versus Mixed change classification.
 `UiPanelRegistration` supplies a common session-local view lock. The UI boundary prevents locked panels from moving,

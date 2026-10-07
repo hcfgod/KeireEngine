@@ -419,17 +419,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                             auto position = transform->LocalPosition();
                             const auto previousPosition = position;
                             const auto currentOrientation = transform->LocalRotation();
-                            if (m_RotationTarget != entity.Id().Value() ||
-                                (!m_RotationEditing && !SameRotation(currentOrientation, m_RotationOrientation)))
-                            {
-                                const auto reference = m_RotationTarget == entity.Id().Value()
-                                                           ? m_RotationEuler
-                                                           : transform->LocalEulerAngles();
-                                m_RotationEuler = ContinuousEulerAngles(currentOrientation, reference);
-                                m_RotationOrientation = currentOrientation;
-                                m_RotationTarget = entity.Id().Value();
-                            }
-                            auto rotation = m_RotationEuler;
+                            auto rotation = m_RotationDisplay.Read(transform);
                             auto scale = transform->LocalScale();
                             const bool positionChanged = ui.DragVector3("Position", position, 0.05F);
                             const auto positionState = ui.LastItemState();
@@ -494,8 +484,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                         MakeInspectorTransformEdit(entity.Id(), InspectorTransformProperty::Rotation,
                                                                    currentOrientation, orientation, m_EditSerial));
                                 }
-                                m_RotationEuler = rotation;
-                                m_RotationOrientation = orientation;
+                                m_RotationDisplay.SetValue(rotation, orientation);
                             }
                             if (scaleChanged && validScale)
                             {
@@ -516,11 +505,10 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 ui.TextColored(
                                     theme.Error,
                                     "Scale axes need magnitude 0.000001 or greater. Finish typing to apply.");
-                            m_RotationEditing = rotationState.Active;
+                            m_RotationDisplay.SetEditing(rotationState.Active);
                             if (rotationState.DeactivatedAfterEdit)
                             {
-                                m_RotationEditing = false;
-                                m_RotationOrientation = transform->LocalRotation();
+                                m_RotationDisplay.EndEdit(transform->LocalRotation());
                             }
                             if (positionState.DeactivatedAfterEdit || rotationState.DeactivatedAfterEdit ||
                                 scaleState.DeactivatedAfterEdit)
@@ -539,10 +527,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                     sceneDocument.SetTransforms(editTargets, defaults);
                                 else
                                     sceneDocument.SetTransform(entity.Id(), defaults);
-                                m_RotationTarget = entity.Id().Value();
-                                m_RotationEuler = {};
-                                m_RotationOrientation = {};
-                                m_RotationEditing = false;
+                                m_RotationDisplay.Reset();
                             }
                             if (ui.LastItemState().Hovered)
                                 ui.SetTooltip("Reset local position, rotation, and scale.");

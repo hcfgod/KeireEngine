@@ -4,6 +4,47 @@
 
 namespace KeireEditor
 {
+    Keire::Vector3 InspectorEulerState::Read(const Keire::Ref<Keire::TransformComponent>& transform)
+    {
+        if (!transform)
+        {
+            Reset();
+            return {};
+        }
+        const bool sameTarget = m_Target.Lock() == transform;
+        const auto orientation = transform->LocalRotation();
+        if (!sameTarget || (!m_Editing && !SameRotation(orientation, m_Orientation)))
+        {
+            const auto reference = sameTarget ? m_Degrees : transform->LocalEulerAngles();
+            m_Degrees = ContinuousEulerAngles(orientation, reference);
+            m_Orientation = orientation;
+            m_Target = transform;
+            if (!sameTarget)
+                m_Editing = false;
+        }
+        return m_Degrees;
+    }
+
+    void InspectorEulerState::SetValue(const Keire::Vector3 degrees, const Keire::Quaternion orientation) noexcept
+    {
+        m_Degrees = degrees;
+        m_Orientation = orientation;
+    }
+
+    void InspectorEulerState::EndEdit(const Keire::Quaternion orientation) noexcept
+    {
+        m_Editing = false;
+        m_Orientation = orientation;
+    }
+
+    void InspectorEulerState::Reset() noexcept
+    {
+        m_Target.Reset();
+        m_Degrees = {};
+        m_Orientation = {};
+        m_Editing = false;
+    }
+
     namespace
     {
         [[nodiscard]] float NearestEquivalentAngle(const float degrees, const float reference) noexcept

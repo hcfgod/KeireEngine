@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Opening the Editor without command-line arguments opens the Hub project picker instead of exiting silently.
+  Installer launch, shortcuts, and direct executable launches share this behavior; explicit project arguments
+  continue to open their requested project.
+
+- Inspector rotation displays follow the actual Transform component, so stopping Play does not leave simulated
+  full turns in the authored rotation fields. Continuous angle editing remains available on the same component.
+
+- Hub keeps invalid project-folder selections open with repair guidance and disables empty submissions.
+  Newly created projects also schedule their metadata refresh automatically. Unmeasured project sizes and refresh
+  notices no longer imply a background scan is still running; Tasks reports the actual progress.
+
 - Windows Editor setup allows up to five minutes for complete payload verification instead of rejecting valid
   large installations after 30 seconds. Failed verification now identifies the failed step or timeout before rollback.
 

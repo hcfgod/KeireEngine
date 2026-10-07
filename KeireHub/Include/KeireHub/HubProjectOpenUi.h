@@ -16,5 +16,6 @@ namespace KeireHub
     };
 
     [[nodiscard]] HubOpenProjectAction DrawHubOpenProjectDialog(Keire::UiFrame& ui, const HubProductSnapshot& snapshot,
-                                                                std::string& projectPath, bool folderDialogPending);
+                                                                std::string& projectPath, std::string& errorMessage,
+                                                                bool folderDialogPending);
 } // namespace KeireHub

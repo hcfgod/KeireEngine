@@ -396,6 +396,7 @@ namespace
                         else
                         {
                             KeireHub::ReloadProjectRegistry(m_Registry);
+                            m_ProjectMetadataRefreshPending = true;
                             m_Notice = "Project created at " + KeireHub::Utf8Path(creation->Result->Root) + ".";
                             m_NoticeError = false;
                             if (m_ActiveCreationOpenAfter)
@@ -489,7 +490,10 @@ namespace
                         if (m_FolderTarget == FolderTarget::CreateLocation)
                             m_CreateLocation = Keire::Detail::PathToUtf8(m_FolderDialog->SelectedPath());
                         else if (m_FolderTarget == FolderTarget::OpenProject)
+                        {
                             m_OpenPath = Keire::Detail::PathToUtf8(m_FolderDialog->SelectedPath());
+                            m_OpenPathError.clear();
+                        }
                         else if (m_FolderTarget == FolderTarget::LocateEditor)
                             LocateEditor(m_FolderDialog->SelectedPath());
                         else if (m_FolderTarget == FolderTarget::EditorInstallLocation)
@@ -1231,7 +1235,7 @@ namespace
                 KeireHub::ReloadProjectRegistry(m_Registry);
                 m_ProjectMetadataRefreshPending = true;
                 RequireWorkflowSuccess(StartPendingProjectMetadataRefresh());
-                m_Notice = "Project metadata is refreshing in the background.";
+                m_Notice = "Project metadata refresh requested. See Tasks for progress.";
                 m_NoticeError = false;
             }
             catch (const std::exception& error)
@@ -1414,7 +1418,7 @@ namespace
         }
         void DrawOpenDialog(Keire::UiFrame& ui)
         {
-            const auto action = KeireHub::DrawHubOpenProjectDialog(ui, m_ProductSnapshot, m_OpenPath,
+            const auto action = KeireHub::DrawHubOpenProjectDialog(ui, m_ProductSnapshot, m_OpenPath, m_OpenPathError,
                                                                    static_cast<bool>(m_FolderDialog));
             if (action == KeireHub::HubOpenProjectAction::Browse)
                 BrowseForFolder(FolderTarget::OpenProject, Keire::Detail::PathFromUtf8(m_OpenPath));
@@ -1460,6 +1464,7 @@ namespace
         std::string m_CreateName = "NewProject";
         std::string m_CreateLocation;
         std::string m_OpenPath;
+        std::string m_OpenPathError;
         std::string m_Notice;
         std::optional<std::string> m_RuntimeStartupFailure;
         std::string m_FatalActionMessage;

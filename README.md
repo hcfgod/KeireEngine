@@ -129,6 +129,11 @@ complete interactive and cross-platform acceptance remains pending.
 | **Keire.Managed** | Exposes the supported .NET 10 / C# 14 gameplay surface through stable value handles rather than native pointers. |
 
 The Hub is the normal entry point. Direct editor launch remains available for automation and focused development.
+When adding an existing project, select its root folder containing `ProjectSettings/Project.keireproject`.
+Opening the Editor directly, from its shortcut, or after setup opens the Hub project picker. Command-line users
+can still open a specific project with `KeireClient --project <path>`.
+The folder dialog keeps invalid selections open with repair guidance; new projects refresh their displayed metadata
+automatically after creation.
 Its task and notification centers retain useful history across restarts; finished tasks and read notifications can be
 dismissed individually, and the task center can clear all finished work at once. Dismissing a retryable editor removal
 hides its recovery record durably while preserving the exact journal identity needed by a later Retry or Remove action.

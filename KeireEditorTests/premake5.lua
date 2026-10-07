@@ -32,6 +32,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorManagedRuntimeCoordinator.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorPackageCoordinator.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorPlayModeCoordinator.cpp",
+        "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorProjectPicker.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorReplayProfilingCoordinator.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorRuntimeUiInput.cpp",
         "../" .. ProjectConfig.CLIENT_DIRECTORY .. "/Source/Editor/EditorWorkspaceLifecycleCoordinator.cpp",
