@@ -73,7 +73,7 @@ systems and cooked content selected by a project.
 Kéire is currently **version 0.4.7 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
-Windows Hub and Editor 0.4.7 are active in immutable signed catalog sequence 22. The same signed
+Windows Hub and Editor 0.4.7 are active in immutable signed catalog sequence 23. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
 
