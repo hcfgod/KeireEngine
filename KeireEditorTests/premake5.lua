@@ -125,3 +125,7 @@ project(ProjectConfig.PROJECT_NAMESPACE .. "EditorTests")
     LinkKeireCore()
     dependson { AssetWorkerTarget }
     LinkSDL3()
+
+    filter "files:Source/InspectorComponentMenuTests.cpp"
+        externalincludedirs { VendorIncludeDirs.imgui }
+    filter {}
