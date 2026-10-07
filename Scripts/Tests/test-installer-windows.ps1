@@ -30,7 +30,10 @@ foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_P
         'File /oname=KeireInstallWorker.exe "${SOURCE_DIRECTORY}\bin\KeireInstallWorker.exe"',
         'install-deferred --product editor', 'integrate --product editor', 'commit --product editor',
         'recover --product editor', 'uninstall --product editor', 'KeireInstallWorkerPending',
-        'nsExec::ExecToStack /TIMEOUT=30000', '${CLIENT_TARGET}.exe" --verify-installation',
+        '!define KEIRE_EDITOR_VERIFY_TIMEOUT_MS 300000',
+        'nsExec::ExecToStack /TIMEOUT=${KEIRE_EDITOR_VERIFY_TIMEOUT_MS}',
+        'Editor file verification timed out.', 'Editor file verification failed (exit $0).',
+        '${CLIENT_TARGET}.exe" --verify-installation',
         'MUI_FINISHPAGE_RUN "$INSTDIR\bin\${CLIENT_TARGET}.exe"')) {
     if (-not $template.Contains($contract)) {
         throw "The worker-authority Editor NSIS template is missing '$contract'."

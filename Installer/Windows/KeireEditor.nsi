@@ -50,6 +50,12 @@ Var KeireEditorInstallerMutex
 Var KeireInstallWorkerPending
 Var KeireEditorStartMenuSelected
 Var KeireEditorDesktopSelected
+Var KeireEditorInstallFailure
+
+; Verification hashes the complete Editor and bundled SDK, including on busy or slower disks.
+!ifndef KEIRE_EDITOR_VERIFY_TIMEOUT_MS
+    !define KEIRE_EDITOR_VERIFY_TIMEOUT_MS 300000
+!endif
 
 !macro KeireEditorTestTrace MESSAGE
 !ifdef KEIRE_INSTALL_TEST_TRACE_PATH
@@ -168,6 +174,7 @@ FunctionEnd
 
 Section "${PRODUCT_NAME} (required)" MainSection
     SectionIn RO
+    StrCpy $KeireEditorInstallFailure "The Editor payload could not be prepared. Check free disk space and retry setup."
     SetShellVarContext current
     ; NSIS only gathers the complete payload. The worker classifies the destination and owns every mutation.
     !insertmacro KeireEditorTestTrace "main begin root=$INSTDIR"
@@ -210,19 +217,27 @@ EditorDestinationReady:
     Pop $1
     DetailPrint "$1"
     !insertmacro KeireEditorTestTrace "install-deferred exit=$0 output=$1"
+    StrCpy $KeireEditorInstallFailure "Editor payload installation failed (exit $0).$\r$\n$1"
     StrCmp $0 "0" 0 EditorInstallWorkerRecover
     StrCpy $KeireInstallWorkerPending "1"
-    nsExec::ExecToStack /TIMEOUT=30000 '"$INSTDIR\bin\${CLIENT_TARGET}.exe" --verify-installation'
+    DetailPrint "Checking all installed Editor files. This can take several minutes..."
+    nsExec::ExecToStack /TIMEOUT=${KEIRE_EDITOR_VERIFY_TIMEOUT_MS} '"$INSTDIR\bin\${CLIENT_TARGET}.exe" --verify-installation'
     Pop $0
     Pop $1
     !insertmacro KeireEditorTestTrace "binary verification exit=$0 output=$1"
+    StrCpy $KeireEditorInstallFailure "Editor file verification failed (exit $0).$\r$\n$1"
+    StrCmp $0 "timeout" 0 +2
+    StrCpy $KeireEditorInstallFailure "Editor file verification timed out. Close other disk-intensive applications and retry setup."
     StrCmp $0 "0" EditorInstallWorkerPrepared
 EditorInstallWorkerRecover:
+    DetailPrint "$KeireEditorInstallFailure"
     Call RecoverPendingEditorInstall
 EditorInstallWorkerFailed:
+    !insertmacro KeireEditorTestTrace "failure=$KeireEditorInstallFailure"
     MessageBox MB_ICONSTOP|MB_OK \
-        "The Editor install worker rejected or rolled back the transaction. Existing and unrelated files were preserved." \
+        "$KeireEditorInstallFailure$\r$\n$\r$\nSetup did not complete. Existing and unrelated files were preserved." \
         /SD IDOK
+    SetErrorLevel 1
     Abort
 EditorInstallWorkerPrepared:
     SetOutPath "$PLUGINSDIR"

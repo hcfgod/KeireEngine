@@ -492,6 +492,8 @@ Missing parent folders are created when installation begins; choosing a destinat
 Setup checks the destination before extracting the large payload. If the product is already registered elsewhere,
 select that installation folder to upgrade it, or uninstall it from Windows Settings before choosing another folder.
 If the registered folder was deleted or is empty, setup can reinstall into that same location without manual registry edits.
+Editor setup verifies every installed file, including the bundled SDK, and allows up to five minutes for this check.
+If verification times out, setup rolls back and asks you to close disk-intensive applications before retrying.
 Interrupted transactions containing only empty backup directories recover automatically; unknown files remain protected.
 Player Support retains debugging symbols but excludes incremental linker caches to reduce download and installation size.
 Installer details show transaction phases. Uninstall and rollback skip directory-pruning retries while sibling

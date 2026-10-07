@@ -170,7 +170,8 @@ function New-Installer {
         [Parameter(Mandatory = $true)][string]$Version,
         [Parameter(Mandatory = $true)][string]$Source,
         [Parameter(Mandatory = $true)][string]$Output,
-        [string]$TestDefine = ""
+        [string]$TestDefine = "",
+        [int]$VerificationTimeoutMs = 0
     )
 
     $tracePath = "$Output.trace.log"
@@ -193,6 +194,9 @@ function New-Installer {
     )
     if ($TestDefine) {
         $arguments += "/D$TestDefine=1"
+    }
+    if ($VerificationTimeoutMs -gt 0) {
+        $arguments += "/DKEIRE_EDITOR_VERIFY_TIMEOUT_MS=$VerificationTimeoutMs"
     }
     $arguments += $info.Template
     $outputLines = @(& $makensis @arguments 2>&1)
@@ -348,6 +352,11 @@ try {
     if ($exit -eq 0) {
         throw "The $Product NSIS update ignored a failed real executable verification."
     }
+    if ($Product -eq "editor" -and
+        -not (Get-Content -LiteralPath "$installer2.trace.log" -Raw).Contains(
+            'failure=Editor file verification failed (exit 7).')) {
+        throw 'The Editor lost its verification failure diagnostic during rollback.'
+    }
     Remove-Item Env:\KEIRE_INSTALL_VERIFY_FIXTURE_MODE -ErrorAction SilentlyContinue
     Assert-Version -RootPath $installRoot -Version "1.0.0"
     if ((Get-FileHash -LiteralPath $receipt -Algorithm SHA256).Hash -ne $receiptHash) {
@@ -355,18 +364,35 @@ try {
     }
     Assert-UnknownFiles -RootPath $installRoot
 
+    $timeoutInstaller = $installer2
+    if ($Product -eq "editor") {
+        $timeoutInstaller = Join-Path $caseRoot "$Product-short-timeout.exe"
+        New-Installer -Version "2.0.0" -Source $payload2 -Output $timeoutInstaller -VerificationTimeoutMs 1000
+    }
     $env:KEIRE_INSTALL_VERIFY_FIXTURE_MODE = "timeout"
-    $exit = Invoke-Installer -Path $installer2 -Arguments @("/S", "/D=$installRoot") `
+    $exit = Invoke-Installer -Path $timeoutInstaller -Arguments @("/S", "/D=$installRoot") `
         -Operation "verification-timeout"
     if ($exit -eq 0) {
-        throw "The $Product NSIS update ignored the 30-second verification timeout."
+        throw "The $Product NSIS update ignored its verification timeout."
     }
     Remove-Item Env:\KEIRE_INSTALL_VERIFY_FIXTURE_MODE -ErrorAction SilentlyContinue
     Assert-Version -RootPath $installRoot -Version "1.0.0"
     Assert-UnknownFiles -RootPath $installRoot
 
+    if ($Product -eq "editor") {
+        $timeoutTrace = Get-Content -LiteralPath "$timeoutInstaller.trace.log" -Raw
+        if (-not $timeoutTrace.Contains('binary verification exit=timeout')) {
+            throw 'The Editor timeout fixture failed for a reason other than its verification deadline.'
+        }
+        if (-not $timeoutTrace.Contains('failure=Editor file verification timed out.')) {
+            throw 'The Editor lost its actionable timeout diagnostic during rollback.'
+        }
+        # The existing fixture waits 35 seconds, beyond the old release timeout.
+        $env:KEIRE_INSTALL_VERIFY_FIXTURE_MODE = "timeout"
+    }
     $exit = Invoke-Installer -Path $installer2 -Arguments @("/S", "/D=$installRoot") `
         -Operation "update"
+    Remove-Item Env:\KEIRE_INSTALL_VERIFY_FIXTURE_MODE -ErrorAction SilentlyContinue
     Assert-ExitCode -Actual $exit -Expected @(0) -Operation "$Product NSIS update"
     Assert-Version -RootPath $installRoot -Version "2.0.0"
     Assert-UnknownFiles -RootPath $installRoot

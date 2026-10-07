@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Windows Editor setup allows up to five minutes for complete payload verification instead of rejecting valid
+  large installations after 30 seconds. Failed verification now identifies the failed step or timeout before rollback.
+
 - Setup can reinstall at its registered location when that folder is missing or empty. Failed reinstalls restore
   the previous registration; choosing another folder still requires resolving the existing installation first.
 
