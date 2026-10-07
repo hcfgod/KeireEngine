@@ -488,6 +488,7 @@ Packaging is performed on the target operating system:
 Windows Editor and Hub installers use the shared first-party install worker for exact hash receipts, transactional
 rollback, reparse-safe destination checks, and drift-preserving uninstall. Fresh installs require an absent or empty
 ordinary directory; unknown and modified neighboring files are never recursively removed.
+Missing parent folders are created when installation begins; choosing a destination during preparation does not create them.
 Setup checks the destination before extracting the large payload. If the product is already registered elsewhere,
 select that installation folder to upgrade it, or uninstall it from Windows Settings before choosing another folder.
 Interrupted transactions containing only empty backup directories recover automatically; unknown files remain protected.

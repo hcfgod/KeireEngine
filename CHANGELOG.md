@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Installer preparation accepts destinations with missing parent folders without creating them. Installation creates
+  ordinary parent folders safely; existing product registrations still direct users to the correct upgrade folder.
+
 - The Windows 0.4.7 patch adds the October 2026 distribution signing key to Hub trust. Existing Hub installations
   require a manual installation of the patched Hub before using catalogs signed by this replacement key.
 - Distribution publishing can explicitly trust a second public key during platform-specific signing-key rollovers,

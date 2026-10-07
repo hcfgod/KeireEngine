@@ -7,9 +7,11 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <memory>
 #include <random>
 #include <ranges>
 #include <system_error>
+#include <vector>
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -31,6 +33,44 @@ namespace KeireHub::Detail
                     .Message = std::move(message),
                     .AffectedItem = PathToUtf8(path),
                     .TechnicalDetails = std::move(details)};
+        }
+
+        [[nodiscard]] HubResult<std::shared_ptr<InstallMutationFileSystem>>
+        PinLocatorParent(InstallMutationAuthority& mutation, const std::filesystem::path& parent, const bool create)
+        {
+            if (const auto safe = ValidateInstallMutationPath(parent.root_path(), parent.relative_path(), true); !safe)
+                return HubResult<std::shared_ptr<InstallMutationFileSystem>>::Failure(safe.Error());
+
+            std::vector<std::filesystem::path> missing;
+            auto current = parent;
+            while (!current.empty())
+            {
+                std::error_code error;
+                const auto status = std::filesystem::symlink_status(current, error);
+                if (error == std::errc::no_such_file_or_directory || (!error && !std::filesystem::exists(status)))
+                {
+                    missing.push_back(current);
+                    current = current.parent_path();
+                    continue;
+                }
+                if (error || !std::filesystem::is_directory(status) || std::filesystem::is_symlink(status))
+                {
+                    return HubResult<std::shared_ptr<InstallMutationFileSystem>>::Failure(LocatorError(
+                        HubErrorCode::UnsafeInstallRoot,
+                        "The installation parent must be an ordinary accessible folder.", current, error.message()));
+                }
+                break;
+            }
+            // A missing parent cannot contain recovery state. Preparation remains read-only.
+            if (!create && !missing.empty())
+                return HubResult<std::shared_ptr<InstallMutationFileSystem>>::Success(nullptr);
+            // Keep every newly created parent pinned through the transaction. Never recursively create through links.
+            for (auto iterator = missing.rbegin(); iterator != missing.rend(); ++iterator)
+            {
+                if (auto pinned = mutation.Pin(*iterator, true, true); !pinned)
+                    return pinned;
+            }
+            return mutation.Pin(parent);
         }
 
         [[nodiscard]] bool SamePath(const std::filesystem::path& left, const std::filesystem::path& right)
@@ -104,16 +144,16 @@ namespace KeireHub::Detail
         return path;
     }
 
-    HubResult<InstallTransactionLocator>
-    CreateInstallTransactionLocator(InstallMutationAuthority& mutation, const std::filesystem::path& destination,
-                                    const InstallProduct product)
+    HubResult<InstallTransactionLocator> CreateInstallTransactionLocator(InstallMutationAuthority& mutation,
+                                                                         const std::filesystem::path& destination,
+                                                                         const InstallProduct product)
     {
         const auto absoluteDestination = std::filesystem::absolute(destination).lexically_normal();
         const auto parent = absoluteDestination.parent_path();
         const auto locatorPath = InstallTransactionLocatorPath(absoluteDestination);
         try
         {
-            auto parentFiles = mutation.Pin(parent);
+            auto parentFiles = PinLocatorParent(mutation, parent, true);
             if (!parentFiles)
                 return HubResult<InstallTransactionLocator>::Failure(parentFiles.Error());
             auto existing = parentFiles.Value()->Describe(locatorPath.filename(), true);
@@ -121,9 +161,9 @@ namespace KeireHub::Detail
                 return HubResult<InstallTransactionLocator>::Failure(existing.Error());
             if (!existing.Value().Sha256.empty())
             {
-                return HubResult<InstallTransactionLocator>::Failure(LocatorError(
-                    HubErrorCode::DestinationConflict, "An installation transaction locator already exists.",
-                    locatorPath));
+                return HubResult<InstallTransactionLocator>::Failure(
+                    LocatorError(HubErrorCode::DestinationConflict,
+                                 "An installation transaction locator already exists.", locatorPath));
             }
 
             const auto transactionId = SecureInstallRandomId();
@@ -136,8 +176,7 @@ namespace KeireHub::Detail
                 return HubResult<InstallTransactionLocator>::Failure(transactionFiles.Error());
 
             const auto document = EncodeLocator(transactionId, product, absoluteDestination, transactionRoot);
-            if (const auto written =
-                    transactionFiles.Value()->WriteTextAtomically(PendingLocatorName, document, false);
+            if (const auto written = transactionFiles.Value()->WriteTextAtomically(PendingLocatorName, document, false);
                 !written)
                 return HubResult<InstallTransactionLocator>::Failure(written.Error());
             auto pendingFile = transactionFiles.Value()->Describe(PendingLocatorName);
@@ -145,20 +184,19 @@ namespace KeireHub::Detail
                 return HubResult<InstallTransactionLocator>::Failure(pendingFile.Error());
             auto locatorFile = pendingFile.Value();
             locatorFile.Path = locatorPath.filename();
-            if (const auto moved = transactionFiles.Value()->RenameVerifiedTo(
-                    pendingFile.Value(), *parentFiles.Value(), false, locatorPath.filename());
+            if (const auto moved = transactionFiles.Value()->RenameVerifiedTo(pendingFile.Value(), *parentFiles.Value(),
+                                                                              false, locatorPath.filename());
                 !moved)
             {
                 return HubResult<InstallTransactionLocator>::Failure(moved.Error());
             }
-            return HubResult<InstallTransactionLocator>::Success(
-                {.TransactionId = transactionId,
-                 .Product = product,
-                 .DestinationRoot = absoluteDestination,
-                 .LocatorPath = locatorPath,
-                 .TransactionRoot = transactionRoot,
-                 .LocatorFile = std::move(locatorFile),
-                 .DocumentSha256 = HashInstallDocument(document)});
+            return HubResult<InstallTransactionLocator>::Success({.TransactionId = transactionId,
+                                                                  .Product = product,
+                                                                  .DestinationRoot = absoluteDestination,
+                                                                  .LocatorPath = locatorPath,
+                                                                  .TransactionRoot = transactionRoot,
+                                                                  .LocatorFile = std::move(locatorFile),
+                                                                  .DocumentSha256 = HashInstallDocument(document)});
         }
         catch (const std::exception& error)
         {
@@ -175,9 +213,11 @@ namespace KeireHub::Detail
         const auto absoluteDestination = std::filesystem::absolute(destination).lexically_normal();
         const auto parent = absoluteDestination.parent_path();
         const auto locatorPath = InstallTransactionLocatorPath(absoluteDestination);
-        auto parentFiles = mutation.Pin(parent);
+        auto parentFiles = PinLocatorParent(mutation, parent, false);
         if (!parentFiles)
             return HubResult<std::optional<InstallTransactionLocator>>::Failure(parentFiles.Error());
+        if (!parentFiles.Value())
+            return HubResult<std::optional<InstallTransactionLocator>>::Success(std::nullopt);
         auto locatorFile = parentFiles.Value()->Describe(locatorPath.filename(), true);
         if (!locatorFile)
             return HubResult<std::optional<InstallTransactionLocator>>::Failure(locatorFile.Error());
@@ -219,9 +259,9 @@ namespace KeireHub::Detail
         }
         catch (const std::exception& error)
         {
-            return HubResult<std::optional<InstallTransactionLocator>>::Failure(LocatorError(
-                HubErrorCode::UnsafeInstallRoot, "The installation transaction locator is invalid.", locatorPath,
-                error.what()));
+            return HubResult<std::optional<InstallTransactionLocator>>::Failure(
+                LocatorError(HubErrorCode::UnsafeInstallRoot, "The installation transaction locator is invalid.",
+                             locatorPath, error.what()));
         }
     }
 

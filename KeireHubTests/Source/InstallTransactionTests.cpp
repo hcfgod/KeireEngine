@@ -915,6 +915,47 @@ TEST_CASE("install worker recovery cleans empty nested backup directories withou
     }
 }
 
+TEST_CASE("install worker supports missing nested parent folders without mutating during preparation")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    TestRegistrationStore registration;
+    auto product = InstallProduct::Editor;
+    SUBCASE("editor") { product = InstallProduct::Editor; }
+    SUBCASE("hub") { product = InstallProduct::Hub; }
+    const auto source = CreatePackage(temporary.Path(), product, "6.0.0", "payload");
+    const auto parent = temporary.Path() / "new game engines" / "nested";
+    const auto destination = parent / "installation";
+    const auto request = Request(product, {}, destination, registration);
+    REQUIRE(PrepareInstallDestination(request));
+    CHECK_FALSE(std::filesystem::exists(temporary.Path() / "new game engines"));
+    REQUIRE(InstallPackageTransaction(Request(product, source, destination, registration)));
+    CHECK(VerifyInstalledPackage(request));
+    CHECK(std::filesystem::is_directory(parent));
+}
+
+TEST_CASE("install worker preserves a conflicting ancestor and reports a registered location first")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    TestRegistrationStore registration;
+    const auto source = CreatePackage(temporary.Path(), InstallProduct::Editor, "6.0.0", "payload");
+    const auto existing = temporary.Path() / "existing";
+    REQUIRE(InstallPackageTransaction(Request(InstallProduct::Editor, source, existing, registration)));
+    const auto missingParent = temporary.Path() / "missing" / "nested";
+    auto redirected =
+        PrepareInstallDestination(Request(InstallProduct::Editor, {}, missingParent / "editor", registration));
+    REQUIRE_FALSE(redirected);
+    CHECK(redirected.Error().Message.find("Choose that folder to upgrade") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(temporary.Path() / "missing"));
+    CHECK(VerifyInstalledPackage(Request(InstallProduct::Editor, {}, existing, registration)));
+
+    TestRegistrationStore freshRegistration;
+    const auto blockingFile = temporary.Path() / "blocked";
+    KeireHubTests::WriteText(blockingFile, "preserve user file");
+    CHECK_FALSE(PrepareInstallDestination(
+        Request(InstallProduct::Editor, {}, blockingFile / "nested" / "editor", freshRegistration)));
+    CHECK(KeireHubTests::ReadText(blockingFile) == "preserve user file");
+}
+
 TEST_CASE("install worker prepares destinations before extracting a payload")
 {
     KeireHubTests::TemporaryDirectory temporary;
