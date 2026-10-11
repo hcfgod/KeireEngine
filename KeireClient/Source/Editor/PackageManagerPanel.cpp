@@ -734,7 +734,7 @@ namespace KeireEditor
             ui.TextColored(theme.Accent, selected->DisplayName);
             if (!selected->PublisherName.empty())
                 ui.Text("By " + selected->PublisherName);
-            ui.Text(selected->ShortDescription);
+            ui.TextWrapped(selected->ShortDescription);
             if (!selected->Version.empty())
                 ui.Text("Version " + selected->Version);
             if (!selected->LicenseSpdx.empty())
@@ -746,8 +746,9 @@ namespace KeireEditor
             }
             else if (selected->State == KeireHub::MarketplaceCacheState::Failed)
             {
-                ui.TextColored(theme.Error, selected->FailureMessage);
-                ui.TextColored(theme.MutedText, "Choose Open in Editor on the marketplace page to retry through Hub.");
+                ui.TextColoredWrapped(theme.Error, selected->FailureMessage);
+                ui.TextColoredWrapped(theme.MutedText,
+                                      "Choose Open in Editor on the marketplace page to retry through Hub.");
             }
             else if (selected->State != KeireHub::MarketplaceCacheState::Ready)
             {
@@ -771,7 +772,7 @@ namespace KeireEditor
             }
             if (selected->State == KeireHub::MarketplaceCacheState::Ready)
             {
-                ui.TextColored(theme.MutedText, "SHA-256: " + selected->ArchiveSha256);
+                ui.TextColoredWrapped(theme.MutedText, "SHA-256: " + selected->ArchiveSha256);
                 ui.TextColored(theme.MutedText, "Trust: marketplace signature verified");
             }
         }
@@ -974,8 +975,8 @@ namespace KeireEditor
             }
             ui.TextColored(theme.Accent, selected->PackageId);
             ui.Text("Version " + selected->Version);
-            ui.Text("Source: " + selected->Source);
-            ui.Text("SHA-256: " + selected->ArchiveSha256);
+            ui.TextWrapped("Source: " + selected->Source);
+            ui.TextWrapped("SHA-256: " + selected->ArchiveSha256);
             ui.Text("Trust: " + TrustLabel(selected->Embedded ? Keire::ProjectPackageTrust::Embedded
                                            : selected->SignatureKeyId.empty()
                                                ? Keire::ProjectPackageTrust::CatalogHashVerified

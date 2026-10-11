@@ -652,6 +652,13 @@ void EditorWorkspaceLayer::BeginPlayMode()
     KeireEditor::CancelRuntimeUiPointer(m_PlayRuntimeWorld, m_GameRuntimeUiPointer);
     m_Game.SetMaximized(m_MaximizeGameOnPlay);
     m_Game.RequestFocus();
+    const auto scriptNotice = KeireEditor::PlayModeLastGoodScriptNotice(
+        requiresManagedRuntime, build.State, scripts ? scripts->ReloadStatus().State : Keire::ManagedReloadState::Idle);
+    if (!scriptNotice.empty())
+    {
+        m_SceneDocument->SetStatus(std::string(scriptNotice));
+        AddConsoleMessage("Play Mode", std::string(scriptNotice), m_Theme.Warning, Keire::LogLevel::Warn);
+    }
 }
 
 bool EditorWorkspaceLayer::ProjectRequiresManagedRuntime() const noexcept

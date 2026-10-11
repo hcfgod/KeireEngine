@@ -12,7 +12,75 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
+
+TEST_CASE("Overlay actions receive pointer clicks above an overlapping viewport canvas")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    for (const bool fastClick : {false, true})
+    {
+        INFO("Fast click: " << fastClick);
+        bool checked = false;
+        class OverlayInputLayer final : public Keire::Layer
+        {
+          public:
+            OverlayInputLayer(const bool fast, bool& checked) : Layer("Overlay input"), m_Fast(fast), m_Checked(checked)
+            {
+            }
+
+          protected:
+            void OnUi(Keire::UiFrame& ui) override
+            {
+                ui.SetNextWindowSize({420, 320}, false);
+                auto window = ui.BeginWindow("Overlay pointer fixture");
+                if (ui.InvisibleButton("Canvas", {360, 240}, true))
+                    ++m_CanvasClicks;
+                const auto canvas = ui.LastItemRect();
+                const Keire::UiPosition buttonPosition{canvas.Minimum.X + 20, canvas.Minimum.Y + 20};
+                if (ui.OverlayIconButton("Create", Keire::UiIcon::Create,
+                                         {.Position = buttonPosition, .Size = {32, 28}}))
+                    ++m_OverlayClicks;
+                auto& io = ImGui::GetIO();
+                if (m_Frame == 0)
+                    io.AddMousePosEvent(buttonPosition.X + 16, buttonPosition.Y + 14);
+                if (m_Frame == 2 || m_Frame == 8)
+                {
+                    io.AddMouseButtonEvent(0, true);
+                    if (m_Fast)
+                        io.AddMouseButtonEvent(0, false);
+                }
+                if (m_Frame == 3 || m_Frame == 9)
+                    io.AddMouseButtonEvent(0, false);
+                if (m_Frame == 6)
+                    io.AddMousePosEvent(canvas.Maximum.X - 20, canvas.Maximum.Y - 20);
+                if (++m_Frame == 13)
+                {
+                    CHECK(m_OverlayClicks == 1);
+                    CHECK(m_CanvasClicks == 1);
+                    m_Checked = true;
+                    Owner().RequestExit();
+                }
+            }
+
+          private:
+            bool m_Fast;
+            bool& m_Checked;
+            int m_Frame = 0;
+            int m_CanvasClicks = 0;
+            int m_OverlayClicks = 0;
+        };
+        Keire::ApplicationSpecification specification;
+        specification.MainWindow.Visible = false;
+        specification.TargetFrameRate = 0;
+        specification.Ui.Mode = Keire::UiMode::Headless;
+        specification.Ui.LayoutPath.clear();
+        Keire::Application application(specification);
+        (void)application.PushLayer(std::make_unique<OverlayInputLayer>(fastClick, checked));
+        CHECK(application.Run() == 0);
+        CHECK(checked);
+    }
+}
 
 TEST_CASE("numeric field expressions evaluate complete finite arithmetic")
 {
@@ -552,6 +620,97 @@ TEST_CASE("sticky component titles survive scrolling inside an Inspector card")
     (void)application.PushLayer(std::make_unique<StickyCardLayer>(checked));
     CHECK(application.Run() == 0);
     CHECK(checked);
+}
+
+TEST_CASE("interactive sticky headers preserve layout and route clicks above their component body")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    for (const bool scrollCard : {false, true})
+    {
+        INFO("Card scroll instead of Inspector scroll: " << scrollCard);
+        bool checked = false;
+        class HeaderLayer final : public Keire::Layer
+        {
+          public:
+            HeaderLayer(bool& checked, bool scrollCard)
+                : Layer("Pinned header input"), m_Checked(checked), m_ScrollCard(scrollCard)
+            {
+            }
+
+          protected:
+            void OnUi(Keire::UiFrame& ui) override
+            {
+                ImGui::SetNextWindowPos({0, 0});
+                ui.SetNextWindowSize({400, 300});
+                auto window = ui.BeginWindow("Pinned input fixture");
+                const auto start = ui.CursorScreenPosition().Y;
+                {
+                    auto card = ui.BeginChild("Card", {280, m_ScrollCard ? 140.0F : 450.0F}, true);
+                    ui.Text("Original header");
+                    if (ui.Button("Covered body", {240, 180}))
+                        ++m_BodyClicks;
+                    ImGui::Dummy({200, 600});
+                    if (m_ScrollCard)
+                        ImGui::SetScrollY(60);
+                }
+                const auto cursor = ui.CursorScreenPosition();
+                const auto maximum = ImGui::GetCurrentWindow()->DC.CursorMaxPos;
+                ui.StickySectionHeader("Pinned", start, cursor.Y,
+                                       [&]
+                                       {
+                                           if (ui.Button("Actions", {150, 22}))
+                                               ++m_HeaderClicks;
+                                           const auto minimum = ImGui::GetItemRectMin();
+                                           m_Click = {minimum.x + 30, minimum.y + 10};
+                                           ++m_HeaderFrames;
+                                       });
+                CHECK(ui.CursorScreenPosition().X == cursor.X);
+                CHECK(ui.CursorScreenPosition().Y == cursor.Y);
+                CHECK(ImGui::GetCurrentWindow()->DC.CursorMaxPos.x == maximum.x);
+                CHECK(ImGui::GetCurrentWindow()->DC.CursorMaxPos.y == maximum.y);
+                if (!m_ScrollCard)
+                    ImGui::SetScrollY(60);
+                auto& io = ImGui::GetIO();
+                if (m_Frame == 3)
+                {
+                    REQUIRE(m_HeaderFrames > 0);
+                    io.AddMousePosEvent(m_Click.x, m_Click.y);
+                }
+                if (m_Frame == 4)
+                    io.AddMouseButtonEvent(0, true);
+                if (m_Frame == 5)
+                    io.AddMouseButtonEvent(0, false);
+                if (m_Frame == 7)
+                {
+                    CHECK(m_HeaderClicks == 1);
+                    CHECK(m_BodyClicks == 0);
+                    CHECK_THROWS_AS(ui.StickySectionHeader("Throwing", start, cursor.Y,
+                                                           [] { throw std::runtime_error("header callback"); }),
+                                    std::runtime_error);
+                    CHECK(ui.CursorScreenPosition().Y == cursor.Y);
+                    ui.Text("Parent remains usable after callback failure");
+                    m_Checked = true;
+                    Owner().RequestExit();
+                }
+                ++m_Frame;
+            }
+
+          private:
+            bool& m_Checked;
+            bool m_ScrollCard;
+            int m_Frame = 0, m_HeaderFrames = 0, m_HeaderClicks = 0, m_BodyClicks = 0;
+            ImVec2 m_Click{};
+        };
+        Keire::ApplicationSpecification specification;
+        specification.MainWindow.Visible = false;
+        specification.TargetFrameRate = 0;
+        specification.Ui.Mode = Keire::UiMode::Headless;
+        specification.Ui.LayoutPath.clear();
+        Keire::Application application(specification);
+        (void)application.PushLayer(std::make_unique<HeaderLayer>(checked, scrollCard));
+        CHECK(application.Run() == 0);
+        CHECK(checked);
+    }
 }
 
 TEST_CASE("constrained floating panel routes continuous wheel input to its scroll child")

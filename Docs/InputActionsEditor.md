@@ -25,6 +25,8 @@ Save canonicalizes and validates the entire document, atomically replaces the `.
 the same `AssetDatabase` path as `KeireAssetTool`, and requests runtime hot reload. Revert discards the in-memory command
 history and reloads the source. The undo stack is bounded to 128 full-document snapshots so malformed partial commands
 cannot leak into saved data.
+The unsaved indicator compares the current definition with the last successfully loaded or saved definition.
+Undoing back to that content clears the indicator; undoing away from a newly saved version marks it unsaved again.
 
 Listen creates a transient runtime context from the current in-memory document, so existing, new, and unsaved bindings
 can capture any keyboard key, mouse control, or gamepad control without modifying gameplay input. A progress indicator

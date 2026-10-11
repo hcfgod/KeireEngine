@@ -281,6 +281,77 @@ namespace Keire
                       ImGui::GetColorU32(ImGuiCol_Text), title.data(), title.data() + title.size());
         draw->PopClipRect();
     }
+    void UiFrame::StickySectionHeader(const std::string_view id, const float sectionStartY, const float sectionEndY,
+                                      const std::function<void()>& drawHeader)
+    {
+        RequireActive("StickySectionHeader");
+        if (!drawHeader)
+            return;
+        auto* parent = ImGui::GetCurrentWindow();
+        auto clip = parent->InnerClipRect;
+        const float height = ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0F;
+        auto top = Detail::StickySectionTop(sectionStartY, sectionEndY, clip.Min.y, height);
+        for (auto* child : parent->DC.ChildWindows)
+        {
+            if (child->Pos.y >= sectionStartY - 1.0F && child->Pos.y < sectionEndY &&
+                child->Pos.y + child->Size.y > clip.Min.y)
+            {
+                if (child->Scroll.y > 0.0F)
+                {
+                    clip = child->InnerClipRect;
+                    top = Detail::StickySectionTop(child->DC.CursorStartPos.y, child->DC.CursorMaxPos.y, clip.Min.y,
+                                                   height);
+                }
+                break;
+            }
+        }
+        if (!top || clip.GetWidth() <= 0.0F)
+            return;
+
+        // Submit after the card so the child owns both drawing and input over the covered fields.
+        // EndChild advances the parent layout; preserve that state even when the callback throws.
+        struct RestoreLayout
+        {
+            ImGuiWindow* Window;
+            ImVec2 Cursor, Maximum, Previous, CurrentLine, PreviousLine;
+            float CurrentBaseline, PreviousBaseline;
+            bool SameLine, SetPosition;
+            ~RestoreLayout()
+            {
+                auto& dc = Window->DC;
+                dc.CursorPos = Cursor;
+                dc.CursorMaxPos = Maximum;
+                dc.CursorPosPrevLine = Previous;
+                dc.CurrLineSize = CurrentLine;
+                dc.PrevLineSize = PreviousLine;
+                dc.CurrLineTextBaseOffset = CurrentBaseline;
+                dc.PrevLineTextBaseOffset = PreviousBaseline;
+                dc.IsSameLine = SameLine;
+                dc.IsSetPos = SetPosition;
+            }
+        } restore{parent,
+                  parent->DC.CursorPos,
+                  parent->DC.CursorMaxPos,
+                  parent->DC.CursorPosPrevLine,
+                  parent->DC.CurrLineSize,
+                  parent->DC.PrevLineSize,
+                  parent->DC.CurrLineTextBaseOffset,
+                  parent->DC.PrevLineTextBaseOffset,
+                  parent->DC.IsSameLine,
+                  parent->DC.IsSetPos};
+        const std::string safeId(id);
+        ImGui::SetCursorScreenPos({clip.Min.x, *top});
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0F, 0.0F});
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::GetStyleColorVec4(ImGuiCol_WindowBg));
+        const bool visible = ImGui::BeginChild(safeId.c_str(), {clip.GetWidth(), height}, ImGuiChildFlags_None,
+                                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+        m_Impl->OpenScope(UiScope::Kind::Child);
+        auto scope = UiChildScope(*this, visible);
+        if (scope)
+            drawHeader();
+    }
     UiWindowScope UiFrame::BeginWindow(std::string_view title, bool* open, const UiWindowOptions options)
     {
         m_Impl->RequireActive("BeginWindow");
@@ -553,7 +624,12 @@ namespace Keire
     {
         m_Impl->RequireActive("BeginPanel");
         if (!panel.Visible())
+        {
+            // Consume this panel's pending window settings even when it is hidden.
+            // Otherwise size, position, or focus intended for it leaks into the next visible panel.
+            ImGui::GetCurrentContext()->NextWindowData.ClearFlags();
             return UiPanelScope(*this, false, false);
+        }
         if (panel.ConsumeFocusRequest())
             ImGui::SetNextWindowFocus();
         auto effectiveOptions = options;
@@ -713,11 +789,18 @@ namespace Keire
 
     bool UiFrame::InvisibleButton(const std::string_view id, const UiSize size)
     {
+        return InvisibleButton(id, size, false);
+    }
+
+    bool UiFrame::InvisibleButton(const std::string_view id, const UiSize size, const bool allowOverlap)
+    {
         m_Impl->RequireActive("InvisibleButton");
         if (id.empty() || size.Width < 0.0F || size.Height < 0.0F || !std::isfinite(size.Width) ||
             !std::isfinite(size.Height))
             throw std::invalid_argument("UI invisible button dimensions and identifier are invalid.");
         const std::string safeId(id);
+        if (allowOverlap)
+            ImGui::SetNextItemAllowOverlap();
         return ImGui::InvisibleButton(safeId.c_str(), {size.Width, size.Height});
     }
 

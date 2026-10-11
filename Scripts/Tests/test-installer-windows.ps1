@@ -22,7 +22,7 @@ foreach ($contract in @("package-editor.ps1", "Assert-WindowsEditorPackageStage"
 $templatePath = Join-Path $Root "Installer\Windows\KeireEditor.nsi"
 $template = Get-Content -LiteralPath $templatePath -Raw
 foreach ($contract in @('RequestExecutionLevel user', 'MUI_PAGE_LICENSE', 'MUI_PAGE_COMPONENTS',
-        'SetCompressor lzma', 'SetCompressorDictSize 8',
+        'SetCompressor zlib', 'SetDetailsPrint none', 'SetDetailsPrint both', 'extraction elapsed_ms=',
         'MUI_PAGE_DIRECTORY', 'Desktop shortcut', 'Start Menu shortcuts', 'WriteUninstaller',
         'INSTALL_MARKER_CONTENT', 'INSTALL_OWNERSHIP_IDENTIFIER',
         '!error "KeireInstallWorker is the required Editor install and uninstall authority."',

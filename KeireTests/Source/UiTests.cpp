@@ -976,6 +976,76 @@ namespace
     };
 } // namespace
 
+TEST_CASE("Hidden panels consume window settings without resizing the next visible window")
+{
+    class HiddenPanelLayer final : public Keire::Layer
+    {
+      public:
+        HiddenPanelLayer() : Layer("HiddenPanelSettings") {}
+
+      protected:
+        void OnAttach() override
+        {
+            m_Hidden = Owner().GetUiWorkspace().RegisterPanel({"hidden.settings", "Hidden settings", false});
+        }
+
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            if (m_Frame > 0)
+            {
+                ui.SetNextWindowSize({1040.0F, 640.0F}, false);
+                ImGui::SetNextWindowPos({120.0F, 140.0F}, ImGuiCond_Always);
+                auto hidden = ui.BeginPanel(m_Hidden);
+                CHECK_FALSE(static_cast<bool>(hidden));
+            }
+            else
+            {
+                ui.SetNextWindowSize({320.0F, 200.0F}, false);
+                ImGui::SetNextWindowPos({20.0F, 40.0F}, ImGuiCond_Always);
+            }
+            {
+                auto visible = ui.BeginWindow("Unaffected window", nullptr, {.NoSavedSettings = true});
+                REQUIRE(static_cast<bool>(visible));
+                ui.Text("A hidden tool must not change this window.");
+                const auto size = ImGui::GetWindowSize();
+                const auto position = ImGui::GetWindowPos();
+                CHECK(size.x == doctest::Approx(320.0F));
+                CHECK(size.y == doctest::Approx(200.0F));
+                CHECK(position.x == doctest::Approx(20.0F));
+                CHECK(position.y == doctest::Approx(40.0F));
+            }
+            if (++m_Frame == 2)
+                Owner().RequestExit();
+        }
+
+      private:
+        Keire::UiPanelRegistration m_Hidden;
+        int m_Frame = 0;
+    };
+
+    class HiddenPanelApplication final : public Keire::Application
+    {
+      public:
+        HiddenPanelApplication() : Application(Specification())
+        {
+            (void)PushLayer(std::make_unique<HiddenPanelLayer>());
+        }
+
+      private:
+        static Keire::ApplicationSpecification Specification()
+        {
+            auto specification = UiSpecification("hidden-panel-settings", Keire::UiMode::Headless);
+            specification.Ui.Workspace.Enabled = true;
+            specification.Ui.Workspace.Ephemeral = true;
+            return specification;
+        }
+    };
+
+    UseDummyVideoDriver();
+    HiddenPanelApplication application;
+    CHECK(application.Run() == 0);
+}
+
 TEST_CASE("Disabled UI preserves the existing application lifecycle")
 {
     UseDummyVideoDriver();

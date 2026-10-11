@@ -13,10 +13,12 @@ namespace KeireEditor
     {
         DocumentSourcePersistence persistence;
         persistence.Bind(source, std::move(loadedBytes));
+        auto savedDefinition = Keire::InputActionAsset::Encode(definition);
         Close();
         m_Persistence = std::move(persistence);
         m_Asset = asset;
         m_Definition = std::move(definition);
+        m_SavedDefinition = std::move(savedDefinition);
         m_Undo = std::move(undo);
         m_Source = std::move(source);
     }
@@ -25,15 +27,19 @@ namespace KeireEditor
     {
         if (!m_Asset || m_Source.empty())
             throw std::logic_error("InputActionsDocument cannot save without an asset and source path.");
-        m_Persistence.Publish(Keire::InputActionAsset::Encode(m_Definition));
+        auto savedDefinition = Keire::InputActionAsset::Encode(m_Definition);
+        m_Persistence.Publish(savedDefinition);
+        m_SavedDefinition = std::move(savedDefinition);
         m_Dirty = false;
     }
 
     void InputActionsDocument::ReplaceDefinition(Keire::InputActionAssetDefinition definition, const bool dirty)
     {
-        Keire::InputActionAsset::Validate(definition);
+        auto candidateBytes = Keire::InputActionAsset::Encode(definition);
+        if (!dirty)
+            m_SavedDefinition = candidateBytes;
         m_Definition = std::move(definition);
-        m_Dirty = dirty;
+        m_Dirty = dirty && candidateBytes != m_SavedDefinition;
     }
 
     bool InputActionsDocument::TryReplaceDefinition(Keire::InputActionAssetDefinition definition,
@@ -47,8 +53,10 @@ namespace KeireEditor
                 diagnostic.clear();
                 return false;
             }
+            if (!dirty)
+                m_SavedDefinition = candidateBytes;
             m_Definition = std::move(definition);
-            m_Dirty = dirty;
+            m_Dirty = dirty && candidateBytes != m_SavedDefinition;
             diagnostic.clear();
             return true;
         }
@@ -102,7 +110,7 @@ namespace KeireEditor
 
     void InputActionsDocument::RecordApplied(const std::string_view name, Keire::InputActionAssetDefinition before)
     {
-        m_Dirty = true;
+        m_Dirty = Keire::InputActionAsset::Encode(m_Definition) != m_SavedDefinition;
         if (!m_Undo || !m_Undo->IsOpen())
             return;
         auto after = std::make_shared<std::optional<Keire::InputActionAssetDefinition>>();
@@ -115,7 +123,7 @@ namespace KeireEditor
                     return;
                 if (after->has_value())
                     m_Definition = **after;
-                m_Dirty = true;
+                m_Dirty = Keire::InputActionAsset::Encode(m_Definition) != m_SavedDefinition;
             },
             [this, after, before = std::move(before), asset]() mutable
             {
@@ -124,7 +132,7 @@ namespace KeireEditor
                 if (!after->has_value())
                     *after = m_Definition;
                 m_Definition = before;
-                m_Dirty = true;
+                m_Dirty = Keire::InputActionAsset::Encode(m_Definition) != m_SavedDefinition;
             },
             Keire::InputActionAsset::Encode(m_Definition).size(), [this, asset] { return m_Asset == asset; }));
     }
@@ -141,6 +149,7 @@ namespace KeireEditor
         m_Action = {};
         m_Binding = {};
         m_Definition = {};
+        m_SavedDefinition.clear();
         m_Source.clear();
         m_Persistence = {};
         m_Undo.Reset();

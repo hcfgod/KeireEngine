@@ -242,6 +242,10 @@ namespace KeireHub
                 installation.Ownership == InstallationOwnership::External &&
                 std::ranges::any_of(snapshot.Issues, [](const EditorInstallationIssue& issue)
                                     { return issue.Code == EditorInstallationIssueCode::RegistrationMismatch; });
+            const bool registrationOnly =
+                registrationRefreshAvailable && snapshot.Health == InstallationHealth::Damaged &&
+                std::ranges::all_of(snapshot.Issues, [](const EditorInstallationIssue& issue)
+                                    { return issue.Code == EditorInstallationIssueCode::RegistrationMismatch; });
             const auto projectCount =
                 std::ranges::count_if(projects,
                                       [&](const auto& project)
@@ -274,7 +278,8 @@ namespace KeireHub
                                                  !installation.PackageReceiptSha256.empty() &&
                                                  !ResolveEditorEntrypoint(installation).empty(),
                               .RegistrationRefreshAvailable = registrationRefreshAvailable,
-                              .HealthLabel = std::string(HealthLabel(snapshot.Health)),
+                              .HealthLabel = registrationOnly ? "Update needs verification"
+                                                              : std::string(HealthLabel(snapshot.Health)),
                               .HealthIssues = std::move(issues),
                               .Running = snapshot.Activity.Running,
                               .HasActiveTask = snapshot.Activity.HasActiveTask});

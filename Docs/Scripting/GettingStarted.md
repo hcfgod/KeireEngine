@@ -213,7 +213,10 @@ waiting synchronously to cancel and restart compilation. Queued Play waits for t
 an intermediate successful generation is not reloaded while another build is pending.
 An already loaded last-good runtime does not bypass an active replacement build when entering Play. The readiness
 check also waits if the worker has published success but the editor has not requested that generation's reload yet.
-If compilation fails, the existing last-good generation remains available. File-change detection is asynchronous;
+If compilation fails, the existing last-good generation remains available. Entering Play after a failed or cancelled
+build shows a status notice and Console warning that recent script changes are not running, with guidance to inspect
+Managed Build diagnostics or rebuild. A successful replacement clears this condition on the next Play session.
+File-change detection is asynchronous;
 Play requested before the editor detects a save may still enter the existing generation and subsequently hot-reload.
 Unchanged scripts reuse MSBuild compiler outputs. Each successful build still publishes an independent runtime
 generation; compiler caches live under `Library/ScriptAssemblies/Intermediate` and can be regenerated.

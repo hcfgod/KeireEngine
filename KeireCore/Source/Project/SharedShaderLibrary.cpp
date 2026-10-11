@@ -249,6 +249,7 @@ namespace Keire
         if (!existing.Version.empty())
             return existing;
         const Detail::AnchoredFileSystem fs(projectRoot);
+        fs.CreateDirectories("Assets");
         constexpr std::array templates{ShaderGraphTemplate::Lit, ShaderGraphTemplate::Unlit,
                                        ShaderGraphTemplate::Ui,  ShaderGraphTemplate::Fullscreen,
                                        ShaderGraphTemplate::Vfx, ShaderGraphTemplate::CustomGraphics};

@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AuthoringWidgets.h"
+#include "KeireClientInternal/Editor/InspectorFieldLayout.h"
 
 #include <algorithm>
 #include <cmath>
@@ -68,7 +69,7 @@ namespace KeireEditor
     {
         if (!std::isfinite(minimumTime) || !std::isfinite(maximumTime) || maximumTime <= minimumTime)
             throw std::invalid_argument("Curve editor time range must be finite and increasing.");
-        ui.Text(label);
+        ui.Text(Detail::InspectorVisibleLabel(label));
         std::vector<Keire::CurveKey> keys(value.Keys().begin(), value.Keys().end());
         bool changed = false;
         for (std::size_t index = 0; index < keys.size(); ++index)
@@ -98,7 +99,7 @@ namespace KeireEditor
 
     bool AuthoringValueEditors::Gradient(Keire::UiFrame& ui, const std::string_view label, Keire::ColorGradient& value)
     {
-        ui.Text(label);
+        ui.Text(Detail::InspectorVisibleLabel(label));
         std::vector<Keire::ColorGradientKey> keys(value.Keys().begin(), value.Keys().end());
         bool changed = false;
         for (std::size_t index = 0; index < keys.size(); ++index)

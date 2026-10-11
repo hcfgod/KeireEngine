@@ -50,6 +50,7 @@ namespace KeireEditor
         Keire::AssetId m_Action;
         Keire::AssetId m_Binding;
         Keire::InputActionAssetDefinition m_Definition;
+        std::vector<std::byte> m_SavedDefinition;
         std::filesystem::path m_Source;
         DocumentSourcePersistence m_Persistence;
         Keire::Ref<Keire::UndoContext> m_Undo;

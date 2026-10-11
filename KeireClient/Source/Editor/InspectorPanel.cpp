@@ -307,10 +307,14 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 else
                     sceneDocument.ResetComponent(entity.Id(), type);
             };
+            bool* currentHeaderExpanded = nullptr;
+            std::string currentHeaderTitle;
             const auto drawComponentHeader = [&](const Keire::Ref<Keire::Component>& component,
                                                  const Keire::ComponentRegistration& registration, bool& expanded,
                                                  const std::string_view title, const bool mixedValues)
             {
+                currentHeaderExpanded = &expanded;
+                currentHeaderTitle = title;
                 bool removed = false;
                 const auto ordinal = ComponentOrdinal(componentOrder, component);
                 const auto unique = registration.Type.ToString() + "." + std::to_string(ordinal);
@@ -393,6 +397,7 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                 if (!displayedComponent || !commonComponent(displayedComponent))
                     continue;
                 editingComponentOrdinal = ComponentOrdinal(componentOrder, displayedComponent);
+                currentHeaderExpanded = nullptr;
                 const auto componentStartY = ui.CursorScreenPosition().Y;
                 const auto displayedRegistration = scene->Components()->Find(displayedComponent->Type());
                 const bool mixedComponentValues =
@@ -1442,8 +1447,19 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         }
                     }
                 }
-                if (displayedRegistration)
-                    ui.StickySectionTitle(displayedRegistration->Name, componentStartY, ui.CursorScreenPosition().Y);
+                if (displayedRegistration && currentHeaderExpanded)
+                {
+                    const auto headerTitle = currentHeaderTitle;
+                    auto* expanded = currentHeaderExpanded;
+                    const auto headerId = "PinnedComponent##" + displayedRegistration->Type.ToString() + "." +
+                                          std::to_string(editingComponentOrdinal);
+                    ui.StickySectionHeader(headerId, componentStartY, ui.CursorScreenPosition().Y,
+                                           [&]
+                                           {
+                                               (void)drawComponentHeader(displayedComponent, *displayedRegistration,
+                                                                         *expanded, headerTitle, mixedComponentValues);
+                                           });
+                }
             }
             DrawAddComponentMenu(ui, entity, sceneDocument, scene);
             ui.TextColored(theme.MutedText, "Drop a C# script here to attach it");

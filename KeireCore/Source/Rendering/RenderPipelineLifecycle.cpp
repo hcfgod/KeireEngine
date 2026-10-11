@@ -91,7 +91,7 @@ namespace Keire::RenderBackend
         return NativeWindow;
     }
 
-    void RenderSharedState::EnqueueFrame(const std::shared_ptr<RenderFramePacket>& frame,
+    bool RenderSharedState::EnqueueFrame(const std::shared_ptr<RenderFramePacket>& frame,
                                          const std::function<void()>& capture)
     {
         const auto admissionStarted = std::chrono::steady_clock::now();
@@ -119,7 +119,9 @@ namespace Keire::RenderBackend
                                    return StopRenderQueue ||
                                           DeviceLifecycle.load(std::memory_order_acquire) !=
                                               RenderDeviceState::Running ||
-                                          !AvailableFrameSlots.empty();
+                                          !AvailableFrameSlots.empty() ||
+                                          VfxPipelineWarmupState.load(std::memory_order_acquire) ==
+                                              GpuVfxPipelineWarmupState::Compiling;
                                });
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
             if (observedAdmissionWait)
@@ -146,6 +148,10 @@ namespace Keire::RenderBackend
                     rethrowFailureAfterClosingFramesSettle(lock);
                 throw std::logic_error("Renderer is closing and cannot accept another frame.");
             }
+            // Warmup may start after EndFrame begins waiting for a slot. Defer capture at the actual admission
+            // boundary so the owner can keep pumping events even when no rendered frame can retire yet.
+            if (AvailableFrameSlots.empty())
+                return false;
             frame->FrameSlot = AvailableFrameSlots.front();
             AvailableFrameSlots.pop_front();
             frame->Timeline.AdmissionWaitMilliseconds =
@@ -250,10 +256,11 @@ namespace Keire::RenderBackend
         if (!executeSynchronously)
         {
             RenderQueueReady.notify_one();
-            return;
+            return true;
         }
         ExecuteAcceptedFrame(frame);
         RethrowTerminalFailure();
+        return true;
     }
 
     void RenderSharedState::Flush()

@@ -32,7 +32,8 @@ The Asset Browser is a focused editor panel backed by `AssetDatabase`. It presen
 breadcrumbs, search, List and Grid modes, adjustable thumbnail size, multi-selection, double-click open, drag payloads,
 rename, stable-identity duplicate, and recoverable Move to Trash operations. Folders, ordinary assets, and grouped
 sources share the same compact card and row chrome, including full-item hover and selection states plus a muted type
-line.
+line. **Filter current folder** matches names in the displayed folder, rather than searching all project subfolders.
+Use the tree or breadcrumbs to choose the folder whose contents you want to search.
 Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. A parent uses
 the same collapsed footprint as its peers and places a geometry-drawn directional disclosure beside its label, with
 the generated-child count in the card footer so neither control covers the preview. List mode uses the same visible
@@ -117,6 +118,14 @@ is still starting, or if the original instance has closed, Kéire discovers the 
 installation and opens the exact project solution before issuing `File.OpenFile` for the requested source. An explicit
 `devenv.exe` preference remains authoritative. Build Settings also exposes
 **Regenerate C# Project**. Generated root `.sln` and `.csproj` files are ignored by newly created projects.
+
+IDE generation also selects the editor's .NET SDK through a project-local `global.json` when no user SDK policy
+exists. This lets packaged-editor projects build in Visual Studio even when the system installation only has an
+older SDK. Existing project or ancestor policies are preserved. Kéire updates its own unchanged generated policy
+when the selected SDK moves, but preserves user edits; unchanged generation does not trigger an IDE reload.
+Visual Studio may still need time for its initial project restore and indexing before completion and definition
+navigation become available. A persistent `NETSDK1045` error is an SDK mismatch, not an indexing delay; check the
+project's SDK policy and Project Settings > Scripting.
 
 Managed builds keep strict warnings-as-errors behavior for correctness and analyzer diagnostics, but common unused local
 and field diagnostics (`CS0168`, `CS0169`, `CS0219`, and `CS0414`) remain non-blocking warnings. They are reported in the

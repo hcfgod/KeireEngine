@@ -61,6 +61,40 @@ namespace
     }
 } // namespace
 
+TEST_CASE("Invalid duplicate names explain corrections without touching the source or destination")
+{
+    KeireHubTests::TemporaryDirectory temporary;
+    const auto source = temporary.Path() / "Source";
+    const auto destination = temporary.Path() / "Duplicate";
+    WriteProject(source);
+    HubProjectCatalog catalog(temporary.Path() / "projects.json");
+    REQUIRE(catalog.Upsert(RecentProject(source)));
+    bool locked = false;
+    ProjectWorkflowManager workflow(catalog, Services(locked));
+    for (const auto& name : {std::string{}, std::string("QA:Invalid"), std::string(" Leading"),
+                             std::string("Trailing "), std::string(".."), std::string(129, 'x')})
+    {
+        INFO(name);
+        auto request = Request(destination);
+        request.DisplayName = name;
+        const auto result = workflow.PrepareDuplicate(request);
+        REQUIRE_FALSE(result);
+        CHECK(result.Error().Code == HubErrorCode::InvalidArgument);
+        if (name.empty())
+            CHECK(result.Error().Message.find("Enter a name") != std::string::npos);
+        else if (name.size() > 128)
+            CHECK(result.Error().Message.find("shorter name") != std::string::npos);
+        else
+            CHECK(result.Error().Message.find("whitespace") != std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(destination));
+        CHECK(std::filesystem::is_regular_file(source / "Assets" / "hello.txt"));
+        CHECK(catalog.Snapshot()->size() == 1);
+    }
+    const auto missingDestination = workflow.PrepareDuplicate(Request({}));
+    REQUIRE_FALSE(missingDestination);
+    CHECK(missingDestination.Error().Message.find("Choose a destination folder") != std::string::npos);
+}
+
 TEST_CASE("Project duplicate stages on a worker and publishes only during owner-thread commit")
 {
     KeireHubTests::TemporaryDirectory temporary;

@@ -4,6 +4,14 @@ $ErrorActionPreference = "Stop"
 $started = [Diagnostics.Stopwatch]::StartNew()
 $runFast = $Suite -in @("All", "Fast")
 $runIntegration = $Suite -in @("All", "Integration")
+$installerTransactionGates = @(
+    "test-installer-windows.ps1",
+    "test-hub-installer-windows.ps1"
+)
+$distributionPackageGates = @(
+    "test-editor-package-windows.ps1",
+    "test-hub-package-windows.ps1"
+)
 if ($runFast) { & (Join-Path $PSScriptRoot "test-run-routing-windows.ps1") }
 if ($runFast) { & (Join-Path $PSScriptRoot "test-package-runtime-wait-windows.ps1") }
 if ($runFast) { & (Join-Path $PSScriptRoot "test-patched-dependency-cache-windows.ps1") }
@@ -427,10 +435,6 @@ if ($LASTEXITCODE -ne 0) { throw "Repository layout checks failed." }
 if ($LASTEXITCODE -ne 0) { throw "Sandbox template synchronization checks failed." }
 & (Join-Path $PSScriptRoot "test-clean-windows.ps1")
 & (Join-Path $PSScriptRoot "test-managed-host-staging-windows.ps1")
-$installerTransactionGates = @(
-    "test-installer-windows.ps1",
-    "test-hub-installer-windows.ps1"
-)
 $installerPrerequisite = Join-Path $PSScriptRoot "prepare-install-worker-runtime-windows.ps1"
 $installerPrerequisiteSource = Get-Content -LiteralPath $installerPrerequisite -Raw
 foreach ($contract in @('Scripts\Windows', 'build.ps1', '-Generator ninja', '-Configuration $configuration',
@@ -446,18 +450,12 @@ foreach ($gate in $installerTransactionGates) {
                  $gateSource.Contains('test-install-worker-runtime-windows.ps1') -and
                  $gateSource.Contains('test-nsis-worker-runtime-windows.ps1')) `
         "$gate provisions and runs the worker and actual-NSIS transaction matrices"
-    & $gatePath
 }
-$distributionPackageGates = @(
-    "test-editor-package-windows.ps1",
-    "test-hub-package-windows.ps1"
-)
 foreach ($gate in $distributionPackageGates) {
     $gatePath = Join-Path $PSScriptRoot $gate
     $gateSource = Get-Content -LiteralPath $gatePath -Raw
     Assert-True ($gateSource.Contains('--verify-installation')) `
         "$gate exercises the real Dist executable verification contract"
-    & $gatePath
 }
 & $python.Executable @($python.PrefixArguments) (Join-Path $PSScriptRoot "test-prepare-distribution-snapshot.py")
 if ($LASTEXITCODE -ne 0) { throw "Distribution snapshot preparation checks failed." }
@@ -1991,6 +1989,9 @@ Write-Host ("Fast Windows script checks completed in {0:N2}s." -f $started.Elaps
 
 if ($runIntegration) {
 $integrationStarted = [Diagnostics.Stopwatch]::StartNew()
+foreach ($gate in ($installerTransactionGates + $distributionPackageGates)) {
+    & (Join-Path $PSScriptRoot $gate)
+}
 $identityFixture = Join-Path ([IO.Path]::GetTempPath()) ("template-identity-test-" + [guid]::NewGuid().ToString("N"))
 try {
     New-Item -ItemType Directory -Force (Join-Path $identityFixture "Scripts\Windows"), (Join-Path $identityFixture "Config") | Out-Null

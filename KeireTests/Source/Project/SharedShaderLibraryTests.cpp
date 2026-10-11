@@ -31,6 +31,24 @@ namespace
     };
 } // namespace
 
+TEST_CASE("Shared shader library initializes a new project without an Assets directory")
+{
+    SharedShaderFixture fixture;
+    REQUIRE(std::filesystem::remove(fixture.Root / "Assets"));
+    const auto library = Keire::EnsureSharedShaderLibrary(fixture.Root);
+    REQUIRE(library.Shaders.size() == 6);
+    const auto reopened = Keire::EnsureSharedShaderLibrary(fixture.Root);
+    REQUIRE(reopened.Shaders.size() == library.Shaders.size());
+    const Keire::Detail::AnchoredFileSystem fs(fixture.Root);
+    for (std::size_t index = 0; index < library.Shaders.size(); ++index)
+    {
+        const auto path = std::filesystem::path("Assets") / library.Shaders[index].SourcePath;
+        CHECK(fs.Exists(path));
+        CHECK(fs.Exists(std::filesystem::path(path.string() + ".keiremeta")));
+        CHECK(reopened.Shaders[index].Id == library.Shaders[index].Id);
+    }
+}
+
 TEST_CASE("Shared shader library pins deterministic sources and identities across projects")
 {
     SharedShaderFixture first;

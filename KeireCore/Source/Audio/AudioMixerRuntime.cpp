@@ -445,8 +445,11 @@ namespace Keire::Detail
                         reflected += m_Delay[delayedFrame * m_Channels + channel] *
                                      std::pow(decay, static_cast<float>(tap + 1U));
                     }
+                    // Normalize inside the feedback loop: summing the taps without averaging can exceed unity
+                    // feedback even at the default decay, causing a quiet sustained input to grow without bound.
+                    reflected /= static_cast<float>(tapScales.size());
                     m_Delay[m_DelayCursor * m_Channels + channel] = sample + reflected;
-                    value = sample * (1.0F - wet) + reflected * (wet / static_cast<float>(tapScales.size()));
+                    value = sample * (1.0F - wet) + reflected * wet;
                     break;
                 }
                 case AudioGraphNodeType::ConvolutionReverb:

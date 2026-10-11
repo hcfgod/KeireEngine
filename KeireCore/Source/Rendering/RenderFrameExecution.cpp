@@ -133,30 +133,15 @@ namespace Keire::RenderBackend
         if (!FrameActive)
             throw std::logic_error("No render frame is active.");
         FrameActive = false;
-        if (VfxPipelineWarmupState.load(std::memory_order_acquire) == GpuVfxPipelineWarmupState::Compiling)
-        {
-            std::scoped_lock lock(RenderQueueMutex);
-            if (RenderThread.joinable() && AvailableFrameSlots.empty())
-            {
-                // Pipeline creation can be unusually slow on a cold driver cache. Keep the owner thread pumping
-                // native events instead of blocking for a frame slot; the most recently presented frame remains
-                // visible and a fresh frame will be captured as soon as the render thread catches up.
-                PendingSceneRequests.clear();
-                PendingRuntimeUiSubmissions.clear();
-                PendingUiSurfaceTextureBindings.clear();
-                CaptureRequests.clear();
-                CaptureRuntimeUiCommands.clear();
-                return;
-            }
-        }
         auto frame = std::make_shared<RenderFramePacket>();
         frame->Id = CaptureFrameId;
         frame->UiMaterialTime = PendingUiMaterialTime;
         frame->Timeline.OwnerUpdateMilliseconds =
             std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - CaptureFrameStartedAt).count();
+        bool accepted = false;
         try
         {
-            EnqueueFrame(
+            accepted = EnqueueFrame(
                 frame,
                 [this, frame, drawData]
                 {
@@ -335,6 +320,12 @@ namespace Keire::RenderBackend
         PendingSceneRequests.clear();
         PendingRuntimeUiSubmissions.clear();
         PendingUiSurfaceTextureBindings.clear();
+        if (!accepted)
+        {
+            CaptureRequests.clear();
+            CaptureRuntimeUiCommands.clear();
+            return;
+        }
         PendingUiTextureRetirements.clear();
     }
 

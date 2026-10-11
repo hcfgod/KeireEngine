@@ -139,6 +139,7 @@ namespace Keire
         static void BlockNextAcceptedFrame(RenderSystem& renderer) noexcept;
         [[nodiscard]] static bool WaitForAcceptedFrameBlock(RenderSystem& renderer);
         [[nodiscard]] static bool WaitForFrameAdmissionWaiter(RenderSystem& renderer);
+        static void SetGpuVfxWarmupPendingForTest(RenderSystem& renderer, bool pending);
         static void ReleaseAcceptedFrameBlock(RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t SceneCaptureEnumerationCount(const RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t RuntimeUiCaptureEnumerationCount(const RenderSystem& renderer) noexcept;

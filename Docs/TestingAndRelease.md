@@ -296,8 +296,10 @@ bash Scripts/Tests/test-unix.sh --suite fast
 bash Scripts/Tests/test-unix.sh --suite integration
 ```
 
-The umbrella command runs both suites. Fast checks batch repository scans through `rg` and print elapsed time;
-integration keeps the Unicode, rename, rollback, contamination, and launcher fixtures isolated and reports its own
+The umbrella command runs both suites. Fast checks batch repository scans through `rg` and print elapsed time.
+Native installer transaction and distribution package runtime gates run only in Integration or All. Fast still
+checks their script contracts and does not start those native prerequisite builds.
+Integration keeps the Unicode, rename, rollback, contamination, and launcher fixtures isolated and reports its own
 timing. The harnesses exercise argument validation, launcher exit propagation, dependency mappings, generated identity,
 package-stage requirements, public dependency isolation, and safe cleanup behavior without performing a full release
 build. Editor behavior is asserted by compiled controller/document tests rather than source-string matching.

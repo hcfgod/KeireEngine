@@ -397,6 +397,8 @@ namespace
                         {
                             KeireHub::ReloadProjectRegistry(m_Registry);
                             m_ProjectMetadataRefreshPending = true;
+                            m_ProjectsUi.RevealCreatedProject(creation->ProjectName);
+                            m_Page = KeireHub::HubPage::Projects;
                             m_Notice = "Project created at " + KeireHub::Utf8Path(creation->Result->Root) + ".";
                             m_NoticeError = false;
                             if (m_ActiveCreationOpenAfter)
@@ -833,10 +835,7 @@ namespace
                     {
                         if (!m_ProjectMutations)
                             throw std::logic_error("Asynchronous project mutations are unavailable.");
-                        auto started =
-                            m_ProjectMutations->StartDuplicate(command.ProjectId, command.Path, command.DisplayName);
-                        if (!started)
-                            RequireWorkflowSuccess(KeireHub::HubStatus::Failure(started.Error()));
+                        RequireWorkflowSuccess(SubmitProjectDuplicate(*m_ProjectMutations, m_ProjectsUi, command));
                         m_Notice = "Duplicating " + command.DisplayName + " in the background...";
                     }
                     else
@@ -848,6 +847,8 @@ namespace
             }
             catch (const std::exception& error)
             {
+                if (command.Type == KeireHub::HubProjectUiCommandType::Duplicate)
+                    m_ProjectsUi.ResolveDuplicateSubmission(error.what());
                 ReportUnexpected("The project action could not be completed.", error);
             }
         }

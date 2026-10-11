@@ -45,6 +45,19 @@ namespace KeireEditor
         return std::to_string(selectionCount) + " messages selected.";
     }
 
+    Detail::ConsoleRowHighlights Detail::ConsoleHighlights(const Keire::UiColor panel,
+                                                           const Keire::UiColor text) noexcept
+    {
+        // Keep severity text distinct from its highlight, including when it matches the theme accent.
+        const auto tint = [&](const float amount)
+        {
+            return Keire::UiColor{panel.Red + (text.Red - panel.Red) * amount,
+                                  panel.Green + (text.Green - panel.Green) * amount,
+                                  panel.Blue + (text.Blue - panel.Blue) * amount, 1.0F};
+        };
+        return {tint(0.12F), tint(0.08F), tint(0.18F)};
+    }
+
     namespace
     {
         [[nodiscard]] Keire::UiColor LogColor(const Keire::LogLevel level,
@@ -230,8 +243,11 @@ namespace KeireEditor
             constexpr float preferredDetailHeight = 88.0F;
             constexpr float detailSpacing = 8.0F;
             const auto content = ui.ContentAvailable();
-            const float detailHeight = std::clamp(content.Height - detailSpacing - 1.0F, 1.0F, preferredDetailHeight);
-            const float logHeight = std::max(content.Height - detailHeight - detailSpacing, 1.0F);
+            // Keep log rows usable in a short dock. Details return automatically when the panel is enlarged.
+            const bool showDetails = content.Height >= 96.0F;
+            const float detailHeight = showDetails ? std::min(content.Height * 0.4F, preferredDetailHeight) : 0.0F;
+            const float logHeight =
+                std::max(content.Height - detailHeight - (showDetails ? detailSpacing : 0.0F), 1.0F);
             const auto drawEntries = [&](const auto& entries)
             {
                 std::vector<std::uint64_t> available;
@@ -295,6 +311,10 @@ namespace KeireEditor
                         formatted = "\xC3\x97" + std::to_string(projected.Repetitions) + "  " + formatted;
                     auto id = ui.PushId(std::to_string(entry->Serial));
                     auto textColor = ui.PushStyleColor(Keire::UiStyleColorRole::Text, entry->Color);
+                    const auto highlights = Detail::ConsoleHighlights(theme.Panel, entry->Color);
+                    auto selectedColor = ui.PushStyleColor(Keire::UiStyleColorRole::Header, highlights.Selected);
+                    auto hoveredColor = ui.PushStyleColor(Keire::UiStyleColorRole::HeaderHovered, highlights.Hovered);
+                    auto activeColor = ui.PushStyleColor(Keire::UiStyleColorRole::HeaderActive, highlights.Active);
                     if (ui.Selectable(formatted, m_Selection.Contains(entry->Serial)))
                         m_Selection.Select(visibleOrder, entry->Serial, ui.ShiftDown(), ui.ControlDown());
                     if (ui.LastItemState().DoubleClicked)
@@ -343,15 +363,18 @@ namespace KeireEditor
                     findSelected(m_Messages);
             }
 
-            ui.Separator();
-            if (auto details = ui.BeginChild("ConsoleDetails", {0.0F, detailHeight}, true); details)
+            if (showDetails)
             {
-                if (selectedDetail)
-                    ui.TextColoredWrapped(selectedDetail->first, selectedDetail->second);
-                else if (selected.size() > 1)
-                    ui.TextColored(theme.MutedText, Detail::FormatConsoleSelectionSummary(selected.size()));
-                else
-                    ui.TextColored(theme.MutedText, "Select a message to inspect its full text.");
+                ui.Separator();
+                if (auto details = ui.BeginChild("ConsoleDetails", {0.0F, detailHeight}, true); details)
+                {
+                    if (selectedDetail)
+                        ui.TextColoredWrapped(selectedDetail->first, selectedDetail->second);
+                    else if (selected.size() > 1)
+                        ui.TextColored(theme.MutedText, Detail::FormatConsoleSelectionSummary(selected.size()));
+                    else
+                        ui.TextColored(theme.MutedText, "Select a message to inspect its full text.");
+                }
             }
         }
     }

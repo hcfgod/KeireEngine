@@ -4,6 +4,7 @@
 
 #include "Keire/Assets/AssetSystem.h"
 #include "Keire/ECS/Components/AnimatorComponent.h"
+#include "Keire/ECS/Components/TransformComponent.h"
 #include "Keire/Scenes/Scene.h"
 #include "Keire/Scenes/SceneAsset.h"
 #include "Keire/Scenes/SceneRuntimeWorld.h"
@@ -17,6 +18,30 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+TEST_CASE("Play change review exposes rotation values and applies the original quaternion")
+{
+    const auto asset = Keire::AssetId::Generate();
+    const auto editing = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition("Rotation review"));
+    const auto entity = editing->CreateEntity("Actor");
+    const auto runtime = Keire::CreateRef<Keire::Scene>(asset, editing->Snapshot());
+    const Keire::Quaternion rotation{0.0F, 1.0F, 0.0F, 0.0F};
+    runtime->FindEntity(entity.Id()).GetComponent<Keire::TransformComponent>()->SetLocalRotation(rotation);
+    KeireEditor::ScenePlayChangeSet changes(editing, runtime);
+    REQUIRE(changes.Changes().size() == 1);
+    const auto& change = changes.Changes().front();
+    CHECK(change.Before == "Quaternion X: 0.000000, Y: 0.000000, Z: 0.000000, W: 1.000000");
+    CHECK(change.After == "Quaternion X: 0.000000, Y: 1.000000, Z: 0.000000, W: 0.000000");
+    CHECK(change.Origin == KeireEditor::ScenePlayChangeOrigin::Runtime);
+    CHECK_FALSE(change.Selected);
+    changes.SetSelected(change.Id, true);
+    const auto applied = Keire::CreateRef<Keire::Scene>(asset, changes.BuildAppliedDefinition());
+    CHECK(applied->FindEntity(entity.Id()).GetComponent<Keire::TransformComponent>()->LocalRotation() == rotation);
+    CHECK(entity.GetComponent<Keire::TransformComponent>()->LocalRotation() == Keire::Quaternion{});
+    applied->Close();
+    runtime->Close();
+    editing->Close();
+}
 
 TEST_CASE("Play change review distinguishes left and right arm IK from component enabled")
 {

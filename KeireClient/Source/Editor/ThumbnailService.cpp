@@ -1,6 +1,7 @@
 #include "KeireClient/Editor/ThumbnailService.h"
 
 #include "KeireClient/Editor/ThumbnailArtwork.h"
+#include "KeireClientInternal/Editor/AssetPreviewReadiness.h"
 
 #include "Keire/Audio/AudioAssets.h"
 #include "KeireInternal/FileSystem.h"
@@ -1054,12 +1055,29 @@ namespace KeireEditor
 
     std::optional<bool> PrepareGeneratedAssetThumbnail(const Keire::Ref<Keire::AssetSystem>& assets,
                                                        const Keire::AssetSourceRecord& source,
-                                                       ThumbnailRequest& request)
+                                                       ThumbnailRequest& request,
+                                                       const Keire::AssetImportState importState)
     {
         if (!assets)
             return std::nullopt;
+        if (source.Type == Keire::AudioClipAsset::StaticType())
+        {
+            if (Detail::ShouldDeferAssetPreviewLoad(assets->TryGetType(source.Id), source.Type, importState,
+                                                    Keire::AudioClipAsset::StaticType()))
+                return false;
+            const auto handle = assets->Load<Keire::AudioClipAsset>(source.Id, Keire::AssetPriority::Low);
+            if (handle.State() != Keire::AssetState::Reloading)
+                request.PreviewAsset = handle.TryGetLoaded();
+            request.Missing = handle.State() == Keire::AssetState::Failed;
+            if (!request.PreviewAsset && request.Missing)
+                request.PreviewAsset = handle.Get();
+            return static_cast<bool>(request.PreviewAsset);
+        }
         if (source.Type == Keire::VfxEffectAsset::StaticType())
         {
+            if (Detail::ShouldDeferAssetPreviewLoad(assets->TryGetType(source.Id), source.Type, importState,
+                                                    Keire::VfxEffectAsset::StaticType()))
+                return false;
             const auto handle = assets->Load<Keire::VfxEffectAsset>(source.Id, Keire::AssetPriority::Low);
             request.PreviewAsset = handle.TryGetLoaded();
             request.Missing = handle.State() == Keire::AssetState::Failed;

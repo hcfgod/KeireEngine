@@ -4,6 +4,7 @@
 #include "Keire/Scripting/ScriptSystem.h"
 
 #include <cstdint>
+#include <string_view>
 
 namespace KeireEditor
 {
@@ -20,6 +21,21 @@ namespace KeireEditor
         Ready,
         Unavailable
     };
+
+    [[nodiscard]] constexpr std::string_view
+    PlayModeLastGoodScriptNotice(const bool requiresManagedRuntime, const Keire::ManagedBuildState buildState,
+                                 const Keire::ManagedReloadState reloadState) noexcept
+    {
+        if (!requiresManagedRuntime || reloadState != Keire::ManagedReloadState::Active)
+            return {};
+        if (buildState == Keire::ManagedBuildState::Failed)
+            return "Playing with the last successful script build. The latest build failed; recent script changes "
+                   "are not running. Check Managed Build diagnostics in the Console.";
+        if (buildState == Keire::ManagedBuildState::Cancelled)
+            return "Playing with the last successful script build. The latest build was cancelled; recent script "
+                   "changes are not running. Build Scripts to apply them.";
+        return {};
+    }
 
     [[nodiscard]] constexpr PlayModeInputReadiness
     EvaluatePlayModeInputReadiness(const Keire::AssetState state) noexcept

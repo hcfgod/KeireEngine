@@ -45,7 +45,7 @@ structural and API drift; they do not establish that every prose claim or UI wor
 
 ## Complete Guide Library
 
-All 109 published guides and progress records are listed below in the same groups used by the documentation website.
+All 110 published guides and progress records are listed below in the same groups used by the documentation website.
 
 ### Start Here
 
@@ -157,6 +157,7 @@ All 109 published guides and progress records are listed below in the same group
 | [Editor Workflow Performance](EditorWorkflowPerformance.md) | Measured editor latency, verified optimizations, limitations, and workflow testing checklist. |
 | [Editor workflow QA](OvernightEditorQA0926.md) | Recorded editor workflow checks and follow-up findings. |
 | [Testing and Release](TestingAndRelease.md) | Test matrix, sanitizers, smoke modes, regression scripts, packages, and final handoff checks. |
+| [Windows Installer Performance](InstallerPerformance.md) | Extraction benchmarks, compression tradeoffs, integrity checks, and progress diagnostics. |
 | [Package Archives](PackageArchives.md) | Deterministic archives, manifest validation, extraction safety, package identities, and publisher workflows. |
 | [Asset Packages and Project Package Manager](AssetPackages.md) | Deterministic project-content packages, registry mounts, selective imports, executable-code consent, and recovery. |
 | [Diagnostic Bundles](DiagnosticBundles.md) | Local collection, exact frozen preview, privacy redaction, section opt-outs, and atomic archive publication. |

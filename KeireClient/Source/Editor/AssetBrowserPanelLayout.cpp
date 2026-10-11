@@ -95,16 +95,6 @@ namespace KeireEditor
                         request.PreviewAsset = handle.Get();
                     ready = static_cast<bool>(request.PreviewAsset);
                 }
-                else if (assets && record.Type == Keire::AudioClipAsset::StaticType())
-                {
-                    const auto handle = assets->Load<Keire::AudioClipAsset>(record.Id, Keire::AssetPriority::Low);
-                    if (handle.State() != Keire::AssetState::Reloading)
-                        request.PreviewAsset = handle.TryGetLoaded();
-                    request.Missing = handle.State() == Keire::AssetState::Failed;
-                    if (!request.PreviewAsset && request.Missing)
-                        request.PreviewAsset = handle.Get();
-                    ready = static_cast<bool>(request.PreviewAsset);
-                }
                 else if (assets && record.Type == Keire::PrefabAsset::StaticType())
                 {
                     const auto prefabSource =
@@ -169,7 +159,8 @@ namespace KeireEditor
                         ready = dependenciesReady;
                     }
                 }
-                else if (const auto generated = PrepareGeneratedAssetThumbnail(assets, record, request))
+                else if (const auto generated = PrepareGeneratedAssetThumbnail(
+                             assets, record, request, editor.AssetBrowserDatabase()->ImportStatus(record.Id).State))
                     ready = *generated;
                 if (ready && Thumbnails->Request(std::move(request)))
                     ImageDigests.emplace(record.Id, std::move(digest));
@@ -199,7 +190,10 @@ namespace KeireEditor
             if (ui.Button("Trash"))
                 OpenTrashPopup = true;
             ui.SameLine();
-            (void)ui.InputTextWithHint("##ProjectSearch", "Search Assets", Search);
+            (void)ui.InputTextWithHint("##ProjectSearch", "Filter current folder", Search);
+            if (ui.LastItemState().Hovered)
+                ui.SetTooltip("Filters names in the current folder. Open another folder to search its assets.",
+                              {.Delayed = true});
             if (Mode == ViewMode::Grid && ui.SliderFloat("Thumbnail Size", ThumbnailSize, 48.0F, 160.0F) &&
                 ui.LastItemState().DeactivatedAfterEdit)
                 SavePreferences();

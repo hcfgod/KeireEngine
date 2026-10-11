@@ -4,6 +4,31 @@
 
 #include <initializer_list>
 
+TEST_CASE("Play Mode explains last-good scripts only after a failed or cancelled replacement")
+{
+    using KeireEditor::PlayModeLastGoodScriptNotice;
+    for (const auto state : {Keire::ManagedBuildState::Failed, Keire::ManagedBuildState::Cancelled})
+    {
+        CHECK(KeireEditor::EvaluatePlayModeReadiness(true, true, state, Keire::ManagedReloadState::Active) ==
+              KeireEditor::PlayModeReadiness::Ready);
+        const auto notice = PlayModeLastGoodScriptNotice(true, state, Keire::ManagedReloadState::Active);
+        CHECK(notice.find("last successful script build") != std::string_view::npos);
+        CHECK(notice.find("changes are not running") != std::string_view::npos);
+        CHECK(PlayModeLastGoodScriptNotice(false, state, Keire::ManagedReloadState::Active).empty());
+        for (const auto reload : {Keire::ManagedReloadState::Idle, Keire::ManagedReloadState::Prepared,
+                                  Keire::ManagedReloadState::Failed, Keire::ManagedReloadState::Cancelled})
+            CHECK(PlayModeLastGoodScriptNotice(true, state, reload).empty());
+    }
+    for (const auto state :
+         {Keire::ManagedBuildState::Idle, Keire::ManagedBuildState::Generating, Keire::ManagedBuildState::Compiling,
+          Keire::ManagedBuildState::Publishing, Keire::ManagedBuildState::Succeeded})
+        CHECK(PlayModeLastGoodScriptNotice(true, state, Keire::ManagedReloadState::Active).empty());
+    CHECK(PlayModeLastGoodScriptNotice(true, Keire::ManagedBuildState::Failed, Keire::ManagedReloadState::Active)
+              .find("Console") != std::string_view::npos);
+    CHECK(PlayModeLastGoodScriptNotice(true, Keire::ManagedBuildState::Cancelled, Keire::ManagedReloadState::Active)
+              .find("Build Scripts") != std::string_view::npos);
+}
+
 TEST_CASE("Play Mode waits for the first managed runtime generation")
 {
     using KeireEditor::EvaluatePlayModeReadiness;

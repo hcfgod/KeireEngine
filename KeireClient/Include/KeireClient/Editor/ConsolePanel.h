@@ -37,6 +37,15 @@ namespace KeireEditor
         [[nodiscard]] std::string FormatConsoleEntry(std::uint64_t frame, std::string_view category,
                                                      std::string_view text);
         [[nodiscard]] std::string FormatConsoleSelectionSummary(std::size_t selectionCount);
+
+        struct ConsoleRowHighlights final
+        {
+            Keire::UiColor Selected;
+            Keire::UiColor Hovered;
+            Keire::UiColor Active;
+        };
+
+        [[nodiscard]] ConsoleRowHighlights ConsoleHighlights(Keire::UiColor panel, Keire::UiColor text) noexcept;
     } // namespace Detail
 
     class ConsoleSelection final

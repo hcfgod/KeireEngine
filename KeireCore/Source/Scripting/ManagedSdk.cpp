@@ -31,6 +31,42 @@ namespace Keire::Detail
         }
     } // namespace
 
+    void SynchronizeManagedIdeSdk(const std::filesystem::path& projectRoot,
+                                  const std::filesystem::path& dotnetExecutable)
+    {
+        if (dotnetExecutable.empty() || !HasDotnet10Sdk(dotnetExecutable))
+            return;
+        const auto root = std::filesystem::absolute(projectRoot).lexically_normal();
+        const auto policy = root / "global.json";
+        const auto receipt = root / "Library/ScriptAssemblies/IdeSdk/global.generated.json";
+        if (std::filesystem::exists(policy))
+        {
+            // A user-authored or edited policy always wins. Only update our exact previous output.
+            if (!std::filesystem::is_regular_file(receipt) ||
+                ReadTextFile(policy, 1024ULL * 1024U) != ReadTextFile(receipt, 1024ULL * 1024U))
+                return;
+        }
+        else
+        {
+            for (auto parent = root.parent_path(); !parent.empty(); parent = parent.parent_path())
+            {
+                if (std::filesystem::exists(parent / "global.json"))
+                    return;
+                if (parent == parent.parent_path())
+                    break;
+            }
+        }
+        const nlohmann::json document = {
+            {"sdk",
+             {{"version", "10.0.100"},
+              {"rollForward", "latestFeature"},
+              {"allowPrerelease", false},
+              {"paths", {PathToUtf8(std::filesystem::absolute(dotnetExecutable).parent_path()), "$host$"}}}}};
+        const auto text = document.dump(2) + '\n';
+        (void)WriteTextFileAtomicallyIfChanged(policy, text);
+        (void)WriteTextFileAtomicallyIfChanged(receipt, text);
+    }
+
     ManagedSdkConfiguration ReadManagedSdkConfiguration(const std::filesystem::path& projectRoot,
                                                         ManagedSdkConfiguration fallback)
     {

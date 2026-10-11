@@ -1,4 +1,6 @@
+#include "KeireHub/HubProjectMutationIntegration.h"
 #include "KeireHub/HubProjectMutationWorkflow.h"
+#include "KeireHub/HubProjectsUi.h"
 
 #include <doctest/doctest.h>
 
@@ -13,6 +15,20 @@
 
 using namespace KeireHub;
 using namespace std::chrono_literals;
+
+TEST_CASE("Duplicate submission reports synchronous failure instead of announcing background success")
+{
+    HubProjectMutationWorkflow workflow({});
+    HubProjectsUi ui;
+    const auto status = SubmitProjectDuplicate(workflow, ui,
+                                               {.Type = HubProjectUiCommandType::Duplicate,
+                                                .ProjectId = "unavailable-source",
+                                                .Path = "unused-duplicate-destination",
+                                                .DisplayName = "Duplicate"});
+    REQUIRE_FALSE(status);
+    CHECK(status.Error().Message == "Project mutation services are unavailable.");
+    CHECK(workflow.Snapshot()->State == HubProjectMutationState::Failed);
+}
 
 namespace
 {
@@ -229,6 +245,8 @@ TEST_CASE("Project mutation translates preparation and commit exceptions into te
              return HubStatus::Success();
          }});
 
+    HubDuplicateSubmission submission;
+    REQUIRE(submission.Begin());
     const auto rejected = workflow.StartDuplicate(SourceId, "Rejected", "Rejected");
     REQUIRE(rejected);
     CHECK(rejected.Value() == 1);
@@ -236,10 +254,18 @@ TEST_CASE("Project mutation translates preparation and commit exceptions into te
     CHECK(rejectedSnapshot->State == HubProjectMutationState::Failed);
     REQUIRE(rejectedSnapshot->Failure);
     CHECK(rejectedSnapshot->Failure->Code == HubErrorCode::ProjectValidationFailed);
+    submission.ResolveStart(*rejectedSnapshot);
+    CHECK_FALSE(submission.CloseRequested);
+    CHECK_FALSE(submission.Waiting);
+    CHECK(submission.Error == "The source is invalid.");
 
+    REQUIRE(submission.Begin());
     const auto started = workflow.StartDuplicate(SourceId, "Failure", "Failure");
     REQUIRE(started);
     CHECK(started.Value() == 2);
+    submission.ResolveStart(*workflow.Snapshot());
+    CHECK(submission.CloseRequested);
+    CHECK(submission.Error.empty());
     REQUIRE(PollUntilTerminal(workflow));
     const auto failed = workflow.Snapshot();
     CHECK(failed->OperationId == started.Value());

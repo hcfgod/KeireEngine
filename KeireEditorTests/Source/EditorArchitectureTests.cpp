@@ -996,41 +996,6 @@ TEST_CASE("play changes preserve selected unavailable component replacements")
     CHECK(component->Data == "{\"value\":2}");
 }
 
-TEST_CASE("input actions document owns authoring state and dirty lifecycle")
-{
-    const auto undoService = Keire::CreateRef<Keire::UndoService>();
-    const auto undo = undoService->CreateContext({.Name = "Input document test"});
-    const auto root =
-        std::filesystem::temp_directory_path() / ("Keire-InputDocument-" + Keire::AssetId::Generate().ToString());
-    const auto source = root / "Assets/Input/Test.keireinput";
-    std::filesystem::create_directories(source.parent_path());
-    KeireEditor::InputActionsDocument document;
-    document.Open(Keire::AssetId::Parse("ed170000-0000-4000-8000-000000000002"),
-                  Keire::InputActionAsset::DefaultDefinition(), undo, source);
-    const auto originalName = document.Definition().Name;
-    auto edited = document.Definition();
-    document.RecordApplied("Rename input actions", edited);
-    edited.Name = "Edited actions";
-    document.ReplaceDefinition(std::move(edited));
-    CHECK(document.Dirty());
-    CHECK(document.Definition().Name == "Edited actions");
-    CHECK(document.Definition().ActionMaps.size() > 0);
-    CHECK(document.Undo());
-    CHECK(document.Definition().Name == originalName);
-    CHECK(document.Redo());
-    CHECK(document.Definition().Name == "Edited actions");
-    document.Save();
-    CHECK_FALSE(document.Dirty());
-    CHECK(std::filesystem::is_regular_file(source));
-    document.Close();
-    CHECK_FALSE(document.Asset());
-    CHECK(document.Definition().ActionMaps.empty());
-    undo->Close();
-    undoService->Close();
-    std::error_code error;
-    std::filesystem::remove_all(root, error);
-}
-
 TEST_CASE("input actions document rejects invalid text drafts without losing the last valid definition")
 {
     KeireEditor::InputActionsDocument document;

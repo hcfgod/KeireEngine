@@ -57,6 +57,7 @@ Var KeireHubInstallerMutex
 Var KeireInstallWorkerPending
 Var KeireHubStartMenuSelected
 Var KeireHubDesktopSelected
+Var KeireExtractionStarted
 
 !macro KeireHubTestTrace MESSAGE
 !ifdef KEIRE_INSTALL_TEST_TRACE_PATH
@@ -72,8 +73,7 @@ OutFile "${OUTPUT_PATH}"
 InstallDir "$LOCALAPPDATA\Programs\${INSTALL_FOLDER_NAME}"
 InstallDirRegKey HKCU "${HUB_REGISTRY_KEY}" "InstallDirectory"
 RequestExecutionLevel user
-SetCompressor lzma
-SetCompressorDictSize 8
+SetCompressor zlib
 ManifestDPIAware true
 Icon "${SETUP_ICON_PATH}"
 UninstallIcon "${SETUP_ICON_PATH}"
@@ -251,8 +251,16 @@ Section "${PRODUCT_NAME} (required)" MainSection
     SetErrorLevel 1
     Abort
 HubDestinationReady:
+    System::Call 'kernel32::GetTickCount()i .r0'
+    StrCpy $KeireExtractionStarted $0
+    DetailPrint "Extracting Hub files..."
+    SetDetailsPrint none
     SetOutPath "$PLUGINSDIR\payload"
     File /r "${SOURCE_DIRECTORY}\*"
+    SetDetailsPrint both
+    System::Call 'kernel32::GetTickCount()i .r0'
+    IntOp $0 $0 - $KeireExtractionStarted
+    DetailPrint "Hub extraction elapsed_ms=$0"
     !insertmacro KeireHubTestTrace "payload extracted"
     FileOpen $0 "$PLUGINSDIR\payload\.keire-hub-install" w
     IfErrors HubInstallWorkerFailed
@@ -268,10 +276,9 @@ HubDestinationReady:
     Goto HubInstallWorkerFailed
 !endif
     DetailPrint "Verifying and installing the Hub payload..."
-    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product hub --source "$PLUGINSDIR\payload" --root "$INSTDIR"'
+    nsExec::ExecToLog '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product hub --source "$PLUGINSDIR\payload" --root "$INSTDIR"'
     Pop $0
-    Pop $1
-    DetailPrint "$1"
+    StrCpy $1 "See the installation details for the completed phases and any file verification errors."
     !insertmacro KeireHubTestTrace "install-deferred exit=$0 output=$1"
     StrCmp $0 "0" 0 HubInstallWorkerRecover
     StrCpy $KeireInstallWorkerPending "1"

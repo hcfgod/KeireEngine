@@ -5,6 +5,12 @@
 
 **Build worlds. Keep control.**
 
+The Play Mode Changes review shows wrapped **Before** and **After** values for each change, so long values remain
+readable before you choose which runtime edits to keep. Rotation changes show labeled quaternion components.
+
+Play can use the last successful scripts after a failed or cancelled build. A status notice and Console warning
+explain when recent edits are not running; see [script build recovery](Docs/Scripting/GettingStarted.md#build-output-and-last-good-behavior).
+
 Choose **Window > Presentation** to switch between VSync, Mailbox, and Immediate (VSync off). The menu shows the
 active mode, disables modes unavailable on your GPU, and remembers your choice for this project's editor session.
 Games can query support and change modes through C# `Screen.PresentMode`, `Screen.TrySetPresentMode`, and
@@ -33,10 +39,20 @@ See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current s
 Shader Graph focus selects the graph's undo history. Edit output values through the expanded **Input Defaults**.
 Newly created graph nodes are brought into view automatically, including function and blackboard additions.
 Newly opened graphs frame their nodes, and narrow docks wrap authoring controls. Creating or revealing an asset clears
-the Project search so the selected asset remains visible.
+the Project search so the selected asset remains visible. **Filter current folder** searches the displayed folder;
+open a different folder to search its assets.
+
+Prefab Overrides keeps every action accessible in narrow panels by stacking buttons and wrapping help and identifiers.
 
 Property-only materials retain incompatible shader overrides in the Inspector's **Inactive Overrides** section.
 The Inspector reserves scrollbar space so asset previews remain stable when resizing the panel or changing selections.
+After project creation, the Hub shows the Projects page filtered to the new project's name. Clear the search to
+see your other projects; your card/list view and sort preference are preserved.
+
+Component headers stay accessible while scrolling: use the pinned title to collapse the component or its action
+button to open the same component menu, including selection actions when multiple entities are selected.
+After intentionally updating an externally installed Editor, the Hub may show **Update needs verification**.
+Use **Refresh registration** in Installs to verify its files and register the updated package before opening projects.
 With multiple entities selected, **Add Component to Selection** adds missing singleton components without replacing
 existing values; the component menu removes the matching instance from the selection. Component titles remain visible
 while scrolling through their fields. Ctrl-click or double-click numeric fields to type or paste arithmetic such as
@@ -73,6 +89,21 @@ systems and cooked content selected by a project.
 Kéire is currently **version 0.4.7 and pre-1.0**. Its foundations are production-oriented, but interfaces, content
 formats, and release procedures may still change before the first stable release. The project documents current
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
+Renaming an open scene in the Asset Browser or Inspector preserves its identity and pending edits. Clean scenes update
+their saved display name automatically; genuine external source changes still prompt for conflict resolution.
+C# fields declared as `SceneAsset` offer only scene assets in the Inspector picker, with `None` for optional references.
+Curve and gradient Inspector headings display their readable names without internal widget ID suffixes.
+Audio Inspector preview messages and import errors wrap; **Reimport Audio** appears below the playback controls.
+Import settings show **Apply and Reimport** and **Revert Import Settings** on separate rows so both remain accessible
+in narrow Inspectors. Instructions and external-change warnings also wrap to the panel width.
+Algorithmic reverb keeps its combined feedback below unity throughout the supported decay range, so sustained
+sources produce a decaying tail rather than runaway feedback. Mixer meters remain useful for checking ordinary
+gain buildup when combining dry signals, sends, and effects.
+Clipping indicators have reserved space in the Mix Console, keeping channel controls in place as levels change.
+Reverb Zone priority applies only to volumes influencing the listener. Leaving all zone fade regions restores the
+authored base mixer, including its reverb effects and sends.
+VFX edit previews and browser/Inspector thumbnails wait for initial asset imports when opening a project with a fresh
+cache, then start automatically.
 Windows Hub and Editor 0.4.7 are active in immutable signed catalog sequence 23. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
@@ -95,7 +126,8 @@ The Marketplace supports signed-out browsing of published free assets; sign in t
 Paid purchases are not available. Material authoring uses reusable Inspector-based materials with Shader Graph
 and VFX Graph for visual shader and effect authoring.
 
-Editor Console controls stay fixed while log entries scroll. Drag prefabs or meshes into the Scene viewport to place
+Editor Console controls stay fixed while log entries scroll; subtle row highlights preserve severity text while hovering
+and selecting messages. Drag prefabs or meshes into the Scene viewport to place
 them beneath the pointer; prefab placement is retained when the source is reloaded. C# scripts can schedule
 `Destroy(entity, 5f)` and log multiple values with `Debug.Log("Values: {0}, {1}", first, second)`.
 See [scripting lifecycle](Docs/Scripting/BehavioursAndLifecycle.md) and
@@ -130,6 +162,9 @@ complete interactive and cross-platform acceptance remains pending.
 
 The Hub is the normal entry point. Direct editor launch remains available for automation and focused development.
 When adding an existing project, select its root folder containing `ProjectSettings/Project.keireproject`.
+Hub project duplication preserves the entered name and destination when validation fails. Correct the highlighted
+error in the open dialog and retry; duplication starts only after validation succeeds.
+
 Opening the Editor directly, from its shortcut, or after setup opens the Hub project picker. Command-line users
 can still open a specific project with `KeireClient --project <path>`.
 On Windows, separately installed Editors find Hub through its per-user installer registration. If Hub was moved
@@ -493,6 +528,11 @@ full render dependency scheduling, and cross-platform acceptance remain incomple
 Packaging is performed on the target operating system:
 
 - Windows produces ZIP distributions and native EXE installers.
+  Windows EXEs use non-solid zlib compression to favor installation speed over the smallest download size.
+  Installer details report SDK/payload extraction milliseconds and live worker transaction phase timings.
+  Extraction keeps the progress bar visible without adding a details-list row for every SDK file. Preserve these
+  timings when reporting slow installation; verification, rollback, and final installed-file checks remain enabled.
+  See [installer performance](Docs/InstallerPerformance.md) for the reproducible extraction benchmark and its limits.
 - macOS produces native application/distribution output and requires platform signing and notarization for release.
 - Linux produces native `.tar.gz` distributions, DEB Hub/editor installers on Debian/Ubuntu, and RPM Hub installers
   on Rocky/Fedora/openSUSE.
@@ -587,7 +627,7 @@ output and reject stale or build-mismatched reports.
 
 ## Documentation
 
-The [documentation library](Docs/README.md) contains 109 guides and progress records grouped around real tasks. Project authors
+The [documentation library](Docs/README.md) contains 110 guides and progress records grouped around real tasks. Project authors
 should begin with the [Kéire 0.4.7 User Manual](Docs/Manual/README.md):
 
 - [Projects and the Editor](Docs/Manual/ProjectsAndEditor.md),

@@ -11,6 +11,55 @@
 
 using namespace KeireHub;
 
+TEST_CASE("Hub duplicate submission keeps rejected dialogs open and closes only accepted requests")
+{
+    HubDuplicateSubmission submission;
+    submission.Resolve({});
+    CHECK_FALSE(submission.CloseRequested);
+    REQUIRE(submission.Begin());
+    CHECK(submission.Waiting);
+    CHECK_FALSE(submission.Begin());
+    submission.Resolve("The duplicate destination already exists.");
+    CHECK_FALSE(submission.Waiting);
+    CHECK_FALSE(submission.CloseRequested);
+    CHECK(submission.Error == "The duplicate destination already exists.");
+    submission.Resolve({});
+    CHECK_FALSE(submission.CloseRequested);
+    REQUIRE(submission.Begin());
+    CHECK(submission.Error.empty());
+    submission.Resolve({});
+    CHECK_FALSE(submission.Waiting);
+    CHECK(submission.CloseRequested);
+    CHECK_FALSE(submission.Begin());
+    submission = {};
+    REQUIRE(submission.Begin());
+    submission = {};
+    submission.Resolve("Late result after cancellation");
+    CHECK(submission.Error.empty());
+    CHECK_FALSE(submission.CloseRequested);
+    CHECK_FALSE(submission.Waiting);
+}
+
+TEST_CASE("Hub creation reveals the new project despite every previous filter")
+{
+    HubProjectsUi projects;
+    projects.SetPreferences(HubProjectsView::Cards, HubProjectsSort::Name);
+    projects.SetFilters({.Search = "Unrelated", .Version = "0.1.0", .FavoritesOnly = true, .Status = 5, .Editor = 2});
+    projects.RevealCreatedProject("New Exploration");
+    CHECK(projects.Filters().Search == "New Exploration");
+    CHECK(projects.Filters().Version.empty());
+    CHECK_FALSE(projects.Filters().FavoritesOnly);
+    CHECK(projects.Filters().Status == 0);
+    CHECK(projects.Filters().Editor == 0);
+    CHECK(projects.View() == HubProjectsView::Cards);
+    CHECK(projects.Sort() == HubProjectsSort::Name);
+    projects.RevealCreatedProject({});
+    CHECK(projects.Filters().Search == "New Exploration");
+    projects.SetFilters({.Status = 255, .Editor = 255});
+    CHECK(projects.Filters().Status == 0);
+    CHECK(projects.Filters().Editor == 0);
+}
+
 namespace
 {
     constexpr std::string_view ReadyId = "01234567-89ab-cdef-0123-456789abcdef";

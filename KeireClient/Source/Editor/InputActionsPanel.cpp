@@ -107,47 +107,6 @@ namespace KeireEditor
             return;
         }
 
-        auto inputDocument = document.Definition();
-        auto selectedMap = document.SelectedMap();
-        auto selectedScheme = document.SelectedScheme();
-        auto selectedAction = document.SelectedAction();
-        auto selectedBinding = document.SelectedBinding();
-
-        const auto applyValidatedEdit =
-            [&]<typename Operation>(const std::string_view undoName, const Operation& operation)
-        {
-            try
-            {
-                auto candidate = inputDocument;
-                std::invoke(operation, candidate);
-                const auto candidateBytes = Keire::InputActionAsset::Encode(candidate);
-                if (candidateBytes == Keire::InputActionAsset::Encode(inputDocument))
-                    return true;
-            }
-            catch (const std::exception& error)
-            {
-                m_Message = error.what();
-                m_Controller.ReportInputActionsError(m_Message);
-                return false;
-            }
-
-            m_Controller.RecordInputActionsUndo(undoName);
-            std::invoke(operation, inputDocument);
-            return true;
-        };
-
-        const auto commitDocument = [&]
-        {
-            document.SetSelection(selectedMap, selectedScheme, selectedAction, selectedBinding);
-            std::string diagnostic;
-            (void)document.TryReplaceDefinition(std::move(inputDocument), diagnostic);
-            if (!diagnostic.empty())
-            {
-                m_Message = std::move(diagnostic);
-                m_Controller.ReportInputActionsError(m_Message);
-            }
-        };
-
         const auto record = database ? database->Find(document.Asset()) : std::nullopt;
         {
             [[maybe_unused]] auto headingFont = ui.PushFont(Keire::UiFontRole::Heading);
@@ -223,7 +182,7 @@ namespace KeireEditor
         {
             try
             {
-                Keire::InputActionAsset::Validate(inputDocument);
+                Keire::InputActionAsset::Validate(document.Definition());
                 m_Message = "Validation passed.";
             }
             catch (const std::exception& error)
@@ -246,6 +205,48 @@ namespace KeireEditor
         (void)ui.InputTextWithHint("##InputActionsSearch", "Search maps and actions...", m_Search);
         if (!m_Message.empty())
             ui.TextColored(theme.MutedText, m_Message);
+        // Toolbar commands can replace the document; edit the resulting state, never the previous frame snapshot.
+        auto inputDocument = document.Definition();
+        auto selectedMap = document.SelectedMap();
+        auto selectedScheme = document.SelectedScheme();
+        auto selectedAction = document.SelectedAction();
+        auto selectedBinding = document.SelectedBinding();
+
+        const auto applyValidatedEdit =
+            [&]<typename Operation>(const std::string_view undoName, const Operation& operation)
+        {
+            try
+            {
+                auto candidate = inputDocument;
+                std::invoke(operation, candidate);
+                const auto candidateBytes = Keire::InputActionAsset::Encode(candidate);
+                if (candidateBytes == Keire::InputActionAsset::Encode(inputDocument))
+                    return true;
+            }
+            catch (const std::exception& error)
+            {
+                m_Message = error.what();
+                m_Controller.ReportInputActionsError(m_Message);
+                return false;
+            }
+
+            m_Controller.RecordInputActionsUndo(undoName);
+            std::invoke(operation, inputDocument);
+            return true;
+        };
+
+        const auto commitDocument = [&]
+        {
+            document.SetSelection(selectedMap, selectedScheme, selectedAction, selectedBinding);
+            std::string diagnostic;
+            (void)document.TryReplaceDefinition(std::move(inputDocument), diagnostic);
+            if (!diagnostic.empty())
+            {
+                m_Message = std::move(diagnostic);
+                m_Controller.ReportInputActionsError(m_Message);
+            }
+        };
+
         if (m_GeneratedClass.empty())
             m_GeneratedClass = inputDocument.Name.empty() ? "GameInputActions" : inputDocument.Name + "Actions";
         if (auto codeGeneration = ui.BeginTreeNode("C# Code Generation"); codeGeneration)

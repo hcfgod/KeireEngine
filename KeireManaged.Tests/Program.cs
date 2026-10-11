@@ -13,6 +13,7 @@ var tests = new (string Name, Action Run)[]
     ("Gameplay logging preserves all severities formatting assertions and nested exceptions", GameplayLoggingTests.Run),
     ("Constructor defaults formatted logs and delayed destroy preserve managed contracts", CreationLoggingTests.Run),
     ("Prefab assets expose typed stable identity", PrefabAssetMarkerContract),
+    ("Scene assets expose typed stable identity", SceneAssetMarkerContract),
     ("Unity-shaped object API replaces public handles and marker components", UnityShapedObjectApiContract),
     ("Managed state v4 tags direct entity component and asset references", DirectReferenceStateContract),
     ("Managed serialization v4 custom values migrate and invoke callbacks transactionally",
@@ -173,6 +174,20 @@ static void PrefabAssetMarkerContract()
     Keire.Prefab reference = Keire.Asset.FromId<Keire.Prefab>(new Keire.AssetId(101, 202))!;
     Assert(reference.IsValid && reference.Id == new Keire.AssetId(101, 202),
            "Prefab objects must preserve stable prefab identity.");
+}
+
+static void SceneAssetMarkerContract()
+{
+    var marker = (Keire.StableAssetTypeIdAttribute?)Attribute.GetCustomAttribute(
+        typeof(Keire.SceneAsset), typeof(Keire.StableAssetTypeIdAttribute));
+    Assert(marker?.Id == Guid.Parse("4b454952-4553-4345-4e45-415353455401"),
+           "Scene fields must filter by the native scene asset type instead of accepting unrelated assets.");
+
+    Keire.SceneAsset reference = Keire.Asset.FromId<Keire.SceneAsset>(new Keire.AssetId(103, 204))!;
+    Assert(reference.IsValid && reference.Id == new Keire.AssetId(103, 204),
+           "Scene wrappers must preserve stable scene identity.");
+    Assert(Keire.Asset.FromId<Keire.SceneAsset>(default) is null,
+           "An empty optional scene reference must remain null.");
 }
 
 static void InspectorAttributeContract()
@@ -814,6 +829,20 @@ static unsafe void ManagedWorldContract()
                    Keire.SceneManager.LoadedScenes is [{ Asset: var loaded, Id: var loadedHandle }] &&
                    loaded.Id == NativeWorldFixture.CurrentScene && loadedHandle == NativeWorldFixture.CurrentHandle,
                "Scene Manager must expose the native active and loaded scene state.");
+
+        Keire.Scene sameScene = Keire.SceneManager.ActiveScene!;
+        Assert(!ReferenceEquals(activeScene, sameScene) && activeScene == sameScene &&
+                   !(activeScene != sameScene) && activeScene.GetHashCode() == sameScene.GetHashCode(),
+               "Scene handle equality must compare stable identities across independently returned wrappers.");
+        Assert(activeScene.IsActive && activeScene.IsLoaded,
+               "The current active scene must report active even when native queries return new wrappers.");
+        var anotherInstance = new Keire.Scene(activeScene.Asset, activeScene.Id + 1);
+        var anotherAsset = new Keire.Scene(Keire.Asset.FromId<Keire.SceneAsset>(NativeWorldFixture.ReplacementScene)!,
+                                          activeScene.Id);
+        Keire.Scene? absent = null;
+        Assert(activeScene != anotherInstance && activeScene != anotherAsset && activeScene != absent &&
+                   absent != activeScene && absent == null && !(absent != null) && !anotherInstance.IsActive,
+               "Scene equality must distinguish runtime instances and asset identities and handle null safely.");
 
         Keire.SceneLoadOperation load = Keire.SceneManager.LoadSceneAsync(
             Keire.Asset.FromId<Keire.SceneAsset>(NativeWorldFixture.ReplacementScene)!);

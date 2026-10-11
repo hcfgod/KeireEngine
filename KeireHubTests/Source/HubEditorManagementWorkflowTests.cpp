@@ -655,6 +655,17 @@ TEST_CASE("Registration refresh is offered only for external manifest-registrati
     REQUIRE(records.size() == 2);
     CHECK(records[0].RegistrationRefreshAvailable);
     CHECK_FALSE(records[1].RegistrationRefreshAvailable);
+    CHECK(records[0].HealthLabel == "Update needs verification");
+    CHECK_FALSE(records[0].Healthy);
+    CHECK(records[1].HealthLabel == "Damaged");
+
+    auto damagedSnapshots = snapshots;
+    damagedSnapshots[0].Issues.push_back(
+        {.Code = EditorInstallationIssueCode::FileDigestMismatch, .Message = "An installed file failed verification."});
+    const auto damagedRecords = BuildHubEditorUiRecords(damagedSnapshots, {});
+    CHECK(damagedRecords[0].HealthLabel == "Damaged");
+    CHECK_FALSE(damagedRecords[0].Healthy);
+    CHECK(damagedRecords[0].HealthIssues.size() == 2);
 
     HubController controller({.PreferenceRoot = temporary.Path() / "Preferences"});
     REQUIRE(controller.Load(1));

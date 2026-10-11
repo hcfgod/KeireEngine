@@ -108,12 +108,6 @@ namespace KeireHub
         m_Tokens = HubDesignTokens::For(appearance, systemPrefersDark);
     }
 
-    void HubProjectsUi::SetPreferences(const HubProjectsView view, const HubProjectsSort sort) noexcept
-    {
-        m_View = view;
-        m_Sort = sort;
-    }
-
     void HubProjectsUi::SetDuplicateParent(const std::filesystem::path& parent)
     {
         m_DuplicateParent = Utf8Path(parent);
@@ -222,6 +216,7 @@ namespace KeireHub
             SelectPending(project);
             m_DuplicateName = project.Name + " Copy";
             m_DuplicateParent = Utf8Path(project.Root.parent_path());
+            m_DuplicateSubmission = {};
             m_RequestDuplicatePopup = true;
         }
         if (ui.MenuItem("Rename display name...", false, CanMutateProject(project.Status)))
@@ -531,6 +526,13 @@ namespace KeireHub
             HubModalStyleScope duplicateStyle(ui, m_Tokens);
             if (auto dialog = ui.BeginPopupModal("Duplicate Project", nullptr, HubModalWindowOptions(), false); dialog)
             {
+                if (m_DuplicateSubmission.CloseRequested)
+                {
+                    m_DuplicateSubmission = {};
+                    m_Pending.reset();
+                    ui.CloseCurrentPopup();
+                    return;
+                }
                 DrawHubModalHeader(ui, m_Tokens, "Duplicate project",
                                    "Create a clean copy with a new project identity.", "PROJECTS");
                 ui.TextColoredWrapped(
@@ -546,23 +548,24 @@ namespace KeireHub
                         command = {.Type = HubProjectUiCommandType::BrowseDuplicateLocation,
                                    .Path = PathFromUtf8(m_DuplicateParent)};
                 }
-                const bool invalid =
-                    !m_Pending || m_DuplicateName.empty() || m_DuplicateParent.empty() || folderDialogActive;
+                if (!m_DuplicateSubmission.Error.empty())
+                    ui.TextColoredWrapped(m_Tokens.Danger, m_DuplicateSubmission.Error);
+                const bool invalid = !m_Pending || m_DuplicateName.empty() || m_DuplicateParent.empty() ||
+                                     folderDialogActive || m_DuplicateSubmission.Waiting;
                 if (auto disabled = ui.BeginDisabled(invalid); disabled)
                 {
-                    if (HubPrimaryButton(ui, m_Tokens, "Duplicate", {104.0F, 36.0F}))
+                    if (HubPrimaryButton(ui, m_Tokens, "Duplicate", {104.0F, 36.0F}) && m_DuplicateSubmission.Begin())
                     {
                         command = {.Type = HubProjectUiCommandType::Duplicate,
                                    .ProjectId = m_Pending->Id,
                                    .Path = PathFromUtf8(m_DuplicateParent) / PathFromUtf8(m_DuplicateName),
                                    .DisplayName = m_DuplicateName};
-                        m_Pending.reset();
-                        ui.CloseCurrentPopup();
                     }
                 }
                 ui.SameLine();
                 if (HubSecondaryButton(ui, m_Tokens, "Cancel", {88.0F, 36.0F}))
                 {
+                    m_DuplicateSubmission = {};
                     m_Pending.reset();
                     ui.CloseCurrentPopup();
                 }
@@ -671,7 +674,7 @@ namespace KeireHub
             ui.TableNextRow();
             (void)ui.TableNextColumn();
             ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
-            (void)ui.InputTextWithHint("##HubProjectSearch", "Search projects", m_Search);
+            (void)ui.InputTextWithHint("##HubProjectSearch", "Search projects", m_Filters.Search);
             (void)ui.TableNextColumn();
             if (ui.IconButton("HubListView", Keire::UiIcon::List, m_View == HubProjectsView::List, {32.0F, 28.0F}))
             {
@@ -723,34 +726,34 @@ namespace KeireHub
             ui.TableNextRow();
             (void)ui.TableNextColumn();
             ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
-            if (auto status = ui.BeginCombo("##HubProjectStatus", statusLabels[m_StatusFilter]); status)
+            if (auto status = ui.BeginCombo("##HubProjectStatus", statusLabels[m_Filters.Status]); status)
             {
                 for (std::size_t index = 0; index < statusLabels.size(); ++index)
-                    if (ui.Selectable(statusLabels[index], m_StatusFilter == index))
-                        m_StatusFilter = static_cast<std::uint8_t>(index);
+                    if (ui.Selectable(statusLabels[index], m_Filters.Status == index))
+                        m_Filters.Status = static_cast<std::uint8_t>(index);
             }
             (void)ui.TableNextColumn();
             ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
-            if (auto editor = ui.BeginCombo("##HubProjectEditor", editorLabels[m_EditorFilter]); editor)
+            if (auto editor = ui.BeginCombo("##HubProjectEditor", editorLabels[m_Filters.Editor]); editor)
             {
                 for (std::size_t index = 0; index < editorLabels.size(); ++index)
-                    if (ui.Selectable(editorLabels[index], m_EditorFilter == index))
-                        m_EditorFilter = static_cast<std::uint8_t>(index);
+                    if (ui.Selectable(editorLabels[index], m_Filters.Editor == index))
+                        m_Filters.Editor = static_cast<std::uint8_t>(index);
             }
             (void)ui.TableNextColumn();
             ui.SetNextItemWidth(std::max(ui.ContentAvailable().Width, 1.0F));
-            if (auto version =
-                    ui.BeginCombo("##HubProjectVersion", m_VersionFilter.empty() ? "All versions" : m_VersionFilter);
+            if (auto version = ui.BeginCombo("##HubProjectVersion",
+                                             m_Filters.Version.empty() ? "All versions" : m_Filters.Version);
                 version)
             {
-                if (ui.Selectable("All versions", m_VersionFilter.empty()))
-                    m_VersionFilter.clear();
+                if (ui.Selectable("All versions", m_Filters.Version.empty()))
+                    m_Filters.Version.clear();
                 for (const auto& candidate : versions)
-                    if (ui.Selectable(candidate, m_VersionFilter == candidate))
-                        m_VersionFilter = candidate;
+                    if (ui.Selectable(candidate, m_Filters.Version == candidate))
+                        m_Filters.Version = candidate;
             }
             (void)ui.TableNextColumn();
-            (void)ui.Checkbox("Favorites only", m_FavoritesOnly);
+            (void)ui.Checkbox("Favorites only", m_Filters.FavoritesOnly);
         }
         if (!notice.empty())
         {
@@ -772,7 +775,7 @@ namespace KeireHub
             }
         }
 
-        const auto search = Lower(m_Search);
+        const auto search = Lower(m_Filters.Search);
         std::vector<const Keire::RecentProject*> visible;
         visible.reserve(displayEntries.size());
         for (const auto& entry : displayEntries)
@@ -780,14 +783,14 @@ namespace KeireHub
             if (!search.empty() && Lower(entry.Name).find(search) == std::string::npos &&
                 Lower(Utf8Path(entry.Root)).find(search) == std::string::npos)
                 continue;
-            if (m_FavoritesOnly && !entry.Pinned)
+            if (m_Filters.FavoritesOnly && !entry.Pinned)
                 continue;
-            if (m_StatusFilter != 0 && static_cast<std::uint8_t>(entry.Status) + 1U != m_StatusFilter)
+            if (m_Filters.Status != 0 && static_cast<std::uint8_t>(entry.Status) + 1U != m_Filters.Status)
                 continue;
             const bool editorInstalled = HasInstalledEditor(entry, editors);
-            if ((m_EditorFilter == 1 && !editorInstalled) || (m_EditorFilter == 2 && editorInstalled))
+            if ((m_Filters.Editor == 1 && !editorInstalled) || (m_Filters.Editor == 2 && editorInstalled))
                 continue;
-            if (!m_VersionFilter.empty() && entry.LastSavedWithEngineVersion != m_VersionFilter)
+            if (!m_Filters.Version.empty() && entry.LastSavedWithEngineVersion != m_Filters.Version)
                 continue;
             visible.push_back(&entry);
         }

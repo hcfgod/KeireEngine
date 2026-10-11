@@ -4,6 +4,7 @@
 #include "Keire/Log.h"
 
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -502,6 +503,7 @@ namespace Keire::RenderBackend
             throw;
         }
         RenderQueueReady.notify_one();
+        FramesRetired.notify_all();
     }
 
     void RenderSharedState::CompileGpuVfxPipelines()
@@ -532,12 +534,17 @@ namespace Keire::RenderBackend
             information.threadcount_x = threads;
             information.threadcount_y = 1;
             information.threadcount_z = 1;
+            KEIRE_CORE_INFO("Creating GPU VFX compute pipeline (entrypoint={}, bytes={}).", entrypoint, shader.Size);
+            const auto started = std::chrono::steady_clock::now();
             auto* pipeline = SDL_CreateGPUComputePipeline(Device, &information);
             if (!pipeline)
             {
                 throw std::runtime_error("SDL_CreateGPUComputePipeline(GPU VFX " + std::string(entrypoint) +
                                          ") failed: " + LastSdlError());
             }
+            const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started);
+            KEIRE_CORE_INFO("Created GPU VFX compute pipeline (entrypoint={}) in {:.2f} ms.", entrypoint,
+                            elapsed.count());
             return pipeline;
         };
         VfxInitializePipeline = create(BuiltinVfxShaderStage::Initialize, "CSInitialize", 256);

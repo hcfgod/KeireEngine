@@ -127,6 +127,52 @@ TEST_CASE("Native multi-input audio nodes preserve the shared frame-count bounda
     CHECK(outputFrames == 48);
 }
 
+TEST_CASE("Algorithmic reverb remains bounded and its tail decays after sustained input")
+{
+    constexpr std::uint32_t sampleRate = 8'000;
+    constexpr std::size_t blockFrames = 256;
+    constexpr float amplitude = 0.025F;
+    for (const auto room : {5.0F, 90.0F, 500.0F})
+    {
+        for (const auto decay : {0.0F, 0.55F, 0.58F, 0.97F})
+        {
+            for (const std::uint32_t channels : {1U, 2U})
+            {
+                CAPTURE(room);
+                CAPTURE(decay);
+                CAPTURE(channels);
+                Keire::Detail::AudioEffectProcessor processor(Keire::AudioGraphNodeType::AlgorithmicReverb, sampleRate,
+                                                              channels, std::array{room, decay, 1.0F});
+                std::vector<float> block(blockFrames * channels);
+                float peak = 0.0F;
+                float tailPeak = 0.0F;
+                bool finite = true;
+                // DC excites the worst-case sum of the positive feedback coefficients. Keep processing across
+                // callback boundaries, then allow the maximum room/decay setting to ring out without a reset.
+                for (std::size_t frame = 0; frame < 72U * sampleRate; frame += blockFrames)
+                {
+                    std::fill(block.begin(), block.end(), frame < 12U * sampleRate ? amplitude : 0.0F);
+                    processor.Process(block);
+                    for (const auto sample : block)
+                    {
+                        finite = finite && std::isfinite(sample);
+                        peak = std::max(peak, std::abs(sample));
+                        if (frame >= 71U * sampleRate)
+                            tailPeak = std::max(tailPeak, std::abs(sample));
+                    }
+                }
+                CHECK(finite);
+                CHECK(peak < 0.35F);
+                CHECK(tailPeak < 0.00001F);
+                if (decay > 0.0F)
+                    CHECK(peak > 0.001F);
+                else
+                    CHECK(peak == 0.0F);
+            }
+        }
+    }
+}
+
 TEST_CASE("Native mixer attachment failure rolls earlier voices back before publication")
 {
     std::array<int, 6> nodes{};

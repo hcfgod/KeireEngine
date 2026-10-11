@@ -752,6 +752,8 @@ namespace Keire
                     const float weight = zone->BlendDistance() == 0.0F
                                              ? (outsideDistance == 0.0F ? 1.0F : 0.0F)
                                              : std::clamp(1.0F - outsideDistance / zone->BlendDistance(), 0.0F, 1.0F);
+                    if (weight <= 0.0F)
+                        continue;
                     auto found = activeZones.find(zoneMixer);
                     if (found == activeZones.end() || zone->Priority() > found->second.first->Priority() ||
                         (zone->Priority() == found->second.first->Priority() && weight > found->second.second))

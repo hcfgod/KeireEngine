@@ -1123,6 +1123,18 @@ namespace KeireEditor
         DiscardRecovery();
     }
 
+    void SceneDocument::SynchronizeSourceName(std::string name)
+    {
+        if (!m_Scene || !m_Scene->IsOpen() || m_Source.empty() || m_PlaySession)
+            throw std::logic_error("Scene source naming requires an open editing document.");
+        if (name.empty() || m_Scene->Name() == name)
+            return;
+        const bool wasDirty = m_Scene->Dirty();
+        m_Scene->SetName(std::move(name));
+        if (!wasDirty)
+            Save();
+    }
+
     void SceneDocument::ReloadSource()
     {
         if (!m_Scene || !m_Scene->IsOpen() || m_Source.empty() || m_PlaySession)

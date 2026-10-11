@@ -636,9 +636,23 @@ namespace KeireHub
 
     HubResult<ProjectDuplicatePlan> ProjectWorkflowManager::PrepareDuplicate(const ProjectDuplicateRequest& request)
     {
-        if (!IsProjectName(request.DisplayName) || request.Destination.empty() || request.SourceProjectId.empty() ||
-            request.MaximumCopiedEntries == 0 || request.MaximumCopiedEntries > HardMaximumCopiedEntries ||
-            request.MaximumCopiedBytes == 0 || request.MaximumCopiedBytes > HardMaximumCopiedBytes)
+        if (!IsProjectName(request.DisplayName))
+        {
+            const auto message = request.DisplayName.empty() ? "Enter a name for the duplicate project."
+                                 : request.DisplayName.size() > 128
+                                     ? "The project name is too long. Use a shorter name."
+                                     : "Use a project name without leading/trailing whitespace or these characters: "
+                                       "< > : \" / \\ | ? *. Names '.' and '..' are not allowed.";
+            return HubResult<ProjectDuplicatePlan>::Failure(
+                WorkflowError(HubErrorCode::InvalidArgument, message, request.SourceProjectId));
+        }
+        if (request.Destination.empty())
+            return HubResult<ProjectDuplicatePlan>::Failure(
+                WorkflowError(HubErrorCode::InvalidArgument, "Choose a destination folder for the duplicate project.",
+                              request.SourceProjectId));
+        if (request.SourceProjectId.empty() || request.MaximumCopiedEntries == 0 ||
+            request.MaximumCopiedEntries > HardMaximumCopiedEntries || request.MaximumCopiedBytes == 0 ||
+            request.MaximumCopiedBytes > HardMaximumCopiedBytes)
         {
             return HubResult<ProjectDuplicatePlan>::Failure(WorkflowError(
                 HubErrorCode::InvalidArgument, "The duplicate project request is invalid.", request.SourceProjectId));

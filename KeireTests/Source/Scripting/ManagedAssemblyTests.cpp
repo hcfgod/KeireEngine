@@ -182,6 +182,49 @@ TEST_CASE("Managed SDK settings preserve project data and resolve a validated cu
           std::filesystem::absolute(bundledDotnet).lexically_normal());
 }
 
+TEST_CASE("Managed IDE SDK follows the editor and preserves user SDK policy")
+{
+    const auto root = UniqueTemporaryRoot("Keire-IdeSdk-");
+    struct Cleanup final
+    {
+        std::filesystem::path Root;
+        ~Cleanup() { std::filesystem::remove_all(Root); }
+    } cleanup{root};
+    const auto project = root / "Game";
+    const auto sdk = root / "Editor SDK";
+    std::filesystem::create_directories(sdk / "sdk/10.0.302");
+    const auto executable = sdk / "dotnet.exe";
+    Keire::Detail::SynchronizeManagedIdeSdk(project, executable);
+    const auto read = [](const std::filesystem::path& path)
+    {
+        std::ifstream stream(path);
+        return std::string(std::istreambuf_iterator<char>(stream), {});
+    };
+    const auto policy = project / "global.json";
+    const auto original = read(policy);
+    const auto document = nlohmann::json::parse(original);
+    CHECK(document["sdk"]["version"] == "10.0.100");
+    CHECK(document["sdk"]["paths"][0] == sdk.generic_string());
+    const auto preservedTime = std::filesystem::file_time_type::clock::now() - std::chrono::hours(1);
+    std::filesystem::last_write_time(policy, preservedTime);
+    Keire::Detail::SynchronizeManagedIdeSdk(project, executable);
+    CHECK(std::filesystem::last_write_time(policy) == preservedTime);
+
+    const auto relocated = root / "New Editor";
+    std::filesystem::create_directories(relocated / "sdk/10.0.302");
+    Keire::Detail::SynchronizeManagedIdeSdk(project, relocated / "dotnet.exe");
+    CHECK(nlohmann::json::parse(read(policy))["sdk"]["paths"][0] == relocated.generic_string());
+    const std::string userPolicy = "{\"sdk\":{\"version\":\"10.0.302\"}}\n";
+    std::ofstream(policy) << userPolicy;
+    Keire::Detail::SynchronizeManagedIdeSdk(project, executable);
+    CHECK(read(policy) == userPolicy);
+    std::ofstream(root / "global.json") << userPolicy;
+    Keire::Detail::SynchronizeManagedIdeSdk(root / "OtherGame", executable);
+    CHECK_FALSE(std::filesystem::exists(root / "OtherGame/global.json"));
+    Keire::Detail::SynchronizeManagedIdeSdk(root / "MissingSdkGame", root / "missing/dotnet.exe");
+    CHECK_FALSE(std::filesystem::exists(root / "MissingSdkGame/global.json"));
+}
+
 TEST_CASE("Managed IDE workspace mirrors assembly source roots and references")
 {
     const auto root = UniqueTemporaryRoot("Keire-ManagedIde-");

@@ -53,26 +53,27 @@ namespace KeireEditor
                 {
                     currentEntity = change.Entity;
                     currentComponent = {};
-                    ui.TextColored({0.35F, 0.75F, 1.0F, 1.0F},
-                                   change.Entity ? change.EntityName : std::string("Scene"));
+                    ui.TextColoredWrapped({0.35F, 0.75F, 1.0F, 1.0F},
+                                          change.Entity ? change.EntityName : std::string("Scene"));
                 }
                 if (change.Component && change.Component != currentComponent)
                 {
                     currentComponent = change.Component;
-                    ui.TextColored({0.72F, 0.74F, 0.80F, 1.0F}, "  " + change.ComponentName);
+                    ui.TextColoredWrapped({0.72F, 0.74F, 0.80F, 1.0F}, "  " + change.ComponentName);
                 }
                 bool selected = change.Selected;
                 const auto origin = change.Origin == ScenePlayChangeOrigin::Editor  ? " [Editor]"
                                     : change.Origin == ScenePlayChangeOrigin::Mixed ? " [Mixed]"
                                                                                     : " [Runtime]";
-                const auto label = "    " + change.Label + ": " + change.Before + " -> " + change.After + origin +
-                                   "##play-change-" + std::to_string(change.Id);
+                const auto label = "    " + change.Label + origin + "##play-change-" + std::to_string(change.Id);
                 if (ui.Checkbox(label, selected) && !change.Locked)
                     changes.SetSelected(change.Id, selected);
+                ui.TextWrapped("Before: " + change.Before);
+                ui.TextWrapped("After: " + change.After);
                 if (change.Locked && !change.LockReason.empty())
-                    ui.TextColored({0.88F, 0.68F, 0.30F, 1.0F}, "      " + change.LockReason);
+                    ui.TextColoredWrapped({0.88F, 0.68F, 0.30F, 1.0F}, "      " + change.LockReason);
                 if (!change.Conflict.empty())
-                    ui.TextColored({1.0F, 0.38F, 0.34F, 1.0F}, "      " + change.Conflict);
+                    ui.TextColoredWrapped({1.0F, 0.38F, 0.34F, 1.0F}, "      " + change.Conflict);
                 if (change.CanKeepAtRoot && change.Selected)
                 {
                     bool keepAtRoot = change.KeepAtRoot;

@@ -78,6 +78,9 @@ boundary. Unloading the only regular active scene is rejected; use a Single load
 During the destination's `Awake`, `OnEnable`, and `Start` callbacks, the previous world remains the committed active
 scene until the complete activation transaction succeeds.
 
+Scene handles support `==`, `!=`, and `Equals` using the runtime identity and asset ID. Repeated queries can return
+different C# wrappers for the same scene; compare their handles rather than using `ReferenceEquals`.
+
 An asset, startup, script, subsystem, or camera failure leaves the current gameplay scene running and reports the
 diagnostic through `Error`. Only one managed transition may be pending at a time. Replay-driven players reject runtime
 scene transitions because replacing their recorded world would invalidate deterministic replay ownership.

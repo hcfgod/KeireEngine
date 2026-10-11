@@ -4,6 +4,9 @@
 #include "KeireHubRuntime/InstallTransaction.h"
 #include <KeireHubRuntimeInternal/InstallTransactionInternal.h>
 
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
@@ -108,6 +111,35 @@ namespace
             std::cerr << ": " << error.TechnicalDetails;
         std::cerr << '\n';
     }
+
+    class CommandTiming final
+    {
+      public:
+        explicit CommandTiming(const std::string_view command) : m_Command(command) {}
+
+        ~CommandTiming() { std::cout << "installer command=" << m_Command << " elapsed_ms=" << Elapsed() << std::endl; }
+
+        void Phase(const KeireHub::InstallTransactionPhase phase)
+        {
+            constexpr std::string_view names[]{"staged",   "backupMoved", "payloadActivated", "registrationWritten",
+                                               "verified", "committed"};
+            const auto elapsed = Elapsed();
+            std::cout << "installer phase=" << names[static_cast<std::size_t>(phase)] << " elapsed_ms=" << elapsed
+                      << " phase_ms=" << elapsed - m_Previous << std::endl;
+            m_Previous = elapsed;
+        }
+
+      private:
+        [[nodiscard]] std::int64_t Elapsed() const
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - m_Start)
+                .count();
+        }
+
+        std::string_view m_Command;
+        std::chrono::steady_clock::time_point m_Start = std::chrono::steady_clock::now();
+        std::int64_t m_Previous = 0;
+    };
 } // namespace
 
 int main(const int count, char** values)
@@ -126,6 +158,7 @@ int main(const int count, char** values)
                      "[--start-menu <0|1>] [--desktop <0|1>]\n";
         return 64;
     }
+    CommandTiming timing(arguments->Command);
     auto registrationStore = KeireInstallWorker::CreateProductRegistrationStore(arguments->Product);
     KeireHub::InstallTransactionRequest request{.Product = arguments->Product,
                                                 .SourceRoot = arguments->Source,
@@ -134,9 +167,16 @@ int main(const int count, char** values)
                                                 .DeferCommit = arguments->Command == "install-deferred"};
 #if defined(KEIRE_INSTALL_WORKER_FAULT_INJECTION)
     const auto fault = FaultPhase();
-    request.ContinueAfterPhase = [fault](const KeireHub::InstallTransactionPhase phase)
-    { return !fault || phase != *fault; };
 #endif
+    request.ContinueAfterPhase = [&](const KeireHub::InstallTransactionPhase phase)
+    {
+        timing.Phase(phase);
+#if defined(KEIRE_INSTALL_WORKER_FAULT_INJECTION)
+        return !fault || phase != *fault;
+#else
+        return true;
+#endif
+    };
 
     const auto readRegistration = [&]() { return registrationStore.Read(arguments->Product); };
     const auto recoverAndReconcile = [&]() -> KeireHub::HubStatus

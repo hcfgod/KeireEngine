@@ -58,15 +58,20 @@ namespace
 
 void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
 {
+    if (!m_PrefabOverrides.Visible())
+        return;
+    ui.SetNextWindowSize({560.0F, 320.0F});
     if (auto panel = ui.BeginPanel(m_PrefabOverrides); panel)
     {
+        const bool compactActions = ui.ContentAvailable().Width < 520.0F;
         if (m_PrefabEditingStage)
         {
             ui.Text("Prefab Mode");
-            ui.Text(m_PrefabEditingStage->RelativePath.generic_string());
-            ui.TextColored(m_Theme.MutedText,
-                           "This isolated stage does not modify the open scene. Save publishes the prefab source; "
-                           "Discard restores the previous scene document.");
+            ui.TextWrapped(m_PrefabEditingStage->RelativePath.generic_string());
+            ui.TextColoredWrapped(
+                m_Theme.MutedText,
+                "This isolated stage does not modify the open scene. Save publishes the prefab source; "
+                "Discard restores the previous scene document.");
             if (ui.Button("Save Prefab"))
             {
                 try
@@ -78,7 +83,8 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
                     ReportError("Prefab", error.what());
                 }
             }
-            ui.SameLine();
+            if (!compactActions)
+                ui.SameLine();
             if (ui.Button("Save and Close"))
             {
                 try
@@ -91,11 +97,12 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
                     ReportError("Prefab", error.what());
                 }
             }
-            ui.SameLine();
+            if (!compactActions)
+                ui.SameLine();
             if (ui.Button("Discard and Close"))
                 ClosePrefabEditingStage();
             ui.Separator();
-            ui.Text("Edit prefab objects in the Scene viewport and Inspector.");
+            ui.TextWrapped("Edit prefab objects in the Scene viewport and Inspector.");
             return;
         }
 
@@ -124,8 +131,8 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
             return;
         }
 
-        ui.Text("Prefab: " + instance->Prefab.ToString());
-        ui.Text("Instance root: " + instance->Root.ToString());
+        ui.TextWrapped("Prefab: " + instance->Prefab.ToString());
+        ui.TextWrapped("Instance root: " + instance->Root.ToString());
         ui.Text(std::to_string(instance->Objects.size()) + " inherited objects");
         ui.Separator();
         ui.Text(std::to_string(instance->Overrides.size()) + " overrides");
@@ -139,9 +146,9 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
             auto node = ui.BeginTreeNode(label);
             if (node)
             {
-                ui.Text("Object: " + overrideValue.Object.ToString());
+                ui.TextWrapped("Object: " + overrideValue.Object.ToString());
                 if (overrideValue.Component)
-                    ui.Text("Component: " + overrideValue.Component.ToString());
+                    ui.TextWrapped("Component: " + overrideValue.Component.ToString());
             }
         }
 
@@ -158,7 +165,8 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
                 ReportError("Prefab", error.what());
             }
         }
-        ui.SameLine();
+        if (!compactActions)
+            ui.SameLine();
         if (ui.Button("Revert All Overrides"))
         {
             try
@@ -195,7 +203,8 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
                 ReportError("Prefab", error.what());
             }
         }
-        ui.SameLine();
+        if (!compactActions)
+            ui.SameLine();
         if (ui.Button("Unpack"))
         {
             try
@@ -215,7 +224,8 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
                 ReportError("Prefab", error.what());
             }
         }
-        ui.SameLine();
+        if (!compactActions)
+            ui.SameLine();
         if (ui.Button("Unpack Completely"))
         {
             try
@@ -235,7 +245,7 @@ void EditorWorkspaceLayer::DrawPrefabOverrides(Keire::UiFrame& ui)
                 ReportError("Prefab", error.what());
             }
         }
-        ui.TextColored(
+        ui.TextColoredWrapped(
             m_Theme.MutedText,
             "Root placement is scene-owned. Nested roots require a variant so source ownership is preserved.");
     }

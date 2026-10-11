@@ -169,6 +169,46 @@ TEST_CASE("Scene persistence relocation preserves the loaded revision")
     fixture.CheckPreserved();
 }
 
+TEST_CASE("Scene persistence source rename advances the baseline without losing local edits")
+{
+    PersistenceFixture fixture;
+    fixture.Document.Save();
+    const auto destination = fixture.Root / "Renamed.keirescene";
+    std::filesystem::rename(fixture.Source, destination);
+    fixture.Document.SetIdentity(fixture.Asset, destination);
+
+    SUBCASE("clean rename and subsequent edit save")
+    {
+        fixture.Document.SynchronizeSourceName("Renamed");
+        CHECK_FALSE(fixture.Document.Dirty());
+        CHECK(Keire::SceneAsset::Decode(KeireEditor::Detail::ReadSceneBytes(destination))->Definition().Name ==
+              "Renamed");
+        (void)fixture.Document.CreateEntity("After rename");
+        CHECK_NOTHROW(fixture.Document.Save());
+        CHECK_FALSE(fixture.Document.SourceConflict());
+        CHECK(fixture.Document.EditingScene()->Entities().size() == 2);
+        CHECK_FALSE(std::filesystem::exists(fixture.Source));
+    }
+    SUBCASE("dirty rename does not silently save edits")
+    {
+        const auto original = KeireEditor::Detail::ReadSceneBytes(destination);
+        (void)fixture.Document.CreateEntity("Unsaved");
+        fixture.Document.SynchronizeSourceName("Renamed");
+        CHECK(fixture.Document.Dirty());
+        CHECK(KeireEditor::Detail::ReadSceneBytes(destination) == original);
+        CHECK_NOTHROW(fixture.Document.Save());
+    }
+    SUBCASE("external edits still conflict during automatic rename save")
+    {
+        const auto external = PersistenceFixture::Encode("External");
+        Keire::Detail::WriteFileAtomically(destination, external);
+        CHECK_THROWS_AS(fixture.Document.SynchronizeSourceName("Renamed"), KeireEditor::DocumentSourceConflict);
+        CHECK(fixture.Document.Dirty());
+        CHECK(fixture.Document.SourceConflict());
+        CHECK(KeireEditor::Detail::ReadSceneBytes(destination) == external);
+    }
+}
+
 TEST_CASE("Scene persistence rejected history reset leaves the current scene and recovery intact")
 {
     PersistenceFixture fixture;

@@ -116,6 +116,8 @@ namespace KeireEditor
         void SetRecoveryPath(std::filesystem::path path);
         void SetStatus(std::string status);
         void Save(bool overwriteExternalChanges = false);
+        /// Updates the relocated source's display name; only a previously clean document is saved automatically.
+        void SynchronizeSourceName(std::string name);
         void ReloadSource();
         void DismissSourceConflict() noexcept { m_Persistence.DismissConflict(); }
         [[nodiscard]] bool SourceConflict() const noexcept { return m_Persistence.Conflict(); }

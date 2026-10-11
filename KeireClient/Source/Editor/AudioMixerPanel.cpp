@@ -318,9 +318,9 @@ namespace KeireEditor
             }
         }
         if (!m_Message.empty())
-            ui.TextColored(theme.MutedText, m_Message);
+            ui.TextColoredWrapped(theme.MutedText, m_Message);
         if (const auto preview = m_Controller.AudioMixerPreviewDiagnostic(); !preview.empty())
-            ui.TextColored(theme.Warning, preview);
+            ui.TextColoredWrapped(theme.Warning, preview);
         std::size_t effectCount = 0;
         std::size_t sendCount = 0;
         for (const auto& bus : document.Definition().Buses)
@@ -347,6 +347,7 @@ namespace KeireEditor
             {
                 try
                 {
+                    const bool hasSourceBuses = document.Definition().Buses.size() > 1;
                     (void)document.Edit(
                         "Create Reverb Return",
                         [](Keire::AudioMixerDefinition& mixer)
@@ -369,7 +370,11 @@ namespace KeireEditor
                                                          .Gain = 1.0F});
                             mixer.Buses.push_back(std::move(reverb));
                         });
-                    m_Message = "Created a Reverb Return, post-fader sends, and zone-ready wet effect.";
+                    m_Message =
+                        hasSourceBuses
+                            ? "Created a Reverb Return with a wet effect and sends from existing source buses."
+                            : "Created a Reverb Return with a wet effect. Add a source bus and connect its send "
+                              "to Reverb Return in Channel Inspector.";
                 }
                 catch (const std::exception& error)
                 {
@@ -419,7 +424,7 @@ namespace KeireEditor
             ui.TableSetupColumn("Channel", Keire::UiTableColumnSizing::Stretch, 1.7F);
             ui.TableSetupColumn("Output", Keire::UiTableColumnSizing::Stretch, 1.2F);
             ui.TableSetupColumn("Peak", Keire::UiTableColumnSizing::Stretch, 1.5F);
-            ui.TableSetupColumn("Volume", Keire::UiTableColumnSizing::Stretch, 1.4F);
+            ui.TableSetupColumn("Volume (dB)", Keire::UiTableColumnSizing::Stretch, 1.4F);
             ui.TableSetupColumn("Mute", Keire::UiTableColumnSizing::Fixed, 56.0F);
             ui.TableSetupColumn("Solo", Keire::UiTableColumnSizing::Fixed, 56.0F);
             ui.TableHeaderRow();
@@ -446,8 +451,8 @@ namespace KeireEditor
                 const auto peakDb = Keire::LinearToDecibels(peak);
                 ui.ProgressBar(std::clamp((peakDb + 60.0F) / 60.0F, 0.0F, 1.0F), {0.0F, 12.0F},
                                meter == meters.Readings.end() ? "-- dB" : FormatDecibels(peak));
-                if (meter != meters.Readings.end() && meter->Clipping)
-                    ui.TextColored(theme.Error, "CLIP");
+                // Reserve the warning line so changing meter state cannot move the fader/mute/solo targets.
+                ui.TextColored(theme.Error, meter != meters.Readings.end() && meter->Clipping ? "CLIP" : " ");
 
                 (void)ui.TableNextColumn();
                 double gain = Keire::LinearToDecibels(bus.Gain);
@@ -455,6 +460,11 @@ namespace KeireEditor
                     (void)ApplyEdit("Edit Audio Mixer fader",
                                     [busId = bus.Id, value = Keire::DecibelsToLinear(static_cast<float>(gain))](
                                         Keire::AudioMixerDefinition& mixer) { RequireBus(mixer, busId).Gain = value; });
+                if (ui.LastItemState().Hovered)
+                    ui.SetTooltip(
+                        "0 dB keeps the original volume. Negative values reduce it; positive values boost it. "
+                        "Use Mute for silence.",
+                        {.Delayed = true});
 
                 (void)ui.TableNextColumn();
                 bool mute = bus.Mute;

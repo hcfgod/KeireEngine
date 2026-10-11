@@ -2,6 +2,97 @@
 
 ## Unreleased
 
+- The Project panel labels its search as **Filter current folder** and explains its scope on hover.
+
+- Input Actions clears its unsaved indicator when Undo or Redo returns to the saved content, including after saving
+  an edited version and navigating history again.
+
+- Windows Fast script checks no longer start native installer or package validation builds. Those runtime gates
+  run in Integration and All; Fast retains the lightweight contract checks.
+
+- The documentation library includes the Windows installer performance guide in navigation and search.
+
+- Generated Visual Studio workspaces select the project's managed SDK without replacing user-owned SDK policies.
+  Generated policies update when the selected SDK moves and stay unchanged otherwise.
+
+- Managed scene handles compare by scene identity, including `Scene.IsActive`, rather than wrapper object identity.
+
+- Compact Console panels retain space for log rows instead of letting entry details consume the entire panel.
+
+- Hidden panels discard pending window settings so their size and position cannot affect the next visible panel.
+  Prefab Overrides uses a smaller initial window, wraps long help and identifiers, and stacks actions in narrow panels.
+
+- VFX preview status distinguishes paused playback, and preview controls and diagnostics fit narrow panels.
+
+- VFX shader warmup wakes a frame already waiting for render capacity, allowing the editor to keep processing
+  native events. Compute pipeline diagnostics identify each shader and its driver compilation time.
+
+- Audio Mixer identifies volume units as decibels, wraps diagnostics, and explains how to connect a new reverb
+  return when there are no source buses yet.
+
+- Import settings actions occupy separate rows, keeping Revert accessible in narrow Inspectors; instructions and
+  external-change warnings wrap within the panel. Numeric and choice option names wrap above their controls.
+
+- Package Manager wraps package descriptions, failed-download guidance, archive hashes, and installed source paths.
+
+- Input Actions toolbar Undo, Redo, and Revert preserve the restored document instead of overwriting it with stale edits.
+
+- Empty projects initialize their Assets directory before installing shared shaders, avoiding a first-launch error.
+
+- Empty Scene view Create/Open overlay buttons receive clicks above the viewport canvas.
+
+- Reverb zones with zero influence no longer override nearby zones or suppress the base mix after leaving a volume.
+  Boundary, re-entry, wet-effect restoration, and distant higher-priority zone coverage protects both volume shapes.
+
+- Audio Mixer rows keep a stable height when clipping warnings appear or clear, preventing faders and mute/solo
+  controls from moving under the pointer during playback.
+
+- Algorithmic reverb normalizes its feedback taps before storing delay history, preventing sustained quiet audio
+  from growing into runaway clipping at ordinary decay settings. Long-running mono/stereo tail tests cover the range.
+
+- Failed-import summaries no longer imply that newly added assets already have a usable last-good revision.
+
+- Audio Inspector preview status and import errors wrap in narrow panels; Reimport Audio has its own row so it stays accessible.
+
+- Play Mode Changes shows the stored quaternion components for rotation changes instead of two identical "Changed"
+  placeholders.
+
+- Play Mode Changes wraps before/after values, entity headings, and conflict explanations instead of clipping long
+  summaries inside the review list.
+
+- Console messages retain readable severity colors when hovered, selected, or pressed, using subtle row highlights.
+
+- Play Mode shows a status notice and Console warning when it runs the last successful scripts after a failed or
+  cancelled build, explaining that recent script changes are not running.
+
+- Hub keeps the Duplicate Project dialog open after validation errors, preserving the name and destination for correction.
+  Invalid names and missing destinations explain what to change instead of only reporting an invalid request.
+
+- Edit-mode VFX previews and browser/Inspector thumbnails wait for known pending initial imports before requesting their runtime assets, avoiding
+  a transient missing-catalog error on first project open. Missing and failed assets still report errors.
+  Audio thumbnails and Inspector metadata also wait for the first import; Preview explains that wait instead of
+  attempting to load an asset that has not reached the catalog yet.
+
+- Curve and gradient Inspector headings hide internal widget ID suffixes such as `##attenuation`.
+
+- C# `SceneAsset` Inspector fields filter for scenes instead of listing unrelated shaders and other assets.
+
+- Renaming an open scene keeps its saved revision synchronized, preventing a false source-conflict warning on
+  the next save. Unsaved edits remain unsaved and genuine external changes still require conflict resolution.
+
+- Hub project creation opens the Projects page with the new project's name in search and clears incompatible
+  filters, so an existing search or favorites-only view cannot hide the result. View and sort preferences remain.
+
+- Hub labels an external Editor with only an outdated registration as "Update needs verification" rather than
+  "Damaged". Actual file damage retains the damage warning; verifying the changed package is still required.
+
+- Pinned Inspector component headers retain their collapse and action-menu controls while scrolling, including
+  independently scrolling component cards. Covered fields no longer receive clicks through the pinned header.
+
+- Windows installers use faster-extracting non-solid zlib compression, report extraction and live transaction phase
+  timings, and avoid inserting thousands of SDK file entries into the setup details list. Downloads are larger;
+  full payload verification and rollback remain enabled.
+
 - Windows managed API and source generators build with the locked Editor SDK, preventing installed projects from
   failing with CS9057 when the build machine has a newer compiler. Packaging compiles a probe with the staged SDK
   and analyzer before producing an installer.

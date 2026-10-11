@@ -6,7 +6,9 @@ Editor documents share `DocumentSourcePersistence`, which owns the path and exac
 save a document. Publication compares the current bounded source to that baseline before atomic replacement;
 conflict or write failure does not advance the baseline. Asset renames preserve the existing baseline. Scene reload
 prepares a replacement before clearing history or changing the editing scene, and conflicts preserve recovery.
-The scene UI owns the user's Reload/Save Copy/Overwrite decision; the persistence service is independently testable.
+Scene display-name updates after relocation use the document's guarded save path, advancing the baseline only after
+successful publication; a dirty scene retains its pending edits. The scene UI owns the user's Reload/Save Copy/Overwrite
+decision; the persistence service is independently testable.
 This detects stale saves, but ordinary filesystem replacement is not compare-and-swap against arbitrary external
 writers in the final compare/replace interval.
 
@@ -1240,6 +1242,9 @@ validates owner thread and active generation. Its RAII scopes balance backend be
 exception unwinding. Typed color and scalar/vector style scopes map semantic public roles to private backend slots and
 restore them through the same generation-safe stack, so product UI code never owns a Dear ImGui style stack. Scene/Game
 declarations and UI draw data are recorded into one coordinated RenderSystem frame.
+`UiFrame::StickySectionHeader` renders a synchronous callback in a child layered above its scrolled component card.
+The child owns hit testing so covered fields cannot receive header clicks; parent layout and UI scopes are restored
+on both normal return and callback failure. The Inspector reuses its ordinary component controls in this overlay.
 The UI drawing facade accepts per-vertex colored triangles and UI-image textured triangles. When a renderer is active,
 UI Builder submits its retained document to the runtime UI GPU compositor in a dedicated preview view. That path uses
 the runtime font and image asset requests and accepts an optional transient UI-target material selection. The selected

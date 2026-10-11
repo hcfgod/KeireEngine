@@ -410,6 +410,21 @@ namespace Keire
         if (request.Assemblies.empty())
             throw std::invalid_argument("IDE workspace generation requires at least one managed assembly.");
 
+        try
+        {
+            const auto dotnet =
+                m_Impl->Dotnet.empty()
+                    ? Detail::ResolveDotnet(m_Impl->Specification.DotnetExecutable, m_Impl->Specification.SdkSelection,
+                                            m_Impl->ProjectRoot, m_Impl->Specification.RuntimeRootDirectory)
+                    : m_Impl->Dotnet;
+            Detail::SynchronizeManagedIdeSdk(m_Impl->ProjectRoot, dotnet);
+        }
+        catch (const std::exception& error)
+        {
+            KEIRE_CORE_WARN("Could not prepare the IDE SDK selection: {}. Check Project Settings > Scripting.",
+                            error.what());
+        }
+
         std::string safeName(solutionName);
         for (char& character : safeName)
             if (!std::isalnum(static_cast<unsigned char>(character)) && character != '_' && character != '-')

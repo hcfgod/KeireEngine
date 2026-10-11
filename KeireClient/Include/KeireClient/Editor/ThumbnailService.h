@@ -72,7 +72,8 @@ namespace KeireEditor
                                                                     std::uint32_t height, bool missing = false);
     /// Resolves non-blocking runtime dependencies for material, material-graph, and VFX thumbnail requests.
     /// A disengaged result means the asset type is not handled; otherwise the value reports readiness.
-    [[nodiscard]] std::optional<bool> PrepareGeneratedAssetThumbnail(const Keire::Ref<Keire::AssetSystem>& assets,
-                                                                     const Keire::AssetSourceRecord& source,
-                                                                     ThumbnailRequest& request);
+    [[nodiscard]] std::optional<bool>
+    PrepareGeneratedAssetThumbnail(const Keire::Ref<Keire::AssetSystem>& assets, const Keire::AssetSourceRecord& source,
+                                   ThumbnailRequest& request,
+                                   Keire::AssetImportState importState = Keire::AssetImportState::Imported);
 } // namespace KeireEditor

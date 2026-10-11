@@ -51,6 +51,7 @@ Var KeireInstallWorkerPending
 Var KeireEditorStartMenuSelected
 Var KeireEditorDesktopSelected
 Var KeireEditorInstallFailure
+Var KeireExtractionStarted
 
 ; Verification hashes the complete Editor and bundled SDK, including on busy or slower disks.
 !ifndef KEIRE_EDITOR_VERIFY_TIMEOUT_MS
@@ -71,8 +72,7 @@ OutFile "${OUTPUT_PATH}"
 InstallDir "$LOCALAPPDATA\Programs\${INSTALL_FOLDER_NAME}"
 InstallDirRegKey HKCU "${PRODUCT_REGISTRY_KEY}" "InstallDirectory"
 RequestExecutionLevel user
-SetCompressor lzma
-SetCompressorDictSize 8
+SetCompressor zlib
 ManifestDPIAware true
 Icon "${SETUP_ICON_PATH}"
 UninstallIcon "${SETUP_ICON_PATH}"
@@ -195,8 +195,17 @@ Section "${PRODUCT_NAME} (required)" MainSection
     SetErrorLevel 1
     Abort
 EditorDestinationReady:
+    System::Call 'kernel32::GetTickCount()i .r0'
+    StrCpy $KeireExtractionStarted $0
+    DetailPrint "Extracting Editor files and the bundled C# SDK..."
+    ; Thousands of SDK files should not each insert a row into the setup details list.
+    SetDetailsPrint none
     SetOutPath "$PLUGINSDIR\payload"
     File /r "${SOURCE_DIRECTORY}\*"
+    SetDetailsPrint both
+    System::Call 'kernel32::GetTickCount()i .r0'
+    IntOp $0 $0 - $KeireExtractionStarted
+    DetailPrint "Editor extraction elapsed_ms=$0"
     !insertmacro KeireEditorTestTrace "payload extracted"
     FileOpen $0 "$PLUGINSDIR\payload\.keire-editor-install" w
     IfErrors EditorInstallWorkerFailed
@@ -212,10 +221,10 @@ EditorDestinationReady:
     Goto EditorInstallWorkerFailed
 !endif
     DetailPrint "Verifying and installing the Editor payload..."
-    nsExec::ExecToStack '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product editor --source "$PLUGINSDIR\payload" --root "$INSTDIR"'
+    ; Stream phase timings and failures as they occur instead of buffering them until the worker exits.
+    nsExec::ExecToLog '"$PLUGINSDIR\KeireInstallWorker.exe" install-deferred --product editor --source "$PLUGINSDIR\payload" --root "$INSTDIR"'
     Pop $0
-    Pop $1
-    DetailPrint "$1"
+    StrCpy $1 "See the installation details for the completed phases and any file verification errors."
     !insertmacro KeireEditorTestTrace "install-deferred exit=$0 output=$1"
     StrCpy $KeireEditorInstallFailure "Editor payload installation failed (exit $0).$\r$\n$1"
     StrCmp $0 "0" 0 EditorInstallWorkerRecover

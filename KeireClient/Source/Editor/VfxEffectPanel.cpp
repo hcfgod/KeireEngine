@@ -193,9 +193,6 @@ namespace KeireEditor
         const bool frozen = !m_Controller.VfxEffectState().Publishable();
         const auto& theme = m_Controller.VfxEffectTheme();
         ui.Separator();
-        ui.TextColored(frozen ? theme.Warning : (status.Active ? theme.Success : theme.Warning),
-                       frozen ? "PREVIEW FROZEN" : (status.Active ? "PREVIEW LIVE" : "PREVIEW IDLE"));
-        ui.SameLine();
         if (auto disabled = ui.BeginDisabled(frozen); disabled)
         {
             if (ui.IconButton("RestartVfxPreview", Keire::UiIcon::Refresh))
@@ -221,6 +218,10 @@ namespace KeireEditor
         if (ui.Checkbox("Loop Preview", autoRestart))
             m_Controller.SetVfxEffectPreviewAutoRestart(autoRestart);
         ui.SameLine();
+        ui.TextColored(frozen ? theme.Warning
+                              : (status.Paused ? theme.MutedText : (status.Active ? theme.Success : theme.Warning)),
+                       frozen ? "PREVIEW FROZEN"
+                              : (status.Paused ? "PREVIEW PAUSED" : (status.Active ? "PREVIEW LIVE" : "PREVIEW IDLE")));
         auto backend = status.Backend;
         if (auto disabled = ui.BeginDisabled(frozen); disabled)
         {
@@ -232,7 +233,6 @@ namespace KeireEditor
                                       return true;
                                   });
         }
-        ui.SameLine();
         auto speed = status.Speed;
         if (ui.SliderFloat("Speed", speed, 0.05F, 4.0F))
             (void)ApplyAction("Changed VFX preview speed",
@@ -241,10 +241,9 @@ namespace KeireEditor
                                   m_Controller.SetVfxEffectPreviewSpeed(speed);
                                   return true;
                               });
-        ui.SameLine();
         const auto particleLabel = status.Backend == Keire::VfxBackend::Gpu ? " spawned (estimate)" : " active";
-        ui.TextColored(theme.MutedText, std::to_string(status.ActiveParticles) + particleLabel + "  |  " +
-                                            std::to_string(status.DroppedParticles) + " dropped");
+        ui.TextColoredWrapped(theme.MutedText, std::to_string(status.ActiveParticles) + particleLabel + "  |  " +
+                                                   std::to_string(status.DroppedParticles) + " dropped");
     }
 
     void VfxEffectPanel::DrawEffectSettings(Keire::UiFrame& ui)
@@ -333,10 +332,11 @@ namespace KeireEditor
 
         ui.TextColored(theme.Accent, "SYSTEMS");
         ui.TextColored(theme.MutedText, "Schema v" + std::to_string(definition.SchemaVersion));
-        ui.TextColored(definition.ExecutionSource == Keire::VfxExecutionSource::Graph ? theme.Success : theme.Warning,
-                       definition.ExecutionSource == Keire::VfxExecutionSource::Graph
-                           ? "Context Blocks, graph nodes, and typed cables are the executable program."
-                           : "Runtime Modules remain authoritative until this asset is converted.");
+        ui.TextColoredWrapped(definition.ExecutionSource == Keire::VfxExecutionSource::Graph ? theme.Success
+                                                                                             : theme.Warning,
+                              definition.ExecutionSource == Keire::VfxExecutionSource::Graph
+                                  ? "Context Blocks, graph nodes, and typed cables are the executable program."
+                                  : "Runtime Modules remain authoritative until this asset is converted.");
         for (const auto& system : definition.Systems)
         {
             auto id = ui.PushId(system.Id.ToString());
@@ -387,7 +387,7 @@ namespace KeireEditor
             }
         }
         if (executableGraph)
-            ui.TextColored(theme.MutedText, "Executable Graph mode owns one particle system.");
+            ui.TextColoredWrapped(theme.MutedText, "Executable Graph mode owns one particle system.");
 
         ui.Separator();
         ui.TextColored(theme.Accent, "BLACKBOARD");
@@ -429,7 +429,7 @@ namespace KeireEditor
         ui.TextColored(theme.MutedText, std::to_string(nodes) + " nodes  |  " + std::to_string(blocks) +
                                             " Blocks  |  " + std::to_string(links) + " cables");
         if (definition.ExecutionSource == Keire::VfxExecutionSource::Graph && document.Publishable())
-            ui.TextColored(theme.Success, "Connected graph nodes execute on the selected preview backend.");
+            ui.TextColoredWrapped(theme.Success, "Connected graph nodes execute on the selected preview backend.");
         else if (definition.ExecutionSource == Keire::VfxExecutionSource::Graph)
             ui.TextColored(theme.Warning, "Repair the graph to resume compilation, preview, and saving.");
         else

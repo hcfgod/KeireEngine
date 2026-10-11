@@ -2,6 +2,7 @@ using System.Text;
 
 namespace Keire;
 
+[StableAssetTypeId("4b454952-4553-4345-4e45-415353455401")]
 public sealed class SceneAsset : Asset;
 
 public enum SceneLoadMode : byte
@@ -42,6 +43,8 @@ public sealed class Scene : EngineObject, IEquatable<Scene>
     public bool Equals(Scene? other) => other is not null && Id == other.Id && Asset == other.Asset;
     public override bool Equals(object? value) => value is Scene other && Equals(other);
     public override int GetHashCode() => HashCode.Combine(Asset, Id);
+    public static bool operator ==(Scene? left, Scene? right) => Equals(left, right);
+    public static bool operator !=(Scene? left, Scene? right) => !Equals(left, right);
 }
 
 public enum SceneQueryScope : byte

@@ -18,6 +18,7 @@
 
 namespace KeireHub
 {
+    struct HubProjectMutationSnapshot;
     enum class HubProjectsView : std::uint8_t
     {
         List,
@@ -83,12 +84,37 @@ namespace KeireHub
     [[nodiscard]] HubProjectUiCommand TakeOpenWithEditorCommand(std::optional<HubProjectUiPendingSelection>& pending,
                                                                 std::string editorId);
 
+    struct HubDuplicateSubmission final
+    {
+        bool Waiting = false;
+        bool CloseRequested = false;
+        std::string Error;
+
+        [[nodiscard]] bool Begin();
+        void Resolve(std::string error);
+        void ResolveStart(const HubProjectMutationSnapshot& snapshot);
+    };
+
+    struct HubProjectFilters final
+    {
+        std::string Search;
+        std::string Version;
+        bool FavoritesOnly = false;
+        std::uint8_t Status = 0;
+        std::uint8_t Editor = 0;
+    };
+
     class HubProjectsUi final
     {
       public:
         void SetAppearance(HubAppearance appearance, bool systemPrefersDark = true) noexcept;
         void SetPreferences(HubProjectsView view, HubProjectsSort sort) noexcept;
+        void SetFilters(HubProjectFilters filters);
+        void RevealCreatedProject(std::string_view name);
+        [[nodiscard]] const HubProjectFilters& Filters() const noexcept { return m_Filters; }
         void SetDuplicateParent(const std::filesystem::path& parent);
+        void ResolveDuplicateSubmission(std::string error);
+        void ResolveDuplicateStart(const HubProjectMutationSnapshot& snapshot);
         void SetThumbnails(std::shared_ptr<const std::vector<ProjectThumbnail>> thumbnails) noexcept;
 
         [[nodiscard]] HubProjectsView View() const noexcept { return m_View; }
@@ -121,19 +147,16 @@ namespace KeireHub
         HubProjectsSort m_Sort = HubProjectsSort::LastOpened;
         HubDesignTokens m_Tokens = HubDesignTokens::For(HubAppearance::Dark);
         std::optional<HubProjectUiPendingSelection> m_Pending;
-        std::string m_Search;
+        HubProjectFilters m_Filters;
         std::string m_SelectedProjectId;
         std::string m_DuplicateName;
         std::string m_DuplicateParent;
+        HubDuplicateSubmission m_DuplicateSubmission;
         std::string m_RenameName;
-        std::string m_VersionFilter;
         bool m_RequestDuplicatePopup = false;
         bool m_RequestRenamePopup = false;
         bool m_RequestRemovePopup = false;
         bool m_RequestOpenWithPopup = false;
-        bool m_FavoritesOnly = false;
-        std::uint8_t m_StatusFilter = 0;
-        std::uint8_t m_EditorFilter = 0;
         std::shared_ptr<const std::vector<ProjectThumbnail>> m_Thumbnails;
         std::vector<ThumbnailTexture> m_ThumbnailTextures;
     };

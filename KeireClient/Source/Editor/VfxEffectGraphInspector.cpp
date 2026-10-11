@@ -495,8 +495,9 @@ namespace KeireEditor
         if (selected == system->Nodes.end())
         {
             ui.TextColored(theme.Accent, "GRAPH INSPECTOR");
-            ui.TextColored(theme.MutedText,
-                           "Select a node or cable to inspect its executable references, typed pins, and routing.");
+            ui.TextColoredWrapped(
+                theme.MutedText,
+                "Select a node or cable to inspect its executable references, typed pins, and routing.");
             return;
         }
 

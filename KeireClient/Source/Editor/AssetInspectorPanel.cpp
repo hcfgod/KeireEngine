@@ -16,6 +16,7 @@
 #include "KeireClient/Editor/MaterialVariantEditing.h"
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/ThumbnailService.h"
+#include "KeireClientInternal/Editor/AssetPreviewReadiness.h"
 
 #include "Keire/Audio/AudioAssets.h"
 #include "Keire/Rendering/ShaderGraph.h"
@@ -69,21 +70,24 @@ namespace
     {
         if (auto* boolean = std::get_if<bool>(&value))
             return ui.Checkbox(option.DisplayName, *boolean);
+        auto optionId = ui.PushId(option.Key);
+        ui.TextWrapped(option.DisplayName);
+        ui.SetNextItemWidth(-1.0F);
         if (auto* integer = std::get_if<std::int64_t>(&value))
         {
             return ui.DragInteger(
-                option.DisplayName, *integer, option.Step,
+                "##Value", *integer, option.Step,
                 option.Minimum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*option.Minimum)) : std::nullopt,
                 option.Maximum ? std::optional<std::int64_t>(static_cast<std::int64_t>(*option.Maximum))
                                : std::nullopt);
         }
         if (auto* scalar = std::get_if<double>(&value))
-            return ui.DragScalar(option.DisplayName, *scalar, option.Step, option.Minimum, option.Maximum);
+            return ui.DragScalar("##Value", *scalar, option.Step, option.Minimum, option.Maximum);
         auto* choice = std::get_if<std::string>(&value);
         if (!choice)
             return false;
         bool changed = false;
-        if (auto combo = ui.BeginCombo(option.DisplayName, *choice); combo)
+        if (auto combo = ui.BeginCombo("##Value", *choice); combo)
             for (const auto& candidate : option.Choices)
                 if (ui.Selectable(candidate, candidate == *choice))
                 {
@@ -171,8 +175,9 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     const bool importConflict = Keire::Internal::SynchronizeImportSettingsDraft(
         currentImportSettings, m_OriginalImportSettings, m_ImportSettings);
     if (importConflict)
-        ui.TextColored(theme.Warning, "Import settings changed elsewhere. Apply replaces them with this draft; Revert "
-                                      "loads the current settings.");
+        ui.TextColoredWrapped(theme.Warning,
+                              "Import settings changed elsewhere. Apply replaces them with this draft; Revert "
+                              "loads the current settings.");
 
     const auto projectRoot = database->Specification().ProjectRoot;
     if (!m_Thumbnails || m_PreviewProjectRoot != projectRoot)
@@ -214,16 +219,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 request.PreviewAsset = handle.Get();
             ready = static_cast<bool>(request.PreviewAsset);
         }
-        else if (assets && record->Type == Keire::AudioClipAsset::StaticType())
-        {
-            const auto handle = assets->Load<Keire::AudioClipAsset>(record->Id, Keire::AssetPriority::Low);
-            request.PreviewAsset = handle.TryGetLoaded();
-            request.Missing = handle.State() == Keire::AssetState::Failed;
-            if (!request.PreviewAsset && request.Missing)
-                request.PreviewAsset = handle.Get();
-            ready = static_cast<bool>(request.PreviewAsset);
-        }
-        else if (const auto generated = KeireEditor::PrepareGeneratedAssetThumbnail(assets, *record, request))
+        else if (const auto generated = KeireEditor::PrepareGeneratedAssetThumbnail(
+                     assets, *record, request, database->ImportStatus(record->Id).State))
         {
             ready = *generated;
         }
@@ -257,7 +254,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     {
         ui.Separator();
         ui.TextColored(theme.Accent, "IMPORT SETTINGS");
-        ui.TextColored(theme.MutedText, "Changes are stored with this source asset and applied on reimport.");
+        ui.TextColoredWrapped(theme.MutedText, "Changes are stored with this source asset and applied on reimport.");
         std::string activeGroup;
         for (const auto& option : importer->ImportOptions)
         {
@@ -286,7 +283,6 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                 }
             }
         }
-        ui.SameLine();
         if (auto disabled = ui.BeginDisabled(!changed); disabled)
             if (ui.Button("Revert Import Settings"))
             {
@@ -323,13 +319,18 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
         ui.TextColored(theme.Accent, "AUDIO CLIP");
         const auto importStatus = database->ImportStatus(record->Id);
         const bool importFailed = importStatus.State == Keire::AssetImportState::Failed;
+        const bool pendingImport = assets && KeireEditor::Detail::ShouldDeferAssetPreviewLoad(
+                                                 assets->TryGetType(record->Id), record->Type, importStatus.State,
+                                                 Keire::AudioClipAsset::StaticType());
+        if (pendingImport)
+            ui.TextColoredWrapped(theme.MutedText, "Waiting for the first audio import to finish...");
         if (importFailed)
         {
-            ui.TextColored(theme.Error, "Audio import failed. Correct the source file and reimport.");
+            ui.TextColoredWrapped(theme.Error, "Audio import failed. Correct the source file and reimport.");
             for (std::size_t index = 0; index < std::min(importStatus.Diagnostics.size(), std::size_t{64}); ++index)
-                ui.TextColored(theme.Error, FormatAssetDiagnostic(importStatus.Diagnostics[index]));
+                ui.TextColoredWrapped(theme.Error, FormatAssetDiagnostic(importStatus.Diagnostics[index]));
         }
-        if (assets)
+        if (assets && !pendingImport)
         {
             const auto handle = assets->Load<Keire::AudioClipAsset>(record->Id, Keire::AssetPriority::High);
             if (const auto clip = handle.TryGetLoaded())
@@ -344,20 +345,23 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             }
             else
             {
-                ui.TextColored(theme.MutedText, importFailed ? "No playable imported revision is available."
-                                                             : "Loading decoded audio metadata...");
+                ui.TextColoredWrapped(theme.MutedText, importFailed ? "No playable imported revision is available."
+                                                                    : "Loading decoded audio metadata...");
             }
         }
-        if (ui.Button("Preview"))
         {
-            try
+            auto disabled = ui.BeginDisabled(pendingImport);
+            if (ui.Button("Preview"))
             {
-                m_Controller.PreviewInspectorAudio(record->Id);
-                m_Controller.SetInspectorAssetStatus("Started audio preview through the EditorPreview bus.");
-            }
-            catch (const std::exception& error)
-            {
-                m_Controller.ReportInspectorAssetError(std::string("Audio preview failed: ") + error.what());
+                try
+                {
+                    m_Controller.PreviewInspectorAudio(record->Id);
+                    m_Controller.SetInspectorAssetStatus("Started audio preview through the EditorPreview bus.");
+                }
+                catch (const std::exception& error)
+                {
+                    m_Controller.ReportInspectorAssetError(std::string("Audio preview failed: ") + error.what());
+                }
             }
         }
         ui.SameLine();
@@ -366,11 +370,10 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             m_Controller.StopInspectorAudioPreview();
             m_Controller.SetInspectorAssetStatus("Audio preview stopped.");
         }
-        ui.SameLine();
         if (ui.Button("Reimport Audio"))
             m_Controller.ImportInspectorAssets();
         if (!assetStatus.empty())
-            ui.TextColored(theme.MutedText, assetStatus);
+            ui.TextColoredWrapped(theme.MutedText, assetStatus);
     }
     else if (record->Type == Keire::ProceduralMotionProfileAsset::StaticType())
     {

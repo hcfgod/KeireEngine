@@ -974,7 +974,8 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
         clip.SampleRate = 48'000;
         clip.Channels = 1;
         if (!source.empty() && source.front() == std::byte{'i'})
-            clip.Samples = {1.0F};
+            // A non-unity impulse distinguishes restored wet processing from a silently dry mixer.
+            clip.Samples = {0.5F};
         else
             clip.Samples.assign(64, 0.25F);
         return Keire::AudioClipAsset::Encode(clip);
@@ -1031,7 +1032,7 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     const auto routed = audio->RenderVoicesOffline(1);
     REQUIRE(routed.size() == 2);
     const auto centerPanGain = std::sqrt(0.5F);
-    const auto initialRoutedSample = 0.25F * 0.5F * centerPanGain;
+    const auto initialRoutedSample = 0.25F * 0.5F * centerPanGain * 0.5F;
     CHECK(routed[0] == doctest::Approx(initialRoutedSample));
     CHECK(routed[1] == doctest::Approx(initialRoutedSample));
 
@@ -1050,9 +1051,23 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     CHECK(presentation->Statistics().ActiveReverbZones == 1);
     const auto zoned = audio->RenderVoicesOffline(1);
     REQUIRE(zoned.size() == 2);
-    const auto zonedSample = 0.25F * 0.25F * centerPanGain;
+    const auto zonedSample = 0.25F * 0.25F * centerPanGain * 0.5F;
     CHECK(zoned[0] == doctest::Approx(zonedSample));
     CHECK(zoned[1] == doctest::Approx(zonedSample));
+
+    auto distantEntity = scene->CreateEntity("Distant high priority reverb zone");
+    const auto distantZone = distantEntity.AddComponent<Keire::AudioReverbZoneComponent>();
+    REQUIRE(distantZone);
+    distantZone->SetPriority(100);
+    const auto distantTransform = distantEntity.GetComponent<Keire::TransformComponent>();
+    REQUIRE(distantTransform);
+    distantTransform->SetLocalPosition({100.0F, 0.0F, 0.0F});
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
+    CHECK(presentation->Statistics().ActiveReverbZones == 1);
+    const auto withDistantZone = audio->RenderVoicesOffline(1);
+    REQUIRE(withDistantZone.size() == 2);
+    CHECK(withDistantZone[0] == doctest::Approx(zonedSample));
+    CHECK(withDistantZone[1] == doctest::Approx(zonedSample));
 
     REQUIRE(listenerEntity.AddComponent<Keire::AudioListenerComponent>());
     presentation->Synchronize(scene, 320.0F, 180.0F, true);
@@ -1067,6 +1082,33 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     REQUIRE(restored.size() == 2);
     CHECK(restored[0] == doctest::Approx(initialRoutedSample));
     CHECK(restored[1] == doctest::Approx(initialRoutedSample));
+    CHECK(presentation->Statistics().ActiveReverbZones == 0);
+
+    // Exercise the exact fade boundary and re-entry for both supported volume shapes.
+    for (const auto shape : {Keire::AudioReverbZoneShape::Box, Keire::AudioReverbZoneShape::Sphere})
+    {
+        zone->SetShape(shape);
+        zone->SetBoxHalfExtent({5.0F, 5.0F, 5.0F});
+        zone->SetBlendDistance(1.0F);
+        for (const float distance : {0.0F, 5.5F, 6.0F, 6.5F, 0.0F})
+        {
+            CAPTURE(static_cast<int>(shape));
+            CAPTURE(distance);
+            zoneTransform->SetLocalPosition({distance, 0.0F, 0.0F});
+            presentation->Synchronize(scene, 320.0F, 180.0F, true);
+            const auto blended = audio->RenderVoicesOffline(1);
+            REQUIRE(blended.size() == 2);
+            const bool outside = distance >= 6.0F;
+            const float expected = outside            ? initialRoutedSample
+                                   : distance == 5.5F ? 0.25F * 0.375F * centerPanGain * 0.75F
+                                                      : zonedSample;
+            CHECK(blended[0] == doctest::Approx(expected));
+            CHECK(blended[1] == doctest::Approx(expected));
+            CHECK(presentation->Statistics().ActiveReverbZones == (outside ? 0U : 1U));
+        }
+    }
+    zoneTransform->SetLocalPosition({100.0F, 0.0F, 0.0F});
+    presentation->Synchronize(scene, 320.0F, 180.0F, true);
 
     mixerDefinition.Buses[1].Gain = 0.25F;
     const auto revisedMixerBytes = Keire::AudioMixerAsset::Encode(mixerDefinition);
@@ -1077,7 +1119,7 @@ TEST_CASE("scene presentation treats automatic and manual audio playback as edge
     REQUIRE(assets->Unmount(revisedImport.CatalogPath));
     assets->Mount({revisedImport.CatalogPath, 0, true});
     REQUIRE(assets->Reload(mixerRecord->Id));
-    const auto revisedRoutedSample = 0.25F * 0.25F * centerPanGain;
+    const auto revisedRoutedSample = 0.25F * 0.25F * centerPanGain * 0.5F;
     bool observedRevisedMixer = false;
     const auto reloadDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!observedRevisedMixer && std::chrono::steady_clock::now() < reloadDeadline)

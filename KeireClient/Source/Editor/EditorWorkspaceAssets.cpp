@@ -437,13 +437,9 @@ void EditorWorkspaceLayer::QueueAssetMutation(std::shared_ptr<KeireEditor::Asset
                 const auto expectedName = Keire::Detail::PathToUtf8(record->RelativePath.stem());
                 if (!expectedName.empty() && editingScene->Name() != expectedName)
                 {
-                    editingScene->SetName(expectedName);
+                    m_SceneDocument->SynchronizeSourceName(expectedName);
                     if (!activeSceneWasDirty)
-                    {
-                        m_AssetDatabase->ReplaceAssetSource(activeScene,
-                                                            Keire::SceneAsset::Encode(editingScene->Snapshot()));
-                        editingScene->MarkSaved();
-                    }
+                        ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
                 }
             }
         }
@@ -979,13 +975,9 @@ void EditorWorkspaceLayer::UpdateAssetOperations()
                     const auto expectedName = Keire::Detail::PathToUtf8(sceneRecord->RelativePath.stem());
                     if (!expectedName.empty() && editingScene->Name() != expectedName)
                     {
-                        editingScene->SetName(expectedName);
+                        m_SceneDocument->SynchronizeSourceName(expectedName);
                         if (!wasDirty)
-                        {
-                            m_AssetDatabase->ReplaceAssetSource(activeSceneAsset,
-                                                                Keire::SceneAsset::Encode(editingScene->Snapshot()));
-                            editingScene->MarkSaved();
-                        }
+                            ImportAssets(KeireEditor::AssetOperationPriority::AutomaticRefresh);
                     }
                 }
             }
@@ -1328,7 +1320,9 @@ void EditorWorkspaceLayer::ApplyAssetImportResult(const Keire::AssetImportResult
     std::ostringstream status;
     status << "Imported " << result.Imported << " asset(s); " << result.CacheHits << " cache hit(s).";
     if (failures > 0)
-        status << ' ' << failures << " asset(s) kept their last-good revision; select an asset for full diagnostics.";
+        status << ' ' << failures
+               << " asset(s) failed to import. Existing last-good revisions are preserved when "
+                  "available; select an asset for full diagnostics.";
     m_AssetStatus = status.str();
 }
 

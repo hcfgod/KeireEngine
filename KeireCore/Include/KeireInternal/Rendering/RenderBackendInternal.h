@@ -1231,7 +1231,8 @@ namespace Keire::RenderBackend
         void StartRenderThread();
         void StopRenderThread() noexcept;
         void DispatchRender(const std::function<void()>& work);
-        void EnqueueFrame(const std::shared_ptr<RenderFramePacket>& frame, const std::function<void()>& capture);
+        [[nodiscard]] bool EnqueueFrame(const std::shared_ptr<RenderFramePacket>& frame,
+                                        const std::function<void()>& capture);
         [[nodiscard]] bool WaitForRecoveryAtOwnerBoundary(const std::function<bool()>& pumpWindowEvents = {});
         [[nodiscard]] SDL_Window* RequestWindowRecreationAtOwnerBoundary();
         void Flush();

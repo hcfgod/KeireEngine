@@ -195,7 +195,7 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     const auto renderScene = hasScene ? activeScene : Keire::Ref<Keire::Scene>{};
     if (!hasScene || !m_RenderView)
     {
-        (void)ui.InvisibleButton("SceneViewportCanvas", canvasSize);
+        (void)ui.InvisibleButton("SceneViewportCanvas", canvasSize, true);
         imageState = ui.LastItemState();
         imageRect = ui.LastItemRect();
         ui.DrawFilledRectangle(imageRect, {0.055F, 0.062F, 0.075F, 1.0F});

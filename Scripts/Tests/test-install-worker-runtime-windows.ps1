@@ -183,6 +183,27 @@ function Invoke-Worker {
         throw "KeireInstallWorker $($Arguments -join ' ') exited $exitCode; expected " +
             "$($ExpectedExitCodes -join ', ').`n$($output -join [Environment]::NewLine)"
     }
+    # Normal success and reported failures both retain a command duration. Abrupt fault-injection exits cannot.
+    if ($exitCode -ne 86) {
+        $timingPattern = '^installer command=' + [regex]::Escape($Arguments[0]) + ' elapsed_ms=\d+$'
+        if (-not ($output | Where-Object { [string]$_ -match $timingPattern })) {
+            throw "The worker did not report timing for $($Arguments[0]) (exit $exitCode)."
+        }
+    }
+    $previousElapsed = 0L
+    if ($exitCode -eq 0 -and $Arguments[0] -in @('install', 'install-deferred') -and
+        -not ($output | Where-Object { [string]$_ -match '^installer phase=verified ' })) {
+        throw 'A successful installation did not report its verified phase timing.'
+    }
+    foreach ($line in $output) {
+        if ([string]$line -match '^installer phase=\w+ elapsed_ms=(\d+) phase_ms=(\d+)$') {
+            $elapsed = [long]$Matches[1]
+            if ($elapsed -lt $previousElapsed -or [long]$Matches[2] -ne $elapsed - $previousElapsed) {
+                throw "The worker reported inconsistent phase timing: $line"
+            }
+            $previousElapsed = $elapsed
+        }
+    }
     return $exitCode
 }
 

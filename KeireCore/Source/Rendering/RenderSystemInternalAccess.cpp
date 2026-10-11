@@ -509,6 +509,20 @@ namespace Keire
                state.FrameAdmissionWaiters != 0U;
     }
 
+    void RenderSystemInternalAccess::SetGpuVfxWarmupPendingForTest(RenderSystem& renderer, const bool pending)
+    {
+        auto& state = *renderer.m_Impl->State;
+        if (state.Specification.Mode != RenderMode::Headless)
+            throw std::logic_error("Injected VFX warmup requires a headless renderer.");
+        {
+            std::scoped_lock lock(state.RenderQueueMutex);
+            state.VfxPipelineWarmupState.store(pending ? RenderBackend::GpuVfxPipelineWarmupState::Compiling
+                                                       : RenderBackend::GpuVfxPipelineWarmupState::NotStarted,
+                                               std::memory_order_release);
+        }
+        state.FramesRetired.notify_all();
+    }
+
     void RenderSystemInternalAccess::ReleaseAcceptedFrameBlock(RenderSystem& renderer) noexcept
     {
         {

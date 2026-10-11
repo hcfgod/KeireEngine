@@ -5,6 +5,7 @@
 #include "KeireClient/Editor/SceneDocument.h"
 #include "KeireClient/Editor/VfxEffectDocument.h"
 #include "KeireClient/Editor/VfxEffectPanel.h"
+#include "KeireClientInternal/Editor/AssetPreviewReadiness.h"
 
 #include <algorithm>
 #include <cmath>
@@ -320,6 +321,18 @@ void EditorWorkspaceLayer::SynchronizeEditModeVfxPreviews()
             if (preview == m_EditModeVfxPreviews.end() || preview->second.Effect != emitter.Effect ||
                 preview->second.SeedOffset != emitter.SeedOffset)
             {
+                if (m_AssetDatabase)
+                {
+                    const auto source = m_AssetDatabase->Find(emitter.Effect);
+                    if (KeireEditor::Detail::ShouldDeferAssetPreviewLoad(
+                            assets->TryGetType(emitter.Effect), source ? std::optional(source->Type) : std::nullopt,
+                            m_AssetDatabase->ImportStatus(emitter.Effect).State, Keire::VfxEffectAsset::StaticType()))
+                    {
+                        if (preview != m_EditModeVfxPreviews.end())
+                            stopPreview(preview->second);
+                        continue;
+                    }
+                }
                 auto effectHandle = assets->Load<Keire::VfxEffectAsset>(emitter.Effect, Keire::AssetPriority::High);
                 if (preview != m_EditModeVfxPreviews.end())
                     stopPreview(preview->second);

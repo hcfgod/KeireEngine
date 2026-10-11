@@ -1,19 +1,27 @@
 #include "Keire/Core.h"
+#include "KeireClient/Editor/AudioMixerDocument.h"
+#include "KeireClient/Editor/AudioMixerPanel.h"
 #include "KeireClient/Editor/AuthoringWidgets.h"
 #include "KeireClient/Editor/GraphComments.h"
+#include "KeireClient/Editor/ScenePlayChangesPanel.h"
 
 #include <SDL3/SDL.h>
 #include <doctest/doctest.h>
+#include <imgui.h>
+#include <imgui_internal.h>
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace
@@ -76,6 +84,221 @@ namespace
         }
     };
 } // namespace
+
+TEST_CASE("Play changes review wraps long before and after values inside its list")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    const std::string before = "Original scene name with several long descriptive words repeated for review layout ";
+    const std::string after = "Updated scene name with several different descriptive words repeated for review layout ";
+    const auto asset = Keire::AssetId::Generate();
+    auto editing = Keire::CreateRef<Keire::Scene>(asset, Keire::SceneAsset::EmptyDefinition(before + before));
+    auto runtime = Keire::CreateRef<Keire::Scene>(asset, editing->Snapshot());
+    runtime->SetName(after + after);
+    KeireEditor::ScenePlayChangeSet changes(editing, runtime);
+    REQUIRE(changes.Changes().size() == 1);
+    bool checked = false;
+    class ReviewLayer final : public Keire::Layer
+    {
+      public:
+        ReviewLayer(KeireEditor::ScenePlayChangeSet& changes, bool& checked)
+            : Layer("Play review layout"), m_Changes(changes), m_Checked(checked)
+        {
+            m_Panel.Open();
+        }
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            ui.SetNextWindowSize({480, 460}, false);
+            ImGui::LogToBuffer();
+            CHECK(m_Panel.Draw(ui, m_Changes) == KeireEditor::ScenePlayDecision::None);
+            const std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+            ImGui::LogFinish();
+            if (++m_Frames < 3)
+                return;
+            CHECK(text.find("Before:") != std::string::npos);
+            CHECK(text.find("After:") != std::string::npos);
+            bool foundList = false;
+            for (const auto* window : ImGui::GetCurrentContext()->Windows)
+            {
+                if (std::string_view(window->Name).find("PlayChangesList") == std::string_view::npos)
+                    continue;
+                foundList = true;
+                CHECK(window->ContentSize.x <= window->WorkRect.GetWidth() + 1.0F);
+                CHECK(window->ContentSize.y > 3.0F * ImGui::GetTextLineHeight());
+            }
+            CHECK(foundList);
+            CHECK_FALSE(m_Changes.HasSelectedChanges());
+            CHECK(m_Panel.Pending());
+            m_Checked = true;
+            Owner().RequestExit();
+        }
+
+      private:
+        KeireEditor::ScenePlayChangeSet& m_Changes;
+        bool& m_Checked;
+        KeireEditor::ScenePlayChangesPanel m_Panel;
+        int m_Frames = 0;
+    };
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.TargetFrameRate = 0;
+    specification.Ui.Mode = Keire::UiMode::Headless;
+    specification.Ui.LayoutPath.clear();
+    Keire::Application application(specification);
+    (void)application.PushLayer(std::make_unique<ReviewLayer>(changes, checked));
+    CHECK(application.Run() == 0);
+    CHECK(checked);
+    runtime->Close();
+    editing->Close();
+}
+
+TEST_CASE("Audio Mixer clipping indicators preserve control row positions")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    class MixerController final : public KeireEditor::IAudioMixerPanelController
+    {
+      public:
+        MixerController()
+        {
+            auto definition = Keire::AudioMixerAsset::DefaultDefinition();
+            definition.Buses.push_back(
+                {.Id = Keire::AssetId::Generate(), .Name = "Source", .Parent = definition.MasterBus});
+            definition.Buses.push_back(
+                {.Id = Keire::AssetId::Generate(), .Name = "Last row", .Parent = definition.MasterBus});
+            Document.Open(Keire::AssetId::Generate(), std::move(definition), 1);
+        }
+        KeireEditor::AudioMixerDocument& AudioMixerState() noexcept override { return Document; }
+        const Keire::UiThemeDefinition& AudioMixerTheme() const noexcept override { return Theme; }
+        Keire::Ref<Keire::AssetDatabase> AudioMixerDatabase() const noexcept override { return {}; }
+        std::string_view AudioMixerPreviewDiagnostic() const noexcept override { return {}; }
+        Keire::AudioMeterSnapshot AudioMixerMeters() const noexcept override { return Meters; }
+        void ActivateAudioMixerHistory() noexcept override {}
+        void SaveAudioMixerDocument() override {}
+        void DiscardAudioMixerDocument() override {}
+        void ReloadAudioMixerDocument(Keire::AssetId) override {}
+        void UndoAudioMixerEdit() override {}
+        void RedoAudioMixerEdit() override {}
+        void StopAudioMixerPreview() noexcept override {}
+        void ReportAudioMixerError(std::string) noexcept override {}
+
+        KeireEditor::AudioMixerDocument Document{{.Persist = [](Keire::AssetId, std::span<const std::byte>) {}}};
+        Keire::UiThemeDefinition Theme;
+        Keire::AudioMeterSnapshot Meters;
+    };
+    bool checked = false;
+    class MixerLayer final : public Keire::Layer
+    {
+      public:
+        explicit MixerLayer(bool& checked) : Layer("Mixer row layout"), m_Checked(checked) {}
+
+      protected:
+        void OnAttach() override
+        {
+            m_Panel.Attach(Owner().GetUiWorkspace());
+            m_Panel.Registration().SetVisible(true);
+        }
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            m_Controller.Meters.Readings.clear();
+            const bool clipping = m_Frame == 3;
+            if (m_Frame != 5)
+                for (const auto& bus : m_Controller.Document.Definition().Buses)
+                    m_Controller.Meters.Readings.push_back(
+                        {.Bus = bus.Id, .Peak = clipping ? 1.5F : 0.25F, .Clipping = clipping});
+            ImGui::LogToBuffer();
+            m_Panel.Draw(ui);
+            const std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+            ImGui::LogFinish();
+            if (m_Frame >= 2)
+            {
+                auto& tables = ImGui::GetCurrentContext()->Tables;
+                ImGuiTable* console = nullptr;
+                for (int index = 0; index < tables.GetMapSize(); ++index)
+                    if (auto* table = tables.TryGetMapData(index); table && table->ColumnsCount == 6)
+                        console = table;
+                REQUIRE(console != nullptr);
+                if (m_Frame == 2)
+                    m_LastRowY = console->RowPosY1;
+                else
+                    CHECK(console->RowPosY1 == doctest::Approx(m_LastRowY));
+                CHECK((text.find("CLIP") != std::string::npos) == clipping);
+                CHECK_FALSE(m_Controller.Document.Dirty());
+            }
+            if (++m_Frame == 6)
+            {
+                m_Checked = true;
+                Owner().RequestExit();
+            }
+        }
+
+      private:
+        bool& m_Checked;
+        MixerController m_Controller;
+        KeireEditor::AudioMixerPanel m_Panel{m_Controller};
+        int m_Frame = 0;
+        float m_LastRowY = 0.0F;
+    };
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.TargetFrameRate = 0;
+    specification.Ui.Mode = Keire::UiMode::Headless;
+    specification.Ui.LayoutPath.clear();
+    specification.Ui.Workspace.Enabled = true;
+    specification.Ui.Workspace.Ephemeral = true;
+    Keire::Application application(specification);
+    (void)application.PushLayer(std::make_unique<MixerLayer>(checked));
+    CHECK(application.Run() == 0);
+    CHECK(checked);
+}
+
+TEST_CASE("Authoring value headings hide internal widget ID suffixes")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    bool checked = false;
+    class ValueLabelLayer final : public Keire::Layer
+    {
+      public:
+        explicit ValueLabelLayer(bool& checked) : Layer("Value labels"), m_Checked(checked) {}
+
+      protected:
+        void OnUi(Keire::UiFrame& ui) override
+        {
+            ui.SetNextWindowSize({600, 400});
+            auto window = ui.BeginWindow("Value label regression");
+            Keire::Curve1D curve;
+            Keire::ColorGradient gradient;
+            ImGui::LogToBuffer();
+            CHECK_FALSE(KeireEditor::AuthoringValueEditors::Curve(ui, "Attenuation Curve##attenuation", curve));
+            CHECK_FALSE(KeireEditor::AuthoringValueEditors::Gradient(ui, "Tint##gradient", gradient));
+            CHECK_FALSE(KeireEditor::AuthoringValueEditors::Curve(ui, "Plain curve", curve));
+            CHECK_FALSE(KeireEditor::AuthoringValueEditors::Gradient(ui, "##hidden-gradient", gradient));
+            const std::string text = ImGui::GetCurrentContext()->LogBuffer.c_str();
+            ImGui::LogFinish();
+            CHECK(text.find("Attenuation Curve") != std::string::npos);
+            CHECK(text.find("Tint") != std::string::npos);
+            CHECK(text.find("Plain curve") != std::string::npos);
+            CHECK(text.find("##") == std::string::npos);
+            CHECK(text.find("hidden-gradient") == std::string::npos);
+            CHECK(curve.Keys().empty());
+            CHECK(gradient.Keys().empty());
+            m_Checked = true;
+            Owner().RequestExit();
+        }
+
+      private:
+        bool& m_Checked;
+    };
+    Keire::ApplicationSpecification specification;
+    specification.MainWindow.Visible = false;
+    specification.TargetFrameRate = 0;
+    specification.Ui.Mode = Keire::UiMode::Headless;
+    specification.Ui.LayoutPath.clear();
+    Keire::Application application(specification);
+    (void)application.PushLayer(std::make_unique<ValueLabelLayer>(checked));
+    CHECK(application.Run() == 0);
+    CHECK(checked);
+}
 
 TEST_CASE("Node menu selection focuses on open and follows live search results")
 {

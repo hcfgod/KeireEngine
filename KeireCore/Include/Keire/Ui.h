@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -637,6 +638,7 @@ namespace Keire
         [[nodiscard]] UiItemRect LastItemRect() const;
         [[nodiscard]] bool Button(std::string_view label, UiSize size = {});
         [[nodiscard]] bool InvisibleButton(std::string_view id, UiSize size = {});
+        [[nodiscard]] bool InvisibleButton(std::string_view id, UiSize size, bool allowOverlap);
         [[nodiscard]] bool IconButton(std::string_view id, UiIcon icon, bool selected = false,
                                       UiSize size = {30.0F, 0.0F});
         [[nodiscard]] bool OverlayIconButton(std::string_view id, UiIcon icon,
@@ -722,6 +724,10 @@ namespace Keire
         void ScrollLastItemIntoView();
         // Draws a noninteractive section title while its content crosses the viewport's top edge.
         void StickySectionTitle(std::string_view title, float sectionStartY, float sectionEndY);
+        /// Draws interactive pinned content in an isolated child above the section body, without advancing layout.
+        /// The callback runs synchronously only while the section header is offscreen. Exceptions propagate.
+        void StickySectionHeader(std::string_view id, float sectionStartY, float sectionEndY,
+                                 const std::function<void()>& drawHeader);
         void SetNextItemWidth(float width);
         void RequestKeyboardFocus();
         void AlignNextItemGroup(float alignment, float width);
