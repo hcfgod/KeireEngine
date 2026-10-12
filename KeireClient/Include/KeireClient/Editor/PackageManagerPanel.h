@@ -1,6 +1,7 @@
 #pragma once
 
 #include "KeireClient/Editor/PackageImportReview.h"
+#include "KeireClientInternal/Editor/LocalPackageInspection.h"
 
 #include "Keire/Core.h"
 
@@ -71,14 +72,13 @@ namespace KeireEditor
         std::vector<Keire::ProjectAssetImportReceipt> m_Imported;
         std::vector<std::string> m_CompatibilityWarnings;
         std::string m_SelectedPackage;
-        std::string m_LocalArchive;
+        Detail::LocalPackageInspection m_LocalInspection;
         std::string m_LocalSearch;
         std::string m_SelectedMarketplaceProduct;
         std::string m_MarketplaceSessionMessage;
         std::string m_Status;
         std::string m_Error;
         Keire::ProjectPackageEvent m_LastEvent;
-        std::optional<Keire::AssetPackageArchiveMetadata> m_LocalMetadata;
         PackageImportReview m_ImportReview;
         bool m_AllowExecutableCode = false;
         bool m_KeepLocalConflicts = true;

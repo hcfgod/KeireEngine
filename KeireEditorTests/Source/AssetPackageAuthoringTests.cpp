@@ -1,4 +1,5 @@
 #include "KeireClient/Editor/AssetPackageAuthoring.h"
+#include "KeireClientInternal/Editor/LocalPackageInspection.h"
 
 #include "KeireInternal/FileSystem.h"
 
@@ -7,6 +8,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string_view>
 #include <vector>
 
@@ -258,4 +260,55 @@ TEST_CASE("asset-package authoring records engine bounds and managed assembly sc
     CHECK(package.Manifest.Compatibility.MaximumEngineVersion == "0.4.4");
     REQUIRE(package.Manifest.ManagedAssemblies.size() == 1);
     CHECK(package.Manifest.ManagedAssemblies.front().Scope == Keire::AssetPackageManagedAssemblyScope::Runtime);
+}
+
+TEST_CASE("local package inspection belongs to the selected path and clears failed refreshes")
+{
+    PackageFixture fixture;
+    const auto source = fixture.Add("Materials/Test.keirematerial", "material");
+    const auto output = fixture.Root / "Test.keireassetpackage";
+    const auto package = KeireEditor::CreateAssetPackageArchive({.ProjectRoot = fixture.Root,
+                                                                 .Output = output,
+                                                                 .Selection = {.Assets = {source.Id}},
+                                                                 .Draft = fixture.Draft(),
+                                                                 .Records = {source}});
+    KeireEditor::Detail::LocalPackageInspection inspection;
+    const auto path = Keire::Detail::PathToUtf8(output);
+    CHECK(inspection.SetPath(path));
+    CHECK_FALSE(inspection.Metadata());
+    inspection.Inspect();
+    REQUIRE(inspection.Metadata());
+    CHECK(inspection.Metadata()->ArchiveSha256 == package.ArchiveSha256);
+    CHECK_FALSE(inspection.SetPath(path));
+    REQUIRE(inspection.Metadata());
+
+    SUBCASE("changing to another path immediately hides the previous archive")
+    {
+        CHECK(inspection.SetPath(Keire::Detail::PathToUtf8(fixture.Root / "Missing.keireassetpackage")));
+        CHECK_FALSE(inspection.Metadata());
+        CHECK_THROWS_AS(inspection.Inspect(), std::invalid_argument);
+        CHECK_FALSE(inspection.Metadata());
+        CHECK(inspection.SetPath(path));
+        inspection.Inspect();
+        REQUIRE(inspection.Metadata());
+        CHECK(inspection.Metadata()->ArchiveSha256 == package.ArchiveSha256);
+    }
+    SUBCASE("failed refresh of a replaced archive cannot retain the old metadata")
+    {
+        {
+            std::ofstream corrupt(output, std::ios::binary | std::ios::trunc);
+            corrupt << "not an asset package";
+        }
+        CHECK_THROWS(inspection.Inspect());
+        CHECK_FALSE(inspection.Metadata());
+        CHECK(inspection.Path() == path);
+    }
+    SUBCASE("project shutdown clears both path and preview")
+    {
+        inspection.Clear();
+        CHECK(inspection.Path().empty());
+        CHECK_FALSE(inspection.Metadata());
+        inspection.Clear();
+        CHECK(inspection.Path().empty());
+    }
 }

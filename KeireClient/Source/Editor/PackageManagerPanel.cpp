@@ -252,14 +252,13 @@ namespace KeireEditor
         m_Imported.clear();
         m_CompatibilityWarnings.clear();
         m_SelectedPackage.clear();
-        m_LocalArchive.clear();
+        m_LocalInspection.Clear();
         m_LocalSearch.clear();
         m_SelectedMarketplaceProduct.clear();
         m_MarketplaceSessionMessage.clear();
         m_Status.clear();
         m_Error.clear();
         m_LastEvent = {};
-        m_LocalMetadata.reset();
         m_ImportReview.Cancel();
         m_AllowExecutableCode = false;
         m_KeepLocalConflicts = true;
@@ -273,18 +272,14 @@ namespace KeireEditor
     {
         try
         {
-            const auto archive =
-                std::filesystem::absolute(Keire::Detail::PathFromUtf8(m_LocalArchive)).lexically_normal();
-            if (!std::filesystem::is_regular_file(archive) || archive.extension() != ".keireassetpackage")
-                throw std::invalid_argument("Choose an existing .keireassetpackage file.");
-            m_LocalMetadata = Keire::InspectAssetPackageArchive(archive);
-            m_Status =
-                "Inspected " + m_LocalMetadata->Manifest.DisplayName + " " + m_LocalMetadata->Manifest.Version + ".";
+            m_LocalInspection.Inspect();
+            const auto& metadata = *m_LocalInspection.Metadata();
+            m_Status = "Inspected " + metadata.Manifest.DisplayName + " " + metadata.Manifest.Version + ".";
             m_Error.clear();
         }
         catch (const std::exception& error)
         {
-            m_LocalMetadata.reset();
+            m_Status.clear();
             m_Error = error.what();
         }
     }
@@ -780,12 +775,12 @@ namespace KeireEditor
 
     void PackageManagerPanel::InstallLocalPackage()
     {
-        if (!m_Manager || m_LocalArchive.empty())
+        if (!m_Manager || m_LocalInspection.Path().empty())
             return;
         try
         {
             const auto archive =
-                std::filesystem::absolute(Keire::Detail::PathFromUtf8(m_LocalArchive)).lexically_normal();
+                std::filesystem::absolute(Keire::Detail::PathFromUtf8(m_LocalInspection.Path())).lexically_normal();
             if (!std::filesystem::is_regular_file(archive) || archive.extension() != ".keireassetpackage")
                 throw std::invalid_argument("Choose an existing .keireassetpackage file.");
             const auto metadata = Keire::InspectAssetPackageArchive(archive);
@@ -824,16 +819,18 @@ namespace KeireEditor
 
     void PackageManagerPanel::ImportLocalAssetPackage()
     {
-        if (!m_AssetImporter || !m_LocalMetadata)
+        const auto& metadata = m_LocalInspection.Metadata();
+        if (!m_AssetImporter || !metadata)
             return;
         try
         {
-            if (m_LocalMetadata->Manifest.InstallKind != Keire::AssetPackageInstallKind::AssetImport)
+            if (metadata->Manifest.InstallKind != Keire::AssetPackageInstallKind::AssetImport)
                 throw std::invalid_argument("This package does not use the Asset Import workflow.");
             Keire::ProjectAssetImportRequest request{
-                .Archive = std::filesystem::absolute(Keire::Detail::PathFromUtf8(m_LocalArchive)).lexically_normal(),
-                .ExpectedArchiveSizeBytes = m_LocalMetadata->ArchiveSizeBytes,
-                .ExpectedArchiveSha256 = m_LocalMetadata->ArchiveSha256,
+                .Archive =
+                    std::filesystem::absolute(Keire::Detail::PathFromUtf8(m_LocalInspection.Path())).lexically_normal(),
+                .ExpectedArchiveSizeBytes = metadata->ArchiveSizeBytes,
+                .ExpectedArchiveSha256 = metadata->ArchiveSha256,
                 .RequireMarketplaceSignature = false,
                 .AllowExecutableCode = m_AllowExecutableCode};
             auto plan = m_AssetImporter->Preflight(request);
@@ -850,7 +847,7 @@ namespace KeireEditor
                 }
                 plan = m_AssetImporter->Preflight(request);
             }
-            m_ImportReview.Prepare(m_LocalMetadata->Manifest.DisplayName, std::move(request), std::move(plan));
+            m_ImportReview.Prepare(metadata->Manifest.DisplayName, std::move(request), std::move(plan));
             m_Status = "Review the files and local changes before importing.";
             m_Error.clear();
         }
@@ -1078,13 +1075,21 @@ namespace KeireEditor
         ui.TextColored(theme.MutedText,
                        "Local packages are structure- and hash-verified. Marketplace trust requires a Hub download "
                        "grant and signature.");
-        static_cast<void>(
-            ui.InputTextWithHint("##LocalAssetPackage", "Absolute path to .keireassetpackage", m_LocalArchive));
+        auto archive = m_LocalInspection.Path();
+        if (ui.InputTextWithHint("##LocalAssetPackage", "Absolute path to .keireassetpackage", archive) &&
+            m_LocalInspection.SetPath(std::move(archive)))
+        {
+            m_LocalSearch.clear();
+            m_AllowExecutableCode = false;
+            m_ImportReview.Cancel();
+            m_Error.clear();
+            m_Status = "Choose Inspect to review the selected package.";
+        }
         if (ui.Button("Inspect"))
             InspectLocalPackage();
-        if (!m_LocalMetadata)
+        if (!m_LocalInspection.Metadata())
             return;
-        const auto& manifest = m_LocalMetadata->Manifest;
+        const auto& manifest = m_LocalInspection.Metadata()->Manifest;
         ui.Separator();
         ui.TextColored(theme.Accent, manifest.DisplayName + "  " + manifest.Version);
         ui.Text(manifest.PackageId);

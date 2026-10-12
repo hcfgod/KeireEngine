@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Local package inspection stays bound to the selected archive: changing its path clears the old preview and code
+  approval, and failed reinspection clears stale details and success messages.
+
 - Asset pickers no longer report an edit when reselecting the current asset, choosing None in an empty slot, or
   dropping a source that resolves to the already-assigned compiled asset.
 

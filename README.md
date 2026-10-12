@@ -42,6 +42,8 @@ Right-click item actions return focus to their owning panel; hierarchy duplicati
 an extra click to switch away from asset history.
 Reselecting an assigned asset or an already-empty asset slot leaves the scene unchanged; choosing a different asset
 or clearing an assigned slot still records an edit.
+In Package Manager's **Local Packages** tab, changing the archive path clears the previous preview. Choose **Inspect**
+to review the newly selected package before importing it; a failed inspection never leaves old package details active.
 Newly created graph nodes are brought into view automatically, including function and blackboard additions.
 Newly opened graphs frame their nodes, and narrow docks wrap authoring controls. Creating or revealing an asset clears
 the Project search so the selected asset remains visible. **Filter current folder** searches the displayed folder;
