@@ -171,6 +171,7 @@ complete interactive and cross-platform acceptance remains pending.
 
 The Hub is the normal entry point. Direct editor launch remains available for automation and focused development.
 Hub **Learn** includes the packaged animation and rigging guide; search for animation, retargeting, or IK to find it.
+Material slots show the source filename first, and hovering a selected asset shows its full source path.
 When adding an existing project, select its root folder containing `ProjectSettings/Project.keireproject`.
 Hub project duplication preserves the entered name and destination when validation fails. Correct the highlighted
 error in the open dialog and retry; duplication starts only after validation succeeds.

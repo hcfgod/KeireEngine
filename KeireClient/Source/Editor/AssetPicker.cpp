@@ -151,13 +151,14 @@ namespace
                 if (record.Type == Keire::ShaderGraphAsset::StaticType() && *type == Keire::MaterialAsset::StaticType())
                     continue;
                 auto name = options.ResolveDisplayName ? options.ResolveDisplayName(subAsset) : std::string{};
-                const auto labels = KeireEditor::Detail::MakeAssetPickerLabels(
-                    record.RelativePath, name.empty() ? GeneratedAssetLabel(*type) : name);
                 const auto materialSource = record.Type == Keire::MaterialGraphAsset::StaticType() ||
                                             record.Type == Keire::MaterialInstanceAsset::StaticType() ||
                                             record.Type == Keire::ShaderGraphInstanceAsset::StaticType();
                 const auto dropAlias =
                     materialSource && *type == Keire::MaterialAsset::StaticType() ? record.Id : Keire::AssetId{};
+                const auto labels = KeireEditor::Detail::MakeAssetPickerLabels(
+                    record.RelativePath, name.empty() ? GeneratedAssetLabel(*type) : name,
+                    static_cast<bool>(dropAlias));
                 result.push_back(
                     {subAsset, dropAlias, labels.Full, labels.Full + "##" + subAsset.ToString(), labels.Preview});
             }

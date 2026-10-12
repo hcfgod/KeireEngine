@@ -13,12 +13,15 @@ namespace KeireEditor::Detail
     };
 
     [[nodiscard]] inline AssetPickerLabels MakeAssetPickerLabels(const std::filesystem::path& path,
-                                                                 const std::string_view generatedName = {})
+                                                                 const std::string_view generatedName = {},
+                                                                 const bool sourceNameFirst = false)
     {
         const auto full = path.generic_string();
         const auto file = path.filename().generic_string();
         if (generatedName.empty())
             return {file.empty() ? full : file, full};
+        if (sourceNameFirst)
+            return {file + " (" + std::string(generatedName) + ")", full + " / " + std::string(generatedName)};
         return {std::string(generatedName) + " (" + file + ")", full + " / " + std::string(generatedName)};
     }
 } // namespace KeireEditor::Detail

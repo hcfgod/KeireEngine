@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Narrow material slots show the source filename before the generic compiled-material label; animation clip pickers
+  retain their clip-first labels.
+
 - Hub's Learn page includes the packaged animation and rigging guide, discoverable by animation, retargeting, or IK.
 
 - Asset-browser operation messages wrap in a bounded, scrollable area above the asset list instead of disappearing

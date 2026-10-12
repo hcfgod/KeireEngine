@@ -101,6 +101,23 @@ TEST_CASE("Asset picker compact labels keep generated actions before their sourc
     CHECK(unnamed.Preview == "Animation Clip (Fox.glb)");
 }
 
+TEST_CASE("Asset picker material previews distinguish source assets before generic compiled names")
+{
+    const auto wood =
+        KeireEditor::Detail::MakeAssetPickerLabels("Materials/Wood.keirematerial", "Compiled Material", true);
+    const auto stone =
+        KeireEditor::Detail::MakeAssetPickerLabels("Materials/Stone.keirematerial", "Compiled Material", true);
+    CHECK(wood.Preview.starts_with("Wood.keirematerial"));
+    CHECK(stone.Preview.starts_with("Stone.keirematerial"));
+    CHECK(wood.Preview != stone.Preview);
+    CHECK(wood.Full == "Materials/Wood.keirematerial / Compiled Material");
+    const auto duplicate =
+        KeireEditor::Detail::MakeAssetPickerLabels("Archive/Wood.keirematerial", "Compiled Material", true);
+    CHECK(duplicate.Full != wood.Full);
+    const auto unnamed = KeireEditor::Detail::MakeAssetPickerLabels("Materials/Wood.keirematerial", {}, true);
+    CHECK(unnamed.Preview == "Wood.keirematerial");
+}
+
 TEST_CASE("Animation asset pickers resolve imported clips without accepting their model or skeleton")
 {
     Keire::AssetSourceRecord model;
