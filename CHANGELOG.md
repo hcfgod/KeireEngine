@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Cancelling an asset-package import review confirms that no project files or settings changed, instead of leaving
+  the previous review instruction or preflight error visible.
+
 - Local package inspection stays bound to the selected archive: changing its path clears the old preview and code
   approval, and failed reinspection clears stale details and success messages.
 

@@ -1356,6 +1356,39 @@ TEST_CASE("marketplace asset imports require an explicit valid review confirmati
     CHECK_THROWS_AS(review.Update(request, validPlan), std::logic_error);
 }
 
+TEST_CASE("cancelled package reviews discard pending settings and require a fresh confirmation")
+{
+    KeireEditor::PackageImportReview review;
+    Keire::ProjectAssetImportRequest request{.Archive = "cancelled.keireassetpackage"};
+    request.ApplyRenderingSettings = true;
+    request.DefaultInput = Keire::AssetId::Generate();
+    Keire::ProjectAssetImportPlan plan;
+    plan.Entries.push_back({.PackagePath = "Assets/new.asset",
+                            .ProjectPath = "Assets/new.asset",
+                            .Disposition = Keire::ProjectAssetImportDisposition::Install});
+    review.Prepare("Cancelled Pack", request, plan);
+    review.Cancel();
+    review.Cancel();
+    CHECK_FALSE(review.Active());
+    CHECK_FALSE(review.ConsumeOpenRequest());
+    CHECK(review.DisplayName().empty());
+    CHECK(review.Request().Archive.empty());
+    CHECK_FALSE(review.Request().ApplyRenderingSettings);
+    CHECK(review.Request().DefaultInput == Keire::AssetId{});
+    CHECK(review.Plan().Entries.empty());
+    CHECK_THROWS_AS((void)review.Confirm(), std::logic_error);
+    CHECK_THROWS_AS(review.Update(request, plan), std::logic_error);
+
+    Keire::ProjectAssetImportRequest fresh{.Archive = "fresh.keireassetpackage"};
+    review.Prepare("Fresh Pack", fresh, plan);
+    REQUIRE(review.ConsumeOpenRequest());
+    const auto confirmation = review.Confirm();
+    CHECK(confirmation.DisplayName == "Fresh Pack");
+    CHECK(confirmation.Request.Archive == fresh.Archive);
+    CHECK_FALSE(confirmation.Request.ApplyRenderingSettings);
+    CHECK(confirmation.Request.DefaultInput == Keire::AssetId{});
+}
+
 TEST_CASE("VFX Emitter inspector edits exposed typed parameters and removes stale overrides")
 {
     const auto id = [](const std::uint64_t value) { return Keire::AssetId(0x564658494e535045ULL, value); };

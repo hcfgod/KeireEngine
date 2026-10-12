@@ -673,6 +673,8 @@ namespace KeireEditor
             if (ui.Button("Cancel"))
             {
                 m_ImportReview.Cancel();
+                m_Status = "Import cancelled. No project files or settings were changed.";
+                m_Error.clear();
                 ui.CloseCurrentPopup();
             }
         }
