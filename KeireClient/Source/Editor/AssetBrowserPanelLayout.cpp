@@ -219,7 +219,9 @@ namespace KeireEditor
                                   minimumFolderWidth, minimumContentWidth, splitterThickness);
                 ui.SameLine();
             }
-            if (auto contentPane = ui.BeginChild("AssetContentPane", {0.0F, paneHeight}); contentPane)
+            if (auto contentPane =
+                    ui.BeginChild(AssetBrowserContentPaneId(AssetRoot, CurrentFolder), {0.0F, paneHeight});
+                contentPane)
                 DrawContentPane(ui, editor);
 
             DrawRenamePopups(ui, editor);

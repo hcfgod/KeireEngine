@@ -15,6 +15,10 @@ namespace KeireEditor
 {
     class IAssetBrowserController;
 
+    /// Stable content-window identity keeps each project folder's scroll independent.
+    [[nodiscard]] std::string AssetBrowserContentPaneId(const std::filesystem::path& assetRoot,
+                                                        const std::filesystem::path& folder);
+
     /// Consume only after the requested asset's widget has been submitted, even if it is offscreen.
     [[nodiscard]] bool ConsumeAssetBrowserReveal(Keire::AssetId& pending, Keire::AssetId submitted) noexcept;
 

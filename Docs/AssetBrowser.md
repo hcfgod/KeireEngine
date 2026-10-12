@@ -34,6 +34,9 @@ rename, stable-identity duplicate, and recoverable Move to Trash operations. Fol
 sources share the same compact card and row chrome, including full-item hover and selection states plus a muted type
 line. **Filter current folder** matches names in the displayed folder, rather than searching all project subfolders.
 Use the tree or breadcrumbs to choose the folder whose contents you want to search.
+Each folder keeps its own scroll position during the editor session. Newly opened folders start at the top,
+returning to a folder restores its position, and explicitly revealing an asset still scrolls that asset into view.
+Scroll positions are isolated between projects.
 Extracted Shader and Material Functions carry a persistent source-parent identity in their `.keiremeta`. A parent uses
 the same collapsed footprint as its peers and places a geometry-drawn directional disclosure beside its label, with
 the generated-child count in the card footer so neither control covers the preview. List mode uses the same visible

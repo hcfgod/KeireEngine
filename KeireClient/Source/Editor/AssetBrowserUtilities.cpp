@@ -19,6 +19,23 @@
 
 namespace KeireEditor
 {
+    std::string AssetBrowserContentPaneId(const std::filesystem::path& assetRoot, const std::filesystem::path& folder)
+    {
+        std::string id = "AssetContentPane/";
+        constexpr std::string_view digits = "0123456789abcdef";
+        for (const auto& path : {assetRoot, folder})
+        {
+            // Encode paths so ImGui never interprets a filename's ### as an ID override.
+            for (const unsigned char byte : Keire::Detail::PathToUtf8(path.lexically_normal()))
+            {
+                id += digits[byte >> 4];
+                id += digits[byte & 15];
+            }
+            id += '/';
+        }
+        return id;
+    }
+
     bool ConsumeAssetBrowserReveal(Keire::AssetId& pending, const Keire::AssetId submitted) noexcept
     {
         if (!pending || pending != submitted)

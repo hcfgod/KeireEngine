@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Asset Browser navigation keeps scroll positions separate for each project folder. New folders start at the top,
+  returning folders restore their position, and explicit asset reveal still takes priority.
+- VFX preview transport tooltips use wording that applies to both CPU authoring and GPU runtime previews.
+
 - Windows build-lock readers allow owners to release their lock during contention. Cleanup preserves unexpected
   files and reports the retained path instead of opening an interactive deletion prompt in background jobs.
 

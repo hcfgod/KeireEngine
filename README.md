@@ -92,6 +92,7 @@ formats, and release procedures may still change before the first stable release
 capabilities and remaining production-readiness work directly rather than presenting roadmap work as complete.
 Renaming an open scene in the Asset Browser or Inspector preserves its identity and pending edits. Clean scenes update
 their saved display name automatically; genuine external source changes still prompt for conflict resolution.
+Asset Browser folders retain independent scroll positions, so opening a new folder starts at its first assets.
 C# fields declared as `SceneAsset` offer only scene assets in the Inspector picker, with `None` for optional references.
 Curve and gradient Inspector headings display their readable names without internal widget ID suffixes.
 Audio Inspector preview messages and import errors wrap; **Reimport Audio** appears below the playback controls.

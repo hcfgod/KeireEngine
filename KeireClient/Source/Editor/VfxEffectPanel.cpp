@@ -202,8 +202,7 @@ namespace KeireEditor
                                       m_Controller.RestartVfxEffectPreview();
                                       return true;
                                   });
-            ui.SetTooltip(frozen ? "Repair the graph before restarting preview."
-                                 : "Restart the transient authoring preview.");
+            ui.SetTooltip(frozen ? "Repair the graph before restarting preview." : "Restart the transient preview.");
         }
         ui.SameLine();
         if (ui.IconButton("PauseVfxPreview", status.Paused ? Keire::UiIcon::Play : Keire::UiIcon::Pause, status.Paused))
@@ -211,7 +210,7 @@ namespace KeireEditor
             m_Controller.SetVfxEffectPreviewPaused(!status.Paused);
             status.Paused = !status.Paused;
         }
-        ui.SetTooltip(status.Paused ? "Resume the authoring preview." : "Pause the authoring preview.");
+        ui.SetTooltip(status.Paused ? "Resume the preview." : "Pause the preview.");
         ui.SameLine();
 
         auto autoRestart = status.AutoRestart;
