@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hub empty project results explain that search and filters both affect visibility and how to show more projects.
+
 - Import results and failure diagnostics survive editor restarts and unrelated targeted imports in the published
   source index. Correcting and reimporting an asset clears its old failure. Older indexes remain readable.
 - Selecting a different asset stops its audio preview and clears stale Inspector status. Audio sources without a

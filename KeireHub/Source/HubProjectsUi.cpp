@@ -820,9 +820,10 @@ namespace KeireHub
         if (visible.empty())
         {
             ui.Spacing();
-            ui.TextColored(m_Tokens.SecondaryText, entries.empty()
-                                                       ? "No recent projects yet. Create or add one to get started."
-                                                       : "No recent projects match this search.");
+            ui.TextColoredWrapped(m_Tokens.SecondaryText,
+                                  entries.empty() ? "No recent projects yet. Create or add one to get started."
+                                                  : "No recent projects match the current search and filters. "
+                                                    "Clear the search or change the filters to show more projects.");
         }
         else
         {
