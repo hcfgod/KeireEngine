@@ -34,6 +34,16 @@
       "tags": ["assets", "scenes"]
     },
     {
+      "id": "animation-rigging",
+      "title": "Animation and rigging",
+      "summary": "Author animation, rigging, retargeting, inverse kinematics (IK), and grounded character motion.",
+      "difficulty": "intermediate",
+      "category": "Authoring",
+      "type": "guide",
+      "localPath": "Docs/AnimationRigging.md",
+      "tags": ["animation", "rigging", "retargeting", "ik"]
+    },
+    {
       "id": "rendering",
       "title": "Rendering",
       "summary": "Configure shaders, materials, lighting, and renderer settings.",

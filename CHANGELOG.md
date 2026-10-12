@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Hub's Learn page includes the packaged animation and rigging guide, discoverable by animation, retargeting, or IK.
+
 - Asset-browser operation messages wrap in a bounded, scrollable area above the asset list instead of disappearing
   below the folder panes; selection and thumbnail counts remain visible alongside them.
 
