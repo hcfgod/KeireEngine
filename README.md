@@ -38,6 +38,8 @@ UI and fullscreen Shader Graphs display a flat image preview with transparency, 
 See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current scope.
 Shader Graph focus selects the graph's undo history. Edit output values through the expanded **Input Defaults**.
 Scene Undo/Redo restores the clean indicator when the complete authored scene returns to its saved content.
+Right-click item actions return focus to their owning panel; hierarchy duplication can be undone immediately without
+an extra click to switch away from asset history.
 Newly created graph nodes are brought into view automatically, including function and blackboard additions.
 Newly opened graphs frame their nodes, and narrow docks wrap authoring controls. Creating or revealing an asset clears
 the Project search so the selected asset remains visible. **Filter current folder** searches the displayed folder;

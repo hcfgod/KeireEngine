@@ -510,6 +510,11 @@ namespace Keire
     {
         m_Impl->RequireActive("BeginItemContextMenu");
         const std::string safeId(id);
+        // Popup dismissal restores the window focused when it opened. A right-click
+        // must claim its item's owner before opening, just as a left-click does.
+        if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup))
+            ImGui::SetWindowFocus();
         const bool visible = ImGui::BeginPopupContextItem(safeId.empty() ? nullptr : safeId.c_str());
         if (visible)
             m_Impl->OpenScope(UiScope::Kind::Popup);

@@ -836,3 +836,83 @@ TEST_CASE("UI input queue preserves pointer action order and cancellation")
         CHECK(context->InputEventsQueue.empty());
     }
 }
+
+TEST_CASE("item context menus restore keyboard focus to their owning panel")
+{
+    REQUIRE(SDL_SetHintWithPriority(SDL_HINT_VIDEO_DRIVER, "dummy", SDL_HINT_OVERRIDE));
+    for (const bool dismissWithEscape : {false, true})
+    {
+        bool checked = false;
+        class ContextFocusLayer final : public Keire::Layer
+        {
+          public:
+            ContextFocusLayer(bool escape, bool& checked) : Layer("Context focus"), m_Escape(escape), m_Checked(checked)
+            {
+            }
+
+          protected:
+            void OnUi(Keire::UiFrame& ui) override
+            {
+                ui.SetNextWindowPosition({20, 20}, false);
+                ui.SetNextWindowSize({260, 220}, false);
+                {
+                    auto window = ui.BeginWindow("Context owner");
+                    (void)ui.Button("Owner item");
+                    const auto item = ui.LastItemRect();
+                    if (auto popup = ui.BeginItemContextMenu("Owner menu"); popup)
+                    {
+                        m_Opened = true;
+                        ui.Text("Owner action");
+                        if (m_Frame == 6 && !m_Escape)
+                            ImGui::CloseCurrentPopup();
+                    }
+                    auto& io = ImGui::GetIO();
+                    if (m_Frame == 2)
+                        io.AddMousePosEvent(item.Minimum.X + 8, item.Minimum.Y + 8);
+                    if (m_Frame == 3)
+                        io.AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+                    if (m_Frame == 4)
+                        io.AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+                    if (m_Frame == 6 && m_Escape)
+                        io.AddKeyEvent(ImGuiKey_Escape, true);
+                    if (m_Frame == 7 && m_Escape)
+                        io.AddKeyEvent(ImGuiKey_Escape, false);
+                    if (m_Frame == 9)
+                    {
+                        CHECK(m_Opened);
+                        CHECK(ui.WindowFocused());
+                        CHECK_FALSE(ImGui::IsPopupOpen("Owner menu"));
+                        m_Checked = true;
+                        Owner().RequestExit();
+                    }
+                }
+                ui.SetNextWindowPosition({320, 20}, false);
+                ui.SetNextWindowSize({260, 220}, false);
+                {
+                    auto other = ui.BeginWindow("Previously focused asset panel");
+                    ui.Text("Unrelated history");
+                    if (m_Frame == 1)
+                        ImGui::SetWindowFocus();
+                    if (m_Frame == 2)
+                        CHECK(ui.WindowFocused());
+                }
+                ++m_Frame;
+            }
+
+          private:
+            bool m_Escape;
+            bool& m_Checked;
+            bool m_Opened = false;
+            int m_Frame = 0;
+        };
+        Keire::ApplicationSpecification specification;
+        specification.MainWindow.Visible = false;
+        specification.TargetFrameRate = 0;
+        specification.Ui.Mode = Keire::UiMode::Headless;
+        specification.Ui.LayoutPath.clear();
+        Keire::Application application(specification);
+        (void)application.PushLayer(std::make_unique<ContextFocusLayer>(dismissWithEscape, checked));
+        CHECK(application.Run() == 0);
+        CHECK(checked);
+    }
+}

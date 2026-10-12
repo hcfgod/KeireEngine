@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Item context menus restore keyboard focus to their owning panel, so hierarchy actions such as Duplicate can be
+  undone immediately even when an asset panel was previously focused.
+
 - Narrow material slots show the source filename before the generic compiled-material label; animation clip pickers
   retain their clip-first labels.
 
