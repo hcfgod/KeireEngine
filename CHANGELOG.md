@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Asset pickers no longer report an edit when reselecting the current asset, choosing None in an empty slot, or
+  dropping a source that resolves to the already-assigned compiled asset.
+
 - Item context menus restore keyboard focus to their owning panel, so hierarchy actions such as Duplicate can be
   undone immediately even when an asset panel was previously focused.
 

@@ -212,7 +212,7 @@ namespace KeireEditor
         const std::string preview = !value               ? std::string(options.EmptyLabel)
                                     : selectedCompatible ? selected->PreviewLabel
                                                          : "Missing or incompatible asset";
-        bool changed = false;
+        const auto original = value;
         {
             auto id = ui.PushId(options.Label);
             const auto layout = Detail::ResolveInspectorFieldLayout(ui.ContentAvailable().Width, 24.0F);
@@ -232,7 +232,6 @@ namespace KeireEditor
                 if (options.AllowNone && ui.Selectable(options.EmptyLabel, !value))
                 {
                     value = {};
-                    changed = true;
                     m_Diagnostic.clear();
                     ui.CloseCurrentPopup();
                 }
@@ -246,7 +245,6 @@ namespace KeireEditor
                     if (ui.Selectable(candidate.SelectionLabel, candidate.Id == value))
                     {
                         value = candidate.Id;
-                        changed = true;
                         m_Diagnostic.clear();
                         ui.CloseCurrentPopup();
                     }
@@ -273,7 +271,6 @@ namespace KeireEditor
                         else
                         {
                             value = *dropped;
-                            changed = true;
                             m_Diagnostic.clear();
                         }
                     }
@@ -293,7 +290,7 @@ namespace KeireEditor
                 ui.Text(Detail::InspectorVisibleLabel(options.Label));
             }
         }
-        return changed;
+        return value != original;
     }
 
     void AssetPicker::Clear() noexcept

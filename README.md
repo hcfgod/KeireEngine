@@ -40,6 +40,8 @@ Shader Graph focus selects the graph's undo history. Edit output values through 
 Scene Undo/Redo restores the clean indicator when the complete authored scene returns to its saved content.
 Right-click item actions return focus to their owning panel; hierarchy duplication can be undone immediately without
 an extra click to switch away from asset history.
+Reselecting an assigned asset or an already-empty asset slot leaves the scene unchanged; choosing a different asset
+or clearing an assigned slot still records an edit.
 Newly created graph nodes are brought into view automatically, including function and blackboard additions.
 Newly opened graphs frame their nodes, and narrow docks wrap authoring controls. Creating or revealing an asset clears
 the Project search so the selected asset remains visible. **Filter current folder** searches the displayed folder;
