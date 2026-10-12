@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -191,6 +192,20 @@ namespace
 
         void WarmAssets(Keire::RenderSystem& renderer)
         {
+            // Driver compilation is asynchronous setup; keep the asset-residency budget independent of it.
+            const auto now = std::chrono::steady_clock::now();
+            if (!m_PipelinesReady)
+            {
+                if (renderer.Statistics().VfxPipelinesReady)
+                {
+                    m_PipelinesReady = true;
+                    m_WarmupStartedAt = now;
+                }
+                else if (now - m_WarmupStartedAt >= std::chrono::minutes(10))
+                {
+                    throw std::runtime_error("Recovery restoration GPU VFX preparation exceeded 10 minutes.");
+                }
+            }
             if (m_SubmittedWarmupFrame)
             {
                 renderer.Flush();
@@ -210,11 +225,12 @@ namespace
                     return;
                 }
             }
-            if (std::chrono::steady_clock::now() - m_WarmupStartedAt >= std::chrono::seconds(10))
+            if (m_PipelinesReady && now - m_WarmupStartedAt >= std::chrono::seconds(10))
             {
                 const auto counts = Keire::RenderSystemInternalAccess::RecoveryResourceCountsForTest(renderer);
                 throw std::runtime_error(
-                    "Recovery restoration assets did not become resident within 10 seconds (meshes=" +
+                    "Recovery restoration assets did not become resident within 10 seconds after GPU VFX preparation "
+                    "(meshes=" +
                     std::to_string(counts.Meshes) + ", textures=" + std::to_string(counts.Textures) +
                     ", materials=" + std::to_string(counts.Materials) + ", shaders=" + std::to_string(counts.Shaders) +
                     ", GPU VFX worlds=" + std::to_string(counts.GpuVfxWorlds) +
@@ -243,6 +259,7 @@ namespace
         Phase m_Phase = Phase::WarmAssets;
         std::chrono::steady_clock::time_point m_WarmupStartedAt{};
         bool m_SubmittedWarmupFrame = false;
+        bool m_PipelinesReady = false;
     };
 
     enum class RecoveryScenario : std::uint8_t

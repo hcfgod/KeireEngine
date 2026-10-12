@@ -224,8 +224,22 @@ function Get-KeireWorkspaceLockOwner {
 
     $values = @{}
     $ownerPath = Join-Path $LockPath "owner"
-    if (-not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) { return $values }
-    foreach ($line in Get-Content -LiteralPath $ownerPath -Encoding UTF8 -ErrorAction SilentlyContinue) {
+    $stream = $null
+    $reader = $null
+    try {
+        # Waiting commands must not hold a delete-denying handle while the owner releases its lock.
+        $sharing = [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete
+        $stream = [IO.File]::Open($ownerPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, $sharing)
+        $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+        $contents = $reader.ReadToEnd()
+    }
+    catch [IO.IOException] { return $values }
+    catch [UnauthorizedAccessException] { return $values }
+    finally {
+        if ($reader) { $reader.Dispose() }
+        elseif ($stream) { $stream.Dispose() }
+    }
+    foreach ($line in $contents -split '\r?\n') {
         if ($line -match '^([a-z]+)=(.*)$') { $values[$Matches[1]] = $Matches[2] }
     }
     return $values
@@ -244,10 +258,10 @@ function Remove-KeireStaleWorkspaceLock {
         return $false
     }
     foreach ($name in @("owner", "heartbeat")) {
-        Remove-Item -LiteralPath (Join-Path $QuarantinePath $name) -Force -ErrorAction SilentlyContinue
+        try { [IO.File]::Delete((Join-Path $QuarantinePath $name)) } catch {}
     }
     try {
-        Remove-Item -LiteralPath $QuarantinePath -Force -ErrorAction Stop
+        [IO.Directory]::Delete($QuarantinePath, $false)
     }
     catch {
         throw "The stale workspace lock contains unexpected files. Inspect and remove '$QuarantinePath' manually."
@@ -409,9 +423,10 @@ function Enter-KeireWorkspaceLock {
         }
         [Environment]::SetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN", $previousToken)
         foreach ($path in @($ownerTemporary, $heartbeatPath, $ownerPath)) {
-            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            try { [IO.File]::Delete($path) } catch {}
         }
-        Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
+        # Never prompt to recursively remove unexpected files, especially while preserving a setup failure.
+        try { [IO.Directory]::Delete($lockPath, $false) } catch {}
         throw
     }
 
@@ -428,9 +443,12 @@ function Exit-KeireWorkspaceLock {
     }
     $owner = Get-KeireWorkspaceLockOwner -LockPath $Lock.Path
     if ($owner.token -eq $Lock.Token) {
-        Remove-Item -LiteralPath (Join-Path $Lock.Path "heartbeat") -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath (Join-Path $Lock.Path "owner") -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $Lock.Path -Force -ErrorAction SilentlyContinue
+        foreach ($name in @("heartbeat", "owner")) {
+            try { [IO.File]::Delete((Join-Path $Lock.Path $name)) } catch {}
+        }
+        # Remove-Item prompts on nonempty directories even with -Force. Leave unexpected contents intact.
+        try { [IO.Directory]::Delete($Lock.Path, $false) }
+        catch { Write-Warning "Workspace lock cleanup left files at '$($Lock.Path)'. Inspect them before retrying." }
     }
     [Environment]::SetEnvironmentVariable("KEIRE_WORKSPACE_LOCK_TOKEN", $Lock.PreviousToken)
 }

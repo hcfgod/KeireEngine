@@ -17,6 +17,7 @@
 #include "Keire/Vfx/VfxVolumeAsset.h"
 #include "KeireInternal/Rendering/FrameGraphInternal.h"
 #include "KeireInternal/Rendering/GpuOcclusionPolicyInternal.h"
+#include "KeireInternal/Rendering/GpuVfxPipelineBatchInternal.h"
 #include "KeireInternal/Rendering/GpuVisibilityCandidateInternal.h"
 #include "KeireInternal/Rendering/MaterialPassRoutingInternal.h"
 #include "KeireInternal/Rendering/RenderBackendConversionsInternal.h"
@@ -1152,6 +1153,10 @@ namespace Keire::RenderBackend
         void ReleaseSpatialSelectionPipeline() noexcept;
         void StartGpuVfxPipelineWarmup();
         void CompileGpuVfxPipelines();
+        static void BuildGpuVfxPipelines(SDL_GPUDevice* device, GpuVfxPipelineBatch& batch, JobContext* context);
+        void PublishGpuVfxPipelines(GpuVfxPipelineBatch& batch) noexcept;
+        void CompleteGpuVfxPipelineWarmup();
+        void CancelGpuVfxPipelineWarmup(bool abandon) noexcept;
         void ReleaseGpuVfxPipelines() noexcept;
         void PrepareSkinning(SDL_GPUCommandBuffer* commands, SceneRenderPacket& packet, std::uint64_t surface);
         void UploadCpuSkinning(SDL_GPUCommandBuffer* commands, GpuSkinOutputResources& output,
@@ -1475,10 +1480,8 @@ namespace Keire::RenderBackend
         SDL_GPUComputePipeline* VfxCompactVisibilityPipeline = nullptr;
         Ref<JobSystem> Jobs;
         Ref<JobScope> RenderJobs;
-        JobHandle VfxPipelineWarmupJob;
+        GpuVfxPipelineWarmupWork VfxWarmupWork;
         std::atomic<GpuVfxPipelineWarmupState> VfxPipelineWarmupState{GpuVfxPipelineWarmupState::NotStarted};
-        std::atomic<std::uint64_t> VfxPipelineWarmupMicroseconds{0};
-        std::string VfxPipelineWarmupFailure;
         std::unordered_map<std::uint64_t, GpuVfxWorldResources> GpuVfxWorlds;
         std::unordered_map<AssetId, GpuVfxVolumeEntry> VfxVolumeCache;
         std::vector<InFlightFrame> InFlight;

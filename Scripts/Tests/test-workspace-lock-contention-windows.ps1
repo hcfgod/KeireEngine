@@ -76,7 +76,45 @@ try {
     if (@(Get-ChildItem -LiteralPath (Join-Path $fixture "Tools\.locks") -Force).Count -ne 0) {
         throw "Contending commands left ownership files or claim directories behind."
     }
+
+    $cleanupPath = Join-Path $fixture "cleanup.lock"
+    [IO.Directory]::CreateDirectory($cleanupPath) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $cleanupPath "owner"), "token=cleanup-test`n")
+    [IO.File]::WriteAllText((Join-Path $cleanupPath "unexpected"), "preserve me")
+    [IO.Directory]::CreateDirectory((Join-Path $cleanupPath "heartbeat")) | Out-Null
+    [IO.File]::WriteAllText((Join-Path $cleanupPath "heartbeat\unexpected"), "preserve nested data")
+    $cleanupJob = Start-Job -ArgumentList $common, $cleanupPath -ScriptBlock {
+        param($Common, $CleanupPath)
+        $ErrorActionPreference = "Stop"
+        . $Common
+        $env:KEIRE_WORKSPACE_LOCK_TOKEN = "cleanup-test"
+        $lock = [pscustomobject]@{
+            Acquired = $true; Path = $CleanupPath; Token = "cleanup-test"; Job = $null; PreviousToken = "parent-test"
+        }
+        Exit-KeireWorkspaceLock -Lock $lock
+        if ($env:KEIRE_WORKSPACE_LOCK_TOKEN -ne "parent-test") { throw "Cleanup did not restore the parent token." }
+        if ([IO.File]::ReadAllText((Join-Path $CleanupPath "unexpected")) -ne "preserve me") {
+            throw "Cleanup changed an unexpected file."
+        }
+        if ([IO.File]::ReadAllText((Join-Path $CleanupPath "heartbeat\unexpected")) -ne "preserve nested data") {
+            throw "Cleanup changed an unexpected directory."
+        }
+    }
+    $jobs += $cleanupJob
+    $cleanupJob | Wait-Job -Timeout 30 | Out-Null
+    if ($cleanupJob.State -ne "Completed") { throw "Cleanup blocked instead of preserving unexpected files." }
+    Receive-Job -Job $cleanupJob -ErrorAction Stop | Out-Null
+
+    $quarantinePath = Join-Path $fixture "quarantine.lock"
+    $rejected = $false
+    try { Remove-KeireStaleWorkspaceLock -LockPath $cleanupPath -QuarantinePath $quarantinePath | Out-Null }
+    catch { $rejected = $true }
+    if (-not $rejected -or [IO.File]::ReadAllText((Join-Path $quarantinePath "unexpected")) -ne "preserve me" -or
+        [IO.File]::ReadAllText((Join-Path $quarantinePath "heartbeat\unexpected")) -ne "preserve nested data") {
+        throw "Stale lock cleanup did not reject and preserve unexpected files."
+    }
     Write-Host "Windows workspace lock contention passed: six processes, 18 acquisitions, no overlap or residue."
+    Write-Host "Unexpected lock files were preserved without interactive prompts."
 }
 finally {
     foreach ($job in $jobs) {

@@ -942,6 +942,7 @@ void EditorWorkspaceLayer::UndoSceneEdit()
             m_SceneDocument->PlaySession() && ActiveScene() ? std::optional(ActiveScene()->Snapshot()) : std::nullopt;
         if (context->Undo() && before && m_PlayChangeTracker && ActiveScene())
             m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot(), ActiveScene()->Components());
+        m_SceneDocument->RefreshDirtyState();
     }
 }
 
@@ -954,6 +955,7 @@ void EditorWorkspaceLayer::RedoSceneEdit()
             m_SceneDocument->PlaySession() && ActiveScene() ? std::optional(ActiveScene()->Snapshot()) : std::nullopt;
         if (context->Redo() && before && m_PlayChangeTracker && ActiveScene())
             m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot(), ActiveScene()->Components());
+        m_SceneDocument->RefreshDirtyState();
     }
 }
 
@@ -972,6 +974,8 @@ void EditorWorkspaceLayer::ApplyActiveUndo(const bool redo)
             (void)m_ActiveUndoContext->Undo();
         if (before && m_PlayChangeTracker && ActiveScene())
             m_PlayChangeTracker->RecordMutation(*before, ActiveScene()->Snapshot(), ActiveScene()->Components());
+        if (m_ActiveUndoContext == m_SceneDocument->History())
+            m_SceneDocument->RefreshDirtyState();
     }
     catch (const std::exception& error)
     {

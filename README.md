@@ -37,6 +37,7 @@ UI. See [UI Toolkit input handling](Docs/Scripting/UiAndEvents.md) for button cl
 UI and fullscreen Shader Graphs display a flat image preview with transparency, rather than a lit mesh.
 See [shader authoring previews](Docs/ShadersAndMaterials.md) for their current scope.
 Shader Graph focus selects the graph's undo history. Edit output values through the expanded **Input Defaults**.
+Scene Undo/Redo restores the clean indicator when the complete authored scene returns to its saved content.
 Newly created graph nodes are brought into view automatically, including function and blackboard additions.
 Newly opened graphs frame their nodes, and narrow docks wrap authoring controls. Creating or revealing an asset clears
 the Project search so the selected asset remains visible. **Filter current folder** searches the displayed folder;
@@ -104,6 +105,7 @@ Reverb Zone priority applies only to volumes influencing the listener. Leaving a
 authored base mixer, including its reverb effects and sends.
 VFX edit previews and browser/Inspector thumbnails wait for initial asset imports when opening a project with a fresh
 cache, then start automatically.
+The status bar shows **Preparing GPU effects...** during background shader preparation; effects appear when ready.
 Windows Hub and Editor 0.4.7 are active in immutable signed catalog sequence 23. The same signed
 snapshot retains the independently validated Linux x86-64 0.4.2 packages and the previous Windows and Linux records;
 macOS downloads remain gated pending platform, signing, and notarization validation.
@@ -379,6 +381,8 @@ from the Editor distribution folder. You can also launch directly through `Scrip
 19 and 20 launch the staged Editor and Hub; options 7 and 8 update those stages after source changes.
 Player exports prefer the Editor's bundled Build Support when compatible, so a same-version module installed by an
 older development build cannot override it. Installed modules remain the fallback for other targets or configurations.
+In the Hub, open **Installs > Manage Components** for an editor to view its installation path and platform modules.
+Use **Import package** to add a compatible `.keireplayersupport` package for that editor version.
 
 Windows packaging captures and waits for the runtime smoke process, including cold shader warmup, before checking its
 exit code and cleaning up validation content. A failed, timed-out, or unavailable process result stops packaging.

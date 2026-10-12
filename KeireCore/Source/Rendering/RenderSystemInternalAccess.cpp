@@ -509,6 +509,31 @@ namespace Keire
                state.FrameAdmissionWaiters != 0U;
     }
 
+    void RenderSystemInternalAccess::StartGpuVfxWarmupForTest(RenderSystem& renderer, JobFunction compile,
+                                                              const bool rejectScheduling)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("StartGpuVfxWarmupForTest");
+        if (state.Specification.Mode != RenderMode::Headless || !state.RenderThread.joinable() ||
+            state.VfxPipelineWarmupState.load(std::memory_order_acquire) !=
+                RenderBackend::GpuVfxPipelineWarmupState::NotStarted)
+            throw std::logic_error("Background VFX test requires a fresh threaded headless renderer.");
+        state.RenderJobs = state.Jobs->CreateScope("Test GPU pipeline preparation");
+        state.VfxWarmupWork.CompileForTest = std::move(compile);
+        if (rejectScheduling)
+            state.RenderJobs->Cancel();
+        state.StartGpuVfxPipelineWarmup();
+    }
+
+    void RenderSystemInternalAccess::ExpireGpuVfxWarmupForTest(RenderSystem& renderer)
+    {
+        auto& state = *renderer.m_Impl->State;
+        state.RequireOwner("ExpireGpuVfxWarmupForTest");
+        if (state.Specification.Mode != RenderMode::Headless)
+            throw std::logic_error("Expired VFX preparation injection requires a headless renderer.");
+        state.DispatchRender([&state] { ++state.VfxWarmupWork.Generation; });
+    }
+
     void RenderSystemInternalAccess::SetGpuVfxWarmupPendingForTest(RenderSystem& renderer, const bool pending)
     {
         auto& state = *renderer.m_Impl->State;

@@ -12,6 +12,11 @@ Open `Assets/Scenes/SandboxShowcase.keirescene`. It is the startup scene and con
 - four edit-mode VFX examples selected from the full effect library under `Assets/Vfx`;
 - a broader gameplay scene at `Assets/Scenes/SampleScene.keirescene` for input, UI, physics, audio, and animation.
 
+The Sandbox uses Realtime Environment lighting so metallic materials receive the studio environment's reflections.
+For a Sandbox created from an older template, open **Window > Project Settings > Rendering** and select
+**Realtime Environment** under **Global Illumination** to enable the same lighting. Existing projects retain their
+saved lighting settings. This template requires Editor 0.4.7 or later.
+
 The gameplay scene uses a fixed-angle camera that detaches at runtime so player turning cannot orbit it, then smoothly
 follows a close third-person offset. Character movement uses the camera's actual `+Z` view basis on the fixed physics
 clock, slope grounding filters brief contact gaps, the animated visual is parented to the controller with root motion

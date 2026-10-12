@@ -560,7 +560,8 @@ namespace
         void OnAttach() override
         {
             // Cold driver compilation is setup and must not consume the ownership/recovery observation budget.
-            m_Deadline = std::chrono::steady_clock::now() + std::chrono::minutes(3);
+            // A cold D3D12 driver can spend over a minute on each of the large VFX stages.
+            m_Deadline = std::chrono::steady_clock::now() + std::chrono::minutes(10);
             Owner().Renderer()->RequestGpuVfxPipelineWarmup();
             constexpr std::array scenarios{VfxMaskScenario::VisibleSprite, VfxMaskScenario::OccludedSprite,
                                            VfxMaskScenario::WholeRibbon};

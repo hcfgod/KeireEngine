@@ -207,7 +207,7 @@
     },
     {
       "id": "keire.sandbox",
-      "version": "1.3.2",
+      "version": "1.3.3",
       "displayName": "Kéire Sandbox",
       "description": "The complete Kéire production Sandbox with twelve paired Shader Graph and Material Graph examples, a curated VFX gallery, reusable gameplay scripts, rendering, physics, UI, audio, meshes, and textures.",
       "category": "learning",
@@ -221,10 +221,10 @@
       ],
       "thumbnail": "Thumbnails/sandbox.png",
       "screenshots": [],
-      "compatibleEditors": ">=0.3.0 <2.0.0",
+      "compatibleEditors": ">=0.4.7 <2.0.0",
       "projectSchema": 4,
       "platformTarget": "desktop",
-      "estimatedSizeBytes": 25135054,
+      "estimatedSizeBytes": 25135559,
       "payloadRoot": "Payloads/Sandbox",
       "payloadFiles": [
         {
@@ -1124,8 +1124,8 @@
         },
         {
           "path": "ProjectSettings/Rendering.keiresettings",
-          "sizeBytes": 504,
-          "sha256": "e3316b597a45ddd041fee1311c234652ac637d7cae45d74746edb3b29196ada3"
+          "sizeBytes": 603,
+          "sha256": "f137af8eaf9bc832dfc9538fc66f0db81b80f7699e3ba5a6dc50183b1ae9e2f1"
         },
         {
           "path": "ProjectSettings/Scripting.keiresettings",
@@ -1139,8 +1139,8 @@
         },
         {
           "path": "README.md",
-          "sizeBytes": 1648,
-          "sha256": "5483c1d5ffa96b268f8e0e415a824190a745f18cac68ae72de888291475edf79"
+          "sizeBytes": 2054,
+          "sha256": "e8303e29e019fec2f8baf76689459828c46683c809c20a5bc65c850bf4f1e902"
         }
       ],
       "defaultProjectConfiguration": {

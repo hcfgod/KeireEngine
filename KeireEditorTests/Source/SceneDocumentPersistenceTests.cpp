@@ -96,6 +96,98 @@ TEST_CASE("Scene persistence detects external deletion and allows explicit recre
     CHECK_FALSE(fixture.Document.Dirty());
 }
 
+TEST_CASE("Scene history dirty state follows saved content across replacement and later saves")
+{
+    PersistenceFixture fixture;
+    fixture.Document.Save();
+    const auto initial = fixture.Document.EditingScene()->Snapshot();
+    const auto restore = [&](const Keire::SceneDefinition& definition)
+    {
+        auto scene = Keire::CreateRef<Keire::Scene>(fixture.Asset, definition);
+        scene->MarkDirty();
+        fixture.Document.ReplaceEditingScene(std::move(scene));
+        fixture.Document.RefreshDirtyState();
+    };
+    (void)fixture.Document.CreateEntity("Added component target");
+    const auto changed = fixture.Document.EditingScene()->Snapshot();
+    fixture.Document.RefreshDirtyState();
+    CHECK(fixture.Document.Dirty());
+    REQUIRE(fixture.Document.WriteRecovery());
+    restore(initial);
+    CHECK_FALSE(fixture.Document.Dirty());
+    CHECK_FALSE(std::filesystem::exists(fixture.Recovery));
+    restore(changed);
+    CHECK(fixture.Document.Dirty());
+    fixture.Document.Save();
+    restore(initial);
+    CHECK(fixture.Document.Dirty());
+    restore(changed);
+    CHECK_FALSE(fixture.Document.Dirty());
+
+    SUBCASE("failed save does not replace the saved content")
+    {
+        restore(initial);
+        Keire::Detail::WriteFileAtomically(fixture.Source, PersistenceFixture::Encode("External"));
+        CHECK_THROWS_AS(fixture.Document.Save(), KeireEditor::DocumentSourceConflict);
+        fixture.Document.RefreshDirtyState();
+        CHECK(fixture.Document.Dirty());
+        restore(changed);
+        CHECK_FALSE(fixture.Document.Dirty());
+        CHECK(fixture.Document.SourceConflict());
+    }
+    SUBCASE("prefab overrides remain authored changes even when objects match")
+    {
+        auto prefabChanged = changed;
+        prefabChanged.PrefabOverrides.push_back({.Kind = Keire::PrefabOverrideKind::RenameObject,
+                                                 .Object = changed.Objects.front().Id,
+                                                 .Name = "Override"});
+        restore(prefabChanged);
+        CHECK(fixture.Document.Dirty());
+        restore(changed);
+        CHECK_FALSE(fixture.Document.Dirty());
+    }
+    SUBCASE("baked lighting identity remains an authored change")
+    {
+        auto lightingChanged = changed;
+        lightingChanged.BakedLighting = Keire::AssetId::Generate();
+        restore(lightingChanged);
+        CHECK(fixture.Document.Dirty());
+    }
+    SUBCASE("unresolved recovery is never discarded by history reconciliation")
+    {
+        Keire::Detail::WriteFileAtomically(fixture.Recovery, PersistenceFixture::Encode("Unresolved"));
+        fixture.Document.SetRecoveryAvailable(true);
+        restore(changed);
+        CHECK_FALSE(fixture.Document.Dirty());
+        CHECK(fixture.Document.RecoveryAvailable());
+        CHECK(std::filesystem::exists(fixture.Recovery));
+    }
+}
+
+TEST_CASE("Scene history preserves unsaved documents and isolates Play from the edit savepoint")
+{
+    PersistenceFixture fixture;
+    fixture.Document.RefreshDirtyState();
+    CHECK(fixture.Document.Dirty());
+    fixture.Document.Save();
+    fixture.Document.BeginPlay();
+    (void)fixture.Document.CreateEntity("Runtime only");
+    fixture.Document.RefreshDirtyState();
+    CHECK_FALSE(fixture.Document.Dirty());
+    fixture.Document.EndPlay();
+    fixture.Document.RefreshDirtyState();
+    CHECK_FALSE(fixture.Document.Dirty());
+    fixture.Document.Close();
+    CHECK_NOTHROW(fixture.Document.RefreshDirtyState());
+
+    auto scene =
+        Keire::CreateRef<Keire::Scene>(Keire::AssetId::Generate(), Keire::SceneAsset::EmptyDefinition("Unsaved"));
+    scene->MarkDirty();
+    fixture.Document.Open(std::move(scene));
+    fixture.Document.RefreshDirtyState();
+    CHECK(fixture.Document.Dirty());
+}
+
 TEST_CASE("Scene persistence retains the exact revision decoded before open")
 {
     PersistenceFixture fixture;

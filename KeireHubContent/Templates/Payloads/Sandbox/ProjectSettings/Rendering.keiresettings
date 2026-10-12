@@ -16,6 +16,9 @@
   "environmentSpecularIntensity": 1.0,
   "exposure": 1.0,
   "gpuOcclusion": "automatic",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
+  "renderPath": "forwardPlus",
+  "globalIllumination": "realtime",
+  "irradynQuality": "balanced",
   "skyVisible": true
 }

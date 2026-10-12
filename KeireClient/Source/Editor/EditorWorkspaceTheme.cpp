@@ -504,6 +504,13 @@ void EditorWorkspaceLayer::DrawMainStatusBar(Keire::UiFrame& ui)
         ui.SameLine();
         const auto renderer = Owner().Renderer();
         const auto statistics = renderer ? renderer->Statistics() : Keire::RenderStatistics{};
+        if (statistics.VfxPipelineWarmupPending)
+        {
+            ui.TextColored(m_Theme.Warning, "Preparing GPU effects...");
+            ui.SetTooltip("GPU effects will appear when preparation finishes. You can continue editing.",
+                          {.Delayed = true});
+            ui.SameLine();
+        }
         ui.TextColored(m_Theme.MutedText,
                        std::string(renderer && renderer->IsOpen() ? "Renderer online  |  " : "Renderer offline  |  ") +
                            "Frame " + std::to_string(Owner().GetTime().FrameCount()) + "  " +

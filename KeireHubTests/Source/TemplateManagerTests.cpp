@@ -1,6 +1,7 @@
 #include <KeireHubTests/TestSupport.h>
 
 #include "Keire/Project/Project.h"
+#include "Keire/Rendering/RenderSystem.h"
 #include "KeireHubRuntime/ProjectWorkflowManager.h"
 #include "KeireHubRuntime/TemplateManager.h"
 
@@ -62,7 +63,7 @@ namespace
     [[nodiscard]] TemplateCreateRequest SandboxRequest(const std::filesystem::path& destination)
     {
         auto request = Request(destination, "keire.sandbox");
-        request.EditorVersion = Version("0.3.0");
+        request.EditorVersion = Version("0.4.7");
         return request;
     }
 
@@ -354,18 +355,23 @@ TEST_CASE("Sandbox creation copies packaged clean content and never mutates its 
     CHECK(descriptor.at("startupScene") == "85be2f8e-31eb-5971-bca9-e5dd6b3f4029");
     CHECK(descriptor.at("defaultInput") == "97b38693-6dc3-4f06-a228-44ba5786e8d1");
     CHECK(descriptor.at("defaultInputMap") == "a6b6db76-6436-4aa4-b96a-a72a0f987101");
-    CHECK(descriptor.at("createdWithEngineVersion") == "0.3.0");
-    CHECK(descriptor.at("minimumEngineVersion") == "0.3.0");
-    CHECK(descriptor.at("template").at("version") == "1.3.2");
+    CHECK(descriptor.at("createdWithEngineVersion") == "0.4.7");
+    CHECK(descriptor.at("minimumEngineVersion") == "0.4.7");
+    CHECK(descriptor.at("template").at("version") == "1.3.3");
+    const auto rendering = Keire::LoadRenderEnvironmentSettings(first.Value().Root);
+    CHECK(rendering.RequestedGlobalIllumination == Keire::GlobalIlluminationMode::Realtime);
+    CHECK(rendering.EnvironmentDiffuseIntensity > 0.0F);
+    CHECK(rendering.EnvironmentSpecularIntensity > 0.0F);
 }
 
-TEST_CASE("Sandbox requires the Material Ecosystem capable editor line")
+TEST_CASE("Sandbox requires an editor supporting its environment lighting settings")
 {
     KeireHubTests::TemporaryDirectory temporary;
     TemplateManager manager(BuiltInTemplates(), Services());
     REQUIRE(manager.Load());
 
     auto legacyRequest = Request(temporary.Path() / "LegacySandbox", "keire.sandbox");
+    legacyRequest.EditorVersion = Version("0.4.6");
     auto legacy = manager.Preflight(legacyRequest);
     REQUIRE_FALSE(legacy);
     CHECK(legacy.Error().Code == HubErrorCode::TemplateIncompatible);

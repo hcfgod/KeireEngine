@@ -184,6 +184,7 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::AbandonLostDeviceResources(const std::shared_ptr<RenderFramePacket>& interrupted) noexcept
     {
+        CancelGpuVfxPipelineWarmup(true);
 #if defined(KEIRE_ENABLE_TEST_HOOKS)
         std::uint64_t abandonedHandles = 0;
         for (auto* query : TimestampQueries)
@@ -333,7 +334,7 @@ namespace Keire::RenderBackend
         VfxBuildVisibilityPipeline = nullptr;
         VfxCompactVisibilityPipeline = nullptr;
         VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::NotStarted, std::memory_order_release);
-        VfxPipelineWarmupFailure.clear();
+        VfxWarmupWork.Failure.clear();
         Statistics.FenceRetiredBytes = 0;
     }
 
@@ -724,8 +725,8 @@ namespace Keire::RenderBackend
                     CompileGpuVfxPipelines();
                     const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
                         std::chrono::steady_clock::now() - vfxStarted);
-                    VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                        std::memory_order_relaxed);
+                    VfxWarmupWork.Microseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                     std::memory_order_relaxed);
                     VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready, std::memory_order_release);
                 }
                 DeviceGeneration.store(*candidateGeneration, std::memory_order_release);

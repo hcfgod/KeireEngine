@@ -116,6 +116,8 @@ namespace KeireEditor
         void SetRecoveryPath(std::filesystem::path path);
         void SetStatus(std::string status);
         void Save(bool overwriteExternalChanges = false);
+        /// Reconciles edit-mode history with the last saved content, including prefab and lighting data.
+        void RefreshDirtyState();
         /// Updates the relocated source's display name; only a previously clean document is saved automatically.
         void SynchronizeSourceName(std::string name);
         void ReloadSource();
@@ -148,6 +150,7 @@ namespace KeireEditor
         std::vector<Keire::AssetId> m_Selections;
         std::filesystem::path m_Source;
         DocumentSourcePersistence m_Persistence;
+        std::optional<std::vector<std::byte>> m_SavedContent;
         std::filesystem::path m_RecoveryPath;
         std::string m_Status;
         double m_RecoverySeconds = 0.0;

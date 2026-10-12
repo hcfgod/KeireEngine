@@ -1,5 +1,10 @@
 # Architecture
 
+SceneDocument retains canonical saved scene content independently of undo commands. History transitions compare
+the complete scene snapshot, including prefab overrides and lighting, against this savepoint; rendering frames do
+not serialize the scene for dirty-state checks. Successful saves advance the baseline, while failed publication
+and Play-mode mutations preserve it.
+
 ## Document persistence and bounded source reads
 
 Editor documents share `DocumentSourcePersistence`, which owns the path and exact source bytes used to open or last
@@ -728,6 +733,9 @@ This fixed order prevents a direct regression build and a project build from wai
 Windows claims the lock directory by atomically renaming a unique empty sibling; an existence check followed by
 directory creation cannot establish exclusive ownership. Waiters tolerate the current owner releasing its directory
 or heartbeat during inspection. The owner/heartbeat protocol remains compatible with the Unix launcher.
+Windows owner-file readers share deletion access so polling cannot prevent release. Cleanup uses file-only deletion
+and nonrecursive directory removal: unexpected contents remain available for inspection instead of triggering an
+interactive recursive-deletion prompt in a background job.
 
 ## GPU VFX And Media Import Boundaries
 
@@ -786,13 +794,17 @@ Each active system adds one filtered dispatch over the world particle capacity; 
 effect-specific pipeline creation while retaining deterministic cross-backend semantics. Shutdown releases pipelines
 before the device and treats repeated close as inert.
 
-The editor requests GPU VFX pipeline warmup when its rendered workspace attaches. A low-priority compiler thread creates
-the complete backend pipeline set and publishes it atomically, so render recording never observes a partial set and Play
-Mode does not wait on driver pipeline creation. Shutdown joins that worker before releasing the GPU device. Clients that
-own a loading screen can request the same non-blocking work through `RenderSystem::RequestGpuVfxPipelineWarmup`; clients
-that do not request it retain synchronous first-use creation for source compatibility. `RenderStatistics` exposes the
-pending/ready state and elapsed warmup time. While an explicitly requested warmup is pending, GPU VFX presentation is
-deferred without blocking the frame; simulation and unrelated rendering remain live.
+GPU VFX pipeline warmup queues a short render-thread setup operation, either explicitly through
+`RenderSystem::RequestGpuVfxPipelineWarmup` or at first use by the asynchronous renderer. A low-priority blocking job
+compiles a private pipeline batch while normal frames continue without GPU effects. The worker captures the device
+and batch, not mutable renderer state. The render thread publishes the complete set only after the job finishes and
+its captured device generation still matches. Ordinary failures release partial allocations and retain a diagnostic;
+a subsequent request to use GPU effects reports that failure. Lost-device failures follow recovery and abandon handles
+without calling back into the lost device. Device abandonment and destruction cancel and join preparation before the
+device can be replaced, and workers never wait for a render-thread callback. Shutdown drains the renderer job scope.
+Synchronous renderers retain synchronous first-use creation, and recovery compiles required pipelines before replaying
+an interrupted VFX packet. `RenderStatistics` exposes pending/ready state and elapsed warmup time; per-entrypoint logs
+identify driver compilation costs. This scheduling change does not eliminate the driver's compilation cost.
 
 Schema-5 `.keirevfx` documents make execution explicit with `LegacyModules` or `Graph`. The graph compiler accepts
 multiple particle systems with Spawn or named Event sources and canonical Initialize, Update, and Output contexts;

@@ -35,6 +35,7 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::DestroyDeviceAndResources(bool abandon, const bool preserveSurfaceEpochs) noexcept
     {
+        CancelGpuVfxPipelineWarmup(abandon);
         GpuDestructionThread = std::this_thread::get_id();
         try
         {

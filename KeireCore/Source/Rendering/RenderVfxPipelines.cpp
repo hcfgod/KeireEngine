@@ -1,3 +1,4 @@
+#include "KeireInternal/Rendering/GpuVfxPipelineBatchInternal.h"
 #include "KeireInternal/Rendering/RenderBackendInternal.h"
 
 #include "Keire/BuiltinVfxShaders.h"
@@ -401,7 +402,11 @@ namespace Keire::RenderBackend
 
     void RenderSharedState::StartGpuVfxPipelineWarmup()
     {
-        if (!Device)
+        if (!Device
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+            && !VfxWarmupWork.CompileForTest
+#endif
+        )
             return;
         auto expected = GpuVfxPipelineWarmupState::NotStarted;
         if (!VfxPipelineWarmupState.compare_exchange_strong(expected, GpuVfxPipelineWarmupState::Compiling,
@@ -419,73 +424,42 @@ namespace Keire::RenderBackend
             RenderQueue.push_back(
                 {[state]
                  {
-                     const auto started = std::chrono::steady_clock::now();
-                     bool retriedAfterDeviceLoss = false;
-                     for (;;)
+                     if (state->DeviceLifecycle.load(std::memory_order_acquire) != RenderDeviceState::Running ||
+                         state->VfxPipelineWarmupState.load(std::memory_order_acquire) !=
+                             GpuVfxPipelineWarmupState::Compiling)
+                         return;
+                     try
                      {
-                         try
-                         {
-                             state->CompileGpuVfxPipelines();
-                             const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                                 std::chrono::steady_clock::now() - started);
-                             state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                                        std::memory_order_relaxed);
-                             state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready,
-                                                                 std::memory_order_release);
-                             KEIRE_CORE_INFO("GPU VFX pipelines warmed on the render thread in {:.2f} ms.",
-                                             static_cast<double>(elapsed.count()) / 1000.0);
-                             return;
-                         }
-                         catch (...)
-                         {
-                             const auto failure = std::current_exception();
-                             bool deviceLost = false;
-                             std::string detail = "Unknown GPU backend failure.";
-                             try
-                             {
-                                 std::rethrow_exception(failure);
-                             }
-                             catch (const GpuDeviceLostError&)
-                             {
-                                 deviceLost = true;
-                             }
-                             catch (const std::exception& error)
-                             {
-                                 detail = error.what();
-                                 deviceLost =
-                                     state->ClassifyDeviceFailure("GPU VFX pipeline warmup", detail).has_value();
-                             }
-                             catch (...)
-                             {
-                             }
-                             if (deviceLost)
-                             {
-                                 state->HandleRenderThreadFailure(failure);
-                                 if (!retriedAfterDeviceLoss &&
-                                     state->DeviceLifecycle.load(std::memory_order_acquire) ==
-                                         RenderDeviceState::Running)
-                                 {
-                                     retriedAfterDeviceLoss = true;
-                                     continue;
-                                 }
-                                 state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
-                                                                     std::memory_order_release);
-                                 return;
-                             }
-
-                             state->ReleaseGpuVfxPipelines();
-                             state->VfxPipelineWarmupFailure = std::move(detail);
-                             const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                                 std::chrono::steady_clock::now() - started);
-                             state->VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                                        std::memory_order_relaxed);
-                             state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
-                                                                 std::memory_order_release);
-                             KEIRE_CORE_ERROR("GPU VFX pipeline warmup failed after {:.2f} ms: {}",
-                                              static_cast<double>(elapsed.count()) / 1000.0,
-                                              state->VfxPipelineWarmupFailure);
-                             return;
-                         }
+                         auto batch = std::make_shared<GpuVfxPipelineBatch>(state->Device);
+                         state->VfxWarmupWork.Started = std::chrono::steady_clock::now();
+                         state->VfxWarmupWork.Generation = state->DeviceGeneration.load(std::memory_order_acquire);
+                         auto* const device = state->Device;
+                         state->VfxWarmupWork.Batch = batch;
+                         JobFunction compile = [batch, device](JobContext& context)
+                         { BuildGpuVfxPipelines(device, *batch, &context); };
+#if defined(KEIRE_ENABLE_TEST_HOOKS)
+                         if (state->VfxWarmupWork.CompileForTest)
+                             compile = state->VfxWarmupWork.CompileForTest;
+#endif
+                         state->VfxWarmupWork.Job = state->RenderJobs->Submit({.Name = "GPU VFX pipeline preparation",
+                                                                               .Priority = JobPriority::Low,
+                                                                               .Class = JobClass::Blocking,
+                                                                               .Domain = JobDomain::Rendering},
+                                                                              std::move(compile));
+                     }
+                     catch (const std::exception& error)
+                     {
+                         state->CancelGpuVfxPipelineWarmup(false);
+                         state->VfxWarmupWork.Failure = error.what();
+                         state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
+                                                             std::memory_order_release);
+                     }
+                     catch (...)
+                     {
+                         state->CancelGpuVfxPipelineWarmup(false);
+                         state->VfxWarmupWork.Failure = "Could not schedule GPU VFX pipeline preparation.";
+                         state->VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed,
+                                                             std::memory_order_release);
                      }
                  },
                  0U,
@@ -506,9 +480,9 @@ namespace Keire::RenderBackend
         FramesRetired.notify_all();
     }
 
-    void RenderSharedState::CompileGpuVfxPipelines()
+    void RenderSharedState::BuildGpuVfxPipelines(SDL_GPUDevice* device, GpuVfxPipelineBatch& batch, JobContext* context)
     {
-        const auto supported = SDL_GetGPUShaderFormats(Device);
+        const auto supported = SDL_GetGPUShaderFormats(device);
         const auto format = (supported & SDL_GPU_SHADERFORMAT_DXIL)    ? SDL_GPU_SHADERFORMAT_DXIL
                             : (supported & SDL_GPU_SHADERFORMAT_SPIRV) ? SDL_GPU_SHADERFORMAT_SPIRV
                             : (supported & SDL_GPU_SHADERFORMAT_MSL)   ? SDL_GPU_SHADERFORMAT_MSL
@@ -516,11 +490,13 @@ namespace Keire::RenderBackend
         if (format == SDL_GPU_SHADERFORMAT_INVALID)
             throw std::runtime_error("GPU VFX requires a DXIL, SPIR-V, or MSL compute-shader backend.");
 
-        const auto create =
-            [this, format](const BuiltinVfxShaderStage stage, const char* entrypoint, const std::uint32_t threads,
-                           const bool usesExecutionTables = false, const std::uint32_t writeBufferCount = 5U,
-                           const std::uint32_t uniformBufferCount = 1U, const std::uint32_t readBufferCount = 0U)
+        const auto create = [device, format, context](
+                                const BuiltinVfxShaderStage stage, const char* entrypoint, const std::uint32_t threads,
+                                const bool usesExecutionTables = false, const std::uint32_t writeBufferCount = 5U,
+                                const std::uint32_t uniformBufferCount = 1U, const std::uint32_t readBufferCount = 0U)
         {
+            if (context && context->StopRequested())
+                throw std::runtime_error("GPU VFX pipeline preparation cancelled.");
             const auto shader = SelectVfxShader(stage, format);
             SDL_GPUComputePipelineCreateInfo information{};
             information.code = shader.Code;
@@ -536,7 +512,7 @@ namespace Keire::RenderBackend
             information.threadcount_z = 1;
             KEIRE_CORE_INFO("Creating GPU VFX compute pipeline (entrypoint={}, bytes={}).", entrypoint, shader.Size);
             const auto started = std::chrono::steady_clock::now();
-            auto* pipeline = SDL_CreateGPUComputePipeline(Device, &information);
+            auto* pipeline = SDL_CreateGPUComputePipeline(device, &information);
             if (!pipeline)
             {
                 throw std::runtime_error("SDL_CreateGPUComputePipeline(GPU VFX " + std::string(entrypoint) +
@@ -547,24 +523,159 @@ namespace Keire::RenderBackend
                             elapsed.count());
             return pipeline;
         };
-        VfxInitializePipeline = create(BuiltinVfxShaderStage::Initialize, "CSInitialize", 256);
-        VfxResetPipeline = create(BuiltinVfxShaderStage::Reset, "CSReset", 1);
-        VfxKillPipeline = create(BuiltinVfxShaderStage::Kill, "CSKill", 256);
-        VfxTransformPipeline = create(BuiltinVfxShaderStage::Transform, "CSTransform", 256);
-        VfxSimulatePipeline = create(BuiltinVfxShaderStage::Simulate, "CSSimulate", 256, true, 7);
-        VfxSimulateOutputPipeline = create(BuiltinVfxShaderStage::SimulateOutput, "CSSimulateOutput", 256, true, 7);
-        VfxSpawnPipeline = create(BuiltinVfxShaderStage::Spawn, "CSSpawn", 256, true, 7);
-        VfxSpawnInitializePipeline = create(BuiltinVfxShaderStage::SpawnInitialize, "CSSpawnInitialize", 256, true, 7);
-        VfxSpawnOutputPipeline = create(BuiltinVfxShaderStage::SpawnOutput, "CSSpawnOutput", 256, true, 7);
-        VfxMapStripsPipeline = create(BuiltinVfxShaderStage::MapStrips, "CSMapStrips", 256, false, 8);
-        VfxLinkStripsPipeline = create(BuiltinVfxShaderStage::LinkStrips, "CSLinkStrips", 256, false, 8);
-        VfxFinalizePipeline = create(BuiltinVfxShaderStage::Finalize, "CSFinalize", 1);
-        VfxResetRenderPipeline = create(BuiltinVfxShaderStage::ResetRender, "CSResetRender", 1, false, 8);
-        VfxFilterRenderPipeline = create(BuiltinVfxShaderStage::FilterRender, "CSFilterRender", 256, false, 8);
-        VfxBuildVisibilityPipeline = create(BuiltinVfxShaderStage::BuildVisibilityCandidates,
-                                            "CSBuildVisibilityCandidates", 256, false, 5, 1, 5);
-        VfxCompactVisibilityPipeline =
+        batch.Pipelines[0] = create(BuiltinVfxShaderStage::Initialize, "CSInitialize", 256);
+        batch.Pipelines[1] = create(BuiltinVfxShaderStage::Reset, "CSReset", 1);
+        batch.Pipelines[2] = create(BuiltinVfxShaderStage::Kill, "CSKill", 256);
+        batch.Pipelines[3] = create(BuiltinVfxShaderStage::Transform, "CSTransform", 256);
+        batch.Pipelines[4] = create(BuiltinVfxShaderStage::Simulate, "CSSimulate", 256, true, 7);
+        batch.Pipelines[5] = create(BuiltinVfxShaderStage::SimulateOutput, "CSSimulateOutput", 256, true, 7);
+        batch.Pipelines[6] = create(BuiltinVfxShaderStage::Spawn, "CSSpawn", 256, true, 7);
+        batch.Pipelines[7] = create(BuiltinVfxShaderStage::SpawnInitialize, "CSSpawnInitialize", 256, true, 7);
+        batch.Pipelines[8] = create(BuiltinVfxShaderStage::SpawnOutput, "CSSpawnOutput", 256, true, 7);
+        batch.Pipelines[9] = create(BuiltinVfxShaderStage::MapStrips, "CSMapStrips", 256, false, 8);
+        batch.Pipelines[10] = create(BuiltinVfxShaderStage::LinkStrips, "CSLinkStrips", 256, false, 8);
+        batch.Pipelines[11] = create(BuiltinVfxShaderStage::Finalize, "CSFinalize", 1);
+        batch.Pipelines[12] = create(BuiltinVfxShaderStage::ResetRender, "CSResetRender", 1, false, 8);
+        batch.Pipelines[13] = create(BuiltinVfxShaderStage::FilterRender, "CSFilterRender", 256, false, 8);
+        batch.Pipelines[14] = create(BuiltinVfxShaderStage::BuildVisibilityCandidates, "CSBuildVisibilityCandidates",
+                                     256, false, 5, 1, 5);
+        batch.Pipelines[15] =
             create(BuiltinVfxShaderStage::CompactVisibility, "CSCompactVisibility", 1, false, 5, 1, 5);
+    }
+
+    void RenderSharedState::PublishGpuVfxPipelines(GpuVfxPipelineBatch& batch) noexcept
+    {
+        const auto pipelines = batch.Release();
+        VfxInitializePipeline = pipelines[0];
+        VfxResetPipeline = pipelines[1];
+        VfxKillPipeline = pipelines[2];
+        VfxTransformPipeline = pipelines[3];
+        VfxSimulatePipeline = pipelines[4];
+        VfxSimulateOutputPipeline = pipelines[5];
+        VfxSpawnPipeline = pipelines[6];
+        VfxSpawnInitializePipeline = pipelines[7];
+        VfxSpawnOutputPipeline = pipelines[8];
+        VfxMapStripsPipeline = pipelines[9];
+        VfxLinkStripsPipeline = pipelines[10];
+        VfxFinalizePipeline = pipelines[11];
+        VfxResetRenderPipeline = pipelines[12];
+        VfxFilterRenderPipeline = pipelines[13];
+        VfxBuildVisibilityPipeline = pipelines[14];
+        VfxCompactVisibilityPipeline = pipelines[15];
+    }
+
+    void RenderSharedState::CompileGpuVfxPipelines()
+    {
+        GpuVfxPipelineBatch batch(Device);
+        try
+        {
+            BuildGpuVfxPipelines(Device, batch, nullptr);
+        }
+        catch (...)
+        {
+            try
+            {
+                RethrowIfDeviceLost("GPU VFX pipeline batch compilation");
+            }
+            catch (const GpuDeviceLostError&)
+            {
+                batch.Abandon();
+                throw;
+            }
+            throw;
+        }
+        PublishGpuVfxPipelines(batch);
+    }
+
+    void RenderSharedState::CancelGpuVfxPipelineWarmup(bool abandon) noexcept
+    {
+        if (VfxWarmupWork.Job)
+        {
+            VfxWarmupWork.Job.Cancel();
+            (void)VfxWarmupWork.Job.Wait();
+            if (!abandon)
+            {
+                try
+                {
+                    VfxWarmupWork.Job.Result().RethrowIfFailed();
+                }
+                catch (...)
+                {
+                    try
+                    {
+                        RethrowIfDeviceLost("GPU VFX preparation cleanup");
+                    }
+                    catch (...)
+                    {
+                        abandon = true;
+                    }
+                }
+            }
+            VfxWarmupWork.Job = {};
+        }
+        if (VfxWarmupWork.Batch)
+        {
+            if (abandon)
+                VfxWarmupWork.Batch->Abandon();
+            else
+                VfxWarmupWork.Batch->Reset();
+            VfxWarmupWork.Batch.reset();
+        }
+    }
+
+    void RenderSharedState::CompleteGpuVfxPipelineWarmup()
+    {
+        if (!VfxWarmupWork.Job || !VfxWarmupWork.Job.IsComplete())
+            return;
+        const auto result = VfxWarmupWork.Job.Result();
+        try
+        {
+            result.RethrowIfFailed();
+            if (!result.Succeeded())
+                throw std::runtime_error("GPU VFX pipeline preparation cancelled.");
+            if (VfxWarmupWork.Generation != DeviceGeneration.load(std::memory_order_acquire))
+            {
+                CancelGpuVfxPipelineWarmup(true);
+                throw std::logic_error("GPU VFX pipeline preparation belongs to an expired device generation.");
+            }
+        }
+        catch (...)
+        {
+            try
+            {
+                RethrowIfDeviceLost("GPU VFX background pipeline compilation");
+            }
+            catch (const GpuDeviceLostError&)
+            {
+                CancelGpuVfxPipelineWarmup(true);
+                throw;
+            }
+            const auto failure = std::current_exception();
+            CancelGpuVfxPipelineWarmup(false);
+            VfxWarmupWork.Failure = "Unknown GPU VFX pipeline preparation failure.";
+            try
+            {
+                std::rethrow_exception(failure);
+            }
+            catch (const std::exception& error)
+            {
+                VfxWarmupWork.Failure = error.what();
+            }
+            catch (...)
+            {
+            }
+            VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);
+            KEIRE_CORE_ERROR("GPU VFX background preparation failed: {}", VfxWarmupWork.Failure);
+            return;
+        }
+        PublishGpuVfxPipelines(*VfxWarmupWork.Batch);
+        const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() -
+                                                                                   VfxWarmupWork.Started);
+        VfxWarmupWork.Microseconds.store(static_cast<std::uint64_t>(elapsed.count()), std::memory_order_relaxed);
+        CancelGpuVfxPipelineWarmup(false);
+        VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready, std::memory_order_release);
+        KEIRE_CORE_INFO("GPU VFX pipelines prepared in background in {:.2f} ms.",
+                        static_cast<double>(elapsed.count()) / 1000.0);
     }
 
     void RenderSharedState::ReleaseGpuVfxPipelines() noexcept
@@ -600,9 +711,7 @@ namespace Keire::RenderBackend
         {
             if (RenderThread.joinable())
             {
-                // The first submitted VFX frame is allowed to finish without effects, then the render thread warms
-                // the pipelines from its queue. This guarantees that a cold driver cache cannot hold the first
-                // visible application frame hostage for tens of seconds.
+                // Frames continue without GPU effects while a worker prepares the unpublished pipeline batch.
                 StartGpuVfxPipelineWarmup();
                 return false;
             }
@@ -616,8 +725,8 @@ namespace Keire::RenderBackend
                     CompileGpuVfxPipelines();
                     const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
                         std::chrono::steady_clock::now() - started);
-                    VfxPipelineWarmupMicroseconds.store(static_cast<std::uint64_t>(elapsed.count()),
-                                                        std::memory_order_relaxed);
+                    VfxWarmupWork.Microseconds.store(static_cast<std::uint64_t>(elapsed.count()),
+                                                     std::memory_order_relaxed);
                     VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Ready, std::memory_order_release);
                     KEIRE_CORE_WARN("GPU VFX pipelines were compiled on first use in {:.2f} ms. Call "
                                     "RenderSystem::RequestGpuVfxPipelineWarmup during loading to avoid this stall.",
@@ -628,7 +737,7 @@ namespace Keire::RenderBackend
                 {
                     RethrowIfDeviceLost("GPU VFX first-use pipeline compilation");
                     ReleaseGpuVfxPipelines();
-                    VfxPipelineWarmupFailure = error.what();
+                    VfxWarmupWork.Failure = error.what();
                     VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);
                     throw;
                 }
@@ -636,7 +745,7 @@ namespace Keire::RenderBackend
                 {
                     RethrowIfDeviceLost("GPU VFX first-use pipeline compilation");
                     ReleaseGpuVfxPipelines();
-                    VfxPipelineWarmupFailure = "Unknown GPU backend failure.";
+                    VfxWarmupWork.Failure = "Unknown GPU backend failure.";
                     VfxPipelineWarmupState.store(GpuVfxPipelineWarmupState::Failed, std::memory_order_release);
                     throw;
                 }
@@ -647,7 +756,7 @@ namespace Keire::RenderBackend
         if (state == GpuVfxPipelineWarmupState::Compiling)
             return false;
         if (state == GpuVfxPipelineWarmupState::Failed)
-            throw std::runtime_error("GPU VFX pipeline warmup failed: " + VfxPipelineWarmupFailure);
+            throw std::runtime_error("GPU VFX pipeline warmup failed: " + VfxWarmupWork.Failure);
         const bool baseReady = VfxInitializePipeline && VfxResetPipeline && VfxKillPipeline && VfxTransformPipeline &&
                                VfxSimulatePipeline && VfxSimulateOutputPipeline && VfxSpawnPipeline &&
                                VfxSpawnInitializePipeline && VfxSpawnOutputPipeline && VfxFinalizePipeline &&

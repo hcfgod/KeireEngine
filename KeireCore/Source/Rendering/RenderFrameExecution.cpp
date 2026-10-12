@@ -362,6 +362,7 @@ namespace Keire::RenderBackend
                 if (InjectTerminalFailureAtNextAcceptedFrame.exchange(false, std::memory_order_acq_rel))
                     throw std::runtime_error("Injected accepted-frame terminal failure.");
 #endif
+                CompleteGpuVfxPipelineWarmup();
                 if (Specification.Mode != RenderMode::Rendered)
                 {
                     Statistics = frame->CapturedStatistics;
@@ -982,12 +983,6 @@ namespace Keire::RenderBackend
         FramesRetired.notify_all();
         Open = false;
         FrameActive = false;
-        if (VfxPipelineWarmupJob)
-        {
-            VfxPipelineWarmupJob.Cancel();
-            (void)VfxPipelineWarmupJob.Wait();
-            VfxPipelineWarmupJob = {};
-        }
         if (RenderJobs)
         {
             RenderJobs->Cancel();

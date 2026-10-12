@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Keire/ECS/Component.h"
+#include "Keire/Jobs/JobSystem.h"
 #include "Keire/Rendering/RenderSystem.h"
 
 #include <SDL3/SDL_gpu.h>
@@ -140,6 +141,9 @@ namespace Keire
         [[nodiscard]] static bool WaitForAcceptedFrameBlock(RenderSystem& renderer);
         [[nodiscard]] static bool WaitForFrameAdmissionWaiter(RenderSystem& renderer);
         static void SetGpuVfxWarmupPendingForTest(RenderSystem& renderer, bool pending);
+        static void StartGpuVfxWarmupForTest(RenderSystem& renderer, JobFunction compile,
+                                             bool rejectScheduling = false);
+        static void ExpireGpuVfxWarmupForTest(RenderSystem& renderer);
         static void ReleaseAcceptedFrameBlock(RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t SceneCaptureEnumerationCount(const RenderSystem& renderer) noexcept;
         [[nodiscard]] static std::uint64_t RuntimeUiCaptureEnumerationCount(const RenderSystem& renderer) noexcept;

@@ -1192,21 +1192,15 @@ namespace KeireHub
             {
                 ui.TextColoredWrapped(tokens.Warning, m_Message);
                 ui.TextColoredWrapped(tokens.SecondaryText,
-                                      "Select Manage Components on a healthy editor with a typed Asset Tool.");
+                                      "Open Installs and select Manage Components on a verified editor installation.");
                 return;
             }
 
-            {
-                [[maybe_unused]] const auto background =
-                    ui.PushStyleColor(Keire::UiStyleColorRole::ChildBackground, tokens.Elevated);
-                if (auto summary = ui.BeginChild("BuildSupportEditorSummary", {0.0F, 86.0F}, true); summary)
-                {
-                    ui.TextColored(tokens.PrimaryText, "Kéire Editor " + m_Selection->Editor.EngineVersion);
-                    ui.TextColoredWrapped(tokens.SecondaryText, m_Selection->Editor.InstallationId);
-                    ui.TextColoredWrapped(tokens.MutedText,
-                                          "Verified actions run through this editor's typed Asset Tool.");
-                }
-            }
+            ui.TextColored(tokens.PrimaryText, "Kéire Editor " + m_Selection->Editor.EngineVersion);
+            ui.TextColoredWrapped(tokens.SecondaryText, Keire::Detail::PathToUtf8(m_Selection->Editor.Root));
+            ui.TextColoredWrapped(tokens.MutedText,
+                                  "Build Support adds platform modules for exporting games from this editor.");
+            ui.Spacing();
 
             if (m_Selection->Filter.Platform && m_Selection->Filter.Architecture)
             {
@@ -1230,8 +1224,7 @@ namespace KeireHub
                 ui.TextColoredWrapped(
                     tokens.Warning, "Offline mode: local .keireplayersupport Build Support imports remain available.");
             }
-            if (inventoryLoading)
-                ui.TextColored(tokens.MutedText, "Refreshing installed component health...");
+            ui.TextColored(tokens.MutedText, inventoryLoading ? "Refreshing installed component health..." : " ");
 
             ui.Spacing();
             if (auto disabled = ui.BeginDisabled(mutationBlocked); disabled)
@@ -1279,6 +1272,8 @@ namespace KeireHub
             {
                 ui.TextColoredWrapped(tokens.SecondaryText,
                                       "No installed Build Support matches this editor version and target filter.");
+                ui.TextColoredWrapped(tokens.MutedText,
+                                      "Choose Import package to add a compatible .keireplayersupport package.");
                 return;
             }
             for (const auto& component : m_Filtered)

@@ -441,7 +441,7 @@ namespace Keire
         result.VfxPipelineWarmupPending = warmup == RenderBackend::GpuVfxPipelineWarmupState::Compiling;
         result.VfxPipelinesReady = warmup == RenderBackend::GpuVfxPipelineWarmupState::Ready;
         result.VfxPipelineWarmupMilliseconds =
-            static_cast<float>(m_Impl->State->VfxPipelineWarmupMicroseconds.load(std::memory_order_relaxed)) / 1000.0F;
+            static_cast<float>(m_Impl->State->VfxWarmupWork.Microseconds.load(std::memory_order_relaxed)) / 1000.0F;
         result.OutstandingFrames = m_Impl->State->OutstandingFrames.load(std::memory_order_relaxed);
         result.FramesInFlightHighWaterMark = m_Impl->State->OutstandingHighWaterMark.load(std::memory_order_relaxed);
         result.AcceptedFrames = m_Impl->State->AcceptedFrameCount.load(std::memory_order_relaxed);

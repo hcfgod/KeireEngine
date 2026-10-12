@@ -1051,15 +1051,21 @@ namespace KeireEditor
         m_Asset = asset ? asset : m_Scene->Asset();
         m_Source = std::move(source);
         m_Undo = std::move(undo);
+        if (!m_Scene->Dirty())
+            m_SavedContent = Keire::SceneAsset::Encode(m_Scene->Snapshot());
     }
 
     void SceneDocument::ReplaceEditingScene(Keire::Ref<Keire::Scene> scene, const bool preserveSelection)
     {
         if (!scene)
             throw std::invalid_argument("SceneDocument::ReplaceEditingScene requires a scene.");
+        auto savedContent =
+            !scene->Dirty() ? std::optional(Keire::SceneAsset::Encode(scene->Snapshot())) : std::nullopt;
         // Viewport and panel callbacks can retain a scene Ref until the current UI frame completes. Releasing the
         // document's ownership lets the old scene close when its final alias is gone instead of invalidating it here.
         m_Scene = std::move(scene);
+        if (savedContent)
+            m_SavedContent = std::move(savedContent);
         if (preserveSelection)
             SynchronizeSelection();
         else
@@ -1099,6 +1105,7 @@ namespace KeireEditor
         m_Asset = asset;
         m_Source = std::move(source);
         m_Persistence = std::move(persistence);
+        m_SavedContent.reset();
     }
 
     void SceneDocument::SetRecoveryPath(std::filesystem::path path)
@@ -1118,9 +1125,25 @@ namespace KeireEditor
     {
         if (!m_Scene || !m_Scene->IsOpen() || m_Source.empty())
             throw std::logic_error("SceneDocument cannot save without an editing scene and source path.");
-        m_Persistence.Publish(Keire::SceneAsset::Encode(m_Scene->Snapshot()), overwriteExternalChanges);
+        auto savedContent = Keire::SceneAsset::Encode(m_Scene->Snapshot());
+        m_Persistence.Publish(savedContent, overwriteExternalChanges);
+        m_SavedContent = std::move(savedContent);
         m_Scene->MarkSaved();
         DiscardRecovery();
+    }
+
+    void SceneDocument::RefreshDirtyState()
+    {
+        if (!m_Scene || !m_Scene->IsOpen() || m_PlaySession)
+            return;
+        // Compare only at history transitions, never every frame. A failed snapshot must retain the save prompt.
+        m_Scene->MarkDirty();
+        if (m_SavedContent && Keire::SceneAsset::Encode(m_Scene->Snapshot()) == *m_SavedContent)
+        {
+            m_Scene->MarkSaved();
+            if (!m_RecoveryAvailable)
+                DiscardRecovery();
+        }
     }
 
     void SceneDocument::SynchronizeSourceName(std::string name)
@@ -1253,6 +1276,7 @@ namespace KeireEditor
         ClearSelection();
         m_Source.clear();
         m_Persistence = {};
+        m_SavedContent.reset();
         m_RecoveryPath.clear();
         m_Status.clear();
         m_RecoverySeconds = 0.0;

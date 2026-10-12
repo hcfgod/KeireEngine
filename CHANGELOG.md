@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Windows build-lock readers allow owners to release their lock during contention. Cleanup preserves unexpected
+  files and reports the retained path instead of opening an interactive deletion prompt in background jobs.
+
+- New Sandbox projects enable Realtime Environment lighting so metallic material examples receive reflections
+  instead of appearing nearly black. Sandbox template 1.3.3 requires Editor 0.4.7 or later; existing projects retain
+  their lighting settings.
+
+- Hub component management shows the selected editor's installation path and wrapped Build Support guidance,
+  without a clipped summary box or internal installation identifiers. Refresh status keeps its action buttons in place.
+
+- Threaded rendering prepares GPU VFX pipelines in a background job and publishes complete batches on the render
+  thread. Shutdown and device recovery drain preparation before replacing the device; ordinary compilation failures
+  retain actionable diagnostics and partial allocations are cleaned up safely.
+  The editor status bar shows when GPU effects are still being prepared.
+
+- Scene Undo/Redo clears the unsaved indicator only when the full authored content matches the last save,
+  including prefab overrides and baked lighting. Failed saves preserve the previous savepoint.
+  Returning to saved content removes stale autosaves while retaining unresolved recovery snapshots.
+
 - The Project panel labels its search as **Filter current folder** and explains its scope on hover.
 
 - Input Actions clears its unsaved indicator when Undo or Redo returns to the saved content, including after saving
