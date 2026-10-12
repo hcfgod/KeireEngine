@@ -37,7 +37,8 @@ namespace Keire::Detail
             stream.read(contents.data(), static_cast<std::streamsize>(contents.size()));
             if (!stream || stream.peek() != std::char_traits<char>::eof())
                 throw std::runtime_error("Asset-worker document changed while being read: " + PathToUtf8(path));
-            // Release the file before parsing so polling cannot hold up an atomic progress replacement.
+            // Release the file before parsing so polling cannot hold up an atomic
+            // progress replacement.
             stream.close();
             return Json::parse(contents);
         }
@@ -452,15 +453,21 @@ namespace Keire::Detail
         return result;
     }
 
-    void WriteAssetSourceIndex(const std::filesystem::path& path, const std::span<const AssetSourceRecord> records)
+    void WriteAssetSourceIndex(const std::filesystem::path& path, const std::span<const AssetSourceRecord> records,
+                               const std::span<const AssetImportStatus> statuses)
     {
         Json encoded = Json::array();
         for (const auto& record : records)
             encoded.push_back(EncodeRecord(record));
-        WriteJson(path, {{"schemaVersion", 1}, {"records", std::move(encoded)}});
+        AssetImportResult imports;
+        imports.Statuses.assign(statuses.begin(), statuses.end());
+        WriteJson(
+            path,
+            {{"schemaVersion", 1}, {"records", std::move(encoded)}, {"importResults", EncodeImportResult(imports)}});
     }
 
-    std::vector<AssetSourceRecord> ReadAssetSourceIndex(const std::filesystem::path& path)
+    std::vector<AssetSourceRecord> ReadAssetSourceIndex(const std::filesystem::path& path,
+                                                        std::vector<AssetImportStatus>* statuses)
     {
         const auto value = ReadJson(path);
         if (value.value("schemaVersion", 0) != 1 || !value.contains("records") || !value.at("records").is_array())
@@ -469,6 +476,8 @@ namespace Keire::Detail
         records.reserve(value.at("records").size());
         for (const auto& record : value.at("records"))
             records.push_back(DecodeRecord(record));
+        if (statuses)
+            *statuses = DecodeImportResult(value.value("importResults", Json::object())).Statuses;
         return records;
     }
 } // namespace Keire::Detail

@@ -1488,6 +1488,10 @@ publishes a validated source-index snapshot beside the development catalog; the 
 instead of hashing the project again. Cancellation is cooperative until publication. Shutdown waits 250 ms, terminates
 an unresponsive worker, and lets the existing publication journal recover before another operation exposes records.
 Native process handles and protocol JSON remain implementation details.
+The source-index snapshot also carries optional import results, including failure diagnostics. Loading validates
+their enum values and unique source identities before changing the live database. Targeted workers retain results
+for untouched sources, so restarting the editor does not lose failed-import guidance. Schema-1 indexes without this
+optional data remain compatible; a subsequent import supplies current diagnostics.
 Named duplicate, create-folder, and trash requests retain an editor-owned mutation state until the successful worker
 result supplies the inverse asset or trash identity. The workspace then records the applied command in Project asset
 history. Undo and redo reuse that state; failed completions never enter history. Other named mutations require an

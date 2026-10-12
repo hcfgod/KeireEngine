@@ -119,6 +119,8 @@ namespace Keire::Detail
     void WriteAssetWorkerResult(const std::filesystem::path& path, const AssetWorkerResult& result);
     [[nodiscard]] AssetWorkerResult ReadAssetWorkerResult(const std::filesystem::path& path);
 
-    void WriteAssetSourceIndex(const std::filesystem::path& path, std::span<const AssetSourceRecord> records);
-    [[nodiscard]] std::vector<AssetSourceRecord> ReadAssetSourceIndex(const std::filesystem::path& path);
+    void WriteAssetSourceIndex(const std::filesystem::path& path, std::span<const AssetSourceRecord> records,
+                               std::span<const AssetImportStatus> statuses = {});
+    [[nodiscard]] std::vector<AssetSourceRecord>
+    ReadAssetSourceIndex(const std::filesystem::path& path, std::vector<AssetImportStatus>* statuses = nullptr);
 } // namespace Keire::Detail

@@ -1379,8 +1379,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                         {
                             const auto zone = Keire::DynamicRefCast<Keire::AudioReverbZoneComponent>(component);
                             if (!zone || !resolvedMixer)
-                                ui.TextColored(theme.Warning,
-                                               "Assign a Mixer here or configure the project's Default Mixer.");
+                                ui.TextColoredWrapped(theme.Warning,
+                                                      "Assign a Mixer here or configure the project's Default Mixer.");
                             else if (!assets)
                                 ui.TextColored(theme.Warning, "Audio assets are unavailable for setup validation.");
                             else if (mixerAsset)
@@ -1442,8 +1442,8 @@ void KeireEditor::InspectorPanel::Draw(Keire::UiFrame& ui)
                                 }
                             }
                             else if (source && !resolvedMixer)
-                                ui.TextColored(theme.Warning,
-                                               "Assign a Mixer here or configure the project's Default Mixer.");
+                                ui.TextColoredWrapped(theme.Warning,
+                                                      "Assign a Mixer here or configure the project's Default Mixer.");
                         }
                     }
                 }

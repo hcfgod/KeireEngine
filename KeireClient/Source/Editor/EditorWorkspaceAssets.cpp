@@ -185,15 +185,7 @@ void EditorWorkspaceLayer::RefreshAssetBrowserRecords()
 
 void EditorWorkspaceLayer::SetAssetBrowserSelected(const Keire::AssetId asset) noexcept
 {
-    try
-    {
-        FlushMaterialSelectionImports();
-    }
-    catch (...)
-    {
-        // Saved sources and pending refresh identities survive a failed queue allocation.
-    }
-    m_SelectedAsset = asset;
+    SetInspectorSelectedAsset(asset);
 }
 
 void EditorWorkspaceLayer::ClearAssetBrowserSceneSelection() noexcept { m_SceneDocument->ClearSelection(); }

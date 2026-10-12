@@ -137,7 +137,10 @@ void EditorWorkspaceLayer::SetInspectorSelectedAsset(const Keire::AssetId asset)
         // Saved sources and pending refresh identities survive a failed queue allocation.
     }
     if (asset != m_SelectedAsset)
+    {
         StopInspectorAudioPreview();
+        m_AssetStatus.clear();
+    }
     m_SelectedAsset = asset;
 }
 

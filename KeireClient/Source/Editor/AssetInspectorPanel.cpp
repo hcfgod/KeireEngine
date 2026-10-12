@@ -31,6 +31,7 @@
 #include <span>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -133,7 +134,8 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
     const auto database = m_Controller.InspectorAssetDatabase();
     const auto assets = m_Controller.InspectorAssetSystem();
     const auto records = m_Controller.InspectorAssetRecords();
-    const auto assetStatus = m_Controller.InspectorAssetStatus();
+    // Actions below may replace the controller's string during this frame.
+    const std::string assetStatus(m_Controller.InspectorAssetStatus());
     const auto scene = m_Controller.InspectorSceneDocument().ActiveScene();
     if (!selectedAsset || !database)
     {
@@ -323,7 +325,9 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
                                                  assets->TryGetType(record->Id), record->Type, importStatus.State,
                                                  Keire::AudioClipAsset::StaticType());
         if (pendingImport)
-            ui.TextColoredWrapped(theme.MutedText, "Waiting for the first audio import to finish...");
+            ui.TextColoredWrapped(
+                theme.MutedText,
+                "No imported audio is available yet. Wait for active processing or select Reimport Audio.");
         if (importFailed)
         {
             ui.TextColoredWrapped(theme.Error, "Audio import failed. Correct the source file and reimport.");

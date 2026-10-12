@@ -42,7 +42,16 @@ namespace Keire
     void Detail::AssetDatabaseWorkerAccess::PublishSourceIndex(const AssetDatabase& database,
                                                                const std::filesystem::path& path)
     {
-        WriteAssetSourceIndex(path, database.Records());
+        const auto records = database.Records();
+        std::vector<AssetImportStatus> statuses;
+        statuses.reserve(records.size());
+        for (const auto& record : records)
+        {
+            auto status = database.ImportStatus(record.Id);
+            if (status.State != AssetImportState::NotImported)
+                statuses.push_back(std::move(status));
+        }
+        WriteAssetSourceIndex(path, records, statuses);
     }
 
     void Detail::AssetDatabaseWorkerAccess::ApplyImportStatuses(AssetDatabase& database,
@@ -62,7 +71,8 @@ namespace Keire
     std::size_t Detail::AssetDatabaseWorkerAccess::ReloadSourceIndex(AssetDatabase& database,
                                                                      const std::filesystem::path& path)
     {
-        auto records = ReadAssetSourceIndex(path);
+        std::vector<AssetImportStatus> persistedStatuses;
+        auto records = ReadAssetSourceIndex(path, &persistedStatuses);
         std::unordered_set<AssetId> identities;
         std::unordered_set<std::string> relativePaths;
         std::unordered_map<AssetId, FileSignature> signatures;
@@ -82,11 +92,23 @@ namespace Keire
             signatures.emplace(record.Id, FileSignature{sourceSignature.Modified, sourceSignature.Size,
                                                         metadataSignature.Modified, metadataSignature.Size});
         }
+        std::unordered_set<AssetId> statusIdentities;
+        for (const auto& status : persistedStatuses)
+        {
+            if (!identities.contains(status.Id) || !statusIdentities.insert(status.Id).second)
+                throw std::runtime_error("Published asset source index contains an "
+                                         "invalid import status identity.");
+        }
         std::ranges::sort(records, [](const auto& left, const auto& right) { return left.Id < right.Id; });
 
         std::scoped_lock operation(*database.m_Impl->OperationMutex);
         std::scoped_lock lock(database.m_Impl->Mutex);
+        auto updatedStatuses = database.m_Impl->ImportStatuses;
+        for (auto& status : persistedStatuses)
+            updatedStatuses.insert_or_assign(status.Id, std::move(status));
+        std::erase_if(updatedStatuses, [&identities](const auto& entry) { return !identities.contains(entry.first); });
         database.m_Impl->ReplaceRecords(std::move(records));
+        database.m_Impl->ImportStatuses.swap(updatedStatuses);
         database.m_Impl->Observed = std::move(signatures);
         database.m_Impl->PendingChanges.clear();
         database.m_Impl->SourceRevision.fetch_add(1, std::memory_order_release);

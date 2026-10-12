@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Import results and failure diagnostics survive editor restarts and unrelated targeted imports in the published
+  source index. Correcting and reimporting an asset clears its old failure. Older indexes remain readable.
+- Selecting a different asset stops its audio preview and clears stale Inspector status. Audio sources without a
+  published import offer reimport guidance; Mixer setup warnings wrap in narrow Inspectors.
+
 - Audio Inspector enables Preview only when an imported clip is loaded. Missing or failed audio no longer plays
   fallback silence while claiming playback started; playback rejection reports an actionable error.
 

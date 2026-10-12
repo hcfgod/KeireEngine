@@ -59,6 +59,9 @@ clicks can build a folder selection. Copy, cut, duplicate, delete, and drag move
 Selecting an importable source displays its type-aware preview and persistent importer options in the Inspector.
 Audio **Preview** stays disabled until a playable imported revision is loaded. Import failures show their diagnostic;
 correct the source and use **Reimport Audio** to recover. A failed reimport can still preview a retained valid revision.
+Published source indexes retain import diagnostics across editor restarts and unrelated targeted imports. Older
+indexes may not contain a previous result; **Reimport Audio** restores a current diagnostic or playable revision.
+Selecting another asset stops the previous audio preview and clears its status message.
 **Apply and Reimport** validates the edited values, writes them to that asset's `.keiremeta`, and rebuilds only its
 reverse dependency closure. **Revert Import Settings** discards the Inspector draft without touching project files.
 Text and extensionless documents use a readable page preview; C#, Lua, managed assemblies, shader sources, structured
