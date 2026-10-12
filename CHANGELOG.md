@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Asset-browser operation messages wrap in a bounded, scrollable area above the asset list instead of disappearing
+  below the folder panes; selection and thumbnail counts remain visible alongside them.
+
+- Asset-package export explains unsupported source filenames and case collisions instead of reporting a misleading
+  payload-size error, and the authoring dialog shows the archive's filename requirements.
+
 - Native Save dialogs preserve UTF-8 suggested filenames, including accented package/scene names and UI stylesheets.
 
 - Hub empty project results explain that search and filters both affect visibility and how to show more projects.

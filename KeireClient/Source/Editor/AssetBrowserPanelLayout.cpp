@@ -199,12 +199,15 @@ namespace KeireEditor
                 SavePreferences();
 
             ui.Separator();
+            DrawAssetBrowserStatus(ui, editor.AssetBrowserTheme().MutedText, editor.AssetBrowserStatus());
+            ui.TextColored(editor.AssetBrowserTheme().MutedText,
+                           std::to_string(Selection.size() + FolderSelection.size()) + " selected  |  " +
+                               std::to_string(Thumbnails->PendingCount()) + " thumbnail request(s)");
             const auto browserSize = ui.ContentAvailable();
             constexpr float splitterThickness = 4.0F;
             constexpr float minimumFolderWidth = 150.0F;
             constexpr float minimumContentWidth = 260.0F;
-            const float footerHeight = editor.AssetBrowserStatus().empty() ? 30.0F : 54.0F;
-            const float paneHeight = std::max(browserSize.Height - footerHeight, 1.0F);
+            const float paneHeight = std::max(browserSize.Height, 1.0F);
             const bool showFolderPane =
                 browserSize.Width >= minimumFolderWidth + minimumContentWidth + splitterThickness;
             if (showFolderPane)
@@ -227,11 +230,6 @@ namespace KeireEditor
             DrawRenamePopups(ui, editor);
             DrawDeletePopup(ui, editor);
             DrawTrashPopup(ui, editor);
-            if (!editor.AssetBrowserStatus().empty())
-                ui.TextColored(editor.AssetBrowserTheme().MutedText, editor.AssetBrowserStatus());
-            ui.TextColored(editor.AssetBrowserTheme().MutedText,
-                           std::to_string(Selection.size() + FolderSelection.size()) + " selected  |  " +
-                               std::to_string(Thumbnails->PendingCount()) + " thumbnail request(s)");
         }
     }
 } // namespace KeireEditor

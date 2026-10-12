@@ -19,6 +19,24 @@
 
 namespace KeireEditor
 {
+    void DrawAssetBrowserStatus(Keire::UiFrame& ui, const Keire::UiColor color, const std::string_view status)
+    {
+        if (status.empty())
+            return;
+        const auto available = ui.ContentAvailable();
+        if (available.Height <= 1.0F)
+            return;
+        const auto text = ui.MeasureText(status);
+        if (text.Width <= available.Width && text.Height <= ui.MeasureText("Ag").Height * 1.25F)
+        {
+            ui.TextColored(color, status);
+            return;
+        }
+        const float height = std::min(96.0F, std::max(1.0F, available.Height * 0.35F));
+        if (auto message = ui.BeginChild("AssetBrowserStatus", {0.0F, height}, true); message)
+            ui.TextColoredWrapped(color, status);
+    }
+
     std::string AssetBrowserContentPaneId(const std::filesystem::path& assetRoot, const std::filesystem::path& folder)
     {
         std::string id = "AssetContentPane/";

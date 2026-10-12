@@ -94,6 +94,7 @@ Renaming an open scene in the Asset Browser or Inspector preserves its identity 
 their saved display name automatically; genuine external source changes still prompt for conflict resolution.
 Asset Browser folders retain independent scroll positions, so opening a new folder starts at its first assets.
 Native Save dialogs preserve accented and other UTF-8 filenames when exporting packages or saving scene/style copies.
+Asset-browser operation messages appear above the asset list and can be scrolled when a long diagnostic does not fit.
 C# fields declared as `SceneAsset` offer only scene assets in the Inspector picker, with `None` for optional references.
 Curve and gradient Inspector headings display their readable names without internal widget ID suffixes.
 Audio Inspector preview messages and import errors wrap; **Reimport Audio** appears below the playback controls.

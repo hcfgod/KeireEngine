@@ -29,6 +29,11 @@ Paths are relative, normalized, ASCII-portable paths in schema 1. Traversal, lin
 duplicate paths, case-fold collisions, undeclared files, oversized records, malformed manifests, archive-size mismatches,
 hash mismatches, signature failures, and trailing compressed data fail before publication.
 
+Asset filenames and folders inside a schema 1 package use ASCII letters, digits, dots, underscores and hyphens;
+spaces and accented characters in those paths are not supported. The export dialog explains this restriction,
+and inventory errors identify the offending path so it can be renamed in the Asset Browser before retrying.
+The package display name and the archive's output filename may contain spaces and accented characters.
+
 ## Deterministic authoring
 
 Use the public archive functions in `Keire/Assets/AssetPackage.h` to inventory a payload, encode or decode a canonical

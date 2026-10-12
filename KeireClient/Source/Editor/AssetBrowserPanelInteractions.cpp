@@ -228,6 +228,9 @@ namespace KeireEditor
             (void)ui.InputText("Minimum Kéire version", PendingPackageDraft.MinimumEngineVersion);
             (void)ui.InputText("Maximum Kéire version (optional)", PendingPackageDraft.MaximumEngineVersion);
             ui.Text("Keep the package ID and asset metadata unchanged when releasing an update.");
+            ui.TextWrapped("Asset filenames and folders inside the package must use ASCII letters, digits, dots, "
+                           "underscores or hyphens, with no spaces. The package display name and output filename "
+                           "may contain spaces and accented characters.");
             (void)ui.InputText("Summary", PendingPackageDraft.Summary);
             const bool complete = !PendingPackageDraft.DisplayName.empty() && !PendingPackageDraft.PackageId.empty() &&
                                   !PendingPackageDraft.Version.empty() && !PendingPackageDraft.PublisherId.empty() &&

@@ -783,8 +783,15 @@ namespace Keire
                 throw std::runtime_error("Asset-package payload may contain only regular files.");
             const auto relative = iterator->path().lexically_relative(root).lexically_normal();
             const auto size = iterator->file_size();
-            if (!IsPortableRelativePath(relative) || !paths.emplace(CaseFolded(relative)).second ||
-                size > AssetPackageArchiveLimits::MaximumFileBytes ||
+            if (!IsPortableRelativePath(relative))
+                throw std::runtime_error("Cannot package asset path '" + PathText(relative) +
+                                         "'. Rename its files and folders using ASCII letters, digits, dots, "
+                                         "underscores or hyphens; spaces, accented characters, reserved names "
+                                         "and overlong paths are not supported by asset-package schema 1.");
+            if (!paths.emplace(CaseFolded(relative)).second)
+                throw std::runtime_error("Asset-package paths collide when letter case is ignored: '" +
+                                         PathText(relative) + "'. Rename one of the conflicting files or folders.");
+            if (size > AssetPackageArchiveLimits::MaximumFileBytes ||
                 manifest.InstalledSizeBytes > AssetPackageArchiveLimits::MaximumPayloadBytes - size ||
                 manifest.Files.size() >= AssetPackageArchiveLimits::MaximumFiles)
                 throw std::runtime_error("Asset-package payload exceeds its safety limits.");

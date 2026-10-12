@@ -111,6 +111,21 @@ TEST_CASE("asset-package manifests encode canonically and reject noncanonical pa
     CHECK_THROWS_AS(Keire::ValidateAssetPackageManifest(invalidVersion), std::invalid_argument);
 }
 
+TEST_CASE("asset-package inventory explains unsupported source names without changing payload files")
+{
+    AssetPackageFixture fixture;
+    const auto original = fixture.Manifest();
+    const auto relative = std::filesystem::path(u8"Assets/Caf\u00e9 Scene.keirescene");
+    fixture.Write(fixture.Payload / relative, "scene-bytes");
+    CHECK_THROWS_WITH_AS(Keire::InventoryAssetPackagePayload(original, fixture.Payload),
+                         doctest::Contains("Cannot package asset path 'Assets/Caf\xC3\xA9 Scene.keirescene'"),
+                         std::runtime_error);
+    CHECK_THROWS_WITH_AS(Keire::InventoryAssetPackagePayload(original, fixture.Payload),
+                         doctest::Contains("Rename its files and folders using ASCII"), std::runtime_error);
+    CHECK(KeireTests::ReadFile(fixture.Payload / relative) == "scene-bytes");
+    CHECK(KeireTests::ReadFile(fixture.Payload / "Assets/Material.keirematerial") == "material-bytes\n");
+}
+
 TEST_CASE("asset-package archives are deterministic, inspectable, and extracted only into owned staging")
 {
     AssetPackageFixture fixture;
