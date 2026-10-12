@@ -2,6 +2,7 @@
 
 #include "KeireInternal/TrayIconInternal.h"
 #include "KeireInternal/WindowChromeInternal.h"
+#include "KeireInternal/WindowFileDialogsInternal.h"
 #include "KeireInternal/WindowInternal.h"
 
 #include <SDL3/SDL.h>
@@ -15,6 +16,23 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+
+TEST_CASE("Save file dialog defaults preserve UTF-8 names and native directories")
+{
+    Keire::SaveFileDialogSpecification specification;
+    CHECK(Keire::Detail::SaveFileDialogDefaultPath(specification).empty());
+    specification.DefaultName = "Caf\xC3\xA9 Scene.keireassetpackage";
+    CHECK(Keire::Detail::SaveFileDialogDefaultPath(specification) == specification.DefaultName);
+    specification.DefaultLocation = std::filesystem::path(u8"Projects/\u65e5\u672c\u8a9e Folder");
+    const auto expected = specification.DefaultLocation / std::filesystem::path(u8"Caf\u00e9 Scene.keireassetpackage");
+    CHECK(Keire::Detail::PathFromUtf8(Keire::Detail::SaveFileDialogDefaultPath(specification)) == expected);
+    specification.DefaultName.clear();
+    CHECK(Keire::Detail::PathFromUtf8(Keire::Detail::SaveFileDialogDefaultPath(specification)) ==
+          specification.DefaultLocation);
+    specification.DefaultName = "Plain Copy.txt";
+    CHECK(Keire::Detail::PathFromUtf8(Keire::Detail::SaveFileDialogDefaultPath(specification)) ==
+          specification.DefaultLocation / "Plain Copy.txt");
+}
 
 namespace
 {

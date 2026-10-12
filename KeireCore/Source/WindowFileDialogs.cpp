@@ -157,8 +157,8 @@ namespace Keire
         return m_Impl->State->Error;
     }
 
-    Ref<OpenFileDialogOperation> Detail::ShowNativeOpenFileDialog(
-        SDL_Window* parent, const OpenFileDialogSpecification& specification)
+    Ref<OpenFileDialogOperation> Detail::ShowNativeOpenFileDialog(SDL_Window* parent,
+                                                                  const OpenFileDialogSpecification& specification)
     {
         if (specification.Title.empty() || specification.Title.size() > 256 || specification.FilterName.size() > 128 ||
             specification.Extension.size() > 32 || specification.Extension.find('*') != std::string::npos ||
@@ -180,8 +180,8 @@ namespace Keire
         return operation;
     }
 
-    Ref<SaveFileDialogOperation> Detail::ShowNativeSaveFileDialog(
-        SDL_Window* parent, const SaveFileDialogSpecification& specification)
+    Ref<SaveFileDialogOperation> Detail::ShowNativeSaveFileDialog(SDL_Window* parent,
+                                                                  const SaveFileDialogSpecification& specification)
     {
         if (specification.Title.empty() || specification.Title.size() > 256 || specification.DefaultName.size() > 256 ||
             specification.Extension.size() > 32 || specification.Extension.find('*') != std::string::npos ||
@@ -193,11 +193,7 @@ namespace Keire
         auto operation = CreateRef<SaveFileDialogOperation>(std::make_unique<SaveFileDialogOperation::Impl>(state));
         auto request = std::make_unique<SaveFileDialogRequest>();
         request->State = state;
-        const auto location =
-            specification.DefaultLocation.empty() ? std::string{} : Utf8PathString(specification.DefaultLocation);
-        const auto defaultPath = specification.DefaultName.empty()
-                                     ? location
-                                     : Utf8PathString(specification.DefaultLocation / specification.DefaultName);
+        const auto defaultPath = Detail::SaveFileDialogDefaultPath(specification);
         SDL_DialogFileFilter filter{specification.FilterName.c_str(), specification.Extension.c_str()};
         const SDL_DialogFileFilter* filters = specification.Extension.empty() ? nullptr : &filter;
         const int filterCount = filters ? 1 : 0;

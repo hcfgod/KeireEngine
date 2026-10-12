@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Native Save dialogs preserve UTF-8 suggested filenames, including accented package/scene names and UI stylesheets.
+
 - Hub empty project results explain that search and filters both affect visibility and how to show more projects.
 
 - Import results and failure diagnostics survive editor restarts and unrelated targeted imports in the published

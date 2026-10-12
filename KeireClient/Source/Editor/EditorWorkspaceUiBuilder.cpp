@@ -425,7 +425,7 @@ void EditorWorkspaceLayer::RequestSaveUiBuilderStyleSheetAs()
     Keire::SaveFileDialogSpecification dialog;
     dialog.Title = "Save UI Style Sheet As";
     dialog.DefaultLocation = source.parent_path();
-    dialog.DefaultName = source.stem().string() + " Copy.keirestyle";
+    dialog.DefaultName = Keire::Detail::PathToUtf8(source.stem()) + " Copy.keirestyle";
     dialog.FilterName = "Kéire UI Style Sheet";
     dialog.Extension = "keirestyle";
     m_UiBuilderStyleSheetSaveDialog = Owner().Windows()->ShowSaveFileDialog(Owner().MainWindow()->Id(), dialog);
