@@ -57,6 +57,8 @@ Ctrl/Cmd+Shift-click adds that range to the current selection. Content-area fold
 clicks can build a folder selection. Copy, cut, duplicate, delete, and drag moves act on the complete selected set.
 
 Selecting an importable source displays its type-aware preview and persistent importer options in the Inspector.
+Audio **Preview** stays disabled until a playable imported revision is loaded. Import failures show their diagnostic;
+correct the source and use **Reimport Audio** to recover. A failed reimport can still preview a retained valid revision.
 **Apply and Reimport** validates the edited values, writes them to that asset's `.keiremeta`, and rebuilds only its
 reverse dependency closure. **Revert Import Settings** discards the Inspector draft without touching project files.
 Text and extensionless documents use a readable page preview; C#, Lua, managed assemblies, shader sources, structured

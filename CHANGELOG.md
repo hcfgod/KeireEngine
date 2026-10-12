@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Audio Inspector enables Preview only when an imported clip is loaded. Missing or failed audio no longer plays
+  fallback silence while claiming playback started; playback rejection reports an actionable error.
+
 - Asset Browser navigation keeps scroll positions separate for each project folder. New folders start at the top,
   returning folders restore their position, and explicit asset reveal still takes priority.
 - VFX preview transport tooltips use wording that applies to both CPU authoring and GPU runtime previews.

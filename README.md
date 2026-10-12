@@ -96,6 +96,8 @@ Asset Browser folders retain independent scroll positions, so opening a new fold
 C# fields declared as `SceneAsset` offer only scene assets in the Inspector picker, with `None` for optional references.
 Curve and gradient Inspector headings display their readable names without internal widget ID suffixes.
 Audio Inspector preview messages and import errors wrap; **Reimport Audio** appears below the playback controls.
+**Preview** becomes available when an imported clip is loaded; a missing or failed source cannot report successful
+playback of fallback silence. Correct the source file and reimport to recover without reopening the project.
 Import settings show **Apply and Reimport** and **Revert Import Settings** on separate rows so both remain accessible
 in narrow Inspectors. Instructions and external-change warnings also wrap to the panel width.
 Algorithmic reverb keeps its combined feedback below unity throughout the supported decay range, so sustained

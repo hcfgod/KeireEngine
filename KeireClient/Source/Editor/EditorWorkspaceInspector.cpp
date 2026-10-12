@@ -25,6 +25,7 @@
 #include "KeireClient/Editor/ScenePlayChanges.h"
 #include "KeireClient/Editor/ScenePlayChangesPanel.h"
 #include "KeireClient/Editor/ViewportAssetDropRouter.h"
+#include "KeireClientInternal/Editor/AssetPreviewReadiness.h"
 #include "KeireInternal/Assets/AssetDatabaseWorkerAccess.h"
 #include "KeireInternal/EditorCameraController.h"
 #include "KeireInternal/FileSystem.h"
@@ -146,17 +147,17 @@ void EditorWorkspaceLayer::PreviewInspectorAudio(const Keire::AssetId asset)
     const auto assets = Owner().Assets();
     if (!audio || !audio->IsOpen() || !assets || !asset)
         throw std::logic_error("Audio preview services are unavailable.");
-    StopInspectorAudioPreview();
     const auto handle = assets->Load<Keire::AudioClipAsset>(asset, Keire::AssetPriority::High);
-    const auto clip = handle.Get();
-    if (!clip)
-        throw std::runtime_error("The selected audio clip could not be loaded.");
+    const auto clip = KeireEditor::Detail::RequirePreviewAudioClip(handle);
+    StopInspectorAudioPreview();
     Keire::AudioPlaybackRequest request;
     request.Clip = clip->Clip();
     request.Bus = "EditorPreview";
     request.Spatial = false;
     request.Priority = 255;
     m_InspectorAudioPreviewVoice = audio->Play(std::move(request));
+    if (!m_InspectorAudioPreviewVoice)
+        throw std::runtime_error("Audio playback could not start. Check the audio device and available voices.");
 }
 
 void EditorWorkspaceLayer::StopInspectorAudioPreview() noexcept

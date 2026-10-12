@@ -92,6 +92,11 @@ TEST_CASE("Audio and VFX thumbnails wait for catalog publication and retain fail
                 CHECK(request.PreviewAsset);
                 CHECK_FALSE(request.Missing);
                 CHECK(assets->Statistics().FailedLoads == 0);
+                if (audio)
+                {
+                    const auto handle = assets->Load<Keire::AudioClipAsset>(source.Id);
+                    CHECK(KeireEditor::Detail::RequirePreviewAudioClip(handle) == handle.TryGetLoaded());
+                }
                 assets->Close();
             }
             SUBCASE("Failed import still reports the missing runtime asset")
@@ -103,10 +108,33 @@ TEST_CASE("Audio and VFX thumbnails wait for catalog publication and retain fail
                                                                   Keire::AssetImportState::Failed);
                 CHECK(request.Missing);
                 CHECK(assets->Statistics().FailedLoads == 1);
+                if (audio)
+                {
+                    const auto handle = assets->Load<Keire::AudioClipAsset>(source.Id);
+                    REQUIRE(handle.Get());
+                    CHECK(handle.UsingFallback());
+                    CHECK_THROWS_AS(KeireEditor::Detail::RequirePreviewAudioClip(handle), std::runtime_error);
+                }
                 assets->Close();
             }
         }
     }
+}
+
+TEST_CASE("Audio Inspector preview rejects empty and pending handles without accepting runtime fallback silence")
+{
+    CHECK_THROWS_AS(KeireEditor::Detail::RequirePreviewAudioClip({}), std::runtime_error);
+    Keire::AssetSystemSpecification specification;
+    specification.Mode = Keire::AssetMode::Development;
+    specification.DevelopmentCatalog.clear();
+    specification.Decoders = {Keire::CreateAudioClipAssetDecoder()};
+    const auto assets = Keire::CreateRef<Keire::AssetSystem>(specification);
+    const auto handle = assets->Load<Keire::AudioClipAsset>(Keire::AssetId::Generate());
+    REQUIRE(handle.Get());
+    CHECK(handle.UsingFallback());
+    CHECK_THROWS_AS(KeireEditor::Detail::RequirePreviewAudioClip(handle), std::runtime_error);
+    assets->Close();
+    CHECK_THROWS_AS(KeireEditor::Detail::RequirePreviewAudioClip(handle), std::runtime_error);
 }
 
 TEST_CASE("Edit-mode VFX previews defer only known pending initial imports")

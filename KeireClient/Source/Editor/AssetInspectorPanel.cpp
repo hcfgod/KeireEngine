@@ -330,10 +330,12 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             for (std::size_t index = 0; index < std::min(importStatus.Diagnostics.size(), std::size_t{64}); ++index)
                 ui.TextColoredWrapped(theme.Error, FormatAssetDiagnostic(importStatus.Diagnostics[index]));
         }
+        Keire::Ref<const Keire::AudioClipAsset> loadedClip;
         if (assets && !pendingImport)
         {
             const auto handle = assets->Load<Keire::AudioClipAsset>(record->Id, Keire::AssetPriority::High);
-            if (const auto clip = handle.TryGetLoaded())
+            loadedClip = handle.TryGetLoaded();
+            if (const auto& clip = loadedClip)
             {
                 const auto& data = *clip->Clip();
                 ui.Text("Duration: " + std::to_string(clip->DurationSeconds()) + " seconds");
@@ -350,7 +352,7 @@ void KeireEditor::AssetInspectorPanel::Draw(Keire::UiFrame& ui, Keire::AssetId s
             }
         }
         {
-            auto disabled = ui.BeginDisabled(pendingImport);
+            auto disabled = ui.BeginDisabled(!loadedClip);
             if (ui.Button("Preview"))
             {
                 try
