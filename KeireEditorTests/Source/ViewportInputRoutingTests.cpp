@@ -38,3 +38,30 @@ TEST_CASE("game viewport review releases capture and restores ownership when can
     CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, true, false, false));
     CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(false, true, true, true, false, false));
 }
+
+TEST_CASE("play input stays with Game until released and Scene navigation requires an explicit click")
+{
+    KeireEditor::SceneViewportNavigationState scene;
+    // Hovering or even clicking another panel cannot steal input from an unlocked-cursor game.
+    CHECK(KeireEditor::GameViewportOwnsRuntimeInput(true, true, false, false, false));
+    CHECK_FALSE(scene.Update(true, false, true, true));
+    // Escape releases gameplay, but hovering Scene or its stale keyboard focus is not consent to fly.
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, true, true, false, true));
+    CHECK_FALSE(scene.Update(true, true, true, false));
+    CHECK(scene.Update(true, true, true, true));
+    CHECK(scene.Update(true, true, true, false));
+    // Clicking Game, changing focus, or suspending the application revokes Scene navigation.
+    CHECK_FALSE(scene.Update(true, false, false, false));
+    CHECK_FALSE(scene.Update(true, true, true, false));
+    CHECK(scene.Update(true, true, true, true));
+    CHECK_FALSE(scene.Update(true, true, false, false));
+    CHECK_FALSE(scene.Update(true, true, true, false));
+    CHECK_FALSE(KeireEditor::GameViewportOwnsRuntimeInput(true, false, true, true, false));
+    CHECK_FALSE(scene.Update(true, false, true, true));
+    // Edit mode retains the existing hover navigation; a new Play session starts unclaimed by Scene.
+    CHECK(scene.Update(false, true, false, false));
+    CHECK_FALSE(scene.Update(true, true, true, false));
+    CHECK(scene.Update(true, true, true, true));
+    scene.Reset();
+    CHECK_FALSE(scene.Update(true, true, true, false));
+}

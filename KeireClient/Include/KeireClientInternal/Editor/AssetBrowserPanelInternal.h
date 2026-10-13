@@ -331,13 +331,7 @@ namespace KeireEditor
             try
             {
                 const auto folder = UniqueAssetBrowserFolder(AssetRoot, CurrentFolder / "New Folder");
-                editor.MutateAssetBrowser(
-                    {.Kind = Keire::Detail::AssetWorkerMutationKind::CreateFolder, .Destination = folder}, {},
-                    "Create Folder");
-                RenamingFolder = folder;
-                RenameBuffer = folder.filename().string();
-                OpenFolderRenamePopup = true;
-                editor.SetAssetBrowserStatus("Created " + folder.generic_string() + ".");
+                RequestNamedCreate(NamedCreateKind::Folder, Keire::Detail::PathToUtf8(folder.filename()));
             }
             catch (const std::exception& error)
             {

@@ -151,7 +151,12 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
     m_ViewportRect = {};
     auto panel = ui.BeginPanel(m_Registration);
     if (!panel)
+    {
+        m_NavigationState.Reset();
         return;
+    }
+    const bool navigationAvailable = m_Controller.SceneViewportNavigationAvailable();
+    auto inputDisabled = ui.BeginDisabled(!navigationAvailable);
     auto& document = m_Controller.SceneViewportDocument();
     const auto& theme = m_Controller.SceneViewportTheme();
     const auto database = m_Controller.SceneViewportAssetDatabase();
@@ -542,9 +547,14 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         !imageState.Hovered || toolbarRect.Contains(ui.PointerState().Position) ||
         (orientationLayout.ButtonCount > 0U && orientationRect.Contains(ui.PointerState().Position)) ||
         (m_CameraPreviewVisible && cameraPreviewRect.Contains(ui.PointerState().Position));
+    const auto navigationPointer = ui.PointerState();
+    const bool navigationAllowed =
+        m_NavigationState.Update(playActive, navigationAvailable, ui.WindowFocused(),
+                                 !pointerBlocked && (navigationPointer.LeftPressed || navigationPointer.MiddlePressed ||
+                                                     navigationPointer.RightPressed));
     if (renderScene)
     {
-        const bool allowManipulation = !m_Controller.SceneViewportPlayReviewActive();
+        const bool allowManipulation = navigationAllowed;
         const auto pointer = ui.PointerState();
         std::vector<Keire::AssetId> selectionBeforePointer;
         if (imageState.Hovered && pointer.LeftPressed)
@@ -621,11 +631,18 @@ void KeireEditor::SceneViewportPanel::Draw(Keire::UiFrame& ui)
         m_BoxSelecting = false;
         m_BoxSelectionBase.clear();
     }
-    UpdateCamera(ui, imageState);
+    UpdateCamera(ui, imageState, navigationAllowed);
 }
 
-void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState)
+void KeireEditor::SceneViewportPanel::UpdateCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState,
+                                                   const bool navigationAllowed)
 {
+    if (!navigationAllowed)
+    {
+        m_Camera->SetNavigationMode(Keire::Detail::EditorCameraNavigationMode::None);
+        m_SuppressWarpPointerDelta = false;
+        return;
+    }
     const auto scene = m_Controller.SceneViewportDocument().ActiveScene();
     const auto assets = m_Controller.SceneViewportAssetSystem();
     const KeireEditor::MeshBoundsResolver resolveMeshBounds = [assets](const Keire::AssetId mesh)

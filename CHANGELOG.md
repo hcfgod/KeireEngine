@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- New folders use a Create Folder dialog and are created only after confirmation; Cancel leaves no placeholder.
+  Existing folders continue to use Rename Folder.
+- Play Mode retains keyboard/gamepad input until Escape, regardless of the hovered or focused editor panel.
+  Scene navigation then requires an explicit canvas click; switching back to Game releases Scene navigation.
+
 - Cancelling an asset-package import review confirms that no project files or settings changed, instead of leaving
   the previous review instruction or preflight error visible.
 

@@ -1397,14 +1397,12 @@ void EditorWorkspaceLayer::OnUi(Keire::UiFrame& ui)
         m_SceneDocument->PlaySession() && m_SceneDocument->PlaySession()->State() != Keire::ScenePlayState::Stopped;
     const auto windows = Owner().Windows();
     const auto mainWindow = Owner().MainWindow();
-    const bool nativeCursorCaptured =
-        windows && mainWindow && windows->GetCursorMode(mainWindow->Id()) != Keire::CursorMode::Normal;
-    if (playActive && nativeCursorCaptured && ui.KeyDown(Keire::UiKey::Escape))
+    if (playActive && ui.KeyDown(Keire::UiKey::Escape))
     {
         // This is deliberately independent of the project's input asset and managed scripts. If gameplay routing is
         // broken, Escape must still return control to the editor so the user can stop Play Mode.
         m_GameViewportCaptureSuspended = true;
-        m_GameViewportInputActive = false;
+        SetGameViewportInputActive(false);
         ApplyManagedCursorMode();
     }
     else if (!playActive)

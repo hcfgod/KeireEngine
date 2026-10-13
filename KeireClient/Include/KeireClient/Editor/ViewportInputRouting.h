@@ -23,16 +23,40 @@ namespace KeireEditor
     }
 
     [[nodiscard]] constexpr bool GameViewportOwnsRuntimeInput(const bool playActive, const bool applicationFocused,
-                                                              const bool panelFocused, const bool captureRequested,
+                                                              const bool /*panelFocused*/,
+                                                              const bool /*captureRequested*/,
                                                               const bool captureSuspended,
                                                               const bool playReviewActive = false) noexcept
     {
         if (!playActive || !applicationFocused || captureSuspended || playReviewActive)
             return false;
-        if (captureRequested)
-            return true;
-        // Requesting focus when Play starts must be enough to route keyboard/gamepad input even when the pointer is
-        // still over another panel. A click on the viewport focuses its panel and restores ownership after Escape.
-        return panelFocused;
+        // Play owns input until explicitly released, including unlocked-cursor controllers and panel/tab changes.
+        return true;
     }
+
+    class SceneViewportNavigationState final
+    {
+      public:
+        [[nodiscard]] bool Update(const bool playActive, const bool available, const bool panelFocused,
+                                  const bool canvasClicked) noexcept
+        {
+            if (!available || (playActive && !panelFocused))
+            {
+                Reset();
+                return false;
+            }
+            if (!playActive)
+            {
+                Reset();
+                return true;
+            }
+            m_Activated = m_Activated || canvasClicked;
+            return m_Activated;
+        }
+
+        void Reset() noexcept { m_Activated = false; }
+
+      private:
+        bool m_Activated = false;
+    };
 } // namespace KeireEditor

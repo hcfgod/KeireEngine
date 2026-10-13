@@ -295,6 +295,21 @@ namespace KeireEditor
         return {{left, thumbnailBottom + 3.0F}, {std::max(left, right), thumbnailBottom + 21.0F}};
     }
 
+    std::filesystem::path PrepareAssetBrowserFolderCreation(const std::filesystem::path& assetRoot,
+                                                            const std::filesystem::path& parent,
+                                                            const std::string_view name)
+    {
+        if (name.empty() || name == "." || name == ".." || name.find_first_of("/\\") != std::string_view::npos)
+            throw std::invalid_argument("Folder name must be one non-empty path component.");
+        const auto destination = parent / Keire::Detail::PathFromUtf8(name);
+        if (destination.is_absolute() || destination.has_root_name() ||
+            std::ranges::find(destination, std::filesystem::path("..")) != destination.end())
+            throw std::invalid_argument("Create the folder inside the project's Assets directory.");
+        if (std::filesystem::exists(assetRoot / destination))
+            throw std::invalid_argument("A file or folder already uses that name.");
+        return destination;
+    }
+
     std::filesystem::path UniqueAssetBrowserFolder(const std::filesystem::path& assetRoot,
                                                    std::filesystem::path desired)
     {

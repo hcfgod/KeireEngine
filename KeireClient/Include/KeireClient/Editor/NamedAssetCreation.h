@@ -34,7 +34,8 @@ namespace KeireEditor
         Prefab,
         PrefabVariant,
         Shader,
-        InputActions
+        InputActions,
+        Folder
     };
 
     [[nodiscard]] std::string_view NamedAssetCreationDisplayName(NamedAssetCreationKind kind) noexcept;

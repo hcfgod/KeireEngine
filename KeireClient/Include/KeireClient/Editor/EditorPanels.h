@@ -6,6 +6,7 @@
 #include "KeireClient/Editor/EulerEditContinuity.h"
 #include "KeireClient/Editor/ExternalEditorProfiles.h"
 #include "KeireClient/Editor/InspectorTransformUndo.h"
+#include "KeireClient/Editor/ViewportInputRouting.h"
 #include "KeireInternal/Rendering/DynamicResolutionInternal.h"
 
 #include <cstdint>
@@ -67,6 +68,7 @@ namespace KeireEditor
         [[nodiscard]] virtual float SceneViewportDisplayScale() const noexcept = 0;
         [[nodiscard]] virtual const Keire::Time& SceneViewportTime() const noexcept = 0;
         [[nodiscard]] virtual bool SceneViewportPlayReviewActive() const noexcept = 0;
+        [[nodiscard]] virtual bool SceneViewportNavigationAvailable() const noexcept { return false; }
         [[nodiscard]] virtual Keire::VfxRenderSnapshot SceneViewportEditVfx() const = 0;
         virtual void DrawSceneViewportRigChain(Keire::UiFrame&, const Keire::Ref<Keire::Scene>&, Keire::EntityId,
                                                const Keire::RenderCamera&, Keire::UiItemRect)
@@ -240,7 +242,7 @@ namespace KeireEditor
         [[nodiscard]] Keire::UiPanelRegistration& Registration() noexcept { return m_Registration; }
 
       private:
-        void UpdateCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState);
+        void UpdateCamera(Keire::UiFrame& ui, const Keire::UiItemState& imageState, bool navigationAllowed);
 
         ISceneViewportController& m_Controller;
         Keire::UiPanelRegistration m_Registration;
@@ -259,6 +261,7 @@ namespace KeireEditor
         bool m_BoxSelectionAdditive = false;
         bool m_CameraPreviewVisible = false;
         bool m_SuppressWarpPointerDelta = false;
+        SceneViewportNavigationState m_NavigationState;
     };
 
     class HierarchyPanel final

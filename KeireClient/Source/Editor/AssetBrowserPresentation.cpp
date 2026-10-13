@@ -75,6 +75,7 @@ namespace KeireEditor::Detail
         case NamedAssetCreationKind::InputActions:
             return inputActions && controller.CreateAssetBrowserInputActions(*inputActions, name);
         case NamedAssetCreationKind::None:
+        case NamedAssetCreationKind::Folder:
             return false;
         }
         return false;

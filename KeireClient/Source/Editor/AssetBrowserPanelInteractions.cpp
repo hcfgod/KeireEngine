@@ -7,13 +7,14 @@ namespace KeireEditor
 {
     void AssetBrowserPanel::Impl::DrawRenamePopups(Keire::UiFrame& ui, IAssetBrowserController& editor)
     {
+        const auto createTitle = PendingCreateKind == NamedCreateKind::Folder ? "Create Folder" : "Create Asset";
         if (OpenNamedCreatePopup)
         {
-            ui.OpenPopup("Create Asset");
+            ui.OpenPopup(createTitle);
             OpenNamedCreatePopup = false;
             FocusCreateName = true;
         }
-        if (auto create = ui.BeginPopupModal("Create Asset"); create)
+        if (auto create = ui.BeginPopupModal(createTitle); create)
         {
             const auto type = NamedAssetCreationDisplayName(PendingCreateKind);
             ui.Text("Choose a name for the new " + std::string(type));
@@ -54,9 +55,21 @@ namespace KeireEditor
                         bool created = false;
                         try
                         {
-                            created = Detail::CreateNamedAsset(
-                                editor, PendingCreateKind, CreateNameBuffer, PendingManagedType, PendingInputActions,
-                                PendingVariantBase, MaterialGraphCreation.Shader(), PendingShaderGraphTemplate);
+                            if (PendingCreateKind == NamedCreateKind::Folder)
+                            {
+                                const auto destination =
+                                    PrepareAssetBrowserFolderCreation(AssetRoot, CurrentFolder, CreateNameBuffer);
+                                editor.MutateAssetBrowser({.Kind = Keire::Detail::AssetWorkerMutationKind::CreateFolder,
+                                                           .Destination = destination},
+                                                          {}, "Create Folder", true);
+                                editor.SetAssetBrowserStatus("Created folder " + CreateNameBuffer + ".");
+                                created = true;
+                            }
+                            else
+                                created = Detail::CreateNamedAsset(editor, PendingCreateKind, CreateNameBuffer,
+                                                                   PendingManagedType, PendingInputActions,
+                                                                   PendingVariantBase, MaterialGraphCreation.Shader(),
+                                                                   PendingShaderGraphTemplate);
                         }
                         catch (...)
                         {

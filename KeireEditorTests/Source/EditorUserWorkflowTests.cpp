@@ -10,12 +10,48 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <ranges>
 #include <span>
+#include <stdexcept>
 #include <string>
+
+TEST_CASE("folder creation preparation validates the name without creating a placeholder")
+{
+    struct Fixture final
+    {
+        std::filesystem::path Root =
+            std::filesystem::temp_directory_path() /
+            ("keire-folder-create-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        Fixture() { std::filesystem::create_directories(Root / "Parent"); }
+        ~Fixture()
+        {
+            std::error_code ignored;
+            std::filesystem::remove_all(Root, ignored);
+        }
+    } fixture;
+    using KeireEditor::PrepareAssetBrowserFolderCreation;
+    CHECK(KeireEditor::NamedAssetCreationDisplayName(KeireEditor::NamedAssetCreationKind::Folder) == "folder");
+    CHECK(PrepareAssetBrowserFolderCreation(fixture.Root, "Parent", "New Folder") ==
+          std::filesystem::path("Parent/New Folder"));
+    CHECK(std::filesystem::is_empty(fixture.Root / "Parent"));
+    for (const auto name : {"", ".", "..", "../Outside", "Child/Nested", "Child\\Nested"})
+        CHECK_THROWS_AS(PrepareAssetBrowserFolderCreation(fixture.Root, "Parent", name), std::invalid_argument);
+    CHECK_THROWS_AS(PrepareAssetBrowserFolderCreation(fixture.Root, "../Outside", "Child"), std::invalid_argument);
+    CHECK_THROWS_AS(PrepareAssetBrowserFolderCreation(fixture.Root, fixture.Root, "Child"), std::invalid_argument);
+    std::filesystem::create_directory(fixture.Root / "Parent/Existing");
+    std::ofstream(fixture.Root / "Parent/File") << "keep";
+    CHECK_THROWS_WITH(PrepareAssetBrowserFolderCreation(fixture.Root, "Parent", "Existing"),
+                      "A file or folder already uses that name.");
+    CHECK_THROWS_WITH(PrepareAssetBrowserFolderCreation(fixture.Root, "Parent", "File"),
+                      "A file or folder already uses that name.");
+    CHECK(std::filesystem::file_size(fixture.Root / "Parent/File") == 4);
+    CHECK_FALSE(std::filesystem::exists(fixture.Root / "Parent/New Folder"));
+}
 
 TEST_CASE("UI Builder hierarchy search preserves ancestors and original sibling drop indices")
 {

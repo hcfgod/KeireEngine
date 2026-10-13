@@ -126,6 +126,9 @@ namespace KeireEditor
                     continue;
                 matches.push_back(&object);
             }
+            if (matches.empty())
+                ui.TextColoredWrapped({0.55F, 0.60F, 0.68F, 1.0F},
+                                      "No entities match this search. Clear the search to show all entities.");
             std::vector<Keire::AssetId> matchOrder;
             matchOrder.reserve(matches.size());
             for (const auto* object : matches)

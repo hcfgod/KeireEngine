@@ -6,6 +6,8 @@ namespace KeireEditor
     {
         switch (kind)
         {
+        case NamedAssetCreationKind::Folder:
+            return "folder";
         case NamedAssetCreationKind::Scene:
             return "scene";
         case NamedAssetCreationKind::Material:

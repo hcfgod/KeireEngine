@@ -1023,6 +1023,14 @@ const Keire::Time& EditorWorkspaceLayer::SceneViewportTime() const noexcept { re
 
 bool EditorWorkspaceLayer::SceneViewportPlayReviewActive() const noexcept { return m_PlayChanges != nullptr; }
 
+bool EditorWorkspaceLayer::SceneViewportNavigationAvailable() const noexcept
+{
+    const auto window = Owner().MainWindow();
+    const auto play = m_SceneDocument->PlaySession();
+    return window && window->Focused() && !m_PlayChanges &&
+           (!play || play->State() == Keire::ScenePlayState::Stopped || m_GameViewportCaptureSuspended);
+}
+
 void EditorWorkspaceLayer::ActivateSceneViewportHistory() noexcept { m_ActiveUndoContext = m_SceneDocument->History(); }
 
 void EditorWorkspaceLayer::RestoreSceneViewportRecovery() { RestoreSceneRecovery(); }
@@ -1282,6 +1290,11 @@ void EditorWorkspaceLayer::CompletePendingMaterialAssignment(const Keire::AssetI
 void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
 {
     m_GameViewportRect = {};
+    const auto session = m_SceneDocument->PlaySession();
+    const auto window = Owner().MainWindow();
+    SetGameViewportInputActive(KeireEditor::GameViewportOwnsRuntimeInput(
+        session && session->State() == Keire::ScenePlayState::Playing, window && window->Focused(), false, false,
+        m_GameViewportCaptureSuspended, m_PlayChanges != nullptr));
     if (auto gamePanel = ui.BeginPanel(m_Game); gamePanel)
     {
         constexpr std::array aspectLabels{std::string_view("Free"), std::string_view("16:9"), std::string_view("16:10"),
@@ -1447,7 +1460,8 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         const auto imageRect = ui.LastItemRect();
         m_GameViewportRect = imageRect;
 
-        if (playActive && m_GameViewportCaptureSuspended && imageState.Hovered && ui.PointerState().LeftPressed)
+        if (playActive && m_GameViewportCaptureSuspended && imageState.Hovered && ui.PointerState().LeftPressed &&
+            !ui.KeyDown(Keire::UiKey::Escape))
             m_GameViewportCaptureSuspended = false;
         const auto mainWindow = Owner().MainWindow();
         const bool productionInputActive = KeireEditor::GameViewportOwnsRuntimeInput(
@@ -1489,6 +1503,5 @@ void EditorWorkspaceLayer::DrawGame(Keire::UiFrame& ui)
         (void)DrawPerformanceOverlay(ui, imageRect, "GAME CAMERA", occlusion);
         return;
     }
-    SetGameViewportInputActive(false);
     KeireEditor::CancelRuntimeUiPointer(m_PlayRuntimeWorld, m_GameRuntimeUiPointer);
 }

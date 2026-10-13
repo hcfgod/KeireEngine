@@ -199,6 +199,7 @@ class EditorWorkspaceLayer final : public Keire::Layer,
     [[nodiscard]] float SceneViewportDisplayScale() const noexcept override;
     [[nodiscard]] const Keire::Time& SceneViewportTime() const noexcept override;
     [[nodiscard]] bool SceneViewportPlayReviewActive() const noexcept override;
+    [[nodiscard]] bool SceneViewportNavigationAvailable() const noexcept override;
     [[nodiscard]] Keire::VfxRenderSnapshot SceneViewportEditVfx() const override;
     void DrawSceneViewportRigChain(Keire::UiFrame& ui, const Keire::Ref<Keire::Scene>& scene, Keire::EntityId selected,
                                    const Keire::RenderCamera& camera, Keire::UiItemRect viewport) override;

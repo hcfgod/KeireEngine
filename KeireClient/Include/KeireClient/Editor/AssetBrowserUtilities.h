@@ -17,6 +17,10 @@ namespace KeireEditor
 
     void DrawAssetBrowserStatus(Keire::UiFrame& ui, Keire::UiColor color, std::string_view status);
 
+    [[nodiscard]] std::filesystem::path PrepareAssetBrowserFolderCreation(const std::filesystem::path& assetRoot,
+                                                                          const std::filesystem::path& parent,
+                                                                          std::string_view name);
+
     /// Stable content-window identity keeps each project folder's scroll independent.
     [[nodiscard]] std::string AssetBrowserContentPaneId(const std::filesystem::path& assetRoot,
                                                         const std::filesystem::path& folder);

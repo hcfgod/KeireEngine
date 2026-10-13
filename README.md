@@ -5,6 +5,12 @@
 
 **Build worlds. Keep control.**
 
+The Project browser's **Create Folder** dialog asks for a name before creating the folder; **Cancel** leaves no
+placeholder. Right-click an existing folder and choose **Rename** to change its name.
+
+During Play, Game retains keyboard/gamepad input even if the pointer crosses another panel. Press **Escape** to
+release gameplay input, then click inside Scene before navigating its camera. Click Game to resume gameplay input.
+
 The Play Mode Changes review shows wrapped **Before** and **After** values for each change, so long values remain
 readable before you choose which runtime edits to keep. Rotation changes show labeled quaternion components.
 
