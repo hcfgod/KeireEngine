@@ -65,3 +65,15 @@ TEST_CASE("play input stays with Game until released and Scene navigation requir
     scene.Reset();
     CHECK_FALSE(scene.Update(true, true, true, false));
 }
+TEST_CASE("Scene navigation accepts the canvas click that establishes dock focus")
+{
+    KeireEditor::SceneViewportNavigationState scene;
+    CHECK_FALSE(scene.Update(true, false, false, true));
+    CHECK_FALSE(scene.Update(true, true, false, false));
+    CHECK(scene.Update(true, true, false, true));
+    CHECK(scene.Update(true, true, true, false));
+    CHECK_FALSE(scene.Update(true, true, false, false));
+    CHECK_FALSE(scene.Update(true, true, true, false));
+    CHECK(scene.Update(true, true, true, true));
+    CHECK_FALSE(scene.Update(true, false, true, true));
+}

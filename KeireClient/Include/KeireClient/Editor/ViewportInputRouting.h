@@ -40,7 +40,7 @@ namespace KeireEditor
         [[nodiscard]] bool Update(const bool playActive, const bool available, const bool panelFocused,
                                   const bool canvasClicked) noexcept
         {
-            if (!available || (playActive && !panelFocused))
+            if (!available || (playActive && !panelFocused && !canvasClicked))
             {
                 Reset();
                 return false;

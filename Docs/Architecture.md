@@ -24,9 +24,11 @@ Generated asset catalogs preserve `AssetDerivedMetadata::DisplayName` as optiona
 copies the importer-provided subasset name; catalog, worker and import-cache codecs retain it. Legacy catalogs and
 caches without a name remain readable. Identity and dependency resolution continue to use asset IDs.
 
-Managed input actions retain their identity when the editor Game viewport loses focus. The editor suppresses sampled
-values and transient events while preserving action type, frame, and enabled state. Missing or released contexts still
-report invalid handles; focus changes do not masquerade as disposal or fault gameplay scripts.
+During Play, Game owns runtime input until Escape releases it. Panel focus alone does not transfer gameplay input to
+Scene navigation. After release, Scene navigation requires an explicit click on its canvas; clicking Game restores
+runtime ownership. Application focus loss suppresses sampled values and transient events while preserving managed
+action identity, type, frame, and enabled state. Missing or released contexts still report invalid handles; input
+suspension does not masquerade as disposal or fault gameplay scripts.
 Paused simulation and Play change review suspend Game input and native pointer capture. Cancelling review restores
 runtime ownership without disposing the game's action contexts.
 
@@ -1212,12 +1214,11 @@ before each draw.
 During Play Mode, Scene and Game retain separate camera and input ownership: Scene always renders through its persistent
 editor camera. The editor disables automatic input-user joining and explicitly pairs the fixed keyboard and mouse to its
 owned user; pairing failures are fatal during workspace initialization instead of producing a zero-valued gameplay
-context. The `Player` map and UI-capture override are validated before the Play session starts. Game input engages from
-hover or a runtime capture request, even while dock focus is settling, and remains latched while its panel owns focus.
-Losing application focus releases native capture without changing the requested runtime mode. Escape has a global,
-editor-owned safety release when managed input fails; clicking the Game image re-engages that suspended capture without
-warping the pointer. Hovering Scene therefore routes navigation exclusively to the editor camera without mutating
-runtime camera state.
+context. The `Player` map and UI-capture override are validated before the Play session starts. Game input owns the
+running session independently of dock focus. Losing application focus releases native capture without changing the
+requested runtime mode. Escape releases Game input and capture; Scene navigation then requires an explicit canvas
+click. Clicking the Game image restores runtime ownership without warping the pointer. Hovering Scene alone cannot
+move the editor camera while gameplay owns input.
 The workspace implementation is kept below 1,500 lines and is limited to service construction, frame order, command
 binding, notices, and modal arbitration.
 `EditorWorkspaceLayer` remains the owner-thread composition root, while non-copyable internal coordinators own document

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Runtime UI statistics avoid repeated tree/draw scans, and idle trees skip transition traversal.
+  Destruction, reuse, clearing and animation restarts retain their existing behavior.
+- The first Scene canvas click after Escape activates navigation even while dock focus is settling.
+
 - New folders use a Create Folder dialog and are created only after confirmation; Cancel leaves no placeholder.
   Existing folders continue to use Rename Folder.
 - Play Mode retains keyboard/gamepad input until Escape, regardless of the hovered or focused editor panel.

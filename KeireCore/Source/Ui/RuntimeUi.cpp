@@ -12,6 +12,7 @@
 #include <deque>
 #include <limits>
 #include <numbers>
+#include <span>
 #include <stdexcept>
 #include <utility>
 
@@ -25,6 +26,23 @@ namespace Keire
         }
 
         [[nodiscard]] bool Finite(const float value) noexcept { return std::isfinite(value); }
+
+        [[nodiscard]] std::size_t CountDrawBatches(const std::span<const RuntimeUiDrawCommand> commands) noexcept
+        {
+            std::size_t batches = 0;
+            AssetId previousAsset;
+            RuntimeUiDrawType previousType = RuntimeUiDrawType::PopClip;
+            for (const auto& command : commands)
+            {
+                if (command.Type != previousType || command.Asset != previousAsset)
+                {
+                    ++batches;
+                    previousType = command.Type;
+                    previousAsset = command.Asset;
+                }
+            }
+            return batches;
+        }
 
         [[nodiscard]] RuntimeUiRect TransformedBounds(const RuntimeUiRect rectangle, const RuntimeUiStyle& style,
                                                       const float layoutScale) noexcept
@@ -637,6 +655,9 @@ namespace Keire
         float LastLayoutMilliseconds = 0.0F;
         bool LayoutDirty = true;
         bool HasLayout = false;
+        bool MayHaveActiveTransitions = false;
+        std::size_t DrawBatches = 0;
+        std::size_t LiveElements = 0;
     };
 
     RuntimeUiTree::RuntimeUiTree(const std::size_t maximumElements, const std::size_t maximumEvents)
@@ -663,6 +684,7 @@ namespace Keire
         }
         auto& node = m_Impl->Nodes[index];
         node.Alive = true;
+        ++m_Impl->LiveElements;
         node.Dirty = false;
         node.HasStyle = false;
         node.State = {.Type = type, .Parent = parent};
@@ -681,6 +703,7 @@ namespace Keire
             if (!parentIndex)
             {
                 node.Alive = false;
+                --m_Impl->LiveElements;
                 m_Impl->Free.push_back(index);
                 throw std::invalid_argument("Runtime UI parent handle is stale.");
             }
@@ -719,6 +742,7 @@ namespace Keire
         auto& node = m_Impl->Nodes[*index];
         m_Impl->Diagnostics.Forget(element);
         node.Alive = false;
+        --m_Impl->LiveElements;
         node.Dirty = false;
         node.HasStyle = false;
         node.State = {};
@@ -738,6 +762,8 @@ namespace Keire
     {
         for (auto& node : m_Impl->Nodes)
         {
+            if (node.Alive)
+                --m_Impl->LiveElements;
             node.Alive = false;
             node.HasStyle = false;
             node.State = {};
@@ -754,6 +780,8 @@ namespace Keire
         for (std::size_t index = 0; index < m_Impl->Nodes.size(); ++index)
             m_Impl->Free.push_back(index);
         m_Impl->Draws.clear();
+        m_Impl->DrawBatches = 0;
+        m_Impl->MayHaveActiveTransitions = false;
         m_Impl->HitElements.clear();
         m_Impl->Events.clear();
         m_Impl->Diagnostics.Clear();
@@ -822,6 +850,8 @@ namespace Keire
                 Detail::RuntimeUiPropertyEqual(property, current, node.TargetStyle))
                 continue;
             Detail::InterpolateRuntimeUiProperty(node.State.Style, current, node.TargetStyle, property, 0.0F);
+            // Keep the conservative flag set even if allocating the transition throws.
+            m_Impl->MayHaveActiveTransitions = true;
             node.ActiveTransitions.push_back({property, 0.0F,
                                               Detail::RuntimeUiTransitionDelay(node.TargetStyle, property), *duration,
                                               Detail::RuntimeUiTransitionEasingFor(node.TargetStyle, property)});
@@ -961,10 +991,11 @@ namespace Keire
     {
         if (!Finite(deltaSeconds) || deltaSeconds < 0.0F)
             throw std::invalid_argument("Runtime UI transition delta must be finite and non-negative.");
-        if (deltaSeconds == 0.0F)
+        if (deltaSeconds == 0.0F || !m_Impl->MayHaveActiveTransitions)
             return false;
 
         bool changed = false;
+        bool active = false;
         for (std::size_t index = 0; index < m_Impl->Nodes.size(); ++index)
         {
             auto& node = m_Impl->Nodes[index];
@@ -986,12 +1017,14 @@ namespace Keire
             std::erase_if(
                 node.ActiveTransitions, [](const Impl::Node::ActiveTransition& transition)
                 { return transition.ElapsedSeconds >= transition.DelaySeconds + transition.DurationSeconds; });
+            active = active || !node.ActiveTransitions.empty();
             if (next == node.State.Style)
                 continue;
             node.State.Style = std::move(next);
             m_Impl->MarkDirty(index, RuntimeUiDirtyReason::Transition);
             changed = true;
         }
+        m_Impl->MayHaveActiveTransitions = active;
         return changed;
     }
 
@@ -1014,6 +1047,13 @@ namespace Keire
         const auto layoutStarted = std::chrono::steady_clock::now();
 
         m_Impl->LastScale = Detail::ResolveRuntimeUiScale(viewportWidth, viewportHeight, settings);
+        // Keep statistics read-only and consistent even if rebuilding the draw list
+        // throws.
+        struct DrawStatisticsGuard final
+        {
+            Impl& State;
+            ~DrawStatisticsGuard() noexcept { State.DrawBatches = CountDrawBatches(State.Draws); }
+        } statistics{*m_Impl};
         m_Impl->Draws.clear();
         m_Impl->HitElements.clear();
         m_Impl->VisibleElements = 0;
@@ -1358,22 +1398,11 @@ namespace Keire
     {
         RuntimeUiStatistics result;
         result.Generation = m_Impl->TreeGeneration;
-        result.Elements = static_cast<std::size_t>(
-            std::ranges::count_if(m_Impl->Nodes, [](const Impl::Node& node) { return node.Alive; }));
+        result.Elements = m_Impl->LiveElements;
         result.VisibleElements = m_Impl->VisibleElements;
         result.InteractableElements = m_Impl->InteractableElements;
         result.DrawCommands = m_Impl->Draws.size();
-        AssetId previousAsset;
-        RuntimeUiDrawType previousType = RuntimeUiDrawType::PopClip;
-        for (const auto& command : m_Impl->Draws)
-        {
-            if (command.Type != previousType || command.Asset != previousAsset)
-            {
-                ++result.DrawBatches;
-                previousType = command.Type;
-                previousAsset = command.Asset;
-            }
-        }
+        result.DrawBatches = m_Impl->DrawBatches;
         result.ClippedElements = m_Impl->ClippedElements;
         result.PendingEvents = m_Impl->Events.size();
         result.DroppedEvents = m_Impl->DroppedEvents;
