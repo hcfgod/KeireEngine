@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: ./Scripts/project.ps1 package -Generator ninja -Configuration Release -Architecture x86_64 -Toolset msc -CI
       - if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-gpu-${{ matrix.configuration }}-failure
           path: |
@@ -89,7 +89,7 @@ jobs:
         if: matrix.configuration == 'Release'
         run: bash Scripts/project.sh package --generator ninja --configuration Release --architecture x86_64 --toolset clang --ci
       - if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.platform }}-gpu-${{ matrix.configuration }}-failure
           path: |
