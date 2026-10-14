@@ -77,7 +77,7 @@ jobs:
             find Artifacts -maxdepth 1 -name '*-symbols.tar.gz' -type f -size +0c | grep -q .
             find Artifacts -maxdepth 1 -name '*-symbols.tar.gz.sha256' -type f -size +0c | grep -q .
           fi
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sdk-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}
           path: |
@@ -86,13 +86,13 @@ jobs:
             Artifacts/*.sha256
             !Artifacts/*symbols*
           if-no-files-found: error
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: symbols-${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}
           path: Artifacts/*symbols*
           if-no-files-found: ignore
       - if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ matrix.os }}-${{ matrix.architecture }}-${{ matrix.configuration }}-failure
           path: |
